@@ -86,7 +86,7 @@ GPT-5.6 SOL is a development agent only — not a product runtime dependency.
 
 ## Remote
 
-Private GitHub: `git@github.com:JohnClem/cosmaneura-os.git` (Track B only).
+Private GitHub: `git@github.com:CosmaNeura/cosmaneura-os.git` (Track B only).
 
 ## Not authorized here
 

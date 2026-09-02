@@ -64,7 +64,7 @@ Unchanged: Athena/Acuity, real messaging, Clerk/Azure, LLM, payment/PAN, AUTO_TE
 | Item | Value |
 |---|---|
 | Commit | `44e97ed` on `main` |
-| Remote | `git@github.com:JohnClem/cosmaneura-os.git` (private) |
+| Remote | `git@github.com:CosmaNeura/cosmaneura-os.git` (private; company org) |
 | Excluded | `.env`, generated `artifacts/releases/manifest-*.json` |
 
 ## Limitations / next gate
