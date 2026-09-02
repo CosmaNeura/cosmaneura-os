@@ -1,0 +1,4 @@
+# Generated release manifests (local / CI artifacts). Safe to delete.
+*
+!.gitignore
+!README.md

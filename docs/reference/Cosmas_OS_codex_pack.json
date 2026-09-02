@@ -1,0 +1,857 @@
+{
+  "product": "Cosmas_OS",
+  "company": "CosmaNeura Inc.",
+  "version": "1.8",
+  "date": "2026-09-01",
+  "authority": [
+    "cosmaneura-strategy-gtm-v3.md",
+    "cosmaneura-grok-context-pack.md",
+    "Cosmas_OS_Product_Technical_Specs_and_Roadmap.pdf",
+    "this pack"
+  ],
+  "swarm": {
+    "inv6_closed": false,
+    "model": "two_lane",
+    "lanes": {
+      "LEGACY": {
+        "repo": "cosmaneura-master",
+        "owns": [
+          "F-1 Stripe SKU",
+          "scribe conversion",
+          "in-flight Session Prep / coding if already branched"
+        ],
+        "swarm": "FORBIDDEN",
+        "reason": "INV-6 prod SP + deconflict work in flight"
+      },
+      "OS": {
+        "repo": "cosmaneura-os",
+        "owns": [
+          "F-8",
+          "F-4 ArtifactChase",
+          "AppointmentProjection",
+          "capture page",
+          "retention worker",
+          "touchpoint inventory",
+          "Teams adapter"
+        ],
+        "swarm": "ALLOWED on synthetic data with zero prod credentials",
+        "merge_to_prod": "human-only after INV-6"
+      }
+    },
+    "harness": "OPEN-5 unset; OS lane may use Cursor swarm or Codex multi-agent ON cosmaneura-os ONLY",
+    "repos": {
+      "prod": "cosmaneura-master",
+      "patterns_only": [
+        "Cosmas-CAB-Tool",
+        "cosmaneura-scribe",
+        "cosmaneura-scheduling",
+        "sovereign"
+      ],
+      "os": "cosmaneura-os"
+    }
+  },
+  "ceo_rulings_2026_08_31": {
+    "cardchase_v1": "insurance_artifact_chase",
+    "payment_card_chase": "gated dual-use adapter EPIC-10",
+    "open1_bakeoff": "tabled",
+    "proof_exhibit": "cardchase_insurance_kpis + paid_retention_2027H1",
+    "teams": "optional_pointer_notifier_private_dm_plus_one_shared_pointer_channel_not_all_chats",
+    "patient_rail": "a2p_sms_or_email_plus_secure_link",
+    "bound_seats": "optional skins of F-8",
+    "mcd_systems": [
+      "athena",
+      "acuity",
+      "other"
+    ],
+    "internal_name": "Cosmas_OS",
+    "open3_pricing": "flat_saas",
+    "sender_of_record": "provider_or_practice_office_or_designated_vendor",
+    "system_of_record": "athena",
+    "cardchase_working_copy_retention": "delete_7_days_after_chase_complete",
+    "other_records_retention": "standard_policy",
+    "eligibility_path": "athena_270_271_not_direct_clearinghouse",
+    "scribe_seat": "capture_plane_granola_style_stream",
+    "initial_hitl": "chief_disaggregates_stream_into_ticket_list_human_reviews_list",
+    "consumer_messengers": "out_of_scope",
+    "computer_unit": "one_per_org",
+    "new_seats_default_to_org_box": true,
+    "skill_bus": "micro_mcp",
+    "mcp_v1_host": "wrap_legacy_fastapi_as_tools_do_not_merge_repos",
+    "evidence_slot": "generic_deidentified_retrieval",
+    "mobile": "capacitor_ios_android_reuse_scribe",
+    "fragile_browser_jobs": "delayed_until_ephemeral_profile_and_session_kill",
+    "security_zones": "ephi_zone + untrusted_retrieval_zone",
+    "isolation_impl": "two_azure_workloads_same_vnet_nsg_one_way_citation_pipe_not_vm_per_seat",
+    "fragile_browser_jobs_120d": "forbidden",
+    "mcd_shape": "parent_brand + 4_legal_entities + ~300_1099s_on_shared_corporate_IT",
+    "pilot_max_value": "mcd_corporate_ops_if_entity_exists",
+    "terminal_gtm": "independent_private_practices",
+    "computer_unit_independent": "one_per_practice_org",
+    "computer_unit_mcd": "one_per_legal_entity_or_corporate_tenant_not_per_1099_by_default",
+    "mcd_baas": 4,
+    "mcd_covered_entities": 4,
+    "athena_practice_ids": "UNKNOWN",
+    "billing_sku": "per_provider_seat_not_per_vm",
+    "group_practice_pattern": "one_org_one_computer_n_provider_seats",
+    "mcd_role": "gym_lab_plus_referral_not_ICP",
+    "identity": "one_login_per_provider_bound_to_seat",
+    "pilot_org_type": "UNSET_keep_operational_flexibility",
+    "icp_language": "small_private_practice_not_1.36",
+    "ports": [
+      "RecordPort",
+      "SchedulePort",
+      "PayPort",
+      "NotifyPort",
+      "EvidencePort"
+    ],
+    "mvp_adapters": {
+      "RecordPort": "athena",
+      "SchedulePort": "acuity",
+      "PayPort": "stripe"
+    },
+    "marketplace_listing": "cosmas_soap + cardchase_insurance",
+    "tracks": [
+      "A_cosmas_gtm_master",
+      "B_os_skeleton_parallel"
+    ],
+    "early_beta": "core_bots_on_existing_HIPAA_stack_connections_are_rungs",
+    "prospective_pilot": "RRM_MCD_or_external",
+    "pilot_does_not_gate_beta": "other_small_practices_launch_L0_core_without_RRM_pack",
+    "workbook_port": "append_only_working_files_not_SoR",
+    "rrm_demo": "synthetic_labs_to_workbook_command",
+    "identity_idp": "clerk_reuse_existing_users",
+    "fixture_hygiene": "no_prod_PHI_in_os_repo",
+    "togglefile_store": "postgres_per_org_not_git",
+    "sor_writes_idempotent": true,
+    "schedule_conflict": "HITL_ticket_if_acuity_athena_disagree_beyond_threshold",
+    "audio_ttl": "short_fixed_72h_default",
+    "transcript_ttl": "until_final_artifact_submitted_or_1_year_whichever_longer",
+    "ladder_admin_beta": "global_admin_founder_then_org_owner",
+    "marketplace": "second_listing_for_OS_may_cannibalize_soap_cardchase",
+    "early_adopter_live": "dedicated_os_beta_env_not_synth_not_mcd_prod",
+    "early_adopter_requires": [
+      "BAA",
+      "clerk_org",
+      "human_deploy",
+      "L0_default",
+      "no_swarm_on_live"
+    ],
+    "schedule_conflict_ux": "pending_confirmation_bucket",
+    "idempotency": "required_on_all_mutating_actions"
+  },
+  "enums": {
+    "toggle": [
+      "ON",
+      "OFF",
+      "SLEEP"
+    ],
+    "coverage_status": [
+      "UNKNOWN",
+      "MISSING",
+      "STALE",
+      "IMAGE_ON_FILE",
+      "VERIFIED",
+      "INACTIVE",
+      "NEEDS_HUMAN"
+    ],
+    "approval_state": [
+      "draft",
+      "pending_approval",
+      "approved",
+      "edited",
+      "rejected",
+      "escalated",
+      "sent",
+      "confirmed",
+      "closed",
+      "failed"
+    ],
+    "channel": [
+      "in_app",
+      "teams",
+      "a2p_sms",
+      "email"
+    ],
+    "appointment_source": [
+      "acuity",
+      "athena",
+      "other"
+    ],
+    "automation_class": [
+      "AUTO_TEMPLATE",
+      "AUTO_DRAFT",
+      "HITL_REQUIRED",
+      "NEVER_AUTO"
+    ]
+  },
+  "objects": {
+    "ToggleFile": {
+      "org_id": "uuid",
+      "version": "int append-only",
+      "keys": {
+        "coding_suggestions.mcd_only": "ON for MCD orgs else OFF",
+        "artifact_chase.insurance": "ON for design partners",
+        "artifact_chase.payment": "SLEEP until EPIC-10",
+        "channel.teams": "OFF until BAA + adapter"
+      }
+    },
+    "Seat": {
+      "required_v1": [
+        "org.owner",
+        "org.approver",
+        "system.scribe",
+        "system.chief",
+        "system.chaser"
+      ],
+      "optional": [
+        "provider",
+        "biller",
+        "ma"
+      ],
+      "fields": [
+        "org_id",
+        "role",
+        "bound_user_id",
+        "channel_identities",
+        "state"
+      ],
+      "identity_rule": "unique human login; agent never signs; offboarding revokes Cosmas and Teams map same day"
+    },
+    "Charter": {
+      "role": "string",
+      "owns": "string[]",
+      "never": "string[]",
+      "escalate_when": "string[]",
+      "rule": "never-list is compiled matchers evaluated BEFORE model"
+    },
+    "AppointmentProjection": {
+      "id": "uuid",
+      "source": "acuity|athena|other",
+      "source_id": "string",
+      "start_at": "iso",
+      "patient_link_id": "uuid | null",
+      "coverage_status": "enum",
+      "artifact_ids": "uuid[]"
+    },
+    "PatientLink": {
+      "id": "uuid",
+      "acuity_client_ref": "string?",
+      "athena_patient_id": "string?",
+      "confirmed_by_user_id": "uuid",
+      "rule": "no chase until confirmed"
+    },
+    "Ticket": {
+      "lane": "ops|clinical_flag|billing|marketing|artifact_chase",
+      "ehr_pointers": "string[]",
+      "forbidden_in_channel": [
+        "member_id",
+        "images",
+        "vitals",
+        "names_in_patient_sms"
+      ]
+    },
+    "Decision": {
+      "ticket_id": "uuid",
+      "actor_seat": "string",
+      "human_user_id": "uuid",
+      "utterance": "string",
+      "source_urls": "string[]"
+    },
+    "InsuranceArtifact": {
+      "front_blob_id": "uuid",
+      "back_blob_id": "uuid",
+      "payer_name": "string",
+      "member_id_raw": "string",
+      "member_id_status": "ocr_untrusted|human_confirmed|eligibility_matched",
+      "group_id": "string?",
+      "attested_at": "iso",
+      "retention": {
+        "working_copy_delete_after": "ticket.closed + 7 days",
+        "system_of_record": "athena document or coverage object",
+        "purge_job": "required"
+      }
+    },
+    "EligibilityCheck": {
+      "vendor": "athena",
+      "requested_at": "iso",
+      "result": "active|inactive|unknown",
+      "source_pointer": "url",
+      "ttl_hours": 24,
+      "note": "Cosmas_OS triggers Athena eligibility API (Athena sends 270, stores 271). Do not become a clearinghouse. Preview/sandbox will not send live 270s."
+    },
+    "OutboundMessage": {
+      "sender_of_record": "practice|practice_office|designated_vendor",
+      "cosmas_role": "vendor processor under BAA",
+      "a2p_brand": "practice",
+      "body_rules": "neutral notice + magic link only"
+    },
+    "IntakeStream": {
+      "id": "uuid",
+      "source": "visit_audio|imported_transcript|mental_note|assignment",
+      "bound_scribe_user_id": "uuid",
+      "raw_blob_id": "uuid",
+      "transcript_id": "uuid?",
+      "status": "capturing|ready|disaggregated|closed",
+      "rule": "Chief.disaggregate() is the only path from stream to tickets. SOAP generator is a consumer skill, not the capture plane."
+    },
+    "Disaggregation": {
+      "stream_id": "uuid",
+      "proposed_tickets": "Ticket[]",
+      "hitl_state": "pending_review|accepted|edited|rejected",
+      "reviewer_user_id": "uuid",
+      "note": "Initial HITL is the ticket list, not each downstream send."
+    }
+  },
+  "epics": [
+    {
+      "id": "EPIC-0",
+      "name": "IAM P0",
+      "feature_id": "INV-6",
+      "audience": "internal",
+      "repo": "cosmaneura-master",
+      "lane": "LEGACY",
+      "depends_on": [],
+      "story": "Production credentials cannot be used from a pull_request-federated identity.",
+      "acceptance": [
+        "PR-subject federation removed from cosmaneura-gha-prod",
+        "plan/apply identities split",
+        "protected-branch-only apply",
+        "credentials rotated",
+        "CI fails closed on skipped stages"
+      ],
+      "gate": "No parallel agents until green",
+      "start": "day-0"
+    },
+    {
+      "id": "EPIC-1",
+      "name": "Convert the 40",
+      "feature_id": "F-1",
+      "audience": "paying-existing-pilots",
+      "repo": "cosmaneura-master",
+      "depends_on": [],
+      "story": "An existing pilot can pay $60/seat and keep history.",
+      "acceptance": [
+        "Stripe SKU $60 not $89",
+        "conversion survey fires at first invoice",
+        "per-feature telemetry + cancel reason captured",
+        "encounter history retained"
+      ],
+      "gate": "CLK-5 Oct 1 paid test",
+      "lane": "LEGACY"
+    },
+    {
+      "id": "EPIC-S1",
+      "name": "Affiliated systems touchpoint assessment",
+      "feature_id": "F-9",
+      "lane": "OS",
+      "repo": "cosmaneura-os",
+      "swarm": true,
+      "depends_on": [],
+      "story": "Codex produces a living inventory of every affiliated system, auth model, PHI class, and Cosmas_OS touchpoint, with gaps labeled UNKNOWN.",
+      "acceptance": [
+        "inventory covers Athena, Acuity, Stripe, Azure OpenAI, AssemblyAI, Recall.ai, A2P/SMS, Teams, email, blob store",
+        "each row has: direction, object exchanged, PHI y/n, BAA y/n/unknown, API vs webhook vs human, SoR vs working copy",
+        "Acuity plan/API access marked CONFIRMED or UNKNOWN",
+        "Athena eligibility 270/271 path documented",
+        "no production credentials used to probe"
+      ]
+    },
+    {
+      "id": "EPIC-S2",
+      "name": "Chase working-copy purge",
+      "feature_id": "F-4",
+      "lane": "OS",
+      "repo": "cosmaneura-os",
+      "depends_on": [
+        "EPIC-5"
+      ],
+      "story": "Seven days after a chase ticket closes, Cosmas_OS deletes insurance working copies and leaves only Athena pointers plus audit metadata.",
+      "acceptance": [
+        "purge job exists and is heartbeat-monitored",
+        "closed+7d blobs gone",
+        "Athena SoR document remains",
+        "audit row records purge without retaining image bytes"
+      ]
+    },
+    {
+      "id": "EPIC-2",
+      "name": "Loop engine",
+      "feature_id": "F-8",
+      "audience": "platform",
+      "repo": "cosmaneura-os",
+      "mine_patterns_from": "Cosmas-CAB-Tool",
+      "depends_on": [],
+      "story": "A named approver can approve, edit, reject, or escalate a draft with an immutable audit row.",
+      "acceptance": [
+        "states: draft pending_approval approved edited rejected escalated sent confirmed closed failed",
+        "every transition has actor_user_id + timestamp + source pointers",
+        "no feature-local approval queue ships"
+      ],
+      "gate": "substrate for F-2 F-3 F-4",
+      "lane": "OS"
+    },
+    {
+      "id": "EPIC-3",
+      "name": "Toggles and seats",
+      "feature_id": "F-8",
+      "depends_on": [
+        "EPIC-2"
+      ],
+      "story": "An org can enable coding suggestions only for MCD-credentialed providers without a deploy.",
+      "acceptance": [
+        "ToggleFile versioned",
+        "F-3 OFF by default for non-MCD verified by test",
+        "seats owner/approver/chaser exist",
+        "offboarding revokes channel identities"
+      ],
+      "repo": "cosmaneura-os",
+      "lane": "OS"
+    },
+    {
+      "id": "EPIC-4",
+      "name": "Appointment projection",
+      "feature_id": "F-4",
+      "depends_on": [
+        "EPIC-2"
+      ],
+      "story": "Upcoming MCD visits are listed with a computed coverage_status whether born in Acuity or Athena.",
+      "acceptance": [
+        "no duplicate visits",
+        "no chase if patient_link unconfirmed",
+        "FRAGILE declared if Acuity API unavailable"
+      ],
+      "repo": "cosmaneura-os",
+      "lane": "OS"
+    },
+    {
+      "id": "EPIC-5",
+      "name": "Insurance ArtifactChase",
+      "feature_id": "F-4",
+      "audience": "MCD-design-partner",
+      "depends_on": [
+        "EPIC-2",
+        "EPIC-4",
+        "CLK-4",
+        "INV-4"
+      ],
+      "story": "Approver sends a HITL-approved request that a patient upload insurance information before a visit.",
+      "acceptance": [
+        "zero patient sends without approve event",
+        "SMS/email body has no name, member ID, or photo",
+        "images never attached into Teams",
+        "zero PAN fields on capture page",
+        "audit reconstructs who approved what"
+      ],
+      "kpi": [
+        "pct_visits_artifact_24h_prior",
+        "visits_held_vs_cancelled_day_of"
+      ],
+      "kpi_forbidden": [
+        "recovered_dollars"
+      ],
+      "repo": "cosmaneura-os",
+      "lane": "OS"
+    },
+    {
+      "id": "EPIC-6",
+      "name": "Session Prep",
+      "feature_id": "F-2",
+      "depends_on": [
+        "EPIC-2"
+      ],
+      "story": "Clinician receives a pre-visit brief >=24h out and must approve it.",
+      "acceptance": [
+        "zero unreviewed briefs reach a visit"
+      ],
+      "lane": "LEGACY_unless_not_started",
+      "note": "If work already in flight on master, do not swarm it. If not started, implement on F-8 in OS repo and integrate later."
+    },
+    {
+      "id": "EPIC-7",
+      "name": "Coding suggestions MCD-scoped",
+      "feature_id": "F-3",
+      "audience": "MCD-only",
+      "depends_on": [
+        "EPIC-2",
+        "EPIC-3",
+        "CLK-2"
+      ],
+      "story": "MCD provider sees a documentation-to-code consistency check and attests or overrides.",
+      "acceptance": [
+        "flag OFF for non-MCD org in automated test",
+        "no auto-submit to payer",
+        "override rate dashboarded",
+        "copy never says AI billing codes"
+      ],
+      "lane": "LEGACY_unless_not_started",
+      "note": "If work already in flight on master, do not swarm it. If not started, implement on F-8 in OS repo and integrate later."
+    },
+    {
+      "id": "EPIC-8",
+      "name": "External clocks",
+      "feature_id": "F-9",
+      "depends_on": [],
+      "story": "Athena Marketplace application and A2P 10DLC filing exist with dates.",
+      "acceptance": [
+        "application filed evidence",
+        "A2P submitted evidence"
+      ]
+    },
+    {
+      "id": "EPIC-9",
+      "name": "Teams intra-org adapter",
+      "feature_id": "F-8",
+      "launch_blocking": false,
+      "depends_on": [
+        "EPIC-2"
+      ],
+      "story": "Approver receives a pointer ticket in Teams and deep-links to the F-8 queue.",
+      "acceptance": [
+        "payload is visit-ref + status enum only",
+        "no images"
+      ],
+      "repo": "cosmaneura-os",
+      "lane": "OS"
+    },
+    {
+      "id": "EPIC-10",
+      "name": "Payment ArtifactChase adapter",
+      "feature_id": "F-4",
+      "status": "GATED",
+      "depends_on": [
+        "D-5",
+        "CEO changelog"
+      ],
+      "story": "Same loop captures a processor token for an expired card.",
+      "acceptance": [
+        "no PAN at rest",
+        "recovered_dollars counter only after first tokenized capture"
+      ],
+      "do_not_start": true,
+      "note": "OPEN-3 resolved flat SaaS. Still gated on D-5 if payment adapter ever exists."
+    },
+    {
+      "id": "EPIC-11",
+      "name": "Scribe capture plane",
+      "feature_id": "F-1",
+      "lane": "OS",
+      "repo": "cosmaneura-os",
+      "depends_on": [
+        "EPIC-2"
+      ],
+      "story": "A bound Scribe records a visit, a mental note, or an assignment as an IntakeStream; Chief proposes a ticket list; a human accepts or edits that list before work fans out.",
+      "acceptance": [
+        "stream sources: visit_audio, imported_transcript, mental_note, assignment",
+        "SOAP skill consumes the same transcript and never owns capture",
+        "disaggregation output is a ticket list with automation_class on each ticket",
+        "no fan-out send until list HITL or ticket is AUTO_TEMPLATE",
+        "scribe identity is a bound human or a named device, never an unbound model"
+      ]
+    },
+    {
+      "id": "EPIC-12",
+      "name": "Automation class enforcement",
+      "feature_id": "F-8",
+      "lane": "OS",
+      "repo": "cosmaneura-os",
+      "depends_on": [
+        "EPIC-2",
+        "EPIC-11"
+      ],
+      "story": "Every proposed send carries an automation_class; the runtime refuses NEVER_AUTO and HITL_REQUIRED without an approve event.",
+      "acceptance": [
+        "classifier + charter never-list run before send",
+        "AUTO_TEMPLATE requires template_id + owner signature",
+        "AUTO_DRAFT never leaves the staff pane",
+        "tests cover survey auto vs instruction hold vs chatbot logistics-only"
+      ]
+    },
+    {
+      "id": "EPIC-13",
+      "name": "Legacy-as-MCP tool surface",
+      "feature_id": "F-8",
+      "lane": "LEGACY",
+      "repo": "cosmaneura-master",
+      "swarm": false,
+      "story": "Existing Cosmas FastAPI exposes a small, authenticated tool list the OS lane can call: soap.draft, stream ingest already live, plus stubs for tickets later.",
+      "acceptance": [
+        "documented OpenAPI or MCP tool list",
+        "no new PHI fields",
+        "OS lane calls over HTTPS with service identity, never shares prod SP with PR federation",
+        "does not require merging repos"
+      ],
+      "accelerates": true,
+      "does_not": "Do not embed Rakazo in master. Do not let OS swarm write master."
+    },
+    {
+      "id": "EPIC-14",
+      "name": "Two-zone org computer",
+      "feature_id": "F-9",
+      "lane": "OS",
+      "story": "One org computer as product. Two Azure security zones as implementation: ePHI zone and untrusted retrieval zone connected only by a citation pipe.",
+      "acceptance": [
+        "ePHI zone cannot egress to open web except via documented allowlist",
+        "retrieval zone has no Athena creds and no patient store",
+        "only Citation objects flow inbound",
+        "NSG / deny-all default logged"
+      ]
+    },
+    {
+      "id": "EPIC-15",
+      "name": "Capacitor approver + Scribe shell",
+      "feature_id": "F-1",
+      "lane": "OS",
+      "story": "Wrap the web queue and existing Scribe capture work in Capacitor for iOS and Android.",
+      "acceptance": [
+        "approve/edit/reject ticket list on device",
+        "reuse existing Scribe capture where possible",
+        "device store encrypted + short TTL",
+        "no desktop-stream as default mobile UX"
+      ]
+    },
+    {
+      "id": "EPIC-16",
+      "name": "RRM synthetic lab book demo",
+      "lane": "OS",
+      "repo": "cosmaneura-os",
+      "swarm": true,
+      "story": "Record L1 fixture labs + WorkbookPort.append into a synthetic hormone/lab workbook on the org box. Command-gated. Copy-on-write. No EHR write. RRM-flavored demo, generic port.",
+      "acceptance": [
+        "synthetic TSH/progesterone/etc map onto existing header row",
+        "command or accepted ticket required",
+        "backup written before append",
+        "header mismatch refuses",
+        "Decision log has source result ids + file hashes",
+        "works with zero prod credentials"
+      ]
+    }
+  ],
+  "challenges_pending_ceo": [
+    {
+      "id": "CH-4",
+      "target": "v3 CardChase KPI",
+      "severity": "material",
+      "finding": "Insurance-first chase cannot produce recovered $X.",
+      "alternative": "Accept verified-eligibility + salvaged visits as exhibit, or schedule EPIC-10."
+    },
+    {
+      "id": "CH-5",
+      "target": "D-3 wording",
+      "severity": "material",
+      "finding": "v3 text still describes expired payment cards and tokenized capture.",
+      "alternative": "Publish v3 changelog so agents stop seeing two jobs."
+    },
+    {
+      "id": "CH-6",
+      "target": "F-4 detect",
+      "severity": "blocker_if_true",
+      "finding": "No Acuity API means AppointmentProjection cannot be live in 30-60d.",
+      "alternative": "Confirm API access or declare FRAGILE export path before promising live chase."
+    },
+    {
+      "id": "CH-7",
+      "target": "INV-6 vs swarm desire",
+      "severity": "material",
+      "finding": "Swarm on master remains unsafe until IAM. Swarm on a zero-cred OS repo is the only legal acceleration path.",
+      "alternative": "Create cosmaneura-os now. Do not federate prod SP to it."
+    }
+  ],
+  "open3": "SETTLED_flat_saas",
+  "automation_policy": {
+    "principle": "Full agentic send is allowed only when content is a signed template or a standing protocol, reversible, and non-diagnostic.",
+    "candidates": [
+      {
+        "flow": "post_visit_survey",
+        "class": "AUTO_TEMPLATE",
+        "why": "Fixed questions, no advice, fired on visit.closed. Sender = practice.",
+        "gate": "template_id signed by org.owner; no free-text clinical replies auto-answered"
+      },
+      {
+        "flow": "post_visit_instructions",
+        "class": "HITL_REQUIRED unless protocol_id already signed for that visit_type",
+        "why": "Clinical content. INV-3. Standing after-visit instruction packs can graduate to AUTO_TEMPLATE.",
+        "gate": "protocol version pinned; first send of a new protocol is HITL"
+      },
+      {
+        "flow": "booking_prep_chatbot",
+        "class": "AUTO_TEMPLATE for logistics/intake link; HITL_REQUIRED for customized clinical prep",
+        "why": "A booking is not consent to be clinically coached by a model.",
+        "gate": "chatbot may collect intake and explain parking. It may not interpret symptoms."
+      },
+      {
+        "flow": "provider_walk_in_paragraph",
+        "class": "AUTO_DRAFT",
+        "why": "Surfaces in the provider pane as a draft from Session Prep / Scribe. Not patient-facing. Clinician walking in unread is their choice; product does not mark it reviewed.",
+        "gate": "org toggle auto_publish_to_provider_pane only after measured accuracy; never auto-sends to patient"
+      },
+      {
+        "flow": "soap_from_transcript",
+        "class": "AUTO_DRAFT",
+        "why": "Existing Cosmas generator. Provider attests the note. Never auto-signs the chart.",
+        "gate": "INV-3"
+      }
+    ]
+  },
+  "tenancy": {
+    "Org": "a covered-entity or BA-scoped legal practice, not a brand",
+    "MCD": {
+      "parent": "brand + shared IT paid by corporate",
+      "children": "4 legal entities",
+      "workforce_clinical": "1099 providers: visit, note, Athena clinical requests",
+      "workforce_ops": "MCD staff + vendors: middle and back office",
+      "patient_channels": [
+        "zoom",
+        "phone",
+        "email"
+      ],
+      "do_not": "treat 1099 as the CardChase approver by default; they do not run the back office"
+    },
+    "patterns": {
+      "solo_or_small_independent": "1 Org, 1 computer, 1-3 provider seats, physician is default approver",
+      "single_legal_group_e.g_10_derms": "1 Org, 1 computer, N provider seats each with private home/stream; consults are F-8 tickets between seats; SKU charged per provider",
+      "mcd_network": "4 Orgs from 4 BAAs; computers follow entity not 1099; network_tenant toggle ON; ops approves chase; 1099 attests SOAP"
+    },
+    "flexibility": {
+      "rigid": [
+        "Org is a BAA / covered-entity boundary",
+        "Seat is a bound human login",
+        "One computer per Org",
+        "Agent never signs",
+        "network_tenant is a toggle default OFF"
+      ],
+      "configurable_per_org": [
+        "specialty_pack",
+        "seat_roster",
+        "default_approver_by_lane",
+        "channel.teams",
+        "athena_practice_ids",
+        "sku_seat_count"
+      ],
+      "rule": "do not fork code per specialty or network"
+    }
+  },
+  "record_ladder": {
+    "rule": "Launch is not gated on full EHR writeback. Each skill declares a minimum ladder level.",
+    "levels": {
+      "L0": "No EHR. Streams, F-8, SchedulePort only, notes as Cosmas drafts, chase = image + human verify.",
+      "L1": "EHR read: patient match, coverage-if-present, appointments-if-present.",
+      "L2": "Document attach: SOAP PDF / card image into the chart as a file.",
+      "L3": "Structured coverage write + eligibility trigger (270/271).",
+      "L4": "Signed note writeback. Clinician still attests."
+    },
+    "launch_default": "L0",
+    "mcd_gym_target": "L2 then L3",
+    "marketplace_cardchase": "L2 minimum to look real on Athena; L3 preferred"
+  },
+  "invariants_os": {
+    "INV-OS-SUBMIT": "Named provider or account owner submits all system-of-record writes. Cosmas prepares. Never auto-submit notes, claims, Rx, coverage packages, orders."
+  },
+  "ladders": {
+    "RecordPort": [
+      "L0 drafts in Cosmas",
+      "L1 read",
+      "L2 document attach",
+      "L3 coverage+270 owner-confirms",
+      "L4 prepared note owner-submits"
+    ],
+    "SchedulePort": [
+      "L0 CSV/manual",
+      "L1 read adapter",
+      "L2 two-way"
+    ],
+    "ClaimsPort": [
+      "L0 off",
+      "L1 read status",
+      "L2 draft stops at owner",
+      "L3 owner-submit"
+    ],
+    "RxPort": [
+      "L0 off",
+      "L1 draft to prescriber",
+      "L2 owner-submit to pharmacy"
+    ],
+    "PayPort": [
+      "L0 stripe-seat-or-ignore",
+      "Ln other processors",
+      "patient PAN gated"
+    ],
+    "NotifyPort": [
+      "L0 in-app+staff email",
+      "L1 patient email link",
+      "L2 A2P",
+      "Teams optional"
+    ],
+    "EvidencePort": [
+      "L0 off",
+      "Ln citation pipe"
+    ],
+    "WorkbookPort": [
+      "L0 file on org box",
+      "L1 Drive/SharePoint",
+      "never silent full rewrite"
+    ]
+  },
+  "early_beta_core": [
+    "scribe",
+    "chief",
+    "approver_human",
+    "f8",
+    "queue",
+    "chaser_L0_optional"
+  ],
+  "specialty": {
+    "default": "generic_small_practice",
+    "rrm": {
+      "status": "prospective_pilot_pack",
+      "not_a_launch_gate": true,
+      "seats_extra": [
+        "educator",
+        "clinician"
+      ],
+      "method_pack": "config_from_first_RRM_org",
+      "never": [
+        "IVF_IUI_packages",
+        "outcome_copy_without_hold"
+      ]
+    }
+  },
+  "canonical_human_spec": "artifacts/Cosmas_OS_Product_Technical_Specs_and_Roadmap.pdf",
+  "canonical_human_docx": "artifacts/Cosmas_OS_Product_Technical_Specs_and_Roadmap.docx",
+  "stack": {
+    "language": "python_fastapi",
+    "db": "postgres",
+    "blobs": "azure_blob",
+    "containers": "docker_compose_local_container_apps_or_appservice_prod",
+    "model": "azure_openai_gpt-4.1",
+    "mobile": "capacitor",
+    "workbook": "openpyxl",
+    "secrets": "key_vault",
+    "ci": "github_actions_two_lane",
+    "not_beta": [
+      "k8s",
+      "rakazo_runtime",
+      "second_ehr",
+      "eprescribe_sdk",
+      "clearinghouse_sdk"
+    ],
+    "identity": "clerk",
+    "jobs": "celery",
+    "broker": "redis",
+    "cloud": "azure",
+    "stt": "assemblyai",
+    "telehealth_capture": "recall.ai",
+    "credits_usd": 100000,
+    "credits_expire": "2027-01"
+  },
+  "retention": {
+    "raw_audio": "72h_fixed_then_delete",
+    "transcript": "max(final_SoR_artifact_submitted, 1_year)",
+    "insurance_working_copy": "7d_after_chase_complete",
+    "workbook": "clinician_owned_file"
+  },
+  "environments": [
+    "synth_os",
+    "early_adopter_beta",
+    "cosmas_mcd_prod"
+  ]
+}

@@ -1,0 +1,85 @@
+services:
+  postgres:
+    image: postgres:16.9
+    environment:
+      POSTGRES_USER: cosmas
+      POSTGRES_PASSWORD: cosmas
+      POSTGRES_DB: cosmas_os
+    ports:
+      - "54329:5432"
+    volumes:
+      - cosmas_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U cosmas -d cosmas_os"]
+      interval: 2s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:6.2.18
+    ports:
+      - "63799:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn cosmas_os.api.app:app --host 0.0.0.0 --port 8000 --reload
+    environment:
+      DATABASE_URL: postgresql+psycopg://cosmas:cosmas@postgres:5432/cosmas_os
+      REDIS_URL: redis://redis:6379/0
+      COSMAS_ENV: synth_os
+      BLOB_ROOT: /data/blobs
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./:/app
+      - cosmas_blobs:/data/blobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A cosmas_os.worker.celery_app worker --loglevel=INFO
+    environment:
+      DATABASE_URL: postgresql+psycopg://cosmas:cosmas@postgres:5432/cosmas_os
+      REDIS_URL: redis://redis:6379/0
+      COSMAS_ENV: synth_os
+      BLOB_ROOT: /data/blobs
+    volumes:
+      - ./:/app
+      - cosmas_blobs:/data/blobs
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  web:
+    image: node:22.11.0-bookworm
+    working_dir: /web
+    command: sh -c "corepack enable && pnpm install && pnpm dev --host 0.0.0.0 --port 5173"
+    environment:
+      VITE_API_BASE: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./web:/web
+    depends_on:
+      - api
+
+volumes:
+  cosmas_pg:
+  cosmas_blobs:
+
+# Note: this host uses the `docker-compose` binary (not `docker compose`).

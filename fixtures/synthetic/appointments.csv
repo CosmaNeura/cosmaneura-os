@@ -1,0 +1,3 @@
+external_id,start_at,patient_label,source
+appt-1001,2026-09-10T15:00:00+00:00,Jordan Lee,csv
+appt-1002,2026-09-11T16:30:00+00:00,Riley Quinn,csv

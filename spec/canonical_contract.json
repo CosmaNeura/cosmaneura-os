@@ -1,0 +1,233 @@
+{
+  "schema_version": "1.0",
+  "role": "non_authoritative_machine_summary_of_human_contract",
+  "product_contract_version": "1.9-draft",
+  "date": "2026-09-02",
+  "authority": [
+    "direct_owner_instructions",
+    "CANONICAL_PRODUCT_DECISIONS.md",
+    "accepted_decision_log_entries",
+    "docs/CANONICAL_ARCHITECTURE_CONTRACT.md",
+    "current_code_evidence_for_implementation_facts",
+    "historical_reference_documents"
+  ],
+  "repository": {
+    "name": "cosmaneura-os",
+    "track": "B",
+    "separate_git_history": true,
+    "legacy_repositories_read_only": true,
+    "shared_database_with_track_a": false,
+    "shared_deployment_identity_with_track_a": false,
+    "integration": "versioned_authenticated_https_openapi_or_first_party_mcp"
+  },
+  "commercial": {
+    "model": "flat_saas",
+    "exact_tiers": "OPEN",
+    "v1_product": "insurance_artifact_chase",
+    "payment_recovery": "DEFERRED",
+    "percentage_of_recovery_pricing": "FORBIDDEN",
+    "v1_kpis": [
+      "artifact_ready_before_visit",
+      "staff_minutes_saved",
+      "chase_completion",
+      "visits_preserved",
+      "approval_time",
+      "incorrect_or_duplicate_outreach",
+      "support_burden",
+      "paid_retention"
+    ]
+  },
+  "org_box": {
+    "relationship": "one_legal_org_equals_one_logical_box",
+    "box_id": "immutable_audit_root_and_system_representation_of_org_id_not_a_second_tenant_id",
+    "one_vm_per_user": false,
+    "cross_box_network_default": "OFF",
+    "exclusive_box_database_may_inherit_scope": true,
+    "box_id_required_at_shared_boundaries": true,
+    "shared_database": "DEFERRED_NEW_ARCHITECTURE_DECISION"
+  },
+  "principals": {
+    "types": [
+      "HumanSeat",
+      "AgentPrincipal"
+    ],
+    "real_identity_provider": "Clerk",
+    "synthetic_identity": "explicit_local_fake_AuthPort",
+    "agent_cannot_authenticate_as_human": true,
+    "agent_cannot_self_approve": true,
+    "agent_cannot_sign": true,
+    "system_of_record_submit_requires_named_human": true,
+    "clinical_submit_requires_appropriately_licensed_human": true,
+    "last_active_owner_cannot_be_removed_without_successor": true,
+    "ownership_transfer_preserves_box_audit_root": true
+  },
+  "agents": {
+    "baseline": [
+      "Scribe",
+      "Chief",
+      "Chaser"
+    ],
+    "owner_may_disable_or_remove": true,
+    "removal_preserves_tombstoned_audit_identity": true,
+    "policy_precedence": [
+      "platform_safety",
+      "universal_charter",
+      "specialty_overlay",
+      "org_owner_configuration"
+    ],
+    "deny_wins": true,
+    "actions_pin_policy_charter_and_config_versions": true
+  },
+  "workflow": {
+    "engine": "F-8",
+    "feature_local_approval_queues": "FORBIDDEN",
+    "entities": [
+      "Ticket",
+      "ActionRevision",
+      "Decision",
+      "Operation",
+      "AuditEvent"
+    ],
+    "approval_binds_immutable_revision": true,
+    "approval_binds_payload_hash": true,
+    "edit_invalidates_approval": true,
+    "standing_auto_template_in_first_slice": false,
+    "auto_draft_can_send": false,
+    "optimistic_revision_check_on_approval": true,
+    "running_or_completed_operation_cannot_be_retroactively_invalidated": true
+  },
+  "operation_ledger": {
+    "authoritative_store": "Postgres",
+    "worker_transport_hypothesis": "Celery_Redis",
+    "stable_operation_id": true,
+    "approval_and_intent_transactional": true,
+    "duplicate_click_reuses_operation": true,
+    "payload_change_requires_new_revision": true,
+    "unknown_external_result": "RECONCILE_DO_NOT_BLINDLY_RETRY",
+    "kafka": "DEFERRED",
+    "azure_service_bus": "NOT_REQUIRED_FOR_L0"
+  },
+  "ports": {
+    "initial": {
+      "AuthPort": "local_fake",
+      "SchedulePort": "manual_or_csv_synthetic",
+      "RecordPort": "local_draft_no_ehr_write",
+      "NotifyPort": "in_app_or_fake_sink",
+      "BlobPort": "local_synthetic_store"
+    },
+    "dark": [
+      "Athena",
+      "Acuity",
+      "real_email_sms",
+      "A2P",
+      "Teams",
+      "patient_payment",
+      "EvidencePort",
+      "WorkbookPort"
+    ]
+  },
+  "compliance": {
+    "model": "invisible_platform_floor_plus_capability_activation_manifests",
+    "internal_first": true,
+    "external_capabilities_dark_by_default": true,
+    "real_phi_activation_requires_separate_gate": true
+  },
+  "usability": {
+    "normal_ui_exposes": [
+      "work",
+      "agents",
+      "people",
+      "outcomes"
+    ],
+    "normal_ui_hides": [
+      "box_id",
+      "operation_id",
+      "queue_internals",
+      "infrastructure_jargon",
+      "inactive_capability_compliance"
+    ]
+  },
+  "environments": {
+    "synth_os": {
+      "phi": false,
+      "production_credentials": false,
+      "cursor_development": true,
+      "adapters": "fake_or_local"
+    },
+    "early_adopter_beta": {
+      "deployment": "human_approved",
+      "box": "isolated_first_box",
+      "coding_agent_live_access": false,
+      "capability_specific_gates": true,
+      "human_deployment_approval_required": true,
+      "production_or_track_a_credentials": false
+    },
+    "cosmas_mcd_prod": {
+      "owner": "Track_A",
+      "direct_database_access_from_os": false,
+      "integration_before_track_a_production_iam_gate": false
+    }
+  },
+  "technology_hypothesis_to_validate": {
+    "architecture": "modular_monolith",
+    "api": "FastAPI",
+    "database": "Postgres",
+    "orm_migrations": "SQLAlchemy_and_Alembic_or_current_evidence_supported_equivalent",
+    "worker": "Celery",
+    "broker": "Redis",
+    "local": "Docker_Compose",
+    "tests": "Pytest",
+    "python_version": "DECISION_REQUIRED_3_12_vs_3_13",
+    "ui": "DECISION_REQUIRED_LOWEST_COMPLEXITY_COMPATIBLE_QUEUE",
+    "later_azure": "DECISION_REQUIRED_CONTAINER_APPS_vs_APP_SERVICE",
+    "cursor_model_as_product_runtime": false
+  },
+  "first_slice": {
+    "name": "synthetic_insurance_artifact_chase_L0",
+    "requires_owner_build_approval": true,
+    "real_patient": false,
+    "real_message": false,
+    "real_vendor": false,
+    "real_clerk": false,
+    "azure": false,
+    "application_llm": false,
+    "completion": "IMAGE_ON_FILE_plus_human_verification",
+    "includes_purge_receipt": true
+  },
+  "validation_gate": {
+    "phase_0_code_changes": false,
+    "required_reports": 8,
+    "stop_line": "BUILD_GATE: WAITING_FOR_OWNER_APPROVAL",
+    "approval_phrase": "APPROVE LOCAL SYNTH BUILD"
+  },
+  "open_owner_decisions": [
+    "exact_flat_saas_tiers_and_seat_packaging",
+    "first_beta_organization",
+    "approver_matrix_by_lane_and_specialty",
+    "individual_vs_displayed_batch_approval_ui",
+    "patient_email_vs_a2p_sequence",
+    "athena_and_acuity_access",
+    "post_beta_physical_box_packing",
+    "product_runtime_model_if_needed",
+    "quantitative_graduation_and_kill_thresholds"
+  ],
+  "deferred": [
+    "Kubernetes",
+    "microservices",
+    "Kafka",
+    "generalized_event_sourcing",
+    "shared_multi_org_runtime",
+    "second_EHR",
+    "browser_automation",
+    "evidence_open_web_zone",
+    "Teams",
+    "native_mobile",
+    "payment_card_chase",
+    "PAN_handling",
+    "claims",
+    "prescriptions",
+    "RRM_workbook",
+    "full_self_service_onboarding",
+    "rebuild_existing_scribe"
+  ]
+}

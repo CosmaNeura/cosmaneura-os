@@ -1,0 +1,177 @@
+# Synthetic CI — no production secrets, no cloud deploy.
+# Jobs are required; do not mark continue-on-error.
+
+name: synth-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: synth-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  COSMAS_ENV: synth_os
+  PYTHON_VERSION: "3.13"
+  NODE_VERSION: "22"
+
+jobs:
+  python-quality:
+    name: python-lint-type
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Sync
+        run: uv sync --extra dev
+      - name: Ruff
+        run: uv run ruff check src tests
+      - name: Pyright
+        run: uv run pyright src
+
+  python-tests:
+    name: python-tests-migrate
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16.9
+        env:
+          POSTGRES_USER: cosmas
+          POSTGRES_PASSWORD: cosmas
+          POSTGRES_DB: cosmas_os
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U cosmas -d cosmas_os"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+      redis:
+        image: redis:6.2.18
+        ports:
+          - 63799:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql+psycopg://cosmas:cosmas@localhost:54329/cosmas_os
+      REDIS_URL: redis://localhost:63799/0
+      BLOB_ROOT: ./data/blobs
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+      - name: Sync
+        run: uv sync --extra dev
+      - name: Migrations on empty database
+        run: uv run alembic upgrade head
+      - name: Pytest
+        run: uv run pytest -q
+      - name: Demo ArtifactChase
+        run: uv run python -m cosmas_os.cli demo-artifact-chase
+      - name: OpenAPI dump
+        run: uv run python -m cosmas_os.cli dump-openapi
+      - name: Upload OpenAPI
+        uses: actions/upload-artifact@v4
+        with:
+          name: openapi-json
+          path: openapi.json
+
+  web:
+    name: web-test-build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Enable pnpm
+        run: corepack enable && corepack prepare pnpm@9.15.9 --activate
+      - name: Install
+        working-directory: web
+        run: pnpm install --frozen-lockfile
+      - name: Test
+        working-directory: web
+        run: pnpm test
+      - name: Build
+        working-directory: web
+        run: pnpm build
+
+  container-image:
+    name: release-image-manifest
+    runs-on: ubuntu-latest
+    needs: [python-quality, python-tests, web]
+    services:
+      postgres:
+        image: postgres:16.9
+        env:
+          POSTGRES_USER: cosmas
+          POSTGRES_PASSWORD: cosmas
+          POSTGRES_DB: cosmas_os
+        ports:
+          - 54329:5432
+        options: >-
+          --health-cmd "pg_isready -U cosmas -d cosmas_os"
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image (no push)
+        run: |
+          set -euo pipefail
+          IMAGE_TAG="cosmas-os:ci-${GITHUB_SHA}"
+          docker build -t "$IMAGE_TAG" .
+          DIGEST="$(docker image inspect --format='{{.Id}}' "$IMAGE_TAG")"
+          mkdir -p artifacts/releases
+          cat > artifacts/releases/manifest.json <<EOF
+          {
+            "product": "cosmas-os",
+            "track": "B",
+            "env": "synth_os",
+            "git_sha": "${GITHUB_SHA}",
+            "git_ref": "${GITHUB_REF}",
+            "image_tag": "${IMAGE_TAG}",
+            "image_id": "${DIGEST}",
+            "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "deployed": false,
+            "pushed": false,
+            "cloud": false,
+            "notes": "Synthetic CI artifact only. Not pushed. Not cloud-deployed."
+          }
+          EOF
+          echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+      - name: Smoke migrate from image
+        run: |
+          set -euo pipefail
+          docker run --rm --network host \
+            -e DATABASE_URL=postgresql+psycopg://cosmas:cosmas@127.0.0.1:54329/cosmas_os \
+            -e COSMAS_ENV=synth_os \
+            "$IMAGE_TAG" \
+            alembic upgrade head
+      - name: Upload release manifest
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest
+          path: artifacts/releases/manifest.json
+
+  synth-gate:
+    name: synth-ci-gate
+    runs-on: ubuntu-latest
+    needs: [python-quality, python-tests, web, container-image]
+    steps:
+      - name: Confirm all synth gates passed
+        run: |
+          echo "python-quality, python-tests, web, container-image all green"
+          echo "No production secrets used. No deploy performed."

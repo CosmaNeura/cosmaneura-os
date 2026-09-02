@@ -1,0 +1,96 @@
+:root {
+  --ink: #1c2430;
+  --muted: #5b6775;
+  --paper: #f3efe6;
+  --panel: #fffdf8;
+  --line: #d7d0c3;
+  --accent: #0f6a5a;
+  --accent-ink: #f7fffc;
+  --warn: #8a4b12;
+  font-family: "Source Serif 4", "Iowan Old Style", "Palatino Linotype", Palatino, serif;
+  color: var(--ink);
+  background:
+    radial-gradient(circle at top left, rgba(15, 106, 90, 0.12), transparent 40%),
+    linear-gradient(160deg, #efe8da 0%, var(--paper) 45%, #e7eef0 100%);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+button, input, textarea {
+  font: inherit;
+}
+button {
+  cursor: pointer;
+  border: 1px solid var(--line);
+  background: var(--panel);
+  padding: 0.55rem 0.9rem;
+  border-radius: 0.35rem;
+}
+button.primary {
+  background: var(--accent);
+  color: var(--accent-ink);
+  border-color: transparent;
+}
+button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.shell {
+  max-width: 920px;
+  margin: 0 auto;
+  padding: 2.5rem 1.25rem 4rem;
+}
+.brand {
+  font-size: clamp(2.2rem, 5vw, 3.4rem);
+  letter-spacing: -0.03em;
+  margin: 0;
+}
+.lede {
+  color: var(--muted);
+  max-width: 36rem;
+  margin: 0.4rem 0 1.75rem;
+}
+.panel {
+  background: color-mix(in srgb, var(--panel) 92%, white);
+  border: 1px solid var(--line);
+  border-radius: 0.75rem;
+  padding: 1.1rem 1.2rem;
+  margin-bottom: 1rem;
+}
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
+}
+.meta {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+.ticket h2 {
+  margin: 0 0 0.35rem;
+  font-size: 1.2rem;
+}
+.message {
+  white-space: pre-wrap;
+  background: #f7f3ea;
+  border-left: 3px solid var(--accent);
+  padding: 0.75rem 0.9rem;
+  margin: 0.75rem 0;
+}
+.status {
+  display: inline-block;
+  text-transform: lowercase;
+  color: var(--warn);
+}
+.error { color: #8f1d1d; }
+.timeline {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.timeline li {
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--line);
+}
