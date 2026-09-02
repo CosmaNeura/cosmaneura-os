@@ -59,11 +59,19 @@ Note: `git_sha` is `uncommitted` until an owner-requested initial commit exists.
 
 Unchanged: Athena/Acuity, real messaging, Clerk/Azure, LLM, payment/PAN, AUTO_TEMPLATE.
 
+## First commit / private remote (DL-20260902-07)
+
+| Item | Value |
+|---|---|
+| Commit | `44e97ed` on `main` |
+| Remote | `git@github.com:JohnClem/cosmaneura-os.git` (private) |
+| Excluded | `.env`, generated `artifacts/releases/manifest-*.json` |
+
 ## Limitations / next gate
 
-- No GitHub remote yet — Actions file is ready but not executed on GitHub
+- Synth CI may now run on GitHub Actions for pushes to this private remote
 - No image push / no Azure
-- Recommended next: owner-requested git commit (+ optional private remote), then optional non-PHI Azure **only** with a separate explicit decision
+- Optional next: non-PHI Azure **only** with a separate explicit decision
 
 ## Legacy repositories
 

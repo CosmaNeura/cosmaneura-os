@@ -84,6 +84,10 @@ docs/validation/ Phase 0 evidence (complete)
 See `AGENTS.md`, `CANONICAL_PRODUCT_DECISIONS.md`, and `docs/DECISION_LOG.md`.
 GPT-5.6 SOL is a development agent only — not a product runtime dependency.
 
+## Remote
+
+Private GitHub: `git@github.com:JohnClem/cosmaneura-os.git` (Track B only).
+
 ## Not authorized here
 
-Cloud deploy, remotes/push, Track A edits, real vendors, application LLM.
+Cloud deploy, registry push, Track A edits, real vendors, application LLM.
