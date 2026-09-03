@@ -155,11 +155,11 @@ jq -e '
   (rule("AllowAzureDnsUdp") |
     .priority == 110 and .direction == "Outbound" and .access == "Allow" and
     .protocol == "Udp" and .sourcePortRange == "*" and .destinationPortRange == "53" and
-    .sourceAddressPrefix == "*" and .destinationAddressPrefix == "AzurePlatformDNS") and
+    .sourceAddressPrefix == "*" and .destinationAddressPrefix == "168.63.129.16") and
   (rule("AllowAzureDnsTcp") |
     .priority == 120 and .direction == "Outbound" and .access == "Allow" and
     .protocol == "Tcp" and .sourcePortRange == "*" and .destinationPortRange == "53" and
-    .sourceAddressPrefix == "*" and .destinationAddressPrefix == "AzurePlatformDNS") and
+    .sourceAddressPrefix == "*" and .destinationAddressPrefix == "168.63.129.16") and
   (rule("AllowHttpsEgress") |
     .priority == 130 and .direction == "Outbound" and .access == "Allow" and
     .protocol == "Tcp" and .sourcePortRange == "*" and .destinationPortRange == "443" and

@@ -50,15 +50,17 @@ resource "azurerm_network_security_group" "deploy_runner" {
   }
 
   security_rule {
-    name                       = "AllowAzureDnsUdp"
-    priority                   = 110
-    direction                  = "Outbound"
-    access                     = "Allow"
-    protocol                   = "Udp"
-    source_port_range          = "*"
-    destination_port_range     = "53"
-    source_address_prefix      = "*"
-    destination_address_prefix = "AzurePlatformDNS"
+    name                   = "AllowAzureDnsUdp"
+    priority               = 110
+    direction              = "Outbound"
+    access                 = "Allow"
+    protocol               = "Udp"
+    source_port_range      = "*"
+    destination_port_range = "53"
+    source_address_prefix  = "*"
+    # AzurePlatformDNS is a deny-only service tag. Use Azure's documented
+    # platform virtual IP for the explicit DNS allow instead.
+    destination_address_prefix = "168.63.129.16"
   }
 
   security_rule {
@@ -70,7 +72,7 @@ resource "azurerm_network_security_group" "deploy_runner" {
     source_port_range          = "*"
     destination_port_range     = "53"
     source_address_prefix      = "*"
-    destination_address_prefix = "AzurePlatformDNS"
+    destination_address_prefix = "168.63.129.16"
   }
 
   security_rule {

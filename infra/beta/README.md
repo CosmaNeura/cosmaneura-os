@@ -555,24 +555,26 @@ binding's `certificate_binding_type` and
 ignored because Azure populates them asynchronously.
 
 For both the database-preparation and workload stages, use the guarded
-protected transport and guarded subsequent plan flow. Each `release-id` is
-immutable and bound on-runner to one source SHA, so a later candidate or retry
-uses a new ID instead of overwriting reviewed source, tfvars, plans, approvals,
-or results:
+protected transport and guarded subsequent plan flow. Continue using the same
+`release-id` that produced the accepted build evidence through all stages of
+that release. Each `release-id` is immutable and bound on-runner to one source
+SHA, so a later source candidate uses a new ID and produces its own build
+evidence instead of overwriting reviewed source, tfvars, plans, approvals, or
+results:
 
 ```text
 umask 077
 bash ./transport-to-protected-runner.sh stage-vars \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --stage database \
   --var-file /protected/ephemeral/database.tfvars.json
 
 bash ./transport-to-protected-runner.sh plan \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --stage database \
   --artifact-out /protected/ephemeral/d3-beta-database-review.json
 ```
@@ -605,7 +607,7 @@ approval JSON shape with its exact `plan_sha256`, `prior_state.lineage`, and
 bash ./transport-to-protected-runner.sh apply \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --stage database \
   --approval /protected/ephemeral/d3-beta-approval.json \
   --artifact-out /protected/ephemeral/d3-beta-result.json
@@ -627,7 +629,7 @@ logs:
 bash ./transport-to-protected-runner.sh database-prepare \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --artifact-out /protected/ephemeral/d3-beta-database-attestation.json
 ```
 
@@ -646,7 +648,7 @@ read inside the runner and never returned:
 bash ./transport-to-protected-runner.sh bootstrap-identity \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --bootstrap-manifest /protected/ephemeral/beta-bootstrap-envelope.json \
   --artifact-out /protected/ephemeral/d3-beta-identity-bootstrap.json
 ```
@@ -665,14 +667,14 @@ bounded to 16 KiB and expires after four hours:
 bash ./transport-to-protected-runner.sh runtime-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --acceptance-phase runtime \
   --artifact-out /protected/ephemeral/runtime-acceptance.json
 
 bash ./transport-to-protected-runner.sh runtime-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --acceptance-phase workflow-baseline \
   --artifact-out /protected/ephemeral/workflow-baseline.json
 
@@ -680,7 +682,7 @@ bash ./transport-to-protected-runner.sh runtime-acceptance \
 bash ./transport-to-protected-runner.sh runtime-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --acceptance-phase workflow-verify \
   --acceptance-state /protected/ephemeral/workflow-baseline.json \
   --artifact-out /protected/ephemeral/workflow-verified.json
@@ -710,14 +712,14 @@ recipient address:
 bash ./transport-to-protected-runner.sh alert-delivery \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --alert-phase send \
   --artifact-out /protected/ephemeral/alert-send.json
 
 bash ./transport-to-protected-runner.sh alert-delivery \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --alert-phase confirm \
   --alert-test-state /protected/ephemeral/alert-send.json \
   --delivery-confirmation-reference /protected/ephemeral/alert-owner-confirmation.txt \
@@ -842,14 +844,14 @@ inside the returned window:
 bash ./transport-to-protected-runner.sh pitr-freeze \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --quiet-window-end-utc 2026-09-03T18:30:00Z \
   --artifact-out /protected/ephemeral/pitr-freeze.json
 
 bash ./transport-to-protected-runner.sh pitr-manifest \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id candidate-b \
+  --release-id initial-beta \
   --restore-time-utc 2026-09-03T16:00:00Z \
   --artifact-out /protected/ephemeral/pitr-manifest.json
 ```

@@ -185,6 +185,14 @@ run "synthetic_lab_omits_clinic_baa_and_phi_evidence" {
         for rule in azurerm_network_security_group.deploy_runner.security_rule : rule.access
         if rule.name == "DenyAllInbound"
       ]) == "Deny" &&
+      one([
+        for rule in azurerm_network_security_group.deploy_runner.security_rule : rule.destination_address_prefix
+        if rule.name == "AllowAzureDnsUdp"
+      ]) == "168.63.129.16" &&
+      one([
+        for rule in azurerm_network_security_group.deploy_runner.security_rule : rule.destination_address_prefix
+        if rule.name == "AllowAzureDnsTcp"
+      ]) == "168.63.129.16" &&
       output.state_vnet_id == azurerm_virtual_network.state.id &&
       output.state_blob_private_dns_zone_id == azurerm_private_dns_zone.state_blob.id &&
       output.runner_subnet_id == azurerm_subnet.deploy_runner.id &&
