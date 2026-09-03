@@ -2,6 +2,7 @@ resource "azurerm_postgresql_flexible_server" "synth" {
   name                   = local.postgres_name
   resource_group_name    = azurerm_resource_group.synth.name
   location               = var.postgres_location
+  zone                   = var.postgres_zone
   version                = "16"
   administrator_login    = var.postgres_admin_login
   administrator_password = var.postgres_admin_password

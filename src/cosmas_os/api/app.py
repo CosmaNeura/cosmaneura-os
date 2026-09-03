@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from cosmas_os.application import services as svc
+from cosmas_os.config import settings
 from cosmas_os.db import make_engine, make_session_factory
 from cosmas_os.domain.enums import CapabilityKey, DecisionKind
 from cosmas_os.domain.rules import AuthorizationError, DomainError, PolicyDenied
@@ -104,7 +105,7 @@ def _map_err(exc: Exception) -> HTTPException:
 
 @app.get("/health")
 def health() -> dict[str, str]:
-    return {"status": "ok", "env": "synth_os"}
+    return {"status": "ok", "env": settings.cosmas_env}
 
 
 @app.post("/synth/seed", response_model=SeedResponse)

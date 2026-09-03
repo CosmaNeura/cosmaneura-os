@@ -16,6 +16,12 @@ variable "postgres_location" {
   default     = "centralus"
 }
 
+variable "postgres_zone" {
+  type        = string
+  description = "Existing PostgreSQL availability zone, pinned to prevent drift."
+  default     = "1"
+}
+
 variable "resource_group_name" {
   type        = string
   description = "OS-named resource group (must not collide with Track A)."
@@ -42,14 +48,22 @@ variable "postgres_admin_password" {
 
 variable "api_image" {
   type        = string
-  description = "Container image for API (placeholder until registry push authorized)."
-  default     = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+  description = "Digest-pinned Cosmas OS image in the dedicated synth ACR."
+
+  validation {
+    condition     = can(regex("^cosmasossynthacrrkpt0e\\.azurecr\\.io/cosmas-os@sha256:[0-9a-f]{64}$", var.api_image))
+    error_message = "api_image must be the digest-pinned cosmas-os image in the dedicated synth ACR."
+  }
 }
 
 variable "worker_image" {
   type        = string
-  description = "Container image for worker (placeholder until registry push authorized)."
-  default     = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+  description = "Digest-pinned Cosmas OS image in the dedicated synth ACR."
+
+  validation {
+    condition     = can(regex("^cosmasossynthacrrkpt0e\\.azurecr\\.io/cosmas-os@sha256:[0-9a-f]{64}$", var.worker_image))
+    error_message = "worker_image must be the digest-pinned cosmas-os image in the dedicated synth ACR."
+  }
 }
 
 variable "redis_sku_name" {

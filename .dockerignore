@@ -15,5 +15,12 @@ tmp
 .env.*
 !.env.example
 .cursor
+.tools/
 *.egg-info
 .DS_Store
+
+# Infrastructure state, plans, and local apply credentials are never image input.
+infra/
+.azure/
+docs/
+web/

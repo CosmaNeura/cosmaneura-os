@@ -183,3 +183,25 @@ IMPLEMENTATION IMPACT:
   deployment plan, and handoff without local secrets, state, tools, or plan
   artifacts; require green GitHub Actions on the pushed SHA. D2 residual work
   remains blocked until `AUTHORIZE D2 ACR PUSH AND APP WIRING`.
+
+### DL-20260903-02
+
+- **Status:** ACCEPTED
+- **Ruling:** Owner authorized the D2 non-PHI synth residual via the exact
+  phrase `AUTHORIZE D2 ACR PUSH AND APP WIRING`: build and push the Track B OS
+  image only to `cosmasossynthacrrkpt0e.azurecr.io`, digest-pin API and worker,
+  wire the existing synth PostgreSQL/Redis settings through Key Vault and the
+  OS managed identity, migrate the synth `cosmas_os` database, and smoke-test
+  the API and worker. Review a Terraform plan before applying app/image/secret
+  changes.
+- **Rationale:** Replace the D2 placeholder runtime with the already-built
+  synthetic product while preserving the phase and repository boundaries.
+- **Supersedes:** The D2-residual prohibition in `DL-20260903-01` only. D3-D6,
+  destroy, Clerk, vendors, PHI, and Track A remain separately gated.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct owner message
+  `AUTHORIZE D2 ACR PUSH AND APP WIRING` dated 2026-09-03.
+- **Implementation impact:** Produce an immutable ACR digest, update only the
+  OS synth Terraform configuration/state after showing its sanitized plan,
+  run additive migrations with invented data only, verify `/health` returns
+  `synth_os`, verify the worker process, and document the rollback digest.

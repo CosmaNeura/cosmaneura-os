@@ -50,7 +50,7 @@ def dump_openapi(out: Path = Path("openapi.json")) -> None:
 
 @app.command("info")
 def info() -> None:
-    typer.echo(f"env={settings.cosmas_env} db={settings.database_url}")
+    typer.echo(f"env={settings.cosmas_env} database_configured={bool(settings.database_url)}")
 
 
 if __name__ == "__main__":
