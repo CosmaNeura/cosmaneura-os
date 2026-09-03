@@ -129,6 +129,226 @@ early_cleanup() {
   rm -rf -- "$transport_temp_dir"
 }
 trap early_cleanup EXIT
+
+managed_run_command_inventory_is_valid() {
+  local inventory_file="$1"
+  local exact_runner_id="${2,,}"
+
+  jq -e --arg runner "$exact_runner_id" '
+    type == "object" and
+    (.value | type == "array") and
+    ((has("nextLink") | not) or .nextLink == null or .nextLink == "") and
+    all(.value[]?;
+      (.id | type == "string") and
+      ((.id | ascii_downcase) as $id |
+        ($runner + "/runcommands/") as $prefix |
+        ($id | startswith($prefix)) and
+        (($id | ltrimstr($prefix)) | length > 0) and
+        (($id | ltrimstr($prefix)) | contains("/") | not)
+      )
+    )
+  ' "$inventory_file" >/dev/null
+}
+
+managed_run_command_read_inventory() {
+  local exact_runner_id="$1"
+  local api_version="$2"
+  local inventory_file="$3"
+
+  if ! az rest \
+    --method get \
+    --url "https://management.azure.com${exact_runner_id}/runCommands?api-version=${api_version}" \
+    --only-show-errors \
+    --output json >"$inventory_file" 2>/dev/null; then
+    return 1
+  fi
+  chmod 0600 "$inventory_file" || return 1
+  managed_run_command_inventory_is_valid "$inventory_file" "$exact_runner_id"
+}
+
+managed_run_command_inventory_proves_absent() {
+  local inventory_file="$1"
+  local exact_runner_id="$2"
+  local exact_command_id="${3,,}"
+
+  managed_run_command_inventory_is_valid "$inventory_file" "$exact_runner_id" || return 1
+  jq -e --arg command_id "$exact_command_id" '
+    [.value[]?.id | ascii_downcase | select(. == $command_id)] | length == 0
+  ' "$inventory_file" >/dev/null
+}
+
+managed_run_command_delete_and_verify_absent() {
+  local exact_runner_id="$1"
+  local exact_command_id="$2"
+  local api_version="$3"
+  local scratch_dir="$4"
+  local retry_limit="$5"
+  local retry_delay_seconds="$6"
+  local require_full_settle_window="$7"
+  local normalized_runner_id="${exact_runner_id,,}"
+  local normalized_command_id="${exact_command_id,,}"
+  local protected_prefix="${normalized_runner_id}/runcommands/cosmas-d3-"
+  local command_suffix="${normalized_command_id#"$protected_prefix"}"
+  local inventory_file="$scratch_dir/run-command-cleanup-readback.json"
+  local attempt
+  local consecutive_absent_readbacks=0
+
+  [[ "$normalized_command_id" == "$protected_prefix"* ]] || return 2
+  [[ "$command_suffix" =~ ^[a-z0-9][a-z0-9-]*$ ]] || return 2
+  [[ "$api_version" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}(-preview)?$ ]] || return 2
+  [[ "$retry_limit" =~ ^[1-9][0-9]*$ ]] || return 2
+  (( retry_limit >= 2 )) || return 2
+  [[ "$retry_delay_seconds" =~ ^[0-9]+$ ]] || return 2
+  [[ "$require_full_settle_window" == "true" || "$require_full_settle_window" == "false" ]] || return 2
+  [[ -d "$scratch_dir" ]] || return 2
+
+  for ((attempt = 1; attempt <= retry_limit; attempt += 1)); do
+    # A failed DELETE can mean that the resource is already absent. Only the
+    # subsequent exact-parent inventory readbacks decide whether cleanup passed.
+    # DELETE is always attempted first: after an ambiguous PUT failure, an
+    # initially empty eventually-consistent inventory is not proof that the
+    # server did not accept the command.
+    az rest \
+      --method delete \
+      --url "https://management.azure.com${exact_command_id}?api-version=${api_version}" \
+      --only-show-errors \
+      --output none >/dev/null 2>&1 || true
+
+    if managed_run_command_read_inventory "$exact_runner_id" "$api_version" "$inventory_file" &&
+      managed_run_command_inventory_proves_absent "$inventory_file" "$exact_runner_id" "$exact_command_id"; then
+      ((consecutive_absent_readbacks += 1))
+      if [[ "$require_full_settle_window" == "false" ]] && (( consecutive_absent_readbacks >= 2 )); then
+        return 0
+      fi
+    else
+      consecutive_absent_readbacks=0
+    fi
+    if (( attempt < retry_limit )); then
+      sleep "$retry_delay_seconds"
+    fi
+  done
+  (( consecutive_absent_readbacks >= 2 ))
+}
+
+transport_signal_exit() {
+  case "$1" in
+    HUP) exit 129 ;;
+    INT) exit 130 ;;
+    TERM) exit 143 ;;
+    *) exit 1 ;;
+  esac
+}
+
+transport_install_signal_traps() {
+  trap 'transport_signal_exit HUP' HUP
+  trap 'transport_signal_exit INT' INT
+  trap 'transport_signal_exit TERM' TERM
+}
+
+transport_defer_signal() {
+  if [[ -z "${transport_deferred_signal:-}" ]]; then
+    transport_deferred_signal="$1"
+  fi
+}
+
+transport_install_deferred_signal_traps() {
+  trap 'transport_defer_signal HUP' HUP
+  trap 'transport_defer_signal INT' INT
+  trap 'transport_defer_signal TERM' TERM
+}
+
+transport_cleanup_managed_command() {
+  local require_full_settle_window=false
+
+  if [[ "${command_submission_acknowledged:-false}" != "true" ]]; then
+    require_full_settle_window=true
+  fi
+  command_cleanup_attempted=true
+  if managed_run_command_delete_and_verify_absent \
+    "$runner_id" \
+    "$run_command_id" \
+    "$managed_run_command_api_version" \
+    "$transport_temp_dir" \
+    "$managed_run_command_cleanup_attempts" \
+    "$managed_run_command_cleanup_retry_seconds" \
+    "$require_full_settle_window"; then
+    command_cleanup_required=false
+    return 0
+  fi
+  return 1
+}
+
+transport_complete_managed_command_cleanup() {
+  local cleanup_succeeded=false
+
+  transport_deferred_signal=""
+  transport_install_deferred_signal_traps
+  if transport_cleanup_managed_command; then
+    cleanup_succeeded=true
+  fi
+  transport_install_signal_traps
+  [[ "$cleanup_succeeded" == "true" ]] || return 1
+  if [[ -n "$transport_deferred_signal" ]]; then
+    transport_signal_exit "$transport_deferred_signal"
+  fi
+  return 0
+}
+
+transport_remove_local_protected_files() {
+  local local_file
+  local removal_failed=false
+
+  for local_file in \
+    "${payload_file:-}" \
+    "${payload_b64_file:-}" \
+    "${request_file:-}" \
+    "${view_file:-}"; do
+    [[ -n "$local_file" ]] || continue
+    if ! rm -f -- "$local_file"; then
+      removal_failed=true
+    fi
+  done
+  [[ "$removal_failed" == "false" ]]
+}
+
+transport_cleanup_on_exit() {
+  local original_status=$?
+  local managed_cleanup_failed=false
+  local local_cleanup_failed=false
+
+  trap - EXIT
+  transport_deferred_signal=""
+  transport_install_deferred_signal_traps
+  if ! transport_remove_local_protected_files; then
+    local_cleanup_failed=true
+  fi
+  if [[ "${command_cleanup_required:-false}" == "true" && "${command_cleanup_attempted:-false}" == "false" ]]; then
+    if ! transport_cleanup_managed_command; then
+      managed_cleanup_failed=true
+    fi
+  elif [[ "${command_cleanup_required:-false}" == "true" && "$original_status" -ne "${managed_run_command_cleanup_failure_status:-74}" ]]; then
+    managed_cleanup_failed=true
+  fi
+  if ! rm -rf -- "$transport_temp_dir"; then
+    local_cleanup_failed=true
+  fi
+  if [[ "$managed_cleanup_failed" == "true" ]]; then
+    printf '%s\n' 'D3 protected transport cleanup failed closed: the exact managed Run Command could not be proven absent after bounded deletion/readback retries' >&2
+    exit "${managed_run_command_cleanup_failure_status:-74}"
+  fi
+  if [[ "$local_cleanup_failed" == "true" ]]; then
+    printf '%s\n' 'D3 protected transport cleanup failed closed: local protected payload files could not be removed' >&2
+    exit "${managed_run_command_cleanup_failure_status:-74}"
+  fi
+  if [[ "$original_status" -eq 0 && -n "$transport_deferred_signal" ]]; then
+    case "$transport_deferred_signal" in
+      HUP) original_status=129 ;;
+      INT) original_status=130 ;;
+      TERM) original_status=143 ;;
+    esac
+  fi
+  exit "$original_status"
+}
 guard_materialize_committed_file \
   "$repository_root" \
   "$source_sha" \
@@ -611,10 +831,20 @@ jq -e '
   .defaultToOAuthAuthentication == true and .minimumTlsVersion == "TLS1_2"
 ' <<<"$storage_json" >/dev/null || guard_die "state storage lost its private Azure-AD-only boundary"
 
+managed_run_command_api_version="2024-07-01"
+managed_run_command_cleanup_attempts=12
+managed_run_command_cleanup_retry_seconds=5
+managed_run_command_cleanup_failure_status=74
+
 if [[ "$operation" == "cleanup-commands" ]]; then
   command_list_file="$transport_temp_dir/run-command-list.json"
-  az rest --method get --url "https://management.azure.com${runner_id}/runCommands?api-version=2024-07-01" --only-show-errors --output json >"$command_list_file" || guard_die "cannot enumerate managed Run Command resources on the exact protected runner"
-  chmod 0600 "$command_list_file"
+  stale_command_ids_file="$transport_temp_dir/run-command-ids"
+  managed_run_command_read_inventory "$runner_id" "$managed_run_command_api_version" "$command_list_file" || guard_die "cannot enumerate a complete managed Run Command inventory on the exact protected runner"
+  jq -r '
+    .value[]?.id |
+    select((split("/") | last | ascii_downcase) | test("^cosmas-d3-[a-z0-9-]+$"))
+  ' "$command_list_file" >"$stale_command_ids_file"
+  chmod 0600 "$stale_command_ids_file"
   removed_count=0
   active_count=0
   while IFS= read -r stale_command_id; do
@@ -625,14 +855,25 @@ if [[ "$operation" == "cleanup-commands" ]]; then
     fi
     provisioning_state="$(jq -r '.provisioningState // .properties.provisioningState // ""' "$stale_view_file")"
     execution_state="$(jq -r '.instanceView.executionState // .properties.instanceView.executionState // ""' "$stale_view_file")"
+    rm -f -- "$stale_view_file" || guard_die "cannot remove local stale-command result material"
     if [[ "$execution_state" == "Succeeded" || "$execution_state" == "Failed" || "$execution_state" == "Canceled" ]]; then
       [[ "$provisioning_state" == "Succeeded" || "$provisioning_state" == "Failed" ]] || guard_die "stale command has a terminal execution but nonterminal provisioning state"
-      az vm run-command delete --ids "$stale_command_id" --yes --only-show-errors --output none || guard_die "cannot delete an exact terminal protected Run Command"
+      if ! managed_run_command_delete_and_verify_absent \
+        "$runner_id" \
+        "$stale_command_id" \
+        "$managed_run_command_api_version" \
+        "$transport_temp_dir" \
+        "$managed_run_command_cleanup_attempts" \
+        "$managed_run_command_cleanup_retry_seconds" \
+        false; then
+        printf '%s\n' 'D3 protected transport cleanup failed closed: a terminal managed Run Command could not be proven absent after bounded deletion/readback retries' >&2
+        exit "$managed_run_command_cleanup_failure_status"
+      fi
       ((removed_count += 1))
     else
       ((active_count += 1))
     fi
-  done < <(jq -er '.value[]?.id | select(test("/runCommands/cosmas-d3-[A-Za-z0-9-]+$"))' "$command_list_file")
+  done <"$stale_command_ids_file"
   (( active_count == 0 )) || guard_die "$active_count protected Run Command resource(s) are still active; wait for terminal state before cleanup"
   printf 'Removed %s terminal protected Run Command resource(s); no protected output was read.\n' "$removed_count"
   exit 0
@@ -645,15 +886,11 @@ view_file="$transport_temp_dir/run-command-view.json"
 touch "$payload_file" "$payload_b64_file" "$request_file" "$view_file"
 run_command_name="cosmas-d3-$(date -u '+%Y%m%d%H%M%S')-$$"
 run_command_id="$runner_id/runCommands/$run_command_name"
-api_version="2024-07-01"
-command_created=false
-cleanup() {
-  rm -rf -- "$transport_temp_dir"
-  if [[ "$command_created" == "true" ]]; then
-    az vm run-command delete --ids "$run_command_id" --yes --only-show-errors --output none >/dev/null 2>&1 || true
-  fi
-}
-trap cleanup EXIT
+command_cleanup_required=false
+command_cleanup_attempted=false
+command_submission_acknowledged=false
+trap transport_cleanup_on_exit EXIT
+transport_install_signal_traps
 chmod 600 "$payload_file" "$payload_b64_file" "$request_file" "$view_file"
 
 case "$operation" in
@@ -760,13 +997,18 @@ jq -n \
     }
   ' >"$request_file"
 
-az rest \
+command_cleanup_required=true
+if az rest \
   --method put \
-  --url "https://management.azure.com${run_command_id}?api-version=${api_version}" \
+  --url "https://management.azure.com${run_command_id}?api-version=${managed_run_command_api_version}" \
   --body @"$request_file" \
   --only-show-errors \
-  --output none || guard_die "Azure rejected the protected managed Run Command"
-command_created=true
+  --output none; then
+  command_submission_acknowledged=true
+else
+  guard_die "Azure rejected the protected managed Run Command"
+fi
+rm -f -- "$payload_file" "$payload_b64_file" "$request_file" || guard_die "cannot remove local protected Run Command request material"
 
 execution_state=""
 provisioning_state=""
@@ -777,7 +1019,7 @@ for _ in $(seq 1 90); do
     if [[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]]; then
       break
     fi
-    if [[ "$execution_state" == "Failed" || "$provisioning_state" == "Failed" ]]; then
+    if [[ "$execution_state" == "Failed" || "$execution_state" == "Canceled" || "$execution_state" == "TimedOut" || "$provisioning_state" == "Failed" || "$provisioning_state" == "Canceled" ]]; then
       guard_die "protected runner command failed; no raw output was returned because it may be sensitive"
     fi
   fi
@@ -785,8 +1027,22 @@ for _ in $(seq 1 90); do
 done
 [[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]] || guard_die "protected runner command did not succeed within 90 minutes"
 
+command_output=""
 if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   command_output="$(jq -r '.instanceView.output // .properties.instanceView.output // ""' "$view_file")"
+fi
+rm -f -- "$view_file" || guard_die "cannot remove local protected Run Command result material"
+
+# Once any required result has been copied into local protected memory, remove
+# the managed Run Command before parsing or reporting success. Signal handlers
+# are deferred during this bounded critical section. After absence is proven,
+# the first deferred signal is returned with its canonical shell status.
+if ! transport_complete_managed_command_cleanup; then
+  printf '%s\n' 'D3 protected transport cleanup failed closed: the exact managed Run Command could not be proven absent after bounded deletion/readback retries' >&2
+  exit "$managed_run_command_cleanup_failure_status"
+fi
+
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   artifact_base64="$(awk -F= '/^COSMAS_SANITIZED_ARTIFACT_B64=/{sub(/^COSMAS_SANITIZED_ARTIFACT_B64=/, ""); print; exit}' <<<"$command_output")"
   [[ "$artifact_base64" =~ ^[A-Za-z0-9+/=]+$ ]] || guard_die "protected runner did not return a complete sanitized artifact"
   printf '%s' "$artifact_base64" | base64 --decode | gzip -d >"$artifact_out" || {

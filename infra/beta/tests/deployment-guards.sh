@@ -521,6 +521,341 @@ compressed_command_size="$(gzip -9 -c "$beta_dir/protected-runner-command.sh" | 
 }
 grep -F '{name: "COSMAS_COMMAND_GZIP_BASE64", value: $protected_command}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F '{name: "COSMAS_PROTECTED_PAYLOAD_BASE64", value: $protected_payload}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+
+managed_cleanup_helpers="$test_dir/managed-run-command-cleanup-helpers.sh"
+for cleanup_function in \
+  managed_run_command_inventory_is_valid \
+  managed_run_command_read_inventory \
+  managed_run_command_inventory_proves_absent \
+  managed_run_command_delete_and_verify_absent \
+  transport_signal_exit \
+  transport_install_signal_traps \
+  transport_defer_signal \
+  transport_install_deferred_signal_traps \
+  transport_cleanup_managed_command \
+  transport_complete_managed_command_cleanup \
+  transport_remove_local_protected_files \
+  transport_cleanup_on_exit; do
+  sed -n "/^${cleanup_function}() {$/,/^}$/p" "$beta_dir/transport-to-protected-runner.sh" >>"$managed_cleanup_helpers"
+done
+chmod 0600 "$managed_cleanup_helpers"
+[[ "$(grep -c '^managed_run_command_delete_and_verify_absent() {$' "$managed_cleanup_helpers")" == "1" ]] || {
+  printf '%s\n' "managed Run Command cleanup helper could not be isolated for behavioral tests" >&2
+  exit 1
+}
+# shellcheck disable=SC1090 # Extracted committed functions are the test subject.
+source "$managed_cleanup_helpers"
+
+cleanup_runner_id="/subscriptions/$subscription_id/resourceGroups/$state_rg/providers/Microsoft.Compute/virtualMachines/vm-cosmas-os-beta-runner-lab01"
+cleanup_command_id="$cleanup_runner_id/runCommands/cosmas-d3-20260903120000-1234"
+cleanup_api_version="2024-07-01"
+cleanup_scratch="$test_dir/managed-cleanup-direct"
+mkdir -m 0700 "$cleanup_scratch"
+cleanup_mock_state="present"
+cleanup_mock_delete_behavior="remove"
+cleanup_mock_inventory_mode="complete"
+cleanup_mock_delete_calls=0
+cleanup_mock_get_calls=0
+cleanup_mock_sleep_calls=0
+cleanup_mock_events=""
+cleanup_mock_reappear_after_sleep=0
+az() {
+  [[ "${1:-}" == "rest" ]] || return 90
+  shift
+  local method=""
+  local url=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --method) method="${2:-}"; shift 2 ;;
+      --url) url="${2:-}"; shift 2 ;;
+      --only-show-errors) shift ;;
+      --output) shift 2 ;;
+      *) return 91 ;;
+    esac
+  done
+  case "$method" in
+    delete)
+      [[ "$url" == "https://management.azure.com${cleanup_command_id}?api-version=${cleanup_api_version}" ]] || return 92
+      cleanup_mock_delete_calls=$((cleanup_mock_delete_calls + 1))
+      cleanup_mock_events="${cleanup_mock_events}D"
+      case "$cleanup_mock_delete_behavior" in
+        remove) cleanup_mock_state="absent"; return 0 ;;
+        error-absent) cleanup_mock_state="absent"; return 1 ;;
+        linger) cleanup_mock_state="present"; return 0 ;;
+        *) return 93 ;;
+      esac
+      ;;
+    get)
+      [[ "$url" == "https://management.azure.com${cleanup_runner_id}/runCommands?api-version=${cleanup_api_version}" ]] || return 94
+      cleanup_mock_get_calls=$((cleanup_mock_get_calls + 1))
+      cleanup_mock_events="${cleanup_mock_events}G"
+      if [[ "$cleanup_mock_inventory_mode" == "paginated" ]]; then
+        jq -n --arg next_link "https://management.azure.com/next" '{value: [], nextLink: $next_link}'
+      elif [[ "$cleanup_mock_state" == "present" ]]; then
+        jq -n --arg id "$cleanup_command_id" '{value: [{id: $id}]}'
+      else
+        printf '%s\n' '{"value":[]}'
+      fi
+      ;;
+    *) return 95 ;;
+  esac
+}
+sleep() {
+  cleanup_mock_sleep_calls=$((cleanup_mock_sleep_calls + 1))
+  cleanup_mock_events="${cleanup_mock_events}S"
+  if [[ "$cleanup_mock_reappear_after_sleep" -gt 0 && "$cleanup_mock_sleep_calls" -eq "$cleanup_mock_reappear_after_sleep" ]]; then
+    cleanup_mock_state="present"
+  fi
+}
+
+managed_run_command_delete_and_verify_absent "$cleanup_runner_id" "$cleanup_command_id" "$cleanup_api_version" "$cleanup_scratch" 3 0 false
+[[ "$cleanup_mock_delete_calls" == "2" && "$cleanup_mock_get_calls" == "2" && "$cleanup_mock_events" == "DGSDG" ]] || {
+  printf '%s\n' "managed Run Command cleanup did not require DELETE plus repeated absence readback" >&2
+  exit 1
+}
+
+cleanup_mock_state="absent"
+cleanup_mock_delete_behavior="remove"
+cleanup_mock_delete_calls=0
+cleanup_mock_get_calls=0
+cleanup_mock_sleep_calls=0
+cleanup_mock_events=""
+cleanup_mock_reappear_after_sleep=2
+managed_run_command_delete_and_verify_absent "$cleanup_runner_id" "$cleanup_command_id" "$cleanup_api_version" "$cleanup_scratch" 5 0 true
+[[ "$cleanup_mock_delete_calls" == "5" && "$cleanup_mock_get_calls" == "5" && "$cleanup_mock_sleep_calls" == "4" && "$cleanup_mock_events" == "DGSDGSDGSDGSDG" ]] || {
+  printf '%s\n' "ambiguous submission cleanup did not span the full settle window after delayed creation" >&2
+  exit 1
+}
+
+cleanup_mock_state="present"
+cleanup_mock_delete_behavior="error-absent"
+cleanup_mock_reappear_after_sleep=0
+cleanup_mock_delete_calls=0
+cleanup_mock_get_calls=0
+cleanup_mock_sleep_calls=0
+cleanup_mock_events=""
+managed_run_command_delete_and_verify_absent "$cleanup_runner_id" "$cleanup_command_id" "$cleanup_api_version" "$cleanup_scratch" 3 0 false
+[[ "$cleanup_mock_delete_calls" == "2" && "$cleanup_mock_get_calls" == "2" ]] || {
+  printf '%s\n' "DELETE error with independently proven absence was not handled idempotently" >&2
+  exit 1
+}
+
+cleanup_mock_state="present"
+cleanup_mock_delete_behavior="linger"
+cleanup_mock_inventory_mode="complete"
+cleanup_mock_delete_calls=0
+cleanup_mock_get_calls=0
+cleanup_mock_sleep_calls=0
+cleanup_mock_events=""
+if managed_run_command_delete_and_verify_absent "$cleanup_runner_id" "$cleanup_command_id" "$cleanup_api_version" "$cleanup_scratch" 3 0 false; then
+  printf '%s\n' "managed Run Command cleanup accepted a resource that remained listed" >&2
+  exit 1
+fi
+[[ "$cleanup_mock_delete_calls" == "3" && "$cleanup_mock_get_calls" == "3" && "$cleanup_mock_sleep_calls" == "2" ]] || {
+  printf '%s\n' "managed Run Command cleanup retries were not bounded exactly" >&2
+  exit 1
+}
+
+cleanup_mock_state="absent"
+cleanup_mock_delete_behavior="remove"
+cleanup_mock_inventory_mode="paginated"
+cleanup_mock_delete_calls=0
+cleanup_mock_get_calls=0
+cleanup_mock_sleep_calls=0
+if managed_run_command_delete_and_verify_absent "$cleanup_runner_id" "$cleanup_command_id" "$cleanup_api_version" "$cleanup_scratch" 3 0 false; then
+  printf '%s\n' "managed Run Command cleanup treated a paginated inventory as complete absence proof" >&2
+  exit 1
+fi
+[[ "$cleanup_mock_delete_calls" == "3" && "$cleanup_mock_get_calls" == "3" ]] || {
+  printf '%s\n' "incomplete inventory cleanup did not exhaust its bounded verification" >&2
+  exit 1
+}
+
+cleanup_mock_inventory_mode="complete"
+cleanup_mock_delete_calls=0
+if managed_run_command_delete_and_verify_absent "$cleanup_runner_id" "$cleanup_runner_id/runCommands/not-cosmas-d3" "$cleanup_api_version" "$cleanup_scratch" 3 0 false; then
+  printf '%s\n' "managed Run Command cleanup accepted a non-D3 target" >&2
+  exit 1
+fi
+[[ "$cleanup_mock_delete_calls" == "0" ]] || {
+  printf '%s\n' "managed Run Command cleanup attempted DELETE outside its exact target prefix" >&2
+  exit 1
+}
+unset -f az sleep
+
+cleanup_harness="$test_dir/managed-run-command-cleanup-harness.sh"
+cat >"$cleanup_harness" <<'HARNESS'
+#!/usr/bin/env bash
+set -euo pipefail
+
+helpers="$1"
+scenario="$2"
+transport_temp_dir="$3"
+audit_file="$4"
+# shellcheck disable=SC1090
+source "$helpers"
+
+runner_id="/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-state-lab01/providers/Microsoft.Compute/virtualMachines/vm-cosmas-os-beta-runner-lab01"
+run_command_id="$runner_id/runCommands/cosmas-d3-20260903120000-5678"
+managed_run_command_api_version="2024-07-01"
+managed_run_command_cleanup_attempts=3
+managed_run_command_cleanup_retry_seconds=0
+managed_run_command_cleanup_failure_status=74
+command_cleanup_required=true
+command_cleanup_attempted=false
+command_submission_acknowledged=true
+mock_state="present"
+signal_raised=false
+mkdir -m 0700 "$transport_temp_dir"
+payload_file="$transport_temp_dir/protected-payload"
+payload_b64_file="$transport_temp_dir/protected-payload-b64"
+request_file="$transport_temp_dir/run-command-request.json"
+view_file="$transport_temp_dir/run-command-view.json"
+touch "$payload_file" "$payload_b64_file" "$request_file" "$view_file"
+chmod 0600 "$payload_file" "$payload_b64_file" "$request_file" "$view_file"
+
+az() {
+  [[ "${1:-}" == "rest" ]] || return 90
+  shift
+  local method=""
+  local url=""
+  while (( $# > 0 )); do
+    case "$1" in
+      --method) method="${2:-}"; shift 2 ;;
+      --url) url="${2:-}"; shift 2 ;;
+      --only-show-errors) shift ;;
+      --output) shift 2 ;;
+      *) return 91 ;;
+    esac
+  done
+  case "$method" in
+    delete)
+      [[ "$url" == "https://management.azure.com${run_command_id}?api-version=${managed_run_command_api_version}" ]] || return 92
+      for protected_file in "$payload_file" "$payload_b64_file" "$request_file" "$view_file"; do
+        [[ ! -e "$protected_file" ]] || printf '%s\n' "protected-file-present-during-delete" >>"$audit_file"
+      done
+      printf '%s\n' "$url" >>"$audit_file"
+      if [[ "$signal_raised" == "false" ]]; then
+        case "$scenario" in
+          during-hup) signal_raised=true; kill -HUP "$$" ;;
+          during-int) signal_raised=true; kill -INT "$$" ;;
+          during-term) signal_raised=true; kill -TERM "$$" ;;
+        esac
+      fi
+      if [[ "$scenario" != "cleanup-failure" ]]; then
+        mock_state="absent"
+      fi
+      ;;
+    get)
+      [[ "$url" == "https://management.azure.com${runner_id}/runCommands?api-version=${managed_run_command_api_version}" ]] || return 93
+      if [[ "$mock_state" == "present" ]]; then
+        jq -n --arg id "$run_command_id" '{value: [{id: $id}]}'
+      else
+        printf '%s\n' '{"value":[]}'
+      fi
+      ;;
+    *) return 94 ;;
+  esac
+}
+sleep() { :; }
+
+trap transport_cleanup_on_exit EXIT
+transport_install_signal_traps
+case "$scenario" in
+  success)
+    transport_remove_local_protected_files
+    transport_complete_managed_command_cleanup || exit 74
+    exit 0
+    ;;
+  runner-failure) exit 23 ;;
+  put-failure) command_submission_acknowledged=false; exit 31 ;;
+  hup) kill -HUP "$$" ;;
+  int) kill -INT "$$" ;;
+  term) kill -TERM "$$" ;;
+  during-hup|during-int|during-term)
+    transport_remove_local_protected_files
+    transport_complete_managed_command_cleanup || exit 74
+    exit 0
+    ;;
+  cleanup-failure) exit 0 ;;
+  *) exit 99 ;;
+esac
+HARNESS
+chmod 0700 "$cleanup_harness"
+
+run_cleanup_harness_case() {
+  local scenario="$1"
+  local expected_status="$2"
+  local expected_failure_message="${3:-false}"
+  local scratch="$test_dir/cleanup-harness-$scenario"
+  local audit="$test_dir/cleanup-harness-$scenario.audit"
+  local output
+  local actual_status
+
+  : >"$audit"
+  set +e
+  output="$(bash "$cleanup_harness" "$managed_cleanup_helpers" "$scenario" "$scratch" "$audit" 2>&1)"
+  actual_status=$?
+  set -e
+  [[ "$actual_status" == "$expected_status" ]] || {
+    printf '%s\n' "cleanup harness $scenario returned $actual_status instead of $expected_status" >&2
+    exit 1
+  }
+  [[ ! -e "$scratch" ]] || {
+    printf '%s\n' "cleanup harness $scenario retained local protected files" >&2
+    exit 1
+  }
+  if grep -F 'protected-file-present-during-delete' "$audit" >/dev/null; then
+    printf '%s\n' "cleanup harness $scenario retained protected files during remote cleanup" >&2
+    exit 1
+  fi
+  grep -F "https://management.azure.com/subscriptions/" "$audit" >/dev/null || {
+    printf '%s\n' "cleanup harness $scenario did not attempt exact-ID deletion" >&2
+    exit 1
+  }
+  if [[ "$expected_failure_message" == "true" ]]; then
+    grep -F 'cleanup failed closed' <<<"$output" >/dev/null || {
+      printf '%s\n' "cleanup harness $scenario did not report its distinct cleanup failure" >&2
+      exit 1
+    }
+  fi
+}
+
+run_cleanup_harness_case success 0
+run_cleanup_harness_case runner-failure 23
+run_cleanup_harness_case put-failure 31
+run_cleanup_harness_case hup 129
+run_cleanup_harness_case int 130
+run_cleanup_harness_case term 143
+run_cleanup_harness_case during-hup 129
+run_cleanup_harness_case during-int 130
+run_cleanup_harness_case during-term 143
+run_cleanup_harness_case cleanup-failure 74 true
+
+grep -F 'command_cleanup_required=true' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+cleanup_required_line="$(grep -nF 'command_cleanup_required=true' "$beta_dir/transport-to-protected-runner.sh" | tail -1 | cut -d: -f1)"
+submission_line="$(grep -nF -- '--method put' "$beta_dir/transport-to-protected-runner.sh" | tail -1 | cut -d: -f1)"
+[[ "$cleanup_required_line" =~ ^[0-9]+$ && "$submission_line" =~ ^[0-9]+$ && "$cleanup_required_line" -lt "$submission_line" ]] || {
+  printf '%s\n' "managed Run Command cleanup obligation must be armed before submission" >&2
+  exit 1
+}
+for required_trap in \
+  'trap transport_cleanup_on_exit EXIT' \
+  "trap 'transport_signal_exit HUP' HUP" \
+  "trap 'transport_signal_exit INT' INT" \
+  "trap 'transport_signal_exit TERM' TERM" \
+  "trap 'transport_defer_signal HUP' HUP" \
+  "trap 'transport_defer_signal INT' INT" \
+  "trap 'transport_defer_signal TERM' TERM"; do
+  grep -F "$required_trap" "$beta_dir/transport-to-protected-runner.sh" >/dev/null || {
+    printf '%s\n' "protected transport is missing required trap: $required_trap" >&2
+    exit 1
+  }
+done
+if grep -F 'az vm run-command delete' "$beta_dir/transport-to-protected-runner.sh" >/dev/null; then
+  printf '%s\n' "managed Run Command cleanup must use the exact ARM ID and verified collection readback" >&2
+  exit 1
+fi
 previous_bootstrap_parameter_line=0
 # shellcheck disable=SC2016 # These are literal source-code assertions.
 for bootstrap_parameter in \
