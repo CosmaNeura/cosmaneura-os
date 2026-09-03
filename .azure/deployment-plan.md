@@ -3,7 +3,7 @@
 > **Status:** Deployed
 
 Generated: 2026-09-02T23:30:00Z
-Updated: 2026-09-03T00:20:00Z (D2 apply close-out)
+Updated: 2026-09-03T09:33:17Z (D2 hygiene and CI evidence)
 
 **Gate:** D2 live apply completed under `DL-20260902-09` (`deploy now`). Track A untouched. No PHI.
 
@@ -200,8 +200,10 @@ below.
 
 > Current: **Deployed** — infra up; runtime image still placeholder
 
-1. Commit/push the D2 source and evidence under the hygiene authorization in
-   `DL-20260903-01`; record the resulting CI evidence.
+1. ✅ D2 source and evidence committed/pushed as
+   `b54f4c4f90d460beb2bdd14dc7164ade8887d81a`; GitHub `synth-ci` run
+   [33739304958](https://github.com/CosmaNeura/cosmaneura-os/actions/runs/33739304958)
+   passed, including the aggregate gate.
 2. Wait for `AUTHORIZE D2 ACR PUSH AND APP WIRING` before ACR image push,
    digest pinning, app connection settings, migrations, or cloud smoke tests.
 3. Keep D3 separately gated by

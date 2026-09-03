@@ -123,7 +123,7 @@ Recovery added Flexible Server, database `cosmas_os`, and AllowAzureServices fir
 | Terraform source | Terraform 1.9.8 `fmt -check -recursive infra` and `validate -no-color` passed |
 | Terraform example | `postgres_location = "centralus"`; no `postgres_admin_password` assignment |
 | Local synth CI | `./scripts/ci-local.sh` passed: Ruff, Pyright, Alembic, 23 Pytest tests, OpenAPI, demo, web test/build |
-| GitHub `synth-ci` | Pending push; result will be recorded after the hygiene commit completes |
+| GitHub `synth-ci` | **Passed** for `b54f4c4f90d460beb2bdd14dc7164ade8887d81a`; run [33739304958](https://github.com/CosmaNeura/cosmaneura-os/actions/runs/33739304958), including the aggregate `synth-ci-gate` |
 
 ## Limitations / next gate
 
