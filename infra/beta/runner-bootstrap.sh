@@ -9,6 +9,60 @@ die() {
   exit 1
 }
 
+docker_buildx_output_matches_pin() {
+  local actual_output="$1"
+  local package_version="$2"
+  [[ "$actual_output" == "github.com/docker/buildx 0.30.1 $package_version" ]]
+}
+
+bootstrap_payload_matches_context() {
+  local encoded_payload="$1"
+  local expected_subscription_id="$2"
+  local expected_deploy_client_id="$3"
+  local expected_state_storage_account="$4"
+  printf '%s' "$encoded_payload" |
+    python3 -c '
+import base64
+import binascii
+import json
+import sys
+
+try:
+    document = json.loads(base64.b64decode(sys.stdin.buffer.read(), validate=True))
+except (binascii.Error, UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit(1)
+
+required_fields = (
+    "subscription_id",
+    "tenant_id",
+    "box_id",
+    "backend_storage_account_name",
+    "deploy_identity_client_id",
+    "runner_vm_name",
+    "state_blob_private_endpoint_id",
+    "state_private_endpoint_subnet_id",
+    "runner_vm_size",
+    "runner_image_version",
+)
+if not isinstance(document, dict):
+    raise SystemExit(1)
+for field in required_fields:
+    item = document.get(field)
+    if not isinstance(item, dict) or not isinstance(item.get("value"), str) or not item["value"]:
+        raise SystemExit(1)
+if document["subscription_id"]["value"] != sys.argv[1]:
+    raise SystemExit(1)
+if document["deploy_identity_client_id"]["value"] != sys.argv[2]:
+    raise SystemExit(1)
+if document["backend_storage_account_name"]["value"] != sys.argv[3]:
+    raise SystemExit(1)
+if document["runner_vm_size"]["value"] != "Standard_B2s":
+    raise SystemExit(1)
+if document["runner_image_version"]["value"] != "22.04.202608060":
+    raise SystemExit(1)
+' "$expected_subscription_id" "$expected_deploy_client_id" "$expected_state_storage_account"
+}
+
 [[ $# -eq 13 ]] || die "expected bootstrap output payload plus exact OpenTofu, Trivy, and apt tool version/hash arguments"
 subscription_id="$1"
 deploy_identity_client_id="$2"
@@ -42,6 +96,14 @@ done
 [[ "$docker_buildx_package_version" == "0.30.1-0ubuntu1~22.04.1" ]] || die "Docker Buildx does not match the reviewed D3 Jammy pin"
 [[ "$git_package_version" == "1:2.34.1-1ubuntu1.17" ]] || die "git does not match the reviewed D3 Jammy pin"
 [[ "$jq_package_version" == "1.6-2.1ubuntu3.2" ]] || die "jq does not match the reviewed D3 Jammy pin"
+# Reject truncated or misparsed transport before changing the host.
+if ! bootstrap_payload_matches_context \
+  "$bootstrap_outputs_base64" \
+  "$subscription_id" \
+  "$deploy_identity_client_id" \
+  "$state_storage_account" >/dev/null 2>&1; then
+  die "bootstrap outputs payload is invalid or does not match this runner context"
+fi
 [[ "$(uname -m)" == "x86_64" ]] || die "this reviewed runner setup supports only the Standard_B2s x86_64 image"
 . /etc/os-release
 [[ "${ID:-}" == "ubuntu" && "${VERSION_CODENAME:-}" == "jammy" ]] || die "runner image must be Ubuntu jammy"
@@ -142,7 +204,8 @@ install -o root -g root -m 0755 "$trivy_extract_dir/trivy" /usr/local/bin/trivy
 
 systemctl enable --now docker.service
 [[ -x /usr/libexec/docker/cli-plugins/docker-buildx ]] || die "reviewed Docker Buildx plugin binary is missing"
-docker buildx version | grep -F 'v0.30.1' >/dev/null || die "Docker Buildx plugin does not match the reviewed release"
+docker_buildx_output="$(docker buildx version)"
+docker_buildx_output_matches_pin "$docker_buildx_output" "$docker_buildx_package_version" || die "Docker Buildx plugin does not match the reviewed distro release"
 identity_ready=false
 for _ in $(seq 1 60); do
   if az login --identity --client-id "$deploy_identity_client_id" --allow-no-subscriptions --output none >/dev/null 2>&1 &&

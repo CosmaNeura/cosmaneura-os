@@ -521,6 +521,144 @@ compressed_command_size="$(gzip -9 -c "$beta_dir/protected-runner-command.sh" | 
 }
 grep -F '{name: "COSMAS_COMMAND_GZIP_BASE64", value: $protected_command}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F '{name: "COSMAS_PROTECTED_PAYLOAD_BASE64", value: $protected_payload}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+previous_bootstrap_parameter_line=0
+# shellcheck disable=SC2016 # These are literal source-code assertions.
+for bootstrap_parameter in \
+  'subscription_id=$GUARD_SUBSCRIPTION_ID' \
+  'deploy_client_id=$GUARD_DEPLOY_CLIENT_ID' \
+  'state_storage_account=$GUARD_STATE_STORAGE_ACCOUNT' \
+  'tofu_version=$tofu_version' \
+  'tofu_sha256=$tofu_sha256' \
+  'azure_cli_version=$azure_cli_version' \
+  'docker_version=$docker_version' \
+  'docker_buildx_version=$docker_buildx_version' \
+  'git_version=$git_version' \
+  'jq_version=$jq_version' \
+  'trivy_version=$trivy_version' \
+  'trivy_sha256=$trivy_sha256' \
+  'bootstrap_outputs_base64=$(base64 <"$bootstrap_outputs" | tr -d '\''\n'\'')'; do
+  bootstrap_parameter_line="$(grep -nF "\"$bootstrap_parameter\"" "$beta_dir/prepare-protected-runner.sh" | cut -d: -f1)"
+  [[ "$bootstrap_parameter_line" =~ ^[0-9]+$ && "$bootstrap_parameter_line" -gt "$previous_bootstrap_parameter_line" ]] || {
+    printf '%s\n' "runner bootstrap parameters must remain explicitly named and ordered" >&2
+    exit 1
+  }
+  previous_bootstrap_parameter_line="$bootstrap_parameter_line"
+done
+grep -F 'runner_ready_marker="D3 protected runner is ready; private state DNS and managed-identity access passed"' "$beta_dir/prepare-protected-runner.sh" >/dev/null
+# shellcheck disable=SC2016 # These are literal jq source-code assertions.
+grep -F '($values | type == "array" and length > 0) and' "$beta_dir/prepare-protected-runner.sh" >/dev/null
+# shellcheck disable=SC2016
+grep -F 'all($values[]?; (.code | type == "string" and endswith("/succeeded"))) and' "$beta_dir/prepare-protected-runner.sh" >/dev/null
+# shellcheck disable=SC2016
+grep -F 'any($values[]?; .code == "ProvisioningState/succeeded") and' "$beta_dir/prepare-protected-runner.sh" >/dev/null
+# shellcheck disable=SC2016 # This is a literal jq source-code assertion.
+grep -F '[$values[]?.message? | strings | split("\n")[]] | any(. == $marker)' "$beta_dir/prepare-protected-runner.sh" >/dev/null
+if grep -F 'select(.code | endswith("/succeeded"))' "$beta_dir/prepare-protected-runner.sh" >/dev/null; then
+  printf '%s\n' "runner preparation must require its exact terminal readiness marker" >&2
+  exit 1
+fi
+runner_ready_marker="D3 protected runner is ready; private state DNS and managed-identity access passed"
+# shellcheck disable=SC2016 # Exercise the same literal readiness predicate used by the controller.
+runner_readiness_filter='
+  (.value? // null) as $values |
+  ($values | type == "array" and length > 0) and
+  all($values[]?; (.code | type == "string" and endswith("/succeeded"))) and
+  any($values[]?; .code == "ProvisioningState/succeeded") and
+  ([$values[]?.message? | strings | split("\n")[]] | any(. == $marker))
+'
+valid_runner_result="$(jq -n --arg marker "$runner_ready_marker" '{value: [{code: "ProvisioningState/succeeded", message: ("Enable succeeded:\n[stdout]\n" + $marker + "\n[stderr]\n")}]}')"
+jq -e --arg marker "$runner_ready_marker" "$runner_readiness_filter" <<<"$valid_runner_result" >/dev/null
+wrong_code_runner_result="$(jq -n --arg marker "$runner_ready_marker" '{value: [{code: "ComponentStatus/StdOut/succeeded", message: $marker}]}')"
+if jq -e --arg marker "$runner_ready_marker" "$runner_readiness_filter" <<<"$wrong_code_runner_result" >/dev/null; then
+  printf '%s\n' "runner readiness must reject a non-provisioning success code" >&2
+  exit 1
+fi
+failed_runner_result="$(jq -n --arg marker "$runner_ready_marker" '{value: [{code: "ProvisioningState/failed", message: $marker}]}')"
+if jq -e --arg marker "$runner_ready_marker" "$runner_readiness_filter" <<<"$failed_runner_result" >/dev/null; then
+  printf '%s\n' "runner readiness must reject a failed result even when its marker is present" >&2
+  exit 1
+fi
+mixed_runner_result="$(jq -n --arg marker "$runner_ready_marker" '{value: [{code: "ProvisioningState/succeeded", message: $marker}, {code: "ComponentStatus/StdErr/failed", message: "bootstrap failed"}]}')"
+if jq -e --arg marker "$runner_ready_marker" "$runner_readiness_filter" <<<"$mixed_runner_result" >/dev/null; then
+  printf '%s\n' "runner readiness must reject mixed success and failure results" >&2
+  exit 1
+fi
+if jq -e --arg marker "$runner_ready_marker" "$runner_readiness_filter" <<<'{"value":[]}' >/dev/null; then
+  printf '%s\n' "runner readiness must reject an empty result array" >&2
+  exit 1
+fi
+missing_marker_runner_result='{"value":[{"code":"ProvisioningState/succeeded","message":"Enable succeeded"}]}'
+if jq -e --arg marker "$runner_ready_marker" "$runner_readiness_filter" <<<"$missing_marker_runner_result" >/dev/null; then
+  printf '%s\n' "runner readiness must reject success without the exact terminal marker" >&2
+  exit 1
+fi
+near_marker_runner_result="$(jq -n --arg marker "${runner_ready_marker}." '{value: [{code: "ProvisioningState/succeeded", message: $marker}]}')"
+if jq -e --arg marker "$runner_ready_marker" "$runner_readiness_filter" <<<"$near_marker_runner_result" >/dev/null; then
+  printf '%s\n' "runner readiness must reject a near-match terminal marker" >&2
+  exit 1
+fi
+payload_validation_line="$(grep -nF 'base64.b64decode(sys.stdin.buffer.read(), validate=True)' "$beta_dir/runner-bootstrap.sh" | cut -d: -f1)"
+apt_mutation_line="$(grep -nF "sed -i \\" "$beta_dir/runner-bootstrap.sh" | head -1 | cut -d: -f1)"
+[[ "$payload_validation_line" =~ ^[0-9]+$ && "$apt_mutation_line" =~ ^[0-9]+$ && "$payload_validation_line" -lt "$apt_mutation_line" ]] || {
+  printf '%s\n' "bootstrap payload must be validated before apt source mutation" >&2
+  exit 1
+}
+bootstrap_payload_matcher="$test_dir/bootstrap-payload-matcher.sh"
+sed -n '/^bootstrap_payload_matches_context() {$/,/^}$/p' "$beta_dir/runner-bootstrap.sh" >"$bootstrap_payload_matcher"
+[[ "$(grep -c '^bootstrap_payload_matches_context() {$' "$bootstrap_payload_matcher")" == "1" ]] || {
+  printf '%s\n' "runner bootstrap must define one executable payload/context validator" >&2
+  exit 1
+}
+# shellcheck disable=SC1090 # The extracted committed function is the test subject.
+source "$bootstrap_payload_matcher"
+valid_bootstrap_payload="$({ jq '.runner_image_version.value = "22.04.202608060"' "$bootstrap_outputs" | base64 | tr -d '\n'; })"
+bootstrap_payload_matches_context "$valid_bootstrap_payload" "$subscription_id" "$deploy_client_id" 'cmbetatflab01abc123'
+for rejected_bootstrap_payload in '=' 'e30='; do
+  if bootstrap_payload_matches_context "$rejected_bootstrap_payload" "$subscription_id" "$deploy_client_id" 'cmbetatflab01abc123'; then
+    printf '%s\n' "bootstrap payload validator accepted malformed or incomplete input" >&2
+    exit 1
+  fi
+done
+if bootstrap_payload_matches_context "$valid_bootstrap_payload" '00000000-0000-4000-8000-000000000099' "$deploy_client_id" 'cmbetatflab01abc123'; then
+  printf '%s\n' "bootstrap payload validator accepted the wrong subscription" >&2
+  exit 1
+fi
+if bootstrap_payload_matches_context "$valid_bootstrap_payload" "$subscription_id" '00000000-0000-4000-8000-000000000099' 'cmbetatflab01abc123'; then
+  printf '%s\n' "bootstrap payload validator accepted the wrong deploy client" >&2
+  exit 1
+fi
+if bootstrap_payload_matches_context "$valid_bootstrap_payload" "$subscription_id" "$deploy_client_id" 'wrongstorageaccount'; then
+  printf '%s\n' "bootstrap payload validator accepted the wrong state storage account" >&2
+  exit 1
+fi
+missing_bootstrap_field_payload="$({ jq 'del(.tenant_id)' "$bootstrap_outputs" | base64 | tr -d '\n'; })"
+if bootstrap_payload_matches_context "$missing_bootstrap_field_payload" "$subscription_id" "$deploy_client_id" 'cmbetatflab01abc123'; then
+  printf '%s\n' "bootstrap payload validator accepted a missing required field" >&2
+  exit 1
+fi
+unset -f bootstrap_payload_matches_context
+for buildx_script in runner-bootstrap.sh protected-runner-command.sh; do
+  buildx_matcher="$test_dir/${buildx_script%.sh}-buildx-matcher.sh"
+  sed -n '/^docker_buildx_output_matches_pin() {$/,/^}$/p' "$beta_dir/$buildx_script" >"$buildx_matcher"
+  [[ "$(grep -c '^docker_buildx_output_matches_pin() {$' "$buildx_matcher")" == "1" ]] || {
+    printf '%s\n' "$buildx_script must define one executable Buildx output matcher" >&2
+    exit 1
+  }
+  # shellcheck disable=SC1090 # The extracted committed function is the test subject.
+  source "$buildx_matcher"
+  docker_buildx_output_matches_pin 'github.com/docker/buildx 0.30.1 0.30.1-0ubuntu1~22.04.1' '0.30.1-0ubuntu1~22.04.1'
+  for rejected_buildx_output in \
+    'github.com/docker/buildx v0.30.1 0.30.1-0ubuntu1~22.04.1' \
+    'github.com/docker/buildx 0.30.10 0.30.1-0ubuntu1~22.04.1' \
+    'github.com/docker/buildx 0.30.1 0.30.1-0ubuntu1~22.04.2' \
+    'github.com/docker/buildx 0.30.1 0.30.1-0ubuntu1~22.04.1 extra'; do
+    if docker_buildx_output_matches_pin "$rejected_buildx_output" '0.30.1-0ubuntu1~22.04.1'; then
+      printf '%s\n' "$buildx_script accepted a non-exact Docker Buildx version output" >&2
+      exit 1
+    fi
+  done
+  unset -f docker_buildx_output_matches_pin
+done
 grep -F '.phase == "foundation_reconcile" and $stage == "foundation"' "$beta_dir/protected-runner-command.sh" >/dev/null
 for guarded_operation in release-rollback release-forward offboarding-acceptance; do
   grep -F "\"$guarded_operation\"" "$beta_dir/transport-to-protected-runner.sh" >/dev/null

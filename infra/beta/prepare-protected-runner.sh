@@ -265,26 +265,36 @@ for _ in $(seq 1 60); do
 done
 [[ "$agent_ready" == "true" ]] || guard_die "Azure VM Agent did not become ready within ten minutes"
 
+# Azure CLI splits every Run Command parameter at its first equals sign. Name
+# every value explicitly so Base64 padding remains data and the positional
+# order consumed by runner-bootstrap.sh stays deterministic.
 result_json="$(az vm run-command invoke \
   --ids "$runner_id" \
   --command-id RunShellScript \
   --scripts @"$committed_bootstrap_script" \
   --parameters \
-    "$GUARD_SUBSCRIPTION_ID" \
-    "$GUARD_DEPLOY_CLIENT_ID" \
-    "$GUARD_STATE_STORAGE_ACCOUNT" \
-    "$tofu_version" \
-    "$tofu_sha256" \
-    "$azure_cli_version" \
-    "$docker_version" \
-    "$docker_buildx_version" \
-    "$git_version" \
-    "$jq_version" \
-    "$trivy_version" \
-    "$trivy_sha256" \
-    "$(base64 <"$bootstrap_outputs" | tr -d '\n')" \
+    "subscription_id=$GUARD_SUBSCRIPTION_ID" \
+    "deploy_client_id=$GUARD_DEPLOY_CLIENT_ID" \
+    "state_storage_account=$GUARD_STATE_STORAGE_ACCOUNT" \
+    "tofu_version=$tofu_version" \
+    "tofu_sha256=$tofu_sha256" \
+    "azure_cli_version=$azure_cli_version" \
+    "docker_version=$docker_version" \
+    "docker_buildx_version=$docker_buildx_version" \
+    "git_version=$git_version" \
+    "jq_version=$jq_version" \
+    "trivy_version=$trivy_version" \
+    "trivy_sha256=$trivy_sha256" \
+    "bootstrap_outputs_base64=$(base64 <"$bootstrap_outputs" | tr -d '\n')" \
   --only-show-errors \
   --output json)" || guard_die "Azure Run Command failed while preparing the protected runner"
-jq -e '[.value[]? | select(.code | endswith("/succeeded"))] | length > 0' <<<"$result_json" >/dev/null || guard_die "protected runner setup did not report success"
+runner_ready_marker="D3 protected runner is ready; private state DNS and managed-identity access passed"
+jq -e --arg marker "$runner_ready_marker" '
+  (.value? // null) as $values |
+  ($values | type == "array" and length > 0) and
+  all($values[]?; (.code | type == "string" and endswith("/succeeded"))) and
+  any($values[]?; .code == "ProvisioningState/succeeded") and
+  ([$values[]?.message? | strings | split("\n")[]] | any(. == $marker))
+' <<<"$result_json" >/dev/null || guard_die "protected runner setup did not emit the exact readiness marker"
 
 printf '%s\n' "D3 protected runner preparation passed without a VM public IP or persistent CI/repository credential"

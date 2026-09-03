@@ -12,6 +12,12 @@ die() {
   exit 1
 }
 
+docker_buildx_output_matches_pin() {
+  local actual_output="$1"
+  local package_version="$2"
+  [[ "$actual_output" == "github.com/docker/buildx 0.30.1 $package_version" ]]
+}
+
 [[ "$(id -u)" == "0" ]] || die "Azure Run Command must execute as root"
 [[ $# -eq 0 ]] || die "named managed Run Command parameters must not be supplied positionally"
 
@@ -164,7 +170,8 @@ TOOLS
   [[ -x /usr/libexec/docker/cli-plugins/docker-buildx && ! -L /usr/libexec/docker/cli-plugins/docker-buildx ]] || die "pinned Docker Buildx plugin is missing"
   expected_hash="$(jq -er '.docker_buildx_binary_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$toolchain_manifest")" || die "toolchain Docker Buildx hash is missing"
   [[ "$(sha256sum /usr/libexec/docker/cli-plugins/docker-buildx | awk '{print $1}')" == "$expected_hash" ]] || die "Docker Buildx plugin differs from the setup-time checksum"
-  [[ "$(docker buildx version)" == *"v0.30.1"* ]] || die "Docker Buildx plugin drifted from the reviewed 0.30.1 release"
+  expected_version="$(jq -er '.docker_buildx_package_version' "$toolchain_manifest")" || die "toolchain Docker Buildx package version is missing"
+  docker_buildx_output_matches_pin "$(docker buildx version)" "$expected_version" || die "Docker Buildx plugin drifted from the reviewed distro release"
 }
 
 fresh_managed_identity_login() {
