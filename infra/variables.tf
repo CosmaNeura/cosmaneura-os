@@ -49,6 +49,7 @@ variable "postgres_admin_password" {
 variable "api_image" {
   type        = string
   description = "Digest-pinned Cosmas OS image in the dedicated synth ACR."
+  default     = "cosmasossynthacrrkpt0e.azurecr.io/cosmas-os@sha256:af48b5b22b15d64f5592405a7ac041237224fb7a1ed05b8041e0b60f5a5ca6be"
 
   validation {
     condition     = can(regex("^cosmasossynthacrrkpt0e\\.azurecr\\.io/cosmas-os@sha256:[0-9a-f]{64}$", var.api_image))
@@ -59,6 +60,7 @@ variable "api_image" {
 variable "worker_image" {
   type        = string
   description = "Digest-pinned Cosmas OS image in the dedicated synth ACR."
+  default     = "cosmasossynthacrrkpt0e.azurecr.io/cosmas-os@sha256:af48b5b22b15d64f5592405a7ac041237224fb7a1ed05b8041e0b60f5a5ca6be"
 
   validation {
     condition     = can(regex("^cosmasossynthacrrkpt0e\\.azurecr\\.io/cosmas-os@sha256:[0-9a-f]{64}$", var.worker_image))

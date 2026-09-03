@@ -9,6 +9,6 @@ name_prefix         = "cosmasossynth"
 # DO NOT put postgres_admin_password here in a committed file.
 # export TF_VAR_postgres_admin_password='…'
 
-# Required after the separately authorized ACR push. Use the same immutable
-# `cosmasossynthacrrkpt0e.azurecr.io/cosmas-os@sha256:<64-hex-digest>` value
-# for both `TF_VAR_api_image` and `TF_VAR_worker_image`.
+# Current D2 residual image. Both processes use the same immutable artifact.
+api_image    = "cosmasossynthacrrkpt0e.azurecr.io/cosmas-os@sha256:af48b5b22b15d64f5592405a7ac041237224fb7a1ed05b8041e0b60f5a5ca6be"
+worker_image = "cosmasossynthacrrkpt0e.azurecr.io/cosmas-os@sha256:af48b5b22b15d64f5592405a7ac041237224fb7a1ed05b8041e0b60f5a5ca6be"
