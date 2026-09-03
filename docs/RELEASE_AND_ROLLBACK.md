@@ -80,15 +80,33 @@ git checkout <git_sha>   # when history exists
 
 Compare `image_id` in `artifacts/releases/manifest-*.json`.
 
+## D2 Azure synth infrastructure
+
+See [`infra/README.md`](../infra/README.md) and [`.azure/deployment-plan.md`](../.azure/deployment-plan.md).
+
+- The non-PHI Terraform stack was applied under `DL-20260902-09`; PostgreSQL
+  recovered in `centralus` while the remainder stayed in `eastus`.
+- API and worker still run placeholder `helloworld` images. No OS image has
+  been pushed to ACR and no application migration has run against Azure.
+- `terraform init -backend=false`, `terraform validate`, and `terraform plan`
+  are the default review path. Any later apply requires its applicable exact
+  owner gate.
+- State must stay OS-local (or a future OS-named backend) — never Track A `cosmaneura-tfstate`.
+- The D2 residual must use digest-pinned ACR images and document the prior
+  digest for rollback.
+- Only `DESTROY COSMANEURA-OS-SYNTH` authorizes retiring the synth resource
+  group.
+
 ## Secrets policy
 
 CI and release scripts use only synthetic Compose credentials from
-`.env.example` placeholders. No Azure, Clerk, Stripe, Athena, Acuity, or
-production GitHub deploy identities.
+`.env.example` placeholders. No Clerk, Stripe, Athena, Acuity, or
+production GitHub deploy identities. Azure apply-time secrets use `TF_VAR_*`
+only and must not be committed.
 
-## Explicit non-goals
+## Explicit non-goals (until separately authorized)
 
-- Registry push  
-- Azure / Container Apps deploy  
+- ACR push or Container Apps application wiring
+- Further Azure mutation
 - Auto-promote to early-adopter beta  
 - Track A integration  

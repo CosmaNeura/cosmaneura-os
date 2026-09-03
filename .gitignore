@@ -23,3 +23,28 @@ data/
 *.egg-info/
 .uv/
 web/dist/
+.tools/
+
+# Terraform (D2 local state — never commit secrets/state)
+infra/.terraform/
+infra/.terraform.tfstate.lock.info
+infra/*.tfstate
+infra/*.tfstate.*
+infra/tfplan*
+infra/*.tfplan
+infra/crash*.log
+infra/override.tf
+infra/override.tf.json
+infra/*_override.tf
+infra/*_override.tf.json
+infra/terraform.tfvars
+infra/*.tfvars.json
+infra/*.auto.tfvars
+infra/*.auto.tfvars.json
+infra/.apply-env
+!infra/terraform.tfvars.example
+.terraformrc
+terraform.rc
+
+# Generated local release metadata can embed host-specific image IDs.
+artifacts/releases/manifest-*.json

@@ -1,8 +1,9 @@
 # Cosmas OS (Track B)
 
 Local synthetic practice computer. This repository is **synth-only**: invented
-people, appointments, and insurance images. No PHI, no production credentials,
-no live Athena/Acuity/Clerk/Azure/messaging.
+people, appointments, and insurance images. No PHI, production credentials, or
+live Athena/Acuity/Clerk/messaging. Its Azure footprint is a non-PHI D2 synth
+environment only.
 
 ## One-command local start
 
@@ -56,6 +57,20 @@ cd web && pnpm test && pnpm build
 - Rollback / migration recovery: [`docs/RELEASE_AND_ROLLBACK.md`](docs/RELEASE_AND_ROLLBACK.md)
 - Manifests land in `artifacts/releases/` (not pushed, not deployed)
 
+## D2 Azure synth infrastructure (deployed)
+
+```bash
+# See infra/README.md — plan is the default; every later mutation is gated
+```
+
+- Plan: [`.azure/deployment-plan.md`](.azure/deployment-plan.md)
+- Code: [`infra/`](infra/)
+- Resource group `cosmaneura-os-synth` is deployed; most resources are in
+  `eastus`, while PostgreSQL is in `centralus` after the subscription rejected
+  Flexible Server provisioning in `eastus`.
+- API and worker still use placeholder `helloworld` images. ACR push, digest
+  pinning, and app wiring require `AUTHORIZE D2 ACR PUSH AND APP WIRING`.
+
 ## What this slice proves
 
 1. Seed one Org Box with owner + Scribe/Chief/Chaser  
@@ -90,4 +105,5 @@ Private GitHub: `git@github.com:CosmaNeura/cosmaneura-os.git` (Track B only).
 
 ## Not authorized here
 
-Cloud deploy, registry push, Track A edits, real vendors, application LLM.
+Further Azure mutation, registry push/app wiring, D3+, Track A edits, real
+vendors, PHI, and an application LLM.

@@ -1,0 +1,12 @@
+subscription_id     = "bab2a709-1fcb-4c87-a9fc-802f7477ec13"
+location            = "eastus"
+# Flexible Server blocked on this sub in eastus; keep RG in eastus, PG in centralus.
+postgres_location   = "centralus"
+resource_group_name = "cosmaneura-os-synth"
+name_prefix         = "cosmasossynth"
+
+# DO NOT put postgres_admin_password here in a committed file.
+# export TF_VAR_postgres_admin_password='…'
+
+api_image    = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"
+worker_image = "mcr.microsoft.com/azuredocs/containerapps-helloworld:latest"

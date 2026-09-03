@@ -125,3 +125,61 @@ IMPLEMENTATION IMPACT:
 - **Implementation impact:** Commit the local synthetic tree; create/push a
   private GitHub repository; keep `.env` and generated release manifests out of
   git.
+
+### DL-20260902-08
+
+- **Status:** ACCEPTED
+- **Ruling:** Owner authorized Deployment stage D2 — optional non-PHI Azure
+  development — with OS-named resources only, synthetic data, and
+  human-approved deploy. No MCD/Track A production connection, no Clerk/PHI,
+  no real vendors, no registry push to Track A identities.
+- **Rationale:** Advances past D1 after company private remote exists.
+- **Supersedes:** None. D3+ remain gated.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct owner message `I authorize D2` dated
+  2026-09-02.
+- **Implementation impact:** Owner selected D2 depth **3** (IaC scaffold only),
+  region **B** (`eastus`, RG `cosmaneura-os-synth`, subscription
+  `bab2a709-1fcb-4c87-a9fc-802f7477ec13`), tooling **1** (Terraform). No
+  `terraform apply` until a later explicit deploy message. Design:
+  `docs/superpowers/specs/2026-09-02-d2-terraform-scaffold-design.md`; plan:
+  `.azure/deployment-plan.md`.
+
+### DL-20260902-09
+
+- **Status:** ACCEPTED
+- **Ruling:** Owner authorized D2 live apply via exact message `deploy now` —
+  create OS-named non-PHI synth resources in subscription
+  `bab2a709-1fcb-4c87-a9fc-802f7477ec13`, region `eastus`, RG
+  `cosmaneura-os-synth` only. No Track A mutation, no Clerk/PHI/vendors, no
+  MCD production join.
+- **Rationale:** Completes the gated apply step after validated Terraform
+  scaffold.
+- **Supersedes:** The “no apply” clause of the D2 depth-3 scaffold choice only.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct owner message `deploy now` dated
+  2026-09-02.
+- **Implementation impact:** `terraform apply` for `infra/`; retain secrets out
+  of git; record outputs in BUILD_REPORT / deployment-plan.
+
+### DL-20260903-01
+
+- **Status:** ACCEPTED
+- **Ruling:** Owner authorized repository hygiene for the existing D2 tree:
+  tighten ignores, correct D2 documentation, commit and push the non-secret
+  D2 source and evidence to `CosmaNeura/cosmaneura-os` `main`, and verify
+  `synth-ci`. The handoff confirms that most D2 resources remain in `eastus`,
+  PostgreSQL recovered in `centralus` after `ParameterOutOfRange`, and the
+  prior `deploy now` authorization is consumed. This authorization does not
+  permit Azure mutation, ACR push, app wiring, vendor activation, PHI, or
+  Track A changes.
+- **Rationale:** Preserve the already-applied non-PHI D2 infrastructure source
+  and handoff in the company repository before any later gated phase.
+- **Supersedes:** None. D2 residual and D3-D6 remain separately gated.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Owner pasted the Codex D3-to-complete-build
+  handoff containing the explicit hygiene gate on 2026-09-03.
+- **Implementation impact:** Commit and push the current D2 docs, Terraform,
+  deployment plan, and handoff without local secrets, state, tools, or plan
+  artifacts; require green GitHub Actions on the pushed SHA. D2 residual work
+  remains blocked until `AUTHORIZE D2 ACR PUSH AND APP WIRING`.
