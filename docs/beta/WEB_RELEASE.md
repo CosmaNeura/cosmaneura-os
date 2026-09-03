@@ -50,9 +50,12 @@ session token is unavailable.
 ## Human-owned release sequence
 
 1. Apply only the reviewed foundation plan with `deploy_workloads=false`.
-2. Record the non-secret `web_origin`, `api_origin`, and ACR login-server
-   outputs. Confirm the hostnames are inside the new D3 Container Apps
-   environment.
+2. Run the protected `probe-network` operation and record the non-secret
+   `public_configuration.web_origin`, `public_configuration.api_origin`, and
+   `public_configuration.acr_login_server` values from its validated,
+   self-hashed artifact. Confirm the hostnames are inside the new D3 Container
+   Apps environment. Do not inspect or export raw Terraform state to obtain
+   them.
 3. Create/configure the production Cosmas OS Clerk instance for the exact web
    origin, recreate the empty Cosmas Beta Lab Organization there, and retain
    Clerk secrets only in the human-controlled service. Do not invite testers.

@@ -495,6 +495,12 @@ bash ./transport-to-protected-runner.sh build-push \
   --artifact-out /protected/ephemeral/d3-beta-build.json
 ```
 
+The self-hashed network artifact includes a strictly whitelisted
+`public_configuration` object containing only the foundation-derived
+`api_origin`, `web_origin`, `web_default_fqdn`, optional custom-domain state,
+and ACR login server. Use those values for Clerk and the public web build;
+never export or inspect raw Terraform state to discover them.
+
 `public-web-build.json` contains only `vite_cosmas_env`,
 `vite_clerk_publishable_key`, and the exact foundation `vite_api_base`. A
 different state serial requires a new append-only network probe generation;

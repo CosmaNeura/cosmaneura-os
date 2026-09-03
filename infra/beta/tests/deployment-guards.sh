@@ -217,23 +217,92 @@ jq '.planned_values.outputs += {
   runtime_acceptance_job_enabled: {value: true},
   image_reference: {value: "registry.example/cosmas-os@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"},
   web_image_reference: {value: "registry.example/cosmas-web@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},
+  api_origin: {value: "https://ca-api-cosmas-beta-lab01.example.azurecontainerapps.io"},
   web_origin: {value: "https://beta.example.test"},
   web_default_fqdn: {value: "ca-cosmas-web.example.azurecontainerapps.io"},
   web_custom_domain: {value: "beta.example.test"},
   web_custom_domain_binding_enabled: {value: true},
+  acr_login_server: {value: "cosmasbetalab01.azurecr.io"},
   web_custom_domain_verification_id: {value: "MUST-NOT-APPEAR", sensitive: true}
 }' "$plan_file" >"$critical_plan"
 critical_values="$test_dir/critical-values.json"
 guard_write_critical_planned_values "$critical_plan" "$critical_values"
 jq -e '
+  .api_origin == "https://ca-api-cosmas-beta-lab01.example.azurecontainerapps.io" and
   .web_origin == "https://beta.example.test" and
   .web_default_fqdn == "ca-cosmas-web.example.azurecontainerapps.io" and
   .web_custom_domain == "beta.example.test" and
   .web_custom_domain_binding_enabled == true and
+  .acr_login_server == "cosmasbetalab01.azurecr.io" and
   (has("web_custom_domain_verification_id") | not)
 ' "$critical_values" >/dev/null
 if grep -q 'MUST-NOT-APPEAR' "$critical_values"; then
   printf '%s\n' "critical planned-value projection leaked custom-domain verification material" >&2
+  exit 1
+fi
+
+network_public_configuration="$test_dir/network-public-configuration.json"
+jq -n '
+  {
+    schema_version: 1,
+    evidence_type: "protected-runner-live-network",
+    source_sha: ("a" * 40),
+    release_id: "release-a",
+    public_configuration: {
+      api_origin: "https://ca-api-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io",
+      web_origin: "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io",
+      web_default_fqdn: "ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io",
+      web_custom_domain: null,
+      web_custom_domain_binding_enabled: false,
+      acr_login_server: "cosmasbetalab01.azurecr.io"
+    },
+    endpoints: [{kind: "acr", hostname: "cosmasbetalab01.azurecr.io", port: 443}]
+  }
+' >"$network_public_configuration"
+guard_validate_network_public_configuration "$network_public_configuration" "$(printf 'a%.0s' {1..40})" release-a lab01
+
+guard_operation_returns_hashed_evidence probe-network ""
+guard_operation_returns_hashed_evidence retrieve network
+for unhashed_operation in plan apply; do
+  if guard_operation_returns_hashed_evidence "$unhashed_operation" ""; then
+    printf '%s\n' "$unhashed_operation output must retain its distinct plan/result hash contract" >&2
+    exit 1
+  fi
+done
+if guard_operation_returns_hashed_evidence retrieve review; then
+  printf '%s\n' "review retrieval must not be treated as a self-hashed evidence artifact" >&2
+  exit 1
+fi
+network_public_configuration_hash="$(jq -cS '.' "$network_public_configuration" | guard_sha256_stream)"
+jq -S --arg hash "$network_public_configuration_hash" '. + {evidence_payload_sha256: $hash}' \
+  "$network_public_configuration" >"$test_dir/network-public-configuration-hashed.json"
+guard_validate_sanitized_evidence_hash "$test_dir/network-public-configuration-hashed.json"
+[[ "$GUARD_EVIDENCE_PAYLOAD_SHA256" == "$network_public_configuration_hash" ]] || {
+  printf '%s\n' "network evidence hash validator did not retain the verified hash" >&2
+  exit 1
+}
+jq '.public_configuration.web_origin = "https://tampered.example.test"' \
+  "$test_dir/network-public-configuration-hashed.json" >"$test_dir/network-public-configuration-tampered.json"
+if (guard_validate_sanitized_evidence_hash "$test_dir/network-public-configuration-tampered.json" >/dev/null 2>&1); then
+  printf '%s\n' "expected workstation evidence validation to reject a tampered retrieved artifact" >&2
+  exit 1
+fi
+
+jq '.public_configuration.api_origin += "/path"' "$network_public_configuration" >"$test_dir/network-public-configuration-path.json"
+if (guard_validate_network_public_configuration "$test_dir/network-public-configuration-path.json" "$(printf 'a%.0s' {1..40})" release-a lab01 >/dev/null 2>&1); then
+  printf '%s\n' "expected network public configuration to reject an API origin with a path" >&2
+  exit 1
+fi
+
+jq '.public_configuration.acr_login_server = "other.azurecr.io"' "$network_public_configuration" >"$test_dir/network-public-configuration-acr-mismatch.json"
+if (guard_validate_network_public_configuration "$test_dir/network-public-configuration-acr-mismatch.json" "$(printf 'a%.0s' {1..40})" release-a lab01 >/dev/null 2>&1); then
+  printf '%s\n' "expected network public configuration to reject an ACR hostname mismatch" >&2
+  exit 1
+fi
+
+jq '.public_configuration.unexpected_secret = "MUST-NOT-APPEAR"' "$network_public_configuration" >"$test_dir/network-public-configuration-overbroad.json"
+if (guard_validate_network_public_configuration "$test_dir/network-public-configuration-overbroad.json" "$(printf 'a%.0s' {1..40})" release-a lab01 >/dev/null 2>&1); then
+  printf '%s\n' "expected network public configuration to reject an over-broad payload" >&2
   exit 1
 fi
 
@@ -526,6 +595,7 @@ managed_cleanup_helpers="$test_dir/managed-run-command-cleanup-helpers.sh"
 for cleanup_function in \
   managed_run_command_inventory_is_valid \
   managed_run_command_read_inventory \
+  managed_run_command_show_instance \
   managed_run_command_inventory_proves_absent \
   managed_run_command_delete_and_verify_absent \
   transport_signal_exit \
@@ -556,10 +626,39 @@ cleanup_mock_delete_behavior="remove"
 cleanup_mock_inventory_mode="complete"
 cleanup_mock_delete_calls=0
 cleanup_mock_get_calls=0
+cleanup_mock_show_calls=0
 cleanup_mock_sleep_calls=0
 cleanup_mock_events=""
 cleanup_mock_reappear_after_sleep=0
 az() {
+  if [[ "${1:-}" == "vm" && "${2:-}" == "run-command" && "${3:-}" == "show" ]]; then
+    shift 3
+    local subscription=""
+    local resource_group=""
+    local vm_name=""
+    local command_name=""
+    local instance_view=false
+    while (( $# > 0 )); do
+      case "$1" in
+        --subscription) subscription="${2:-}"; shift 2 ;;
+        --resource-group) resource_group="${2:-}"; shift 2 ;;
+        --vm-name) vm_name="${2:-}"; shift 2 ;;
+        --run-command-name) command_name="${2:-}"; shift 2 ;;
+        --instance-view) instance_view=true; shift ;;
+        --only-show-errors) shift ;;
+        --output) [[ "${2:-}" == "json" ]] || return 96; shift 2 ;;
+        *) return 97 ;;
+      esac
+    done
+    [[ "$subscription" == "$GUARD_SUBSCRIPTION_ID" ]] || return 98
+    [[ "$resource_group" == "$GUARD_STATE_RESOURCE_GROUP" ]] || return 99
+    [[ "$vm_name" == "$GUARD_RUNNER_VM_NAME" ]] || return 100
+    [[ "$command_name" == "${cleanup_command_id##*/}" ]] || return 101
+    [[ "$instance_view" == "true" ]] || return 102
+    cleanup_mock_show_calls=$((cleanup_mock_show_calls + 1))
+    printf '%s\n' '{"provisioningState":"Succeeded","instanceView":{"executionState":"Succeeded"}}'
+    return 0
+  fi
   [[ "${1:-}" == "rest" ]] || return 90
   shift
   local method=""
@@ -606,6 +705,35 @@ sleep() {
   if [[ "$cleanup_mock_reappear_after_sleep" -gt 0 && "$cleanup_mock_sleep_calls" -eq "$cleanup_mock_reappear_after_sleep" ]]; then
     cleanup_mock_state="present"
   fi
+}
+
+cleanup_show_result="$test_dir/managed-run-command-show.json"
+managed_run_command_show_instance "$cleanup_runner_id" "$cleanup_command_id" "$cleanup_show_result"
+jq -e '.provisioningState == "Succeeded" and .instanceView.executionState == "Succeeded"' "$cleanup_show_result" >/dev/null
+[[ "$cleanup_mock_show_calls" == "1" ]] || {
+  printf '%s\n' "managed Run Command instance read did not use the explicit resource selectors" >&2
+  exit 1
+}
+if managed_run_command_show_instance "$cleanup_runner_id" "$cleanup_runner_id/runCommands/not-cosmas-d3" "$cleanup_show_result"; then
+  printf '%s\n' "managed Run Command instance read accepted a non-D3 command" >&2
+  exit 1
+fi
+[[ "$cleanup_mock_show_calls" == "1" ]] || {
+  printf '%s\n' "invalid managed Run Command instance read reached Azure" >&2
+  exit 1
+}
+if managed_run_command_show_instance "$cleanup_runner_id" "$cleanup_runner_id/runCommands/parent/cosmas-d3-20260903120000-5678" "$cleanup_show_result"; then
+  printf '%s\n' "managed Run Command instance read accepted a nested child resource ID" >&2
+  exit 1
+fi
+other_runner_id="${cleanup_runner_id%/*}/another-runner"
+if managed_run_command_show_instance "$other_runner_id" "$other_runner_id/runCommands/cosmas-d3-20260903120000-5678" "$cleanup_show_result"; then
+  printf '%s\n' "managed Run Command instance read accepted a different runner resource ID" >&2
+  exit 1
+fi
+[[ "$cleanup_mock_show_calls" == "1" ]] || {
+  printf '%s\n' "invalid nested or mismatched managed Run Command read reached Azure" >&2
+  exit 1
 }
 
 managed_run_command_delete_and_verify_absent "$cleanup_runner_id" "$cleanup_command_id" "$cleanup_api_version" "$cleanup_scratch" 3 0 false
@@ -856,6 +984,10 @@ if grep -F 'az vm run-command delete' "$beta_dir/transport-to-protected-runner.s
   printf '%s\n' "managed Run Command cleanup must use the exact ARM ID and verified collection readback" >&2
   exit 1
 fi
+if grep -E '^[[:space:]]*az vm run-command show[[:space:]]+--ids([[:space:]]|$)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null; then
+  printf '%s\n' "managed Run Command polling must not use the Azure CLI-incompatible --ids selector" >&2
+  exit 1
+fi
 previous_bootstrap_parameter_line=0
 # shellcheck disable=SC2016 # These are literal source-code assertions.
 for bootstrap_parameter in \
@@ -1019,6 +1151,9 @@ grep -F 'docker push "$api_image"' "$beta_dir/protected-runner-command.sh" >/dev
 grep -F 'guard_lock_and_verify_acr_immutable_tag "$acr_name" "$api_repository" "$immutable_tag" "$api_digest"' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'runtime-acceptance)' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'runtime-acceptance)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'public_configuration: {' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'guard_validate_network_public_configuration "$network_evidence_tmp" "$source_sha" "$release_id" "$GUARD_BETA_ID"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'guard_validate_network_public_configuration "$artifact_out" "$source_sha" "$release_id" "$GUARD_BETA_ID"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'domain-verification)' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'domain-verification)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'artifact_file="$release_root/executions/domain-verification/attestation.json"' "$beta_dir/protected-runner-command.sh" >/dev/null

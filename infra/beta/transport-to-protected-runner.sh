@@ -166,6 +166,38 @@ managed_run_command_read_inventory() {
   managed_run_command_inventory_is_valid "$inventory_file" "$exact_runner_id"
 }
 
+managed_run_command_show_instance() {
+  local runner_id="$1"
+  local command_id="$2"
+  local output_file="$3"
+  local normalized_runner_id
+  local normalized_command_id
+  local command_name
+  local expected_runner_id
+
+  normalized_runner_id="${runner_id,,}"
+  normalized_command_id="${command_id,,}"
+  expected_runner_id="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_STATE_RESOURCE_GROUP/providers/Microsoft.Compute/virtualMachines/$GUARD_RUNNER_VM_NAME"
+  [[ "$normalized_runner_id" == "${expected_runner_id,,}" ]] || return 2
+  [[ "$normalized_command_id" == "$normalized_runner_id/runcommands/"* ]] || return 2
+  command_name="${command_id##*/}"
+  [[ "$command_name" =~ ^cosmas-d3-[a-z0-9-]+$ ]] || return 2
+  [[ "$normalized_command_id" == "$normalized_runner_id/runcommands/${command_name,,}" ]] || return 2
+
+  # `az vm run-command show --ids` is not accepted by every Azure CLI release
+  # for managed Run Command resources, including the reviewed workstation
+  # release. Use the explicit resource selectors that are stable across those
+  # versions while retaining the exact, prevalidated runner/name boundary.
+  az vm run-command show \
+    --subscription "$GUARD_SUBSCRIPTION_ID" \
+    --resource-group "$GUARD_STATE_RESOURCE_GROUP" \
+    --vm-name "$GUARD_RUNNER_VM_NAME" \
+    --run-command-name "$command_name" \
+    --instance-view \
+    --only-show-errors \
+    --output json >"$output_file"
+}
+
 managed_run_command_inventory_proves_absent() {
   local inventory_file="$1"
   local exact_runner_id="$2"
@@ -850,7 +882,7 @@ if [[ "$operation" == "cleanup-commands" ]]; then
   while IFS= read -r stale_command_id; do
     [[ "${stale_command_id,,}" == "${runner_id,,}/runcommands/cosmas-d3-"* ]] || guard_die "managed Run Command enumeration escaped the exact protected runner/prefix"
     stale_view_file="$transport_temp_dir/stale-view-$removed_count-$active_count.json"
-    if ! az vm run-command show --ids "$stale_command_id" --instance-view --only-show-errors --output json >"$stale_view_file" 2>/dev/null; then
+    if ! managed_run_command_show_instance "$runner_id" "$stale_command_id" "$stale_view_file" 2>/dev/null; then
       guard_die "cannot verify terminal state for a stale protected Run Command"
     fi
     provisioning_state="$(jq -r '.provisioningState // .properties.provisioningState // ""' "$stale_view_file")"
@@ -1013,7 +1045,7 @@ rm -f -- "$payload_file" "$payload_b64_file" "$request_file" || guard_die "canno
 execution_state=""
 provisioning_state=""
 for _ in $(seq 1 90); do
-  if az vm run-command show --ids "$run_command_id" --instance-view --only-show-errors --output json >"$view_file" 2>/dev/null; then
+  if managed_run_command_show_instance "$runner_id" "$run_command_id" "$view_file" 2>/dev/null; then
     provisioning_state="$(jq -r '.provisioningState // .properties.provisioningState // ""' "$view_file")"
     execution_state="$(jq -r '.instanceView.executionState // .properties.instanceView.executionState // ""' "$view_file")"
     if [[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]]; then
@@ -1054,14 +1086,17 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
     rm -f -- "$artifact_out"
     guard_die "returned artifact is not a schema-version-1 sanitized object"
   }
-  if [[ "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" ]]; then
-    expected_evidence_hash="$(jq -cS 'del(.evidence_payload_sha256)' "$artifact_out" | shasum -a 256 | awk '{print $1}')"
-    [[ "$(jq -er '.evidence_payload_sha256' "$artifact_out")" == "$expected_evidence_hash" ]] || {
+  if guard_operation_returns_hashed_evidence "$operation" "$artifact_kind"; then
+    if ! guard_validate_sanitized_evidence_hash "$artifact_out"; then
       rm -f -- "$artifact_out"
-      guard_die "returned live network evidence hash does not match its canonical payload"
-    }
+      guard_die "returned evidence hash does not match its canonical payload"
+    fi
+    expected_evidence_hash="$GUARD_EVIDENCE_PAYLOAD_SHA256"
+    if [[ "$operation" == "probe-network" || ( "$operation" == "retrieve" && "$artifact_kind" == "network" ) ]]; then
+      guard_validate_network_public_configuration "$artifact_out" "$source_sha" "$release_id" "$GUARD_BETA_ID"
+    fi
     if [[ "$operation" == "probe-network" ]]; then
-      printf 'Use runner_live_network_evidence_reference=runner-network:sha256:%s for this exact release/state.\n' "$expected_evidence_hash"
+      printf 'Use runner_live_network_evidence_reference=runner-network:sha256:%s for this exact release/state; the sanitized artifact contains the foundation-derived public origins.\n' "$expected_evidence_hash"
     elif [[ "$operation" == "build-push" ]]; then
       printf 'Accepted immutable API/web digests are recorded in build evidence sha256:%s.\n' "$expected_evidence_hash"
     elif [[ "$operation" == "database-prepare" ]]; then

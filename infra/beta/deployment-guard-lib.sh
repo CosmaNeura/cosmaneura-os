@@ -889,12 +889,106 @@ guard_write_critical_planned_values() {
     runtime_acceptance_job_enabled: .planned_values.outputs.runtime_acceptance_job_enabled.value,
     image_reference: (.planned_values.outputs.image_reference.value // null),
     web_image_reference: (.planned_values.outputs.web_image_reference.value // null),
+    api_origin: (.planned_values.outputs.api_origin.value // null),
     web_origin: (.planned_values.outputs.web_origin.value // null),
     web_default_fqdn: (.planned_values.outputs.web_default_fqdn.value // null),
     web_custom_domain: (.planned_values.outputs.web_custom_domain.value // null),
-    web_custom_domain_binding_enabled: .planned_values.outputs.web_custom_domain_binding_enabled.value
+    web_custom_domain_binding_enabled: .planned_values.outputs.web_custom_domain_binding_enabled.value,
+    acr_login_server: (.planned_values.outputs.acr_login_server.value // null)
   }' "$plan_json" >"$output_file" || guard_die "cannot generate strict non-secret critical planned-value review"
   chmod 600 "$output_file"
+}
+
+guard_operation_returns_hashed_evidence() {
+  local operation="$1"
+  local artifact_kind="${2:-}"
+
+  case "$operation" in
+    probe-network|build-push|database-prepare|runtime-acceptance|domain-verification|alert-delivery|pitr-*|release-rollback|release-forward|offboarding-acceptance|bootstrap-identity)
+      return 0
+      ;;
+    retrieve)
+      case "$artifact_kind" in
+        network|build|database|runtime|domain|alert|pitr|recovery|offboarding|identity)
+          return 0
+          ;;
+      esac
+      ;;
+  esac
+  return 1
+}
+
+guard_validate_sanitized_evidence_hash() {
+  local artifact_file="$1"
+  local expected_hash
+  local actual_hash
+
+  expected_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$artifact_file")" || return 1
+  actual_hash="$(jq -cS 'del(.evidence_payload_sha256)' "$artifact_file" | guard_sha256_stream)" || return 1
+  [[ "$actual_hash" == "$expected_hash" ]] || return 1
+  GUARD_EVIDENCE_PAYLOAD_SHA256="$expected_hash"
+}
+
+guard_validate_network_public_configuration() {
+  local artifact_file="$1"
+  local expected_source_sha="$2"
+  local expected_release_id="$3"
+  local expected_beta_id="$4"
+
+  [[ "$expected_source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "network evidence source SHA is invalid"
+  [[ "$expected_release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "network evidence release ID is invalid"
+  [[ "$expected_beta_id" =~ ^[a-z0-9][a-z0-9-]{1,8}[a-z0-9]$ && "$expected_beta_id" != *--* ]] || guard_die "network evidence beta ID is invalid"
+
+  jq -e \
+    --arg source_sha "$expected_source_sha" \
+    --arg release_id "$expected_release_id" \
+    --arg beta_id "$expected_beta_id" '
+      . as $artifact |
+      .schema_version == 1 and
+      .evidence_type == "protected-runner-live-network" and
+      .source_sha == $source_sha and
+      .release_id == $release_id and
+      (.public_configuration | type == "object") and
+      (.public_configuration | keys | sort) == ([
+        "acr_login_server", "api_origin", "web_custom_domain",
+        "web_custom_domain_binding_enabled", "web_default_fqdn", "web_origin"
+      ] | sort) and
+      (.public_configuration.api_origin | strings |
+        startswith("https://ca-api-cosmas-beta-" + $beta_id + ".") and
+        endswith(".azurecontainerapps.io") and
+        test("^https://[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
+      ) and
+      (.public_configuration.web_default_fqdn | strings |
+        startswith("ca-web-cosmas-beta-" + $beta_id + ".") and
+        endswith(".azurecontainerapps.io") and
+        test("^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$")
+      ) and
+      ((.public_configuration.api_origin |
+        ltrimstr("https://ca-api-cosmas-beta-" + $beta_id + ".")) ==
+       (.public_configuration.web_default_fqdn |
+        ltrimstr("ca-web-cosmas-beta-" + $beta_id + "."))) and
+      (.public_configuration.web_origin | strings |
+        test("^https://[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$")
+      ) and
+      (.public_configuration.web_custom_domain_binding_enabled | type == "boolean") and
+      (if .public_configuration.web_custom_domain == null then
+         .public_configuration.web_origin == ("https://" + .public_configuration.web_default_fqdn) and
+         .public_configuration.web_custom_domain_binding_enabled == false
+       else
+         (.public_configuration.web_custom_domain | strings |
+           test("^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+         ) and
+         .public_configuration.web_origin == ("https://" + .public_configuration.web_custom_domain)
+       end) and
+      (.public_configuration.acr_login_server | strings |
+        test("^[a-z0-9]{5,50}\\.azurecr\\.io$")
+      ) and
+      ([.endpoints[]? | select(
+        .kind == "acr" and
+        .hostname == $artifact.public_configuration.acr_login_server and
+        .port == 443
+      )] | length) == 1
+    ' "$artifact_file" >/dev/null || guard_die "network evidence public configuration is absent, malformed, or not bound to the requested source/release"
 }
 
 guard_validate_domain_verification_artifact() {

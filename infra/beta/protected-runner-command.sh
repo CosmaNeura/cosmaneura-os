@@ -251,6 +251,7 @@ verify_release_network_evidence() {
   expected_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$evidence")" || die "live runner-network evidence hash is invalid"
   actual_hash="$(jq -cS 'del(.evidence_payload_sha256)' "$evidence" | sha256sum | awk '{print $1}')"
   [[ "$actual_hash" == "$expected_hash" ]] || die "live runner-network evidence was modified after probing"
+  guard_validate_network_public_configuration "$evidence" "$source_sha" "$release_id" "$GUARD_BETA_ID"
   expected_runner_id="/subscriptions/$subscription_id/resourceGroups/$(jq -er '.backend_resource_group_name.value' "$bootstrap_outputs")/providers/Microsoft.Compute/virtualMachines/$(jq -er '.runner_vm_name.value' "$bootstrap_outputs")"
   expected_runner_subnet_id="$(jq -er '.runner_subnet_id.value' "$bootstrap_outputs")"
   expected_box_id="$(jq -er '.box_id.value' "$bootstrap_outputs")"
@@ -903,6 +904,13 @@ case "$operation" in
     "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" output -json >"$probe_outputs"
     chmod 0600 "$probe_outputs"
 
+    api_origin="$(jq -er '.api_origin.value | strings | select(test("^https://[^/?#]+$"))' "$probe_outputs")"
+    web_origin="$(jq -er '.web_origin.value | strings | select(test("^https://[^/?#]+$"))' "$probe_outputs")"
+    web_default_fqdn="$(jq -er '.web_default_fqdn.value | strings | select(test("^[^/?#]+$"))' "$probe_outputs")"
+    web_custom_domain="$(jq -r '.web_custom_domain.value // ""' "$probe_outputs")"
+    web_custom_domain_binding_enabled="$(jq -r '.web_custom_domain_binding_enabled.value' "$probe_outputs")"
+    [[ -z "$web_custom_domain" || "$web_custom_domain" =~ ^[a-z0-9.-]+$ ]] || die "web custom-domain output is invalid"
+    [[ "$web_custom_domain_binding_enabled" == "true" || "$web_custom_domain_binding_enabled" == "false" ]] || die "web custom-domain binding output is invalid"
     acr_host="$(jq -er '.acr_login_server.value | strings' "$probe_outputs")"
     registry_posture="$(jq -er '.registry_network_posture.value | strings' "$probe_outputs")"
     registry_exception_hash="$(jq -r '.registry_public_exception_reference_sha256.value // ""' "$probe_outputs")"
@@ -981,6 +989,11 @@ case "$operation" in
       --arg runner_subnet_id "$GUARD_RUNNER_SUBNET_ID" \
       --arg box_id "$GUARD_BOX_ID" \
       --arg deployment_mode "$GUARD_DEPLOYMENT_MODE" \
+      --arg api_origin "$api_origin" \
+      --arg web_origin "$web_origin" \
+      --arg web_default_fqdn "$web_default_fqdn" \
+      --arg web_custom_domain "$web_custom_domain" \
+      --argjson web_custom_domain_binding_enabled "$web_custom_domain_binding_enabled" \
       --arg registry_posture "$registry_posture" \
       --arg registry_exception_hash "$registry_exception_hash" \
       --arg lineage "$GUARD_STATE_LINEAGE" \
@@ -1002,6 +1015,14 @@ case "$operation" in
           release_id: $release_id,
           runner: {resource_id: $runner_id, subnet_id: $runner_subnet_id},
           boundary: {box_id: $box_id, deployment_mode: $deployment_mode},
+          public_configuration: {
+            api_origin: $api_origin,
+            web_origin: $web_origin,
+            web_default_fqdn: $web_default_fqdn,
+            web_custom_domain: (if $web_custom_domain == "" then null else $web_custom_domain end),
+            web_custom_domain_binding_enabled: $web_custom_domain_binding_enabled,
+            acr_login_server: $acr_host
+          },
           registry: {
             posture: $registry_posture,
             public_exception_reference_sha256: (if $registry_exception_hash == "" then null else $registry_exception_hash end)
@@ -1022,6 +1043,7 @@ case "$operation" in
     jq -S --arg evidence_payload_sha256 "$evidence_hash" '. + {evidence_payload_sha256: $evidence_payload_sha256}' "$probe_payload" >"$network_evidence_tmp"
     chmod 0600 "$network_evidence_tmp"
     jq -e --arg hash "$evidence_hash" '.schema_version == 1 and .evidence_payload_sha256 == $hash' "$network_evidence_tmp" >/dev/null || die "generated network evidence is invalid"
+    guard_validate_network_public_configuration "$network_evidence_tmp" "$source_sha" "$release_id" "$GUARD_BETA_ID"
     ln -- "$network_evidence_tmp" "$network_evidence_file" || die "network evidence generation appeared concurrently"
     rm -f -- "$network_evidence_tmp"
     network_evidence_tmp=""
