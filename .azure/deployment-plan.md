@@ -1,22 +1,26 @@
 # Azure Deployment Plan
 
-> **Status:** Deployed
+> **Status:** D2 runtime deployed and verified
 
 Generated: 2026-09-02T23:30:00Z
-Updated: 2026-09-03T09:33:17Z (D2 hygiene and CI evidence)
+Updated: 2026-09-03T10:19:36Z (D2 ACR push, app wiring, and verification)
 
-**Gate:** D2 live apply completed under `DL-20260902-09` (`deploy now`). Track A untouched. No PHI.
+**Gate:** D2 infrastructure apply completed under `DL-20260902-09`; ACR push
+and application wiring completed under `DL-20260903-02`. Track A untouched. No
+PHI.
 
 Design spec: `docs/superpowers/specs/2026-09-02-d2-terraform-scaffold-design.md`
-Decision: `DL-20260902-08` (+ owner choices depth 3, region B, tooling 1); apply auth `DL-20260902-09`
+Decision: `DL-20260902-08` (+ owner choices depth 3, region B, tooling 1);
+infrastructure apply `DL-20260902-09`; runtime residual `DL-20260903-02`
 
 ---
 
 ## 1. Project Overview
 
 **Original goal:** Scaffold Terraform for optional non-PHI Cosmas OS Azure
-development without joining Track A. The scaffold was later applied under
-`DL-20260902-09`; most resources are in `eastus` and PostgreSQL is in
+development without joining Track A. The scaffold was applied under
+`DL-20260902-09`, then the digest-pinned runtime was wired under
+`DL-20260903-02`; most resources are in `eastus` and PostgreSQL is in
 `centralus`.
 
 **Path:** Add Components (existing modular-monolith repo)
@@ -75,7 +79,7 @@ development without joining Track A. The scaffold was later applied under
 | Worker | Container App | minimal always-on or scale-from-1 (Celery) |
 | Database | PostgreSQL Flexible Server | Burstable `B_Standard_B1ms` (or smallest available) |
 | Broker/cache | Azure Cache for Redis | Basic C0 (variable to swap sidecar later) |
-| Blobs | Storage Account + container | Standard LRS |
+| Blobs | Storage Account + container | Provisioned but unused by app; D2 runtime uses ephemeral local FS |
 | Secrets | Key Vault | Standard |
 | Identity | User-assigned managed identity | for ACA → ACR/KV/Storage |
 
@@ -84,7 +88,7 @@ development without joining Track A. The scaffold was later applied under
 | Service | Purpose |
 |---------|---------|
 | Log Analytics | Centralized logging for ACA |
-| Key Vault | Reserved for residual app secrets; no values committed and app wiring remains incomplete |
+| Key Vault | Active versionless refs for `database-url` and `redis-url`; no values committed or logged |
 | Managed Identity | Avoid admin passwords in app config where possible |
 | Tags | `track=B`, `product=cosmas-os`, `env=synth_os`, `phi=false` |
 
@@ -154,10 +158,11 @@ below.
 - [x] Recovery: Postgres `postgres_location=centralus` after eastus Flexible Server restriction
 - [x] `terraform apply` recovery plan (3 adds) — `APPLY_EXIT:0`
 - [x] Azure RG resource list — all `Succeeded`
-- [ ] ACR image push + digest pin — requires
-  `AUTHORIZE D2 ACR PUSH AND APP WIRING`
-- [ ] App wiring to Postgres/Redis secrets beyond scaffold placeholders — same
-  exact residual gate
+- [x] Owner authorized residual with
+  `AUTHORIZE D2 ACR PUSH AND APP WIRING` (`DL-20260903-02`)
+- [x] ACR image built/pushed and API/worker pinned to the same digest
+- [x] Key Vault/UAMI Postgres and Redis refs wired; Celery command active
+- [x] Synth migration applied; API health and worker readiness verified
 
 ---
 
@@ -171,13 +176,27 @@ below.
 | terraform apply (initial) | `.tools/terraform apply tfplan` → `/tmp/cosmas-os-tf-apply.log` | ⚠️ Failed on PG Version in eastus after Redis complete (~23m) | 2026-09-03T00:08Z |
 | terraform apply (recovery) | `tfplan-recovery` → `/tmp/cosmas-os-tf-apply-recovery.log` | ✅ `APPLY_EXIT:0` — 3 added | 2026-09-03T00:20Z |
 | az resource list RG | `cosmaneura-os-synth` | ✅ All Succeeded | 2026-09-03T00:20Z |
+| ACR QuickRun | `ca1` from source `81d75c3`; Linux/amd64 push | ✅ digest `sha256:af48b5b…a6be` | 2026-09-03T10:05Z |
+| residual terraform plan | saved, sanitized review before apply | ✅ 2 add / 2 update / 0 destroy or replace | 2026-09-03 |
+| residual terraform apply | reviewed saved plan | ✅ 2 added / 2 changed / 0 destroyed | 2026-09-03 |
+| migration | Container Apps exec: upgrade, then `alembic current --check-heads` | ✅ `0001_initial (head)` | 2026-09-03T10:14Z |
+| API smoke | public `GET /health` | ✅ HTTP 200 `synth_os` | 2026-09-03T10:13Z |
+| worker smoke | aggregate-only Log Analytics query | ✅ connected + ready; 0 error/failure signals | 2026-09-03T10:14Z |
+| post-apply plan | refresh-backed detailed-exitcode plan | ✅ 0 add / 0 change / 0 destroy | 2026-09-03T10:17Z |
+| GitHub `synth-ci` | runs [33741787268](https://github.com/CosmaNeura/cosmaneura-os/actions/runs/33741787268) and [33742668350](https://github.com/CosmaNeura/cosmaneura-os/actions/runs/33742668350) | ✅ all five jobs on both commits | 2026-09-03 |
 
 **API URL:** https://ca-api-cosmasossynth.delightfulsmoke-58dcae81.eastus.azurecontainerapps.io
 
 **Deployed names (sanitized):** ACR `cosmasossynthacrrkpt0e`, CAE `cae-cosmasossynth-rkpt0e`, API `ca-api-cosmasossynth`, worker `ca-worker-cosmasossynth`, PG `pg-cosmasossynth-rkpt0e` (centralus), Redis `redis-cosmasossynth-rkpt0e`, KV `kvcosmasossynthrkpt0e`, storage `cosmasossynthstrkpt0e`, LAW `law-cosmasossynth-rkpt0e`, identity `id-cosmasossynth`.
 
-**Validated by:** D2 scaffold workflow + live apply under `DL-20260902-09`
-**Validation timestamp:** 2026-09-03T00:20Z
+**Runtime image:** `cosmasossynthacrrkpt0e.azurecr.io/cosmas-os@sha256:af48b5b22b15d64f5592405a7ac041237224fb7a1ed05b8041e0b60f5a5ca6be`
+
+**Active revisions:** API `ca-api-cosmasossynth--0000001`; worker
+`ca-worker-cosmasossynth--0000001` (both Healthy/Provisioned).
+
+**Validated by:** infrastructure apply `DL-20260902-09` + runtime residual
+`DL-20260903-02`
+**Validation timestamp:** 2026-09-03T10:19Z
 
 ---
 
@@ -190,22 +209,22 @@ below.
 | `infra/*.tf` | Terraform scaffold | ✅ |
 | `infra/.terraform.lock.hcl` | Provider lock | ✅ |
 | `infra/terraform.tfvars.example` | Non-secret examples | ✅ |
-| `infra/README.md` | init/plan and exact residual/destroy gates | ✅ |
-| `Dockerfile` | Existing API/worker image | ✅ (keep) |
+| `infra/README.md` | init/plan, deployed runtime, and remaining gates | ✅ |
+| `Dockerfile` | Pinned-uv API/worker image | ✅ |
 | `azure.yaml` | Not using AZD | ❌ skip |
 
 ---
 
 ## 10. Next Steps
 
-> Current: **Deployed** — infra up; runtime image still placeholder
+> Current: **D2 complete** — non-PHI synth infrastructure and runtime are up
 
 1. ✅ D2 source and evidence committed/pushed as
    `b54f4c4f90d460beb2bdd14dc7164ade8887d81a`; GitHub `synth-ci` run
    [33739304958](https://github.com/CosmaNeura/cosmaneura-os/actions/runs/33739304958)
    passed, including the aggregate gate.
-2. Wait for `AUTHORIZE D2 ACR PUSH AND APP WIRING` before ACR image push,
-   digest pinning, app connection settings, migrations, or cloud smoke tests.
+2. ✅ D2 runtime source and digest commits `81d75c3` / `471f56f`; both
+   GitHub workflows passed. Apps are healthy and Terraform is converged.
 3. Keep D3 separately gated by
    `APPROVE D3 ISOLATED EARLY-ADOPTER BETA`.
 
@@ -237,3 +256,32 @@ below.
 | Key Vault URI | `https://kvcosmasossynthrkpt0e.vault.azure.net/` |
 
 RG resources (all Succeeded): ACR, UAMI, Storage, Redis, Key Vault, LAW, CAE, API/Worker Container Apps, Postgres Flexible Server.
+
+---
+
+## 13. Runtime residual outcome (DL-20260903-02)
+
+| Item | Value |
+|---|---|
+| ACR digest | `sha256:af48b5b22b15d64f5592405a7ac041237224fb7a1ed05b8041e0b60f5a5ca6be` |
+| API revision | `ca-api-cosmasossynth--0000001` — 1 replica, 100% traffic |
+| Worker revision | `ca-worker-cosmasossynth--0000001` — 1 replica, Celery ready |
+| Secrets | Key Vault names `database-url`, `redis-url`; values not queried or logged |
+| Managed identity | `id-cosmasossynth` for ACR pull and Key Vault resolution |
+| Migration | `0001_initial (head)` |
+| Terraform convergence | 0 add / 0 change / 0 destroy |
+
+Pre/post state backups are local-only, mode `0600`, and SHA-256 identified in
+`BUILD_REPORT.md`. State and binary plans contain sensitive values despite CLI
+redaction and must never be committed or rendered to logs.
+
+### D2-only exposure and rollback limits
+
+- API ingress is external, header identities are caller-controlled, and CORS
+  is wildcard. This is not real authentication and no PHI is allowed.
+- PostgreSQL remains public with `AllowAzureServices`. D3 must tighten it.
+- `BLOB_ROOT=/tmp/cosmas-os-blobs` is ephemeral and per replica. API max
+  replicas is 1; the provisioned Azure Blob container is not used by the app.
+- This is the first functional OS digest. The prior mutable
+  `helloworld:latest` placeholder is not a rollback target; the current digest
+  becomes the known-good baseline for the next release.

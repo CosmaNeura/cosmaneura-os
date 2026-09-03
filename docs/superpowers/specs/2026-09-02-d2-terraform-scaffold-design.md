@@ -1,9 +1,13 @@
 # D2 non-PHI Azure — Terraform scaffold design
 
 Date: 2026-09-02
-Status: approved by owner; scaffold validated, then applied under
-`DL-20260902-09`; runtime image push and app wiring remain gated
+Status: historical approved scaffold; applied under `DL-20260902-09`, with the
+runtime residual later completed under `DL-20260903-02`
 Authority: DL-20260902-08; owner choices depth **3**, region **B**, tooling **1**
+
+The remaining scope and non-goals below describe the original scaffold gate,
+not the current deployed D2 state. See `.azure/deployment-plan.md` for current
+evidence.
 
 ## Goal
 

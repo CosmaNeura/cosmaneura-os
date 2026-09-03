@@ -1,26 +1,23 @@
-.venv
-.git
-.github
-web/node_modules
-web/dist
-data
-artifacts
-tmp
-.pytest_cache
-.ruff_cache
-.mypy_cache
-**/__pycache__
-*.pyc
-.env
-.env.*
-!.env.example
-.cursor
-.tools/
-*.egg-info
-.DS_Store
+# Strict allowlist for Docker and Azure CLI's local ACR context packer.
+# Terraform state, credentials, tools, docs, VCS data, and web assets stay out.
+*
+!Dockerfile
+!.dockerignore
+!pyproject.toml
+!uv.lock
+!README.md
+!alembic.ini
+!src
+!src/**
+!migrations
+!migrations/**
+!fixtures
+!fixtures/**
 
-# Infrastructure state, plans, and local apply credentials are never image input.
-infra/
-.azure/
-docs/
-web/
+# Re-exclude generated or sensitive files nested under allowed source trees.
+**/__pycache__
+**/*.py[cod]
+**/.DS_Store
+**/.env
+**/.env.*
+**/*.log

@@ -55,7 +55,8 @@ cd web && pnpm test && pnpm build
 
 - GitHub Actions: [`.github/workflows/synth-ci.yml`](.github/workflows/synth-ci.yml)
 - Rollback / migration recovery: [`docs/RELEASE_AND_ROLLBACK.md`](docs/RELEASE_AND_ROLLBACK.md)
-- Manifests land in `artifacts/releases/` (not pushed, not deployed)
+- D1 manifests land in `artifacts/releases/` (local-only); the separately
+  authorized D2 Azure image is described below.
 
 ## D2 Azure synth infrastructure (deployed)
 
@@ -68,10 +69,19 @@ cd web && pnpm test && pnpm build
 - Resource group `cosmaneura-os-synth` is deployed; most resources are in
   `eastus`, while PostgreSQL is in `centralus` after the subscription rejected
   Flexible Server provisioning in `eastus`.
-- API and worker still use placeholder `helloworld` images. ACR push, digest
-  pinning, and app wiring require `AUTHORIZE D2 ACR PUSH AND APP WIRING`.
+- API revision `ca-api-cosmasossynth--0000001` and worker revision
+  `ca-worker-cosmasossynth--0000001` are healthy on the same immutable image:
+  `cosmasossynthacrrkpt0e.azurecr.io/cosmas-os@sha256:af48b5b22b15d64f5592405a7ac041237224fb7a1ed05b8041e0b60f5a5ca6be`.
+- Key Vault/UAMI connection wiring is active, the synth database is at
+  `0001_initial (head)`, and `/health` returns HTTP 200 for `synth_os`.
 
-## What this slice proves
+This remains a public **synthetic-only** runtime, not a beta: it has no Clerk
+authentication, trusts caller-provided identity headers, permits wildcard
+CORS, and retains the D2 public PostgreSQL `AllowAzureServices` rule. Blob
+bytes use ephemeral per-replica `/tmp/cosmas-os-blobs`; the provisioned Azure
+Blob container is not yet consumed.
+
+## What the local L0 slice proves
 
 1. Seed one Org Box with owner + Scribe/Chief/Chaser  
 2. Import synthetic appointments  
@@ -105,5 +115,5 @@ Private GitHub: `git@github.com:CosmaNeura/cosmaneura-os.git` (Track B only).
 
 ## Not authorized here
 
-Further Azure mutation, registry push/app wiring, D3+, Track A edits, real
-vendors, PHI, and an application LLM.
+D3+, any new Azure mutation beyond the completed D2 residual, D2 destruction,
+Track A edits, Clerk or real-vendor activation, PHI, and an application LLM.
