@@ -33,7 +33,6 @@ from cosmas_os.domain.rules import (
     PolicyDenied,
     enforce_automation_send,
     enforce_capability,
-    require_human_approver,
     resolve_policy,
     transition_ticket,
 )
@@ -67,9 +66,99 @@ class Container:
             else SystemClock()
         )
         self.notify = notify or FakeNotifyAdapter()
-        self.blob = blob or LocalBlobAdapter(settings.blob_root)
+        self.blob = blob if blob is not None else _default_blob_adapter()
         self.auth = auth or FakeAuthAdapter()
         self.schedule = CsvScheduleAdapter()
+
+
+def _default_blob_adapter():
+    if settings.blob_backend == "local":
+        return LocalBlobAdapter(settings.blob_root)
+    if settings.blob_backend != "azure":
+        raise RuntimeError("unsupported BlobPort backend")
+
+    account_url = settings.azure_storage_account_url
+    container_name = settings.azure_blob_container
+    box_id = settings.beta_box_id
+    missing = [
+        name
+        for name, value in (
+            ("AZURE_STORAGE_ACCOUNT_URL", account_url),
+            ("AZURE_BLOB_CONTAINER", container_name),
+            ("BETA_BOX_ID", box_id),
+        )
+        if not value
+    ]
+    if missing:
+        raise RuntimeError("Azure BlobPort configuration missing: " + ", ".join(missing))
+    assert account_url is not None
+    assert container_name is not None
+    assert box_id is not None
+
+    from cosmas_os.adapters.azure import AzureBlobAdapter
+
+    return AzureBlobAdapter.from_managed_identity(
+        account_url=account_url,
+        container_name=container_name,
+        box_id=box_id,
+    )
+
+
+def _require_active_human(
+    principal: Principal | None,
+    *,
+    box_id: str,
+    owner_required: bool = False,
+) -> Principal:
+    if principal is None:
+        raise DomainError("missing principal")
+    if principal.principal_type != PrincipalType.HUMAN.value:
+        raise AuthorizationError("human authority required")
+    if principal.state != PrincipalState.ACTIVE.value:
+        raise AuthorizationError("active human authority required")
+    if principal.box_id != box_id:
+        raise AuthorizationError("principal is outside the Box")
+    if owner_required and not principal.is_owner:
+        raise AuthorizationError("owner authority required")
+    return principal
+
+
+def _require_operation_scope(
+    op: Operation,
+    rev: ActionRevision | None,
+    ticket: Ticket | None,
+) -> tuple[ActionRevision, Ticket]:
+    if rev is None or ticket is None:
+        raise DomainError("missing revision/ticket")
+    if (
+        op.ticket_id != ticket.id
+        or op.action_revision_id != rev.id
+        or rev.ticket_id != ticket.id
+        or op.box_id != ticket.box_id
+        or rev.box_id != ticket.box_id
+        or ticket.current_revision_id != rev.id
+    ):
+        raise DomainError("operation scope mismatch")
+    return rev, ticket
+
+
+def _lock_ticket(c: Container, ticket_id: str) -> Ticket | None:
+    """Load the current ticket row under a transaction-scoped write lock.
+
+    Editing and deciding both replace or bind ``current_revision_id``.  They
+    must therefore serialize on the ticket row so an approval can never be
+    committed for a revision that a concurrent edit has just invalidated.
+    ``populate_existing`` matters when a long-lived session already has the
+    ticket in its identity map: after waiting for the lock, the decision must
+    use the row state committed by the lock holder rather than cached state.
+    """
+
+    return c.session.scalar(
+        select(Ticket)
+        .where(Ticket.id == ticket_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
 
 
 def _audit(
@@ -169,12 +258,10 @@ def provision_box(c: Container, display_name: str = "Synth Family Practice") -> 
 def transfer_owner(c: Container, box_id: str, current_owner_id: str, successor_id: str) -> None:
     current = c.session.get(Principal, current_owner_id)
     successor = c.session.get(Principal, successor_id)
-    if not current or not successor or current.box_id != box_id or successor.box_id != box_id:
+    if not current or not successor:
         raise DomainError("invalid owner transfer principals")
-    if successor.principal_type != PrincipalType.HUMAN.value:
-        raise AuthorizationError("owner must be human")
-    if successor.state != PrincipalState.ACTIVE.value:
-        raise DomainError("successor must be active")
+    _require_active_human(current, box_id=box_id, owner_required=True)
+    _require_active_human(successor, box_id=box_id)
     current.is_owner = False
     successor.is_owner = True
     _audit(
@@ -192,10 +279,9 @@ def transfer_owner(c: Container, box_id: str, current_owner_id: str, successor_i
 def remove_principal(c: Container, actor_id: str, target_id: str) -> None:
     actor = c.session.get(Principal, actor_id)
     target = c.session.get(Principal, target_id)
-    if not actor or not target or actor.box_id != target.box_id:
+    if not target:
         raise DomainError("invalid remove")
-    if actor.principal_type != PrincipalType.HUMAN.value or not actor.is_owner:
-        raise AuthorizationError("only owner may remove")
+    _require_active_human(actor, box_id=target.box_id, owner_required=True)
     if target.is_owner:
         owners = c.session.scalars(
             select(Principal).where(
@@ -224,12 +310,11 @@ def remove_principal(c: Container, actor_id: str, target_id: str) -> None:
 def disable_agent(c: Container, actor_id: str, agent_id: str) -> None:
     actor = c.session.get(Principal, actor_id)
     agent = c.session.get(Principal, agent_id)
-    if not actor or not agent:
+    if not agent:
         raise DomainError("missing principal")
     if agent.principal_type != PrincipalType.AGENT.value:
         raise DomainError("not an agent")
-    if actor.principal_type != PrincipalType.HUMAN.value:
-        raise AuthorizationError("only humans disable agents")
+    _require_active_human(actor, box_id=agent.box_id, owner_required=True)
     agent.state = PrincipalState.DISABLED.value
     _audit(
         c,
@@ -270,8 +355,7 @@ def attest_patient_link(
     label: str,
 ) -> PatientLink:
     human = c.session.get(Principal, human_id)
-    if not human or human.principal_type != PrincipalType.HUMAN.value:
-        raise AuthorizationError("patient link requires human attestation")
+    _require_active_human(human, box_id=box_id)
     existing = c.session.scalar(
         select(PatientLink).where(
             PatientLink.box_id == box_id,
@@ -306,8 +390,9 @@ def attest_patient_link(
 def revoke_patient_link(c: Container, link_id: str, human_id: str) -> None:
     link = c.session.get(PatientLink, link_id)
     human = c.session.get(Principal, human_id)
-    if not link or not human or human.principal_type != PrincipalType.HUMAN.value:
-        raise AuthorizationError("invalid revoke")
+    if not link:
+        raise DomainError("patient link missing")
+    _require_active_human(human, box_id=link.box_id, owner_required=True)
     link.revoked_at = c.clock.now()
     link.state = "revoked"
     c.session.commit()
@@ -323,13 +408,19 @@ def detect_and_open_chase(
     chaser = c.session.get(Principal, chaser_id)
     appt = c.session.get(AppointmentObservation, appointment_id)
     link = c.session.get(PatientLink, patient_link_id)
-    if not chaser or chaser.agent_key != "chaser":
+    if (
+        not chaser
+        or chaser.principal_type != PrincipalType.AGENT.value
+        or chaser.agent_key != "chaser"
+    ):
         raise DomainError("chaser agent required")
     if chaser.state != PrincipalState.ACTIVE.value:
         raise DomainError("chaser disabled")
+    if chaser.box_id != box_id:
+        raise AuthorizationError("chaser is outside the Box")
     if not appt or appt.box_id != box_id:
         raise DomainError("appointment missing")
-    if not link or link.state != "confirmed" or link.revoked_at is not None:
+    if not link or link.box_id != box_id or link.state != "confirmed" or link.revoked_at is not None:
         raise DomainError("unconfirmed PatientLink blocks chase")
     if appt.coverage_status not in {
         CoverageStatus.MISSING.value,
@@ -396,16 +487,18 @@ def detect_and_open_chase(
 
 
 def edit_revision(c: Container, ticket_id: str, human_id: str, new_body: str) -> ActionRevision:
-    ticket = c.session.get(Ticket, ticket_id)
+    ticket = _lock_ticket(c, ticket_id)
     human = c.session.get(Principal, human_id)
     if not ticket or not human:
         raise DomainError("missing")
-    require_human_approver(PrincipalType(human.principal_type))
+    _require_active_human(human, box_id=ticket.box_id)
     if ticket.state != TicketState.PENDING_APPROVAL.value:
         raise DomainError("edit only while pending approval")
     old = c.session.get(ActionRevision, ticket.current_revision_id)
     if not old:
         raise DomainError("no revision")
+    if old.ticket_id != ticket.id or old.box_id != ticket.box_id:
+        raise DomainError("revision scope mismatch")
     old.invalidated = True
     payload = dict(old.payload)
     payload["body"] = new_body
@@ -462,11 +555,11 @@ def decide(
     expected_revision_id: str | None = None,
     note: str | None = None,
 ) -> dict[str, Any]:
-    ticket = c.session.get(Ticket, ticket_id)
+    ticket = _lock_ticket(c, ticket_id)
     human = c.session.get(Principal, human_id)
     if not ticket or not human:
         raise DomainError("missing")
-    require_human_approver(PrincipalType(human.principal_type))
+    _require_active_human(human, box_id=ticket.box_id)
 
     if kind == DecisionKind.APPROVE and not resolve_policy(
         platform_allows=True,
@@ -479,6 +572,8 @@ def decide(
     rev = c.session.get(ActionRevision, ticket.current_revision_id)
     if not rev or rev.invalidated:
         raise DomainError("no current revision")
+    if rev.ticket_id != ticket.id or rev.box_id != ticket.box_id:
+        raise DomainError("revision scope mismatch")
     if expected_revision_id and expected_revision_id != rev.id:
         raise DomainError("stale revision")
 
@@ -487,6 +582,9 @@ def decide(
         select(Operation).where(Operation.action_revision_id == rev.id)
     )
     if kind == DecisionKind.APPROVE and existing_op is not None:
+        _require_operation_scope(existing_op, rev, ticket)
+        if existing_op.status == OperationStatus.PENDING.value:
+            _dispatch_operation(c, existing_op)
         return {"decision": "already_approved", "operation_id": existing_op.id}
     if kind == DecisionKind.APPROVE and ticket.state in {
         TicketState.APPROVED.value,
@@ -581,30 +679,37 @@ def decide(
     )
     c.session.commit()
 
-    if settings.sync_worker:
-        execute_operation(c, op.id)
-        c.session.refresh(op)
-    else:
-        from cosmas_os.worker.tasks import execute_operation_task
-
-        execute_operation_task.delay(op.id)
+    _dispatch_operation(c, op)
 
     return {"decision": "approved", "operation_id": op.id}
+
+
+def _dispatch_operation(c: Container, operation: Operation) -> None:
+    """Dispatch one durable pending operation without creating a replacement."""
+
+    if settings.sync_worker:
+        execute_operation(c, operation.id)
+        c.session.refresh(operation)
+        return
+
+    from cosmas_os.worker.tasks import execute_operation_task
+
+    execute_operation_task.delay(operation.id)
 
 
 def execute_operation(c: Container, operation_id: str) -> Operation:
     op = c.session.get(Operation, operation_id)
     if not op:
         raise DomainError("operation missing")
+
+    rev = c.session.get(ActionRevision, op.action_revision_id)
+    ticket = c.session.get(Ticket, op.ticket_id)
+    rev, ticket = _require_operation_scope(op, rev, ticket)
+
     if op.status in {OperationStatus.SUCCEEDED.value}:
         return op
     if op.status == OperationStatus.UNKNOWN.value:
         return reconcile_unknown(c, operation_id)
-
-    rev = c.session.get(ActionRevision, op.action_revision_id)
-    ticket = c.session.get(Ticket, op.ticket_id)
-    if not rev or not ticket:
-        raise DomainError("missing revision/ticket")
 
     op.status = OperationStatus.RUNNING.value
     op.attempt_count += 1
@@ -677,6 +782,7 @@ def reconcile_unknown(c: Container, operation_id: str) -> Operation:
     prior = c.notify.sent.get(op.id)
     ticket = c.session.get(Ticket, op.ticket_id)
     rev = c.session.get(ActionRevision, op.action_revision_id)
+    rev, ticket = _require_operation_scope(op, rev, ticket)
     if prior and prior.status == "succeeded" and ticket and rev:
         op.status = OperationStatus.SUCCEEDED.value
         op.external_reference = prior.external_reference
@@ -708,8 +814,12 @@ def simulate_upload_and_verify(
 ) -> dict[str, Any]:
     ticket = c.session.get(Ticket, ticket_id)
     human = c.session.get(Principal, human_id)
-    if not ticket or not human or human.principal_type != PrincipalType.HUMAN.value:
-        raise AuthorizationError("human verification required")
+    if not ticket:
+        raise DomainError("ticket missing")
+    _require_active_human(human, box_id=ticket.box_id)
+    appt = c.session.get(AppointmentObservation, ticket.appointment_id) if ticket.appointment_id else None
+    if appt and appt.box_id != ticket.box_id:
+        raise DomainError("appointment scope mismatch")
     arts = []
     for side, data in (("front", front_bytes), ("back", back_bytes)):
         art = Artifact(
@@ -727,7 +837,6 @@ def simulate_upload_and_verify(
         art.blob_key = key
         arts.append(art.id)
 
-    appt = c.session.get(AppointmentObservation, ticket.appointment_id) if ticket.appointment_id else None
     if appt:
         appt.coverage_status = CoverageStatus.IMAGE_ON_FILE.value
     ticket.state = TicketState.CONFIRMED.value
@@ -749,7 +858,7 @@ def close_ticket(c: Container, ticket_id: str, human_id: str) -> Ticket:
     human = c.session.get(Principal, human_id)
     if not ticket or not human:
         raise DomainError("missing")
-    require_human_approver(PrincipalType(human.principal_type))
+    _require_active_human(human, box_id=ticket.box_id)
     current = TicketState(ticket.state)
     if current not in {TicketState.CONFIRMED, TicketState.REJECTED, TicketState.ESCALATED, TicketState.FAILED}:
         # allow close from confirmed primarily
@@ -771,9 +880,19 @@ def close_ticket(c: Container, ticket_id: str, human_id: str) -> Ticket:
     return ticket
 
 
-def purge_due_artifacts(c: Container, box_id: str, *, retain_days: int = 7) -> list[dict[str, Any]]:
+def purge_due_artifacts(
+    c: Container,
+    box_id: str,
+    actor_id: str,
+    *,
+    retain_days: int = 7,
+) -> list[dict[str, Any]]:
     from datetime import timedelta
 
+    actor = c.session.scalar(
+        select(Principal).where(Principal.id == actor_id).with_for_update()
+    )
+    _require_active_human(actor, box_id=box_id, owner_required=True)
     now = c.clock.now()
     tickets = c.session.scalars(
         select(Ticket).where(
@@ -790,6 +909,7 @@ def purge_due_artifacts(c: Container, box_id: str, *, retain_days: int = 7) -> l
         arts = c.session.scalars(
             select(Artifact).where(
                 Artifact.ticket_id == ticket.id,
+                Artifact.box_id == box_id,
                 Artifact.purged_at.is_(None),
             )
         ).all()
@@ -812,8 +932,12 @@ def purge_due_artifacts(c: Container, box_id: str, *, retain_days: int = 7) -> l
                 aggregate_type="artifact",
                 aggregate_id=art.id,
                 event_type="artifact.purged",
+                actor=actor_id,
                 outcome="purged",
-                detail={"retention_rule": receipt["retention_rule"]},
+                detail={
+                    "retention_rule": receipt["retention_rule"],
+                    "owner_authorized": True,
+                },
             )
     c.session.commit()
     return receipts
@@ -826,6 +950,8 @@ def list_queue(c: Container, box_id: str) -> list[dict[str, Any]]:
     out = []
     for t in tickets:
         rev = c.session.get(ActionRevision, t.current_revision_id) if t.current_revision_id else None
+        if rev and (rev.ticket_id != t.id or rev.box_id != box_id):
+            raise DomainError("revision scope mismatch")
         out.append(
             {
                 "id": t.id,
@@ -840,12 +966,26 @@ def list_queue(c: Container, box_id: str) -> list[dict[str, Any]]:
 
 
 def audit_timeline(c: Container, box_id: str, ticket_id: str) -> list[dict[str, Any]]:
+    ticket = c.session.get(Ticket, ticket_id)
+    if not ticket:
+        raise DomainError("ticket missing")
+    if ticket.box_id != box_id:
+        raise AuthorizationError("ticket is outside the Box")
     events = c.session.scalars(
         select(AuditEvent)
         .where(AuditEvent.box_id == box_id, AuditEvent.aggregate_id == ticket_id)
         .order_by(AuditEvent.created_at.asc())
     ).all()
-    ops = c.session.scalars(select(Operation).where(Operation.ticket_id == ticket_id)).all()
+    ops = c.session.scalars(
+        select(Operation)
+        .join(ActionRevision, Operation.action_revision_id == ActionRevision.id)
+        .where(
+            Operation.ticket_id == ticket_id,
+            Operation.box_id == box_id,
+            ActionRevision.ticket_id == ticket_id,
+            ActionRevision.box_id == box_id,
+        )
+    ).all()
     op_ids = {o.id for o in ops}
     more = c.session.scalars(
         select(AuditEvent)

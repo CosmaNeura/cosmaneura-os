@@ -97,7 +97,7 @@ jobs:
         with:
           node-version: ${{ env.NODE_VERSION }}
       - name: Enable pnpm
-        run: corepack enable && corepack prepare pnpm@9.15.9 --activate
+        run: corepack enable
       - name: Install
         working-directory: web
         run: pnpm install --frozen-lockfile
@@ -107,6 +107,13 @@ jobs:
       - name: Build
         working-directory: web
         run: pnpm build
+      - name: Build fail-closed beta artifact with public synthetic configuration
+        working-directory: web
+        env:
+          VITE_COSMAS_ENV: early_adopter_beta
+          VITE_CLERK_PUBLISHABLE_KEY: pk_live_synthetic_public_ci_value
+          VITE_API_BASE: https://api.example.invalid
+        run: pnpm run build:beta
 
   container-image:
     name: release-image-manifest
@@ -131,9 +138,20 @@ jobs:
       - name: Build image (no push)
         run: |
           set -euo pipefail
+          docker buildx version
           IMAGE_TAG="cosmas-os:ci-${GITHUB_SHA}"
-          docker build -t "$IMAGE_TAG" .
+          WEB_IMAGE_TAG="cosmas-os-web:ci-${GITHUB_SHA}"
+          docker buildx build --load --platform linux/amd64 -t "$IMAGE_TAG" .
+          docker buildx build --load \
+            --platform linux/amd64 \
+            --tag "$WEB_IMAGE_TAG" \
+            --file Dockerfile.web \
+            --build-arg VITE_COSMAS_ENV=early_adopter_beta \
+            --build-arg VITE_CLERK_PUBLISHABLE_KEY=pk_live_synthetic_public_ci_value \
+            --build-arg VITE_API_BASE=https://api.example.invalid \
+            .
           DIGEST="$(docker image inspect --format='{{.Id}}' "$IMAGE_TAG")"
+          WEB_DIGEST="$(docker image inspect --format='{{.Id}}' "$WEB_IMAGE_TAG")"
           mkdir -p artifacts/releases
           cat > artifacts/releases/manifest.json <<EOF
           {
@@ -144,6 +162,8 @@ jobs:
             "git_ref": "${GITHUB_REF}",
             "image_tag": "${IMAGE_TAG}",
             "image_id": "${DIGEST}",
+            "web_image_tag": "${WEB_IMAGE_TAG}",
+            "web_image_id": "${WEB_DIGEST}",
             "built_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "deployed": false,
             "pushed": false,
@@ -152,6 +172,7 @@ jobs:
           }
           EOF
           echo "IMAGE_TAG=$IMAGE_TAG" >> "$GITHUB_ENV"
+          echo "WEB_IMAGE_TAG=$WEB_IMAGE_TAG" >> "$GITHUB_ENV"
       - name: Smoke migrate from image
         run: |
           set -euo pipefail
@@ -160,18 +181,73 @@ jobs:
             -e COSMAS_ENV=synth_os \
             "$IMAGE_TAG" \
             alembic upgrade head
+      - name: Confirm non-root runtime
+        run: test "$(docker run --rm --entrypoint id "$IMAGE_TAG" -u)" = "10001"
+      - name: Confirm static web image
+        run: |
+          test "$(docker run --rm --entrypoint id "$WEB_IMAGE_TAG" -u)" != "0"
+          docker run --rm --entrypoint nginx "$WEB_IMAGE_TAG" -t
+      - name: Reject fixable high or critical image vulnerabilities
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/releases artifacts/trivy-cache
+          docker save --output artifacts/releases/api-image.tar "$IMAGE_TAG"
+          docker save --output artifacts/releases/web-image.tar "$WEB_IMAGE_TAG"
+          TRIVY_IMAGE="aquasec/trivy@sha256:ee940acbf1f58ebadb42d01434ce4609530bf1b52536afbd1eee66cd7123c5c9"
+          docker run --rm \
+            --volume "$PWD/artifacts/releases:/scan:ro" \
+            --volume "$PWD/artifacts/trivy-cache:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image \
+            --input /scan/api-image.tar \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --no-progress
+          docker run --rm \
+            --volume "$PWD/artifacts/releases:/scan:ro" \
+            --volume "$PWD/artifacts/trivy-cache:/root/.cache/trivy" \
+            "$TRIVY_IMAGE" image \
+            --input /scan/web-image.tar \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --no-progress
+          rm -f artifacts/releases/api-image.tar artifacts/releases/web-image.tar
       - name: Upload release manifest
         uses: actions/upload-artifact@v4
         with:
           name: release-manifest
           path: artifacts/releases/manifest.json
 
+  beta-infra-static:
+    name: beta-infra-static
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.12.5
+      - name: Format
+        run: tofu fmt -check -recursive infra/beta
+      - name: Validate bootstrap without backend
+        working-directory: infra/beta/bootstrap
+        run: tofu init -backend=false -input=false && tofu validate -no-color && tofu test -no-color
+      - name: Validate environment without backend
+        working-directory: infra/beta/environment
+        run: tofu init -backend=false -input=false && tofu validate -no-color && tofu test -no-color
+      - name: Deployment guard shell tests
+        run: |
+          bash -n infra/beta/*.sh infra/beta/tests/*.sh
+          bash infra/beta/tests/deployment-guards.sh
+
   synth-gate:
     name: synth-ci-gate
     runs-on: ubuntu-latest
-    needs: [python-quality, python-tests, web, container-image]
+    needs: [python-quality, python-tests, web, container-image, beta-infra-static]
     steps:
       - name: Confirm all synth gates passed
         run: |
-          echo "python-quality, python-tests, web, container-image all green"
+          echo "python-quality, python-tests, web, container-image, beta-infra-static all green"
           echo "No production secrets used. No deploy performed."

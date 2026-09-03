@@ -10,7 +10,8 @@ No IaC created in Phase 0. Exact SaaS price/tiers remain open.
 | D0 Local synth | `APPROVE LOCAL SYNTH BUILD` | Compose, fake adapters, zero cloud |
 | D1 Synthetic CI | Separate CI enablement | Pinned image digest, ephemeral DB tests, release manifest, no auto-deploy |
 | D2 Optional non-PHI Azure | Separate owner decision | OS-named RG only; synthetic data; human deploy |
-| D3 Isolated early-adopter beta | Separate deployment approval | Dedicated Box, Clerk Org, BAA, human deploy, L0 ports |
+| D3 Isolated early-adopter beta | Separate deployment approval | Dedicated Box, Clerk Org, human deploy, L0 ports; named clinic and BAA apply only to `authorized_beta` |
+| D3M Native mobile closed beta | After D3 browser gate | Capacitor shell; iOS TestFlight and Android closed testing; same synthetic boundary |
 | D4 One-clinic L0 pilot | After D3 gate | Measure readiness KPIs; no EHR write required |
 | D5 Connector rungs | Per-adapter gates | Schedule/Record/Notify climb independently |
 | D6 Track A integration | After Track A IAM gate | Versioned HTTPS/OpenAPI or MCP; no shared DB/SP |

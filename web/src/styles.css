@@ -64,6 +64,12 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
   gap: 0.6rem;
   align-items: center;
 }
+.app-header {
+  justify-content: space-between;
+}
+.account-controls {
+  margin-left: auto;
+}
 .meta {
   color: var(--muted);
   font-size: 0.92rem;
@@ -93,4 +99,55 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .timeline li {
   padding: 0.35rem 0;
   border-bottom: 1px solid var(--line);
+}
+.identity-admin-heading {
+  justify-content: space-between;
+}
+.identity-admin-heading h2 {
+  margin: 0 0 0.25rem;
+}
+.identity-admin-heading p {
+  margin: 0;
+}
+.identity-form {
+  display: grid;
+  gap: 0.75rem;
+  margin: 1rem 0;
+}
+.identity-form label {
+  display: grid;
+  gap: 0.3rem;
+}
+.identity-form input {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: 0.35rem;
+  padding: 0.55rem 0.65rem;
+}
+.identity-roster {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+}
+.identity-member {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.85rem 0;
+  border-bottom: 1px solid var(--line);
+}
+.identity-subject {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.notice {
+  color: var(--accent);
+}
+.retention-admin {
+  border-top: 1px solid var(--line);
+  margin-top: 1rem;
+  padding-top: 1rem;
+}
+.retention-admin h3 {
+  margin: 0 0 0.35rem;
 }

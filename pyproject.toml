@@ -17,6 +17,9 @@ dependencies = [
     "typer>=0.14.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.12",
+    "pyjwt[crypto]>=2.10.1",
+    "azure-identity>=1.24.0",
+    "azure-storage-blob>=12.26.0",
 ]
 
 [project.optional-dependencies]

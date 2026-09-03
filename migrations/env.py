@@ -7,18 +7,19 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
+from cosmas_os import models  # noqa: F401
 from cosmas_os.config import settings
 from cosmas_os.db import Base
-from cosmas_os import models  # noqa: F401
 
 config = context.config
-if config.config_file_name is not None:
+if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
 target_metadata = Base.metadata
 # Alembic stores this value in a ConfigParser, where percent-encoded URL
 # credentials must escape "%" to avoid interpolation errors.
-config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
+if config.attributes.get("connection") is None:
+    config.set_main_option("sqlalchemy.url", settings.database_url.replace("%", "%%"))
 
 
 def run_migrations_offline() -> None:
@@ -34,6 +35,13 @@ def run_migrations_offline() -> None:
 
 
 def run_migrations_online() -> None:
+    supplied_connection = config.attributes.get("connection")
+    if supplied_connection is not None:
+        context.configure(connection=supplied_connection, target_metadata=target_metadata)
+        with context.begin_transaction():
+            context.run_migrations()
+        return
+
     connectable = engine_from_config(
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",

@@ -1,77 +1,190 @@
-import { useEffect, useState, useTransition } from "react";
-import { api, type QueueItem, type Seed } from "./api";
+import { OrganizationSwitcher, SignIn, UserButton, useAuth } from "@clerk/react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
+import { BetaIdentityAdmin } from "./BetaIdentityAdmin";
+import { api, type ApiIdentity, type QueueItem, type Seed } from "./api";
 
-export function App() {
-  const [seed, setSeed] = useState<Seed | null>(null);
+export type AppRuntimeMode = "synth_os" | "early_adopter_beta" | "unconfigured";
+
+export function resolveRuntimeMode(
+  configuredMode: string | undefined,
+  isDevelopment: boolean,
+): AppRuntimeMode {
+  if (configuredMode === "synth_os" || configuredMode === "early_adopter_beta") {
+    return configuredMode;
+  }
+  return configuredMode === undefined && isDevelopment ? "synth_os" : "unconfigured";
+}
+
+const runtimeMode = resolveRuntimeMode(import.meta.env.VITE_COSMAS_ENV, import.meta.env.DEV);
+
+type StatusScreenProps = {
+  title: string;
+  detail: string;
+  role?: "alert" | "status";
+  children?: ReactNode;
+};
+
+export function StatusScreen({ title, detail, role = "alert", children }: StatusScreenProps) {
+  return (
+    <main className="shell">
+      <h1 className="brand">Cosmas OS</h1>
+      <section className="panel" role={role}>
+        <h2>{title}</h2>
+        <p>{detail}</p>
+        {children}
+      </section>
+    </main>
+  );
+}
+
+export function BlockedRuntime({ mode }: { mode: Exclude<AppRuntimeMode, "synth_os"> }) {
+  return (
+    <StatusScreen
+      title={
+        mode === "early_adopter_beta"
+          ? "Beta login is not configured"
+          : "App mode is not configured"
+      }
+      detail="This build is intentionally offline. It will not contact the API until the approved beta identity provider and runtime configuration are installed."
+    />
+  );
+}
+
+function synthIdentity(seed: Seed): ApiIdentity {
+  return { mode: "synth_os", boxId: seed.box_id, actorId: seed.owner_id };
+}
+
+type QueueSession = {
+  identity: ApiIdentity;
+  items: QueueItem[];
+};
+
+type OwnerQueueProps = {
+  bootstrap: () => Promise<QueueSession>;
+  clinicName: string;
+  lede: string;
+  headerActions?: ReactNode;
+  afterQueue?: (identity: ApiIdentity) => ReactNode;
+};
+
+function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: OwnerQueueProps) {
+  const [identity, setIdentity] = useState<ApiIdentity | null>(null);
   const [items, setItems] = useState<QueueItem[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [pending, setPending] = useState(false);
   const [editText, setEditText] = useState<Record<string, string>>({});
-  const [timeline, setTimeline] = useState<Record<string, Array<{ event_type: string; outcome: string | null }>>>({});
-  const [pending, startTransition] = useTransition();
+  const [timeline, setTimeline] = useState<
+    Record<string, Array<{ event_type: string; outcome: string | null }>>
+  >({});
+  const startup = useRef<ReturnType<OwnerQueueProps["bootstrap"]> | null>(null);
 
-  async function refresh(s: Seed) {
-    const q = await api.queue(s.box_id);
-    setItems(q);
+  async function refresh(currentIdentity: ApiIdentity) {
+    const queue = await api.queue(currentIdentity);
+    setItems(queue);
   }
 
   useEffect(() => {
-    startTransition(async () => {
-      try {
-        const s = await api.seed();
-        setSeed(s);
-        await refresh(s);
-      } catch (e) {
-        setError(e instanceof Error ? e.message : "Failed to load");
-      }
-    });
+    // React StrictMode replays effects in development. Reuse the same request so
+    // one page load does not seed twice or issue duplicate beta API requests.
+    startup.current ??= bootstrap();
+    let active = true;
+    void startup.current
+      .then(({ identity: loadedIdentity, items: loadedItems }) => {
+        if (!active) return;
+        setIdentity(loadedIdentity);
+        setItems(loadedItems);
+      })
+      .catch((cause: unknown) => {
+        if (!active) return;
+        setError(cause instanceof Error ? cause.message : "Failed to load");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
+    // The organization wrapper is keyed by active Org, so each mounted queue
+    // intentionally consumes exactly one bootstrap function.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  async function act(item: QueueItem, kind: string) {
-    if (!seed) return;
+  async function act(
+    item: QueueItem,
+    kind: "approve" | "edit" | "reject" | "escalate" | "close",
+  ) {
+    if (!identity || pending) return;
     setError(null);
+    setPending(true);
     try {
       if (kind === "edit") {
         const body = editText[item.id] ?? item.proposed_message ?? "";
-        await api.edit(seed.box_id, seed.owner_id, item.id, body);
+        await api.edit(identity, item.id, body);
       } else if (kind === "close") {
-        await api.close(seed.box_id, seed.owner_id, item.id);
+        await api.close(identity, item.id);
       } else {
-        await api.decide(seed.box_id, seed.owner_id, item.id, kind);
+        if (!item.revision_id) throw new Error("Current action revision is unavailable");
+        await api.decide(identity, item.id, kind, item.revision_id);
       }
-      await refresh(seed);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Action failed");
+      await refresh(identity);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Action failed");
+    } finally {
+      setPending(false);
     }
   }
 
   async function showTimeline(item: QueueItem) {
-    if (!seed) return;
-    const t = await api.timeline(seed.box_id, item.id);
-    setTimeline((prev) => ({ ...prev, [item.id]: t }));
+    if (!identity || pending) return;
+    setError(null);
+    setPending(true);
+    try {
+      const events = await api.timeline(identity, item.id);
+      setTimeline((previous) => ({ ...previous, [item.id]: events }));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Failed to load history");
+    } finally {
+      setPending(false);
+    }
   }
 
   return (
     <main className="shell">
-      <h1 className="brand">Cosmas OS</h1>
-      <p className="lede">
-        Practice work queue for synthetic Insurance ArtifactChase. Review the proposed
-        message, then approve, edit, reject, or escalate.
-      </p>
+      <div className="row app-header">
+        <h1 className="brand">Cosmas OS</h1>
+        {headerActions}
+      </div>
+      <p className="lede">{lede}</p>
 
       <section className="panel">
         <div className="row">
           <strong>Clinic</strong>
-          <span className="meta">{seed ? "Northside Synth Clinic" : pending ? "Loading…" : "Unavailable"}</span>
+          <span className="meta">{loading ? "Loading…" : identity ? clinicName : "Unavailable"}</span>
         </div>
-        <p className="meta">People and agents are ready. Infrastructure details stay off this screen.</p>
+        <p className="meta">
+          People and agents are ready. Infrastructure details stay off this screen.
+        </p>
       </section>
 
-      {error ? <p className="error">{error}</p> : null}
+      {error ? (
+        <p className="error" role="alert">
+          {error}
+        </p>
+      ) : null}
 
-      {items.length === 0 ? (
+      {loading ? (
+        <section className="panel" role="status">
+          Loading work…
+        </section>
+      ) : !error && items.length === 0 ? (
         <section className="panel">
-          <p>No open work. Run the demo seed CLI to create a chase, then refresh.</p>
-          <button type="button" onClick={() => seed && refresh(seed)}>
+          <p>No open work. Refresh to check the queue again.</p>
+          <button
+            type="button"
+            disabled={pending || !identity}
+            onClick={() => identity && refresh(identity)}
+          >
             Refresh
           </button>
         </section>
@@ -90,41 +203,55 @@ export function App() {
                   rows={3}
                   style={{ width: "100%" }}
                   value={editText[item.id] ?? item.proposed_message ?? ""}
-                  onChange={(e) => setEditText((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                  onChange={(event) =>
+                    setEditText((previous) => ({ ...previous, [item.id]: event.target.value }))
+                  }
                 />
                 <div className="row" style={{ marginTop: "0.75rem" }}>
-                  <button className="primary" type="button" onClick={() => act(item, "approve")}>
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={pending}
+                    onClick={() => act(item, "approve")}
+                  >
                     Approve
                   </button>
-                  <button type="button" onClick={() => act(item, "edit")}>
+                  <button type="button" disabled={pending} onClick={() => act(item, "edit")}>
                     Save edit
                   </button>
-                  <button type="button" onClick={() => act(item, "reject")}>
+                  <button type="button" disabled={pending} onClick={() => act(item, "reject")}>
                     Reject
                   </button>
-                  <button type="button" onClick={() => act(item, "escalate")}>
+                  <button type="button" disabled={pending} onClick={() => act(item, "escalate")}>
                     Escalate
                   </button>
                 </div>
               </>
             ) : (
               <div className="row">
-                {item.state === "confirmed" || item.state === "sent" ? (
-                  <button className="primary" type="button" onClick={() => act(item, "close")}>
+                {["confirmed", "sent", "rejected", "escalated", "failed"].includes(
+                  item.state,
+                ) ? (
+                  <button
+                    className="primary"
+                    type="button"
+                    disabled={pending}
+                    onClick={() => act(item, "close")}
+                  >
                     Close
                   </button>
                 ) : null}
-                <button type="button" onClick={() => showTimeline(item)}>
+                <button type="button" disabled={pending} onClick={() => showTimeline(item)}>
                   Show history
                 </button>
               </div>
             )}
             {timeline[item.id] ? (
               <ul className="timeline">
-                {timeline[item.id].map((ev, idx) => (
-                  <li key={`${ev.event_type}-${idx}`}>
-                    <strong>{ev.event_type}</strong>
-                    {ev.outcome ? ` — ${ev.outcome}` : ""}
+                {timeline[item.id].map((event, index) => (
+                  <li key={`${event.event_type}-${index}`}>
+                    <strong>{event.event_type}</strong>
+                    {event.outcome ? ` — ${event.outcome}` : ""}
                   </li>
                 ))}
               </ul>
@@ -132,6 +259,111 @@ export function App() {
           </article>
         ))
       )}
+      {!loading && identity ? afterQueue?.(identity) : null}
     </main>
   );
+}
+
+async function loadSyntheticQueue(): Promise<QueueSession> {
+  const seed = await api.seedDemoQueue();
+  const identity = synthIdentity(seed);
+  return { identity, items: await api.queue(identity) };
+}
+
+function SyntheticQueue() {
+  return (
+    <OwnerQueue
+      bootstrap={loadSyntheticQueue}
+      clinicName="Northside Synth Clinic"
+      lede="Practice work queue for synthetic Insurance ArtifactChase. Review the proposed message, then approve, edit, reject, or escalate."
+    />
+  );
+}
+
+export function isValidClerkOrganizationId(value: string | null | undefined): value is string {
+  return typeof value === "string" && value.length <= 255 && /^org_[A-Za-z0-9]+$/.test(value);
+}
+
+type BetaTokenGetter = Extract<ApiIdentity, { mode: "early_adopter_beta" }>["getToken"];
+
+function BetaOrganizationQueue({ getToken }: { getToken: BetaTokenGetter }) {
+  async function loadBetaQueue(): Promise<QueueSession> {
+    const identity: ApiIdentity = { mode: "early_adopter_beta", getToken };
+    return { identity, items: await api.queue(identity) };
+  }
+
+  return (
+    <OwnerQueue
+      bootstrap={loadBetaQueue}
+      clinicName="Cosmas Beta Lab"
+      lede="Synthetic-only beta work queue. Use invented data only—never clinic or patient information. Review the proposed message, then approve, edit, reject, or escalate."
+      headerActions={
+        <div className="row account-controls" aria-label="Account and organization">
+          <OrganizationSwitcher hidePersonal />
+          <UserButton />
+        </div>
+      }
+      afterQueue={(identity) =>
+        identity.mode === "early_adopter_beta" ? (
+          <BetaIdentityAdmin identity={identity} />
+        ) : null
+      }
+    />
+  );
+}
+
+export function ClerkBetaApp() {
+  const auth = useAuth();
+
+  if (!auth.isLoaded) {
+    return (
+      <StatusScreen
+        title="Checking your session"
+        detail="Cosmas is waiting for the login service before loading any work."
+        role="status"
+      />
+    );
+  }
+
+  if (auth.isSignedIn !== true) {
+    return (
+      <main className="shell">
+        <h1 className="brand">Cosmas OS</h1>
+        <p className="lede">Sign in with your invited Cosmas Beta Lab account.</p>
+        <SignIn routing="hash" />
+      </main>
+    );
+  }
+
+  if (!isValidClerkOrganizationId(auth.orgId)) {
+    return (
+      <StatusScreen
+        title="Choose an organization"
+        detail="An active Cosmas Organization is required before any work can be loaded."
+      >
+        <OrganizationSwitcher hidePersonal />
+      </StatusScreen>
+    );
+  }
+
+  if (typeof auth.getToken !== "function") {
+    return (
+      <StatusScreen
+        title="Secure session unavailable"
+        detail="Sign out and sign in again. No work has been loaded."
+      />
+    );
+  }
+
+  return (
+    <BetaOrganizationQueue
+      key={`${auth.sessionId}:${auth.orgId}`}
+      getToken={auth.getToken}
+    />
+  );
+}
+
+export function App({ runtimeMode: selectedMode = runtimeMode }: { runtimeMode?: AppRuntimeMode }) {
+  if (selectedMode !== "synth_os") return <BlockedRuntime mode={selectedMode} />;
+  return <SyntheticQueue />;
 }

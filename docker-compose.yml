@@ -71,6 +71,7 @@ services:
     command: sh -c "corepack enable && pnpm install && pnpm dev --host 0.0.0.0 --port 5173"
     environment:
       VITE_API_BASE: http://localhost:8000
+      VITE_COSMAS_ENV: synth_os
     ports:
       - "5173:5173"
     volumes:

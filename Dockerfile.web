@@ -1,0 +1,30 @@
+FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c AS build
+
+WORKDIR /build/web
+COPY web/package.json web/pnpm-lock.yaml ./
+RUN corepack enable \
+    && pnpm config set store-dir /pnpm/store \
+    && pnpm fetch --frozen-lockfile --ignore-scripts
+
+RUN --network=none pnpm install --frozen-lockfile --offline
+
+COPY web/ ./
+
+# These are public client configuration, not credentials. The beta build
+# validator requires a production Clerk publishable key and exact HTTPS API
+# origin, and it intentionally refuses a partially configured artifact.
+ARG VITE_COSMAS_ENV
+ARG VITE_CLERK_PUBLISHABLE_KEY
+ARG VITE_API_BASE
+ENV VITE_COSMAS_ENV=${VITE_COSMAS_ENV} \
+    VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY} \
+    VITE_API_BASE=${VITE_API_BASE}
+RUN --network=none pnpm run build:beta
+
+FROM nginxinc/nginx-unprivileged:stable-alpine@sha256:ee1643aef6b99d1058aa79b74679ba3e63094a98a1144a4326def7bae77d293b
+
+COPY web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /build/web/dist /usr/share/nginx/html
+
+USER 101:101
+EXPOSE 8080

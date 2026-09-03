@@ -8,6 +8,7 @@ from pathlib import Path
 
 from cosmas_os.ports import (
     AuthSubject,
+    BlobRepresentationAbsence,
     NotifyReceipt,
     NotifyRequest,
     ScheduleAppointment,
@@ -49,7 +50,9 @@ class CsvScheduleAdapter:
 class FakeNotifyAdapter:
     """Deterministic in-memory notify sink. Idempotent by operation_id."""
 
-    def __init__(self, *, fail_once_ops: set[str] | None = None, unknown_ops: set[str] | None = None) -> None:
+    def __init__(
+        self, *, fail_once_ops: set[str] | None = None, unknown_ops: set[str] | None = None
+    ) -> None:
         self.sent: dict[str, NotifyReceipt] = {}
         self.attempts: dict[str, int] = {}
         self.fail_once_ops = fail_once_ops or set()
@@ -100,6 +103,17 @@ class LocalBlobAdapter:
         meta = path.with_suffix(path.suffix + ".meta")
         if meta.exists():
             meta.unlink()
+
+    def probe_recoverable_absence(self, key: str) -> BlobRepresentationAbsence:
+        path = self.root / key
+        meta = path.with_suffix(path.suffix + ".meta")
+        absent = not path.exists() and not meta.exists()
+        return BlobRepresentationAbsence(
+            current_absent=absent,
+            versions_absent=absent,
+            snapshots_absent=absent,
+            deleted_absent=absent,
+        )
 
     def issue_upload_token(self, artifact_id: str) -> str:
         token = secrets.token_urlsafe(24)

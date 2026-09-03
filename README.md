@@ -1,9 +1,9 @@
 # Cosmas OS (Track B)
 
-Local synthetic practice computer. This repository is **synth-only**: invented
-people, appointments, and insurance images. No PHI, production credentials, or
-live Athena/Acuity/Clerk/messaging. Its Azure footprint is a non-PHI D2 synth
-environment only.
+Cosmas OS Track B: a locally runnable synthetic practice computer plus the
+fail-closed source and infrastructure preparation for an isolated D3
+early-adopter beta. Repository fixtures remain invented. No PHI, production
+credentials, or live Athena/Acuity/Clerk/messaging belong in this tree.
 
 ## One-command local start
 
@@ -20,7 +20,10 @@ In another terminal:
 cd web && pnpm install && pnpm dev
 ```
 
-Open http://localhost:5173 for the owner work queue.
+Open http://localhost:5173 for the local synthetic owner work queue. It creates
+one invented pending chase automatically so the approve/edit/reject/escalate,
+close, and history flow can be tested in the browser. The synth path does not
+load Clerk and continues to use only the local synthetic identity headers.
 
 ## Demo (full ArtifactChase L0)
 
@@ -45,6 +48,16 @@ uv run ruff check src tests
 uv run pyright src
 cd web && pnpm test && pnpm build
 ```
+
+For the complete local D3 source check (application tests, mode tests and
+validation for both isolated OpenTofu roots, and a non-root runtime image):
+
+```bash
+./scripts/d3-self-test.sh
+```
+
+This command does not authenticate to Azure or Clerk, deploy anything, or use
+PHI.
 
 ## Synthetic CI / release artifact (D1)
 
@@ -81,6 +94,57 @@ CORS, and retains the D2 public PostgreSQL `AllowAzureServices` rule. Blob
 bytes use ephemeral per-replica `/tmp/cosmas-os-blobs`; the provisioned Azure
 Blob container is not yet consumed.
 
+## D3 isolated beta candidate (source-prepared, not deployed)
+
+The owner authorized D3 planning and implementation in `DL-20260903-03`;
+`DL-20260903-04` selected the strictly non-PHI Cosmas Beta Lab as the first
+slice.
+The repository now contains:
+
+- a Clerk JWT verification boundary with exact issuer, audience, authorized
+  party, Organization, and reviewed server-side subject-to-Box binding;
+- a conditional Clerk React login boundary that requires an explicit HTTPS API
+  URL, a Clerk publishable key, a signed-in session, and an active Organization
+  before loading beta work;
+- a managed-identity Azure Blob adapter with Box-prefixed object keys;
+- additive migration `0002_external_identities`, a protected first-owner
+  bootstrap, and authenticated owner-only identity lifecycle APIs;
+- a separate manual, unscheduled, digest-pinned in-network database job that
+  applies the sole expected Alembic head and proves the runtime role cannot
+  perform DDL or mutate audit history;
+- strict beta startup validation, exact CORS origins, current-schema
+  readiness, non-root containers, and synthetic-only beta seeding;
+- separate `infra/beta/bootstrap` and `infra/beta/environment` roots with no
+  D2 or Track A state/resource sharing;
+- protected procedures for workflow and physical-purge acceptance, alert
+  delivery, isolated point-in-time restore, exact-digest rollback/forward
+  recovery, tester offboarding, and staged custom-domain binding; and
+- prerequisite, capability-manifest, human-deploy, recovery, and cost gates.
+
+This is deliberately **not an Azure deployment**. The approved synthetic-lab
+path still needs its dedicated Box, production Cosmas OS Clerk instance and
+Organization, approved HTTPS origin, final region/cost choices, deployed
+private human-runner path, and human deployment evidence. The separate
+development Clerk application and zero-member development Beta Lab Organization
+are configured but provide no production authority. A named clinic, clinic
+approval, BAA evidence, and PHI-authorization reference are not prerequisites
+for this strictly synthetic path; common service, region, network, and
+deployment evidence remains required. Those clinic/PHI-specific prerequisites
+remain mandatory for any clinic or PHI-capable beta. Startup and workload
+deployment fail closed when the evidence for the selected mode is incomplete.
+PHI remains unauthorized; all external connectors remain dark.
+See [`docs/beta/README.md`](docs/beta/README.md) and
+[`infra/beta/README.md`](infra/beta/README.md). The staged database runbook is
+[`docs/beta/DATABASE_PREPARATION.md`](docs/beta/DATABASE_PREPARATION.md).
+
+The beta web build requires `VITE_COSMAS_ENV=early_adopter_beta`, an approved
+HTTPS `VITE_API_BASE`, and `VITE_CLERK_PUBLISHABLE_KEY`. These are build-time
+browser values; only the Clerk **publishable** key belongs there. If any value
+is missing or invalid, the page remains blocked and makes no Clerk or Cosmas API
+request. Once signed in, each Cosmas API request obtains a fresh uncached Clerk
+token for the active Organization and sends it only as a bearer token. Never
+add a Clerk secret key, Box ID, or principal ID to frontend configuration.
+
 ## What the local L0 slice proves
 
 1. Seed one Org Box with owner + Scribe/Chief/Chaser  
@@ -113,7 +177,10 @@ GPT-5.6 SOL is a development agent only — not a product runtime dependency.
 
 Private GitHub: `git@github.com:CosmaNeura/cosmaneura-os.git` (Track B only).
 
-## Not authorized here
+## Still not authorized
 
-D3+, any new Azure mutation beyond the completed D2 residual, D2 destruction,
-Track A edits, Clerk or real-vendor activation, PHI, and an application LLM.
+Any D3 Azure mutation before its recorded human prerequisites, PHI use, D4-D6,
+D2 destruction, Track A edits, Clerk invitations/production activation beyond
+`DL-20260903-05`, other live-vendor activation, and an application LLM. D3
+source preparation and the empty Clerk development structure are authorized;
+those later actions are not implied.

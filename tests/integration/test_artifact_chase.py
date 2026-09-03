@@ -1,13 +1,18 @@
 from __future__ import annotations
 
-import pytest
-from sqlalchemy import select
+from concurrent.futures import ThreadPoolExecutor
+from threading import Event, get_ident
 
+import pytest
+from sqlalchemy import event, func, select, text
+
+from cosmas_os.adapters.local import FakeNotifyAdapter
 from cosmas_os.application import services as svc
 from cosmas_os.application.seed import SYNTH_CSV
+from cosmas_os.db import make_session_factory
 from cosmas_os.domain.enums import CapabilityKey, DecisionKind, OperationStatus, PrincipalType
 from cosmas_os.domain.rules import AuthorizationError, DomainError, PolicyDenied
-from cosmas_os.models import Operation, Principal
+from cosmas_os.models import AuditEvent, Decision, Operation, Principal
 
 
 def test_provision_and_agents(seeded):
@@ -76,6 +81,177 @@ def test_edit_invalidates_and_approve_executes_once(container, seeded):
     assert ops[0].status == OperationStatus.SUCCEEDED.value
 
 
+def test_concurrent_edit_and_approve_serialize_on_current_revision(
+    engine, clock, blob, monkeypatch
+):
+    """An approval waiting on an edit must reject the now-stale revision."""
+
+    from cosmas_os.models import ActionRevision, Ticket
+
+    monkeypatch.setattr("cosmas_os.config.settings.sync_worker", True)
+    session_factory = make_session_factory(engine)
+    setup_session = session_factory()
+    setup = svc.Container(
+        setup_session,
+        clock=clock,
+        blob=blob,
+        notify=FakeNotifyAdapter(),
+    )
+    seeded = svc.provision_box(setup, "Concurrent workflow test")
+    box_id = str(seeded["box_id"])
+    owner_id = str(seeded["owner_id"])
+    agents = seeded["agents"]
+    assert isinstance(agents, dict)
+    appointment_id = svc.import_schedule(setup, box_id, SYNTH_CSV)[0]
+    link = svc.attest_patient_link(
+        setup,
+        box_id,
+        owner_id,
+        "csv:concurrent-jordan-lee",
+        "Jordan Lee",
+    )
+    ticket = svc.detect_and_open_chase(
+        setup,
+        box_id,
+        str(agents["chaser"]),
+        appointment_id,
+        link.id,
+    )
+    ticket_id = ticket.id
+    original_revision_id = ticket.current_revision_id
+    setup_session.close()
+
+    lock_session = session_factory()
+    lock_container = svc.Container(
+        lock_session,
+        clock=clock,
+        blob=blob,
+        notify=FakeNotifyAdapter(),
+    )
+    approval_select_started = Event()
+    approval_thread_id: list[int] = []
+
+    def note_approval_lock_query(
+        _conn, _cursor, statement: str, _parameters, _context, _executemany
+    ) -> None:
+        if (
+            approval_thread_id
+            and get_ident() == approval_thread_id[0]
+            and "FOR UPDATE" in statement.upper()
+        ):
+            approval_select_started.set()
+
+    def approve_original_revision() -> object:
+        approval_thread_id.append(get_ident())
+        approval_session = session_factory()
+        try:
+            approval = svc.Container(
+                approval_session,
+                clock=clock,
+                blob=blob,
+                notify=FakeNotifyAdapter(),
+            )
+            return svc.decide(
+                approval,
+                ticket_id,
+                owner_id,
+                DecisionKind.APPROVE,
+                expected_revision_id=original_revision_id,
+            )
+        except Exception as exc:  # return the competing request's result to the test thread
+            return exc
+        finally:
+            approval_session.close()
+
+    try:
+        # Hold the row before the competing request begins, so the interleaving
+        # is deterministic rather than dependent on thread scheduling.
+        locked = lock_session.scalar(
+            select(Ticket).where(Ticket.id == ticket_id).with_for_update()
+        )
+        assert locked is not None
+        event.listen(engine, "before_cursor_execute", note_approval_lock_query)
+        with ThreadPoolExecutor(max_workers=1) as pool:
+            approval_result = pool.submit(approve_original_revision)
+            assert approval_select_started.wait(timeout=5)
+            revised = svc.edit_revision(
+                lock_container,
+                ticket_id,
+                owner_id,
+                "Concurrent synthetic edit wins the ticket lock.",
+            )
+            result = approval_result.result(timeout=5)
+
+        assert isinstance(result, DomainError)
+        assert str(result) == "stale revision"
+
+        verification_session = session_factory()
+        try:
+            verification = svc.Container(
+                verification_session,
+                clock=clock,
+                blob=blob,
+                notify=FakeNotifyAdapter(),
+            )
+            current_ticket = verification_session.get(Ticket, ticket_id)
+            original_revision = verification_session.get(
+                ActionRevision, original_revision_id
+            )
+            assert current_ticket is not None
+            assert current_ticket.state == "pending_approval"
+            assert current_ticket.current_revision_id == revised.id
+            assert original_revision is not None and original_revision.invalidated is True
+            assert (
+                verification_session.scalar(
+                    select(func.count())
+                    .select_from(Operation)
+                    .where(Operation.ticket_id == ticket_id)
+                )
+                == 0
+            )
+
+            accepted = svc.decide(
+                verification,
+                ticket_id,
+                owner_id,
+                DecisionKind.APPROVE,
+                expected_revision_id=revised.id,
+            )
+            operation = verification_session.get(Operation, accepted["operation_id"])
+            assert operation is not None
+            assert operation.action_revision_id == revised.id
+            assert operation.status == OperationStatus.SUCCEEDED.value
+        finally:
+            verification_session.close()
+    finally:
+        event.remove(engine, "before_cursor_execute", note_approval_lock_query)
+        lock_session.close()
+        # This test uses independent committed sessions to exercise real row
+        # locking, so clean its isolated Box explicitly.
+        with engine.begin() as connection:
+            for table_name in (
+                "decisions",
+                "operations",
+                "artifacts",
+                "audit_events",
+                "action_revisions",
+                "tickets",
+                "appointment_observations",
+                "patient_links",
+                "external_identities",
+                "capability_configs",
+                "principals",
+            ):
+                connection.execute(
+                    text(f"DELETE FROM {table_name} WHERE box_id = :box_id"),
+                    {"box_id": box_id},
+                )
+            connection.execute(
+                text("DELETE FROM box_contexts WHERE id = :box_id"),
+                {"box_id": box_id},
+            )
+
+
 def test_worker_retry_reuses_operation(container, seeded):
     chaser = seeded["agents"]["chaser"]
     appts = svc.import_schedule(container, seeded["box_id"], SYNTH_CSV)
@@ -89,6 +265,63 @@ def test_worker_retry_reuses_operation(container, seeded):
     op = svc.execute_operation(container, op_id)
     assert op.status == OperationStatus.SUCCEEDED.value
     assert container.notify.attempts[op_id] == 1
+
+
+def test_async_publish_failure_can_be_retried_without_stranding_operation(
+    monkeypatch, container, seeded
+):
+    from cosmas_os.config import settings
+    from cosmas_os.worker.tasks import execute_operation_task
+
+    chaser = seeded["agents"]["chaser"]
+    appts = svc.import_schedule(container, seeded["box_id"], SYNTH_CSV)
+    link = svc.attest_patient_link(
+        container, seeded["box_id"], seeded["owner_id"], "csv:jordan-lee", "Jordan Lee"
+    )
+    ticket = svc.detect_and_open_chase(
+        container, seeded["box_id"], chaser, appts[0], link.id
+    )
+    published: list[str] = []
+
+    def publish(operation_id: str) -> None:
+        published.append(operation_id)
+        if len(published) == 1:
+            raise RuntimeError("synthetic broker unavailable")
+
+    monkeypatch.setattr(settings, "sync_worker", False)
+    monkeypatch.setattr(execute_operation_task, "delay", publish)
+
+    with pytest.raises(RuntimeError, match="synthetic broker unavailable"):
+        svc.decide(container, ticket.id, seeded["owner_id"], DecisionKind.APPROVE)
+
+    operation = container.session.scalar(
+        select(Operation).where(Operation.ticket_id == ticket.id)
+    )
+    assert operation is not None
+    assert operation.status == OperationStatus.PENDING.value
+    assert (
+        container.session.scalar(
+            select(func.count()).select_from(Decision).where(Decision.ticket_id == ticket.id)
+        )
+        == 1
+    )
+
+    retry = svc.decide(container, ticket.id, seeded["owner_id"], DecisionKind.APPROVE)
+
+    assert retry == {"decision": "already_approved", "operation_id": operation.id}
+    assert published == [operation.id, operation.id]
+    assert (
+        container.session.scalar(
+            select(func.count()).select_from(Operation).where(Operation.ticket_id == ticket.id)
+        )
+        == 1
+    )
+    assert (
+        container.session.scalar(
+            select(func.count()).select_from(Decision).where(Decision.ticket_id == ticket.id)
+        )
+        == 1
+    )
 
 
 def test_unknown_reconcile_not_blind_retry(container, seeded, notify):
@@ -195,13 +428,48 @@ def test_upload_verify_close_purge(container, seeded):
     closed = svc.close_ticket(container, ticket.id, seeded["owner_id"])
     assert closed.state == "closed"
     container.clock.advance_days(8)
-    receipts = svc.purge_due_artifacts(container, seeded["box_id"])
+    receipts = svc.purge_due_artifacts(container, seeded["box_id"], seeded["owner_id"])
     assert len(receipts) == 2
     assert "artifact_id" in receipts[0]
     assert "patient" not in str(receipts).lower() or "jordan" not in str(receipts).lower()
+    purge_audit = container.session.scalar(
+        select(AuditEvent).where(
+            AuditEvent.aggregate_id == receipts[0]["artifact_id"],
+            AuditEvent.event_type == "artifact.purged",
+        )
+    )
+    assert purge_audit is not None
+    assert purge_audit.actor_principal_id == seeded["owner_id"]
+    assert purge_audit.detail["owner_authorized"] is True
     timeline = svc.audit_timeline(container, seeded["box_id"], ticket.id)
     assert any(e["event_type"] == "decision.approved" for e in timeline)
     assert any(e["event_type"] == "ticket.closed" for e in timeline)
+
+
+def test_non_owner_member_cannot_purge_box_artifacts(container, seeded):
+    member = Principal(
+        box_id=seeded["box_id"],
+        principal_type=PrincipalType.HUMAN.value,
+        display_name="Synth Member",
+        is_owner=False,
+        state="active",
+    )
+    container.session.add(member)
+    container.session.commit()
+
+    with pytest.raises(AuthorizationError, match="owner authority required"):
+        svc.purge_due_artifacts(container, seeded["box_id"], member.id)
+
+
+def test_cross_box_owner_cannot_purge_another_box(container, seeded):
+    other_box = svc.provision_box(container, "Other Synthetic Clinic")
+
+    with pytest.raises(AuthorizationError, match="outside the Box"):
+        svc.purge_due_artifacts(
+            container,
+            seeded["box_id"],
+            other_box["owner_id"],
+        )
 
 
 def test_disabled_chaser_cannot_open(container, seeded):

@@ -5,7 +5,7 @@ from pathlib import Path
 from sqlalchemy.orm import Session
 
 from cosmas_os.application import services as svc
-from cosmas_os.domain.enums import DecisionKind
+from cosmas_os.domain.enums import CoverageStatus, DecisionKind
 
 SYNTH_CSV = """external_id,start_at,patient_label,source
 appt-1001,2026-09-10T15:00:00+00:00,Jordan Lee,csv
@@ -41,6 +41,58 @@ def seed_synth(session: Session) -> dict:
     return svc.provision_box(c, "Northside Synth Clinic")
 
 
+def seed_synth_work_queue(session: Session) -> dict:
+    """Create one reviewable synthetic chase without approving or sending it."""
+
+    from sqlalchemy import select
+
+    from cosmas_os.models import AppointmentObservation, Ticket
+
+    c = svc.Container(session)
+    seeded = seed_synth(session)
+    existing = session.scalar(
+        select(Ticket)
+        .where(
+            Ticket.box_id == seeded["box_id"],
+            Ticket.state == "pending_approval",
+        )
+        .order_by(Ticket.created_at.asc())
+    )
+    if existing:
+        return {**seeded, "ticket_id": existing.id}
+
+    appointment = session.scalar(
+        select(AppointmentObservation).where(
+            AppointmentObservation.box_id == seeded["box_id"],
+            AppointmentObservation.external_id == "appt-1001",
+        )
+    )
+    if appointment is None:
+        appointment_id = svc.import_schedule(c, seeded["box_id"], SYNTH_CSV)[0]
+    else:
+        # This endpoint is a repeatable synthetic demo reset. A prior demo may
+        # have moved the fixed appointment to IMAGE_ON_FILE; return it to the
+        # invented missing-artifact state before opening a fresh review item.
+        appointment.coverage_status = CoverageStatus.MISSING.value
+        session.commit()
+        appointment_id = appointment.id
+    link = svc.attest_patient_link(
+        c,
+        seeded["box_id"],
+        seeded["owner_id"],
+        source_pair_key="csv:jordan-lee",
+        label="Jordan Lee",
+    )
+    ticket = svc.detect_and_open_chase(
+        c,
+        seeded["box_id"],
+        seeded["agents"]["chaser"],
+        appointment_id,
+        link.id,
+    )
+    return {**seeded, "ticket_id": ticket.id}
+
+
 def run_demo(session: Session) -> dict:
     c = svc.Container(session)
     seeded = seed_synth(session)
@@ -70,7 +122,7 @@ def run_demo(session: Session) -> dict:
         from cosmas_os.adapters.local import InjectableClock
 
         c.clock = InjectableClock(c.clock.now() + timedelta(days=8))
-    receipts = svc.purge_due_artifacts(c, box_id)
+    receipts = svc.purge_due_artifacts(c, box_id, owner_id)
     timeline = svc.audit_timeline(c, box_id, ticket.id)
 
     return {

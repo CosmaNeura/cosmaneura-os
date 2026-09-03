@@ -1,0 +1,856 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Human-side control-plane transport for the no-inbound D3 runner. Secret
+# payloads are placed only in an Azure managed Run Command protected parameter
+# through an @file ARM request; they never appear in process arguments or
+# command output.
+
+umask 077
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
+repository_root="$(cd -- "$script_dir/../.." && pwd -P)"
+# shellcheck source=deployment-guard-lib.sh
+source "$script_dir/deployment-guard-lib.sh"
+
+usage() {
+  printf '%s\n' \
+    "Usage:" \
+    "  $0 stage-source --bootstrap-outputs PATH --source-sha SHA --deploy-key PATH --known-hosts PATH" \
+    "  $0 probe-network --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
+    "  $0 build-push --bootstrap-outputs PATH --source-sha SHA --release-id ID --web-build-config PATH --artifact-out PATH" \
+    "  $0 database-prepare --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
+    "  $0 runtime-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --acceptance-phase runtime|workflow-baseline|workflow-verify|purge-setup|purge-verify [--acceptance-state PATH] --artifact-out PATH" \
+    "  $0 domain-verification --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
+    "  $0 alert-delivery --bootstrap-outputs PATH --source-sha SHA --release-id ID --alert-phase send|confirm [--alert-test-state PATH --delivery-confirmation-reference PATH] --artifact-out PATH" \
+    "  $0 pitr-freeze --bootstrap-outputs PATH --source-sha SHA --release-id ID --quiet-window-end-utc TIMESTAMP --artifact-out PATH" \
+    "  $0 pitr-manifest --bootstrap-outputs PATH --source-sha SHA --release-id ID --restore-time-utc TIMESTAMP --artifact-out PATH" \
+    "  $0 pitr-start|pitr-complete|pitr-cleanup|pitr-resume --bootstrap-outputs PATH --source-sha SHA --release-id ID --approval PATH --artifact-out PATH" \
+    "  $0 release-rollback|release-forward --bootstrap-outputs PATH --source-sha SHA --release-id ID --prior-source-sha SHA --prior-release-id ID --approval PATH --artifact-out PATH" \
+    "  $0 offboarding-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --offboarding-phase baseline|verify [--offboarding-request PATH | --offboarding-state PATH --offboarding-confirmation PATH] --artifact-out PATH" \
+    "  $0 bootstrap-identity --bootstrap-outputs PATH --source-sha SHA --release-id ID --bootstrap-manifest PATH --artifact-out PATH" \
+    "  $0 retrieve --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage STAGE --artifact-kind review|result|network|build|database|runtime|domain|alert|pitr|recovery|offboarding|identity [--acceptance-phase PHASE | --alert-phase send|confirm | --pitr-phase PHASE | --recovery-phase rollback|forward | --offboarding-phase baseline|verify] --artifact-out PATH" \
+    "  $0 cleanup-commands --bootstrap-outputs PATH --source-sha SHA" \
+    "  $0 stage-vars --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --var-file PATH" \
+    "  $0 plan --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --artifact-out PATH" \
+    "  $0 apply --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --approval PATH --artifact-out PATH" \
+    "" \
+    "Source is fixed to ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git." \
+    "Secrets use a temporary Azure managed Run Command protected parameter."
+}
+
+[[ $# -gt 0 ]] || { usage >&2; exit 1; }
+operation="$1"
+shift
+
+bootstrap_outputs=""
+source_sha=""
+stage=""
+release_id=""
+deploy_key=""
+known_hosts=""
+var_file=""
+web_build_config=""
+bootstrap_manifest=""
+approval_file=""
+artifact_out=""
+artifact_kind=""
+acceptance_phase=""
+acceptance_state=""
+alert_phase=""
+alert_test_state=""
+delivery_confirmation_reference=""
+pitr_phase=""
+restore_time_utc=""
+quiet_window_end_utc=""
+prior_source_sha=""
+prior_release_id=""
+recovery_phase=""
+offboarding_phase=""
+offboarding_request=""
+offboarding_state=""
+offboarding_confirmation=""
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --bootstrap-outputs) bootstrap_outputs="${2:-}"; shift 2 ;;
+    --source-sha) source_sha="${2:-}"; shift 2 ;;
+    --stage) stage="${2:-}"; shift 2 ;;
+    --release-id) release_id="${2:-}"; shift 2 ;;
+    --deploy-key) deploy_key="${2:-}"; shift 2 ;;
+    --known-hosts) known_hosts="${2:-}"; shift 2 ;;
+    --var-file) var_file="${2:-}"; shift 2 ;;
+    --web-build-config) web_build_config="${2:-}"; shift 2 ;;
+    --bootstrap-manifest) bootstrap_manifest="${2:-}"; shift 2 ;;
+    --approval) approval_file="${2:-}"; shift 2 ;;
+    --artifact-out) artifact_out="${2:-}"; shift 2 ;;
+    --artifact-kind) artifact_kind="${2:-}"; shift 2 ;;
+    --acceptance-phase) acceptance_phase="${2:-}"; shift 2 ;;
+    --acceptance-state) acceptance_state="${2:-}"; shift 2 ;;
+    --alert-phase) alert_phase="${2:-}"; shift 2 ;;
+    --alert-test-state) alert_test_state="${2:-}"; shift 2 ;;
+    --delivery-confirmation-reference) delivery_confirmation_reference="${2:-}"; shift 2 ;;
+    --pitr-phase) pitr_phase="${2:-}"; shift 2 ;;
+    --restore-time-utc) restore_time_utc="${2:-}"; shift 2 ;;
+    --quiet-window-end-utc) quiet_window_end_utc="${2:-}"; shift 2 ;;
+    --prior-source-sha) prior_source_sha="${2:-}"; shift 2 ;;
+    --prior-release-id) prior_release_id="${2:-}"; shift 2 ;;
+    --recovery-phase) recovery_phase="${2:-}"; shift 2 ;;
+    --offboarding-phase) offboarding_phase="${2:-}"; shift 2 ;;
+    --offboarding-request) offboarding_request="${2:-}"; shift 2 ;;
+    --offboarding-state) offboarding_state="${2:-}"; shift 2 ;;
+    --offboarding-confirmation) offboarding_confirmation="${2:-}"; shift 2 ;;
+    -h|--help) usage; exit 0 ;;
+    *) guard_die "unknown argument: $1" ;;
+  esac
+done
+
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" || "$operation" == "cleanup-commands" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" ]] || guard_die "operation is invalid"
+if [[ "$operation" == pitr-* ]]; then
+  [[ "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" ]] || guard_die "PITR operation is invalid"
+fi
+[[ -n "$bootstrap_outputs" ]] || guard_die "--bootstrap-outputs is required"
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "--source-sha must be a full lowercase Git commit"
+for command_name in az jq stat base64 gzip git; do
+  command -v "$command_name" >/dev/null 2>&1 || guard_die "$command_name is required"
+done
+
+bootstrap_outputs="$(guard_absolute_path "$bootstrap_outputs")"
+guard_outside_repository "$bootstrap_outputs" "$repository_root" "bootstrap output JSON"
+guard_private_file "$bootstrap_outputs" "bootstrap output JSON"
+guard_load_bootstrap_outputs "$bootstrap_outputs"
+
+transport_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/cosmas-d3-protected-transport.XXXXXX")"
+chmod 700 "$transport_temp_dir"
+command_script_file="$transport_temp_dir/protected-runner-command.sh"
+command_script_gzip_b64_file="$transport_temp_dir/protected-runner-command.sh.gz.b64"
+command_launcher_file="$transport_temp_dir/protected-runner-launcher.sh"
+early_cleanup() {
+  rm -rf -- "$transport_temp_dir"
+}
+trap early_cleanup EXIT
+guard_materialize_committed_file \
+  "$repository_root" \
+  "$source_sha" \
+  "infra/beta/protected-runner-command.sh" \
+  "$command_script_file" \
+  "git@github.com:CosmaNeura/cosmaneura-os.git"
+command_script_sha256="$(guard_sha256 "$command_script_file")"
+gzip -9 -c "$command_script_file" | base64 | tr -d '\n' >"$command_script_gzip_b64_file"
+chmod 0600 "$command_script_gzip_b64_file"
+cat >"$command_launcher_file" <<'LAUNCHER'
+#!/usr/bin/env bash
+set -euo pipefail
+umask 077
+command_file="$(mktemp /run/cosmas-protected-command.XXXXXX)"
+cleanup_launcher() {
+  rm -f -- "$command_file"
+}
+trap cleanup_launcher EXIT
+[[ "${COSMAS_COMMAND_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || {
+  printf '%s\n' 'D3 protected command launcher refused: invalid committed-command hash' >&2
+  exit 1
+}
+[[ "${COSMAS_COMMAND_GZIP_BASE64:-}" =~ ^[A-Za-z0-9+/=]+$ ]] || {
+  printf '%s\n' 'D3 protected command launcher refused: invalid protected command encoding' >&2
+  exit 1
+}
+printf '%s' "$COSMAS_COMMAND_GZIP_BASE64" | base64 --decode | gzip -d >"$command_file"
+chmod 0700 "$command_file"
+[[ "$(sha256sum "$command_file" | awk '{print $1}')" == "$COSMAS_COMMAND_SHA256" ]] || {
+  printf '%s\n' 'D3 protected command launcher refused: committed-command hash mismatch' >&2
+  exit 1
+}
+unset COSMAS_COMMAND_GZIP_BASE64 COSMAS_COMMAND_SHA256
+set +e
+/usr/bin/env bash "$command_file"
+status=$?
+set -e
+exit "$status"
+LAUNCHER
+chmod 0700 "$command_launcher_file"
+(( $(wc -c <"$command_launcher_file") <= 65536 )) || guard_die "managed Run Command launcher exceeds Azure's 64 KiB inline-script limit"
+(( $(wc -c <"$command_script_gzip_b64_file") <= 65536 )) || guard_die "compressed committed runner command exceeds the bounded protected-parameter transport"
+
+case "$operation" in
+  stage-source)
+    stage="source"
+    release_id="source"
+    [[ -n "$deploy_key" && -n "$known_hosts" ]] || guard_die "stage-source requires --deploy-key and --known-hosts"
+    deploy_key="$(guard_absolute_path "$deploy_key")"
+    known_hosts="$(guard_absolute_path "$known_hosts")"
+    guard_outside_repository "$deploy_key" "$repository_root" "ephemeral deploy private key"
+    guard_outside_repository "$known_hosts" "$repository_root" "reviewed GitHub known-hosts file"
+    guard_private_file "$deploy_key" "ephemeral deploy private key"
+    guard_private_file "$known_hosts" "reviewed GitHub known-hosts file"
+    ;;
+  stage-vars)
+    [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "stage-vars requires a valid --stage"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "stage-vars requires a 3-32 character lowercase --release-id"
+    [[ -n "$var_file" ]] || guard_die "stage-vars requires --var-file"
+    var_file="$(guard_absolute_path "$var_file")"
+    guard_outside_repository "$var_file" "$repository_root" "private environment tfvars JSON"
+    guard_private_file "$var_file" "private environment tfvars JSON"
+    jq -e 'type == "object"' "$var_file" >/dev/null || guard_die "--var-file must be a JSON object"
+    ;;
+  probe-network)
+    stage="network"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "probe-network requires a 3-32 character lowercase --release-id"
+    [[ -n "$artifact_out" ]] || guard_die "probe-network requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized live network evidence"
+    guard_new_private_path "$artifact_out" "sanitized live network evidence"
+    ;;
+  build-push)
+    stage="images"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "build-push requires a 3-32 character lowercase --release-id"
+    [[ -n "$web_build_config" && -n "$artifact_out" ]] || guard_die "build-push requires --web-build-config and --artifact-out"
+    web_build_config="$(guard_absolute_path "$web_build_config")"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$web_build_config" "$repository_root" "public web build configuration"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized build evidence"
+    guard_private_file "$web_build_config" "public web build configuration"
+    guard_new_private_path "$artifact_out" "sanitized build evidence"
+    jq -e 'type == "object"' "$web_build_config" >/dev/null || guard_die "--web-build-config must be a JSON object"
+    ;;
+  database-prepare)
+    stage="database"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "database-prepare requires a 3-32 character lowercase --release-id"
+    [[ -n "$artifact_out" ]] || guard_die "database-prepare requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized database-preparation attestation"
+    guard_new_private_path "$artifact_out" "sanitized database-preparation attestation"
+    ;;
+  runtime-acceptance)
+    stage="acceptance"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "runtime-acceptance requires a 3-32 character lowercase --release-id"
+    [[ "$acceptance_phase" == "runtime" || "$acceptance_phase" == "workflow-baseline" || "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "purge-setup" || "$acceptance_phase" == "purge-verify" ]] || guard_die "runtime-acceptance requires an enumerated --acceptance-phase"
+    [[ -n "$artifact_out" ]] || guard_die "runtime-acceptance requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized runtime-acceptance attestation"
+    guard_new_private_path "$artifact_out" "sanitized runtime-acceptance attestation"
+    if [[ "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "purge-verify" ]]; then
+      [[ -n "$acceptance_state" ]] || guard_die "$acceptance_phase requires --acceptance-state from its protected baseline/setup execution"
+      acceptance_state="$(guard_absolute_path "$acceptance_state")"
+      guard_outside_repository "$acceptance_state" "$repository_root" "protected acceptance state"
+      guard_private_file "$acceptance_state" "protected acceptance state"
+      (( $(wc -c <"$acceptance_state") <= 16384 )) || guard_die "protected acceptance state exceeds 16 KiB"
+      jq -e 'type == "object" and .schema_version == 1 and .evidence_type == "protected-runner-runtime-acceptance" and (.acceptance_output | type == "object")' "$acceptance_state" >/dev/null || guard_die "--acceptance-state is not a protected runtime-acceptance artifact"
+    else
+      [[ -z "$acceptance_state" ]] || guard_die "--acceptance-state is accepted only for workflow-verify or purge-verify"
+    fi
+    ;;
+  domain-verification)
+    stage="domain"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "domain-verification requires a 3-32 character lowercase --release-id"
+    [[ -n "$artifact_out" ]] || guard_die "domain-verification requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "protected public-DNS verification artifact"
+    guard_new_private_path "$artifact_out" "protected public-DNS verification artifact"
+    ;;
+  alert-delivery)
+    stage="alert"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "alert-delivery requires a 3-32 character lowercase --release-id"
+    [[ "$alert_phase" == "send" || "$alert_phase" == "confirm" ]] || guard_die "alert-delivery requires --alert-phase send|confirm"
+    [[ -n "$artifact_out" ]] || guard_die "alert-delivery requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized alert-delivery attestation"
+    guard_new_private_path "$artifact_out" "sanitized alert-delivery attestation"
+    if [[ "$alert_phase" == "confirm" ]]; then
+      [[ -n "$alert_test_state" && -n "$delivery_confirmation_reference" ]] || guard_die "alert delivery confirmation requires --alert-test-state and --delivery-confirmation-reference"
+      alert_test_state="$(guard_absolute_path "$alert_test_state")"
+      delivery_confirmation_reference="$(guard_absolute_path "$delivery_confirmation_reference")"
+      guard_outside_repository "$alert_test_state" "$repository_root" "protected alert test state"
+      guard_outside_repository "$delivery_confirmation_reference" "$repository_root" "owner delivery confirmation reference"
+      guard_private_file "$alert_test_state" "protected alert test state"
+      guard_private_file "$delivery_confirmation_reference" "owner delivery confirmation reference"
+      (( $(wc -c <"$alert_test_state") <= 16384 )) || guard_die "protected alert test state exceeds 16 KiB"
+      jq -e 'type == "object" and .schema_version == 1 and .evidence_type == "protected-runner-alert-delivery" and .alert_phase == "send"' "$alert_test_state" >/dev/null || guard_die "--alert-test-state is not a protected alert send artifact"
+      guard_validate_alert_owner_confirmation "$delivery_confirmation_reference" "$alert_test_state"
+    else
+      [[ -z "$alert_test_state" && -z "$delivery_confirmation_reference" ]] || guard_die "alert send does not accept confirmation inputs"
+    fi
+    ;;
+  pitr-freeze)
+    stage="pitr"
+    pitr_phase="freeze"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "pitr-freeze requires a 3-32 character lowercase --release-id"
+    [[ "$quiet_window_end_utc" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || guard_die "pitr-freeze requires a whole-second UTC --quiet-window-end-utc"
+    [[ -n "$artifact_out" ]] || guard_die "pitr-freeze requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized PITR writer-freeze attestation"
+    guard_new_private_path "$artifact_out" "sanitized PITR writer-freeze attestation"
+    ;;
+  pitr-manifest)
+    stage="pitr"
+    pitr_phase="manifest"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "pitr-manifest requires a 3-32 character lowercase --release-id"
+    [[ "$restore_time_utc" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || guard_die "pitr-manifest requires a whole-second UTC --restore-time-utc"
+    [[ -n "$artifact_out" ]] || guard_die "pitr-manifest requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized PITR manifest evidence"
+    guard_new_private_path "$artifact_out" "sanitized PITR manifest evidence"
+    ;;
+  pitr-start|pitr-complete|pitr-cleanup|pitr-resume)
+    stage="pitr"
+    pitr_phase="${operation#pitr-}"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "$operation requires a 3-32 character lowercase --release-id"
+    [[ -n "$approval_file" && -n "$artifact_out" ]] || guard_die "$operation requires --approval and --artifact-out"
+    approval_file="$(guard_absolute_path "$approval_file")"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$approval_file" "$repository_root" "private PITR owner approval"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized PITR evidence"
+    guard_private_file "$approval_file" "private PITR owner approval"
+    guard_new_private_path "$artifact_out" "sanitized PITR evidence"
+    if [[ "$operation" == "pitr-resume" ]]; then
+      jq -e '
+        type == "object" and
+        (keys | sort) == (["approved_at", "confirmation", "freeze_evidence_sha256", "reviewer_reference", "schema_version"] | sort) and
+        .schema_version == 1 and .confirmation == "RESUME D3 WRITERS" and
+        (.freeze_evidence_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+        (.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+        (.reviewer_reference | contains("@") | not)
+      ' "$approval_file" >/dev/null || guard_die "PITR resume approval is not the exact bounded owner assertion"
+    else
+      jq -e '
+        type == "object" and
+        (keys | sort) == (["approved_at", "confirmation", "manifest_sha256", "reviewer_reference", "schema_version"] | sort) and
+        .schema_version == 1 and .confirmation == "AUTHORIZE D3 BILLABLE PITR" and
+        (.manifest_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+        (.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+        (.reviewer_reference | contains("@") | not)
+      ' "$approval_file" >/dev/null || guard_die "PITR approval is not the exact manifest-bound owner assertion"
+    fi
+    ;;
+  release-rollback|release-forward)
+    stage="recovery"
+    recovery_phase="${operation#release-}"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "$operation requires a valid current --release-id"
+    [[ "$prior_source_sha" =~ ^[0-9a-f]{40}$ && "$prior_source_sha" != "$source_sha" ]] || guard_die "$operation requires a distinct full lowercase --prior-source-sha"
+    [[ "$prior_release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ && "$prior_release_id" != "$release_id" ]] || guard_die "$operation requires a distinct --prior-release-id"
+    [[ -n "$approval_file" && -n "$artifact_out" ]] || guard_die "$operation requires --approval and --artifact-out"
+    approval_file="$(guard_absolute_path "$approval_file")"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$approval_file" "$repository_root" "private release-recovery owner approval"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized release-recovery evidence"
+    guard_private_file "$approval_file" "private release-recovery owner approval"
+    guard_new_private_path "$artifact_out" "sanitized release-recovery evidence"
+    (( $(wc -c <"$approval_file") <= 16384 )) || guard_die "release-recovery approval exceeds 16 KiB"
+    jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg prior_source_sha "$prior_source_sha" --arg prior_release_id "$prior_release_id" '
+      type == "object" and
+      (keys | sort) == (["approved_at", "confirmation", "contract", "current", "prior", "reviewer_reference", "schema_version"] | sort) and
+      .schema_version == 1 and .contract == "cosmas-os-d3-release-recovery-approval-v1" and
+      .confirmation == "AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK AND FORWARD RECOVERY" and
+      (.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+      (.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+      (.reviewer_reference | contains("@") | not) and
+      (.current | keys | sort) == (["api_digest", "release_id", "source_sha", "web_digest"] | sort) and
+      (.prior | keys | sort) == (["api_digest", "release_id", "source_sha", "web_digest"] | sort) and
+      .current.source_sha == $source_sha and .current.release_id == $release_id and
+      .prior.source_sha == $prior_source_sha and .prior.release_id == $prior_release_id and
+      (.current.api_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
+      (.current.web_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
+      (.prior.api_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
+      (.prior.web_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
+      .current.api_digest != .prior.api_digest and .current.web_digest != .prior.web_digest
+    ' "$approval_file" >/dev/null || guard_die "release-recovery approval is not the exact two-release owner assertion"
+    ;;
+  offboarding-acceptance)
+    stage="offboarding"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "offboarding-acceptance requires a valid --release-id"
+    [[ "$offboarding_phase" == "baseline" || "$offboarding_phase" == "verify" ]] || guard_die "offboarding-acceptance requires --offboarding-phase baseline|verify"
+    [[ -n "$artifact_out" ]] || guard_die "offboarding-acceptance requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized offboarding evidence"
+    guard_new_private_path "$artifact_out" "sanitized offboarding evidence"
+    if [[ "$offboarding_phase" == "baseline" ]]; then
+      [[ -n "$offboarding_request" && -z "$offboarding_state" && -z "$offboarding_confirmation" ]] || guard_die "offboarding baseline requires only --offboarding-request"
+      offboarding_request="$(guard_absolute_path "$offboarding_request")"
+      guard_outside_repository "$offboarding_request" "$repository_root" "private reviewed offboarding target"
+      guard_private_file "$offboarding_request" "private reviewed offboarding target"
+      (( $(wc -c <"$offboarding_request") <= 16384 )) || guard_die "offboarding request exceeds 16 KiB"
+      jq -e '
+        type == "object" and
+        (keys | sort) == (["approved_at", "box_id", "clerk_issuer", "clerk_organization_id", "clerk_subject", "contract", "principal_id", "reviewer_reference", "schema_version"] | sort) and
+        .schema_version == 1 and .contract == "cosmas-os-d3-offboarding-request-v1" and
+        (.box_id | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")) and
+        (.clerk_issuer | strings | test("^https://[^/?#]+/?$")) and
+        (.clerk_organization_id | strings | test("^org_[^[:space:]]+$")) and
+        (.clerk_subject | strings | test("^user_[^[:space:]]+$")) and
+        (.principal_id | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")) and
+        (.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+        (.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+        (.reviewer_reference | contains("@") | not)
+      ' "$offboarding_request" >/dev/null || guard_die "offboarding request is not an exact private synthetic target binding"
+    else
+      [[ -z "$offboarding_request" && -n "$offboarding_state" && -n "$offboarding_confirmation" ]] || guard_die "offboarding verify requires --offboarding-state and --offboarding-confirmation"
+      offboarding_state="$(guard_absolute_path "$offboarding_state")"
+      offboarding_confirmation="$(guard_absolute_path "$offboarding_confirmation")"
+      guard_outside_repository "$offboarding_state" "$repository_root" "sanitized offboarding baseline state"
+      guard_outside_repository "$offboarding_confirmation" "$repository_root" "private human/browser offboarding confirmation"
+      guard_private_file "$offboarding_state" "sanitized offboarding baseline state"
+      guard_private_file "$offboarding_confirmation" "private human/browser offboarding confirmation"
+      (( $(wc -c <"$offboarding_state") <= 16384 && $(wc -c <"$offboarding_confirmation") <= 16384 )) || guard_die "offboarding verification input exceeds 16 KiB"
+      jq -e 'type == "object" and .schema_version == 1 and .evidence_type == "protected-runner-offboarding-acceptance" and .offboarding_phase == "baseline" and (.offboarding_output | type == "object")' "$offboarding_state" >/dev/null || guard_die "offboarding state is not a protected baseline artifact"
+      jq -e --slurpfile baseline "$offboarding_state" '
+        type == "object" and
+        (keys | sort) == (["baseline_evidence_sha256", "challenge", "clerk_organization_membership_removed", "clerk_sessions_revoked", "confirmation_reference", "confirmed_at", "live_access_denied", "owner_assertion", "schema_version"] | sort) and
+        .schema_version == 1 and .owner_assertion == "I CONFIRM D3 CLERK OFFBOARDING AND LIVE ACCESS DENIAL" and
+        .challenge == $baseline[0].offboarding_output.confirmation_challenge and
+        .baseline_evidence_sha256 == $baseline[0].offboarding_output.evidence_sha256 and
+        .clerk_organization_membership_removed == true and .clerk_sessions_revoked == true and .live_access_denied == true and
+        (.confirmed_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+        (.confirmation_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+        (.confirmation_reference | contains("@") | not)
+      ' "$offboarding_confirmation" >/dev/null || guard_die "offboarding confirmation is not bound to the exact baseline challenge"
+    fi
+    ;;
+  bootstrap-identity)
+    stage="identity"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "bootstrap-identity requires a 3-32 character lowercase --release-id"
+    [[ -n "$bootstrap_manifest" && -n "$artifact_out" ]] || guard_die "bootstrap-identity requires --bootstrap-manifest and --artifact-out"
+    bootstrap_manifest="$(guard_absolute_path "$bootstrap_manifest")"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$bootstrap_manifest" "$repository_root" "private reviewed beta bootstrap manifest"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized identity-bootstrap evidence"
+    guard_private_file "$bootstrap_manifest" "private reviewed beta bootstrap manifest"
+    guard_new_private_path "$artifact_out" "sanitized identity-bootstrap evidence"
+    jq -e 'type == "object" and .schema_version == 1 and (.deployment_binding | type == "object") and (.bootstrap_manifest | type == "object")' "$bootstrap_manifest" >/dev/null || guard_die "bootstrap manifest must be a schema-version-1 protected deployment envelope"
+    ;;
+  retrieve)
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "retrieve requires a 3-32 character lowercase --release-id"
+    [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" || "$artifact_kind" == "network" || "$artifact_kind" == "build" || "$artifact_kind" == "database" || "$artifact_kind" == "runtime" || "$artifact_kind" == "domain" || "$artifact_kind" == "alert" || "$artifact_kind" == "pitr" || "$artifact_kind" == "recovery" || "$artifact_kind" == "offboarding" || "$artifact_kind" == "identity" ]] || guard_die "retrieve requires a valid --artifact-kind"
+    if [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" ]]; then
+      [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "review/result retrieval requires its exact environment --stage"
+    else
+      case "$artifact_kind" in
+        network) stage="network" ;;
+        build) stage="images" ;;
+        database) stage="database" ;;
+        runtime)
+          stage="acceptance"
+          [[ "$acceptance_phase" == "runtime" || "$acceptance_phase" == "workflow-baseline" || "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "purge-setup" || "$acceptance_phase" == "purge-verify" ]] || guard_die "runtime retrieval requires an enumerated --acceptance-phase"
+          ;;
+        domain) stage="domain" ;;
+        alert)
+          stage="alert"
+          [[ "$alert_phase" == "send" || "$alert_phase" == "confirm" ]] || guard_die "alert retrieval requires --alert-phase send|confirm"
+          ;;
+        pitr)
+          stage="pitr"
+          [[ "$pitr_phase" == "freeze" || "$pitr_phase" == "manifest" || "$pitr_phase" == "start" || "$pitr_phase" == "complete" || "$pitr_phase" == "cleanup" || "$pitr_phase" == "resume" ]] || guard_die "PITR retrieval requires an enumerated --pitr-phase"
+          ;;
+        recovery)
+          stage="recovery"
+          [[ "$recovery_phase" == "rollback" || "$recovery_phase" == "forward" ]] || guard_die "release-recovery retrieval requires --recovery-phase rollback|forward"
+          ;;
+        offboarding)
+          stage="offboarding"
+          [[ "$offboarding_phase" == "baseline" || "$offboarding_phase" == "verify" ]] || guard_die "offboarding retrieval requires --offboarding-phase baseline|verify"
+          ;;
+        identity) stage="identity" ;;
+      esac
+    fi
+    [[ -n "$artifact_out" ]] || guard_die "retrieve requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "retrieved sanitized artifact"
+    guard_new_private_path "$artifact_out" "retrieved sanitized artifact"
+    ;;
+  cleanup-commands)
+    stage="maintenance"
+    release_id="cleanup"
+    ;;
+  plan)
+    [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "plan requires a valid --stage"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "plan requires a 3-32 character lowercase --release-id"
+    [[ -n "$artifact_out" ]] || guard_die "plan requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized review artifact"
+    guard_new_private_path "$artifact_out" "sanitized review artifact"
+    ;;
+  apply)
+    [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "apply requires a valid --stage"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "apply requires a 3-32 character lowercase --release-id"
+    [[ -n "$approval_file" && -n "$artifact_out" ]] || guard_die "apply requires --approval and --artifact-out"
+    approval_file="$(guard_absolute_path "$approval_file")"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$approval_file" "$repository_root" "private approval"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized result artifact"
+    guard_private_file "$approval_file" "private approval"
+    guard_new_private_path "$artifact_out" "sanitized result artifact"
+    jq -e 'type == "object" and .schema_version == 1' "$approval_file" >/dev/null || guard_die "approval must be a schema-version-1 JSON object"
+    ;;
+esac
+
+account_json="$(az account show --only-show-errors --output json)" || guard_die "Azure account context is unavailable"
+[[ "$(guard_lower "$(jq -er '.id' <<<"$account_json")")" == "$(guard_lower "$GUARD_SUBSCRIPTION_ID")" ]] || guard_die "active subscription does not match bootstrap output"
+[[ "$(guard_lower "$(jq -er '.tenantId' <<<"$account_json")")" == "$(guard_lower "$GUARD_TENANT_ID")" ]] || guard_die "active tenant does not match bootstrap output"
+
+for boundary_group in "$GUARD_STATE_RESOURCE_GROUP" "$GUARD_WORKLOAD_RESOURCE_GROUP"; do
+  group_json="$(az group show --subscription "$GUARD_SUBSCRIPTION_ID" --name "$boundary_group" --only-show-errors --output json)" || guard_die "cannot read boundary resource group $boundary_group"
+  jq -e \
+    --arg group "$(guard_lower "$boundary_group")" \
+    --arg subscription "$(guard_lower "$GUARD_SUBSCRIPTION_ID")" \
+    --arg mode "$GUARD_DEPLOYMENT_MODE" \
+    --arg classification "$GUARD_DATA_CLASSIFICATION" \
+    --arg box "$GUARD_BOX_ID" '
+      (.id | ascii_downcase) == ("/subscriptions/" + $subscription + "/resourcegroups/" + $group) and
+      .tags.track == "B" and .tags.product == "cosmas-os" and .tags.env == "early_adopter_beta" and
+      .tags.deployment_mode == $mode and .tags.data_classification == $classification and
+      .tags.box_scope == "dedicated" and .tags.box_id == $box and .tags.managed == "terraform"
+    ' <<<"$group_json" >/dev/null || guard_die "resource group $boundary_group drifted outside the exact D3 mode/Box boundary"
+done
+
+runner_id="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_STATE_RESOURCE_GROUP/providers/Microsoft.Compute/virtualMachines/$GUARD_RUNNER_VM_NAME"
+deploy_identity_id="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_STATE_RESOURCE_GROUP/providers/Microsoft.ManagedIdentity/userAssignedIdentities/$GUARD_DEPLOY_IDENTITY_NAME"
+identity_json="$(az identity show --ids "$deploy_identity_id" --only-show-errors --output json)" || guard_die "cannot read exact deploy identity"
+jq -e \
+  --arg identity_id "$(guard_lower "$deploy_identity_id")" \
+  --arg client_id "$(guard_lower "$GUARD_DEPLOY_CLIENT_ID")" \
+  --arg principal_id "$(guard_lower "$GUARD_DEPLOY_PRINCIPAL_ID")" '
+    (.id | ascii_downcase) == $identity_id and
+    (.clientId | ascii_downcase) == $client_id and
+    (.principalId | ascii_downcase) == $principal_id
+  ' <<<"$identity_json" >/dev/null || guard_die "deploy identity differs from bootstrap output"
+
+role_json="$(az role assignment list --assignee-object-id "$GUARD_DEPLOY_PRINCIPAL_ID" --all --include-inherited --fill-principal-name false --only-show-errors --output json)" || guard_die "cannot read deploy identity RBAC"
+workload_rg_id="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_WORKLOAD_RESOURCE_GROUP"
+state_rg_id="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_STATE_RESOURCE_GROUP"
+state_storage_id="$state_rg_id/providers/Microsoft.Storage/storageAccounts/$GUARD_STATE_STORAGE_ACCOUNT"
+jq -e \
+  --arg workload_rg "$(guard_lower "$workload_rg_id")" \
+  --arg state_rg "$(guard_lower "$state_rg_id")" \
+  --arg storage "$(guard_lower "$state_storage_id")" \
+  --arg state_vnet "$(guard_lower "$GUARD_STATE_VNET_ID")" \
+  --arg state_dns "$(guard_lower "$GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID")" '
+    [ .[] | {scope: (.scope | ascii_downcase), role: .roleDefinitionName} ] as $actual |
+    ($actual | all(
+      (.scope == $state_rg and .role == "Reader") or
+      (.scope == $workload_rg and (.role == "Contributor" or .role == "User Access Administrator")) or
+      (.scope == $storage and .role == "Storage Blob Data Contributor") or
+      (.scope == $state_vnet and .role == "Network Contributor") or
+      (.scope == $state_dns and .role == "Private DNS Zone Contributor") or
+      ((.scope | startswith($workload_rg + "/")) and
+        (.role == "AcrPush" or .role == "Storage Blob Data Contributor" or .role == "Key Vault Secrets Officer"))
+    )) and
+    ($actual | any(.scope == $workload_rg and .role == "Contributor")) and
+    ($actual | any(.scope == $workload_rg and .role == "User Access Administrator")) and
+    ($actual | any(.scope == $state_rg and .role == "Reader")) and
+    ($actual | any(.scope == $storage and .role == "Storage Blob Data Contributor")) and
+    ($actual | any(.scope == $state_vnet and .role == "Network Contributor")) and
+    ($actual | any(.scope == $state_dns and .role == "Private DNS Zone Contributor"))
+  ' <<<"$role_json" >/dev/null || guard_die "deploy identity RBAC is missing a required scope or extends beyond the two D3 resource groups"
+
+federated_credentials_json="$(az identity federated-credential list --identity-name "$GUARD_DEPLOY_IDENTITY_NAME" --resource-group "$GUARD_STATE_RESOURCE_GROUP" --only-show-errors --output json)" || guard_die "cannot inspect deploy identity federated credentials"
+jq -e 'length == 0' <<<"$federated_credentials_json" >/dev/null || guard_die "deploy identity has a forbidden federated credential; D3 permits VM-attached UAMI only"
+
+vm_json="$(az vm show --ids "$runner_id" --only-show-errors --output json)" || guard_die "cannot read protected runner"
+runner_location="$(jq -er '.location' <<<"$vm_json")"
+jq -e \
+  --arg identity_id "$(guard_lower "$deploy_identity_id")" \
+  --arg image_version "$GUARD_RUNNER_IMAGE_VERSION" '
+    .securityProfile.securityType == "TrustedLaunch" and
+    .securityProfile.uefiSettings.secureBootEnabled == true and
+    .securityProfile.uefiSettings.vTpmEnabled == true and
+    .hardwareProfile.vmSize == "Standard_B2s" and
+    .osProfile.linuxConfiguration.disablePasswordAuthentication == true and
+    .storageProfile.imageReference.publisher == "Canonical" and
+    .storageProfile.imageReference.offer == "0001-com-ubuntu-server-jammy" and
+    .storageProfile.imageReference.sku == "22_04-lts-gen2" and
+    ((.storageProfile.imageReference.version // .storageProfile.imageReference.exactVersion) == $image_version) and
+    .identity.type == "UserAssigned" and
+    ((.identity.userAssignedIdentities | keys | map(ascii_downcase)) == [$identity_id]) and
+    ([.networkProfile.networkInterfaces[]?.id] | length == 1)
+  ' <<<"$vm_json" >/dev/null || guard_die "runner image, Trusted Launch, or exact UAMI boundary drifted"
+
+nic_id="$(jq -er '.networkProfile.networkInterfaces[0].id' <<<"$vm_json")"
+nic_json="$(az network nic show --ids "$nic_id" --only-show-errors --output json)" || guard_die "cannot read runner NIC"
+jq -e --arg subnet_id "$(guard_lower "$GUARD_RUNNER_SUBNET_ID")" '
+  (.ipConfigurations | length) == 1 and
+  ([.ipConfigurations[]? | select(.publicIPAddress != null)] | length == 0) and
+  (.ipConfigurations[0].subnet.id | ascii_downcase) == $subnet_id
+' <<<"$nic_json" >/dev/null || guard_die "runner NIC is not private-only in the exact subnet"
+
+subnet_json="$(az network vnet subnet show --ids "$GUARD_RUNNER_SUBNET_ID" --only-show-errors --output json)" || guard_die "cannot read runner subnet"
+jq -e \
+  --arg nsg_id "$(guard_lower "$GUARD_RUNNER_NSG_ID")" \
+  --arg nat_id "$(guard_lower "$GUARD_RUNNER_NAT_GATEWAY_ID")" '
+    .defaultOutboundAccess == false and
+    (.networkSecurityGroup.id | ascii_downcase) == $nsg_id and
+    (.natGateway.id | ascii_downcase) == $nat_id
+  ' <<<"$subnet_json" >/dev/null || guard_die "runner subnet lost its reviewed NSG/NAT/default-outbound boundary"
+
+nsg_json="$(az network nsg show --ids "$GUARD_RUNNER_NSG_ID" --only-show-errors --output json)" || guard_die "cannot read runner NSG"
+jq -e '
+  def rule($name): first(.securityRules[] | select(.name == $name));
+  (.securityRules | length) == 8 and
+  (rule("AllowPrivateDeploymentPorts") | .priority == 100 and .direction == "Outbound" and .access == "Allow" and .protocol == "Tcp" and .sourcePortRange == "*" and .sourceAddressPrefix == "VirtualNetwork" and .destinationAddressPrefix == "VirtualNetwork" and (.destinationPortRanges | sort) == (["10000", "443", "5432"] | sort)) and
+  (rule("AllowAzureInstanceMetadata") | .priority == 105 and .direction == "Outbound" and .access == "Allow" and .protocol == "Tcp" and .sourcePortRange == "*" and .destinationPortRange == "80" and .sourceAddressPrefix == "*" and .destinationAddressPrefix == "169.254.169.254") and
+  (rule("AllowAzureWireServer") | .priority == 106 and .direction == "Outbound" and .access == "Allow" and .protocol == "Tcp" and .sourcePortRange == "*" and (.destinationPortRanges | sort) == (["80", "32526"] | sort) and .sourceAddressPrefix == "*" and .destinationAddressPrefix == "168.63.129.16") and
+  (rule("AllowAzureDnsUdp") | .priority == 110 and .direction == "Outbound" and .access == "Allow" and .protocol == "Udp" and .sourcePortRange == "*" and .destinationPortRange == "53" and .sourceAddressPrefix == "*" and .destinationAddressPrefix == "AzurePlatformDNS") and
+  (rule("AllowAzureDnsTcp") | .priority == 120 and .direction == "Outbound" and .access == "Allow" and .protocol == "Tcp" and .sourcePortRange == "*" and .destinationPortRange == "53" and .sourceAddressPrefix == "*" and .destinationAddressPrefix == "AzurePlatformDNS") and
+  (rule("AllowHttpsEgress") | .priority == 130 and .direction == "Outbound" and .access == "Allow" and .protocol == "Tcp" and .sourcePortRange == "*" and .destinationPortRange == "443" and .sourceAddressPrefix == "*" and .destinationAddressPrefix == "Internet") and
+  (rule("DenyOtherOutbound") | .priority == 4095 and .direction == "Outbound" and .access == "Deny" and .protocol == "*" and .sourcePortRange == "*" and .destinationPortRange == "*" and .sourceAddressPrefix == "*" and .destinationAddressPrefix == "*") and
+  (rule("DenyAllInbound") | .priority == 4096 and .direction == "Inbound" and .access == "Deny" and .protocol == "*" and .sourcePortRange == "*" and .destinationPortRange == "*" and .sourceAddressPrefix == "*" and .destinationAddressPrefix == "*")
+' <<<"$nsg_json" >/dev/null || guard_die "runner NSG differs from the reviewed no-inbound/HTTPS-only rules"
+
+nat_json="$(az network nat gateway show --ids "$GUARD_RUNNER_NAT_GATEWAY_ID" --only-show-errors --output json)" || guard_die "cannot read runner NAT gateway"
+jq -e --arg public_ip_id "$(guard_lower "$GUARD_RUNNER_EGRESS_PUBLIC_IP_ID")" '
+  .sku.name == "Standard" and (.publicIpAddresses | length) == 1 and
+  (.publicIpAddresses[0].id | ascii_downcase) == $public_ip_id
+' <<<"$nat_json" >/dev/null || guard_die "runner NAT gateway differs from the reviewed dedicated egress boundary"
+
+public_ip_json="$(az network public-ip show --ids "$GUARD_RUNNER_EGRESS_PUBLIC_IP_ID" --only-show-errors --output json)" || guard_die "cannot read runner NAT public IP"
+jq -e '.sku.name == "Standard" and .publicIPAllocationMethod == "Static" and .publicIPAddressVersion == "IPv4"' <<<"$public_ip_json" >/dev/null || guard_die "runner egress IP is not dedicated Standard/Static IPv4"
+
+storage_json="$(az storage account show --subscription "$GUARD_SUBSCRIPTION_ID" --resource-group "$GUARD_STATE_RESOURCE_GROUP" --name "$GUARD_STATE_STORAGE_ACCOUNT" --only-show-errors --output json)" || guard_die "cannot read private state storage account"
+jq -e '
+  .publicNetworkAccess == "Disabled" and .allowSharedKeyAccess == false and
+  .defaultToOAuthAuthentication == true and .minimumTlsVersion == "TLS1_2"
+' <<<"$storage_json" >/dev/null || guard_die "state storage lost its private Azure-AD-only boundary"
+
+if [[ "$operation" == "cleanup-commands" ]]; then
+  command_list_file="$transport_temp_dir/run-command-list.json"
+  az rest --method get --url "https://management.azure.com${runner_id}/runCommands?api-version=2024-07-01" --only-show-errors --output json >"$command_list_file" || guard_die "cannot enumerate managed Run Command resources on the exact protected runner"
+  chmod 0600 "$command_list_file"
+  removed_count=0
+  active_count=0
+  while IFS= read -r stale_command_id; do
+    [[ "${stale_command_id,,}" == "${runner_id,,}/runcommands/cosmas-d3-"* ]] || guard_die "managed Run Command enumeration escaped the exact protected runner/prefix"
+    stale_view_file="$transport_temp_dir/stale-view-$removed_count-$active_count.json"
+    if ! az vm run-command show --ids "$stale_command_id" --instance-view --only-show-errors --output json >"$stale_view_file" 2>/dev/null; then
+      guard_die "cannot verify terminal state for a stale protected Run Command"
+    fi
+    provisioning_state="$(jq -r '.provisioningState // .properties.provisioningState // ""' "$stale_view_file")"
+    execution_state="$(jq -r '.instanceView.executionState // .properties.instanceView.executionState // ""' "$stale_view_file")"
+    if [[ "$execution_state" == "Succeeded" || "$execution_state" == "Failed" || "$execution_state" == "Canceled" ]]; then
+      [[ "$provisioning_state" == "Succeeded" || "$provisioning_state" == "Failed" ]] || guard_die "stale command has a terminal execution but nonterminal provisioning state"
+      az vm run-command delete --ids "$stale_command_id" --yes --only-show-errors --output none || guard_die "cannot delete an exact terminal protected Run Command"
+      ((removed_count += 1))
+    else
+      ((active_count += 1))
+    fi
+  done < <(jq -er '.value[]?.id | select(test("/runCommands/cosmas-d3-[A-Za-z0-9-]+$"))' "$command_list_file")
+  (( active_count == 0 )) || guard_die "$active_count protected Run Command resource(s) are still active; wait for terminal state before cleanup"
+  printf 'Removed %s terminal protected Run Command resource(s); no protected output was read.\n' "$removed_count"
+  exit 0
+fi
+
+payload_file="$transport_temp_dir/protected-payload"
+payload_b64_file="$transport_temp_dir/protected-payload-b64"
+request_file="$transport_temp_dir/run-command-request.json"
+view_file="$transport_temp_dir/run-command-view.json"
+touch "$payload_file" "$payload_b64_file" "$request_file" "$view_file"
+run_command_name="cosmas-d3-$(date -u '+%Y%m%d%H%M%S')-$$"
+run_command_id="$runner_id/runCommands/$run_command_name"
+api_version="2024-07-01"
+command_created=false
+cleanup() {
+  rm -rf -- "$transport_temp_dir"
+  if [[ "$command_created" == "true" ]]; then
+    az vm run-command delete --ids "$run_command_id" --yes --only-show-errors --output none >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup EXIT
+chmod 600 "$payload_file" "$payload_b64_file" "$request_file" "$view_file"
+
+case "$operation" in
+  stage-source)
+    jq -n --rawfile deploy_key "$deploy_key" --rawfile known_hosts "$known_hosts" \
+      '{deploy_key_base64: ($deploy_key | @base64), known_hosts_base64: ($known_hosts | @base64)}' >"$payload_file"
+    ;;
+  stage-vars) install -m 0600 "$var_file" "$payload_file" ;;
+  build-push) install -m 0600 "$web_build_config" "$payload_file" ;;
+  bootstrap-identity) install -m 0600 "$bootstrap_manifest" "$payload_file" ;;
+  retrieve)
+    if [[ "$artifact_kind" == "runtime" ]]; then
+      jq -n --arg artifact_kind "$artifact_kind" --arg acceptance_phase "$acceptance_phase" '{artifact_kind: $artifact_kind, acceptance_phase: $acceptance_phase}' >"$payload_file"
+    elif [[ "$artifact_kind" == "alert" ]]; then
+      jq -n --arg artifact_kind "$artifact_kind" --arg alert_phase "$alert_phase" '{artifact_kind: $artifact_kind, alert_phase: $alert_phase}' >"$payload_file"
+    elif [[ "$artifact_kind" == "pitr" ]]; then
+      jq -n --arg artifact_kind "$artifact_kind" --arg pitr_phase "$pitr_phase" '{artifact_kind: $artifact_kind, pitr_phase: $pitr_phase}' >"$payload_file"
+    elif [[ "$artifact_kind" == "recovery" ]]; then
+      jq -n --arg artifact_kind "$artifact_kind" --arg recovery_phase "$recovery_phase" '{artifact_kind: $artifact_kind, recovery_phase: $recovery_phase}' >"$payload_file"
+    elif [[ "$artifact_kind" == "offboarding" ]]; then
+      jq -n --arg artifact_kind "$artifact_kind" --arg offboarding_phase "$offboarding_phase" '{artifact_kind: $artifact_kind, offboarding_phase: $offboarding_phase}' >"$payload_file"
+    else
+      jq -n --arg artifact_kind "$artifact_kind" '{artifact_kind: $artifact_kind}' >"$payload_file"
+    fi
+    ;;
+  runtime-acceptance)
+    if [[ -n "$acceptance_state" ]]; then
+      jq -n --arg acceptance_phase "$acceptance_phase" --slurpfile prior_attestation "$acceptance_state" \
+        '{acceptance_phase: $acceptance_phase, prior_attestation: $prior_attestation[0]}' >"$payload_file"
+    else
+      jq -n --arg acceptance_phase "$acceptance_phase" '{acceptance_phase: $acceptance_phase}' >"$payload_file"
+    fi
+    ;;
+  alert-delivery)
+    if [[ "$alert_phase" == "confirm" ]]; then
+      jq -n --arg alert_phase "$alert_phase" --slurpfile prior_attestation "$alert_test_state" --slurpfile confirmation "$delivery_confirmation_reference" \
+        '{alert_phase: $alert_phase, prior_attestation: $prior_attestation[0], confirmation: $confirmation[0]}' >"$payload_file"
+    else
+      jq -n --arg alert_phase "$alert_phase" '{alert_phase: $alert_phase}' >"$payload_file"
+    fi
+    ;;
+  pitr-freeze)
+    jq -n --arg pitr_phase "$pitr_phase" --arg quiet_window_end_utc "$quiet_window_end_utc" \
+      '{pitr_phase: $pitr_phase, quiet_window_end_utc: $quiet_window_end_utc}' >"$payload_file"
+    ;;
+  pitr-manifest)
+    jq -n --arg pitr_phase "$pitr_phase" --arg restore_time_utc "$restore_time_utc" \
+      '{pitr_phase: $pitr_phase, restore_time_utc: $restore_time_utc}' >"$payload_file"
+    ;;
+  pitr-start|pitr-complete|pitr-cleanup|pitr-resume)
+    jq -n --arg pitr_phase "$pitr_phase" --slurpfile owner_approval "$approval_file" \
+      '{pitr_phase: $pitr_phase, owner_approval: $owner_approval[0]}' >"$payload_file"
+    ;;
+  release-rollback|release-forward)
+    jq -n --arg recovery_phase "$recovery_phase" --arg prior_source_sha "$prior_source_sha" --arg prior_release_id "$prior_release_id" --slurpfile owner_approval "$approval_file" \
+      '{recovery_phase: $recovery_phase, prior_source_sha: $prior_source_sha, prior_release_id: $prior_release_id, owner_approval: $owner_approval[0]}' >"$payload_file"
+    ;;
+  offboarding-acceptance)
+    if [[ "$offboarding_phase" == "baseline" ]]; then
+      jq -n --arg offboarding_phase "$offboarding_phase" --slurpfile offboarding_request "$offboarding_request" \
+        '{offboarding_phase: $offboarding_phase, offboarding_request: $offboarding_request[0]}' >"$payload_file"
+    else
+      jq -n --arg offboarding_phase "$offboarding_phase" --slurpfile prior_attestation "$offboarding_state" --slurpfile owner_confirmation "$offboarding_confirmation" \
+        '{offboarding_phase: $offboarding_phase, prior_attestation: $prior_attestation[0], owner_confirmation: $owner_confirmation[0]}' >"$payload_file"
+    fi
+    ;;
+  plan|probe-network|database-prepare|domain-verification) printf '{}' >"$payload_file" ;;
+  apply) install -m 0600 "$approval_file" "$payload_file" ;;
+esac
+base64 <"$payload_file" | tr -d '\n' >"$payload_b64_file"
+
+jq -n \
+  --arg location "$runner_location" \
+  --rawfile script "$command_launcher_file" \
+  --arg subscription_id "$GUARD_SUBSCRIPTION_ID" \
+  --arg deploy_client_id "$GUARD_DEPLOY_CLIENT_ID" \
+  --arg operation "$operation" \
+  --arg stage "$stage" \
+  --arg release_id "$release_id" \
+  --arg source_sha "$source_sha" \
+  --arg command_sha256 "$command_script_sha256" \
+  --rawfile protected_command "$command_script_gzip_b64_file" \
+  --rawfile protected_payload "$payload_b64_file" '
+    {
+      location: $location,
+      properties: {
+        source: {script: $script},
+        parameters: [
+          {name: "COSMAS_SUBSCRIPTION_ID", value: $subscription_id},
+          {name: "COSMAS_DEPLOY_CLIENT_ID", value: $deploy_client_id},
+          {name: "COSMAS_OPERATION", value: $operation},
+          {name: "COSMAS_STAGE", value: $stage},
+          {name: "COSMAS_RELEASE_ID", value: $release_id},
+          {name: "COSMAS_SOURCE_SHA", value: $source_sha},
+          {name: "COSMAS_COMMAND_SHA256", value: $command_sha256}
+        ],
+        protectedParameters: [
+          {name: "COSMAS_COMMAND_GZIP_BASE64", value: $protected_command},
+          {name: "COSMAS_PROTECTED_PAYLOAD_BASE64", value: $protected_payload}
+        ],
+        asyncExecution: false,
+        timeoutInSeconds: 5400
+      }
+    }
+  ' >"$request_file"
+
+az rest \
+  --method put \
+  --url "https://management.azure.com${run_command_id}?api-version=${api_version}" \
+  --body @"$request_file" \
+  --only-show-errors \
+  --output none || guard_die "Azure rejected the protected managed Run Command"
+command_created=true
+
+execution_state=""
+provisioning_state=""
+for _ in $(seq 1 90); do
+  if az vm run-command show --ids "$run_command_id" --instance-view --only-show-errors --output json >"$view_file" 2>/dev/null; then
+    provisioning_state="$(jq -r '.provisioningState // .properties.provisioningState // ""' "$view_file")"
+    execution_state="$(jq -r '.instanceView.executionState // .properties.instanceView.executionState // ""' "$view_file")"
+    if [[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]]; then
+      break
+    fi
+    if [[ "$execution_state" == "Failed" || "$provisioning_state" == "Failed" ]]; then
+      guard_die "protected runner command failed; no raw output was returned because it may be sensitive"
+    fi
+  fi
+  sleep 60
+done
+[[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]] || guard_die "protected runner command did not succeed within 90 minutes"
+
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
+  command_output="$(jq -r '.instanceView.output // .properties.instanceView.output // ""' "$view_file")"
+  artifact_base64="$(awk -F= '/^COSMAS_SANITIZED_ARTIFACT_B64=/{sub(/^COSMAS_SANITIZED_ARTIFACT_B64=/, ""); print; exit}' <<<"$command_output")"
+  [[ "$artifact_base64" =~ ^[A-Za-z0-9+/=]+$ ]] || guard_die "protected runner did not return a complete sanitized artifact"
+  printf '%s' "$artifact_base64" | base64 --decode | gzip -d >"$artifact_out" || {
+    rm -f -- "$artifact_out"
+    guard_die "sanitized artifact could not be decoded"
+  }
+  chmod 600 "$artifact_out"
+  jq -e 'type == "object" and .schema_version == 1' "$artifact_out" >/dev/null || {
+    rm -f -- "$artifact_out"
+    guard_die "returned artifact is not a schema-version-1 sanitized object"
+  }
+  if [[ "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" ]]; then
+    expected_evidence_hash="$(jq -cS 'del(.evidence_payload_sha256)' "$artifact_out" | shasum -a 256 | awk '{print $1}')"
+    [[ "$(jq -er '.evidence_payload_sha256' "$artifact_out")" == "$expected_evidence_hash" ]] || {
+      rm -f -- "$artifact_out"
+      guard_die "returned live network evidence hash does not match its canonical payload"
+    }
+    if [[ "$operation" == "probe-network" ]]; then
+      printf 'Use runner_live_network_evidence_reference=runner-network:sha256:%s for this exact release/state.\n' "$expected_evidence_hash"
+    elif [[ "$operation" == "build-push" ]]; then
+      printf 'Accepted immutable API/web digests are recorded in build evidence sha256:%s.\n' "$expected_evidence_hash"
+    elif [[ "$operation" == "database-prepare" ]]; then
+      printf 'Structured database_preparation_attestation is recorded in evidence sha256:%s.\n' "$expected_evidence_hash"
+    elif [[ "$operation" == "runtime-acceptance" ]]; then
+      jq -e --arg phase "$acceptance_phase" '.evidence_type == "protected-runner-runtime-acceptance" and .acceptance_phase == $phase' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned runtime-acceptance artifact differs from the requested phase"
+      }
+      printf 'Synthetic runtime-UAMI dependency acceptance is recorded in evidence sha256:%s.\n' "$expected_evidence_hash"
+    elif [[ "$operation" == "domain-verification" ]]; then
+      guard_validate_domain_verification_artifact "$artifact_out" "$source_sha" "$release_id"
+      printf 'State-bound public DNS verification material is recorded in evidence sha256:%s.\n' "$expected_evidence_hash"
+    elif [[ "$operation" == "alert-delivery" ]]; then
+      jq -e --arg phase "$alert_phase" '.evidence_type == "protected-runner-alert-delivery" and .alert_phase == $phase and .recipient_address_returned == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned alert-delivery artifact differs from the requested PHI-safe phase"
+      }
+      printf 'PHI-safe alert delivery %s evidence is recorded as sha256:%s.\n' "$alert_phase" "$expected_evidence_hash"
+    elif [[ "$operation" == pitr-* ]]; then
+      jq -e --arg phase "$pitr_phase" '.evidence_type == "protected-runner-pitr" and .pitr_phase == $phase and .secrets_returned == false' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned PITR artifact differs from the requested protected phase"
+      }
+      printf 'Protected PITR %s evidence is recorded as sha256:%s.\n' "$pitr_phase" "$expected_evidence_hash"
+    elif [[ "$operation" == "release-rollback" || "$operation" == "release-forward" ]]; then
+      jq -e --arg phase "$recovery_phase" '.evidence_type == "protected-runner-release-recovery" and .recovery_phase == $phase and .mutable_tags_used == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned release-recovery artifact differs from the requested exact-digest phase"
+      }
+      printf 'Immutable-digest release %s evidence is recorded as sha256:%s.\n' "$recovery_phase" "$expected_evidence_hash"
+    elif [[ "$operation" == "offboarding-acceptance" ]]; then
+      jq -e --arg phase "$offboarding_phase" '.evidence_type == "protected-runner-offboarding-acceptance" and .offboarding_phase == $phase and .identifiers_returned == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned offboarding artifact differs from the requested privacy-bounded phase"
+      }
+      printf 'Synthetic Clerk/app offboarding %s evidence is recorded as sha256:%s.\n' "$offboarding_phase" "$expected_evidence_hash"
+    else
+      printf 'Synthetic beta owner/bootstrap evidence is recorded as sha256:%s.\n' "$expected_evidence_hash"
+    fi
+  fi
+  if [[ "$operation" == "retrieve" && "$artifact_kind" == "domain" ]]; then
+    guard_validate_domain_verification_artifact "$artifact_out" "$source_sha" "$release_id"
+  fi
+  printf 'D3 protected runner %s succeeded; sanitized artifact written to %s\n' "$operation" "$artifact_out"
+else
+  printf 'D3 protected runner %s succeeded without returning protected payload contents\n' "$operation"
+fi

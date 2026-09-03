@@ -1,6 +1,6 @@
-# Release and rollback (synthetic D1 / Azure D2)
+# Release and rollback (synthetic D1 / Azure D2 / prepared D3)
 
-Status: D1 local release flow and D2 Azure runtime verified
+Status: D1 local release flow and D2 Azure runtime verified; D3 source prepared, not deployed
 Updated: 2026-09-03
 
 The D1 workflow produces a **pinned local container image and release
@@ -27,7 +27,9 @@ explicit `deployed: false` / `pushed: false` / `cloud: false`.
 4. Demo ArtifactChase CLI  
 5. Web test + production build  
 6. Container image build + manifest (no push)  
-7. Aggregate `synth-ci-gate` job  
+7. Static validation of both isolated D3 OpenTofu roots
+8. Non-root container assertion
+9. Aggregate `synth-ci-gate` job
 
 ## Migration apply / recovery
 
@@ -133,6 +135,49 @@ Current D2 limits remain part of rollback acceptance: the externally reachable
 API uses fake caller-controlled identity headers and wildcard CORS, PostgreSQL
 retains public `AllowAzureServices`, and `BLOB_ROOT` is ephemeral per replica.
 No PHI is allowed.
+
+## Prepared D3 release boundary
+
+The D3 candidate adds the forward-only Alembic revision
+`0002_external_identities`. It creates reviewed Clerk-subject bindings to an
+existing Box principal and adds the composite principal/Box constraint used by
+that boundary. This migration has been exercised locally only; the deployed D2
+database remains at `0001_initial` on its currently deployed image.
+
+Before any D3 workload receives traffic, a human must:
+
+1. complete the D3 prerequisite and capability records;
+2. provision the isolated secret-free foundation;
+3. build and record one immutable D3 image digest;
+4. create and manually execute the digest-pinned, in-network database job in
+   [`docs/beta/DATABASE_PREPARATION.md`](beta/DATABASE_PREPARATION.md);
+5. retain only its sanitized proof that the runtime role is non-admin, DDL and
+   audit mutation are denied, and `0002_external_identities` is the sole head;
+6. bootstrap the reviewed Clerk-to-Box identity binding from a protected,
+   untracked manifest; and
+7. enable workloads only after `/ready` is wired as a readiness/startup probe.
+
+The source can be checked locally without cloud credentials:
+
+```bash
+./scripts/d3-self-test.sh
+```
+
+The protected D3 workflow now provides `release-rollback` and
+`release-forward`; the exact command and approval schemas are documented in
+[`infra/beta/README.md`](../infra/beta/README.md). The live demonstration still
+requires two genuinely distinct protected-runner releases. Both releases must
+have source-bound, scan-clean, immutable ACR API and web digests; a relabel of
+one image is not a rollback candidate. The rollback operation records the old
+and new revision IDs and proves exact routing/readiness. The forward operation
+restores the Terraform-declared digests and must finish with a refresh-backed
+zero-change plan.
+
+Database changes remain forward-only: if the prior application digest is not
+compatible with schema head, use `release-forward` immediately and deploy a
+tested correction instead of downgrading or restoring over the live database.
+Backup/restore and digest rollback evidence are mandatory before D3 can be
+called complete.
 
 ## Secrets policy
 

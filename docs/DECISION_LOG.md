@@ -205,3 +205,99 @@ IMPLEMENTATION IMPACT:
   OS synth Terraform configuration/state after showing its sanitized plan,
   run additive migrations with invented data only, verify `/health` returns
   `synth_os`, verify the worker process, and document the rollback digest.
+
+### DL-20260903-03
+
+- **Status:** ACCEPTED
+- **Ruling:** Owner authorized D3 planning and implementation via the exact
+  phrase `APPROVE D3 ISOLATED EARLY-ADOPTER BETA`. D3 must be a separate,
+  isolated environment and must not be an in-place promotion of
+  `cosmaneura-os-synth`.
+- **Rationale:** Advance from the verified non-PHI D2 runtime toward one
+  early-adopter beta while preserving Box, identity, data, and Track A
+  boundaries.
+- **Supersedes:** None. D4-D6, connector activation, D2 destruction, Track A
+  integration, and any PHI use remain separately gated.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct owner message
+  `APPROVE D3 ISOLATED EARLY-ADOPTER BETA` dated 2026-09-03.
+- **Implementation impact:** Prepare a dedicated D3 resource group, state,
+  identity, database, storage scope, workloads, authentication boundary,
+  recovery evidence, and capability manifest. Before any D3 Azure mutation or
+  PHI-capable deployment, record the real named clinic, its dedicated Box and
+  Clerk Organization, applicable BAA prerequisites, and human deploy evidence.
+  Never invent these inputs; coding agents receive no live PHI or live
+  credentials.
+
+### DL-20260903-04
+
+- **Status:** ACCEPTED
+- **Ruling:** The first D3 slice is a non-PHI **Cosmas Beta Lab** for the owner
+  and invited outside testers. Identity uses a new, separate Cosmas OS Clerk
+  application with Organizations enabled; the existing MyCatholicDoctor Clerk
+  application, users, keys, sessions, and domains remain unchanged. The Beta
+  Lab Organization maps to one synthetic-only Cosmas Box. The initial
+  enrollment path is direct invitation/re-invitation; no MyCatholicDoctor user
+  export or bulk migration is authorized.
+- **Rationale:** Enables real usability testing without waiting for a named
+  clinic, BAA, or PHI authorization and preserves a clean identity and data
+  boundary from MyCatholicDoctor.
+- **Supersedes:** The named-clinic and BAA prerequisites in the implementation
+  impact of `DL-20260903-03` only for a strictly synthetic, non-PHI Beta Lab.
+  They remain mandatory before any clinic or PHI-capable deployment.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct owner message approving the recommended
+  synthetic-only Cosmas Beta Lab path dated 2026-09-03.
+- **Implementation impact:** Add fail-closed Clerk frontend integration and a
+  reviewed multi-user enrollment/offboarding path; deploy only to a separate
+  D3 lab boundary with invented data. Testers may review, edit, and decide only
+  the fixed invented queue; schedule import, PatientLink creation, new chase
+  creation, and uploads remain blocked in `synthetic_lab`. Keep all non-auth
+  external connectors dark, keep MyCatholicDoctor and Track A untouched, and
+  require separate human approval and handling before any bulk user migration.
+
+### DL-20260903-05
+
+- **Status:** ACCEPTED
+- **Ruling:** Owner explicitly authorized creation of a new **Cosmas OS** Clerk
+  application in the CosmaNeura account with B2B project type, email-only
+  authentication, and Organizations enabled, followed by configuration of the
+  synthetic **Cosmas Beta Lab** Organization. MyCatholicDoctor provider testers
+  and any user migration are deferred until the application is closer to
+  functional.
+- **Rationale:** Establish the isolated identity boundary needed for the
+  synthetic lab without touching the existing Cosmas/MyCatholicDoctor identity
+  environment or inviting users prematurely.
+- **Supersedes:** The prohibition on creating the specific new Clerk structure
+  in `DL-20260903-04`; it does not authorize production-domain invention,
+  invitations, bulk migration, Track A access, PHI, or connector activation.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct owner confirmation dated 2026-09-03.
+- **Implementation impact:** A separate Cosmas OS development application and
+  zero-member Cosmas Beta Lab Organization were created. Email verification-code
+  login, invite-only access, required Organization membership, disabled
+  user-created Organizations, and session audience `cosmas-os-beta-api` were
+  configured. The existing Cosmas application was not changed. Production
+  instance creation remains blocked on the exact approved HTTPS application
+  domain; no placeholder domain was entered and no invitation was sent.
+
+### DL-20260903-06
+
+- **Status:** ACCEPTED
+- **Ruling:** Add a native mobile closed-beta tranche after the browser-based
+  D3 gate and before the D4 one-clinic pilot. Package the proven web approval
+  queue with Capacitor for iOS TestFlight and Android closed testing; preserve
+  the same synthetic-only authorization until a separate PHI gate is approved.
+- **Rationale:** Mobile access is part of the product roadmap, but validating
+  the shared browser workflow and identity boundary first avoids creating two
+  platform-specific failure surfaces during the initial D3 deployment.
+- **Supersedes:** The indefinite mobile deferral in the roadmap scope cuts;
+  mobile remains outside the initial D3 web launch and all current cloud work.
+- **Affected contract version:** 1.9-draft
+- **Owner acceptance evidence:** Direct owner agreement with the recommended
+  post-D3, pre-D4 placement dated 2026-09-03.
+- **Implementation impact:** Add Deployment 3M with TestFlight and Android
+  closed-test gates, encrypted short-lived device storage, mobile identity and
+  offboarding tests, store-release evidence, and a separately reviewed Scribe
+  integration. No mobile build, store enrollment, signing, or upload is
+  authorized by this scheduling decision alone.

@@ -222,8 +222,10 @@ Likely components, subject to Phase 0/current evidence:
 - Clerk Org;
 - dedicated beta deployment identity.
 
-The first clinic receives one isolated Box/database or schema/storage boundary.
-Shared logs, backups, blobs, jobs, and support tooling carry `box_id`.
+The first D3 slice is the synthetic-only Cosmas Beta Lab. It receives one
+isolated Box/database or schema/storage boundary; shared logs, backups, blobs,
+jobs, and support tooling carry `box_id`. Any later clinic deployment uses a
+separate `authorized_beta` evidence gate and must not reuse the lab boundary.
 
 Gate:
 
@@ -234,6 +236,28 @@ Gate:
 - parametric cost ranges and support assumptions show at least one plausible
   flat-SaaS packing scenario without Azure credits; exact pricing remains an
   owner decision.
+
+### Deployment 3M - native mobile closed beta
+
+After the browser-based D3 gate passes and before the one-clinic D4 pilot,
+package the proven web queue as the roadmap's Capacitor approver shell. This
+tranche does not delay the initial D3 web launch and does not expand its
+synthetic-only data authorization.
+
+- iOS distribution through TestFlight;
+- Android distribution through a closed testing track;
+- approve, edit, reject, and queue review on device;
+- encrypted device storage with a short retention period;
+- no persistent bearer tokens, PHI, or production credentials in app bundles;
+- reuse Scribe capture only after its separate interface and security review.
+
+Gate:
+
+- D3 browser workflow, identity boundary, and rollback have passed first;
+- physical-device authentication, Organization switching, session revocation,
+  offboarding, upgrade, and rollback tests pass on both platforms;
+- store signing, privacy disclosures, tester cohorts, and support ownership are
+  human-controlled and documented.
 
 ### Deployment 4 - one-clinic L0 pilot
 

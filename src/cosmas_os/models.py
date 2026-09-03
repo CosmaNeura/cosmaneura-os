@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Integer,
     String,
     Text,
@@ -41,6 +42,9 @@ class BoxContext(Base):
 
 class Principal(Base):
     __tablename__ = "principals"
+    __table_args__ = (
+        UniqueConstraint("id", "box_id", name="uq_principal_id_box"),
+    )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     box_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("box_contexts.id"), nullable=False)
@@ -53,6 +57,40 @@ class Principal(Base):
     config_version: Mapped[str] = mapped_column(String(64), default="config-v1")
     policy_version: Mapped[str] = mapped_column(String(64), default="policy-v1")
     tombstoned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ExternalIdentity(Base):
+    """Reviewed binding from a verified IdP subject to one Box principal."""
+
+    __tablename__ = "external_identities"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["principal_id", "box_id"],
+            ["principals.id", "principals.box_id"],
+            name="fk_external_identity_principal_box",
+        ),
+        UniqueConstraint("issuer", "subject", name="uq_external_identity_issuer_subject"),
+        UniqueConstraint(
+            "issuer",
+            "organization_id",
+            "principal_id",
+            name="uq_external_identity_org_principal",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    box_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), ForeignKey("box_contexts.id"), nullable=False
+    )
+    principal_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False, default="clerk")
+    issuer: Mapped[str] = mapped_column(String(255), nullable=False)
+    subject: Mapped[str] = mapped_column(String(255), nullable=False)
+    organization_id: Mapped[str] = mapped_column(String(255), nullable=False)
+    active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    reviewed_by: Mapped[str] = mapped_column(String(200), nullable=False)
+    evidence_ref: Mapped[str] = mapped_column(String(255), nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

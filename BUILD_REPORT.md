@@ -1,4 +1,4 @@
-# BUILD_REPORT — local synthetic L0 through D2 Azure runtime
+# BUILD_REPORT — local synthetic L0 through D3 synthetic-lab source preparation
 
 Updated: 2026-09-03
 
@@ -11,12 +11,23 @@ Approvals:
 - `deploy now` → DL-20260902-09
 - Pasted D3-to-complete-build handoff hygiene gate → DL-20260903-01
 - `AUTHORIZE D2 ACR PUSH AND APP WIRING` → DL-20260903-02
+- `APPROVE D3 ISOLATED EARLY-ADOPTER BETA` → DL-20260903-03
+- Approved non-PHI Cosmas Beta Lab first slice → DL-20260903-04
+- Approved creation/configuration of the separate Cosmas OS Clerk development
+  application and Beta Lab Organization → DL-20260903-05
+- Approved native mobile closed-beta placement after browser D3 and before D4
+  → DL-20260903-06
 
 ## Verdict
 
 **Local synthetic Insurance ArtifactChase L0 is implemented and verified.**  
 **Deployment D1 (synthetic CI / release artifact) is implemented and verified locally.**
 **D2: the non-PHI Azure synth runtime is deployed and verified.**
+**D3: the isolated synthetic Beta Lab source candidate is implemented and the
+complete local D3 gate passed on 2026-09-03. Any deployable release must use a
+committed SHA with green GitHub CI and bind that exact SHA in its external,
+protected release record. All exact-plan and live deployment acceptance gates
+remain open. No D3 Azure resource or production Clerk instance exists.**
 
 API and Celery worker now run one immutable Cosmas OS ACR digest. Key Vault
 references supply the synth PostgreSQL and Redis URLs through the OS managed
@@ -71,9 +82,10 @@ manifests use a commit SHA and remain local-only.
 
 ## Dark capabilities
 
-Unchanged: Athena/Acuity, real messaging, Clerk, Azure Blob adapter, LLM,
-payment/PAN, and `AUTO_TEMPLATE`. The separate D2 Azure synth runtime itself is
-now on; it is not a beta or PHI environment.
+For the deployed D2 runtime, Athena/Acuity, real messaging, Clerk, Azure Blob,
+LLM, payment/PAN, and `AUTO_TEMPLATE` remain dark. The D3 candidate now contains
+offline-tested Clerk and Azure Blob boundaries, but neither is live. The D2
+runtime remains synthetic-only; it is not a beta or PHI environment.
 
 ## First commit / private remote (DL-20260902-07)
 
@@ -171,6 +183,42 @@ environment, or log files. A local image rebuild succeeded with a 293.9 kB
 Docker context. Future ACR builds must use this guarded context (preferably a
 clean committed staging tree).
 
+## D3 isolated synthetic Beta Lab source (DL-20260903-03 / -04)
+
+The approved first D3 slice is a separate, invitation-only, strictly non-PHI
+Cosmas Beta Lab for the owner and outside testers. It does not reuse the
+MyCatholicDoctor Clerk application, D2 resources, or Track A state.
+
+| Item | Result |
+|---|---|
+| Deployment modes | `synthetic_lab` is the fail-closed default; `authorized_beta` separately requires named-clinic, clinic-approval, BAA, and PHI authorization evidence |
+| Authentication | Exact Clerk issuer/audience/authorized-party checks, bounded JWKS caches, no unknown-key request-time fetch, exact Org and server-side Principal/Box authority |
+| Browser | Supported Clerk React provider, signed-in session plus active Org required, fresh bearer token per API call, zero API calls when configuration or identity is incomplete |
+| Identity administration | Protected first-owner bootstrap plus an authenticated owner-only roster and web screen for bind, deactivate, reactivate, and ownership transfer; stale-owner race regression covered |
+| Storage | Managed-identity Azure Blob adapter with Box-prefixed keys |
+| Infrastructure | Independent bootstrap/environment roots, separated web/runtime/database-job identities, staged private data-plane writes, private Azure Managed Redis `Balanced_B0` with two-node HA/TLS/one-second AOF, a manual digest-pinned in-network role/migration verifier, immutable API/worker and web image digests |
+| Complete local gate | `./scripts/d3-self-test.sh` passed on 2026-09-03: Ruff, Pyright, Alembic/OpenAPI/demo, **209 Python tests**, **32 web tests**, and the production web build passed |
+| Infrastructure and shell gates | Bootstrap OpenTofu **6/6** and environment OpenTofu **32/32** passed; deployment guards, Bash syntax, and ShellCheck were clean |
+| Recovery/offboarding suites | Focused PITR, release recovery, and offboarding tests passed **31/31** |
+| Protected runner | Final compressed custom-data payload measured **61,132 / 65,536 bytes** |
+| Container evidence | Final local Linux/amd64 API and web images built; both current-database Trivy scans reported **0 fixable HIGH/CRITICAL findings**; final release digests do not exist until protected-runner build/push |
+| Security review | Final source audit found **no code blocker**; live control and deployment evidence remain required |
+| Clerk state | Separate Cosmas OS development app and zero-member Cosmas Beta Lab Org created under `DL-20260903-05`; email-code, invite-only, required Org membership, disabled user-created Orgs, and exact API audience configured; existing Cosmas app untouched |
+| Release eligibility | **LOCAL SOURCE GATES COMPLETE**; each deployable release still requires a committed SHA, green GitHub CI, and exact-SHA binding in its external protected release record |
+| Live state | **D3 not deployed**; a development-only Clerk structure exists, but no D3 Azure resource, production Clerk instance, tester invitation, credential in the repository, MCD transfer, or PHI was created |
+
+The current private, low-traffic D3 planning envelope is approximately
+**$170–260/month** across its bootstrap/state and workload resource groups,
+without credits and excluding founder support, Clerk paid-plan charges, taxes,
+and unusual egress/log volume. The proposed **$350/month combined alert** is a
+notification threshold across both D3 groups, not a spending cap, and still
+requires owner approval plus a human-owned recipient before apply.
+
+The concrete source-controlled capability record is
+`docs/beta/SYNTHETIC_LAB_CAPABILITY_MANIFEST.md`. A deployable release must bind
+the manifest's exact committed SHA and SHA-256 in the external protected record;
+all live values remain pending, and this document is not an apply approval.
+
 ## Limitations / next gate
 
 - This is still a public, synthetic-only D2 service: the API trusts caller-set
@@ -183,7 +231,35 @@ clean committed staging tree).
 - This is the first functional OS image in ACR. The placeholder predecessor was
   mutable `helloworld:latest`, not a valid product rollback target. The current
   digest is the rollback baseline for the next release.
-- `APPROVE D3 ISOLATED EARLY-ADOPTER BETA` is still required before D3.
+- The synthetic Beta Lab still needs its production Clerk instance and
+  production Organization, dedicated synthetic Box UUID, approved HTTPS
+  origin, human deploy identity/evidence, final region/cost choice, and
+  reviewed D3 bootstrap, foundation, database-preparation, and workload plans
+  before deployment. Each apply is bound to an exact saved plan hash and
+  current state lineage/serial; the existing D3 phase approval is not a blank
+  approval for later plans.
+- The source now includes a separate digest-pinned, HTTPS-only static beta web
+  Container App and fail-closed release contract. Its foundation-derived
+  origin, production Clerk configuration, reviewed image digest, and human
+  deployment evidence are still required before the host exists.
+- The recommended beta registry posture is Premium/private ACR, and the source
+  requires an explicit selection. A lower-cost Basic/public exception is
+  possible only for `synthetic_lab` with a reviewed risk reference; a human
+  must select and evidence the final posture before planning.
+- The D3 broker design is closed in source on private Azure Managed Redis
+  `Balanced_B0` with HA. A human must still refresh and record Central US
+  availability, quota, contract price, and a live broker-mediated worker probe
+  before admitting testers.
+- The least-privilege database and private migration path is now implemented as
+  a manual, unscheduled Container Apps Job with sanitized evidence. Its live
+  Azure execution must produce the structured
+  `database_preparation_attestation`; protected-runner probes must separately
+  produce `runner_live_network_evidence_reference`. Worker readiness,
+  controlled outbound egress, and physical purge/restore evidence remain
+  deployment controls to close before testers are admitted.
+- Any clinic or PHI-capable beta additionally requires the named clinic,
+  clinic approval, applicable BAA/service eligibility, and a separate PHI
+  authorization.
 - `infra/.apply-env`, local Terraform state, tools, and plan files remain
   uncommitted; their contents are not reproduced here.
 

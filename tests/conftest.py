@@ -28,7 +28,10 @@ def session(engine) -> Iterator[Session]:
     connection = engine.connect()
     trans = connection.begin()
     SessionLocal = make_session_factory(engine)
-    session = SessionLocal(bind=connection)
+    # Application services deliberately commit/rollback their own unit of work.
+    # Keep each test isolated behind a savepoint without de-associating the
+    # fixture's outer transaction when an expected failure rolls back.
+    session = SessionLocal(bind=connection, join_transaction_mode="create_savepoint")
     yield session
     session.close()
     trans.rollback()

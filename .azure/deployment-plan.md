@@ -1,13 +1,14 @@
 # Azure Deployment Plan
 
-> **Status:** D2 runtime deployed and verified
+> **Status:** D2 runtime deployed and verified; D3 local source gates complete, not deployed
 
 Generated: 2026-09-02T23:30:00Z
-Updated: 2026-09-03T10:19:36Z (D2 ACR push, app wiring, and verification)
+Updated: 2026-09-03 (D3 isolated-beta source preparation; no D3 Azure mutation)
 
 **Gate:** D2 infrastructure apply completed under `DL-20260902-09`; ACR push
-and application wiring completed under `DL-20260903-02`. Track A untouched. No
-PHI.
+and application wiring completed under `DL-20260903-02`; D3 source preparation
+is authorized under `DL-20260903-03`, and `DL-20260903-04` selects the strictly
+non-PHI `synthetic_lab` first slice. Track A untouched. No PHI.
 
 Design spec: `docs/superpowers/specs/2026-09-02-d2-terraform-scaffold-design.md`
 Decision: `DL-20260902-08` (+ owner choices depth 3, region B, tooling 1);
@@ -225,8 +226,12 @@ below.
    passed, including the aggregate gate.
 2. ✅ D2 runtime source and digest commits `81d75c3` / `471f56f`; both
    GitHub workflows passed. Apps are healthy and Terraform is converged.
-3. Keep D3 separately gated by
-   `APPROVE D3 ISOLATED EARLY-ADOPTER BETA`.
+3. ✅ D3 planning and source implementation were authorized by
+   `APPROVE D3 ISOLATED EARLY-ADOPTER BETA` (`DL-20260903-03`). The separate
+   candidate is under `infra/beta/`; it has not been initialized against a
+   remote backend, planned against Azure, or applied.
+4. ✅ `DL-20260903-04` selected the isolated, strictly non-PHI
+   `synthetic_lab` path for the owner and invited outside testers.
 
 ---
 
@@ -235,8 +240,8 @@ below.
 - No Track A resource mutation
 - No secrets in git (`infra/.apply-env` local-only)
 - No PHI
-- No further Azure mutation without the exact applicable owner phrase
-
+- No D3 Azure mutation until the selected-mode prerequisites are recorded and
+  the sanitized plan is reviewed by the named human deployer
 
 ---
 
@@ -285,3 +290,93 @@ redaction and must never be committed or rendered to logs.
 - This is the first functional OS digest. The prior mutable
   `helloworld:latest` placeholder is not a rollback target; the current digest
   becomes the known-good baseline for the next release.
+
+---
+
+## 14. D3 isolated early-adopter preparation (DL-20260903-03 / -04)
+
+**Status:** synthetic Beta Lab path approved; local source gates complete;
+release SHA/CI binding required; **not deployed**; **PHI not authorized**
+
+The D3 design uses new `infra/beta/bootstrap` and `infra/beta/environment`
+state boundaries. It does not import, promote, rename, or reference the D2
+workload resources, and it does not share Track A state, identity, database,
+storage, or networking. Workloads are digest-pinned and disabled by default.
+
+Read-only Azure inventory on 2026-09-03 found no existing beta resource-group
+collision. `centralus` is only a provisional single-region candidate because
+the current subscription rejected PostgreSQL Flexible Server in East US.
+Required resource providers are registered, Central US advertises the selected
+service families and the runner's `Standard_B2s` VM shape, and the applicable
+BS-family quota had room for the runner's two vCPUs when checked. Those are
+point-in-time facts, not a capacity guarantee. D3 must select either the
+implemented Premium/private ACR posture or record a reviewed synthetic-only
+public-registry exception. The recommended posture is private, but the source
+requires an explicit selection and its routing and cost evidence remain human
+deployment prerequisites.
+
+The D3 Celery broker path is selected in source: Azure Managed Redis
+`Balanced_B0`, two-node high availability, TLS-only `NoCluster`, `NoEviction`,
+one-second AOF persistence, public access disabled, and a `redisEnterprise`
+private endpoint using `privatelink.redis.azure.net`. AzureRM 4.81 supports the
+resource natively. Read-only Central US retail evidence on 2026-09-03 was
+$0.018 per node-hour (about $26.28/month for two HA nodes), before the private
+endpoint and data processing. The legacy D2 Basic C0 service retires on
+2028-09-30; a self-hosted Container Apps broker was rejected because the
+current application lacks an automatic PostgreSQL-to-broker re-enqueue scanner
+and a single ephemeral replica would not satisfy the worker reliability gate.
+The human plan record must still refresh regional availability, quota, and
+contract pricing.
+
+The current low-traffic planning envelope for the source-declared private
+shape is approximately **$170–260/month** across the bootstrap/state and
+workload resource groups, without credits and excluding founder support, Clerk
+paid-plan charges, taxes, and unusual egress/log volume. The proposed first
+guardrail is a **$350/month aggregate Cost Management alert across both D3
+resource groups**. It is a notification threshold, not a cap or automatic
+shutdown. Owner acceptance, a human-owned alert recipient, exact-plan pricing,
+and evidence that both groups are covered remain required.
+
+No D3 Azure command that could mutate resources or state has run. The approved
+`synthetic_lab` mode does not require a named clinic, BAA, or PHI authorization.
+Local verification completed on 2026-09-03: `./scripts/d3-self-test.sh` passed
+with **209 Python** and **32 web** tests; bootstrap OpenTofu passed **6/6** and
+environment OpenTofu passed **32/32**; deployment guards, Bash syntax, and
+ShellCheck were clean; focused PITR/recovery/offboarding tests passed **31/31**;
+and the protected-runner payload measured **61,132 / 65,536 bytes**. Final
+local Linux/amd64 API and web builds succeeded, current-database Trivy scans
+reported **0 fixable HIGH/CRITICAL findings**, and the final source audit found
+no code blocker.
+
+Any deployable release must use a committed SHA with green GitHub CI and bind
+that exact SHA in its external protected release record. The bootstrap plan
+also remains blocked on a dedicated synthetic Box UUID, named human deployer,
+final region/SKU/cost and registry choices, protected-runner network evidence,
+and approval of the exact saved bootstrap plan/review hashes. The create-only
+foundation plan then receives its own exact hash approval and keeps the
+database-preparation job and all workloads off.
+
+Only after the foundation outputs the exact web/API origins can a human create
+the production Cosmas OS Clerk instance and production Beta Lab Organization,
+build/scan/push the production-configured images, and record their immutable
+digests. A separately approved database-stage plan and live unscheduled job
+must produce the structured `database_preparation_attestation`; protected-runner
+probes separately produce `runner_live_network_evidence_reference`. Enabling
+workloads requires those records, web release evidence, the final committed
+capability-manifest hash, exact current state lineage/serial, and another
+human-approved saved plan hash. The source provides the database path as a
+separate, digest-pinned Container Apps Job with an ACR-pull-only identity and
+credential-free evidence output; the foundation creates neither that job nor
+private Key Vault/Blob workload data-plane objects.
+
+Tester admission is a final human gate after login/authority, readiness,
+audit/purge, restore, rollback, drift, monitoring, and offboarding evidence.
+Any later `authorized_beta` plan additionally requires the named clinic,
+clinic approval, applicable BAA/service eligibility, and a separate PHI
+authorization.
+
+The local-only verification entry point is `./scripts/d3-self-test.sh`. It
+validates application behavior, the two OpenTofu roots, and the non-root image
+without logging into Azure or Clerk. The complete gate passed on 2026-09-03;
+that local result is not GitHub CI, an Azure plan/apply, or live Clerk/Azure
+acceptance evidence.
