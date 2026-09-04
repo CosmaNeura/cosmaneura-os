@@ -197,22 +197,22 @@ MyCatholicDoctor Clerk application, D2 resources, or Track A state.
 | Identity administration | Protected first-owner bootstrap plus an authenticated owner-only roster and web screen for bind, deactivate, reactivate, and ownership transfer; stale-owner race regression covered |
 | Storage | Managed-identity Azure Blob adapter with Box-prefixed keys |
 | Infrastructure | Independent bootstrap/environment roots, separated web/runtime/database-job identities, staged private data-plane writes, private Azure Managed Redis `Balanced_B0` with two-node HA/TLS/one-second AOF, a manual digest-pinned in-network role/migration verifier, immutable API/worker and web image digests |
-| Complete local gate | `./scripts/d3-self-test.sh` passed on 2026-09-03: Ruff, Pyright, Alembic/OpenAPI/demo, **209 Python tests**, **32 web tests**, and the production web build passed |
-| Infrastructure and shell gates | Bootstrap OpenTofu **6/6** and environment OpenTofu **32/32** passed; deployment guards, Bash syntax, and ShellCheck were clean |
+| Complete local gate | `./scripts/d3-self-test.sh` passed on 2026-09-04: Ruff, Pyright, Alembic/OpenAPI/demo, **447 Python tests**, **32 web tests**, and the production web build passed |
+| Infrastructure and shell gates | Bootstrap OpenTofu **6/6** and environment OpenTofu **35/35** passed; deployment guards, formatting, Bash syntax, ShellCheck, and diff integrity were clean |
 | Recovery/offboarding suites | Focused PITR, release recovery, and offboarding tests passed **31/31** |
-| Protected runner | Final compressed custom-data payload measured **61,132 / 65,536 bytes** |
+| Protected runner | The guarded compressed custom-data payload remains within Azure's **65,536-byte** limit |
 | Container evidence | Final local Linux/amd64 API and web images built; both current-database Trivy scans reported **0 fixable HIGH/CRITICAL findings**; final release digests do not exist until protected-runner build/push |
-| Security review | Final source audit found **no code blocker**; live control and deployment evidence remain required |
+| Security review | Independent adversarial review found **no open P0-P2 source defect**; live control and deployment evidence remain required |
 | Clerk state | Separate Cosmas OS development app and zero-member Cosmas Beta Lab Org created under `DL-20260903-05`; email-code, invite-only, required Org membership, disabled user-created Orgs, and exact API audience configured; existing Cosmas app untouched |
 | Release eligibility | **LOCAL SOURCE GATES COMPLETE**; each deployable release still requires a committed SHA, green GitHub CI, and exact-SHA binding in its external protected release record |
-| Live state | **D3 not deployed**; a development-only Clerk structure exists, but no D3 Azure resource, production Clerk instance, tester invitation, credential in the repository, MCD transfer, or PHI was created |
+| Live state | The isolated D3 bootstrap/state boundary and protected runner exist. The application foundation, database job, workloads, custom-domain binding, production Clerk instance, tester invitations, MCD transfer, and PHI remain absent |
 
 The current private, low-traffic D3 planning envelope is approximately
 **$170–260/month** across its bootstrap/state and workload resource groups,
 without credits and excluding founder support, Clerk paid-plan charges, taxes,
-and unusual egress/log volume. The proposed **$350/month combined alert** is a
-notification threshold across both D3 groups, not a spending cap, and still
-requires owner approval plus a human-owned recipient before apply.
+and unusual egress/log volume. The accepted **$350/month combined alert** is a
+notification threshold across both D3 groups, not a spending cap; the exact
+plan and human-owned recipient still require review before apply.
 
 The concrete source-controlled capability record is
 `docs/beta/SYNTHETIC_LAB_CAPABILITY_MANIFEST.md`. A deployable release must bind

@@ -6,6 +6,10 @@ output "tenant_id" {
   value = var.tenant_id
 }
 
+output "location" {
+  value = var.location
+}
+
 output "deployment_mode" {
   value = var.deployment_mode
 }

@@ -255,6 +255,10 @@ resource "terraform_data" "prerequisite_guard" {
       error_message = "deploy_workloads requires human approval of the exact D3 web_origin."
     }
     precondition {
+      condition     = !var.deploy_workloads || var.web_custom_domain != null
+      error_message = "deploy_workloads requires a dedicated web_custom_domain for production Clerk; DNS readiness remains separately gated."
+    }
+    precondition {
       condition     = !var.web_custom_domain_dns_ready || (var.web_custom_domain != null && var.deploy_workloads && var.web_image_digest != null)
       error_message = "web_custom_domain_dns_ready may be enabled only for a workload plan with a concrete web_custom_domain and web image."
     }

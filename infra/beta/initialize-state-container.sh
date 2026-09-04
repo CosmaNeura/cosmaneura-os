@@ -1,4 +1,36 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
+case "$-" in
+  *p*) ;;
+  *)
+    printf '%s\n' "D3 state initialization refused: invoke with /bin/bash -p" >&2
+    exit 1
+    ;;
+esac
+
+_cosmas_state_path="/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin"
+_cosmas_state_environment_clean=true
+while IFS='=' read -r _cosmas_state_name _cosmas_state_value; do
+  case "$_cosmas_state_name" in
+    COSMAS_STATE_ENV_ISOLATED|HOME|LANG|LC_ALL|PATH|PWD|SHLVL|_) ;;
+    *) _cosmas_state_environment_clean=false ;;
+  esac
+done < <(/usr/bin/env)
+if [[ "${COSMAS_STATE_ENV_ISOLATED:-}" != "1" \
+  || "$_cosmas_state_environment_clean" != "true" \
+  || "${PATH:-}" != "$_cosmas_state_path" \
+  || "${HOME:-}" != "/root" \
+  || "${LANG:-}" != "C.UTF-8" \
+  || "${LC_ALL:-}" != "C.UTF-8" ]]; then
+  exec /usr/bin/env -i \
+    PATH="$_cosmas_state_path" HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    COSMAS_STATE_ENV_ISOLATED=1 \
+    /bin/bash --noprofile --norc -p "$0" "$@"
+fi
+unset COSMAS_STATE_ENV_ISOLATED BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH \
+  PYTHONSTARTUP BASH_XTRACEFD PS4
+unset _cosmas_state_path _cosmas_state_environment_clean _cosmas_state_name \
+  _cosmas_state_value
 set -euo pipefail
 
 # Intended for Azure VM Run Command on the protected deployment runner. It
@@ -16,9 +48,12 @@ deploy_identity_client_id="$2"
 
 [[ "$storage_account_name" =~ ^[a-z0-9]{3,24}$ ]] || die "storage account name is invalid"
 [[ "$deploy_identity_client_id" =~ ^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$ ]] || die "deploy identity client ID is invalid"
-command -v python3 >/dev/null 2>&1 || die "python3 is required on the protected runner"
+[[ -x /usr/bin/python3 && ! -L /usr/bin/python3 ]] || die "fixed python3 is required on the protected runner"
 
-python3 - "$storage_account_name" "$deploy_identity_client_id" <<'PY'
+/usr/bin/env -i \
+  PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin \
+  HOME=/nonexistent LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  /usr/bin/python3 -I -E -s - "$storage_account_name" "$deploy_identity_client_id" <<'PY'
 import email.utils
 import json
 import sys

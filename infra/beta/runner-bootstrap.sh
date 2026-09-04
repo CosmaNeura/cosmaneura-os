@@ -1,5 +1,50 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
 set -euo pipefail
+
+bootstrap_environment_clean=true
+while IFS='=' read -r bootstrap_name _; do
+  case "$bootstrap_name" in
+    COSMAS_BOOTSTRAP_ENV_ISOLATED|HOME|LANG|LC_ALL|PATH|PWD|SHLVL|_) ;;
+    *) bootstrap_environment_clean=false ;;
+  esac
+done < <(/usr/bin/env)
+if [[ "${COSMAS_BOOTSTRAP_ENV_ISOLATED:-}" != "1" \
+  || "$bootstrap_environment_clean" != "true" \
+  || "${PATH:-}" != "/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin" \
+  || "${HOME:-}" != "/root" \
+  || "${LANG:-}" != "C.UTF-8" \
+  || "${LC_ALL:-}" != "C.UTF-8" ]]; then
+  exec /usr/bin/env -i \
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin \
+    HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    COSMAS_BOOTSTRAP_ENV_ISOLATED=1 \
+    /bin/bash --noprofile --norc -p "$0" "$@"
+fi
+unset COSMAS_BOOTSTRAP_ENV_ISOLATED BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PYTHONSTARTUP \
+  BASH_XTRACEFD PS4
+unset bootstrap_environment_clean bootstrap_name
+
+python3() {
+  /usr/bin/python3 -I -E -s "$@"
+}
+
+curl() {
+  /usr/bin/env -i \
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin \
+    HOME=/nonexistent LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    /usr/bin/curl --disable --noproxy '*' \
+      --cacert /etc/ssl/certs/ca-certificates.crt "$@"
+}
+
+az() {
+  /usr/bin/env -i \
+    PATH=/usr/sbin:/usr/bin:/sbin:/bin:/usr/local/bin \
+    HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    AZURE_CONFIG_DIR="${AZURE_CONFIG_DIR:-/root/.azure}" \
+    AZURE_CORE_NO_COLOR=1 AZURE_CORE_ONLY_SHOW_ERRORS=1 \
+    /usr/bin/az "$@"
+}
 
 # Executed as root by Azure Run Command. Every argument is non-secret release
 # metadata. Do not add repository credentials, Terraform variables, or secrets.
@@ -177,7 +222,7 @@ apt-get install -y --no-install-recommends --allow-downgrades \
   "docker-buildx=$docker_buildx_package_version" \
   "git=$git_package_version" \
   "jq=$jq_package_version"
-apt-mark hold azure-cli docker.io docker-buildx git jq >/dev/null
+apt-mark hold azure-cli curl docker.io docker-buildx git jq >/dev/null
 
 tofu_archive="$(mktemp /tmp/tofu.XXXXXX.zip)"
 trap 'rm -f -- "$key_tmp" "$tofu_archive"' EXIT
@@ -271,23 +316,26 @@ jq -n \
   --arg trivy "$(trivy --version | awk 'NR == 1 {print $2}')" \
   --arg trivy_archive_sha256 "$trivy_linux_amd64_sha256" \
   --arg trivy_binary_sha256 "$(sha256sum /usr/local/bin/trivy | awk '{print $1}')" \
-  --arg azure_cli "$(az version --output json | jq -r '."azure-cli"')" \
+  --arg azure_cli "$(/usr/bin/az version --output json | /usr/bin/jq -r '."azure-cli"')" \
   --arg azure_cli_package_version "$(dpkg-query -W -f='${Version}' azure-cli)" \
-  --arg azure_cli_binary_sha256 "$(sha256sum "$(command -v az)" | awk '{print $1}')" \
-  --arg docker "$(docker --version)" \
+  --arg azure_cli_binary_sha256 "$(sha256sum /usr/bin/az | awk '{print $1}')" \
+  --arg curl "$(/usr/bin/curl --version | awk 'NR == 1')" \
+  --arg curl_package_version "$(dpkg-query -W -f='${Version}' curl)" \
+  --arg curl_binary_sha256 "$(sha256sum /usr/bin/curl | awk '{print $1}')" \
+  --arg docker "$(/usr/bin/docker --version)" \
   --arg docker_server_version "$(docker version --format '{{.Server.Version}}')" \
   --arg docker_package_version "$(dpkg-query -W -f='${Version}' docker.io)" \
-  --arg docker_binary_sha256 "$(sha256sum "$(command -v docker)" | awk '{print $1}')" \
+  --arg docker_binary_sha256 "$(sha256sum /usr/bin/docker | awk '{print $1}')" \
   --arg dockerd_binary_sha256 "$(sha256sum /usr/bin/dockerd | awk '{print $1}')" \
   --arg docker_buildx "$(docker buildx version)" \
   --arg docker_buildx_package_version "$(dpkg-query -W -f='${Version}' docker-buildx)" \
   --arg docker_buildx_binary_sha256 "$(sha256sum /usr/libexec/docker/cli-plugins/docker-buildx | awk '{print $1}')" \
-  --arg git "$(git --version)" \
+  --arg git "$(/usr/bin/git --version)" \
   --arg git_package_version "$(dpkg-query -W -f='${Version}' git)" \
-  --arg git_binary_sha256 "$(sha256sum "$(command -v git)" | awk '{print $1}')" \
-  --arg jq_version "$(jq --version)" \
+  --arg git_binary_sha256 "$(sha256sum /usr/bin/git | awk '{print $1}')" \
+  --arg jq_version "$(/usr/bin/jq --version)" \
   --arg jq_package_version "$(dpkg-query -W -f='${Version}' jq)" \
-  --arg jq_binary_sha256 "$(sha256sum "$(command -v jq)" | awk '{print $1}')" \
+  --arg jq_binary_sha256 "$(sha256sum /usr/bin/jq | awk '{print $1}')" \
   --arg configured_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" '
     {
       configured_at: $configured_at,
@@ -300,6 +348,9 @@ jq -n \
       azure_cli: $azure_cli,
       azure_cli_package_version: $azure_cli_package_version,
       azure_cli_binary_sha256: $azure_cli_binary_sha256,
+      curl: $curl,
+      curl_package_version: $curl_package_version,
+      curl_binary_sha256: $curl_binary_sha256,
       docker: $docker,
       docker_server_version: $docker_server_version,
       docker_package_version: $docker_package_version,

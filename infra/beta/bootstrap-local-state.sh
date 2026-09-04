@@ -1,4 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
+_cosmas_wrapper_dir="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && /bin/pwd -P)" || exit 1
+# shellcheck source=local-wrapper-env.sh
+. "$_cosmas_wrapper_dir/local-wrapper-env.sh"
+cosmas_isolate_local_wrapper_environment "$@"
+unset -f cosmas_isolate_local_wrapper_environment
+unset _cosmas_wrapper_dir
 set -euo pipefail
 
 umask 077
@@ -13,7 +20,7 @@ usage() {
   printf '%s\n' \
     "Usage:" \
     "  $0 plan --state PATH --var-file PATH --plan-out PATH --review-out PATH" \
-    "  $0 apply --state PATH --var-file PATH --plan PATH --review PATH --approval PATH" \
+    "  $0 apply --state PATH --var-file PATH --plan PATH --review PATH --approval PATH --attempt-claim PATH" \
     "  $0 outputs --state PATH --output PATH" \
     "" \
     "Bootstrap state and artifacts must be in private paths outside the repo." \
@@ -33,6 +40,7 @@ var_file=""
 plan_path=""
 review_path=""
 approval_path=""
+attempt_claim=""
 output_path=""
 
 while [[ $# -gt 0 ]]; do
@@ -42,6 +50,7 @@ while [[ $# -gt 0 ]]; do
     --plan-out|--plan) plan_path="${2:-}"; shift 2 ;;
     --review-out|--review) review_path="${2:-}"; shift 2 ;;
     --approval) approval_path="${2:-}"; shift 2 ;;
+    --attempt-claim) attempt_claim="${2:-}"; shift 2 ;;
     --output) output_path="${2:-}"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *) guard_die "unknown argument: $1" ;;
@@ -50,7 +59,7 @@ done
 
 [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "outputs" ]] || guard_die "operation must be plan, apply, or outputs"
 [[ -n "$state_path" ]] || guard_die "--state is required"
-for command_name in jq stat git; do
+for command_name in az jq stat git; do
   command -v "$command_name" >/dev/null 2>&1 || guard_die "$command_name is required"
 done
 guard_find_terraform
@@ -144,10 +153,11 @@ inspect_bootstrap_plan() {
   chmod 600 "$plan_json"
 
   jq -e '
-    .planned_values.outputs.box_id.value
+    (.planned_values.outputs.location.value == "centralus") and
+    (.planned_values.outputs.box_id.value
       | strings
-      | test("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$")
-  ' "$plan_json" >/dev/null || guard_die "bootstrap plan does not expose an exact Box UUID"
+      | test("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$"))
+  ' "$plan_json" >/dev/null || guard_die "bootstrap plan does not expose the exact Central US/Box boundary"
   jq -e '
     (.planned_values.outputs.deployment_mode.value == "synthetic_lab" and
       .planned_values.outputs.data_classification.value == "synthetic-only") or
@@ -199,6 +209,7 @@ write_review_manifest() {
     --arg subscription_id "$(jq -er '.planned_values.outputs.subscription_id.value' "$plan_json")" \
     --arg tenant_id "$(jq -er '.planned_values.outputs.tenant_id.value' "$plan_json")" \
     --arg box_id "$(jq -er '.planned_values.outputs.box_id.value' "$plan_json")" \
+    --arg location "$(jq -er '.planned_values.outputs.location.value' "$plan_json")" \
     --arg deployment_mode "$(jq -er '.planned_values.outputs.deployment_mode.value' "$plan_json")" \
     --arg data_classification "$(jq -er '.planned_values.outputs.data_classification.value' "$plan_json")" \
     --arg backend_key "$(jq -er '.planned_values.outputs.backend_key.value' "$plan_json")" \
@@ -232,6 +243,7 @@ write_review_manifest() {
           subscription_id: $subscription_id,
           tenant_id: $tenant_id,
           box_id: $box_id,
+          location: $location,
           deployment_mode: $deployment_mode,
           data_classification: $data_classification,
           backend_key: $backend_key,
@@ -266,6 +278,7 @@ validate_review_and_approval() {
     --arg subscription_id "$(jq -er '.planned_values.outputs.subscription_id.value' "$plan_json")" \
     --arg tenant_id "$(jq -er '.planned_values.outputs.tenant_id.value' "$plan_json")" \
     --arg box_id "$(jq -er '.planned_values.outputs.box_id.value' "$plan_json")" \
+    --arg location "$(jq -er '.planned_values.outputs.location.value' "$plan_json")" \
     --arg deployment_mode "$(jq -er '.planned_values.outputs.deployment_mode.value' "$plan_json")" \
     --arg data_classification "$(jq -er '.planned_values.outputs.data_classification.value' "$plan_json")" \
     --arg backend_key "$(jq -er '.planned_values.outputs.backend_key.value' "$plan_json")" \
@@ -289,7 +302,8 @@ validate_review_and_approval() {
       .prior_state.serial == (if $prior_state_exists then $prior_state_serial else null end) and
       .prior_state.sha256 == (if $prior_state_exists then $prior_state_sha256 else null end) and
       .boundary.subscription_id == $subscription_id and .boundary.tenant_id == $tenant_id and
-      .boundary.box_id == $box_id and .boundary.deployment_mode == $deployment_mode and
+      .boundary.box_id == $box_id and .boundary.location == $location and $location == "centralus" and
+      .boundary.deployment_mode == $deployment_mode and
       .boundary.data_classification == $data_classification and .boundary.backend_key == $backend_key and
       .boundary.state_resource_group == $state_resource_group and
       .boundary.workload_resource_group == $workload_resource_group and
@@ -297,17 +311,44 @@ validate_review_and_approval() {
       .managed_actions == $managed_actions[0] and
       .security_posture == $security_posture[0]
     ' "$review_path" >/dev/null || guard_die "bootstrap review does not match the exact plan, source, tool, lock, actions, and boundary"
-  jq -e \
-    --arg plan_sha256 "$plan_sha256" \
-    --arg review_sha256 "$review_sha256" \
-    --arg source_sha "$GUARD_SOURCE_SHA" '
-      .schema_version == 1 and
-      .plan_sha256 == $plan_sha256 and
-      .review_sha256 == $review_sha256 and
-      .source_sha == $source_sha and
-      (.reviewer | strings | length >= 3) and
-      (.review_reference | strings | length >= 3)
-    ' "$approval_path" >/dev/null || guard_die "bootstrap approval does not bind a named reviewer/reference to the exact review, plan, and source"
+  guard_python "$script_dir/validate_bootstrap_apply_approval.py" "$approval_path" \
+    --source-sha "$GUARD_SOURCE_SHA" \
+    --plan-sha256 "$plan_sha256" \
+    --review-sha256 "$review_sha256" \
+    --variable-file-sha256 "$(guard_sha256 "$var_file")" \
+    --state-exists "$PRIOR_STATE_EXISTS" \
+    --state-lineage "$PRIOR_STATE_LINEAGE" \
+    --state-serial "$PRIOR_STATE_SERIAL" \
+    --state-sha256 "$PRIOR_STATE_SHA256" || guard_die "bootstrap approval failed strict v2 binding and freshness validation"
+}
+
+verify_bootstrap_live_boundary() {
+  local account_json
+  local group_name
+  local group_json
+  local group_exists
+  local expected_subscription
+  local expected_tenant
+
+  expected_subscription="$(jq -er '.planned_values.outputs.subscription_id.value | ascii_downcase' "$plan_json")"
+  expected_tenant="$(jq -er '.planned_values.outputs.tenant_id.value | ascii_downcase' "$plan_json")"
+  account_json="$(az account show --only-show-errors --output json)" || guard_die "Azure account context is unavailable"
+  [[ "$(jq -er '.id | ascii_downcase' <<<"$account_json")" == "$expected_subscription" ]] || guard_die "bootstrap Azure subscription differs from the reviewed plan"
+  [[ "$(jq -er '.tenantId | ascii_downcase' <<<"$account_json")" == "$expected_tenant" ]] || guard_die "bootstrap Azure tenant differs from the reviewed plan"
+  for group_name in \
+    "$(jq -er '.planned_values.outputs.backend_resource_group_name.value' "$plan_json")" \
+    "$(jq -er '.planned_values.outputs.workload_resource_group_name.value' "$plan_json")"; do
+    group_exists="$(az group exists --subscription "$expected_subscription" --name "$group_name" --only-show-errors --output tsv)" || guard_die "bootstrap resource-group existence check failed"
+    [[ "$group_exists" == "true" || "$group_exists" == "false" ]] || guard_die "bootstrap resource-group existence result is invalid"
+    if [[ "$group_exists" == "true" ]]; then
+      group_json="$(az group show --subscription "$expected_subscription" --name "$group_name" --only-show-errors --output json)" || guard_die "existing bootstrap resource group cannot be read"
+      jq -e --arg name "${group_name,,}" --arg subscription "$expected_subscription" '
+        (.name | ascii_downcase) == $name and
+        (.location | ascii_downcase) == "centralus" and
+        (.id | ascii_downcase) == ("/subscriptions/" + $subscription + "/resourcegroups/" + $name)
+      ' <<<"$group_json" >/dev/null || guard_die "existing bootstrap resource group is outside the exact Central US boundary"
+    fi
+  done
 }
 
 case "$operation" in
@@ -350,19 +391,30 @@ case "$operation" in
     [[ -n "$var_file" ]] || guard_die "apply requires --var-file"
     [[ -n "$review_path" ]] || guard_die "apply requires --review"
     [[ -n "$approval_path" ]] || guard_die "apply requires --approval"
+    [[ -n "$attempt_claim" ]] || guard_die "apply requires --attempt-claim"
     plan_path="$(guard_absolute_path "$plan_path")"
     var_file="$(guard_absolute_path "$var_file")"
     review_path="$(guard_absolute_path "$review_path")"
     approval_path="$(guard_absolute_path "$approval_path")"
-    for artifact in "$var_file" "$plan_path" "$review_path" "$approval_path"; do
+    attempt_claim="$(guard_absolute_path "$attempt_claim")"
+    for artifact in "$var_file" "$plan_path" "$review_path" "$approval_path" "$attempt_claim"; do
       guard_outside_repository "$artifact" "$repository_root" "bootstrap artifact"
+    done
+    for artifact in "$var_file" "$plan_path" "$review_path" "$approval_path"; do
       guard_private_file "$artifact" "bootstrap apply artifact"
     done
+    guard_new_private_path "$attempt_claim" "bootstrap apply-attempt claim"
     jq -e 'type == "object"' "$var_file" >/dev/null || guard_die "bootstrap variable file must be a JSON object"
     load_local_state_binding "$state_path" "$var_file"
 
     initialize_bootstrap
     inspect_bootstrap_plan "$plan_path"
+    validate_review_and_approval
+    verify_bootstrap_live_boundary
+    validate_review_and_approval
+    guard_claim_apply_attempt "$attempt_claim" "$GUARD_SOURCE_SHA" "bootstrap" "bootstrap" \
+      "$(guard_sha256 "$plan_path")" "$(guard_sha256 "$approval_path")" \
+      "$(guard_sha256 "$approval_path")" "direct-owner-authorization"
     validate_review_and_approval
     "$GUARD_TERRAFORM_BIN" -chdir="$bootstrap_dir" apply \
       -input=false \
@@ -382,7 +434,7 @@ case "$operation" in
     initialize_bootstrap
     "$GUARD_TERRAFORM_BIN" -chdir="$bootstrap_dir" output -state="$state_path" -json >"$output_path"
     chmod 600 "$output_path"
-    jq -e '.box_id.value | strings | length > 0' "$output_path" >/dev/null || {
+    jq -e '.location.value == "centralus" and (.box_id.value | strings | length > 0)' "$output_path" >/dev/null || {
       rm -f -- "$output_path"
       guard_die "bootstrap outputs are missing box_id"
     }

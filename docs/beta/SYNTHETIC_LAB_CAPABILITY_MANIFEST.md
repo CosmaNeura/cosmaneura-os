@@ -1,7 +1,7 @@
 # D3 Cosmas Beta Lab capability manifest
 
-Manifest status: **LOCAL SOURCE GATES COMPLETE / RELEASE SHA AND CI BINDING REQUIRED / LIVE EVIDENCE INCOMPLETE**
-Environment status: **NOT DEPLOYED**
+Manifest status: **CURRENT WORKTREE GATES PASS / RELEASE SHA AND CI BINDING REQUIRED / LIVE APPLICATION EVIDENCE INCOMPLETE**
+Environment status: **ISOLATED BOOTSTRAP AND PROTECTED RUNNER DEPLOYED / APPLICATION FOUNDATION AND WORKLOADS ABSENT**
 Deployment mode: **`synthetic_lab`**
 Data classification: **`synthetic-only`**
 PHI authorization: **NOT AUTHORIZED**
@@ -10,8 +10,9 @@ Non-auth external connectors: **ALL DARK**
 This is the concrete source-controlled capability decision for the first D3
 Cosmas Beta Lab. It records what the lab may do and what remains blocked. It is
 not a Terraform approval, a live-evidence record, or permission to invite a
-tester. Deployment-derived values stay `PENDING` until a human records them;
-none may be replaced with an invented identifier or evidence reference.
+tester. Private deployment identifiers remain in protected evidence rather
+than this public manifest; values that do not yet exist stay `PENDING`. None may
+be replaced with an invented identifier or evidence reference.
 
 The final workload approval must identify this file at the reviewed full Git
 commit and record its SHA-256 outside the repository. Editing the file after
@@ -26,7 +27,7 @@ that review invalidates the prior manifest reference.
 | Data | **Invented data only** | `synthetic_lab`; PHI, real clinic data, and production exports prohibited |
 | Identity topology | **Separate Cosmas OS Clerk application and one Beta Lab Organization mapped to one Box** | `DL-20260903-04` and `DL-20260903-05` |
 | Development Clerk state | **CONFIGURED** | B2B, email verification code, invite-only, Organizations required, user-created Organizations disabled, audience `cosmas-os-beta-api`; zero members |
-| Production Clerk state | **PENDING EXACT OWNER DECISION AND FOUNDATION-DERIVED WEB ORIGIN** | Recommended package: `beta.cosmaneura.com`, verified email + TOTP + recovery codes, SMS disabled, no wildcard/shared ACA origin; no production Organization or tester invitation yet |
+| Production Clerk state | **HOSTNAME AND POLICY CHOSEN; EXACT POLICY-PACKAGE ACCEPTANCE AND EXECUTION PENDING** | Accepted bounded input: `beta.cosmaneura.com`, verified email + TOTP + recovery codes, SMS disabled, no wildcard/shared ACA origin. No production Organization or tester invitation exists yet |
 | MyCatholicDoctor users | **NO TRANSFER / NO SHARED SESSION** | Direct re-invitation may be reviewed later; bulk migration remains separately gated |
 | Mobile | **SCHEDULED AFTER BROWSER D3, BEFORE D4; NOT AUTHORIZED TO BUILD/UPLOAD HERE** | `DL-20260903-06` |
 | Track A | **OUT OF SCOPE / UNTOUCHED** | No shared state, identity, database, storage, credential, or direct call |
@@ -36,20 +37,20 @@ that review invalidates the prior manifest reference.
 | Field | Current value |
 |---|---|
 | Organization display name | `Cosmas Beta Lab` |
-| Dedicated logical `box_id` | **PENDING — generate a UUID and obtain owner review before bootstrap apply** |
+| Dedicated logical `box_id` | **ASSIGNED IN PROTECTED BOOTSTRAP EVIDENCE — exact UUID intentionally not published** |
 | Production Clerk Organization ID | **PENDING — create after the exact web origin exists** |
 | Production Clerk issuer/JWKS | **PENDING — exact production values only** |
 | Accepted Clerk audience | `cosmas-os-beta-api` |
 | Azure subscription display name | `Microsoft Azure Sponsorship` (identifiers omitted from this repository record) |
-| Bootstrap/state resource group | **PENDING — exact source-derived name in reviewed bootstrap plan** |
-| Workload resource group | **PENDING — exact source-derived name in reviewed bootstrap/environment plans** |
-| Region | `centralus` **PROVISIONAL; human approval and refreshed quota/price evidence pending** |
-| Registry posture | `private` **RECOMMENDED TARGET; exact selection plus Premium/Private Link cost and routing approval pending** |
+| Bootstrap/state resource group | **CREATED — exact source-derived name retained in protected bootstrap evidence** |
+| Workload resource group | **CREATED AS THE ISOLATED BOUNDARY — exact name retained in protected bootstrap evidence; application foundation absent** |
+| Region | `centralus` **ACCEPTED FOR THIS SYNTHETIC LAB; live capacity and refreshed cost evidence pending** |
+| Registry posture | `private` **ACCEPTED; Premium/Private Link live routing and refreshed exact-plan cost proof pending** |
 | Deployable source revision | **REQUIRED PER RELEASE — exact committed SHA with green GitHub CI and external protected-record binding** |
 | API/worker image digest | **PENDING PROTECTED-RUNNER BUILD, SCAN, PUSH, AND READBACK** |
 | Web image digest | **PENDING EXACT-ORIGIN/PRODUCTION-CLERK BUILD, SCAN, PUSH, AND READBACK** |
-| Dedicated production web hostname | **PENDING EXACT OWNER DECISION — `beta.cosmaneura.com` RECOMMENDED** |
-| API and web origins | **PENDING FOUNDATION OUTPUTS; production web origin must use the accepted dedicated hostname** |
+| Dedicated production web hostname | **ACCEPTED — `beta.cosmaneura.com`** |
+| API and web origins | Web origin **ACCEPTED** as `https://beta.cosmaneura.com`; foundation-derived API and default-host evidence **PENDING** |
 | Named human deployer | **PENDING HUMAN RECORD** |
 | Capability manifest binding | **REQUIRED PER DEPLOYABLE RELEASE — exact committed SHA plus external SHA-256 evidence record** |
 
@@ -98,34 +99,37 @@ approved authentication boundary, not a general D5 connector activation.
 ## 5. Source evidence and open verification
 
 Current component evidence is recorded in `BUILD_REPORT.md`. The complete
-`./scripts/d3-self-test.sh` gate passed on 2026-09-03 with **209 Python** and
-**32 web** tests, bootstrap OpenTofu **6/6**, environment OpenTofu **32/32**,
-and clean deployment-guard, Bash-syntax, and ShellCheck results. Focused
-PITR/recovery/offboarding tests passed **31/31**, and the protected-runner
-payload measured **61,132 / 65,536 bytes**. Final local Linux/amd64 API and web
-builds succeeded; current-database Trivy scans found **0 fixable HIGH/CRITICAL
-findings**; and the final source audit found no code blocker.
+`./scripts/d3-self-test.sh` gate passed on 2026-09-04 with **447 Python** and
+**32 web** tests, bootstrap OpenTofu **6/6**, environment OpenTofu **35/35**,
+clean deployment guards, and successful local Linux/amd64 API and web builds.
+Ruff, Pyright, Bash syntax, ShellCheck, formatting, and diff integrity pass;
+the guarded protected-runner payload remains within Azure's 65,536-byte limit.
+The latest current-database Trivy scans found **0 fixable HIGH/CRITICAL
+findings**, and independent adversarial review found no open P0-P2 source
+defect.
 
-Local source gates are complete, but that result alone does **not** make a
+Current worktree gates pass, but that result alone does **not** make a
 deployable release or complete D3. Every deployable release must use a committed
 SHA with green GitHub CI and bind that exact SHA in its external protected
-release record. Live Azure, exact-plan/apply, production Clerk, and tester
-acceptance evidence do not exist.
+release record. Protected bootstrap and runner evidence exists. Application
+foundation, workload exact-plan/apply, production Clerk, and tester-acceptance
+evidence does not.
 
 ## 6. Required live controls
 
-- [ ] Bootstrap and workload boundaries use two new D3 resource groups and no
+- [x] Bootstrap and workload boundaries use two new D3 resource groups and no
       D2/Track A dependency.
-- [ ] Protected runner has no public IP or inbound path; exact UAMI, private
+- [x] Protected runner has no public IP or inbound path; exact UAMI, private
       state path, source SHA, toolchain, and network boundary are verified.
+      Fresh verification remains mandatory before every protected operation.
 - [ ] Public access is disabled for PostgreSQL, Redis, Blob, Key Vault, and the
       selected private ACR posture; private DNS and endpoint reachability are
       demonstrated from the exact protected runner.
 - [ ] Runtime identity has only ACR pull, secret read, and Box-container Blob
       rights; web identity has ACR pull only; database-job identity has ACR
       pull only.
-- [ ] The exact owner decision binds the dedicated production hostname and
-      authentication policy before the foundation; the recommended package is
+- [x] The exact owner decision binds the dedicated production hostname and
+      authentication policy before the foundation; the accepted package is
       `beta.cosmaneura.com`, verified email + TOTP + recovery codes, SMS
       disabled, and no wildcard/shared `azurecontainerapps.io` origin.
 - [ ] Production Clerk issuer, JWKS, audience, authorized party, Organization,
@@ -155,7 +159,7 @@ retention, and purge design; it must not inherit this setting implicitly.
 |---|---|
 | Low-traffic infrastructure envelope | **Approximately $170–260/month** across bootstrap/state and workload resource groups; planning range only, no credits |
 | Exclusions | Founder support, Clerk paid-plan charges, taxes, and unusual egress/log volume |
-| Proposed aggregate alert | **$350/month across both D3 resource groups — OWNER APPROVAL PENDING** |
+| Accepted aggregate alert | **$350/month across both D3 resource groups — exact-plan proof and recipient pending** |
 | Alert semantics | Notification only; **not a spending cap or automatic shutdown** |
 | Alert recipient | **PENDING HUMAN-OWNED ADDRESS; do not record the address in this public manifest** |
 | Support owner/escalation | **PENDING** |
@@ -169,12 +173,12 @@ not satisfy the combined requirement.
 | Approval/evidence | Current state |
 |---|---|
 | Release SHA, green CI, and external manifest binding | **REQUIRED PER DEPLOYABLE RELEASE** |
-| Bootstrap saved-plan hash and named-human approval | **PENDING** |
+| Bootstrap saved-plan hash and named-human approval | **COMPLETE / ONE-USE APPROVAL CONSUMED** |
 | Foundation saved-plan hash and named-human approval | **PENDING** |
-| Production Clerk/Org/Box and web-release evidence | **PENDING** |
+| Production Clerk/Org/Box and web-release evidence | **POLICY PACKAGE PREPARED; EXACT ACCEPTANCE, EXECUTION, AND LIVE READBACK PENDING** |
 | Database-stage saved-plan approval and live attestation | **PENDING** |
 | Workload saved-plan hash, lineage/serial, and named-human approval | **PENDING** |
 | Live acceptance and tester-admission decision | **PENDING** |
 
-Final disposition: **BLOCKED — D3 IS NOT COMPLETE OR DEPLOYED; PHI IS NOT
-AUTHORIZED; ALL NON-AUTH EXTERNAL CONNECTORS REMAIN DARK.**
+Final disposition: **BLOCKED — D3 IS NOT COMPLETE; THE APPLICATION IS NOT
+DEPLOYED; PHI IS NOT AUTHORIZED; ALL NON-AUTH EXTERNAL CONNECTORS REMAIN DARK.**

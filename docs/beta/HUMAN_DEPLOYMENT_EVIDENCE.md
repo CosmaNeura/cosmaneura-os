@@ -1,9 +1,9 @@
 # D3 human deployment evidence checklist and runbook
 
-Runbook status: **SYNTHETIC LAB PATH APPROVED / NOT EXECUTED**
-D3 status: **NOT COMPLETE / NOT DEPLOYED**
+Runbook status: **SYNTHETIC LAB PATH APPROVED / BOOTSTRAP EXECUTED / APPLICATION PENDING**
+D3 status: **NOT COMPLETE / APPLICATION NOT DEPLOYED**
 PHI status: **NOT AUTHORIZED**
-Clerk AuthPort: **DEVELOPMENT CONFIGURED / PRODUCTION DOMAIN BLOCKED**
+Clerk AuthPort: **DEVELOPMENT CONFIGURED / PRODUCTION POLICY ACCEPTED / EXECUTION PENDING**
 Non-auth/D5 connectors: **ALL DARK**
 
 This runbook defines evidence a human must produce. It is not an instruction to
@@ -44,56 +44,69 @@ approval sequence is deliberately staged:
 Every apply approval identifies the named human reviewer and binds the exact
 private plan hash. A coding agent cannot approve on the owner's behalf.
 
-## 1. Hard preflight gate
+## 1. Completed bootstrap evidence and remaining pre-foundation gate
 
-The human deployer must stop before the **bootstrap apply** unless every item
-below that can exist before the foundation is complete:
+The bootstrap apply is complete. These checkboxes describe current evidence,
+not an unexecuted template:
 
-- [ ] D3 owner authorization is recorded.
-- [ ] `deployment_mode` is explicitly recorded in the bootstrap input and
-      capability manifest; the later environment plan and resource tags must
-      inherit that exact value.
-- [ ] A dedicated `box_id` is recorded.
+- [x] D3 owner authorization, `synthetic_lab`, and the `synthetic-only` boundary
+      are recorded.
+- [x] A dedicated `box_id`, two D3 resource groups, deploy identity, isolated
+      state boundary, and private protected runner are recorded in protected
+      bootstrap evidence.
 - [x] The separate development Cosmas OS Clerk application and zero-member
-      development Beta Lab Organization are recorded. They are evidence of the
-      identity design only, not production authority.
-- [ ] Human deployer and dedicated beta deployment identity are named.
-- [ ] Final region and residency decision is recorded. Central US is only a
-      provisional 2026-09-03 finding, not standing approval.
-- [ ] Azure Managed Redis `Balanced_B0` availability/quota and current
-      two-node HA plus Private Link cost are confirmed in the selected region;
-      the instance is TLS-only, `NoCluster`, `NoEviction`, AOF-persistent, and
-      public-network-disabled.
-- [ ] Network/CIDR/private DNS/egress/operator-access design is approved.
-- [ ] The exact owner decision accepts a dedicated production web hostname and
-      Clerk authentication policy before foundation planning. The recommended
-      package is `beta.cosmaneura.com`, verified email + TOTP + recovery codes,
-      SMS disabled, and no wildcard/shared `azurecontainerapps.io` origin.
-- [ ] RTO/RPO, backup, retention, purge, monitoring, and support ownership are
-      approved.
-- [ ] The current **$170–260/month low-traffic planning envelope** is refreshed
-      against the exact plan without credits, and the owner approves or revises
-      the proposed **$350 aggregate alert across both D3 resource groups** plus
-      a human-owned recipient. This alert is not a spending cap.
-- [ ] All non-auth/D5 external connectors are DARK unless a later exact gate
-      and capability-specific manifest says otherwise; Clerk AuthPort is
-      enabled only for the approved Organization/Box when testers are admitted.
-- [ ] The deploy contains no Track A resource, state, identity, credential, or
-      database dependency.
+      development Beta Lab Organization are recorded. They are identity-design
+      evidence only, not production authority.
+- [x] Central US is the accepted single-region resource-placement choice; this
+      is not a legal-residency or capacity claim.
+- [x] The private network/operator design, private ACR posture,
+      `beta.cosmaneura.com`, verified-email + TOTP + recovery-code Clerk policy,
+      SMS prohibition, best-effort recovery/support posture, and $350 combined
+      notification threshold are accepted bounded operating choices.
+- [x] All non-auth/D5 connectors are dark, PHI is unauthorized, and the D3
+      boundary has no D2 or Track A dependency.
 
-Before the **workload apply**, the human must additionally stop unless:
+The human must stop before the **foundation plan or apply** unless every item
+below is complete:
 
-- [ ] The foundation-derived dedicated `web_origin` and `api_origin` are
-      recorded; production Clerk does not use the shared
-      `azurecontainerapps.io` web hostname.
+- [ ] The successor source is committed, GitHub CI is green, and the exact SHA
+      is bound in protected release evidence.
+- [ ] The two exact named Azure capacity requests are authorized, submitted,
+      and resolved; Container Apps has at least four sandbox cores and Managed
+      Redis `Balanced_B0` is advertised in Central US.
+- [ ] Capacity, selected-SKU, Private Link, and exact-plan cost evidence is
+      refreshed without assuming credits; a human-owned recipient for the
+      accepted $350 combined alert is recorded privately.
+- [ ] The protected runner's source, identity, toolchain, private state path,
+      no-public-IP posture, and network boundary are freshly reverified.
+- [ ] The named accountable support owner and private escalation route are
+      recorded before tester admission.
+
+Before the **initial workload apply**, the human must additionally stop unless:
+
+- [ ] The foundation-derived `api_origin` and default web host plus the selected
+      dedicated `web_origin` are recorded; production Clerk never treats the
+      shared `azurecontainerapps.io` hostname as an application origin.
 - [ ] The production Cosmas OS Clerk instance and empty production Cosmas Beta
-      Lab Organization are configured for that exact origin and map to the
-      dedicated Box.
+      Lab Organization use the approved preliminary auth/Org policy, map to the
+      dedicated Box, and supply the reviewed publishable key for the web build.
 - [ ] The reviewed API/worker and web digests, web release evidence, structured
       `database_preparation_attestation`, and
       `runner_live_network_evidence_reference` are all present.
 - [ ] The concrete capability manifest is bound by its committed source path,
       commit SHA, and SHA-256 hash; all non-auth connectors remain dark.
+
+Before the **DNS-ready workload promotion** or any tester admission, also stop
+unless:
+
+- [ ] The initial web revision produced protected CNAME/`asuid` evidence for
+      the selected hostname, and a human independently verified those exact DNS
+      records and Azure certificate state.
+- [ ] Clerk's exact custom application origin and redirects are configured and
+      read back; no wildcard, shared ACA, MyCatholicDoctor, or Track A origin is
+      present.
+- [ ] A fresh workload generation and exact approval change only the reviewed
+      DNS-ready progression fields and current live-network evidence.
 
 For `synthetic_lab`, additionally confirm:
 
@@ -163,7 +176,8 @@ Before apply, publish only a whitelist-based summary containing:
 - immutable image digest when enabling workloads, plus non-secret
   SKU/scale/network choices;
 - the strict, whitelisted before/after security-posture projection for every
-  managed resource change (network exposure, RBAC scope, retention,
+  managed resource change (network exposure, exact RBAC scope/role/principal,
+  retention,
   ingress/probes, runtime mode, scale, and monitoring); a newly introduced
   resource type must fail closed until reviewed;
 - a SHA-256 hash of the private saved plan or review artifact;
@@ -193,9 +207,14 @@ Use the exact saved plan reviewed above; do not regenerate an unreviewed plan at
 apply time. Use `transport-to-protected-runner.sh`; it invokes
 `apply-first-environment-plan.sh` for the create-only foundation and
 `apply-environment-plan.sh` for every later or reconciliation stage. Each
-requires a private approval JSON binding the reviewer/reference to the exact
-plan hash and expected prior-state lineage/serial (both null only for the first
-plan).
+requires a private duplicate-free, self-hashed v2 approval binding the exact
+source, release, stage, plan/review/tfvars hashes, state tuple, owner assertion,
+authorization and claim hashes, and content-addressed bundle. Foundation also
+binds the readiness, human-review, cost, package-manifest, and approval-request
+hashes. Its effective expiry is the minimum of every carried expiry and is
+rechecked immediately before mutation. The runner atomically consumes it with
+a root-owned apply-attempt claim; an interrupted/unknown apply requires explicit
+inspection and recovery rather than an ordinary retry.
 
 Record only:
 
@@ -245,10 +264,11 @@ private DNS and endpoint probes on the exact protected runner.
 
 ### Reviewed identity bootstrap
 
-After workloads are applied, the private database is migrated, and the exact
-Clerk settings are active, the human deployer creates a protected envelope
-outside the repository with mode `0600`. The values below are deliberately
-invented shape examples, not deployable defaults:
+After the final DNS-ready workload generation is applied, `workload-verify` is
+fresh and successful for that exact state, the private database is migrated,
+and the exact Clerk settings are active, the human deployer creates a protected
+envelope outside the repository with mode `0600`. The values below are
+deliberately invented shape examples, not deployable defaults:
 
 ```json
 {
@@ -274,11 +294,11 @@ invented shape examples, not deployable defaults:
 }
 ```
 
-After generating fresh live network evidence for the workload state, the human
-runs:
+After generating fresh live network evidence and the required workload
+attestation for the same state, the human runs:
 
 ```text
-bash ./infra/beta/transport-to-protected-runner.sh bootstrap-identity \
+/bin/bash -p ./infra/beta/transport-to-protected-runner.sh bootstrap-identity \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
   --release-id candidate-b \
@@ -290,10 +310,13 @@ The existing manifest schema calls this display field `clinic_display_name`.
 For `synthetic_lab`, `Cosmas Beta Lab` is an organization label, not a clinic
 claim. The transport refuses a manifest inside the repository or readable by
 group/other users, binds it to the exact source/release/state/digest, retrieves
-runtime secrets only inside the private runner, invokes both idempotent CLI
-commands in the exact digest with Azure platform endpoints blocked, and returns
-only a self-hashed sanitized result. The seed loads only the repository's fixed
-invented queue and refuses `authorized_beta` mode.
+runtime secrets only inside the private runner, invokes both bootstrap commands
+twice in the exact digest with Azure platform endpoints blocked, and compares
+two self-hashed readbacks with stable Box, principal, Clerk-binding, audit,
+appointment, patient-link, and pending-ticket counts. Any count change is a
+hard failure. The returned evidence contains only those counts and hashes. The
+seed loads only the repository's fixed invented queue and refuses
+`authorized_beta` mode.
 
 ## 4. Post-apply verification
 
@@ -302,6 +325,19 @@ deployment. For `authorized_beta`, do not use PHI until its separate release
 decision has been recorded and the mode-specific plan has passed all guards.
 
 - [ ] API and worker use the exact approved digest; ACR manifest matches.
+- [ ] Protected `workload-verify` is `verified` for the exact current
+      source/release/state/Box: API, worker, and web revisions/images match;
+      managed-environment subnet/internal/Log Analytics topology, tags, runtime
+      environment and secret references, commands/args, probe definitions,
+      CPU/memory/ephemeral-storage bounds, scale bounds, and three-revision
+      rollback retention match; traffic is 100%
+      to one ready revision; public API/web health succeeds; and the worker is
+      non-ingress and ready. A new verification performs live reads; only
+      artifact retrieval is cached. The resident attestation is revalidated
+      before identity bootstrap or any runtime-acceptance phase; missing,
+      stale, or altered evidence is a hard stop. It must be no more than one
+      hour old (with at most five minutes of forward clock skew) at each
+      downstream gate.
 - [ ] Active revisions are healthy and the prior valid digest is retained as a
       rollback target.
 - [ ] Registry pulls use the dedicated D3 managed identity.
@@ -334,16 +370,23 @@ decision has been recorded and the mode-specific plan has passed all guards.
 - [ ] The manual database-preparation evidence proves the expected Alembic
       head, non-admin runtime role, DDL denial, and audit mutation denial;
       record its execution identifier, UTC, and sanitized evidence hash only.
-- [ ] Audit replay and retention purge are demonstrated.
+- [ ] Protected `audit-replay` proves the completed synthetic ticket timeline
+      is Box-scoped, ordered, linked to its operation, denied from an alternate
+      Box, and exported without identifiers or content; retention purge is also
+      demonstrated.
 - [ ] Backup and restore are demonstrated to an isolated, exact-manifest-bound
       target with the protected `pitr-freeze` → `pitr-manifest` → `pitr-start`
       → `pitr-complete`/`pitr-cleanup` → `pitr-resume` sequence. Retain only
       self-hashed sanitized evidence, the distinct owner's manifest approval,
       and writer-freeze/resume evidence; never retain the database URL, raw Box
       identifier, source/target server IDs, or database contents outside the
-      protected runner.
+      protected runner. The terminal completion artifact must include the
+      bound freeze, restore-point, restore-start, and restore-ready timestamps
+      plus measured RTO/RPO seconds.
 - [ ] Run protected `release-rollback` followed immediately by
       `release-forward` against two distinct staged, scan-clean, locked releases.
+      Release B must be a descendant of A with a different Git tree, and all
+      four A/B API/web digests must be pairwise distinct.
       Retain both exact digest/source/release bindings, all resulting revision
       IDs, route/readiness/HTTPS health evidence, and the forward zero-drift
       review hash. A mutable tag or a second tag for the same digest is not
@@ -368,9 +411,11 @@ decision has been recorded and the mode-specific plan has passed all guards.
 | Deployment mode and classification match | **BLOCKED / REQUIRED** |
 | API/worker revision IDs and health | **BLOCKED / REQUIRED** |
 | ACR manifest digest match | **BLOCKED / REQUIRED** |
+| Workload verification JSON hash and exact source/release/state binding | **BLOCKED / REQUIRED** |
 | `/health` status and non-sensitive body | **BLOCKED / REQUIRED** |
 | API `/ready` status and non-sensitive body | **BLOCKED / REQUIRED** |
 | Worker private `:8001/ready` status and latency | **BLOCKED / REQUIRED** |
+| Box-scoped, content-free audit replay evidence hash | **BLOCKED / REQUIRED** |
 | Database-preparation JSON hash, expected head, and execution ID | **BLOCKED / REQUIRED** |
 | Private DNS/connectivity outcomes | **BLOCKED / REQUIRED** |
 | Clerk Org/role test evidence ID | **BLOCKED / REQUIRED** |
@@ -392,7 +437,7 @@ and are mandatory before any `authorized_beta` plan or use.
 
 | Decision | `synthetic_lab` | `authorized_beta` current state |
 |---|---|---|
-| D3 infrastructure ready | **REQUIRED before testers; currently NO** | **NO — NOT DEPLOYED** |
+| D3 infrastructure ready | **REQUIRED before testers; currently NO — bootstrap/runner only** | **NO — application foundation and workloads absent** |
 | Dedicated Organization and Box bound | **REQUIRED before testers; currently NO** | **NO — BLOCKED** |
 | Clerk Org and authority proven | **REQUIRED before testers; currently NO** | **NO — BLOCKED** |
 | Human deployment evidenced | **REQUIRED before testers; currently NO** | **NO — BLOCKED** |

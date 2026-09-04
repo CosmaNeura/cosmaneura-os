@@ -1,4 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
+_cosmas_wrapper_dir="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && /bin/pwd -P)" || exit 1
+# shellcheck source=local-wrapper-env.sh
+. "$_cosmas_wrapper_dir/local-wrapper-env.sh"
+cosmas_isolate_local_wrapper_environment "$@"
+unset -f cosmas_isolate_local_wrapper_environment
+unset _cosmas_wrapper_dir
 set -euo pipefail
 
 umask 077
@@ -81,7 +88,7 @@ cleanup() {
   rm -rf -- "$prepare_temp_dir"
 }
 trap cleanup EXIT
-guard_materialize_committed_file \
+guard_materialize_local_committed_file \
   "$repository_root" \
   "$source_sha" \
   "infra/beta/runner-bootstrap.sh" \

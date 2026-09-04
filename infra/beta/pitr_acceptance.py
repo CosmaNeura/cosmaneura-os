@@ -19,12 +19,13 @@ import tempfile
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 from urllib.parse import parse_qs, urlsplit, urlunsplit
 from uuid import UUID
 
+UTC = timezone.utc  # noqa: UP017 -- protected runner supports Python 3.10.
 ARM_API_VERSION = "2024-08-01"
 MANIFEST_CONTRACT = "cosmas-os-d3-pitr-manifest-v1"
 STATE_CONTRACT = "cosmas-os-d3-pitr-state-v1"
@@ -247,6 +248,17 @@ def _timestamp(value: datetime) -> str:
     if value.tzinfo is None:
         raise PitrError("PITR timestamp invalid")
     return value.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _now_utc() -> datetime:
+    return datetime.now(UTC).replace(microsecond=0)
+
+
+def _read_utc_clock(clock: Callable[[], datetime]) -> datetime:
+    observed = clock()
+    if observed.tzinfo is None:
+        raise PitrError("PITR timestamp invalid")
+    return observed.astimezone(UTC).replace(microsecond=0)
 
 
 def _parse_timestamp(value: str) -> datetime:
@@ -482,7 +494,7 @@ def _assert_quiet_window(
     start = _parse_timestamp(config.quiet_window_start_utc)
     end = _parse_timestamp(config.quiet_window_end_utc)
     current = now.astimezone(UTC)
-    if current < start or current > end:
+    if current < start or current >= end:
         raise PitrError("source quiet window is not active")
     if require_remaining and end - current < MIN_QUIET_WINDOW_REMAINING:
         raise PitrError("source quiet window is too close to expiry")
@@ -531,7 +543,7 @@ def _read_approved_manifest(
     if (
         expires_at - created_at != MANIFEST_LIFETIME
         or current < created_at
-        or (require_unexpired and current > expires_at)
+        or (require_unexpired and current >= expires_at)
     ):
         raise PitrError("approved manifest expired")
     return manifest
@@ -822,6 +834,8 @@ def _initial_state(manifest: dict[str, Any], fingerprint: dict[str, Any]) -> dic
         "phase": "f1_captured",
         "f1": fingerprint,
         "restore_request_sha256": None,
+        "restore_started_at_utc": None,
+        "restore_ready_at_utc": None,
     }
     return _self_hashed(payload, "state_sha256")
 
@@ -872,6 +886,29 @@ def _put_restore(
         raise PitrError("restore create failed")
 
 
+def _measurement(
+    config: Config,
+    manifest: dict[str, Any],
+    state: dict[str, Any],
+) -> dict[str, Any]:
+    started = _parse_timestamp(str(state.get("restore_started_at_utc", "")))
+    ready = _parse_timestamp(str(state.get("restore_ready_at_utc", "")))
+    freeze = _parse_timestamp(config.quiet_window_start_utc)
+    restore_point = _parse_timestamp(str(manifest["restore"]["point_in_time_utc"]))
+    if ready < started or restore_point < freeze:
+        raise PitrError("PITR measurement timestamps invalid")
+    measured_rto = int((ready - started).total_seconds())
+    measured_rpo = max(0, int((freeze - restore_point).total_seconds()))
+    return {
+        "restore_started_at_utc": _timestamp(started),
+        "restore_ready_at_utc": _timestamp(ready),
+        "write_freeze_at_utc": _timestamp(freeze),
+        "restore_point_utc": _timestamp(restore_point),
+        "measured_rto_seconds": measured_rto,
+        "measured_rpo_seconds": measured_rpo,
+    }
+
+
 def start_restore(config: Config, runner: CommandRunner, *, now: datetime) -> dict[str, Any]:
     manifest = _read_approved_manifest(config, now, require_unexpired=True)
     _assert_quiet_window(config, now, require_remaining=True)
@@ -894,6 +931,15 @@ def start_restore(config: Config, runner: CommandRunner, *, now: datetime) -> di
 
     request = _restore_request(config, manifest)
     request_sha = _sha256_json(request)
+    if state.get("restore_started_at_utc") is None:
+        state["restore_started_at_utc"] = _timestamp(now)
+        _save_state(config, state)
+        state = _read_state(config, manifest)
+        assert state is not None
+    else:
+        started_at = _parse_timestamp(str(state["restore_started_at_utc"]))
+        if started_at > now.astimezone(UTC):
+            raise PitrError("restore start timestamp invalid")
     target = _az_get(runner, target_id)
     if target is None:
         if state.get("phase") != "f1_captured":
@@ -1010,12 +1056,39 @@ def _poll_target(
     return target
 
 
+def _poll_ready_target(
+    config: Config,
+    manifest: dict[str, Any],
+    runner: CommandRunner,
+    target_id: str,
+    *,
+    sleeper: Callable[[float], None],
+) -> dict[str, Any] | None:
+    target: dict[str, Any] | None = None
+    for attempt in range(config.poll_attempts):
+        target = _az_get(runner, target_id)
+        if target is not None:
+            state = str(target.get("properties", {}).get("state", ""))
+            _validate_target(
+                config,
+                manifest,
+                target,
+                phase="ready" if state == "Ready" else "provisioning",
+            )
+            if state == "Ready":
+                return target
+        if attempt + 1 < config.poll_attempts and config.poll_interval_seconds:
+            sleeper(config.poll_interval_seconds)
+    return target
+
+
 def complete_restore(
     config: Config,
     runner: CommandRunner,
     *,
     now: datetime,
     sleeper: Callable[[float], None] = time.sleep,
+    clock: Callable[[], datetime] = _now_utc,
 ) -> tuple[dict[str, Any], int]:
     manifest = _read_approved_manifest(config, now, require_unexpired=False)
     _assert_quiet_window(config, now, require_remaining=False)
@@ -1034,11 +1107,11 @@ def complete_restore(
     target_id = str(manifest["restore"]["target_resource_id"])
 
     if state["phase"] == "restore_started":
-        target = _poll_target(
+        target = _poll_ready_target(
             config,
+            manifest,
             runner,
             target_id,
-            want_absent=False,
             sleeper=sleeper,
         )
         if target is None:
@@ -1059,6 +1132,19 @@ def complete_restore(
                 2,
             )
         target_fqdn = _validate_target(config, manifest, target, phase="ready")
+        ready_observed_at = _read_utc_clock(clock)
+        started_at = _parse_timestamp(str(state.get("restore_started_at_utc", "")))
+        if ready_observed_at < now.astimezone(UTC) or ready_observed_at < started_at:
+            raise PitrError("restore ready timestamp invalid")
+        if state.get("restore_ready_at_utc") is None:
+            state["restore_ready_at_utc"] = _timestamp(ready_observed_at)
+            _save_state(config, state)
+            state = _read_state(config, manifest)
+            assert state is not None
+        else:
+            ready_at = _parse_timestamp(str(state["restore_ready_at_utc"]))
+            if ready_at > ready_observed_at:
+                raise PitrError("restore ready timestamp invalid")
         state["f2"] = _fingerprint(
             config,
             runner,
@@ -1125,6 +1211,7 @@ def complete_restore(
     state["f4_matches_f1"] = f4_equal
     _save_state(config, state)
     verified = f123_equal and f4_equal
+    measurement = _measurement(config, manifest, state)
     return (
         _evidence(
             "complete",
@@ -1137,6 +1224,7 @@ def complete_restore(
             exact_target_deleted=True,
             target_absence_404_verified=True,
             f4_equals_f1=f4_equal,
+            measurement=measurement,
         ),
         0 if verified else 1,
     )
@@ -1197,7 +1285,7 @@ def _run(config: Config, runner: CommandRunner, now: datetime) -> tuple[dict[str
 
 def main() -> int:
     operation = os.environ.get("COSMAS_PITR_OPERATION", "unknown")
-    now = datetime.now(UTC).replace(microsecond=0)
+    now = _now_utc()
     try:
         if os.geteuid() != 0:
             raise PitrError("protected runner root required")

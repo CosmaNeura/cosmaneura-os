@@ -406,6 +406,24 @@ def test_start_requires_active_owner_approved_source_quiet_window(tmp_path) -> N
     assert runner.calls == []
 
 
+def test_quiet_window_end_is_exclusive(tmp_path) -> None:
+    config = pitr.Config.from_environment(_environment(tmp_path))
+    with pytest.raises(pitr.PitrError, match="quiet window is not active"):
+        pitr._assert_quiet_window(
+            config,
+            datetime(2026, 9, 3, 18, 30, tzinfo=UTC),
+            require_remaining=False,
+        )
+
+
+def test_approved_manifest_expiry_is_exclusive(tmp_path) -> None:
+    environment, manifest = _approved_environment(tmp_path, "start")
+    config = pitr.Config.from_environment(environment)
+    expires_at = datetime.fromisoformat(str(manifest["expires_at"]).replace("Z", "+00:00"))
+    with pytest.raises(pitr.PitrError, match="approved manifest expired"):
+        pitr._read_approved_manifest(config, expires_at, require_unexpired=True)
+
+
 def _started_restore(
     tmp_path: Path,
 ) -> tuple[dict[str, str], dict[str, Any]]:
@@ -465,6 +483,7 @@ def test_complete_proves_f1_f2_f3_deletes_exact_target_then_proves_f4(tmp_path) 
         runner,
         now=NOW + timedelta(minutes=2),
         sleeper=lambda _seconds: None,
+        clock=lambda: NOW + timedelta(minutes=2),
     )
 
     assert exit_code == 0
@@ -473,6 +492,14 @@ def test_complete_proves_f1_f2_f3_deletes_exact_target_then_proves_f4(tmp_path) 
     assert evidence["exact_target_deleted"] is True
     assert evidence["target_absence_404_verified"] is True
     assert evidence["f4_equals_f1"] is True
+    assert evidence["measurement"] == {
+        "restore_started_at_utc": "2026-09-03T17:01:00Z",
+        "restore_ready_at_utc": "2026-09-03T17:02:00Z",
+        "write_freeze_at_utc": "2026-09-03T15:55:00Z",
+        "restore_point_utc": "2026-09-03T16:00:00Z",
+        "measured_rto_seconds": 60,
+        "measured_rpo_seconds": 0,
+    }
     _assert_evidence_self_hash(evidence)
     delete_calls = [
         call for call in runner.calls if call[0:4] == ["az", "rest", "--method", "delete"]
@@ -537,6 +564,7 @@ def test_complete_cleans_exact_target_but_fails_attestation_on_fingerprint_misma
         runner,
         now=NOW + timedelta(minutes=2),
         sleeper=lambda _seconds: None,
+        clock=lambda: NOW + timedelta(minutes=2),
     )
 
     assert exit_code == 1
@@ -544,6 +572,143 @@ def test_complete_cleans_exact_target_but_fails_attestation_on_fingerprint_misma
     assert evidence["f1_f2_f3_equal"] is False
     assert evidence["exact_target_deleted"] is True
     assert target_exists is False
+
+
+def test_complete_rto_includes_time_spent_polling_until_ready(tmp_path) -> None:
+    environment, manifest = _started_restore(tmp_path)
+    environment["COSMAS_PITR_POLL_ATTEMPTS"] = "3"
+    environment["COSMAS_PITR_POLL_INTERVAL_SECONDS"] = "5"
+    config = pitr.Config.from_environment(environment)
+    target_id = manifest["restore"]["target_resource_id"]
+    target_exists = True
+    readiness_reads = 0
+    observed_time = NOW + timedelta(minutes=2)
+
+    def handle(command: list[str]) -> Any:
+        nonlocal target_exists, readiness_reads
+        if command[0] == "docker":
+            return pitr.CommandResult(0, json.dumps(_fingerprint()) + "\n")
+        method = command[command.index("--method") + 1]
+        url = command[command.index("--url") + 1]
+        if method == "get" and SOURCE_ID in url:
+            return pitr.CommandResult(0, json.dumps(_source()))
+        if method == "get" and target_id in url:
+            if not target_exists:
+                return _not_found()
+            readiness_reads += 1
+            state = "Creating" if readiness_reads < 3 else "Ready"
+            return pitr.CommandResult(0, json.dumps(_target(manifest, state=state)))
+        if method == "delete" and target_id in url:
+            target_exists = False
+            return pitr.CommandResult(0)
+        raise AssertionError(command)
+
+    def sleep_and_advance(seconds: float) -> None:
+        nonlocal observed_time
+        observed_time += timedelta(seconds=seconds)
+
+    evidence, exit_code = pitr.complete_restore(
+        config,
+        FakeRunner(handle),
+        now=NOW + timedelta(minutes=2),
+        sleeper=sleep_and_advance,
+        clock=lambda: observed_time,
+    )
+
+    assert exit_code == 0
+    assert readiness_reads >= 3
+    assert evidence["measurement"]["restore_started_at_utc"] == "2026-09-03T17:01:00Z"
+    assert evidence["measurement"]["restore_ready_at_utc"] == "2026-09-03T17:02:10Z"
+    assert evidence["measurement"]["measured_rto_seconds"] == 70
+
+
+def test_complete_does_not_record_ready_time_until_a_ready_poll(tmp_path) -> None:
+    environment, manifest = _started_restore(tmp_path)
+    environment["COSMAS_PITR_POLL_ATTEMPTS"] = "2"
+    environment["COSMAS_PITR_POLL_INTERVAL_SECONDS"] = "3"
+    config = pitr.Config.from_environment(environment)
+    target_id = manifest["restore"]["target_resource_id"]
+    sleeps: list[float] = []
+
+    def handle(command: list[str]) -> Any:
+        method = command[command.index("--method") + 1]
+        url = command[command.index("--url") + 1]
+        if method == "get" and SOURCE_ID in url:
+            return pitr.CommandResult(0, json.dumps(_source()))
+        if method == "get" and target_id in url:
+            return pitr.CommandResult(0, json.dumps(_target(manifest, state="Creating")))
+        raise AssertionError(command)
+
+    evidence, exit_code = pitr.complete_restore(
+        config,
+        FakeRunner(handle),
+        now=NOW + timedelta(minutes=2),
+        sleeper=sleeps.append,
+        clock=lambda: pytest.fail("clock must only be sampled after Ready is observed"),
+    )
+
+    assert exit_code == 2
+    assert evidence["status"] == "restore_pending"
+    assert sleeps == [3]
+    state = json.loads(Path(environment["COSMAS_PITR_STATE_PATH"]).read_text(encoding="utf-8"))
+    assert state["phase"] == "restore_started"
+    assert state["restore_ready_at_utc"] is None
+
+
+def test_complete_persists_first_ready_observation_before_fingerprinting(tmp_path) -> None:
+    environment, manifest = _started_restore(tmp_path)
+    config = pitr.Config.from_environment(environment)
+    target_id = manifest["restore"]["target_resource_id"]
+
+    def handle(command: list[str]) -> Any:
+        if command[0] == "docker":
+            return pitr.CommandResult(1, stderr="invented fingerprint failure")
+        method = command[command.index("--method") + 1]
+        url = command[command.index("--url") + 1]
+        if method == "get" and SOURCE_ID in url:
+            return pitr.CommandResult(0, json.dumps(_source()))
+        if method == "get" and target_id in url:
+            return pitr.CommandResult(0, json.dumps(_target(manifest)))
+        raise AssertionError(command)
+
+    with pytest.raises(pitr.PitrError):
+        pitr.complete_restore(
+            config,
+            FakeRunner(handle),
+            now=NOW + timedelta(minutes=2),
+            sleeper=lambda _seconds: None,
+            clock=lambda: NOW + timedelta(minutes=2),
+        )
+
+    state = json.loads(Path(environment["COSMAS_PITR_STATE_PATH"]).read_text(encoding="utf-8"))
+    assert state["phase"] == "restore_started"
+    assert state["restore_ready_at_utc"] == "2026-09-03T17:02:00Z"
+
+
+def test_complete_rejects_ready_clock_before_polling_started(tmp_path) -> None:
+    environment, manifest = _started_restore(tmp_path)
+    config = pitr.Config.from_environment(environment)
+    target_id = manifest["restore"]["target_resource_id"]
+
+    def handle(command: list[str]) -> Any:
+        if command[0] == "docker":
+            return pytest.fail("fingerprint must not run after invalid ready timestamp")
+        method = command[command.index("--method") + 1]
+        url = command[command.index("--url") + 1]
+        if method == "get" and SOURCE_ID in url:
+            return pitr.CommandResult(0, json.dumps(_source()))
+        if method == "get" and target_id in url:
+            return pitr.CommandResult(0, json.dumps(_target(manifest)))
+        raise AssertionError(command)
+
+    with pytest.raises(pitr.PitrError, match="restore ready timestamp invalid"):
+        pitr.complete_restore(
+            config,
+            FakeRunner(handle),
+            now=NOW + timedelta(minutes=2),
+            sleeper=lambda _seconds: None,
+            clock=lambda: NOW,
+        )
 
 
 def test_cleanup_refuses_drifted_target_without_deleting(tmp_path) -> None:

@@ -1,4 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
+_cosmas_wrapper_dir="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && /bin/pwd -P)" || exit 1
+# shellcheck source=local-wrapper-env.sh
+. "$_cosmas_wrapper_dir/local-wrapper-env.sh"
+cosmas_isolate_local_wrapper_environment "$@"
+unset -f cosmas_isolate_local_wrapper_environment
+unset _cosmas_wrapper_dir
 set -euo pipefail
 
 # Human-side control-plane transport for the no-inbound D3 runner. Secret
@@ -7,6 +14,7 @@ set -euo pipefail
 # command output.
 
 umask 077
+export GIT_NO_REPLACE_OBJECTS=1
 
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 repository_root="$(cd -- "$script_dir/../.." && pwd -P)"
@@ -16,11 +24,12 @@ source "$script_dir/deployment-guard-lib.sh"
 usage() {
   printf '%s\n' \
     "Usage:" \
-    "  $0 stage-source --bootstrap-outputs PATH --source-sha SHA --deploy-key PATH --known-hosts PATH" \
+    "  $0 stage-source --bootstrap-outputs PATH --source-sha SHA [--prior-source-sha SHA] --deploy-key PATH --known-hosts PATH" \
     "  $0 probe-network --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
     "  $0 build-push --bootstrap-outputs PATH --source-sha SHA --release-id ID --web-build-config PATH --artifact-out PATH" \
     "  $0 database-prepare --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
-    "  $0 runtime-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --acceptance-phase runtime|workflow-baseline|workflow-verify|purge-setup|purge-verify [--acceptance-state PATH] --artifact-out PATH" \
+    "  $0 workload-verify --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
+    "  $0 runtime-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --acceptance-phase runtime|workflow-baseline|workflow-verify|audit-replay|purge-setup|purge-verify [--acceptance-state PATH] --artifact-out PATH" \
     "  $0 domain-verification --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
     "  $0 alert-delivery --bootstrap-outputs PATH --source-sha SHA --release-id ID --alert-phase send|confirm|inspect-intent [--alert-retry-approval PATH | --alert-test-state PATH --delivery-confirmation-reference PATH] --artifact-out PATH" \
     "  $0 pitr-freeze --bootstrap-outputs PATH --source-sha SHA --release-id ID --quiet-window-end-utc TIMESTAMP --artifact-out PATH" \
@@ -31,13 +40,14 @@ usage() {
     "  $0 stage-generation --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --stage-transition-mode abandoned_retry|planned_workloads_progression --approval PATH --var-file PATH --artifact-out PATH" \
     "  $0 offboarding-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --offboarding-phase baseline|verify [--offboarding-request PATH | --offboarding-state PATH --offboarding-confirmation PATH] --artifact-out PATH" \
     "  $0 bootstrap-identity --bootstrap-outputs PATH --source-sha SHA --release-id ID --bootstrap-manifest PATH --artifact-out PATH" \
-    "  $0 retrieve --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage STAGE --artifact-kind review|result|network|build|database|runtime|domain|alert|pitr|recovery|offboarding|identity [--acceptance-phase PHASE | --alert-phase send|confirm | --pitr-phase PHASE | --recovery-phase rollback|forward | --offboarding-phase baseline|verify] --artifact-out PATH" \
+    "  $0 retrieve --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage STAGE --artifact-kind review|result|network|build|database|workload|runtime|domain|alert|pitr|recovery|offboarding|identity [--acceptance-phase PHASE | --alert-phase send|confirm | --pitr-phase PHASE | --recovery-phase rollback|forward | --offboarding-phase baseline|verify] --artifact-out PATH" \
     "  $0 cleanup-commands --bootstrap-outputs PATH --source-sha SHA" \
     "  $0 stage-vars --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --var-file PATH" \
     "  $0 plan --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --artifact-out PATH" \
-    "  $0 apply --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --approval PATH --artifact-out PATH" \
+    "  $0 apply --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --approval PATH --approval-bundle DIR --artifact-out PATH" \
     "" \
     "Source is fixed to ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git." \
+    "stage-source alone requires --deploy-key PATH --known-hosts PATH; later operations execute only the authenticated, remote-free resident source." \
     "Secrets use a temporary Azure managed Run Command protected parameter."
 }
 
@@ -55,7 +65,9 @@ var_file=""
 web_build_config=""
 bootstrap_manifest=""
 approval_file=""
+approval_bundle=""
 artifact_out=""
+artifact_staging=""
 artifact_kind=""
 acceptance_phase=""
 acceptance_state=""
@@ -88,6 +100,7 @@ while [[ $# -gt 0 ]]; do
     --web-build-config) web_build_config="${2:-}"; shift 2 ;;
     --bootstrap-manifest) bootstrap_manifest="${2:-}"; shift 2 ;;
     --approval) approval_file="${2:-}"; shift 2 ;;
+    --approval-bundle) approval_bundle="${2:-}"; shift 2 ;;
     --artifact-out) artifact_out="${2:-}"; shift 2 ;;
     --artifact-kind) artifact_kind="${2:-}"; shift 2 ;;
     --acceptance-phase) acceptance_phase="${2:-}"; shift 2 ;;
@@ -113,13 +126,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" || "$operation" == "cleanup-commands" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" ]] || guard_die "operation is invalid"
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" || "$operation" == "cleanup-commands" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" ]] || guard_die "operation is invalid"
 if [[ "$operation" == pitr-* ]]; then
   [[ "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" ]] || guard_die "PITR operation is invalid"
 fi
 [[ -n "$bootstrap_outputs" ]] || guard_die "--bootstrap-outputs is required"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "--source-sha must be a full lowercase Git commit"
-for command_name in az jq stat base64 bzip2 gzip git; do
+for command_name in az jq stat base64 bzip2 gzip git ssh-keygen install; do
   command -v "$command_name" >/dev/null 2>&1 || guard_die "$command_name is required"
 done
 
@@ -131,6 +144,7 @@ guard_load_bootstrap_outputs "$bootstrap_outputs"
 transport_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/cosmas-d3-protected-transport.XXXXXX")"
 chmod 700 "$transport_temp_dir"
 command_script_file="$transport_temp_dir/protected-runner-command.sh"
+resident_command_reference_file="$transport_temp_dir/resident-protected-runner-command.sh"
 command_script_bzip2_b64_file="$transport_temp_dir/protected-runner-command.sh.bz2.b64"
 command_launcher_file="$transport_temp_dir/protected-runner-launcher.sh"
 early_cleanup() {
@@ -342,7 +356,8 @@ transport_remove_local_protected_files() {
     "${payload_file:-}" \
     "${payload_b64_file:-}" \
     "${request_file:-}" \
-    "${view_file:-}"; do
+    "${view_file:-}" \
+    "${artifact_staging:-}"; do
     [[ -n "$local_file" ]] || continue
     if ! rm -f -- "$local_file"; then
       removal_failed=true
@@ -389,22 +404,171 @@ transport_cleanup_on_exit() {
   fi
   exit "$original_status"
 }
-guard_materialize_committed_file \
-  "$repository_root" \
-  "$source_sha" \
-  "infra/beta/protected-runner-command.sh" \
-  "$command_script_file" \
-  "git@github.com:CosmaNeura/cosmaneura-os.git"
+if [[ "$operation" == "stage-source" ]]; then
+  [[ -n "$deploy_key" && -n "$known_hosts" ]] || guard_die "stage-source requires --deploy-key and --known-hosts"
+  deploy_key="$(guard_absolute_path "$deploy_key")"
+  known_hosts="$(guard_absolute_path "$known_hosts")"
+  guard_outside_repository "$deploy_key" "$repository_root" "ephemeral deploy private key"
+  guard_outside_repository "$known_hosts" "$repository_root" "reviewed GitHub known-hosts file"
+  guard_private_file "$deploy_key" "ephemeral deploy private key"
+  guard_private_file "$known_hosts" "reviewed GitHub known-hosts file"
+  ssh-keygen -y -f "$deploy_key" >/dev/null 2>&1 || guard_die "ephemeral deploy key is not a valid SSH private key"
+  [[ "$(grep -cve '^[[:space:]]*$' "$known_hosts")" == "1" ]] || guard_die "known-hosts file must contain exactly one reviewed key"
+  grep -Eq '^\[ssh\.github\.com\]:443[[:space:]]+ssh-ed25519[[:space:]]+[A-Za-z0-9+/=]+([[:space:]]|$)' "$known_hosts" || guard_die "known-hosts entry must pin GitHub SSH on port 443 with Ed25519"
+  authenticated_deploy_key="$transport_temp_dir/github-deploy-key"
+  authenticated_known_hosts="$transport_temp_dir/github-known-hosts"
+  install -m 0600 "$deploy_key" "$authenticated_deploy_key"
+  install -m 0600 "$known_hosts" "$authenticated_known_hosts"
+  deploy_key="$authenticated_deploy_key"
+  known_hosts="$authenticated_known_hosts"
+  guard_materialize_authenticated_committed_file \
+    "$repository_root" \
+    "$source_sha" \
+    "infra/beta/protected-runner-command.sh" \
+    "$command_script_file" \
+    "git@github.com:CosmaNeura/cosmaneura-os.git" \
+    "$deploy_key" \
+    "$known_hosts" \
+    "$prior_source_sha"
+  resident_command_sha256="$(guard_sha256 "$command_script_file")"
+else
+  [[ -z "$deploy_key" && -z "$known_hosts" ]] || guard_die "deploy credentials are accepted only by stage-source"
+  guard_materialize_local_committed_file \
+    "$repository_root" \
+    "$source_sha" \
+    "infra/beta/protected-runner-command.sh" \
+    "$resident_command_reference_file" \
+    "git@github.com:CosmaNeura/cosmaneura-os.git"
+  resident_command_sha256="$(guard_sha256 "$resident_command_reference_file")"
+cat >"$command_script_file" <<'DISPATCHER'
+#!/bin/bash -p
+set +x
+set -euo pipefail
+umask 077
+export GIT_NO_REPLACE_OBJECTS=1
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PYTHONSTARTUP
+die() { printf 'D3 resident command dispatcher refused: %s\n' "$1" >&2; exit 1; }
+[[ "$(id -u)" == "0" ]] || die "dispatcher must execute as root"
+source_sha="${COSMAS_SOURCE_SHA:-}"
+expected_command_sha256="${COSMAS_RESIDENT_COMMAND_SHA256:-}"
+[[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || die "source SHA is invalid"
+[[ "$expected_command_sha256" =~ ^[0-9a-f]{64}$ ]] || die "resident command hash is invalid"
+repository="/opt/cosmas-os/releases/$source_sha"
+receipt="/var/lib/cosmas-deploy-runner/source-receipts/$source_sha.json"
+command_path="$repository/infra/beta/protected-runner-command.sh"
+toolchain_manifest="/var/lib/cosmas-deploy-runner/toolchain.json"
+/usr/bin/python3 -I -E -s - "$repository" "$receipt" "$command_path" "$toolchain_manifest" "$source_sha" "$expected_command_sha256" <<'PY'
+import hashlib
+import json
+import os
+import stat
+import sys
+from typing import Any
+
+repository, receipt_path, command_path, toolchain_path, source_sha, expected_command_hash = sys.argv[1:]
+
+def refuse(condition: bool, message: str) -> None:
+    if not condition:
+        raise SystemExit(message)
+
+def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        refuse(key not in value, "duplicate receipt key")
+        value[key] = item
+    return value
+
+for path in (repository, receipt_path, command_path, toolchain_path, "/usr/bin/git"):
+    current = path
+    while current != "/":
+        info = os.lstat(current)
+        refuse(not stat.S_ISLNK(info.st_mode) and info.st_uid == 0, "unsafe protected path")
+        current = os.path.dirname(current)
+with open(receipt_path, "rb") as handle:
+    raw = handle.read(16385)
+refuse(len(raw) <= 16384, "source receipt is oversized")
+receipt = json.loads(raw, object_pairs_hook=unique, parse_constant=lambda value: refuse(False, f"invalid constant {value}"))
+keys = {"schema_version", "contract", "status", "source_sha", "source_tree_sha1", "runner_command_sha256", "authenticated_origin", "fetch_mode", "remote_removed", "replace_refs_disabled", "completed_at", "evidence_payload_sha256"}
+refuse(isinstance(receipt, dict) and set(receipt) == keys, "source receipt shape is invalid")
+refuse(receipt["schema_version"] == 2 and type(receipt["schema_version"]) is int, "source receipt version is invalid")
+refuse(receipt["contract"] == "cosmas-os-d3-authenticated-source-staging-v2" and receipt["status"] == "verified", "source receipt contract is invalid")
+refuse(receipt["source_sha"] == source_sha and receipt["runner_command_sha256"] == expected_command_hash, "source receipt binding is invalid")
+refuse(receipt["authenticated_origin"] == "ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git" and receipt["fetch_mode"] == "full", "source receipt origin is invalid")
+refuse(receipt["remote_removed"] is True and receipt["replace_refs_disabled"] is True, "source receipt isolation is invalid")
+refuse(isinstance(receipt["source_tree_sha1"], str) and __import__("re").fullmatch(r"[0-9a-f]{40}", receipt["source_tree_sha1"]) is not None, "source receipt tree is invalid")
+refuse(isinstance(receipt["completed_at"], str) and __import__("re").fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", receipt["completed_at"]) is not None, "source receipt timestamp is invalid")
+payload = dict(receipt)
+expected_hash = payload.pop("evidence_payload_sha256", "")
+actual_hash = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+refuse(expected_hash == actual_hash, "source receipt hash is invalid")
+with open(command_path, "rb") as handle:
+    actual_command_hash = hashlib.sha256(handle.read()).hexdigest()
+refuse(actual_command_hash == expected_command_hash, "resident protected command differs from its authenticated receipt")
+with open(toolchain_path, "rb") as handle:
+    toolchain_raw = handle.read(65537)
+refuse(len(toolchain_raw) <= 65536, "toolchain manifest is oversized")
+toolchain = json.loads(toolchain_raw, object_pairs_hook=unique, parse_constant=lambda value: refuse(False, f"invalid constant {value}"))
+expected_git_hash = toolchain.get("git_binary_sha256")
+git_info = os.lstat("/usr/bin/git")
+refuse(
+    isinstance(expected_git_hash, str)
+    and __import__("re").fullmatch(r"[0-9a-f]{64}", expected_git_hash) is not None
+    and stat.S_ISREG(git_info.st_mode)
+    and git_info.st_uid == 0
+    and not git_info.st_mode & 0o022,
+    "fixed Git binary is unsafe",
+)
+with open("/usr/bin/git", "rb") as handle:
+    actual_git_hash = hashlib.sha256(handle.read()).hexdigest()
+refuse(actual_git_hash == expected_git_hash, "fixed Git binary differs from its protected pin")
+PY
+safe_git() {
+  /usr/bin/env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    HOME=/root LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_TERMINAL_PROMPT=0 GIT_NO_REPLACE_OBJECTS=1 \
+    /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false \
+      -c core.hooksPath=/dev/null -c credential.helper= "$@"
+}
+[[ "$(safe_git -C "$repository" rev-parse --verify HEAD)" == "$source_sha" ]] || die "resident source HEAD differs"
+[[ "$(safe_git -C "$repository" rev-parse "$source_sha^{tree}")" == "$(/usr/bin/jq -er '.source_tree_sha1' "$receipt")" ]] || die "resident source tree differs from its authenticated receipt"
+[[ -z "$(safe_git -C "$repository" status --porcelain=v1 --untracked-files=all)" ]] || die "resident source is dirty"
+[[ -z "$(safe_git -C "$repository" remote)" ]] || die "resident source retained a remote"
+[[ -z "$(safe_git -C "$repository" for-each-ref --format='%(refname)' refs/replace)" ]] || die "resident source contains replace refs"
+[[ ! -e "$repository/.git/shallow" && ! -e "$repository/.git/objects/info/alternates" ]] || die "resident source is shallow or uses alternates"
+if safe_git -C "$repository" config --local --list | awk -F= '{key=tolower($1); if (key == "extensions.partialclone" || key ~ /^remote\..*\.(promisor|partialclonefilter)$/) found=1} END {exit !found}'; then die "resident source has lazy-fetch configuration"; fi
+if find "$repository/.git/objects/pack" -type f -name '*.promisor' -print -quit 2>/dev/null | grep -q .; then die "resident source has promisor objects"; fi
+safe_git -C "$repository" fsck --full --no-dangling "$source_sha" >/dev/null 2>&1 || die "resident source object graph is incomplete"
+exec /usr/bin/env -i \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  COSMAS_SUBSCRIPTION_ID="${COSMAS_SUBSCRIPTION_ID:-}" \
+  COSMAS_DEPLOY_CLIENT_ID="${COSMAS_DEPLOY_CLIENT_ID:-}" \
+  COSMAS_OPERATION="${COSMAS_OPERATION:-}" \
+  COSMAS_STAGE="${COSMAS_STAGE:-}" \
+  COSMAS_RELEASE_ID="${COSMAS_RELEASE_ID:-}" \
+  COSMAS_SOURCE_SHA="${COSMAS_SOURCE_SHA:-}" \
+  COSMAS_RESIDENT_COMMAND_SHA256="${COSMAS_RESIDENT_COMMAND_SHA256:-}" \
+  COSMAS_PROTECTED_PAYLOAD_BASE64="${COSMAS_PROTECTED_PAYLOAD_BASE64:-}" \
+  /bin/bash --noprofile --norc -p "$command_path"
+DISPATCHER
+  chmod 0600 "$command_script_file"
+fi
 command_script_sha256="$(guard_sha256 "$command_script_file")"
 bzip2 -9 -c "$command_script_file" | base64 | tr -d '\n' >"$command_script_bzip2_b64_file"
 chmod 0600 "$command_script_bzip2_b64_file"
 cat >"$command_launcher_file" <<'LAUNCHER'
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
 set -euo pipefail
 umask 077
-command_file="$(mktemp /run/cosmas-protected-command.XXXXXX)"
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PYTHONSTARTUP
+command_file="$(/usr/bin/mktemp /run/cosmas-protected-command.XXXXXX)"
 cleanup_launcher() {
-  rm -f -- "$command_file"
+  /usr/bin/rm -f -- "$command_file"
 }
 trap cleanup_launcher EXIT
 [[ "${COSMAS_COMMAND_SHA256:-}" =~ ^[0-9a-f]{64}$ ]] || {
@@ -419,15 +583,26 @@ trap cleanup_launcher EXIT
   printf '%s\n' 'D3 protected command launcher refused: protected command exceeds its bound' >&2
   exit 1
 }
-printf '%s' "$COSMAS_COMMAND_BZIP2_BASE64" | base64 --decode | python3 -c 'import bz2,sys; data=sys.stdin.buffer.read(49153); decoder=bz2.BZ2Decompressor(); decoded=decoder.decompress(data,524289); (len(data) <= 49152 and len(decoded) <= 524288 and decoder.eof and not decoder.unused_data) or sys.exit(1); sys.stdout.buffer.write(decoded)' >"$command_file"
-chmod 0700 "$command_file"
-[[ "$(sha256sum "$command_file" | awk '{print $1}')" == "$COSMAS_COMMAND_SHA256" ]] || {
+printf '%s' "$COSMAS_COMMAND_BZIP2_BASE64" | /usr/bin/base64 --decode | /usr/bin/python3 -I -E -s -c 'import bz2,sys; data=sys.stdin.buffer.read(49153); decoder=bz2.BZ2Decompressor(); decoded=decoder.decompress(data,524289); (len(data) <= 49152 and len(decoded) <= 524288 and decoder.eof and not decoder.unused_data) or sys.exit(1); sys.stdout.buffer.write(decoded)' >"$command_file"
+/usr/bin/chmod 0700 "$command_file"
+[[ "$(/usr/bin/sha256sum "$command_file" | /usr/bin/awk '{print $1}')" == "$COSMAS_COMMAND_SHA256" ]] || {
   printf '%s\n' 'D3 protected command launcher refused: committed-command hash mismatch' >&2
   exit 1
 }
 unset COSMAS_COMMAND_BZIP2_BASE64 COSMAS_COMMAND_SHA256
 set +e
-/usr/bin/env bash "$command_file"
+/usr/bin/env -i \
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+  HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+  COSMAS_SUBSCRIPTION_ID="${COSMAS_SUBSCRIPTION_ID:-}" \
+  COSMAS_DEPLOY_CLIENT_ID="${COSMAS_DEPLOY_CLIENT_ID:-}" \
+  COSMAS_OPERATION="${COSMAS_OPERATION:-}" \
+  COSMAS_STAGE="${COSMAS_STAGE:-}" \
+  COSMAS_RELEASE_ID="${COSMAS_RELEASE_ID:-}" \
+  COSMAS_SOURCE_SHA="${COSMAS_SOURCE_SHA:-}" \
+  COSMAS_RESIDENT_COMMAND_SHA256="${COSMAS_RESIDENT_COMMAND_SHA256:-}" \
+  COSMAS_PROTECTED_PAYLOAD_BASE64="${COSMAS_PROTECTED_PAYLOAD_BASE64:-}" \
+  /bin/bash --noprofile --norc -p "$command_file"
 status=$?
 set -e
 exit "$status"
@@ -440,13 +615,13 @@ case "$operation" in
   stage-source)
     stage="source"
     release_id="source"
-    [[ -n "$deploy_key" && -n "$known_hosts" ]] || guard_die "stage-source requires --deploy-key and --known-hosts"
-    deploy_key="$(guard_absolute_path "$deploy_key")"
-    known_hosts="$(guard_absolute_path "$known_hosts")"
-    guard_outside_repository "$deploy_key" "$repository_root" "ephemeral deploy private key"
-    guard_outside_repository "$known_hosts" "$repository_root" "reviewed GitHub known-hosts file"
-    guard_private_file "$deploy_key" "ephemeral deploy private key"
-    guard_private_file "$known_hosts" "reviewed GitHub known-hosts file"
+    if [[ -n "$prior_source_sha" ]]; then
+      [[ "$prior_source_sha" =~ ^[0-9a-f]{40}$ && "$prior_source_sha" != "$source_sha" ]] || guard_die "stage-source --prior-source-sha must be a different full lowercase commit"
+      # The command sent to the protected runner is itself read from source_sha.
+      # Prove its A->B relationship locally before transporting that candidate
+      # command; the runner repeats the proof over its authenticated full fetch.
+      guard_validate_git_source_transition "$repository_root" "$prior_source_sha" "$source_sha"
+    fi
     ;;
   stage-vars)
     [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "stage-vars requires a valid --stage"
@@ -485,10 +660,18 @@ case "$operation" in
     guard_outside_repository "$artifact_out" "$repository_root" "sanitized database-preparation attestation"
     guard_new_private_path "$artifact_out" "sanitized database-preparation attestation"
     ;;
+  workload-verify)
+    stage="workload-verification"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "workload-verify requires a 3-32 character lowercase --release-id"
+    [[ -n "$artifact_out" ]] || guard_die "workload-verify requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized workload-verification attestation"
+    guard_new_private_path "$artifact_out" "sanitized workload-verification attestation"
+    ;;
   runtime-acceptance)
     stage="acceptance"
     [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "runtime-acceptance requires a 3-32 character lowercase --release-id"
-    [[ "$acceptance_phase" == "runtime" || "$acceptance_phase" == "workflow-baseline" || "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "purge-setup" || "$acceptance_phase" == "purge-verify" ]] || guard_die "runtime-acceptance requires an enumerated --acceptance-phase"
+    [[ "$acceptance_phase" == "runtime" || "$acceptance_phase" == "workflow-baseline" || "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "audit-replay" || "$acceptance_phase" == "purge-setup" || "$acceptance_phase" == "purge-verify" ]] || guard_die "runtime-acceptance requires an enumerated --acceptance-phase"
     [[ -n "$artifact_out" ]] || guard_die "runtime-acceptance requires --artifact-out"
     artifact_out="$(guard_absolute_path "$artifact_out")"
     guard_outside_repository "$artifact_out" "$repository_root" "sanitized runtime-acceptance attestation"
@@ -651,7 +834,7 @@ case "$operation" in
       (.current.web_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
       (.prior.api_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
       (.prior.web_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
-      .current.api_digest != .prior.api_digest and .current.web_digest != .prior.web_digest
+      ([.current.api_digest, .current.web_digest, .prior.api_digest, .prior.web_digest] | unique | length) == 4
     ' "$approval_file" >/dev/null || guard_die "release-recovery approval is not the exact phase-specific two-release owner assertion"
     ;;
   inspect-stage)
@@ -766,7 +949,7 @@ case "$operation" in
     ;;
   retrieve)
     [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "retrieve requires a 3-32 character lowercase --release-id"
-    [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" || "$artifact_kind" == "network" || "$artifact_kind" == "build" || "$artifact_kind" == "database" || "$artifact_kind" == "runtime" || "$artifact_kind" == "domain" || "$artifact_kind" == "alert" || "$artifact_kind" == "pitr" || "$artifact_kind" == "recovery" || "$artifact_kind" == "offboarding" || "$artifact_kind" == "identity" ]] || guard_die "retrieve requires a valid --artifact-kind"
+    [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" || "$artifact_kind" == "network" || "$artifact_kind" == "build" || "$artifact_kind" == "database" || "$artifact_kind" == "workload" || "$artifact_kind" == "runtime" || "$artifact_kind" == "domain" || "$artifact_kind" == "alert" || "$artifact_kind" == "pitr" || "$artifact_kind" == "recovery" || "$artifact_kind" == "offboarding" || "$artifact_kind" == "identity" ]] || guard_die "retrieve requires a valid --artifact-kind"
     if [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" ]]; then
       [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "review/result retrieval requires its exact environment --stage"
     else
@@ -774,9 +957,10 @@ case "$operation" in
         network) stage="network" ;;
         build) stage="images" ;;
         database) stage="database" ;;
+        workload) stage="workload-verification" ;;
         runtime)
           stage="acceptance"
-          [[ "$acceptance_phase" == "runtime" || "$acceptance_phase" == "workflow-baseline" || "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "purge-setup" || "$acceptance_phase" == "purge-verify" ]] || guard_die "runtime retrieval requires an enumerated --acceptance-phase"
+          [[ "$acceptance_phase" == "runtime" || "$acceptance_phase" == "workflow-baseline" || "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "audit-replay" || "$acceptance_phase" == "purge-setup" || "$acceptance_phase" == "purge-verify" ]] || guard_die "runtime retrieval requires an enumerated --acceptance-phase"
           ;;
         domain) stage="domain" ;;
         alert)
@@ -818,14 +1002,30 @@ case "$operation" in
   apply)
     [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "apply requires a valid --stage"
     [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "apply requires a 3-32 character lowercase --release-id"
-    [[ -n "$approval_file" && -n "$artifact_out" ]] || guard_die "apply requires --approval and --artifact-out"
+    [[ -n "$approval_file" && -n "$approval_bundle" && -n "$artifact_out" ]] || guard_die "apply requires --approval, --approval-bundle, and --artifact-out"
     approval_file="$(guard_absolute_path "$approval_file")"
+    approval_bundle="$(guard_absolute_path "$approval_bundle")"
     artifact_out="$(guard_absolute_path "$artifact_out")"
     guard_outside_repository "$approval_file" "$repository_root" "private approval"
+    guard_outside_repository "$approval_bundle" "$repository_root" "private approval bundle"
     guard_outside_repository "$artifact_out" "$repository_root" "sanitized result artifact"
+    guard_private_directory "$approval_bundle" "private approval bundle"
     guard_private_file "$approval_file" "private approval"
+    [[ "$approval_file" == "$approval_bundle/source-approval.json" ]] || guard_die "--approval must be the fixed source-approval.json inside --approval-bundle"
+    for approval_name in approval-request.json owner-authorization.json claim.json source-approval.json manifest.json; do
+      guard_private_file "$approval_bundle/$approval_name" "private approval bundle file $approval_name"
+    done
     guard_new_private_path "$artifact_out" "sanitized result artifact"
-    jq -e 'type == "object" and .schema_version == 1' "$approval_file" >/dev/null || guard_die "approval must be a schema-version-1 JSON object"
+    approval_plan_sha="$(jq -er '.plan_sha256 | strings' "$approval_file")" || guard_die "approval plan hash is unavailable"
+    approval_review_sha="$(jq -er '.review_sha256 | strings' "$approval_file")" || guard_die "approval review hash is unavailable"
+    approval_var_sha="$(jq -er '.variable_file_sha256 | strings' "$approval_file")" || guard_die "approval variable-file hash is unavailable"
+    approval_state_exists="$(jq -er '.state.exists | booleans' "$approval_file")" || guard_die "approval state flag is unavailable"
+    approval_state_lineage="$(jq -r 'if .state.lineage == null then "" else .state.lineage end' "$approval_file")"
+    approval_state_serial="$(jq -r 'if .state.serial == null then "null" else (.state.serial | tostring) end' "$approval_file")"
+    approval_state_sha="$(jq -r 'if .state.sha256 == null then "" else .state.sha256 end' "$approval_file")"
+    guard_validate_apply_approval "$approval_file" "$approval_bundle" "$source_sha" "$release_id" "$stage" \
+      "$approval_plan_sha" "$approval_review_sha" "$approval_var_sha" "$approval_state_exists" \
+      "$approval_state_lineage" "$approval_state_serial" "$approval_state_sha"
     ;;
 esac
 
@@ -838,10 +1038,12 @@ for boundary_group in "$GUARD_STATE_RESOURCE_GROUP" "$GUARD_WORKLOAD_RESOURCE_GR
   jq -e \
     --arg group "$(guard_lower "$boundary_group")" \
     --arg subscription "$(guard_lower "$GUARD_SUBSCRIPTION_ID")" \
+    --arg location "centralus" \
     --arg mode "$GUARD_DEPLOYMENT_MODE" \
     --arg classification "$GUARD_DATA_CLASSIFICATION" \
     --arg box "$GUARD_BOX_ID" '
       (.id | ascii_downcase) == ("/subscriptions/" + $subscription + "/resourcegroups/" + $group) and
+      ((.location // "") | ascii_downcase) == $location and
       .tags.track == "B" and .tags.product == "cosmas-os" and .tags.env == "early_adopter_beta" and
       .tags.deployment_mode == $mode and .tags.data_classification == $classification and
       .tags.box_scope == "dedicated" and .tags.box_id == $box and .tags.managed == "terraform"
@@ -1020,8 +1222,8 @@ chmod 600 "$payload_file" "$payload_b64_file" "$request_file" "$view_file"
 
 case "$operation" in
   stage-source)
-    jq -n --rawfile deploy_key "$deploy_key" --rawfile known_hosts "$known_hosts" \
-      '{deploy_key_base64: ($deploy_key | @base64), known_hosts_base64: ($known_hosts | @base64)}' >"$payload_file"
+    jq -n --arg prior_source_sha "$prior_source_sha" --rawfile deploy_key "$deploy_key" --rawfile known_hosts "$known_hosts" \
+      '{deploy_key_base64: ($deploy_key | @base64), known_hosts_base64: ($known_hosts | @base64), prior_source_sha: (if $prior_source_sha == "" then null else $prior_source_sha end)}' >"$payload_file"
     ;;
   stage-vars) install -m 0600 "$var_file" "$payload_file" ;;
   inspect-stage) printf '{}' >"$payload_file" ;;
@@ -1090,9 +1292,28 @@ case "$operation" in
         '{offboarding_phase: $offboarding_phase, prior_attestation: $prior_attestation[0], owner_confirmation: $owner_confirmation[0]}' >"$payload_file"
     fi
     ;;
-  plan|probe-network|database-prepare|domain-verification) printf '{}' >"$payload_file" ;;
-  apply) install -m 0600 "$approval_file" "$payload_file" ;;
+  plan|probe-network|database-prepare|workload-verify|domain-verification) printf '{}' >"$payload_file" ;;
+  apply)
+    jq -n \
+      --rawfile approval_request "$approval_bundle/approval-request.json" \
+      --rawfile owner_authorization "$approval_bundle/owner-authorization.json" \
+      --rawfile authorization_claim "$approval_bundle/claim.json" \
+      --rawfile source_approval "$approval_bundle/source-approval.json" \
+      --rawfile authorization_manifest "$approval_bundle/manifest.json" '
+        {
+          contract: "cosmas-os-d3-protected-apply-bundle-transport-v1",
+          files: {
+            "approval-request.json": ($approval_request | @base64),
+            "owner-authorization.json": ($owner_authorization | @base64),
+            "claim.json": ($authorization_claim | @base64),
+            "source-approval.json": ($source_approval | @base64),
+            "manifest.json": ($authorization_manifest | @base64)
+          }
+        }
+      ' >"$payload_file"
+    ;;
 esac
+(( $(wc -c <"$payload_file") <= 393216 )) || guard_die "protected payload exceeds 384 KiB"
 base64 <"$payload_file" | tr -d '\n' >"$payload_b64_file"
 
 jq -n \
@@ -1105,6 +1326,7 @@ jq -n \
   --arg release_id "$release_id" \
   --arg source_sha "$source_sha" \
   --arg command_sha256 "$command_script_sha256" \
+  --arg resident_command_sha256 "$resident_command_sha256" \
   --rawfile protected_command "$command_script_bzip2_b64_file" \
   --rawfile protected_payload "$payload_b64_file" '
     {
@@ -1118,7 +1340,8 @@ jq -n \
           {name: "COSMAS_STAGE", value: $stage},
           {name: "COSMAS_RELEASE_ID", value: $release_id},
           {name: "COSMAS_SOURCE_SHA", value: $source_sha},
-          {name: "COSMAS_COMMAND_SHA256", value: $command_sha256}
+          {name: "COSMAS_COMMAND_SHA256", value: $command_sha256},
+          {name: "COSMAS_RESIDENT_COMMAND_SHA256", value: $resident_command_sha256}
         ],
         protectedParameters: [
           {name: "COSMAS_COMMAND_BZIP2_BASE64", value: $protected_command},
@@ -1161,7 +1384,7 @@ done
 [[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]] || guard_die "protected runner command did not succeed within 90 minutes"
 
 command_output=""
-if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   command_output="$(jq -r '.instanceView.output // .properties.instanceView.output // ""' "$view_file")"
 fi
 rm -f -- "$view_file" || guard_die "cannot remove local protected Run Command result material"
@@ -1175,9 +1398,13 @@ if ! transport_complete_managed_command_cleanup; then
   exit "$managed_run_command_cleanup_failure_status"
 fi
 
-if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   artifact_base64="$(awk -F= '/^COSMAS_SANITIZED_ARTIFACT_B64=/{sub(/^COSMAS_SANITIZED_ARTIFACT_B64=/, ""); print; exit}' <<<"$command_output")"
   [[ "$artifact_base64" =~ ^[A-Za-z0-9+/=]+$ ]] || guard_die "protected runner did not return a complete sanitized artifact"
+  artifact_destination="$artifact_out"
+  artifact_staging="$(mktemp "$(dirname -- "$artifact_destination")/.$(basename -- "$artifact_destination").partial.XXXXXX")"
+  chmod 0600 "$artifact_staging"
+  artifact_out="$artifact_staging"
   printf '%s' "$artifact_base64" | base64 --decode | gzip -d >"$artifact_out" || {
     rm -f -- "$artifact_out"
     guard_die "sanitized artifact could not be decoded"
@@ -1188,7 +1415,7 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
     guard_die "returned artifact is not a schema-version-1 sanitized object"
   }
   if guard_operation_returns_hashed_evidence "$operation" "$artifact_kind"; then
-    if [[ "$operation" == "inspect-stage" || "$operation" == "stage-generation" ]]; then
+    if [[ "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "workload-verify" || ( "$operation" == "retrieve" && "$artifact_kind" == "workload" ) ]]; then
       evidence_hash_valid=false
       if guard_validate_python_sanitized_evidence_hash "$artifact_out"; then
         evidence_hash_valid=true
@@ -1213,6 +1440,12 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
       printf 'Accepted immutable API/web digests are recorded in build evidence sha256:%s.\n' "$expected_evidence_hash"
     elif [[ "$operation" == "database-prepare" ]]; then
       printf 'Structured database_preparation_attestation is recorded in evidence sha256:%s.\n' "$expected_evidence_hash"
+    elif [[ "$operation" == "workload-verify" ]]; then
+      jq -e '.contract == "cosmas-os-d3-workload-verification-v1" and .status == "verified" and .exact_revisions_and_images_verified == true and .exact_runtime_configuration_verified == true and .managed_environment_verified == true and .single_revision_traffic_verified == true and .api_ready_verified == true and .web_health_verified == true and .worker_probe_configuration_verified == true and .worker_private_and_ready == true and .synthetic_box_id_returned == true and .person_or_patient_identifiers_returned == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned workload-verification artifact is invalid"
+      }
+      printf 'Exact deployed workload verification is recorded in evidence sha256:%s.\n' "$expected_evidence_hash"
     elif [[ "$operation" == "runtime-acceptance" ]]; then
       jq -e --arg phase "$acceptance_phase" '.evidence_type == "protected-runner-runtime-acceptance" and .acceptance_phase == $phase' "$artifact_out" >/dev/null || {
         rm -f -- "$artifact_out"
@@ -1246,7 +1479,7 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
       }
       printf 'Protected PITR %s evidence is recorded as sha256:%s.\n' "$pitr_phase" "$expected_evidence_hash"
     elif [[ "$operation" == "release-rollback" || "$operation" == "release-forward" ]]; then
-      jq -e --arg phase "$recovery_phase" '.evidence_type == "protected-runner-release-recovery" and .recovery_phase == $phase and .mutable_tags_used == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
+      jq -e --arg phase "$recovery_phase" '.evidence_type == "protected-runner-release-recovery" and .recovery_phase == $phase and .source_relationship.prior_is_ancestor == true and .source_relationship.source_tree_differs == true and (.source_relationship.current_tree_sha1 | strings | test("^[0-9a-f]{40}$")) and (.source_relationship.prior_tree_sha1 | strings | test("^[0-9a-f]{40}$")) and .source_relationship.current_tree_sha1 != .source_relationship.prior_tree_sha1 and .four_release_image_digests_distinct == true and .mutable_tags_used == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
         rm -f -- "$artifact_out"
         guard_die "returned release-recovery artifact differs from the requested exact-digest phase"
       }
@@ -1284,6 +1517,9 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
   if [[ "$operation" == "retrieve" && "$artifact_kind" == "domain" ]]; then
     guard_validate_domain_verification_artifact "$artifact_out" "$source_sha" "$release_id"
   fi
+  guard_publish_private_file "$artifact_out" "$artifact_destination" "sanitized protected-runner artifact"
+  artifact_staging=""
+  artifact_out="$artifact_destination"
   printf 'D3 protected runner %s succeeded; sanitized artifact written to %s\n' "$operation" "$artifact_out"
 else
   printf 'D3 protected runner %s succeeded without returning protected payload contents\n' "$operation"

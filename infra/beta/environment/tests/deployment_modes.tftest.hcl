@@ -423,7 +423,8 @@ run "workloads_reject_skipped_database_preparation" {
     deploy_workloads                       = true
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -449,7 +450,8 @@ run "workloads_reject_missing_database_preparation_attestation" {
     database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -468,7 +470,8 @@ run "workloads_reject_attestation_for_different_image" {
     database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -494,7 +497,8 @@ run "workloads_reject_attestation_for_different_box" {
     database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -524,7 +528,8 @@ run "workloads_reject_pending_production_clerk" {
     database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -549,7 +554,8 @@ run "workloads_reject_missing_web_digest" {
     enable_database_preparation_job        = true
     database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -575,6 +581,7 @@ run "workloads_reject_unapproved_web_origin" {
     database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
     web_origin                             = "https://wrong.example.invalid"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
@@ -592,7 +599,7 @@ run "workloads_reject_unapproved_web_origin" {
   expect_failures = [azurerm_container_app.web[0]]
 }
 
-run "workloads_create_digest_pinned_https_web_host" {
+run "workloads_reject_missing_custom_domain" {
   command = plan
 
   variables {
@@ -602,6 +609,33 @@ run "workloads_create_digest_pinned_https_web_host" {
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
     web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_release_evidence_reference         = "web-release:test"
+    runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
+    runner_live_network_evidence_reference = "network-live:workloads:test"
+    database_preparation_attestation = {
+      image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      schema_revision    = "0002_external_identities"
+      evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
+      box_id             = "00000000-0000-4000-8000-000000000004"
+      database_server_id = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-cosmas-beta-lab01-abc123"
+    }
+  }
+
+  expect_failures = [terraform_data.prerequisite_guard]
+}
+
+run "workloads_create_digest_pinned_https_web_host" {
+  command = plan
+
+  variables {
+    deploy_workloads                       = true
+    enable_database_preparation_job        = true
+    database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -634,16 +668,19 @@ run "workloads_create_digest_pinned_https_web_host" {
 
   assert {
     condition = (
-      output.web_origin == "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io" &&
+      output.web_origin == "https://app.beta.cosmaneura.com" &&
       output.web_custom_domain_binding_enabled == false &&
       output.api_origin == "https://ca-api-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
     )
-    error_message = "The reviewed web and API origins must be deterministic within the isolated D3 Container Apps environment."
+    error_message = "The reviewed custom web origin and derived API origin must be deterministic within the isolated D3 Container Apps environment."
   }
 
   assert {
     condition = (
       length(azurerm_container_app.worker) == 1 &&
+      azurerm_container_app.api[0].max_inactive_revisions == 3 &&
+      azurerm_container_app.worker[0].max_inactive_revisions == 3 &&
+      azurerm_container_app.web[0].max_inactive_revisions == 3 &&
       azurerm_container_app.worker[0].template[0].container[0].startup_probe[0].transport == "HTTP" &&
       azurerm_container_app.worker[0].template[0].container[0].startup_probe[0].port == 8001 &&
       azurerm_container_app.worker[0].template[0].container[0].startup_probe[0].path == "/ready" &&
@@ -836,7 +873,8 @@ run "workloads_reject_missing_alert_contact" {
     database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:workloads:test"
@@ -863,7 +901,8 @@ run "database_candidate_can_advance_without_replacing_live_workloads" {
     image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
     database_preparation_image_digest      = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
     web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-    web_origin                             = "https://ca-web-cosmas-beta-lab01.synthetic.centralus.azurecontainerapps.io"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
     web_release_evidence_reference         = "web-release:test"
     runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
     runner_live_network_evidence_reference = "network-live:upgrade:test"

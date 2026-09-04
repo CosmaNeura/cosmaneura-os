@@ -1,4 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
+_cosmas_wrapper_dir="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && /bin/pwd -P)" || exit 1
+# shellcheck source=local-wrapper-env.sh
+. "$_cosmas_wrapper_dir/local-wrapper-env.sh"
+cosmas_isolate_local_wrapper_environment "$@"
+unset -f cosmas_isolate_local_wrapper_environment
+unset _cosmas_wrapper_dir
 set -euo pipefail
 
 umask 077
@@ -11,7 +18,7 @@ source "$script_dir/deployment-guard-lib.sh"
 
 usage() {
   printf '%s\n' \
-    "Usage: $0 --bootstrap-outputs PATH --var-file PATH --plan PATH --review PATH --approval PATH --result-out PATH" \
+    "Usage: $0 --bootstrap-outputs PATH --var-file PATH --plan PATH --review PATH --approval PATH --approval-bundle DIR --attempt-claim PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --result-out PATH" \
     "" \
     "Applies one plan emitted by subsequent-environment-plan.sh. The approval" \
     "JSON must bind a named reviewer/reference to the exact plan hash and prior" \
@@ -23,7 +30,12 @@ plan_path=""
 var_file=""
 review_path=""
 approval_path=""
+approval_bundle=""
 result_out=""
+approved_source_sha=""
+release_id=""
+stage=""
+attempt_claim=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,6 +64,31 @@ while [[ $# -gt 0 ]]; do
       approval_path="$2"
       shift 2
       ;;
+    --approval-bundle)
+      [[ $# -ge 2 ]] || guard_die "--approval-bundle requires a path"
+      approval_bundle="$2"
+      shift 2
+      ;;
+    --source-sha)
+      [[ $# -ge 2 ]] || guard_die "--source-sha requires a value"
+      approved_source_sha="$2"
+      shift 2
+      ;;
+    --release-id)
+      [[ $# -ge 2 ]] || guard_die "--release-id requires a value"
+      release_id="$2"
+      shift 2
+      ;;
+    --stage)
+      [[ $# -ge 2 ]] || guard_die "--stage requires a value"
+      stage="$2"
+      shift 2
+      ;;
+    --attempt-claim)
+      [[ $# -ge 2 ]] || guard_die "--attempt-claim requires a path"
+      attempt_claim="$2"
+      shift 2
+      ;;
     --result-out)
       [[ $# -ge 2 ]] || guard_die "--result-out requires a path"
       result_out="$2"
@@ -72,6 +109,11 @@ done
 [[ -n "$var_file" ]] || guard_die "--var-file is required"
 [[ -n "$review_path" ]] || guard_die "--review is required"
 [[ -n "$approval_path" ]] || guard_die "--approval is required"
+[[ -n "$approval_bundle" ]] || guard_die "--approval-bundle is required"
+[[ "$approved_source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "--source-sha must be a lowercase commit SHA"
+[[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "--release-id is invalid"
+[[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "--stage is invalid"
+[[ -n "$attempt_claim" ]] || guard_die "--attempt-claim is required"
 [[ -n "$result_out" ]] || guard_die "--result-out is required"
 
 for command_name in az jq stat; do
@@ -84,18 +126,24 @@ plan_path="$(guard_absolute_path "$plan_path")"
 var_file="$(guard_absolute_path "$var_file")"
 review_path="$(guard_absolute_path "$review_path")"
 approval_path="$(guard_absolute_path "$approval_path")"
+approval_bundle="$(guard_absolute_path "$approval_bundle")"
+attempt_claim="$(guard_absolute_path "$attempt_claim")"
 result_out="$(guard_absolute_path "$result_out")"
 guard_outside_repository "$bootstrap_outputs" "$repository_root" "bootstrap output JSON"
 guard_outside_repository "$plan_path" "$repository_root" "plan"
 guard_outside_repository "$var_file" "$repository_root" "environment variable file"
 guard_outside_repository "$review_path" "$repository_root" "review manifest"
 guard_outside_repository "$approval_path" "$repository_root" "approval record"
+guard_outside_repository "$approval_bundle" "$repository_root" "approval bundle"
+guard_outside_repository "$attempt_claim" "$repository_root" "apply-attempt claim"
 guard_outside_repository "$result_out" "$repository_root" "apply result"
 guard_private_file "$bootstrap_outputs" "bootstrap output JSON"
 guard_private_file "$plan_path" "plan"
 guard_private_file "$var_file" "environment variable file"
 guard_private_file "$review_path" "review manifest"
 guard_private_file "$approval_path" "approval record"
+guard_private_directory "$approval_bundle" "approval bundle"
+[[ "$approval_path" == "$approval_bundle/source-approval.json" ]] || guard_die "--approval must be the fixed source-approval.json inside --approval-bundle"
 guard_new_private_path "$result_out" "apply result"
 
 pre_state=""
@@ -121,6 +169,7 @@ trap cleanup EXIT
 
 guard_load_bootstrap_outputs "$bootstrap_outputs"
 guard_source_metadata "$repository_root"
+[[ "$GUARD_SOURCE_SHA" == "$approved_source_sha" ]] || guard_die "approved source SHA does not match the checked-out source"
 guard_verify_azure_context_and_boundary
 guard_state_exists || guard_die "remote state does not exist; a subsequent plan cannot be applied"
 review_phase="$(jq -er '.phase | strings' "$review_path")"
@@ -139,6 +188,8 @@ pre_lineage="$GUARD_STATE_LINEAGE"
 pre_serial="$GUARD_STATE_SERIAL"
 pre_state_sha256="$GUARD_STATE_SHA256"
 plan_sha256="$(guard_sha256 "$plan_path")"
+review_sha256="$(guard_sha256 "$review_path")"
+variable_file_sha256="$(guard_sha256 "$var_file")"
 
 jq -e \
   --arg plan_sha256 "$plan_sha256" \
@@ -186,17 +237,9 @@ jq -e \
     .managed_action_counts.replace == 0
   ' "$review_path" >/dev/null || guard_die "review manifest does not match the exact plan, state, identity, mode, and Box boundary"
 
-jq -e \
-  --arg plan_sha256 "$plan_sha256" \
-  --arg lineage "$pre_lineage" \
-  --argjson serial "$pre_serial" '
-    .schema_version == 1 and
-    .plan_sha256 == $plan_sha256 and
-    .state_lineage == $lineage and
-    .state_serial == $serial and
-    (.reviewer | strings | length >= 3) and
-    (.review_reference | strings | length >= 3)
-  ' "$approval_path" >/dev/null || guard_die "approval record does not bind a named reviewer/reference to this exact plan and prior state"
+guard_validate_apply_approval "$approval_path" "$approval_bundle" "$GUARD_SOURCE_SHA" "$release_id" "$stage" \
+  "$plan_sha256" "$review_sha256" "$variable_file_sha256" true \
+  "$pre_lineage" "$pre_serial" "$pre_state_sha256"
 
 plan_json="$(mktemp "${TMPDIR:-/tmp}/cosmas-d3-apply-plan.XXXXXX")"
 "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" show -json "$plan_path" >"$plan_json"
@@ -239,6 +282,18 @@ else
   # OpenTofu performs its own saved-plan state snapshot check while it acquires
   # the remote backend lock. A concurrent state change therefore fails even
   # after the explicit pre-apply lineage/serial check above.
+  # Re-read the live centralus boundary and all authorization expiries at the
+  # last possible point before OpenTofu can mutate anything.
+  guard_verify_azure_context_and_boundary
+  guard_validate_apply_approval "$approval_path" "$approval_bundle" "$GUARD_SOURCE_SHA" "$release_id" "$stage" \
+    "$plan_sha256" "$review_sha256" "$variable_file_sha256" true \
+    "$pre_lineage" "$pre_serial" "$pre_state_sha256"
+  guard_claim_apply_attempt "$attempt_claim" "$GUARD_SOURCE_SHA" "$release_id" "$stage" \
+    "$plan_sha256" "$(guard_sha256 "$approval_path")" "$(jq -er '.authorization_claim_sha256' "$approval_path")" \
+    "causal-bundle-claim"
+  guard_validate_apply_approval "$approval_path" "$approval_bundle" "$GUARD_SOURCE_SHA" "$release_id" "$stage" \
+    "$plan_sha256" "$review_sha256" "$variable_file_sha256" true \
+    "$pre_lineage" "$pre_serial" "$pre_state_sha256"
   "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" apply \
     -input=false \
     "$plan_path"
