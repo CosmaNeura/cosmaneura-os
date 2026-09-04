@@ -72,7 +72,7 @@ saved plan, then starts and attests exactly one execution through the protected
 runner:
 
 ```text
-bash ./infra/beta/transport-to-protected-runner.sh database-prepare \
+/bin/bash -p ./infra/beta/transport-to-protected-runner.sh database-prepare \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
   --release-id REVIEWED_RELEASE_ID \

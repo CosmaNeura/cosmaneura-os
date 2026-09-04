@@ -12,7 +12,7 @@ from uuid import UUID, uuid4
 
 from azure.core.exceptions import ResourceNotFoundError
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from cosmas_os.adapters.azure import AzureBlobAdapter
@@ -26,18 +26,22 @@ from cosmas_os.domain.enums import (
     TicketState,
 )
 from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.domain.rules import AuthorizationError
 from cosmas_os.models import (
     ActionRevision,
+    AppointmentObservation,
     Artifact,
     AuditEvent,
     Decision,
     Operation,
+    PatientLink,
     Principal,
     Ticket,
 )
 from cosmas_os.ports import BlobPort
 
 WORKFLOW_ACCEPTANCE_CONTRACT = "cosmas-os-d3-workflow-acceptance-v1"
+AUDIT_REPLAY_CONTRACT = "cosmas-os-d3-audit-replay-acceptance-v1"
 PURGE_ACCEPTANCE_CONTRACT = "cosmas-os-d3-physical-purge-acceptance-v1"
 
 _HANDLE_PATTERN = r"^[0-9a-f]{64}$"
@@ -47,10 +51,27 @@ _PURGE_CLASSIFICATION = "synthetic_purge_acceptance"
 _PURGE_CONTENT = b"COSMAS_OS_SYNTHETIC_PURGE_ACCEPTANCE_V1\n"
 _PURGE_CONTENT_TYPE = "application/octet-stream"
 _PURGE_RETAIN_DAYS = 7
+_SYNTHETIC_APPOINTMENT_REF = "appt-1001"
+_SYNTHETIC_APPOINTMENT_START = datetime(2026, 9, 10, 15, 0, tzinfo=UTC)
+_SYNTHETIC_PATIENT_LABEL = "Jordan Lee"
+_SYNTHETIC_PATIENT_LINK_SOURCE = "csv:jordan-lee"
+_SYNTHETIC_MESSAGE = (
+    "Please use the secure link to share insurance information before your visit. "
+    "This message contains no clinical details."
+)
+_SYNTHETIC_POLICY_VERSION = "policy-v1"
+_SYNTHETIC_CHARTER_VERSION = "charter-v1"
+_SYNTHETIC_CONFIG_VERSION = "config-v1"
+_WORKER_AUDIT_CLOCK_BOUND = timedelta(seconds=5)
 
 
 class BetaAcceptanceError(RuntimeError):
     """A live beta acceptance assertion failed without exposing its inputs."""
+
+
+def _reject_acceptance_if(*conditions: bool) -> None:
+    if any(conditions):
+        raise BetaAcceptanceError("beta acceptance failed")
 
 
 class _SignedState(BaseModel):
@@ -106,6 +127,29 @@ class WorkflowAcceptanceEvidence:
     approval_audit_delta: int
     success_audit_delta: int
     approval_precedes_worker_success: bool
+
+    def sanitized_payload(self) -> dict[str, str | bool | int]:
+        return asdict(self)
+
+    def sanitized_json(self) -> str:
+        return _evidence_json(self.sanitized_payload())
+
+
+@dataclass(frozen=True)
+class AuditReplayEvidence:
+    contract: str
+    stage: str
+    status: str
+    completed_at: str
+    box_scope_enforced: bool
+    cross_box_replay_denied: bool
+    ticket_timeline_replayed: bool
+    operation_events_linked: bool
+    required_event_order_verified: bool
+    no_content_fields_returned: bool
+    timeline_event_count: int
+    identifiers_returned: bool
+    content_returned: bool
 
     def sanitized_payload(self) -> dict[str, str | bool | int]:
         return asdict(self)
@@ -197,7 +241,10 @@ def _timestamp_matches(value: object, expected: datetime | None) -> bool:
 
 
 def _database_now(session: Session) -> datetime:
-    observed = session.scalar(select(func.now()))
+    # PostgreSQL now() is fixed at transaction start and can precede a worker's
+    # just-recorded wall-clock timestamps.  clock_timestamp() is the live DB
+    # boundary required for strict no-future evidence validation.
+    observed = session.scalar(select(func.clock_timestamp()))
     if not isinstance(observed, datetime):
         raise BetaAcceptanceError("beta acceptance failed")
     if observed.tzinfo is None:
@@ -282,7 +329,7 @@ def _validate_signed_state(state: _SignedState, key: bytes, now: datetime) -> No
         raise BetaAcceptanceError("beta acceptance failed")
     issued_at = _parse_utc_timestamp(state.issued_at)
     expires_at = _parse_utc_timestamp(state.expires_at)
-    if expires_at - issued_at != _STATE_LIFETIME or now < issued_at or now > expires_at:
+    if expires_at - issued_at != _STATE_LIFETIME or now < issued_at or now >= expires_at:
         raise BetaAcceptanceError("beta acceptance failed")
 
 
@@ -305,44 +352,32 @@ def _validate_workflow_revision(revision: ActionRevision | None, ticket: Ticket)
 def _workflow_counts(
     session: Session,
     ticket: Ticket,
-) -> tuple[list[Decision], list[Operation], list[AuditEvent], list[AuditEvent]]:
-    approvals = list(
-        session.scalars(
-            select(Decision).where(
-                Decision.box_id == ticket.box_id,
-                Decision.ticket_id == ticket.id,
-                Decision.kind == DecisionKind.APPROVE.value,
-            )
-        ).all()
+) -> tuple[list[ActionRevision], list[Decision], list[Operation], list[AuditEvent]]:
+    revisions = list(
+        session.scalars(select(ActionRevision).where(ActionRevision.ticket_id == ticket.id)).all()
     )
+    decisions = list(session.scalars(select(Decision).where(Decision.ticket_id == ticket.id)).all())
     operations = list(
-        session.scalars(
-            select(Operation).where(
-                Operation.box_id == ticket.box_id,
-                Operation.ticket_id == ticket.id,
-            )
-        ).all()
+        session.scalars(select(Operation).where(Operation.ticket_id == ticket.id)).all()
     )
-    approval_audits = list(
+    linked_audits = list(
         session.scalars(
             select(AuditEvent).where(
-                AuditEvent.box_id == ticket.box_id,
-                AuditEvent.aggregate_type == "ticket",
-                AuditEvent.aggregate_id == ticket.id,
-                AuditEvent.event_type == "decision.approved",
+                or_(
+                    AuditEvent.action_revision_id == ticket.current_revision_id,
+                    and_(
+                        AuditEvent.aggregate_type == "ticket",
+                        AuditEvent.aggregate_id == ticket.id,
+                    ),
+                    and_(
+                        AuditEvent.aggregate_type == "operation",
+                        AuditEvent.aggregate_id.in_([operation.id for operation in operations]),
+                    ),
+                )
             )
         ).all()
     )
-    success_audits = list(
-        session.scalars(
-            select(AuditEvent).where(
-                AuditEvent.box_id == ticket.box_id,
-                AuditEvent.event_type == "operation.succeeded",
-                AuditEvent.action_revision_id == ticket.current_revision_id,
-            )
-        ).all()
-    )
-    return approvals, operations, approval_audits, success_audits
+    return revisions, decisions, operations, linked_audits
 
 
 def baseline_beta_workflow_acceptance(
@@ -368,9 +403,27 @@ def baseline_beta_workflow_acceptance(
         if len(pending) != 1:
             raise BetaAcceptanceError("beta acceptance failed")
         ticket = pending[0]
-        _validate_workflow_revision(session.get(ActionRevision, ticket.current_revision_id), ticket)
-        approvals, operations, approval_audits, success_audits = _workflow_counts(session, ticket)
-        if approvals or operations or approval_audits or success_audits:
+        revisions, decisions, operations, linked_audits = _workflow_counts(session, ticket)
+        if len(revisions) != 1 or decisions or operations or len(linked_audits) != 1:
+            raise BetaAcceptanceError("beta acceptance failed")
+        revision = _validate_workflow_revision(revisions[0], ticket)
+        opened = linked_audits[0]
+        if (
+            opened.box_id != box_id
+            or opened.aggregate_type != "ticket"
+            or opened.aggregate_id != ticket.id
+            or opened.event_type != "ticket.opened"
+            or opened.actor_principal_id != revision.created_by_principal_id
+            or opened.initiated_by_principal_id != revision.created_by_principal_id
+            or opened.approved_by_principal_id is not None
+            or opened.action_revision_id != revision.id
+            or opened.payload_hash != revision.payload_hash
+            or opened.policy_version != revision.policy_version
+            or opened.charter_version != revision.charter_version
+            or opened.config_version != revision.config_version
+            or opened.outcome != "pending_approval"
+            or opened.detail != {}
+        ):
             raise BetaAcceptanceError("beta acceptance failed")
 
         observed_at = _database_now(session)
@@ -428,21 +481,30 @@ def verify_beta_workflow_acceptance(
         if len(matches) != 1:
             raise BetaAcceptanceError("beta acceptance failed")
         ticket = matches[0]
-        revision = _validate_workflow_revision(
-            session.get(ActionRevision, ticket.current_revision_id),
-            ticket,
-        )
-        approvals, operations, approval_audits, success_audits = _workflow_counts(session, ticket)
+        revisions, decisions, operations, linked_audits = _workflow_counts(session, ticket)
+        if len(revisions) != 1:
+            raise BetaAcceptanceError("beta acceptance failed")
+        revision = _validate_workflow_revision(revisions[0], ticket)
+        approval_audits = [
+            event for event in linked_audits if event.event_type == "decision.approved"
+        ]
+        success_audits = [
+            event for event in linked_audits if event.event_type == "operation.succeeded"
+        ]
+        opened_audits = [event for event in linked_audits if event.event_type == "ticket.opened"]
         if (
-            len(approvals) - state.approval_decision_count != 1
+            len(decisions) - state.approval_decision_count != 1
             or len(operations) - state.operation_count != 1
             or len(approval_audits) - state.approval_audit_count != 1
             or len(success_audits) - state.success_audit_count != 1
+            or len(opened_audits) != 1
+            or len(linked_audits) != 3
         ):
             raise BetaAcceptanceError("beta acceptance failed")
 
-        decision = approvals[0]
+        decision = decisions[0]
         operation = operations[0]
+        opened_audit = opened_audits[0]
         approval_audit = approval_audits[0]
         matching_success_audits = [
             event
@@ -467,28 +529,71 @@ def verify_beta_workflow_acceptance(
             success_audit.created_at,
         )
         if (
-            decision.action_revision_id != revision.id
+            decision.box_id != box_id
+            or decision.kind != DecisionKind.APPROVE.value
+            or decision.action_revision_id != revision.id
             or decision.ticket_id != ticket.id
             or decision.note is not None
             or approver is None
             or approver.box_id != box_id
             or approver.principal_type != PrincipalType.HUMAN.value
             or approver.state != PrincipalState.ACTIVE.value
+            or not approver.is_owner
+            or approver.agent_key is not None
+            or approver.policy_version != revision.policy_version
+            or approver.charter_version != revision.charter_version
+            or approver.config_version != revision.config_version
+            or approver.tombstoned_at is not None
+            or operation.box_id != box_id
             or operation.action_revision_id != revision.id
             or operation.ticket_id != ticket.id
             or operation.adapter != "notify"
             or operation.status != OperationStatus.SUCCEEDED.value
-            or operation.attempt_count < 1
+            or operation.attempt_count != 1
+            or operation.error_message is not None
             or not hmac.compare_digest(operation.external_reference or "", expected_reference)
             or not hmac.compare_digest(operation.result_receipt_hash or "", expected_receipt_hash)
             or ticket.state != TicketState.SENT.value
+            or opened_audit.box_id != box_id
+            or opened_audit.aggregate_type != "ticket"
+            or opened_audit.aggregate_id != ticket.id
+            or opened_audit.event_type != "ticket.opened"
+            or opened_audit.actor_principal_id != revision.created_by_principal_id
+            or opened_audit.initiated_by_principal_id != revision.created_by_principal_id
+            or opened_audit.approved_by_principal_id is not None
+            or opened_audit.action_revision_id != revision.id
+            or opened_audit.payload_hash != revision.payload_hash
+            or opened_audit.policy_version != revision.policy_version
+            or opened_audit.charter_version != revision.charter_version
+            or opened_audit.config_version != revision.config_version
+            or opened_audit.outcome != "pending_approval"
+            or opened_audit.detail != {}
+            or approval_audit.box_id != box_id
+            or approval_audit.aggregate_type != "ticket"
+            or approval_audit.aggregate_id != ticket.id
+            or approval_audit.event_type != "decision.approved"
+            or approval_audit.actor_principal_id != decision.actor_principal_id
+            or approval_audit.initiated_by_principal_id is not None
             or approval_audit.action_revision_id != revision.id
             or approval_audit.payload_hash != revision.payload_hash
             or approval_audit.approved_by_principal_id != decision.actor_principal_id
+            or approval_audit.policy_version != revision.policy_version
+            or approval_audit.charter_version != revision.charter_version
+            or approval_audit.config_version != revision.config_version
             or approval_audit.outcome != "approved"
             or approval_audit.detail != {"operation_bound": True}
+            or success_audit.box_id != box_id
+            or success_audit.aggregate_type != "operation"
+            or success_audit.aggregate_id != operation.id
+            or success_audit.event_type != "operation.succeeded"
+            or success_audit.actor_principal_id is not None
+            or success_audit.initiated_by_principal_id is not None
+            or success_audit.approved_by_principal_id is not None
             or success_audit.action_revision_id != revision.id
             or success_audit.payload_hash != revision.payload_hash
+            or success_audit.policy_version is not None
+            or success_audit.charter_version is not None
+            or success_audit.config_version is not None
             or success_audit.outcome != "succeeded"
             or success_audit.detail != {"external_reference": expected_reference}
             or any(value is None for value in timestamps)
@@ -496,14 +601,31 @@ def verify_beta_workflow_acceptance(
             raise BetaAcceptanceError("beta acceptance failed")
         assert operation.started_at is not None
         assert operation.completed_at is not None
-        # PostgreSQL ``now()``/CURRENT_TIMESTAMP is the transaction-start time,
-        # while worker and audit timestamps come from the application clock.
-        # Preserve strict ordering within each clock domain; comparing across
-        # them would reject a causally valid workflow under ordinary clock skew.
+        # PostgreSQL creation timestamps share a transaction clock. API audit
+        # and worker timestamps can come from separate application hosts, so
+        # only their cross-host causal edges receive the explicit skew bound.
         if not (
-            issued_at <= decision.created_at <= operation.created_at
+            issued_at <= decision.created_at + _WORKER_AUDIT_CLOCK_BOUND
+            and decision.created_at <= operation.created_at
             and operation.started_at <= operation.completed_at
-            and approval_audit.created_at <= success_audit.created_at
+            and operation.completed_at <= success_audit.created_at
+            and abs((approval_audit.created_at - operation.created_at).total_seconds())
+            <= _WORKER_AUDIT_CLOCK_BOUND.total_seconds()
+            and approval_audit.created_at <= operation.started_at + _WORKER_AUDIT_CLOCK_BOUND
+            and all(
+                value.tzinfo is not None and value.astimezone(UTC) <= observed_at
+                for value in (decision.created_at, operation.created_at)
+            )
+            and all(
+                value.tzinfo is not None
+                and value.astimezone(UTC) <= observed_at + _WORKER_AUDIT_CLOCK_BOUND
+                for value in (
+                    operation.started_at,
+                    operation.completed_at,
+                    approval_audit.created_at,
+                    success_audit.created_at,
+                )
+            )
         ):
             raise BetaAcceptanceError("beta acceptance failed")
 
@@ -524,6 +646,373 @@ def verify_beta_workflow_acceptance(
             approval_audit_delta=1,
             success_audit_delta=1,
             approval_precedes_worker_success=True,
+        )
+    except BetaAcceptanceError:
+        raise
+    except Exception:
+        raise BetaAcceptanceError("beta acceptance failed") from None
+
+
+def verify_beta_audit_replay(
+    session: Session,
+    runtime: Settings,
+) -> AuditReplayEvidence:
+    """Replay one completed synthetic workflow without exporting row identifiers or content."""
+
+    from cosmas_os.application import services as svc
+
+    try:
+        box_id = _validate_runtime(runtime, require_blob=False)
+        observed_at = _database_now(session)
+        tickets = list(session.scalars(select(Ticket).where(Ticket.box_id == box_id)).all())
+        if len(tickets) != 1 or tickets[0].state != TicketState.SENT.value:
+            raise BetaAcceptanceError("beta acceptance failed")
+        ticket = tickets[0]
+        revisions = list(
+            session.scalars(
+                select(ActionRevision).where(ActionRevision.ticket_id == ticket.id)
+            ).all()
+        )
+        decisions = list(
+            session.scalars(select(Decision).where(Decision.ticket_id == ticket.id)).all()
+        )
+        operations = list(
+            session.scalars(select(Operation).where(Operation.ticket_id == ticket.id)).all()
+        )
+        if len(revisions) != 1 or len(decisions) != 1 or len(operations) != 1:
+            raise BetaAcceptanceError("beta acceptance failed")
+        revision = _validate_workflow_revision(revisions[0], ticket)
+        decision = decisions[0]
+        operation = operations[0]
+        approver = session.get(Principal, decision.actor_principal_id)
+        initiator = session.get(Principal, ticket.created_by_principal_id)
+        appointment = session.get(AppointmentObservation, ticket.appointment_id)
+        patient_link = session.get(PatientLink, ticket.patient_link_id)
+        expected_reference = f"fake-{operation.id}"
+        expected_receipt_hash = payload_hash(
+            {"ref": expected_reference, "status": OperationStatus.SUCCEEDED.value}
+        )
+        expected_payload = {
+            "action": "notify.patient_insurance_request",
+            "channel": "fake_secure_link",
+            "body": _SYNTHETIC_MESSAGE,
+            "target_ref": f"patient_link:{ticket.patient_link_id}",
+            "appointment_ref": _SYNTHETIC_APPOINTMENT_REF,
+        }
+        _reject_acceptance_if(
+            ticket.version != 2,
+            ticket.lane != "artifact_chase",
+            ticket.closed_at is not None,
+            ticket.current_revision_id != revision.id,
+            ticket.appointment_id is None,
+            ticket.patient_link_id is None,
+            initiator is None,
+            appointment is None,
+            patient_link is None,
+            approver is None,
+        )
+        assert initiator is not None
+        assert appointment is not None
+        assert patient_link is not None
+        assert approver is not None
+        _reject_acceptance_if(
+            initiator.box_id != box_id,
+            initiator.principal_type != PrincipalType.AGENT.value,
+            initiator.agent_key != "chaser",
+            initiator.display_name != "Chaser",
+            initiator.state != PrincipalState.ACTIVE.value,
+            initiator.is_owner,
+            initiator.policy_version != _SYNTHETIC_POLICY_VERSION,
+            initiator.charter_version != _SYNTHETIC_CHARTER_VERSION,
+            initiator.config_version != _SYNTHETIC_CONFIG_VERSION,
+            initiator.tombstoned_at is not None,
+            appointment.box_id != box_id,
+            appointment.external_id != _SYNTHETIC_APPOINTMENT_REF,
+            appointment.source != "csv",
+            appointment.start_at.astimezone(UTC) != _SYNTHETIC_APPOINTMENT_START,
+            appointment.patient_label != _SYNTHETIC_PATIENT_LABEL,
+            appointment.coverage_status != "missing",
+            appointment.patient_link_id != ticket.patient_link_id,
+            patient_link.box_id != box_id,
+            patient_link.id != ticket.patient_link_id,
+            patient_link.source_pair_key != _SYNTHETIC_PATIENT_LINK_SOURCE,
+            patient_link.label != _SYNTHETIC_PATIENT_LABEL,
+            patient_link.confirmed_by_principal_id != decision.actor_principal_id,
+            patient_link.attested_at is None,
+            patient_link.state != "confirmed",
+            patient_link.revoked_at is not None,
+        )
+        _reject_acceptance_if(
+            revision.revision_number != 1,
+            revision.action_type != "notify.patient_insurance_request",
+            revision.created_by_principal_id != initiator.id,
+            revision.target_ref != f"patient_link:{ticket.patient_link_id}",
+            revision.content != _SYNTHETIC_MESSAGE,
+            revision.payload != expected_payload,
+            revision.payload_hash != payload_hash(expected_payload),
+            revision.policy_version != initiator.policy_version,
+            revision.charter_version != initiator.charter_version,
+            revision.config_version != initiator.config_version,
+            decision.kind != DecisionKind.APPROVE.value,
+            decision.box_id != box_id,
+            decision.ticket_id != ticket.id,
+            decision.action_revision_id != revision.id,
+            decision.note is not None,
+            approver.box_id != box_id,
+            approver.principal_type != PrincipalType.HUMAN.value,
+            approver.state != PrincipalState.ACTIVE.value,
+            not approver.is_owner,
+            approver.agent_key is not None,
+            approver.policy_version != _SYNTHETIC_POLICY_VERSION,
+            approver.charter_version != _SYNTHETIC_CHARTER_VERSION,
+            approver.config_version != _SYNTHETIC_CONFIG_VERSION,
+            approver.tombstoned_at is not None,
+        )
+        _reject_acceptance_if(
+            operation.box_id != box_id,
+            operation.ticket_id != ticket.id,
+            operation.action_revision_id != revision.id,
+            operation.idempotency_key != f"op:{revision.id}",
+            operation.adapter != "notify",
+            operation.status != OperationStatus.SUCCEEDED.value,
+            operation.attempt_count != 1,
+            operation.error_message is not None,
+            not hmac.compare_digest(operation.external_reference or "", expected_reference),
+            not hmac.compare_digest(operation.result_receipt_hash or "", expected_receipt_hash),
+            operation.started_at is None,
+            operation.completed_at is None,
+        )
+        assert operation.started_at is not None
+        assert operation.completed_at is not None
+        assert patient_link.attested_at is not None
+        _reject_acceptance_if(
+            operation.started_at > operation.completed_at,
+            any(
+                value is None or value.tzinfo is None or value.astimezone(UTC) > observed_at
+                for value in (
+                    ticket.created_at,
+                    revision.created_at,
+                    decision.created_at,
+                    operation.created_at,
+                )
+            ),
+            any(
+                value.tzinfo is None
+                or value.astimezone(UTC) > observed_at + _WORKER_AUDIT_CLOCK_BOUND
+                for value in (
+                    operation.started_at,
+                    operation.completed_at,
+                    patient_link.attested_at,
+                )
+            ),
+        )
+
+        linked_events = list(
+            session.scalars(
+                select(AuditEvent)
+                .where(
+                    or_(
+                        AuditEvent.action_revision_id == revision.id,
+                        and_(
+                            AuditEvent.aggregate_type == "ticket",
+                            AuditEvent.aggregate_id == ticket.id,
+                        ),
+                        and_(
+                            AuditEvent.aggregate_type == "operation",
+                            AuditEvent.aggregate_id == operation.id,
+                        ),
+                    )
+                )
+                .order_by(AuditEvent.created_at, AuditEvent.id)
+            ).all()
+        )
+        ticket_events = [
+            event
+            for event in linked_events
+            if event.aggregate_type == "ticket" and event.aggregate_id == ticket.id
+        ]
+        operation_events = [
+            event
+            for event in linked_events
+            if event.aggregate_type == "operation" and event.aggregate_id == operation.id
+        ]
+        if len(ticket_events) != 2 or len(operation_events) != 1:
+            raise BetaAcceptanceError("beta acceptance failed")
+        opened, approved = ticket_events
+        succeeded = operation_events[0]
+        correlation_ids: set[str] = set()
+        for event in (opened, approved, succeeded):
+            try:
+                correlation_id = str(UUID(str(event.correlation_id)))
+            except ValueError:
+                raise BetaAcceptanceError("beta acceptance failed") from None
+            if correlation_id != event.correlation_id or event.created_at is None:
+                raise BetaAcceptanceError("beta acceptance failed")
+            if (
+                event.created_at.tzinfo is None
+                or event.created_at.astimezone(UTC) > observed_at + _WORKER_AUDIT_CLOCK_BOUND
+            ):
+                raise BetaAcceptanceError("beta acceptance failed")
+            correlation_ids.add(correlation_id)
+        _reject_acceptance_if(
+            len(correlation_ids) != 3,
+            len(linked_events) != 3,
+            opened.box_id != box_id,
+            opened.aggregate_type != "ticket",
+            opened.aggregate_id != ticket.id,
+            opened.event_type != "ticket.opened",
+            opened.actor_principal_id != initiator.id,
+            opened.initiated_by_principal_id != initiator.id,
+            opened.approved_by_principal_id is not None,
+            opened.action_revision_id != revision.id,
+            opened.payload_hash != revision.payload_hash,
+            opened.policy_version != revision.policy_version,
+            opened.charter_version != revision.charter_version,
+            opened.config_version != revision.config_version,
+            opened.outcome != "pending_approval",
+            opened.detail != {},
+            approved.box_id != box_id,
+            approved.aggregate_type != "ticket",
+            approved.aggregate_id != ticket.id,
+            approved.event_type != "decision.approved",
+            approved.actor_principal_id != decision.actor_principal_id,
+            approved.initiated_by_principal_id is not None,
+            approved.approved_by_principal_id != decision.actor_principal_id,
+            approved.action_revision_id != revision.id,
+            approved.payload_hash != revision.payload_hash,
+            approved.policy_version != revision.policy_version,
+            approved.charter_version != revision.charter_version,
+            approved.config_version != revision.config_version,
+            approved.outcome != "approved",
+            approved.detail != {"operation_bound": True},
+        )
+        _reject_acceptance_if(
+            succeeded.box_id != box_id,
+            succeeded.aggregate_type != "operation",
+            succeeded.aggregate_id != operation.id,
+            succeeded.event_type != "operation.succeeded",
+            succeeded.actor_principal_id is not None,
+            succeeded.initiated_by_principal_id is not None,
+            succeeded.approved_by_principal_id is not None,
+            succeeded.action_revision_id != revision.id,
+            succeeded.payload_hash != revision.payload_hash,
+            succeeded.policy_version is not None,
+            succeeded.charter_version is not None,
+            succeeded.config_version is not None,
+            succeeded.outcome != "succeeded",
+            succeeded.detail != {"external_reference": expected_reference},
+            not (
+                ticket.created_at
+                <= revision.created_at
+                <= decision.created_at
+                <= operation.created_at
+            ),
+            not (operation.started_at <= operation.completed_at <= succeeded.created_at),
+            # Ticket/revision/decision/operation creation use PostgreSQL's
+            # transaction clock. Link/worker/audit timestamps use the
+            # application clock. Preserve strict same-clock order above and
+            # permit only this bounded inversion at each causal clock edge.
+            patient_link.attested_at > ticket.created_at + _WORKER_AUDIT_CLOCK_BOUND,
+            patient_link.attested_at < opened.created_at - _WORKER_AUDIT_CLOCK_BOUND,
+            patient_link.attested_at > opened.created_at + _WORKER_AUDIT_CLOCK_BOUND,
+            revision.created_at > opened.created_at + _WORKER_AUDIT_CLOCK_BOUND,
+            opened.created_at > decision.created_at + _WORKER_AUDIT_CLOCK_BOUND,
+            abs((approved.created_at - operation.created_at).total_seconds())
+            > _WORKER_AUDIT_CLOCK_BOUND.total_seconds(),
+            approved.created_at > operation.started_at + _WORKER_AUDIT_CLOCK_BOUND,
+            operation.started_at < operation.created_at - _WORKER_AUDIT_CLOCK_BOUND,
+        )
+
+        container = svc.Container(session)
+        timeline = svc.audit_timeline(container, box_id, ticket.id)
+        allowed_fields = {
+            "event_type",
+            "actor_principal_id",
+            "approved_by_principal_id",
+            "action_revision_id",
+            "payload_hash",
+            "outcome",
+            "created_at",
+        }
+        if not timeline or any(set(item) != allowed_fields for item in timeline):
+            raise BetaAcceptanceError("beta acceptance failed")
+        expected_event_outcomes = {
+            "ticket.opened": "pending_approval",
+            "decision.approved": "approved",
+            "operation.succeeded": "succeeded",
+        }
+        timeline_timestamps: list[datetime] = []
+        for item in timeline:
+            event_type = item["event_type"]
+            if (
+                event_type not in expected_event_outcomes
+                or item["outcome"] != expected_event_outcomes[event_type]
+                or item["created_at"] is None
+            ):
+                raise BetaAcceptanceError("beta acceptance failed")
+            try:
+                created_at = datetime.fromisoformat(str(item["created_at"]).replace("Z", "+00:00"))
+            except ValueError:
+                raise BetaAcceptanceError("beta acceptance failed") from None
+            if created_at.tzinfo is None:
+                raise BetaAcceptanceError("beta acceptance failed")
+            timeline_timestamps.append(created_at.astimezone(UTC))
+            for key in (
+                "actor_principal_id",
+                "approved_by_principal_id",
+                "action_revision_id",
+            ):
+                value = item[key]
+                if value is not None and str(UUID(str(value))) != value:
+                    raise BetaAcceptanceError("beta acceptance failed")
+            value = item["payload_hash"]
+            if value is not None and not re.fullmatch(_HANDLE_PATTERN, str(value)):
+                raise BetaAcceptanceError("beta acceptance failed")
+        if timeline_timestamps != sorted(timeline_timestamps):
+            raise BetaAcceptanceError("beta acceptance failed")
+        event_types = [str(item["event_type"]) for item in timeline]
+        if (
+            event_types != ["ticket.opened", "decision.approved", "operation.succeeded"]
+            or len(timeline) != 3
+        ):
+            raise BetaAcceptanceError("beta acceptance failed")
+        expected_timeline = [
+            {
+                "event_type": event.event_type,
+                "actor_principal_id": event.actor_principal_id,
+                "approved_by_principal_id": event.approved_by_principal_id,
+                "action_revision_id": event.action_revision_id,
+                "payload_hash": event.payload_hash,
+                "outcome": event.outcome,
+                "created_at": event.created_at.isoformat(),
+            }
+            for event in (opened, approved, succeeded)
+        ]
+        if timeline != expected_timeline:
+            raise BetaAcceptanceError("beta acceptance failed")
+
+        alternate_box = str(UUID(int=UUID(box_id).int ^ 1))
+        try:
+            svc.audit_timeline(container, alternate_box, ticket.id)
+        except AuthorizationError:
+            pass
+        else:
+            raise BetaAcceptanceError("beta acceptance failed")
+
+        return AuditReplayEvidence(
+            contract=AUDIT_REPLAY_CONTRACT,
+            stage="live_replay",
+            status="verified",
+            completed_at=_utc_timestamp(_database_now(session)),
+            box_scope_enforced=True,
+            cross_box_replay_denied=True,
+            ticket_timeline_replayed=True,
+            operation_events_linked=True,
+            required_event_order_verified=True,
+            no_content_fields_returned=True,
+            timeline_event_count=len(timeline),
+            identifiers_returned=False,
+            content_returned=False,
         )
     except BetaAcceptanceError:
         raise

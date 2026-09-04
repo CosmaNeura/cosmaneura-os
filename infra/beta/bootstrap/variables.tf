@@ -30,8 +30,13 @@ variable "beta_id" {
 
 variable "location" {
   type        = string
-  description = "Single region for the isolated beta. Central US is provisional until the human region/quota review is recorded."
+  description = "Locked deployment region for the isolated beta. The reviewed D3 boundary is Central US."
   default     = "centralus"
+
+  validation {
+    condition     = var.location == "centralus"
+    error_message = "D3 bootstrap location is locked to centralus."
+  }
 }
 
 variable "deployment_mode" {

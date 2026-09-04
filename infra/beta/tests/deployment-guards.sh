@@ -13,6 +13,98 @@ cleanup() {
 }
 trap cleanup EXIT
 
+hostile_marker="$test_dir/hostile-environment-executed"
+hostile_bin="$test_dir/hostile-bin"
+hostile_python="$test_dir/hostile-python"
+mkdir -m 0700 "$hostile_bin" "$hostile_python"
+cat >"$test_dir/hostile-bash-env" <<EOF
+printf '%s\n' compromised >>'$hostile_marker'
+EOF
+cat >"$hostile_python/sitecustomize.py" <<EOF
+from pathlib import Path
+Path('$hostile_marker').write_text('compromised', encoding='utf-8')
+EOF
+cat >"$hostile_bin/python3" <<EOF
+#!/bin/sh
+printf '%s\n' compromised >>'$hostile_marker'
+exit 0
+EOF
+chmod 0700 "$hostile_bin/python3"
+
+for guarded_wrapper in \
+  apply-first-environment-plan.sh \
+  apply-environment-plan.sh \
+  bootstrap-local-state.sh \
+  first-environment-plan.sh \
+  subsequent-environment-plan.sh \
+  transport-to-protected-runner.sh \
+  prepare-protected-runner.sh; do
+  grep -F '#!/bin/bash -p' "$beta_dir/$guarded_wrapper" >/dev/null
+  grep -F 'cosmas_isolate_local_wrapper_environment "$@"' \
+    "$beta_dir/$guarded_wrapper" >/dev/null
+  /usr/bin/env \
+    BASH_ENV="$test_dir/hostile-bash-env" \
+    PYTHONPATH="$hostile_python" PYTHONHOME="$hostile_python" \
+    PATH="$hostile_bin" SHELLOPTS=xtrace PS4='hostile-secret: ' \
+    /bin/bash -p "$beta_dir/$guarded_wrapper" --help >/dev/null 2>&1 || true
+done
+[[ ! -e "$hostile_marker" ]]
+
+local_env_probe="$test_dir/local-env-probe.sh"
+cat >"$local_env_probe" <<EOF
+#!/bin/bash -p
+set +x
+. '$beta_dir/local-wrapper-env.sh'
+cosmas_isolate_local_wrapper_environment "\$@"
+unset -f cosmas_isolate_local_wrapper_environment
+/usr/bin/env
+EOF
+chmod 0700 "$local_env_probe"
+local_env_result="$(/usr/bin/env BASH_ENV="$test_dir/hostile-bash-env" \
+  PYTHONPATH="$hostile_python" PATH="$hostile_bin" HTTPS_PROXY=https://attacker.invalid \
+  /bin/bash -p "$local_env_probe")"
+[[ "$local_env_result" == *"PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"* \
+  || "$local_env_result" == *"PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"* ]]
+for hostile_name in BASH_ENV PYTHONPATH PYTHONHOME HTTPS_PROXY COSMAS_GUARDED_ENVIRONMENT; do
+  ! grep -q "^$hostile_name=" <<<"$local_env_result"
+done
+
+grep -F 'COSMAS_PROTECTED_WRAPPER_CONTEXT=1' "$beta_dir/protected-runner-command.sh" >/dev/null
+for protected_name in AZURE_CONFIG_DIR ARM_USE_MSI ARM_USE_AZUREAD ARM_CLIENT_ID \
+  ARM_SUBSCRIPTION_ID ARM_TENANT_ID COSMAS_TERRAFORM_BIN TF_IN_AUTOMATION; do
+  grep -F "$protected_name" "$beta_dir/local-wrapper-env.sh" >/dev/null
+done
+grep -F '#!/bin/bash -p' "$beta_dir/initialize-state-container.sh" >/dev/null
+grep -F '/usr/bin/python3 -I -E -s -' "$beta_dir/initialize-state-container.sh" >/dev/null
+[[ "$(grep -Fc '/bin/bash --noprofile --norc -p "$foundation_plan_wrapper"' \
+  "$beta_dir/protected-runner-command.sh")" -eq 1 ]]
+for topology_key in volumes initContainers volumeMounts; do
+  grep -F "absent_or_empty_array" "$beta_dir/runtime-acceptance-job-contract.jq" >/dev/null
+  grep -F "\"$topology_key\"" "$beta_dir/runtime-acceptance-job-contract.jq" >/dev/null
+  grep -F "absent_or_empty_array" "$beta_dir/runtime-acceptance-execution-contract.jq" >/dev/null
+  grep -F "\"$topology_key\"" "$beta_dir/runtime-acceptance-execution-contract.jq" >/dev/null
+done
+grep -F 'runtime-acceptance-job-contract.jq' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'runtime-acceptance-start-request.jq' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'runtime-acceptance-execution-contract.jq' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'runtime-acceptance-output-contract.jq' "$beta_dir/protected-runner-command.sh" >/dev/null
+
+publication_candidate="$test_dir/.artifact.partial"
+publication_destination="$test_dir/artifact.json"
+printf '%s\n' '{"schema_version":1,"status":"validated"}' >"$publication_candidate"
+chmod 0600 "$publication_candidate"
+guard_publish_private_file "$publication_candidate" "$publication_destination" "test artifact"
+[[ ! -e "$publication_candidate" && ! -L "$publication_candidate" ]]
+[[ "$(cat "$publication_destination")" == '{"schema_version":1,"status":"validated"}' ]]
+publication_second_candidate="$test_dir/.artifact-second.partial"
+printf '%s\n' '{"schema_version":1,"status":"replacement"}' >"$publication_second_candidate"
+chmod 0600 "$publication_second_candidate"
+if (guard_publish_private_file "$publication_second_candidate" "$publication_destination" "test artifact" >/dev/null 2>&1); then
+  printf '%s\n' "expected atomic artifact publication to refuse an existing destination" >&2
+  exit 1
+fi
+[[ "$(cat "$publication_destination")" == '{"schema_version":1,"status":"validated"}' ]]
+
 subscription_id="00000000-0000-4000-8000-000000000001"
 tenant_id="00000000-0000-4000-8000-000000000002"
 deploy_client_id="00000000-0000-4000-8000-000000000005"
@@ -41,6 +133,7 @@ jq -n \
       deploy_identity_principal_id: {value: "00000000-0000-4000-8000-000000000006"},
       deployment_mode: {value: "synthetic_lab"},
       data_classification: {value: "synthetic-only"},
+      location: {value: "centralus"},
       box_id: {value: $box_id},
       state_vnet_id: {value: ("/subscriptions/" + $subscription_id + "/resourceGroups/" + $state_rg + "/providers/Microsoft.Network/virtualNetworks/vnet-cosmas-os-beta-state-lab01")},
       state_blob_private_dns_zone_id: {value: ("/subscriptions/" + $subscription_id + "/resourceGroups/" + $state_rg + "/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net")},
@@ -69,6 +162,7 @@ jq -n \
       lineage: $lineage,
       serial: 7,
       outputs: {
+        location: {value: "centralus"},
         box_id: {value: $box_id},
         environment: {value: "early_adopter_beta"},
         deployment_mode: {value: "synthetic_lab"},
@@ -112,6 +206,7 @@ jq -n \
   --arg workload_rg "$workload_rg" '
     {
       planned_values: {outputs: {
+        location: {value: "centralus"},
         box_id: {value: $box_id},
         environment: {value: "early_adopter_beta"},
         deployment_mode: {value: "synthetic_lab"},
@@ -131,8 +226,30 @@ guard_validate_planned_boundary "$plan_file"
 guard_validate_safe_plan_actions "$plan_file"
 [[ "$GUARD_CREATE_COUNT" == "0" && "$GUARD_UPDATE_COUNT" == "1" && "$GUARD_NOOP_COUNT" == "1" ]]
 
+wrong_region_plan="$test_dir/wrong-region-plan.json"
+jq '.planned_values.outputs.location.value = "eastus"' "$plan_file" >"$wrong_region_plan"
+chmod 600 "$wrong_region_plan"
+if (guard_validate_planned_boundary "$wrong_region_plan" >/dev/null 2>&1); then
+  printf '%s\n' "expected non-centralus plan rejection" >&2
+  exit 1
+fi
+wrong_region_state="$test_dir/wrong-region-state.json"
+jq '.outputs.location.value = "eastus"' "$state_file" >"$wrong_region_state"
+chmod 600 "$wrong_region_state"
+if (guard_validate_environment_state "$wrong_region_state" >/dev/null 2>&1); then
+  printf '%s\n' "expected non-centralus state rejection" >&2
+  exit 1
+fi
+
 security_plan="$test_dir/security-plan.json"
-jq '.resource_changes += [
+jq '.configuration = {root_module: {resources: [{
+      address: "azurerm_role_assignment.runtime_acr_pull",
+      expressions: {
+        scope: {references: ["azurerm_container_registry.beta.id"]},
+        principal_id: {references: ["azurerm_user_assigned_identity.runtime.principal_id"]}
+      }
+    }]}} |
+  .resource_changes += [
   {
     mode: "managed",
     address: "azurerm_storage_account.beta",
@@ -150,6 +267,21 @@ jq '.resource_changes += [
   },
   {
     mode: "managed",
+    address: "azurerm_user_assigned_identity.runtime",
+    type: "azurerm_user_assigned_identity",
+    change: {
+      actions: ["create"],
+      before: null,
+      after: {
+        name: "id-cosmas-runtime",
+        resource_group_name: "rg-cosmas-os-beta-lab01",
+        principal_id: "00000000-0000-4000-8000-000000000007",
+        client_id: "MUST-NOT-APPEAR"
+      }
+    }
+  },
+  {
+    mode: "managed",
     address: "azurerm_key_vault.beta",
     type: "azurerm_key_vault",
     change: {
@@ -161,6 +293,23 @@ jq '.resource_changes += [
         public_network_access_enabled: false,
         network_acls: [{bypass: "None", default_action: "Deny"}],
         contact_email: "MUST-NOT-APPEAR"
+      }
+    }
+  },
+  {
+    mode: "managed",
+    address: "azurerm_role_assignment.runtime_acr_pull",
+    type: "azurerm_role_assignment",
+    change: {
+      actions: ["create"],
+      before: null,
+      after: {
+        scope: "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.ContainerRegistry/registries/cosmasbeta",
+        role_definition_name: "AcrPull",
+        principal_id: "00000000-0000-4000-8000-000000000007",
+        principal_type: "ServicePrincipal",
+        skip_service_principal_aad_check: false,
+        condition: "MUST-NOT-APPEAR"
       }
     }
   },
@@ -192,10 +341,29 @@ jq -e '
 ' "$security_posture" >/dev/null
 jq -e '
   any(.[];
+    .address == "azurerm_user_assigned_identity.runtime" and
+    .after.name == "id-cosmas-runtime" and
+    .after.resource_group_name == "rg-cosmas-os-beta-lab01" and
+    .after.principal_id == "00000000-0000-4000-8000-000000000007" and
+    (.after | has("client_id") | not))
+' "$security_posture" >/dev/null
+jq -e '
+  any(.[];
     .address == "azurerm_key_vault.beta" and
     .after.rbac_authorization_enabled == true and
     .before.network_acls == [{bypass: "AzureServices", default_action: "Deny"}] and
     .after.network_acls == [{bypass: "None", default_action: "Deny"}])
+' "$security_posture" >/dev/null
+jq -e '
+  any(.[];
+    .address == "azurerm_role_assignment.runtime_acr_pull" and
+    .after.scope == "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.ContainerRegistry/registries/cosmasbeta" and
+    .after.role_definition_name == "AcrPull" and
+    .after.principal_id == "00000000-0000-4000-8000-000000000007" and
+    .after.principal_type == "ServicePrincipal" and
+    .after.scope_reference_address == "azurerm_container_registry.beta" and
+    .after.principal_reference_address == "azurerm_user_assigned_identity.runtime" and
+    .after.skip_service_principal_aad_check == false)
 ' "$security_posture" >/dev/null
 jq -e '
   any(.[];
@@ -206,6 +374,77 @@ jq -e '
 ' "$security_posture" >/dev/null
 if grep -q 'MUST-NOT-APPEAR' "$security_posture"; then
   printf '%s\n' "security-posture projection leaked an unapproved field" >&2
+  exit 1
+fi
+
+wrong_role_reference_plan="$test_dir/wrong-role-reference-plan.json"
+jq '.configuration.root_module.resources[0].expressions.principal_id.references =
+  ["data.azurerm_user_assigned_identity.deploy.principal_id"]' \
+  "$security_plan" >"$wrong_role_reference_plan"
+if (guard_write_security_posture "$wrong_role_reference_plan" "$test_dir/wrong-role-reference.json" >/dev/null 2>&1); then
+  printf '%s\n' "expected wrong role principal dependency rejection" >&2
+  exit 1
+fi
+duplicate_role_reference_plan="$test_dir/duplicate-role-reference-plan.json"
+jq '.configuration.root_module.resources[0].expressions.scope.references +=
+  ["azurerm_container_registry.beta.id"]' \
+  "$security_plan" >"$duplicate_role_reference_plan"
+if (guard_write_security_posture "$duplicate_role_reference_plan" "$test_dir/duplicate-role-reference.json" >/dev/null 2>&1); then
+  printf '%s\n' "expected duplicate role scope dependency rejection" >&2
+  exit 1
+fi
+
+while IFS='|' read -r role_address scope_reference principal_reference; do
+  bootstrap_role_plan="$test_dir/bootstrap-${role_address##*.}.json"
+  bootstrap_role_posture="$test_dir/bootstrap-${role_address##*.}-posture.json"
+  jq --arg address "$role_address" --arg scope_reference "$scope_reference" \
+    --arg principal_reference "$principal_reference" '
+      .configuration = {root_module: {resources: [{
+        address: $address,
+        expressions: {
+          scope: {references: [($scope_reference + ".id")]},
+          principal_id: {references: [($principal_reference + ".principal_id")]}
+        }
+      }]}} |
+      .resource_changes = [{
+        mode: "managed",
+        address: $address,
+        type: "azurerm_role_assignment",
+        change: {
+          actions: ["create"],
+          before: null,
+          after: {
+            scope: "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-state-lab01",
+            role_definition_name: "fixture-role",
+            principal_id: "00000000-0000-4000-8000-000000000006",
+            principal_type: "ServicePrincipal",
+            skip_service_principal_aad_check: true
+          }
+        }
+      }]
+    ' "$plan_file" >"$bootstrap_role_plan"
+  guard_write_security_posture "$bootstrap_role_plan" "$bootstrap_role_posture"
+  jq -e --arg address "$role_address" --arg scope_reference "$scope_reference" \
+    --arg principal_reference "$principal_reference" '
+      length == 1 and .[0].address == $address and
+      .[0].after.scope_reference_address == $scope_reference and
+      .[0].after.principal_reference_address == $principal_reference
+    ' "$bootstrap_role_posture" >/dev/null
+done <<'EOF'
+azurerm_role_assignment.deploy_state|azurerm_storage_account.state|azurerm_user_assigned_identity.deploy
+azurerm_role_assignment.deploy_state_reader|azurerm_resource_group.state|azurerm_user_assigned_identity.deploy
+azurerm_role_assignment.deploy_state_network|azurerm_virtual_network.state|azurerm_user_assigned_identity.deploy
+azurerm_role_assignment.deploy_state_private_dns|azurerm_private_dns_zone.state_blob|azurerm_user_assigned_identity.deploy
+azurerm_role_assignment.deploy_workload|azurerm_resource_group.workload|azurerm_user_assigned_identity.deploy
+azurerm_role_assignment.deploy_workload_rbac|azurerm_resource_group.workload|azurerm_user_assigned_identity.deploy
+EOF
+
+bad_bootstrap_role_plan="$test_dir/bootstrap-role-wrong-scope.json"
+jq '.configuration.root_module.resources[0].expressions.scope.references =
+  ["azurerm_resource_group.workload.id"]' \
+  "$test_dir/bootstrap-deploy_state.json" >"$bad_bootstrap_role_plan"
+if (guard_write_security_posture "$bad_bootstrap_role_plan" "$test_dir/bootstrap-role-wrong-scope-posture.json" >/dev/null 2>&1); then
+  printf '%s\n' "expected wrong bootstrap role scope dependency rejection" >&2
   exit 1
 fi
 
@@ -228,6 +467,7 @@ jq '.planned_values.outputs += {
 critical_values="$test_dir/critical-values.json"
 guard_write_critical_planned_values "$critical_plan" "$critical_values"
 jq -e '
+  .location == "centralus" and
   .api_origin == "https://ca-api-cosmas-beta-lab01.example.azurecontainerapps.io" and
   .web_origin == "https://beta.example.test" and
   .web_default_fqdn == "ca-cosmas-web.example.azurecontainerapps.io" and
@@ -238,6 +478,349 @@ jq -e '
 ' "$critical_values" >/dev/null
 if grep -q 'MUST-NOT-APPEAR' "$critical_values"; then
   printf '%s\n' "critical planned-value projection leaked custom-domain verification material" >&2
+  exit 1
+fi
+
+approval_source_sha="$(printf 'a%.0s' {1..40})"
+approval_plan_sha="$(printf 'b%.0s' {1..64})"
+approval_review_sha="$(printf 'c%.0s' {1..64})"
+approval_var_sha="$(printf 'd%.0s' {1..64})"
+approval_bundle="$test_dir/$approval_plan_sha"
+mkdir -m 700 "$approval_bundle"
+python3 - "$approval_bundle" "$approval_source_sha" "$approval_plan_sha" "$approval_review_sha" "$approval_var_sha" <<'PY'
+import hashlib
+import json
+import os
+import pathlib
+import sys
+
+bundle = pathlib.Path(sys.argv[1])
+source_sha, plan_sha, review_sha, variable_sha = sys.argv[2:]
+readiness_sha = "3" * 64
+human_sha = "4" * 64
+cost_sha = "5" * 64
+package_sha = "6" * 64
+credential_sha = "7" * 64
+assertion = f"AUTHORIZE D3 FOUNDATION APPLY {plan_sha} {review_sha}"
+
+def canonical(value: object, *, trailing_lf: bool = True) -> bytes:
+    data = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    return data + (b"\n" if trailing_lf else b"")
+
+def self_hash(value: dict[str, object], *, trailing_lf: bool = True) -> dict[str, object]:
+    result = dict(value)
+    result["evidence_payload_sha256"] = hashlib.sha256(canonical(result, trailing_lf=trailing_lf)).hexdigest()
+    return result
+
+def write(name: str, value: object) -> None:
+    path = bundle / name
+    path.write_text(json.dumps(value, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    os.chmod(path, 0o600)
+
+def file_hash(name: str) -> str:
+    return hashlib.sha256((bundle / name).read_bytes()).hexdigest()
+
+state = {"exists": False, "lineage": None, "serial": None}
+expirations = {
+    "readiness_expires_at": "2026-09-04T12:30:00Z",
+    "human_review_expires_at": "2026-09-04T12:25:00Z",
+    "cost_expires_at": "2026-09-04T12:40:00Z",
+    "earliest_evidence_expires_at": "2026-09-04T12:25:00Z",
+}
+template = {
+    "schema_version": 1,
+    "contract": "cosmas-os-d3-foundation-plan-authorization-v1",
+    "authorization_status": "PENDING_NOT_AUTHORITY",
+    "source_sha": source_sha,
+    "release_id": "release-b",
+    "plan_sha256": None,
+    "review_sha256": None,
+    "state_lineage": None,
+    "state_serial": None,
+    "owner_assertion": None,
+    "reviewer_reference": None,
+    "approved_at": None,
+    "expires_at": None,
+}
+template_sha = hashlib.sha256((json.dumps(template, ensure_ascii=False, indent=2) + "\n").encode()).hexdigest()
+request = self_hash({
+    "schema_version": 1,
+    "contract": "cosmas-os-d3-foundation-plan-approval-request-v1",
+    "artifact_status": "IMMUTABLE_EXACT_PLAN_APPROVAL_REQUEST_NOT_AUTHORITY",
+    "source_sha": source_sha,
+    "release_id": "release-b",
+    "readiness_payload_sha256": readiness_sha,
+    "foundation_package_id": readiness_sha,
+    "foundation_package_manifest_sha256": package_sha,
+    "foundation_tfvars_sha256": variable_sha,
+    "credential_claim_sha256": credential_sha,
+    "review_sha256": review_sha,
+    "plan_sha256": plan_sha,
+    "state": state,
+    "exact_owner_assertion": assertion,
+    "authorization_contract": "cosmas-os-d3-foundation-plan-authorization-v1",
+    "authorization_template": {"path": f"/private/foundation-plan-authorization-{source_sha[:7]}.template.json", "sha256": template_sha},
+    "maximum_validity_seconds": 1800,
+    "evidence_expiration": expirations,
+    "does_not_authorize": ["a different or regenerated plan", "Terraform apply before append-only claim", "workloads", "DNS or Clerk mutation"],
+})
+write("approval-request.json", request)
+owner = {
+    "schema_version": 1,
+    "contract": "cosmas-os-d3-foundation-plan-authorization-v1",
+    "authorization_status": "APPROVED",
+    "source_sha": source_sha,
+    "release_id": "release-b",
+    "plan_sha256": plan_sha,
+    "review_sha256": review_sha,
+    "state_lineage": None,
+    "state_serial": None,
+    "owner_assertion": assertion,
+    "reviewer_reference": "Owner Reviewer",
+    "approved_at": "2026-09-04T12:00:00Z",
+    "expires_at": "2026-09-04T12:20:00Z",
+}
+write("owner-authorization.json", owner)
+owner_sha = file_hash("owner-authorization.json")
+request_sha = file_hash("approval-request.json")
+claim = self_hash({
+    "schema_version": 1,
+    "contract": "cosmas-os-d3-foundation-plan-claim-v1",
+    "status": "CLAIMED_FOR_EXACT_PROTECTED_APPLY",
+    "source_sha": source_sha,
+    "release_id": "release-b",
+    "plan_sha256": plan_sha,
+    "review_sha256": review_sha,
+    "approval_request_sha256": request_sha,
+    "authorization_sha256": owner_sha,
+    "credential_claim_sha256": credential_sha,
+    "readiness_payload_sha256": readiness_sha,
+    "human_review_payload_sha256": human_sha,
+    "cost_evidence_payload_sha256": cost_sha,
+    "readiness_expires_at": expirations["readiness_expires_at"],
+    "human_review_expires_at": expirations["human_review_expires_at"],
+    "cost_expires_at": expirations["cost_expires_at"],
+    "owner_expires_at": owner["expires_at"],
+    "effective_expires_at": owner["expires_at"],
+    "claimed_at": "2026-09-04T12:01:00Z",
+    "reviewer_reference_sha256": hashlib.sha256(b"Owner Reviewer").hexdigest(),
+})
+write("claim.json", claim)
+claim_sha = file_hash("claim.json")
+source = self_hash({
+    "schema_version": 2,
+    "contract": "cosmas-os-d3-foundation-protected-apply-authorization-v2",
+    "authorization_status": "APPROVED",
+    "source_sha": source_sha,
+    "release_id": "release-b",
+    "stage": "foundation",
+    "plan_sha256": plan_sha,
+    "review_sha256": review_sha,
+    "variable_file_sha256": variable_sha,
+    "state": {**state, "sha256": None},
+    "reviewer": "Owner Reviewer",
+    "owner_assertion": assertion,
+    "review_reference": f"owner-authorization:sha256:{owner_sha}",
+    "authorization_sha256": owner_sha,
+    "authorization_claim_sha256": claim_sha,
+    "authorization_bundle_id": plan_sha,
+    "approved_at": owner["approved_at"],
+    "claimed_at": claim["claimed_at"],
+    "owner_expires_at": owner["expires_at"],
+    "expires_at": owner["expires_at"],
+    "readiness_payload_sha256": readiness_sha,
+    "human_review_payload_sha256": human_sha,
+    "cost_evidence_payload_sha256": cost_sha,
+    "foundation_package_manifest_sha256": package_sha,
+    "approval_request_sha256": request_sha,
+    "readiness_expires_at": expirations["readiness_expires_at"],
+    "human_review_expires_at": expirations["human_review_expires_at"],
+    "cost_expires_at": expirations["cost_expires_at"],
+}, trailing_lf=False)
+write("source-approval.json", source)
+files = {name: file_hash(name) for name in ("approval-request.json", "owner-authorization.json", "claim.json", "source-approval.json")}
+manifest = self_hash({
+    "schema_version": 1,
+    "contract": "cosmas-os-d3-foundation-apply-authorization-bundle-v1",
+    "status": "CLAIMED_READY_FOR_EXACT_PROTECTED_APPLY",
+    "source_sha": source_sha,
+    "release_id": "release-b",
+    "plan_sha256": plan_sha,
+    "review_sha256": review_sha,
+    "foundation_package_id": readiness_sha,
+    "foundation_package_manifest_sha256": package_sha,
+    "foundation_tfvars_sha256": variable_sha,
+    "owner_authorization": {"sha256": owner_sha, "approved_at": owner["approved_at"], "expires_at": owner["expires_at"], "claimed_at": claim["claimed_at"]},
+    "effective_expires_at": owner["expires_at"],
+    "upstream_expiration": expirations,
+    "files": files,
+    "append_only": True,
+    "does_not_execute_apply": True,
+})
+write("manifest.json", manifest)
+PY
+approval_file="$approval_bundle/source-approval.json"
+approval_validator=(
+  python3 "$beta_dir/validate_apply_approval.py" "$approval_file"
+  --bundle-dir "$approval_bundle"
+  --source-sha "$approval_source_sha" --release-id release-b --stage foundation
+  --plan-sha256 "$approval_plan_sha" --review-sha256 "$approval_review_sha"
+  --variable-file-sha256 "$approval_var_sha" --state-exists false
+  --state-lineage "" --state-serial null --state-sha256 ""
+  --now 2026-09-04T12:10:00Z
+)
+"${approval_validator[@]}"
+
+mkdir -m 700 "$test_dir/duplicate-root"
+duplicate_bundle="$test_dir/duplicate-root/$approval_plan_sha"
+cp -R "$approval_bundle" "$duplicate_bundle"
+duplicate_approval="$duplicate_bundle/source-approval.json"
+python3 - "$approval_file" "$duplicate_approval" <<'PY'
+import pathlib
+import sys
+source, destination = map(pathlib.Path, sys.argv[1:])
+value = source.read_text(encoding="utf-8")
+destination.write_text(value.replace('"schema_version": 2', '"schema_version": 2, "schema_version": 2', 1), encoding="utf-8")
+PY
+duplicate_validator=("${approval_validator[@]}")
+duplicate_validator[2]="$duplicate_approval"
+duplicate_validator[4]="$duplicate_bundle"
+if "${duplicate_validator[@]}" >/dev/null 2>&1; then
+  printf '%s\n' "strict approval parser accepted a duplicate key" >&2
+  exit 1
+fi
+
+expired_validator=("${approval_validator[@]}")
+expired_validator[-1]="2026-09-04T12:20:00Z"
+if "${expired_validator[@]}" >/dev/null 2>&1; then
+  printf '%s\n' "approval validator accepted an expired owner window" >&2
+  exit 1
+fi
+
+cp "$approval_bundle/claim.json" "$test_dir/claim.original.json"
+jq '.credential_claim_sha256 = ("9" * 64)' "$test_dir/claim.original.json" >"$approval_bundle/claim.json"
+chmod 600 "$approval_bundle/claim.json"
+if "${approval_validator[@]}" >/dev/null 2>&1; then
+  printf '%s\n' "approval validator accepted a self-consistent forged plan binding" >&2
+  exit 1
+fi
+mv "$test_dir/claim.original.json" "$approval_bundle/claim.json"
+chmod 600 "$approval_bundle/claim.json"
+
+attempt_claim="$test_dir/apply-attempt.claim"
+authorization_claim_sha="$(guard_sha256 "$approval_bundle/claim.json")"
+guard_claim_apply_attempt "$attempt_claim" "$approval_source_sha" release-b foundation "$approval_plan_sha" "$(guard_sha256 "$approval_file")" "$authorization_claim_sha" causal-bundle-claim
+if (guard_claim_apply_attempt "$attempt_claim" "$approval_source_sha" release-b foundation "$approval_plan_sha" "$(guard_sha256 "$approval_file")" "$authorization_claim_sha" causal-bundle-claim >/dev/null 2>&1); then
+  printf '%s\n' "apply-attempt claim allowed a second invocation" >&2
+  exit 1
+fi
+jq -e \
+  --arg authorization_claim_sha "$authorization_claim_sha" '
+    .schema_version == 2 and
+    .contract == "cosmas-os-d3-apply-attempt-claim-v2" and
+    .authorization_binding_type == "causal-bundle-claim" and
+    .authorization_binding_sha256 == $authorization_claim_sha
+  ' "$attempt_claim" >/dev/null
+
+bootstrap_approval_payload="$test_dir/bootstrap-approval-payload.json"
+bootstrap_approval="$test_dir/bootstrap-approval.json"
+jq -cSj -n \
+  --arg source "$approval_source_sha" --arg plan "$approval_plan_sha" \
+  --arg review "$approval_review_sha" --arg vars "$approval_var_sha" '
+    {
+      schema_version: 2,
+      contract: "cosmas-os-d3-bootstrap-protected-apply-authorization-v2",
+      authorization_status: "APPROVED",
+      source_sha: $source,
+      release_id: "bootstrap",
+      stage: "bootstrap",
+      plan_sha256: $plan,
+      review_sha256: $review,
+      variable_file_sha256: $vars,
+      state: {exists: false, lineage: null, serial: null, sha256: null},
+      reviewer: "Owner Reviewer",
+      owner_assertion: ("AUTHORIZE D3 BOOTSTRAP APPLY " + $plan + " " + $review),
+      review_reference: "owner-review:bootstrap-test",
+      approved_at: "2026-09-04T12:00:00Z",
+      expires_at: "2026-09-04T12:20:00Z"
+    }
+  ' >"$bootstrap_approval_payload"
+bootstrap_approval_hash="$(guard_sha256 "$bootstrap_approval_payload")"
+jq -cS --arg hash "$bootstrap_approval_hash" '. + {evidence_payload_sha256: $hash}' \
+  "$bootstrap_approval_payload" >"$bootstrap_approval"
+chmod 600 "$bootstrap_approval"
+bootstrap_validator=(
+  python3 "$beta_dir/validate_bootstrap_apply_approval.py" "$bootstrap_approval"
+  --source-sha "$approval_source_sha" --plan-sha256 "$approval_plan_sha"
+  --review-sha256 "$approval_review_sha" --variable-file-sha256 "$approval_var_sha"
+  --state-exists false --state-lineage "" --state-serial null --state-sha256 ""
+  --now 2026-09-04T12:10:00Z
+)
+"${bootstrap_validator[@]}"
+bootstrap_expired=("${bootstrap_validator[@]}")
+bootstrap_expired[-1]="2026-09-04T12:20:00Z"
+if "${bootstrap_expired[@]}" >/dev/null 2>&1; then
+  printf '%s\n' "bootstrap approval accepted its exact expiry instant" >&2
+  exit 1
+fi
+bootstrap_future=("${bootstrap_validator[@]}")
+bootstrap_future[-1]="2026-09-04T11:59:59Z"
+if "${bootstrap_future[@]}" >/dev/null 2>&1; then
+  printf '%s\n' "bootstrap approval accepted a future authorization" >&2
+  exit 1
+fi
+bootstrap_bad_state="$test_dir/bootstrap-bad-state.json"
+jq -cSj '.state.exists = 0 | del(.evidence_payload_sha256)' "$bootstrap_approval" >"$test_dir/bootstrap-bad-state-payload.json"
+bootstrap_bad_state_hash="$(guard_sha256 "$test_dir/bootstrap-bad-state-payload.json")"
+jq -cS --arg hash "$bootstrap_bad_state_hash" '. + {evidence_payload_sha256: $hash}' \
+  "$test_dir/bootstrap-bad-state-payload.json" >"$bootstrap_bad_state"
+chmod 600 "$bootstrap_bad_state"
+bootstrap_bad_state_validator=("${bootstrap_validator[@]}")
+bootstrap_bad_state_validator[2]="$bootstrap_bad_state"
+if "${bootstrap_bad_state_validator[@]}" >/dev/null 2>&1; then
+  printf '%s\n' "bootstrap approval accepted numeric false state" >&2
+  exit 1
+fi
+bootstrap_link="$test_dir/bootstrap-approval-link.json"
+ln -s "$bootstrap_approval" "$bootstrap_link"
+bootstrap_link_validator=("${bootstrap_validator[@]}")
+bootstrap_link_validator[2]="$bootstrap_link"
+if "${bootstrap_link_validator[@]}" >/dev/null 2>&1; then
+  printf '%s\n' "bootstrap approval validator accepted a symlink" >&2
+  exit 1
+fi
+bootstrap_attempt_claim="$test_dir/bootstrap-apply-attempt.claim"
+guard_claim_apply_attempt "$bootstrap_attempt_claim" "$approval_source_sha" bootstrap bootstrap \
+  "$approval_plan_sha" "$(guard_sha256 "$bootstrap_approval")" "$(guard_sha256 "$bootstrap_approval")" direct-owner-authorization
+jq -e --arg approval_sha "$(guard_sha256 "$bootstrap_approval")" '
+  .authorization_binding_type == "direct-owner-authorization" and
+  .authorization_binding_sha256 == $approval_sha
+' "$bootstrap_attempt_claim" >/dev/null
+
+transition_repo="$test_dir/source-transition"
+git init -q "$transition_repo"
+git -C "$transition_repo" config user.name "D3 Guard Test"
+git -C "$transition_repo" config user.email "d3-guard@example.invalid"
+printf '%s\n' "release-a" >"$transition_repo/source.txt"
+git -C "$transition_repo" add source.txt
+git -C "$transition_repo" commit -q -m "release a"
+transition_a="$(git -C "$transition_repo" rev-parse HEAD)"
+printf '%s\n' "release-b" >"$transition_repo/source.txt"
+git -C "$transition_repo" commit -q -am "release b"
+transition_b="$(git -C "$transition_repo" rev-parse HEAD)"
+guard_validate_git_source_transition "$transition_repo" "$transition_a" "$transition_b"
+git -C "$transition_repo" commit -q --allow-empty -m "same tree"
+same_tree="$(git -C "$transition_repo" rev-parse HEAD)"
+if (guard_validate_git_source_transition "$transition_repo" "$transition_b" "$same_tree" >/dev/null 2>&1); then
+  printf '%s\n' "source transition accepted an unchanged Git tree" >&2
+  exit 1
+fi
+git -C "$transition_repo" checkout -q -b sibling "$transition_a"
+printf '%s\n' "sibling" >"$transition_repo/source.txt"
+git -C "$transition_repo" commit -q -am "sibling"
+sibling="$(git -C "$transition_repo" rev-parse HEAD)"
+if (guard_validate_git_source_transition "$transition_repo" "$transition_b" "$sibling" >/dev/null 2>&1); then
+  printf '%s\n' "source transition accepted a non-descendant commit" >&2
   exit 1
 fi
 
@@ -478,29 +1061,100 @@ git -C "$source_repo" commit --quiet -m "guard fixture"
 git -C "$source_repo" remote add origin git@github.com:CosmaNeura/cosmaneura-os.git
 source_sha="$(git -C "$source_repo" rev-parse HEAD)"
 materialized="$test_dir/materialized-runner.sh"
-guard_materialize_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git
+guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git
 [[ "$(guard_sha256 "$materialized")" == "$(git -C "$source_repo" show "$source_sha:runner.sh" | shasum -a 256 | awk '{print $1}')" ]]
 rm -f -- "$materialized"
 
+hostile_git_bin="$test_dir/hostile-git-bin"
+mkdir -m 700 "$hostile_git_bin"
+cat >"$hostile_git_bin/git" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' invoked >"$test_dir/hostile-git-invoked"
+exit 99
+EOF
+chmod 0700 "$hostile_git_bin/git"
+hostile_global_config="$test_dir/hostile-gitconfig"
+printf '%s\n' '[core]' '  fsmonitor = /definitely/not-reviewed' >"$hostile_global_config"
+materialized="$test_dir/materialized-under-hostile-env.sh"
+PATH="$hostile_git_bin:$PATH" \
+  GIT_DIR="$test_dir/nonexistent-git-dir" \
+  GIT_WORK_TREE="$test_dir/nonexistent-work-tree" \
+  GIT_OBJECT_DIRECTORY="$test_dir/nonexistent-object-dir" \
+  GIT_CONFIG_GLOBAL="$hostile_global_config" \
+  guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git
+[[ ! -e "$test_dir/hostile-git-invoked" && -f "$materialized" ]]
+rm -f -- "$materialized"
+
 printf '%s\n' '# dirty' >>"$source_repo/runner.sh"
-if (guard_materialize_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
   printf '%s\n' "expected dirty tracked-source rejection" >&2
   exit 1
 fi
 git -C "$source_repo" show "$source_sha:runner.sh" >"$source_repo/runner.sh"
 touch "$source_repo/untracked.txt"
-if (guard_materialize_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
   printf '%s\n' "expected untracked-source rejection" >&2
   exit 1
 fi
 rm -f -- "$source_repo/untracked.txt"
-if (guard_materialize_committed_file "$source_repo" 0000000000000000000000000000000000000000 runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+if (guard_materialize_local_committed_file "$source_repo" 0000000000000000000000000000000000000000 runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
   printf '%s\n' "expected source-SHA mismatch rejection" >&2
   exit 1
 fi
 git -C "$source_repo" remote set-url origin git@example.invalid:attacker/repo.git
-if (guard_materialize_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
   printf '%s\n' "expected wrong-origin rejection" >&2
+  exit 1
+fi
+git -C "$source_repo" remote set-url origin git@github.com:CosmaNeura/cosmaneura-os.git
+replacement_commit="$(printf '%s\n' replacement | git -C "$source_repo" commit-tree "$source_sha^{tree}")"
+git -C "$source_repo" replace "$source_sha" "$replacement_commit"
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+  printf '%s\n' "expected replace-ref source rejection" >&2
+  exit 1
+fi
+git -C "$source_repo" replace -d "$source_sha" >/dev/null
+printf '%s\n' "$source_sha" >"$(git -C "$source_repo" rev-parse --path-format=absolute --git-path shallow)"
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+  printf '%s\n' "expected shallow-source rejection" >&2
+  exit 1
+fi
+rm -f -- "$(git -C "$source_repo" rev-parse --path-format=absolute --git-path shallow)"
+alternates_path="$(git -C "$source_repo" rev-parse --path-format=absolute --git-path objects/info/alternates)"
+mkdir -p "$(dirname -- "$alternates_path")"
+printf '%s\n' "$test_dir" >"$alternates_path"
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+  printf '%s\n' "expected alternate-object source rejection" >&2
+  exit 1
+fi
+rm -f -- "$alternates_path"
+git -C "$source_repo" config remote.origin.promisor true
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+  printf '%s\n' "expected promisor-config source rejection" >&2
+  exit 1
+fi
+git -C "$source_repo" config --unset remote.origin.promisor
+promisor_path="$(git -C "$source_repo" rev-parse --path-format=absolute --git-path objects/pack/guard-test.promisor)"
+touch "$promisor_path"
+if (guard_materialize_local_committed_file "$source_repo" "$source_sha" runner.sh "$materialized" git@github.com:CosmaNeura/cosmaneura-os.git >/dev/null 2>&1); then
+  printf '%s\n' "expected promisor-object source rejection" >&2
+  exit 1
+fi
+rm -f -- "$promisor_path"
+
+metadata_repo="$test_dir/source-metadata"
+mkdir -p "$metadata_repo/infra/beta/environment"
+git -C "$metadata_repo" init --quiet
+git -C "$metadata_repo" config user.name "D3 Guard Test"
+git -C "$metadata_repo" config user.email "d3-guard@example.invalid"
+printf '%s\n' '# lock fixture' >"$metadata_repo/infra/beta/environment/.terraform.lock.hcl"
+git -C "$metadata_repo" add infra/beta/environment/.terraform.lock.hcl
+git -C "$metadata_repo" commit --quiet -m "metadata fixture"
+metadata_sha="$(git -C "$metadata_repo" rev-parse HEAD)"
+replacement_metadata_commit="$(printf '%s\n' replacement | git -C "$metadata_repo" commit-tree "$metadata_sha^{tree}")"
+git -C "$metadata_repo" replace "$metadata_sha" "$replacement_metadata_commit"
+if (guard_source_metadata "$metadata_repo" "$metadata_repo/infra/beta/environment" >/dev/null 2>&1); then
+  printf '%s\n' "expected normal plan/apply source guard to reject replace refs" >&2
   exit 1
 fi
 
@@ -651,8 +1305,13 @@ for python_hash_binding in \
 done
 
 compressed_command_size="$(bzip2 -9 -c "$beta_dir/protected-runner-command.sh" | base64 | tr -d '\n' | wc -c | tr -d '[:space:]')"
+compressed_command_bytes="$(bzip2 -9 -c "$beta_dir/protected-runner-command.sh" | wc -c | tr -d '[:space:]')"
 [[ "$compressed_command_size" =~ ^[0-9]+$ && "$compressed_command_size" -le 65536 ]] || {
   printf '%s\n' "protected runner command no longer fits the bounded protected-parameter transport" >&2
+  exit 1
+}
+[[ "$compressed_command_bytes" =~ ^[0-9]+$ && "$compressed_command_bytes" -le 49152 ]] || {
+  printf '%s\n' "compressed protected runner command exceeds the decoder's 49,152-byte limit" >&2
   exit 1
 }
 grep -F '{name: "COSMAS_COMMAND_BZIP2_BASE64", value: $protected_command}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
@@ -1139,6 +1798,31 @@ apt_mutation_line="$(grep -nF "sed -i \\" "$beta_dir/runner-bootstrap.sh" | head
   printf '%s\n' "bootstrap payload must be validated before apt source mutation" >&2
   exit 1
 }
+hostile_bootstrap_dir="$test_dir/hostile-bootstrap"
+mkdir -m 700 "$hostile_bootstrap_dir"
+printf '%s\n' 'open("'"$hostile_bootstrap_dir"'/pythonpath-ran", "w").write("unsafe")' >"$hostile_bootstrap_dir/sitecustomize.py"
+printf '%s\n' 'printf "%s\\n" unsafe >"'"$hostile_bootstrap_dir"'/bash-env-ran"' >"$hostile_bootstrap_dir/bash-env"
+chmod 0600 "$hostile_bootstrap_dir/sitecustomize.py" "$hostile_bootstrap_dir/bash-env"
+if /usr/bin/env \
+  BASH_ENV="$hostile_bootstrap_dir/bash-env" \
+  ENV="$hostile_bootstrap_dir/bash-env" \
+  SHELLOPTS=xtrace \
+  PYTHONPATH="$hostile_bootstrap_dir" \
+  'BASH_FUNC_unreviewed%%=() { printf "%s\n" unsafe >"/tmp/cosmas-unreviewed-function"; }' \
+  "$beta_dir/runner-bootstrap.sh" \
+  "$subscription_id" "$deploy_client_id" cmbetatflab01abc123 \
+  1.12.5 dade9650e6b74fc7a8b986bd8717497d32f9e09cf82e479afef4977fa3085536 \
+  2.89.1-1~jammy 29.1.3-0ubuntu3~22.04.2 0.30.1-0ubuntu1~22.04.1 \
+  1:2.34.1-1ubuntu1.17 1.6-2.1ubuntu3.2 \
+  0.74.0 2ae6fe3ee734b7fdf11335663e18c75ea12dccc76062f09f164a3b0f8be4371a \
+  invalid-base64 >/dev/null 2>&1; then
+  printf '%s\n' "expected invalid bootstrap payload to fail before host mutation" >&2
+  exit 1
+fi
+[[ ! -e "$hostile_bootstrap_dir/bash-env-ran" && ! -e "$hostile_bootstrap_dir/pythonpath-ran" ]]
+grep -F '#!/bin/bash -p' "$beta_dir/runner-bootstrap.sh" >/dev/null
+grep -F '/bin/bash --noprofile --norc -p "$0" "$@"' "$beta_dir/runner-bootstrap.sh" >/dev/null
+grep -F '/usr/bin/python3 -I -E -s "$@"' "$beta_dir/runner-bootstrap.sh" >/dev/null
 bootstrap_payload_matcher="$test_dir/bootstrap-payload-matcher.sh"
 sed -n '/^bootstrap_payload_matches_context() {$/,/^}$/p' "$beta_dir/runner-bootstrap.sh" >"$bootstrap_payload_matcher"
 [[ "$(grep -c '^bootstrap_payload_matches_context() {$' "$bootstrap_payload_matcher")" == "1" ]] || {
@@ -1206,7 +1890,7 @@ sed -n '/^attestation_generation_window_status() {$/,/^}$/p' "$beta_dir/protecte
 source "$attestation_window_helper"
 alert_window_evidence="$test_dir/alert-window-evidence.json"
 jq -n '{completed_at: "2030-01-01T00:00:00Z"}' >"$alert_window_evidence"
-[[ "$(attestation_generation_window_status alert-send "$alert_window_evidence" '2030-01-01T04:00:00Z')" == "live" ]]
+[[ "$(attestation_generation_window_status alert-send "$alert_window_evidence" '2030-01-01T04:00:00Z')" == "expired" ]]
 [[ "$(attestation_generation_window_status alert-send "$alert_window_evidence" '2030-01-01T04:00:01Z')" == "expired" ]]
 if attestation_generation_window_status alert-send "$alert_window_evidence" '2029-12-31T23:59:59Z' >/dev/null 2>&1; then
   printf '%s\n' "alert generation validator accepted evidence issued in the future" >&2
@@ -1214,7 +1898,7 @@ if attestation_generation_window_status alert-send "$alert_window_evidence" '202
 fi
 offboarding_window_evidence="$test_dir/offboarding-window-evidence.json"
 jq -n '{offboarding_output: {issued_at: "2030-01-01T00:00:00Z", expires_at: "2030-01-01T04:00:00Z"}}' >"$offboarding_window_evidence"
-[[ "$(attestation_generation_window_status offboarding-baseline "$offboarding_window_evidence" '2030-01-01T04:00:00Z')" == "live" ]]
+[[ "$(attestation_generation_window_status offboarding-baseline "$offboarding_window_evidence" '2030-01-01T04:00:00Z')" == "expired" ]]
 [[ "$(attestation_generation_window_status offboarding-baseline "$offboarding_window_evidence" '2030-01-01T04:00:01Z')" == "expired" ]]
 jq '.offboarding_output.expires_at = "2030-01-01T03:59:59Z"' "$offboarding_window_evidence" >"$test_dir/offboarding-invalid-window.json"
 if attestation_generation_window_status offboarding-baseline "$test_dir/offboarding-invalid-window.json" '2030-01-01T04:00:01Z' >/dev/null 2>&1; then
@@ -1465,7 +2149,7 @@ fi
 unset -f write_alert_send_intent find_unresolved_alert_send_intent write_alert_send_generation find_reconcilable_alert_send_generation resolve_attestation_generation attestation_generation_window_status stat die
 
 grep -F '.phase == "foundation_reconcile" and $stage == "foundation"' "$beta_dir/protected-runner-command.sh" >/dev/null
-for guarded_operation in release-rollback release-forward inspect-stage stage-generation offboarding-acceptance; do
+for guarded_operation in workload-verify release-rollback release-forward inspect-stage stage-generation offboarding-acceptance; do
   grep -F "\"$guarded_operation\"" "$beta_dir/transport-to-protected-runner.sh" >/dev/null
   grep -F "\"$guarded_operation\"" "$beta_dir/protected-runner-command.sh" >/dev/null
 done
@@ -1477,6 +2161,10 @@ for recovery_confirmation in \
 done
 grep -F 'rollback_state_sha256' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'rollback_state_sha256' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'git_isolated -C "$repository_root" merge-base --is-ancestor "$prior_source_sha" "$source_sha"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'Release B must have a different Git tree from Release A' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'Release A/B API and web images must have four distinct immutable digests' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'four_release_image_digests_distinct: true' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'AUTHORIZE D3 IMMUTABLE STAGE GENERATION TRANSITION' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'stage_generation_transition.py' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'validate_stage_tfvars_payload "$replacement_tfvars_file" "$stage"' "$beta_dir/protected-runner-command.sh" >/dev/null
@@ -1526,7 +2214,7 @@ if grep -Eq 'az acr repository delete .*\$attempt_tag' "$beta_dir/protected-runn
   printf '%s\n' "candidate cleanup must never delete an aliased ACR manifest by tag" >&2
   exit 1
 fi
-if grep -Eq 'candidate_|repository untag|guard_untag_acr' "$beta_dir/protected-runner-command.sh" "$beta_dir/deployment-guard-lib.sh"; then
+if grep -Eq 'repository untag|guard_untag_acr' "$beta_dir/protected-runner-command.sh" "$beta_dir/deployment-guard-lib.sh"; then
   printf '%s\n' "protected image publication must not create or untag candidate aliases requiring AcrDelete" >&2
   exit 1
 fi
@@ -1534,6 +2222,82 @@ grep -F 'docker push "$api_image"' "$beta_dir/protected-runner-command.sh" >/dev
 grep -F 'guard_lock_and_verify_acr_immutable_tag "$acr_name" "$api_repository" "$immutable_tag" "$api_digest"' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'runtime-acceptance)' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'runtime-acceptance)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'workload-verify)' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'workload-verify)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'workload_verification.py' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'validate_workload_attestation.py' "$beta_dir/protected-runner-command.sh" >/dev/null
+[[ "$(grep -Fc 'verify_current_workload_attestation' "$beta_dir/protected-runner-command.sh")" == "3" ]] || {
+  printf '%s\n' "workload attestation must be verified by the helper before identity bootstrap and runtime acceptance" >&2
+  exit 1
+}
+[[ "$(sed -n '/^  runtime-acceptance)$/,/^  domain-verification)$/p' "$beta_dir/protected-runner-command.sh" | grep -Fc 'verify_current_workload_attestation')" == "1" ]]
+[[ "$(sed -n '/^  bootstrap-identity)$/,/^  retrieve)$/p' "$beta_dir/protected-runner-command.sh" | grep -Fc 'verify_current_workload_attestation')" == "1" ]]
+sed -n '/^  runtime-acceptance)$/,/^  domain-verification)$/p' "$beta_dir/protected-runner-command.sh" | awk '
+  index($0, "verify_current_workload_attestation") && !verification { verification = NR }
+  index($0, "az rest --method post --url") && index($0, "${job_id}/start?") && !mutation { mutation = NR }
+  END { exit !(verification && mutation && verification < mutation) }
+' || {
+  printf '%s\n' "workload attestation must be verified before runtime acceptance starts its Azure job" >&2
+  exit 1
+}
+sed -n '/^  bootstrap-identity)$/,/^  retrieve)$/p' "$beta_dir/protected-runner-command.sh" | awk '
+  index($0, "verify_current_workload_attestation") && !verification { verification = NR }
+  index($0, "docker pull ") && !mutation { mutation = NR }
+  END { exit !(verification && mutation && verification < mutation) }
+' || {
+  printf '%s\n' "workload attestation must be verified before identity bootstrap mutates the Docker cache" >&2
+  exit 1
+}
+grep -F '.state == {exists: true, lineage: $lineage, serial: $serial, sha256: $state_sha256}' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'if [[ "$artifact_kind" == "workload" ]]; then' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'artifact_actual_hash="$(jq -cSj' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F '"$operation" == "workload-verify" || ( "$operation" == "retrieve" && "$artifact_kind" == "workload" )' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'exact_revisions_and_images_verified == true' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'worker_probe_configuration_verified == true' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'exact_runtime_configuration_verified == true' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'if ! python3 "$workload_script" >"$private_result_file"' "$beta_dir/protected-runner-command.sh" >/dev/null
+if grep -F -- '--filter=blob:none' "$beta_dir/protected-runner-command.sh" >/dev/null; then
+  printf '%s\n' "protected checkout must not use a lazy/blobless network-dependent fetch" >&2
+  exit 1
+fi
+grep -F 'fetch --quiet --no-tags origin "$source_sha"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'prior_source_sha: (if $prior_source_sha == "" then null else $prior_source_sha end)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'guard_validate_git_source_transition "$repository_root" "$prior_source_sha" "$source_sha"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F '"${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" merge-base --is-ancestor "$prior_source_sha" "$source_sha"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'approved source tree does not differ from the bound prior source' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F '/usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" remote remove origin' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'git_isolated -C "$repository" config --local --list' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F -- "-name '*.promisor'" "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'validate_complete_offline_repository "$repository_root" "$source_sha"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'validate_complete_offline_repository "$prior_repository_root" "$prior_source_sha"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F '/usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" checkout --quiet --detach "$source_sha"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'write_source_receipt' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'cosmas-os-d3-authenticated-source-staging-v2' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'guard_materialize_authenticated_committed_file' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'deploy credentials are accepted only by stage-source' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'guard_validate_apply_approval "$approval_file" "$approval_bundle"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'cosmas-os-d3-protected-apply-bundle-transport-v1' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'apply-attempt.claim' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F '.acceptance_phase == "workflow-verify" or .acceptance_phase == "audit-replay"' "$beta_dir/protected-runner-command.sh" >/dev/null
+for acceptance_command in \
+  verify-beta-runtime \
+  baseline-beta-workflow-acceptance \
+  verify-beta-workflow-acceptance \
+  verify-beta-audit-replay \
+  prepare-beta-purge-acceptance \
+  verify-beta-purge-acceptance; do
+  grep -F "$acceptance_command" "$beta_dir/runtime-acceptance-start-request.jq" >/dev/null
+done
+[[ "$(grep -Fc 'python -m cosmas_os.cli bootstrap-beta-identity /run/beta-bootstrap.json --confirm-reviewed-human-deploy' "$beta_dir/protected-runner-command.sh")" == "2" ]] || {
+  printf '%s\n' "identity bootstrap must execute twice for live idempotence proof" >&2
+  exit 1
+}
+[[ "$(grep -Fc 'python -m cosmas_os.cli seed-beta-synthetic --confirm-synthetic-only' "$beta_dir/protected-runner-command.sh")" == "2" ]] || {
+  printf '%s\n' "synthetic seed must execute twice for live idempotence proof" >&2
+  exit 1
+}
+grep -F 'cmp -s "$bootstrap_readback_first" "$bootstrap_readback_second"' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'public_configuration: {' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'guard_validate_network_public_configuration "$network_evidence_tmp" "$source_sha" "$release_id" "$GUARD_BETA_ID"' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'guard_validate_network_public_configuration "$artifact_out" "$source_sha" "$release_id" "$GUARD_BETA_ID"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
@@ -1541,6 +2305,8 @@ grep -F 'domain-verification)' "$beta_dir/protected-runner-command.sh" >/dev/nul
 grep -F 'domain-verification)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'artifact_file="$release_root/executions/domain-verification/attestation.json"' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'guard_validate_domain_verification_artifact "$artifact_out" "$source_sha" "$release_id"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'artifact_staging="$(mktemp "$(dirname -- "$artifact_destination")/.$(basename -- "$artifact_destination").partial.XXXXXX")"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'guard_publish_private_file "$artifact_out" "$artifact_destination" "sanitized protected-runner artifact"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'alert-delivery)' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'alert-delivery)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'pitr-freeze|pitr-manifest|pitr-start|pitr-complete|pitr-cleanup|pitr-resume)' "$beta_dir/protected-runner-command.sh" >/dev/null
@@ -1549,9 +2315,11 @@ grep -F 'exact_api_revision_inactive: true' "$beta_dir/protected-runner-command.
 grep -F '/deactivate?api-version=2024-03-01' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F '/activate?api-version=2024-03-01' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'pitr_acceptance.py' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'measured_rto_seconds' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'measured_rpo_seconds' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F '/createNotifications?api-version=2024-10-01-preview' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F '.properties.networkAcls.bypass == "None"' "$beta_dir/protected-runner-command.sh" >/dev/null
-grep -F 'realized runtime-acceptance execution differs from the exact reviewed image/command/args/environment override' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'runtime-acceptance execution contract mismatch' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'recipient_address_returned: false' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'docker-buildx=$docker_buildx_package_version' "$beta_dir/runner-bootstrap.sh" >/dev/null
 grep -F 'docker buildx build --load' "$beta_dir/protected-runner-command.sh" >/dev/null

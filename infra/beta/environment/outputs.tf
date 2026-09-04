@@ -161,7 +161,7 @@ output "container_app_environment_resource_id" {
 }
 
 output "log_analytics_workspace_customer_id" {
-  description = "Workspace customer ID used by the protected runner to retrieve only the sanitized job evidence line."
+  description = "Workspace customer ID used by protected job-log retrieval and exact workload-environment verification."
   value       = azurerm_log_analytics_workspace.beta.workspace_id
 }
 

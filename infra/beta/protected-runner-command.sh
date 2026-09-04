@@ -1,15 +1,41 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
 set -euo pipefail
 
-# This script is sent through Azure managed Run Command. Its final positional
-# argument is a protected parameter; never call it through the ordinary
-# `az vm run-command invoke --parameters` path.
-
 umask 077
+export GIT_NO_REPLACE_OBJECTS=1
+export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+unset BASH_ENV ENV CDPATH PYTHONHOME PYTHONPATH PYTHONSTARTUP
 
 die() {
   printf 'D3 protected runner command refused: %s\n' "$1" >&2
   exit 1
+}
+
+python3() {
+  /usr/bin/python3 -I -E -s "$@"
+}
+
+az() {
+  local -a command_environment
+  command_environment=(
+    /usr/bin/env -i
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+    HOME=/root LANG=C.UTF-8 LC_ALL=C.UTF-8
+    AZURE_CORE_NO_COLOR=1 AZURE_CORE_ONLY_SHOW_ERRORS=1
+  )
+  if [[ -n "${azure_config_dir:-}" ]]; then
+    command_environment+=("AZURE_CONFIG_DIR=$azure_config_dir")
+  fi
+  "${command_environment[@]}" /usr/bin/az "$@"
+}
+
+curl() {
+  /usr/bin/env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    HOME=/nonexistent LANG=C.UTF-8 LC_ALL=C.UTF-8 \
+    /usr/bin/curl --disable --noproxy '*' \
+      --cacert /etc/ssl/certs/ca-certificates.crt "$@"
 }
 
 fsync_path() {
@@ -30,6 +56,80 @@ finally:
 PY
 }
 
+require_root_owned_nonsymlink_chain() {
+  local path="$1"
+  local current="$path"
+  while [[ "$current" != "/" ]]; do
+    [[ -e "$current" && ! -L "$current" ]] || die "protected path contains a missing or symlink component"
+    [[ "$(stat -c '%u' "$current")" == "0" ]] || die "protected path contains a non-root-owned component"
+    current="$(dirname -- "$current")"
+  done
+  [[ "$(stat -c '%u' /)" == "0" ]] || die "filesystem root is not root-owned"
+}
+
+verify_pinned_git_binary() {
+  [[ -f "$toolchain_manifest" && ! -L "$toolchain_manifest" ]] || die "protected toolchain manifest is missing"
+  [[ "$(stat -c '%a' "$toolchain_manifest")" == "600" && "$(stat -c '%u' "$toolchain_manifest")" == "0" ]] || die "protected toolchain manifest is not root-owned mode 0600"
+  /usr/bin/python3 -I -E -s - "$toolchain_manifest" /usr/bin/git <<'PY' || die "fixed Git binary differs from the protected toolchain pin"
+import hashlib
+import json
+import os
+import stat
+import sys
+
+manifest_path, git_path = sys.argv[1:]
+with open(manifest_path, "rb") as handle:
+    raw = handle.read(65537)
+if len(raw) > 65536:
+    raise SystemExit(1)
+manifest = json.loads(raw)
+expected = manifest.get("git_binary_sha256")
+info = os.lstat(git_path)
+if (
+    not isinstance(expected, str)
+    or len(expected) != 64
+    or not stat.S_ISREG(info.st_mode)
+    or info.st_uid != 0
+    or info.st_mode & 0o022
+    or hashlib.sha256(open(git_path, "rb").read()).hexdigest() != expected
+):
+    raise SystemExit(1)
+PY
+}
+
+git_isolated() {
+  verify_pinned_git_binary
+  /usr/bin/env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    HOME=/root LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_TERMINAL_PROMPT=0 GIT_NO_REPLACE_OBJECTS=1 \
+    /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false \
+      -c core.hooksPath=/dev/null -c credential.helper= "$@"
+}
+
+validate_complete_offline_repository() {
+  local repository="$1"
+  local expected_sha="$2"
+  local local_config
+
+  [[ -d "$repository/.git" && ! -L "$repository" && ! -L "$repository/.git" ]] || die "protected source repository is unavailable or unsafe"
+  require_root_owned_nonsymlink_chain "$repository"
+  [[ "$(git_isolated -C "$repository" rev-parse --verify HEAD)" == "$expected_sha" ]] || die "protected source HEAD differs from its exact binding"
+  [[ -z "$(git_isolated -C "$repository" status --porcelain=v1 --untracked-files=all)" ]] || die "protected source checkout is not clean"
+  [[ -z "$(git_isolated -C "$repository" remote)" ]] || die "protected source retained a network-capable Git remote"
+  [[ -z "$(git_isolated -C "$repository" for-each-ref --format='%(refname)' refs/replace)" ]] || die "protected source contains forbidden replace refs"
+  [[ ! -e "$repository/.git/shallow" && ! -e "$repository/.git/objects/info/alternates" ]] || die "protected source is shallow or uses alternate objects"
+  local_config="$(git_isolated -C "$repository" config --local --list)"
+  if awk -F= '{key=tolower($1); if (key == "extensions.partialclone" || key ~ /^remote\..*\.(promisor|partialclonefilter)$/) found=1} END {exit !found}' <<<"$local_config"; then
+    die "protected source retained lazy-fetch configuration"
+  fi
+  if find "$repository/.git/objects/pack" -type f -name '*.promisor' -print -quit 2>/dev/null | grep -q .; then
+    die "protected source retained promisor objects"
+  fi
+  git_isolated -C "$repository" fsck --full --no-dangling "$expected_sha" >/dev/null 2>&1 || die "protected source does not contain its complete commit graph"
+}
+
 docker_buildx_output_matches_pin() {
   local actual_output="$1"
   local package_version="$2"
@@ -41,7 +141,9 @@ attestation_generation_window_status() {
   local evidence_file="$2"
   local observed_at="${3:-}"
   python3 - "$evidence_kind" "$evidence_file" "$observed_at" <<'PY'
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 import json
 import sys
 
@@ -71,7 +173,7 @@ else:
 now = timestamp(observed_at) if observed_at else datetime.now(UTC)
 if now < issued:
     raise ValueError("evidence was issued in the future")
-print("live" if now <= expires else "expired")
+print("live" if now < expires else "expired")
 PY
 }
 
@@ -341,14 +443,16 @@ operation="${COSMAS_OPERATION:-}"
 stage="${COSMAS_STAGE:-}"
 release_id="${COSMAS_RELEASE_ID:-}"
 source_sha="${COSMAS_SOURCE_SHA:-}"
+resident_command_sha256="${COSMAS_RESIDENT_COMMAND_SHA256:-}"
 
 uuid_pattern='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 [[ "$subscription_id" =~ $uuid_pattern ]] || die "subscription ID is invalid"
 [[ "$deploy_client_id" =~ $uuid_pattern ]] || die "deploy identity client ID is invalid"
-[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
-[[ "$stage" == "source" || "$stage" == "network" || "$stage" == "images" || "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" || "$stage" == "acceptance" || "$stage" == "domain" || "$stage" == "alert" || "$stage" == "pitr" || "$stage" == "recovery" || "$stage" == "offboarding" || "$stage" == "identity" ]] || die "stage is invalid"
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
+[[ "$stage" == "source" || "$stage" == "network" || "$stage" == "images" || "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" || "$stage" == "workload-verification" || "$stage" == "acceptance" || "$stage" == "domain" || "$stage" == "alert" || "$stage" == "pitr" || "$stage" == "recovery" || "$stage" == "offboarding" || "$stage" == "identity" ]] || die "stage is invalid"
 [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || die "release ID must be 3-32 lowercase letters, digits, or hyphens"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || die "source SHA must be a full lowercase Git commit"
+[[ "$resident_command_sha256" =~ ^[0-9a-f]{64}$ ]] || die "resident protected-command SHA-256 is invalid"
 [[ "${COSMAS_PROTECTED_PAYLOAD_BASE64:-}" =~ ^[A-Za-z0-9+/=]*$ ]] || die "protected payload is not base64"
 for docker_override in DOCKER_HOST DOCKER_CONTEXT DOCKER_CONFIG DOCKER_API_VERSION BUILDKIT_HOST DOCKER_BUILDKIT DOCKER_TLS DOCKER_TLS_VERIFY DOCKER_CERT_PATH; do
   [[ ! -v "$docker_override" ]] || die "inherited Docker routing/TLS override is forbidden: $docker_override"
@@ -358,6 +462,8 @@ runner_root="/var/lib/cosmas-deploy-runner"
 bootstrap_outputs="$runner_root/bootstrap-outputs.json"
 toolchain_manifest="$runner_root/toolchain.json"
 repository_root="/opt/cosmas-os/releases/$source_sha"
+source_receipt_root="$runner_root/source-receipts"
+source_receipt="$source_receipt_root/$source_sha.json"
 release_root="$runner_root/releases/$release_id"
 build_root="$runner_root/builds/$source_sha"
 stage_root="$release_root/stages/$stage"
@@ -381,6 +487,7 @@ network_evidence_tmp=""
 build_evidence_tmp=""
 database_evidence_tmp=""
 database_pointer_tmp=""
+workload_evidence_tmp=""
 runtime_acceptance_evidence_tmp=""
 runtime_acceptance_pointer_tmp=""
 alert_delivery_evidence_tmp=""
@@ -415,6 +522,7 @@ cleanup() {
   [[ -z "$build_evidence_tmp" ]] || rm -f -- "$build_evidence_tmp"
   [[ -z "$database_evidence_tmp" ]] || rm -f -- "$database_evidence_tmp"
   [[ -z "$database_pointer_tmp" ]] || rm -f -- "$database_pointer_tmp"
+  [[ -z "$workload_evidence_tmp" ]] || rm -f -- "$workload_evidence_tmp"
   [[ -z "$runtime_acceptance_evidence_tmp" ]] || rm -f -- "$runtime_acceptance_evidence_tmp"
   [[ -z "$runtime_acceptance_pointer_tmp" ]] || rm -f -- "$runtime_acceptance_pointer_tmp"
   [[ -z "$alert_delivery_evidence_tmp" ]] || rm -f -- "$alert_delivery_evidence_tmp"
@@ -446,13 +554,147 @@ exec 9>"$runner_lock"
 chmod 0600 "$runner_lock"
 flock -n 9 || die "another protected deployment operation is active"
 
+validate_source_repository() {
+  validate_complete_offline_repository "$repository_root" "$source_sha"
+}
+
+validate_source_receipt() {
+  [[ -f "$source_receipt" && ! -L "$source_receipt" ]] || die "authenticated source-staging receipt is unavailable"
+  [[ "$(stat -c '%a' "$source_receipt")" == "600" && "$(stat -c '%u' "$source_receipt")" == "0" ]] || die "authenticated source-staging receipt is not root-owned mode 0600"
+  require_root_owned_nonsymlink_chain "$source_receipt"
+  python3 - "$source_receipt" "$repository_root" "$source_sha" "$resident_command_sha256" <<'PY' || exit 1
+import hashlib
+import json
+import pathlib
+import re
+import sys
+from typing import Any
+
+receipt_path, repository, source_sha, runner_hash = sys.argv[1:]
+
+def fail(message: str) -> None:
+    print(f"D3 protected runner command refused: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            fail("authenticated source receipt contains duplicate keys")
+        value[key] = item
+    return value
+
+raw = pathlib.Path(receipt_path).read_bytes()
+if len(raw) > 16384:
+    fail("authenticated source receipt is oversized")
+try:
+    receipt = json.loads(raw, object_pairs_hook=unique, parse_constant=lambda value: fail("authenticated source receipt contains an invalid constant"))
+except (UnicodeDecodeError, json.JSONDecodeError):
+    fail("authenticated source receipt is not strict JSON")
+keys = {"schema_version", "contract", "status", "source_sha", "source_tree_sha1", "runner_command_sha256", "authenticated_origin", "fetch_mode", "remote_removed", "replace_refs_disabled", "completed_at", "evidence_payload_sha256"}
+if not isinstance(receipt, dict) or set(receipt) != keys:
+    fail("authenticated source receipt shape is invalid")
+if type(receipt["schema_version"]) is not int or receipt["schema_version"] != 2:
+    fail("authenticated source receipt schema is invalid")
+if receipt["contract"] != "cosmas-os-d3-authenticated-source-staging-v2" or receipt["status"] != "verified":
+    fail("authenticated source receipt contract is invalid")
+if receipt["source_sha"] != source_sha or receipt["runner_command_sha256"] != runner_hash:
+    fail("authenticated source receipt command/source binding is invalid")
+if receipt["authenticated_origin"] != "ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git" or receipt["fetch_mode"] != "full":
+    fail("authenticated source receipt origin/fetch binding is invalid")
+if receipt["remote_removed"] is not True or receipt["replace_refs_disabled"] is not True:
+    fail("authenticated source receipt isolation binding is invalid")
+if not isinstance(receipt["source_tree_sha1"], str) or re.fullmatch(r"[0-9a-f]{40}", receipt["source_tree_sha1"]) is None:
+    fail("authenticated source receipt tree binding is invalid")
+command = pathlib.Path(repository) / "infra/beta/protected-runner-command.sh"
+if hashlib.sha256(command.read_bytes()).hexdigest() != runner_hash:
+    fail("resident protected command differs from authenticated source receipt")
+payload = dict(receipt)
+expected = payload.pop("evidence_payload_sha256", "")
+actual = hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+if expected != actual:
+    fail("authenticated source receipt self-hash is invalid")
+PY
+  [[ "$(git_isolated -C "$repository_root" rev-parse "$source_sha^{tree}")" == "$(jq -er '.source_tree_sha1' "$source_receipt")" ]] || die "resident source tree differs from authenticated source receipt"
+}
+
 validate_source() {
-  [[ -d "$repository_root/.git" && ! -L "$repository_root" ]] || die "approved source has not been staged"
-  [[ "$(stat -c '%u' "$repository_root")" == "0" ]] || die "staged source is not root-owned"
-  [[ "$(git -C "$repository_root" rev-parse --verify HEAD)" == "$source_sha" ]] || die "staged source does not match the approved commit"
-  [[ -z "$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all)" ]] || die "staged source checkout is not clean"
-  [[ "$(git -C "$repository_root" remote get-url origin)" == "ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git" ]] || die "staged source origin is not the fixed CosmaNeura repository over SSH port 443"
-  [[ "$(git -C "$repository_root" remote get-url --push origin)" == "DISABLED" ]] || die "staged source push URL is not disabled"
+  validate_source_repository
+  validate_source_receipt
+}
+
+write_source_receipt() {
+  local runner_command="$repository_root/infra/beta/protected-runner-command.sh"
+  local actual_command_sha256
+  local source_tree_sha1
+
+  [[ -f "$runner_command" && ! -L "$runner_command" ]] || die "authenticated source lacks the protected runner command"
+  actual_command_sha256="$(sha256sum "$runner_command" | awk '{print $1}')"
+  [[ "$actual_command_sha256" == "$resident_command_sha256" ]] || die "authenticated source runner command differs from the transported command"
+  source_tree_sha1="$(git_isolated -C "$repository_root" rev-parse "$source_sha^{tree}")"
+  [[ "$source_tree_sha1" =~ ^[0-9a-f]{40}$ ]] || die "authenticated source tree is invalid"
+  install -d -o root -g root -m 0700 "$source_receipt_root"
+  require_root_owned_nonsymlink_chain "$source_receipt_root"
+  [[ ! -e "$source_receipt" && ! -L "$source_receipt" ]] || die "authenticated source-staging receipt already exists"
+  python3 - "$source_receipt" "$source_sha" "$source_tree_sha1" "$actual_command_sha256" <<'PY'
+import hashlib
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+UTC = timezone.utc
+
+path, source_sha, source_tree, command_hash = sys.argv[1:]
+payload = {
+    "schema_version": 2,
+    "contract": "cosmas-os-d3-authenticated-source-staging-v2",
+    "status": "verified",
+    "source_sha": source_sha,
+    "source_tree_sha1": source_tree,
+    "runner_command_sha256": command_hash,
+    "authenticated_origin": "ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git",
+    "fetch_mode": "full",
+    "remote_removed": True,
+    "replace_refs_disabled": True,
+    "completed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+}
+payload["evidence_payload_sha256"] = hashlib.sha256(
+    json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+).hexdigest()
+encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+parent = os.path.dirname(path)
+descriptor, temporary = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", dir=parent)
+directory = -1
+try:
+    os.fchmod(descriptor, 0o600)
+    remaining = memoryview(encoded)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written <= 0:
+            raise OSError("source receipt write made no progress")
+        remaining = remaining[written:]
+    os.fsync(descriptor)
+    os.close(descriptor)
+    descriptor = -1
+    directory = os.open(parent, os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+    os.link(temporary, path, follow_symlinks=False)
+    os.fsync(directory)
+finally:
+    if descriptor >= 0:
+        os.close(descriptor)
+    try:
+        os.unlink(temporary)
+        if directory >= 0:
+            os.fsync(directory)
+    except FileNotFoundError:
+        pass
+    if directory >= 0:
+        os.close(directory)
+PY
+  chown root:root "$source_receipt"
+  chmod 0600 "$source_receipt"
 }
 
 verify_pinned_toolchain() {
@@ -471,16 +713,18 @@ verify_pinned_toolchain() {
   [[ "$(sha256sum /usr/local/bin/trivy | awk '{print $1}')" == "$expected_hash" ]] || die "Trivy binary differs from the setup-time checksum"
   [[ "$(/usr/local/bin/trivy --version | awk 'NR == 1 {print $2}')" == "$expected_version" ]] || die "Trivy version differs from the setup-time pin"
   [[ ! -e /root/.terraformrc && ! -e /root/.tofurc && ! -e /root/.terraform.d/credentials.tfrc.json && ! -e /root/.tofu.d/credentials.tfrc.json ]] || die "an unreviewed default Terraform/OpenTofu CLI configuration is present"
-  while IFS='|' read -r package_name manifest_version_key binary_name manifest_hash_key; do
+  while IFS='|' read -r package_name manifest_version_key binary_path manifest_hash_key; do
     expected_version="$(jq -er --arg key "$manifest_version_key" '.[$key] | strings' "$toolchain_manifest")" || die "toolchain package version is missing: $package_name"
     [[ "$(dpkg-query -W -f='${Version}' "$package_name")" == "$expected_version" ]] || die "installed package version differs from the setup-time pin: $package_name"
-    expected_hash="$(jq -er --arg key "$manifest_hash_key" '.[$key] | strings | select(test("^[0-9a-f]{64}$"))' "$toolchain_manifest")" || die "toolchain binary hash is missing: $binary_name"
-    [[ "$(sha256sum "$(command -v "$binary_name")" | awk '{print $1}')" == "$expected_hash" ]] || die "installed binary differs from the setup-time pin: $binary_name"
+    expected_hash="$(jq -er --arg key "$manifest_hash_key" '.[$key] | strings | select(test("^[0-9a-f]{64}$"))' "$toolchain_manifest")" || die "toolchain binary hash is missing: $binary_path"
+    [[ -x "$binary_path" && ! -L "$binary_path" && "$(stat -c '%u' "$binary_path")" == "0" ]] || die "toolchain binary path is unsafe: $binary_path"
+    [[ "$(sha256sum "$binary_path" | awk '{print $1}')" == "$expected_hash" ]] || die "installed binary differs from the setup-time pin: $binary_path"
   done <<'TOOLS'
-azure-cli|azure_cli_package_version|az|azure_cli_binary_sha256
-docker.io|docker_package_version|docker|docker_binary_sha256
-git|git_package_version|git|git_binary_sha256
-jq|jq_package_version|jq|jq_binary_sha256
+azure-cli|azure_cli_package_version|/usr/bin/az|azure_cli_binary_sha256
+curl|curl_package_version|/usr/bin/curl|curl_binary_sha256
+docker.io|docker_package_version|/usr/bin/docker|docker_binary_sha256
+git|git_package_version|/usr/bin/git|git_binary_sha256
+jq|jq_package_version|/usr/bin/jq|jq_binary_sha256
 TOOLS
   [[ "$(jq -er '.docker_server_version' "$toolchain_manifest")" == "29.1.3" ]] || die "setup-time Docker server is not the reviewed 29.1.3 release"
   expected_hash="$(jq -er '.dockerd_binary_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$toolchain_manifest")" || die "toolchain Docker daemon hash is missing"
@@ -526,6 +770,7 @@ fresh_managed_identity_login() {
   export ARM_TENANT_ID="$tenant_id"
   export COSMAS_TERRAFORM_BIN=/usr/local/bin/tofu
   export TF_IN_AUTOMATION=1
+  export COSMAS_PROTECTED_WRAPPER_CONTEXT=1
 }
 
 emit_sanitized_artifact() {
@@ -637,6 +882,7 @@ verify_release_build_evidence() {
       .build_isolation.container_to_azure_platform_endpoints_blocked_and_probed == true and
       (.images.api.digest | strings | test("^sha256:[0-9a-f]{64}$")) and
       (.images.web.digest | strings | test("^sha256:[0-9a-f]{64}$")) and
+      .images.api.digest != .images.web.digest and
       .images.api.tag_write_delete_locked == true and
       .images.api.manifest_write_delete_locked == true and
       .images.web.tag_write_delete_locked == true and
@@ -646,6 +892,27 @@ verify_release_build_evidence() {
       (.images.api.trivy_report_sha256 | strings | test("^[0-9a-f]{64}$")) and
       (.images.web.trivy_report_sha256 | strings | test("^[0-9a-f]{64}$"))
     ' "$evidence" >/dev/null || die "image build evidence is not bound to this source/release/Box with clean Trivy results"
+}
+
+verify_current_workload_attestation() {
+  local workload_root="$release_root/executions/workload-verification"
+  local workload_attestation="$workload_root/attestation.json"
+  local validator="$repository_root/infra/beta/validate_workload_attestation.py"
+  local expected_api_digest
+  local expected_web_digest
+
+  [[ -f "$validator" && ! -L "$validator" ]] || die "committed workload-attestation validator is unavailable"
+  git_isolated -C "$repository_root" ls-files --error-unmatch infra/beta/validate_workload_attestation.py >/dev/null 2>&1 || die "workload-attestation validator is not part of the approved commit"
+  [[ -d "$workload_root" && ! -L "$workload_root" ]] || die "resident workload-verification evidence is unavailable"
+  [[ "$(stat -c '%a' "$workload_root")" == "700" && "$(stat -c '%u' "$workload_root")" == "0" ]] || die "resident workload-verification evidence directory is unsafe"
+  require_root_owned_nonsymlink_chain "$workload_root"
+  expected_api_digest="$(jq -er '.images.api.digest' "$build_root/build-evidence.json")"
+  expected_web_digest="$(jq -er '.images.web.digest' "$build_root/build-evidence.json")"
+  python3 "$validator" \
+    "$workload_attestation" "$source_sha" "$release_id" "${GUARD_STATE_LINEAGE,,}" \
+    "$GUARD_STATE_SERIAL" "$GUARD_STATE_SHA256" "${GUARD_BOX_ID,,}" \
+    "$expected_api_digest" "$expected_web_digest" ||
+    die "resident workload-verification evidence is absent, stale, modified, or unsuccessful"
 }
 
 probe_exact_private_endpoint() {
@@ -855,7 +1122,6 @@ prepare_pitr_context() {
   PITR_NETWORK_EVIDENCE="$VERIFIED_NETWORK_EVIDENCE"
   verify_release_build_evidence
   fresh_managed_identity_login
-  # shellcheck source=deployment-guard-lib.sh
   source "$repository_root/infra/beta/deployment-guard-lib.sh"
   GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
   guard_find_terraform
@@ -909,7 +1175,7 @@ prepare_pitr_context() {
       (.postgres_private_dns_zone_id.value | ascii_downcase) == $dns_id
     ' "$probe_outputs" >/dev/null || die "PITR is restricted to the exact deployed synthetic workload and accepted immutable images"
   [[ -f "$PITR_SCRIPT" && ! -L "$PITR_SCRIPT" ]] || die "committed PITR acceptance primitive is unavailable"
-  git -C "$repository_root" ls-files --error-unmatch infra/beta/pitr_acceptance.py >/dev/null 2>&1 || die "PITR primitive is not part of the approved commit"
+    git_isolated -C "$repository_root" ls-files --error-unmatch infra/beta/pitr_acceptance.py >/dev/null 2>&1 || die "PITR primitive is not part of the approved commit"
   install -d -o root -g root -m 0700 "$PITR_ROOT" "$PITR_ROOT/evidence"
 }
 
@@ -1042,7 +1308,6 @@ prepare_live_acceptance_context() {
   LIVE_NETWORK_EVIDENCE="$VERIFIED_NETWORK_EVIDENCE"
   verify_release_build_evidence
   fresh_managed_identity_login
-  # shellcheck source=deployment-guard-lib.sh
   source "$repository_root/infra/beta/deployment-guard-lib.sh"
   GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
   guard_find_terraform
@@ -1090,7 +1355,7 @@ recovery_no_drift_review() {
   ' "$workload_vars" >/dev/null || die "workload variables do not declare the exact current release digests"
   if [[ ! -e "$review_file" && ! -L "$review_file" ]]; then
     [[ ! -e "$plan_file" && ! -L "$plan_file" ]] || die "orphaned release-recovery plan requires manual review"
-    if ! bash "$repository_root/infra/beta/subsequent-environment-plan.sh" \
+    if ! /bin/bash --noprofile --norc -p "$repository_root/infra/beta/subsequent-environment-plan.sh" \
       --bootstrap-outputs "$bootstrap_outputs" \
       --var-file "$workload_vars" \
       --plan-out "$plan_file" \
@@ -1179,41 +1444,111 @@ validate_stage_tfvars_payload() {
 case "$operation" in
   stage-source)
     [[ "$stage" == "source" ]] || die "stage-source requires stage=source"
-    for command_name in git ssh ssh-keygen jq base64; do
+    verify_pinned_git_binary
+    for command_name in ssh ssh-keygen jq base64; do
       command -v "$command_name" >/dev/null 2>&1 || die "$command_name is required"
     done
     jq -e '
       type == "object" and
       (.deploy_key_base64 | strings | test("^[A-Za-z0-9+/=]+$")) and
       (.known_hosts_base64 | strings | test("^[A-Za-z0-9+/=]+$")) and
-      (keys | sort) == (["deploy_key_base64", "known_hosts_base64"] | sort)
+      ((.prior_source_sha == null) or (.prior_source_sha | strings | test("^[0-9a-f]{40}$"))) and
+      (keys | sort) == (["deploy_key_base64", "known_hosts_base64", "prior_source_sha"] | sort)
     ' "$payload_file" >/dev/null || die "source payload has an invalid shape"
+    prior_source_sha="$(jq -r '.prior_source_sha // ""' "$payload_file")"
+    [[ -z "$prior_source_sha" || "$prior_source_sha" != "$source_sha" ]] || die "source transition must name a distinct prior commit"
     deploy_key_file="$(mktemp /run/cosmas-github-deploy-key.XXXXXX)"
     known_hosts_file="$(mktemp /run/cosmas-github-known-hosts.XXXXXX)"
     jq -er '.deploy_key_base64' "$payload_file" | base64 --decode >"$deploy_key_file" || die "deploy key could not be decoded"
     jq -er '.known_hosts_base64' "$payload_file" | base64 --decode >"$known_hosts_file" || die "known-hosts data could not be decoded"
     chmod 0600 "$deploy_key_file" "$known_hosts_file"
+    require_root_owned_nonsymlink_chain "$deploy_key_file"
+    require_root_owned_nonsymlink_chain "$known_hosts_file"
     ssh-keygen -y -f "$deploy_key_file" >/dev/null 2>&1 || die "protected deploy key is not a valid private SSH key"
     [[ "$(grep -cve '^[[:space:]]*$' "$known_hosts_file")" == "1" ]] || die "known-hosts file must contain exactly one reviewed key"
     grep -Eq '^\[ssh\.github\.com\]:443[[:space:]]+ssh-ed25519[[:space:]]+[A-Za-z0-9+/=]+([[:space:]]|$)' "$known_hosts_file" || die "known-hosts entry must pin GitHub SSH on port 443 with Ed25519"
+    staged_source_count=0
+    for staged_source_dir in /opt/cosmas-os/releases/*; do
+      [[ -e "$staged_source_dir" || -L "$staged_source_dir" ]] || continue
+      [[ -d "$staged_source_dir/.git" && ! -L "$staged_source_dir" && ! -L "$staged_source_dir/.git" && "$(basename -- "$staged_source_dir")" =~ ^[0-9a-f]{40}$ ]] || die "unrecognized entry exists in the protected source-release directory"
+      staged_source_count=$((staged_source_count + 1))
+    done
+    if [[ -n "$prior_source_sha" ]]; then
+      prior_repository_root="/opt/cosmas-os/releases/$prior_source_sha"
+      [[ -d "$prior_repository_root/.git" && ! -L "$prior_repository_root" && ! -L "$prior_repository_root/.git" && "$(stat -c '%u' "$prior_repository_root")" == "0" ]] || die "the exact prior protected source is unavailable"
+      prior_remotes="$(git_isolated -C "$prior_repository_root" remote)"
+      if [[ -n "$prior_remotes" ]]; then
+        [[ "$prior_remotes" == "origin" ]] || die "prior protected source has an unexpected Git remote"
+        [[ "$(git_isolated -C "$prior_repository_root" remote get-url origin)" == "ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git" ]] || die "prior protected source origin is unexpected"
+        [[ "$(git_isolated -C "$prior_repository_root" remote get-url --push origin)" == "DISABLED" ]] || die "prior protected source push URL is not disabled"
+        git_isolated -C "$prior_repository_root" remote remove origin
+      fi
+      validate_complete_offline_repository "$prior_repository_root" "$prior_source_sha"
+    elif (( staged_source_count > 0 )) && [[ ! -d "$repository_root/.git" ]]; then
+      die "a new protected source requires an explicit prior-source-sha transition binding"
+    fi
+    recover_source_receipt=false
     if [[ -e "$repository_root" || -L "$repository_root" ]]; then
-      validate_source
-      printf '%s\n' "D3 protected runner already has the exact clean approved source"
-      exit 0
+      validate_source_repository
+      if [[ -n "$prior_source_sha" ]]; then
+        git_isolated -C "$repository_root" merge-base --is-ancestor "$prior_source_sha" "$source_sha" || die "approved source is not a descendant of the bound prior source"
+        [[ "$(git_isolated -C "$repository_root" rev-parse "$prior_source_sha^{tree}")" != "$(git_isolated -C "$repository_root" rev-parse "$source_sha^{tree}")" ]] || die "approved source tree does not differ from the bound prior source"
+      fi
+      if [[ -e "$source_receipt" || -L "$source_receipt" ]]; then
+        if (validate_source_receipt) >/dev/null 2>&1; then
+          printf '%s\n' "D3 protected runner already has the exact clean approved source"
+          exit 0
+        fi
+        [[ -f "$source_receipt" && ! -L "$source_receipt" && "$(stat -c '%a' "$source_receipt")" == "600" && "$(stat -c '%u' "$source_receipt")" == "0" ]] || die "invalid source receipt is not safely recoverable"
+        if python3 - "$source_receipt" <<'PY'
+import json
+import pathlib
+import sys
+
+try:
+    json.loads(pathlib.Path(sys.argv[1]).read_bytes())
+except (UnicodeDecodeError, json.JSONDecodeError):
+    raise SystemExit(1)
+PY
+        then
+          die "well-formed but invalid source receipt cannot be replaced"
+        fi
+      fi
+      recover_source_receipt=true
     fi
     install -d -o root -g root -m 0700 /opt/cosmas-os /opt/cosmas-os/releases
     source_staging="$(mktemp -d /opt/cosmas-os/source.XXXXXX)"
     chmod 0700 "$source_staging"
-    git -C "$source_staging" init --quiet
-    git -C "$source_staging" remote add origin ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git
-    GIT_SSH_COMMAND="ssh -i $deploy_key_file -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -p 443" \
-      git -C "$source_staging" fetch --quiet --depth=1 origin "$source_sha"
-    git -C "$source_staging" checkout --quiet --detach "$source_sha"
-    [[ "$(git -C "$source_staging" rev-parse --verify HEAD)" == "$source_sha" ]] || die "GitHub did not return the approved source commit"
-    git -C "$source_staging" remote set-url --push origin DISABLED
-    [[ -z "$(git -C "$source_staging" status --porcelain=v1 --untracked-files=all)" ]] || die "new source checkout is not clean"
-    mv -- "$source_staging" "$repository_root"
-    source_staging=""
+    require_root_owned_nonsymlink_chain "$source_staging"
+    clean_git_env=(/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C LC_ALL=C GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_NO_REPLACE_OBJECTS=1)
+    "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" -c init.templateDir= init --quiet
+    "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" remote add origin ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git
+    "${clean_git_env[@]}" "GIT_SSH_COMMAND=/usr/bin/ssh -F /dev/null -i $deploy_key_file -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o ProxyCommand=none -o ProxyJump=none -o GlobalKnownHostsFile=/dev/null -o StrictHostKeyChecking=yes -o UserKnownHostsFile=$known_hosts_file -p 443" \
+      /usr/bin/git --no-pager -c protocol.allow=never -c protocol.ssh.allow=always -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" fetch --quiet --no-tags origin "$source_sha"
+    if [[ -n "$prior_source_sha" ]]; then
+      "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" merge-base --is-ancestor "$prior_source_sha" "$source_sha" || die "approved source is not a descendant of the bound prior source"
+      [[ "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" rev-parse "$prior_source_sha^{tree}")" != "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" rev-parse "$source_sha^{tree}")" ]] || die "approved source tree does not differ from the bound prior source"
+    fi
+    "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" remote remove origin
+    "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" checkout --quiet --detach "$source_sha"
+    [[ "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" rev-parse --verify HEAD)" == "$source_sha" ]] || die "GitHub did not return the approved source commit"
+    [[ -z "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" remote)" ]] || die "source checkout retained a network-capable Git remote"
+    [[ -z "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$source_staging" status --porcelain=v1 --untracked-files=all)" ]] || die "new source checkout is not clean"
+    validate_complete_offline_repository "$source_staging" "$source_sha"
+    if [[ "$recover_source_receipt" == "true" ]]; then
+      [[ "$(git_isolated -C "$source_staging" rev-parse "$source_sha^{tree}")" == "$(git_isolated -C "$repository_root" rev-parse "$source_sha^{tree}")" ]] || die "fresh authenticated source differs from the interrupted checkout"
+      rm -rf -- "$source_staging"
+      source_staging=""
+      if [[ -e "$source_receipt" || -L "$source_receipt" ]]; then
+        rm -f -- "$source_receipt"
+        fsync_path "$source_receipt_root"
+      fi
+    else
+      mv -- "$source_staging" "$repository_root"
+      source_staging=""
+      validate_source_repository
+    fi
+    write_source_receipt
     validate_source
     printf '%s\n' "D3 protected runner staged the exact approved source over ssh.github.com:443 and removed its private deploy key"
     ;;
@@ -1233,7 +1568,7 @@ case "$operation" in
     [[ -f "$release_root/source-sha" && ! -L "$release_root/source-sha" && "$(cat "$release_root/source-sha")" == "$source_sha" ]] || die "release ID is not bound to the approved source commit"
     stage_transition_script="$repository_root/infra/beta/stage_generation_transition.py"
     [[ -f "$stage_transition_script" && ! -L "$stage_transition_script" ]] || die "committed stage-generation primitive is unavailable"
-    git -C "$repository_root" ls-files --error-unmatch infra/beta/stage_generation_transition.py >/dev/null 2>&1 || die "stage-generation primitive is not part of the approved commit"
+    git_isolated -C "$repository_root" ls-files --error-unmatch infra/beta/stage_generation_transition.py >/dev/null 2>&1 || die "stage-generation primitive is not part of the approved commit"
     operation_temp_dir="$(mktemp -d /run/cosmas-stage-generation.XXXXXX)"
     chmod 0700 "$operation_temp_dir"
     if [[ "$operation" == "stage-generation" ]]; then
@@ -1288,7 +1623,6 @@ case "$operation" in
     verify_pinned_toolchain
     bind_release_to_source
     fresh_managed_identity_login
-    # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
     GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
     guard_find_terraform
@@ -1476,7 +1810,6 @@ case "$operation" in
       (keys | sort) == (["vite_api_base", "vite_clerk_publishable_key", "vite_cosmas_env"] | sort)
     ' "$payload_file" >/dev/null || die "build payload must contain only the exact public D3 web build arguments"
     fresh_managed_identity_login
-    # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
     GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
     guard_find_terraform
@@ -1670,7 +2003,6 @@ case "$operation" in
     verify_release_build_evidence
     jq -e 'type == "object" and length == 0' "$payload_file" >/dev/null || die "database-prepare accepts no protected input values"
     fresh_managed_identity_login
-    # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
     GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
     guard_find_terraform
@@ -1903,6 +2235,83 @@ PY
     database_pointer_tmp=""
     emit_sanitized_artifact "$execution_root/attestation.json"
     ;;
+  workload-verify)
+    [[ "$stage" == "workload-verification" ]] || die "workload-verify requires stage=workload-verification"
+    jq -e 'type == "object" and length == 0' "$payload_file" >/dev/null || die "workload-verify does not accept an input payload"
+    prepare_live_acceptance_context
+    workload_script="$repository_root/infra/beta/workload_verification.py"
+    [[ -f "$workload_script" && ! -L "$workload_script" ]] || die "committed workload-verification primitive is unavailable"
+    git_isolated -C "$repository_root" ls-files --error-unmatch infra/beta/workload_verification.py >/dev/null 2>&1 || die "workload-verification primitive is not part of the approved commit"
+    workload_root="$release_root/executions/workload-verification"
+    workload_evidence_file="$workload_root/attestation.json"
+    install -d -o root -g root -m 0700 "$workload_root"
+    COSMAS_WORKLOAD_RUNTIME_IDENTITY_ID="$(jq -er '.runtime_identity_resource_id.value | strings' "$probe_outputs")" || die "runtime identity output is invalid"
+    COSMAS_WORKLOAD_WEB_IDENTITY_ID="/subscriptions/$subscription_id/resourceGroups/$GUARD_WORKLOAD_RESOURCE_GROUP/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-cosmas-beta-web-$GUARD_BETA_ID"
+    COSMAS_WORKLOAD_MANAGED_ENVIRONMENT_ID="$(jq -er '.container_app_environment_resource_id.value | strings' "$probe_outputs")" || die "Container Apps environment output is invalid"
+    COSMAS_WORKLOAD_LOG_ANALYTICS_CUSTOMER_ID="$(jq -er '.log_analytics_workspace_customer_id.value | strings' "$probe_outputs")" || die "Log Analytics customer ID output is invalid"
+    COSMAS_WORKLOAD_RUNTIME_IDENTITY_CLIENT_ID="$(jq -er '.runtime_identity_client_id.value | strings' "$probe_outputs")" || die "runtime identity client ID output is invalid"
+    COSMAS_WORKLOAD_WEB_ORIGIN="$(jq -er '.web_origin.value | strings | select(test("^https://[^/?#]+$"))' "$probe_outputs")" || die "web origin is invalid"
+    COSMAS_WORKLOAD_CLERK_ORGANIZATION_ID="$(jq -er '.clerk_organization_id.value | strings' "$probe_outputs")" || die "Clerk organization output is invalid"
+    COSMAS_WORKLOAD_CLERK_ISSUER="$(jq -er '.clerk_issuer_url.value | strings' "$probe_outputs")" || die "Clerk issuer output is invalid"
+    COSMAS_WORKLOAD_CLERK_JWKS_URL="$(jq -er '.clerk_jwks_url.value | strings' "$probe_outputs")" || die "Clerk JWKS output is invalid"
+    COSMAS_WORKLOAD_CLERK_AUDIENCE="$(jq -er '.clerk_audience.value | strings' "$probe_outputs")" || die "Clerk audience output is invalid"
+    COSMAS_WORKLOAD_BLOB_ACCOUNT_URL="$(jq -er '.blob_account_url.value | strings' "$probe_outputs")" || die "Blob account output is invalid"
+    COSMAS_WORKLOAD_BLOB_CONTAINER="$(jq -er '.blob_container_name.value | strings' "$probe_outputs")" || die "Blob container output is invalid"
+    COSMAS_WORKLOAD_KEY_VAULT_URI="$(jq -er '.key_vault_uri.value | strings' "$probe_outputs")" || die "Key Vault output is invalid"
+    COSMAS_WORKLOAD_REGISTRY_POSTURE="$(jq -er '.registry_network_posture.value | strings' "$probe_outputs")" || die "registry posture output is invalid"
+    COSMAS_WORKLOAD_API_READY_URL="$(jq -er '.api_origin.value | strings | select(test("^https://[^/?#]+$"))' "$probe_outputs")/ready" || die "API readiness URL is invalid"
+    COSMAS_WORKLOAD_WEB_HEALTH_URL="$(jq -er '.web_health_url.value | strings | select(test("^https://[^?#]+/healthz$"))' "$probe_outputs")" || die "web health URL is invalid"
+    export COSMAS_WORKLOAD_SUBSCRIPTION_ID="${subscription_id,,}"
+    export COSMAS_WORKLOAD_RESOURCE_GROUP="$GUARD_WORKLOAD_RESOURCE_GROUP"
+    export COSMAS_WORKLOAD_BETA_ID="$GUARD_BETA_ID"
+    export COSMAS_WORKLOAD_BOX_ID="$GUARD_BOX_ID"
+    export COSMAS_WORKLOAD_REGISTRY="$LIVE_REGISTRY"
+    export COSMAS_WORKLOAD_RUNTIME_IDENTITY_ID COSMAS_WORKLOAD_WEB_IDENTITY_ID
+    export COSMAS_WORKLOAD_MANAGED_ENVIRONMENT_ID COSMAS_WORKLOAD_LOG_ANALYTICS_CUSTOMER_ID COSMAS_WORKLOAD_RUNTIME_IDENTITY_CLIENT_ID COSMAS_WORKLOAD_WEB_ORIGIN
+    export COSMAS_WORKLOAD_CLERK_ORGANIZATION_ID COSMAS_WORKLOAD_CLERK_ISSUER COSMAS_WORKLOAD_CLERK_JWKS_URL COSMAS_WORKLOAD_CLERK_AUDIENCE
+    export COSMAS_WORKLOAD_BLOB_ACCOUNT_URL COSMAS_WORKLOAD_BLOB_CONTAINER COSMAS_WORKLOAD_KEY_VAULT_URI COSMAS_WORKLOAD_REGISTRY_POSTURE
+    export COSMAS_WORKLOAD_API_READY_URL COSMAS_WORKLOAD_WEB_HEALTH_URL
+    export COSMAS_WORKLOAD_SOURCE_SHA="$source_sha"
+    export COSMAS_WORKLOAD_RELEASE_ID="$release_id"
+    export COSMAS_WORKLOAD_API_DIGEST="$LIVE_API_DIGEST"
+    export COSMAS_WORKLOAD_WEB_DIGEST="$LIVE_WEB_DIGEST"
+    export COSMAS_WORKLOAD_STATE_LINEAGE="${GUARD_STATE_LINEAGE,,}"
+    export COSMAS_WORKLOAD_STATE_SERIAL="$GUARD_STATE_SERIAL"
+    export COSMAS_WORKLOAD_STATE_SHA256="$GUARD_STATE_SHA256"
+    operation_temp_dir="$(mktemp -d /run/cosmas-workload-verification.XXXXXX)"
+    chmod 0700 "$operation_temp_dir"
+    private_result_file="$operation_temp_dir/output.json"
+    if ! python3 "$workload_script" >"$private_result_file" 2>"$operation_temp_dir/private.log"; then
+      die "workload verification failed; private diagnostics remain root-only on the runner"
+    fi
+    [[ "$(wc -l <"$private_result_file" | tr -d ' ')" == "1" && "$(wc -c <"$private_result_file")" -le 16384 ]] || die "workload verifier did not return one bounded sanitized record"
+    jq -e \
+      --arg source_sha "$source_sha" --arg release_id "$release_id" --arg box_id "$GUARD_BOX_ID" \
+      --arg lineage "${GUARD_STATE_LINEAGE,,}" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
+      --arg api_digest "$LIVE_API_DIGEST" --arg web_digest "$LIVE_WEB_DIGEST" '
+        type == "object" and
+        (keys | sort) == (["api_ready_verified", "box_id", "completed_at", "contract", "evidence_payload_sha256", "exact_revisions_and_images_verified", "exact_runtime_configuration_verified", "images", "managed_environment_verified", "person_or_patient_identifiers_returned", "release_id", "revision_id_sha256", "schema_version", "secrets_returned", "single_revision_traffic_verified", "source_sha", "state", "status", "synthetic_box_id_returned", "web_health_verified", "worker_private_and_ready", "worker_probe_configuration_verified"] | sort) and
+        .schema_version == 1 and .contract == "cosmas-os-d3-workload-verification-v1" and .status == "verified" and
+        .source_sha == $source_sha and .release_id == $release_id and (.box_id | ascii_downcase) == ($box_id | ascii_downcase) and
+        .state == {exists: true, lineage: $lineage, serial: $serial, sha256: $state_sha256} and
+        .images == {api: $api_digest, worker: $api_digest, web: $web_digest} and
+        (.revision_id_sha256 | keys | sort) == (["api", "web", "worker"] | sort) and
+        ([.revision_id_sha256[] | strings | select(test("^[0-9a-f]{64}$"))] | length) == 3 and
+        .exact_revisions_and_images_verified == true and .single_revision_traffic_verified == true and
+        .exact_runtime_configuration_verified == true and .managed_environment_verified == true and
+        .api_ready_verified == true and .web_health_verified == true and .worker_probe_configuration_verified == true and
+        .worker_private_and_ready == true and
+        .synthetic_box_id_returned == true and .person_or_patient_identifiers_returned == false and .secrets_returned == false and
+        (.evidence_payload_sha256 | strings | test("^[0-9a-f]{64}$"))
+      ' "$private_result_file" >/dev/null || die "workload verifier returned an invalid or over-broad contract"
+    workload_hash="$(jq -cSj 'del(.evidence_payload_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
+    [[ "$(jq -er '.evidence_payload_sha256' "$private_result_file")" == "$workload_hash" ]] || die "workload-verification evidence self-hash is invalid"
+    workload_evidence_tmp="$(mktemp "$workload_root/.attestation.XXXXXX")"
+    install -o root -g root -m 0600 "$private_result_file" "$workload_evidence_tmp"
+    mv -f -- "$workload_evidence_tmp" "$workload_evidence_file"
+    workload_evidence_tmp=""
+    emit_sanitized_artifact "$workload_evidence_file"
+    ;;
   runtime-acceptance)
     [[ "$stage" == "acceptance" ]] || die "runtime-acceptance requires stage=acceptance"
     validate_source
@@ -1914,7 +2323,7 @@ PY
     jq -e '
       type == "object" and
       (.acceptance_phase == "runtime" or .acceptance_phase == "workflow-baseline" or
-       .acceptance_phase == "workflow-verify" or .acceptance_phase == "purge-setup" or
+       .acceptance_phase == "workflow-verify" or .acceptance_phase == "audit-replay" or .acceptance_phase == "purge-setup" or
        .acceptance_phase == "purge-verify") and
       (if (.acceptance_phase == "workflow-verify" or .acceptance_phase == "purge-verify")
        then (keys | sort) == (["acceptance_phase", "prior_attestation"] | sort) and (.prior_attestation | type == "object")
@@ -1922,7 +2331,6 @@ PY
     ' "$payload_file" >/dev/null || die "runtime-acceptance protected payload is invalid"
     acceptance_phase="$(jq -er '.acceptance_phase' "$payload_file")"
     fresh_managed_identity_login
-    # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
     GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
     guard_find_terraform
@@ -1939,6 +2347,7 @@ PY
       .serial == $evidence[0].state.serial
     ' "$probe_state" >/dev/null || die "re-probe the protected network after the workload apply before runtime acceptance"
     [[ "$GUARD_STATE_SHA256" == "$(jq -er '.state.sha256' "$network_evidence_file")" ]] || die "re-probe the protected network after the workload state changed"
+    verify_current_workload_attestation
     probe_outputs="$(mktemp /run/cosmas-runtime-acceptance-outputs.XXXXXX)"
     "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" output -json >"$probe_outputs"
     chmod 0600 "$probe_outputs"
@@ -2005,6 +2414,7 @@ PY
     jq -e \
       --arg job_id "${job_id,,}" \
       --arg image "$expected_image" \
+      --arg registry "$acr_host" \
       --arg identity_id "${runtime_identity_id,,}" \
       --arg client_id "$runtime_identity_client_id" \
       --arg environment_id "${container_environment_id,,}" \
@@ -2019,91 +2429,16 @@ PY
       --arg database_secret "${key_vault_uri}secrets/database-url" \
       --arg redis_secret "${key_vault_uri}secrets/redis-url" \
       --arg evidence_secret "${key_vault_uri}secrets/human-deploy-evidence-reference" \
-      --arg hmac_secret "${key_vault_uri}secrets/runtime-acceptance-hmac-key" '
-        def env($name): first(.properties.template.containers[0].env[] | select(.name == $name));
-        (.id | ascii_downcase) == $job_id and
-        (.properties.environmentId | ascii_downcase) == $environment_id and
-        .identity.type == "UserAssigned" and
-        ((.identity.userAssignedIdentities | keys | map(ascii_downcase)) == [$identity_id]) and
-        .properties.configuration.triggerType == "Manual" and
-        .properties.configuration.replicaTimeout == 900 and
-        .properties.configuration.replicaRetryLimit == 0 and
-        .properties.configuration.manualTriggerConfig.parallelism == 1 and
-        .properties.configuration.manualTriggerConfig.replicaCompletionCount == 1 and
-        (.properties.configuration.registries | length) == 1 and
-        (.properties.configuration.registries[0].identity | ascii_downcase) == $identity_id and
-        (.properties.configuration.secrets | length) == 4 and
-        ([.properties.configuration.secrets[] | {name, identity: (.identity | ascii_downcase), keyVaultUrl}] | sort_by(.name)) == ([
-          {name: "acceptance-hmac-key", identity: $identity_id, keyVaultUrl: $hmac_secret},
-          {name: "database-url", identity: $identity_id, keyVaultUrl: $database_secret},
-          {name: "human-deploy-evidence-reference", identity: $identity_id, keyVaultUrl: $evidence_secret},
-          {name: "redis-url", identity: $identity_id, keyVaultUrl: $redis_secret}
-        ] | sort_by(.name)) and
-        (.properties.template.containers | length) == 1 and
-        .properties.template.containers[0].name == "runtime-acceptance" and
-        .properties.template.containers[0].image == $image and
-        .properties.template.containers[0].command == ["python", "-m", "cosmas_os.cli"] and
-        .properties.template.containers[0].args == ["verify-beta-runtime", "--confirm-synthetic-only", "--confirm-runtime-uami"] and
-        (.properties.template.containers[0].env | length) == 21 and
-        env("COSMAS_ENV") == {name: "COSMAS_ENV", value: "early_adopter_beta"} and
-        env("DATA_MODE") == {name: "DATA_MODE", value: "synthetic"} and
-        env("AUTH_MODE") == {name: "AUTH_MODE", value: "clerk_jwt"} and
-        env("CORS_ALLOWED_ORIGINS") == {name: "CORS_ALLOWED_ORIGINS", value: $web_origin} and
-        env("SYNTH_SEED") == {name: "SYNTH_SEED", value: "false"} and
-        env("BLOB_BACKEND") == {name: "BLOB_BACKEND", value: "azure"} and
-        env("BETA_BOX_ID") == {name: "BETA_BOX_ID", value: $box_id} and
-        env("CLERK_ORGANIZATION_ID") == {name: "CLERK_ORGANIZATION_ID", value: $clerk_org} and
-        env("CLERK_ISSUER") == {name: "CLERK_ISSUER", value: $clerk_issuer} and
-        env("CLERK_JWKS_URL") == {name: "CLERK_JWKS_URL", value: $clerk_jwks} and
-        env("CLERK_AUDIENCE") == {name: "CLERK_AUDIENCE", value: $clerk_audience} and
-        env("CLERK_AUTHORIZED_PARTIES") == {name: "CLERK_AUTHORIZED_PARTIES", value: $web_origin} and
-        env("AZURE_CLIENT_ID") == {name: "AZURE_CLIENT_ID", value: $client_id} and
-        env("EXPECTED_RUNTIME_MANAGED_IDENTITY_CLIENT_ID") == {name: "EXPECTED_RUNTIME_MANAGED_IDENTITY_CLIENT_ID", value: $client_id} and
-        env("COSMAS_ACCEPTANCE_HMAC_KEY") == {name: "COSMAS_ACCEPTANCE_HMAC_KEY", secretRef: "acceptance-hmac-key"} and
-        env("HUMAN_DEPLOY_EVIDENCE_REF") == {name: "HUMAN_DEPLOY_EVIDENCE_REF", secretRef: "human-deploy-evidence-reference"} and
-        env("DATABASE_URL") == {name: "DATABASE_URL", secretRef: "database-url"} and
-        env("REDIS_URL") == {name: "REDIS_URL", secretRef: "redis-url"} and
-        env("AZURE_STORAGE_ACCOUNT_URL") == {name: "AZURE_STORAGE_ACCOUNT_URL", value: $blob_url} and
-        env("AZURE_BLOB_CONTAINER") == {name: "AZURE_BLOB_CONTAINER", value: $blob_container} and
-        env("SYNC_WORKER") == {name: "SYNC_WORKER", value: "false"}
-      ' "$operation_temp_dir/job.json" >/dev/null || die "live runtime-acceptance job differs from the reviewed exact-digest/runtime-UAMI contract"
+      --arg hmac_secret "${key_vault_uri}secrets/runtime-acceptance-hmac-key" \
+      -f "$repository_root/infra/beta/runtime-acceptance-job-contract.jq" \
+      "$operation_temp_dir/job.json" >/dev/null || die "runtime-acceptance job contract mismatch"
 
     jq -n \
       --arg phase "$acceptance_phase" \
       --arg prior_state_json "$prior_state_json" \
-      --slurpfile job "$operation_temp_dir/job.json" '
-        ($job[0].properties.template.containers[0]) as $container |
-        def base_env: $container.env;
-        def direct($args): {
-          name: $container.name,
-          image: $container.image,
-          resources: $container.resources,
-          command: ["python", "-m", "cosmas_os.cli"],
-          args: $args,
-          env: base_env
-        };
-        def verify($args): {
-          name: $container.name,
-          image: $container.image,
-          resources: $container.resources,
-          command: ["python", "-m", "cosmas_os.cli"],
-          args: $args,
-          env: (base_env + [{name: "COSMAS_ACCEPTANCE_STATE", value: $prior_state_json}])
-        };
-        {template: {containers: [
-          if $phase == "runtime" then
-            direct(["verify-beta-runtime", "--confirm-synthetic-only", "--confirm-runtime-uami"])
-          elif $phase == "workflow-baseline" then
-            direct(["baseline-beta-workflow-acceptance", "--confirm-synthetic-only", "--confirm-async-worker"])
-          elif $phase == "workflow-verify" then
-            verify(["verify-beta-workflow-acceptance", "--confirm-synthetic-only", "--confirm-browser-complete"])
-          elif $phase == "purge-setup" then
-            direct(["prepare-beta-purge-acceptance", "--confirm-synthetic-only", "--confirm-runtime-uami"])
-          elif $phase == "purge-verify" then
-            verify(["verify-beta-purge-acceptance", "--confirm-synthetic-only", "--confirm-runtime-uami", "--confirm-browser-complete"])
-          else error("unreviewed acceptance phase") end
-        ]}}
-      ' >"$operation_temp_dir/start-request.json" || die "cannot construct the enumerated runtime-acceptance execution override"
+      --slurpfile job "$operation_temp_dir/job.json" \
+      -f "$repository_root/infra/beta/runtime-acceptance-start-request.jq" \
+      >"$operation_temp_dir/start-request.json" || die "cannot construct the enumerated runtime-acceptance execution override"
     chmod 0600 "$operation_temp_dir/start-request.json"
     az rest --method post --url "https://management.azure.com${job_id}/start?api-version=2023-11-02-preview" --body @"$operation_temp_dir/start-request.json" --only-show-errors --output json >"$operation_temp_dir/start.json" || die "runtime-acceptance execution did not start"
     chmod 0600 "$operation_temp_dir/start.json"
@@ -2123,20 +2458,9 @@ PY
     done
     [[ "$execution_succeeded" == "true" ]] || die "runtime-acceptance execution did not succeed within twenty minutes"
     jq -e --slurpfile requested "$operation_temp_dir/start-request.json" \
-      --arg execution_id "${execution_id,,}" '
-        (.id | ascii_downcase) == $execution_id and .properties.status == "Succeeded" and
-        ((.properties.template.initContainers // []) | length) == 0 and
-        (.properties.template.containers | length) == 1 and
-        ([.properties.template.containers[0] | {
-          name, image, command, args,
-          env: ((.env // []) | sort_by(.name)),
-          resources
-        }]) == ([$requested[0].template.containers[0] | {
-          name, image, command, args,
-          env: ((.env // []) | sort_by(.name)),
-          resources
-        }])
-      ' "$operation_temp_dir/execution.json" >/dev/null || die "realized runtime-acceptance execution differs from the exact reviewed image/command/args/environment override"
+      --arg execution_id "${execution_id,,}" \
+      -f "$repository_root/infra/beta/runtime-acceptance-execution-contract.jq" \
+      "$operation_temp_dir/execution.json" >/dev/null || die "runtime-acceptance execution contract mismatch"
 
     az rest --method get --url "https://management.azure.com${job_id}?api-version=2023-11-02-preview" --only-show-errors --output json >"$operation_temp_dir/job-for-logs.json" || die "cannot read runtime-acceptance job log endpoint"
     event_stream_endpoint="$(jq -er '.properties.eventStreamEndpoint | strings | select(startswith("https://")) | split("/subscriptions/")[0]' "$operation_temp_dir/job-for-logs.json")" || die "runtime-acceptance job has no HTTPS event-stream endpoint"
@@ -2191,6 +2515,16 @@ contracts = {
             "durable_operation_delta", "worker_attempted", "operation_succeeded",
             "fake_notify_receipt_verified", "ticket_sent", "approval_audit_delta",
             "success_audit_delta", "approval_precedes_worker_success", "evidence_sha256",
+        },
+    ),
+    "audit-replay": (
+        "cosmas-os-d3-audit-replay-acceptance-v1",
+        {
+            "contract", "stage", "status", "completed_at", "box_scope_enforced",
+            "cross_box_replay_denied", "ticket_timeline_replayed",
+            "operation_events_linked", "required_event_order_verified",
+            "no_content_fields_returned", "timeline_event_count", "identifiers_returned",
+            "content_returned", "evidence_sha256",
         },
     ),
     "purge-setup": (
@@ -2257,54 +2591,9 @@ PY
     done
     [[ "$evidence_found" == "true" ]] || die "exact sanitized runtime-acceptance evidence was not available from the succeeded execution"
     chmod 0600 "$operation_temp_dir/job-evidence.json"
-    jq -e --arg phase "$acceptance_phase" '
-      (.evidence_sha256 | strings | test("^[0-9a-f]{64}$")) and
-      if $phase == "runtime" then
-        .contract == "cosmas-os-d3-runtime-acceptance-v2" and .status == "ready" and
-        .environment == "early_adopter_beta" and .data_mode == "synthetic" and
-        .blob_backend == "azure" and .sync_worker_disabled == true and
-        .user_assigned_managed_identity == true and
-        .blob_write_read_sha_match == true and
-        .blob_current_representation_absent_after_delete == true and
-        .blob_version_representations_absent_after_delete == true and
-        .blob_snapshot_representations_absent_after_delete == true and
-        .blob_deleted_representations_absent_after_delete == true and
-        .blob_recoverable_absence_verified == true and
-        .redis_round_trip == true and .redis_cleanup_confirmed == true and
-        .database_schema_revision == "0002_external_identities" and
-        .database_schema_at_expected_head == true and .database_insert_read_rolled_back == true
-      elif $phase == "workflow-baseline" then
-        .contract == "cosmas-os-d3-workflow-acceptance-v1" and .stage == "baseline" and
-        .status == "ready_for_browser" and (.state_mac | test("^[0-9a-f]{64}$")) and
-        (.ticket_handle | test("^[0-9a-f]{64}$")) and
-        .pending_ticket_count == 1 and .approval_decision_count == 0 and
-        .operation_count == 0 and .approval_audit_count == 0 and .success_audit_count == 0
-      elif $phase == "workflow-verify" then
-        .contract == "cosmas-os-d3-workflow-acceptance-v1" and .stage == "post_browser" and
-        .status == "verified" and .state_bound == true and .async_dispatch_configured == true and
-        .current_revision_valid == true and .approval_decision_delta == 1 and
-        .durable_operation_delta == 1 and .worker_attempted == true and
-        .operation_succeeded == true and .fake_notify_receipt_verified == true and
-        .ticket_sent == true and .approval_audit_delta == 1 and .success_audit_delta == 1 and
-        .approval_precedes_worker_success == true
-      elif $phase == "purge-setup" then
-        .contract == "cosmas-os-d3-physical-purge-acceptance-v1" and .stage == "setup" and
-        .status == "ready_for_browser" and (.state_mac | test("^[0-9a-f]{64}$")) and
-        (.artifact_handle | test("^[0-9a-f]{64}$")) and
-        .due_unpurged_artifact_count == 1 and .purge_audit_count == 0 and
-        .blob_current_representation_readable == true
-      elif $phase == "purge-verify" then
-        .contract == "cosmas-os-d3-physical-purge-acceptance-v1" and .stage == "post_browser" and
-        .status == "verified" and .state_bound == true and .owner_authorized_purge_observed == true and
-        .owner_authority_verified == true and .application_tombstone_verified == true and
-        .purge_receipt_verified == true and .purge_audit_delta == 1 and
-        .blob_current_representation_absent == true and
-        .blob_version_representations_absent == true and
-        .blob_snapshot_representations_absent == true and
-        .blob_deleted_representations_absent == true and
-        .blob_recoverable_absence_verified == true and .due_unpurged_probe_count == 0
-      else false end
-    ' "$operation_temp_dir/job-evidence.json" >/dev/null || die "runtime-acceptance evidence did not prove the exact requested synthetic contract"
+    jq -e --arg phase "$acceptance_phase" \
+      -f "$repository_root/infra/beta/runtime-acceptance-output-contract.jq" \
+      "$operation_temp_dir/job-evidence.json" >/dev/null || die "runtime-acceptance evidence did not prove the exact requested synthetic contract"
     runtime_evidence_hash="$(jq -cSj 'del(.evidence_sha256)' "$operation_temp_dir/job-evidence.json" | sha256sum | awk '{print $1}')"
     [[ "$(jq -er '.evidence_sha256' "$operation_temp_dir/job-evidence.json")" == "$runtime_evidence_hash" ]] || die "runtime-acceptance evidence self-hash is invalid"
     execution_root="$release_root/executions/runtime-acceptance/$acceptance_phase/$execution_name"
@@ -2453,7 +2742,6 @@ PY
     ' "$payload_file" >/dev/null || die "alert-delivery protected payload is invalid"
     alert_phase="$(jq -er '.alert_phase | select(. == "send" or . == "confirm" or . == "inspect-intent")' "$payload_file")"
     fresh_managed_identity_login
-    # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
     GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
     guard_find_terraform
@@ -2610,7 +2898,9 @@ PY
         .confirmation.send_evidence_sha256 == $send_hash
       ' "$payload_file" >/dev/null || die "owner alert assertion does not bind the unpredictable send challenge and exact send evidence"
       python3 - "$payload_file" <<'PY' || die "owner alert assertion timestamp is outside the bounded four-hour confirmation window"
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 import json
 import sys
 
@@ -2618,7 +2908,7 @@ value = json.load(open(sys.argv[1], encoding="utf-8"))
 sent = datetime.strptime(value["prior_attestation"]["completed_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 confirmed = datetime.strptime(value["confirmation"]["confirmed_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 now = datetime.now(UTC)
-if now > sent + timedelta(hours=4) or confirmed < sent or confirmed > sent + timedelta(hours=4) or confirmed > now + timedelta(minutes=5) or confirmed < now - timedelta(hours=4):
+if now >= sent + timedelta(hours=4) or confirmed < sent or confirmed >= sent + timedelta(hours=4) or confirmed > now or confirmed <= now - timedelta(hours=4):
     raise SystemExit(1)
 PY
       confirmation_reference_hash="$(jq -j '.confirmation.confirmation_reference' "$payload_file" | sha256sum | awk '{print $1}')"
@@ -2841,14 +3131,16 @@ PY
           jq -cS '.ambiguous_retry_approval' "$payload_file" >"$ambiguous_retry_approval_file"
           chmod 0600 "$ambiguous_retry_approval_file"
           python3 - "$ambiguous_retry_approval_file" <<'PY' || die "ambiguous alert retry approval is outside its four-hour window"
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 import json
 import sys
 
 value = json.load(open(sys.argv[1], encoding="utf-8"))
 approved = datetime.strptime(value["approved_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 now = datetime.now(UTC)
-if approved > now + timedelta(minutes=5) or approved < now - timedelta(hours=4):
+if approved > now or approved <= now - timedelta(hours=4):
     raise SystemExit(1)
 PY
           supersedes_intent_sha256="$unresolved_intent_hash"
@@ -3094,7 +3386,9 @@ PY
     if [[ "$pitr_phase" == "freeze" ]]; then
       quiet_window_end="$(jq -er '.quiet_window_end_utc' "$payload_file")"
       python3 - "$quiet_window_end" <<'PY' || die "PITR quiet-window end must be 20 minutes to 4 hours in the future"
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 import sys
 
 end = datetime.strptime(sys.argv[1], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
@@ -3223,13 +3517,15 @@ PY
         (.owner_approval.reviewer_reference | contains("@") | not)
       ' "$payload_file" >/dev/null || die "PITR resume assertion is not bound to the exact writer freeze"
       python3 - "$payload_file" <<'PY' || die "PITR resume assertion timestamp is outside its bounded four-hour window"
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 import json
 import sys
 
 approved = datetime.strptime(json.load(open(sys.argv[1], encoding="utf-8"))["owner_approval"]["approved_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 now = datetime.now(UTC)
-if approved > now + timedelta(minutes=5) or approved < now - timedelta(hours=4):
+if approved > now or approved <= now - timedelta(hours=4):
     raise SystemExit(1)
 PY
       if [[ -e "$PITR_MANIFEST" || -L "$PITR_MANIFEST" ]]; then
@@ -3306,7 +3602,9 @@ PY
         manifest_preparer_reference_sha256="$(printf '%s' "$manifest_preparer_reference" | sha256sum | awk '{print $1}')"
         approval_reviewer_reference_sha256="$(printf '%s' "$approval_reviewer_reference" | sha256sum | awk '{print $1}')"
         python3 - "$payload_file" "$PITR_MANIFEST" "$pitr_phase" <<'PY' || die "PITR owner approval timestamp is invalid for this phase"
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
+
+UTC = timezone.utc
 import json
 import sys
 
@@ -3316,7 +3614,7 @@ phase = sys.argv[3]
 approved = datetime.strptime(payload["owner_approval"]["approved_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 created = datetime.strptime(manifest["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 now = datetime.now(UTC)
-if approved < created or approved > now + timedelta(minutes=5) or (phase == "start" and now - approved > timedelta(hours=4)):
+if approved < created or approved > now or (phase == "start" and now - approved >= timedelta(hours=4)):
     raise SystemExit(1)
 PY
         owner_approval_sha256="$(jq -cS '.owner_approval' "$payload_file" | sha256sum | awk '{print $1}')"
@@ -3366,6 +3664,12 @@ PY
       jq -e --arg phase "$pitr_phase" '
         type == "object" and .schema_version == 1 and .contract == "cosmas-os-d3-pitr-acceptance-v1" and
         .operation == $phase and (.status | strings) and
+        (if $phase == "complete" and (.status == "verified" or .status == "failed") then
+          (.measurement | keys | sort) == (["measured_rpo_seconds", "measured_rto_seconds", "restore_point_utc", "restore_ready_at_utc", "restore_started_at_utc", "write_freeze_at_utc"] | sort) and
+          (.measurement.measured_rto_seconds | numbers | floor == . and . >= 0) and
+          (.measurement.measured_rpo_seconds | numbers | floor == . and . >= 0) and
+          ([.measurement.restore_point_utc, .measurement.restore_ready_at_utc, .measurement.restore_started_at_utc, .measurement.write_freeze_at_utc] | all(strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")))
+        else true end) and
         (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
       ' "$private_result_file" >/dev/null || die "PITR primitive returned an invalid sanitized contract"
       pitr_output_hash="$(jq -cSj 'del(.evidence_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
@@ -3447,8 +3751,8 @@ PY
       (.owner_approval.current.web_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
       (.owner_approval.prior.api_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
       (.owner_approval.prior.web_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
-      .owner_approval.current.api_digest != .owner_approval.prior.api_digest and
-      .owner_approval.current.web_digest != .owner_approval.prior.web_digest and
+      ([.owner_approval.current.api_digest, .owner_approval.current.web_digest,
+        .owner_approval.prior.api_digest, .owner_approval.prior.web_digest] | unique | length) == 4 and
       (.owner_approval.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
       (.owner_approval.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
       (.owner_approval.reviewer_reference | contains("@") | not)
@@ -3459,9 +3763,9 @@ import json
 import sys
 
 value = json.load(open(sys.argv[1], encoding="utf-8"))["owner_approval"]["approved_at"]
-approved = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.UTC)
-now = datetime.datetime.now(datetime.UTC)
-if approved > now + datetime.timedelta(minutes=5) or approved < now - datetime.timedelta(hours=4):
+approved = datetime.datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc)
+now = datetime.datetime.now(datetime.timezone.utc)
+if approved > now or approved <= now - datetime.timedelta(hours=4):
     raise SystemExit(1)
 PY
     prepare_live_acceptance_context
@@ -3471,16 +3775,20 @@ PY
     prior_release_root="$runner_root/releases/$prior_release_id"
     prior_build_root="$runner_root/builds/$prior_source_sha"
     prior_build_evidence="$prior_build_root/build-evidence.json"
-    [[ -d "$prior_repository_root/.git" && ! -L "$prior_repository_root" && "$(stat -c '%u' "$prior_repository_root")" == "0" ]] || die "approved prior source is not staged safely on the protected runner"
-    [[ "$(git -C "$prior_repository_root" rev-parse --verify HEAD)" == "$prior_source_sha" ]] || die "staged prior source differs from the owner-approved commit"
-    [[ -z "$(git -C "$prior_repository_root" status --porcelain=v1 --untracked-files=all)" ]] || die "staged prior source checkout is not clean"
-    [[ "$(git -C "$prior_repository_root" remote get-url origin)" == "ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git" ]] || die "staged prior source origin is invalid"
+    validate_complete_offline_repository "$prior_repository_root" "$prior_source_sha"
+    git_isolated -C "$repository_root" cat-file -e "$prior_source_sha^{commit}" 2>/dev/null || die "current source checkout does not contain the approved prior commit history"
+    git_isolated -C "$repository_root" merge-base --is-ancestor "$prior_source_sha" "$source_sha" || die "current Release B source is not a descendant of approved Release A"
+    current_tree="$(git_isolated -C "$repository_root" rev-parse "$source_sha^{tree}")"
+    prior_tree="$(git_isolated -C "$repository_root" rev-parse "$prior_source_sha^{tree}")"
+    [[ "$current_tree" =~ ^[0-9a-f]{40}$ && "$prior_tree" =~ ^[0-9a-f]{40}$ && "$current_tree" != "$prior_tree" ]] || die "Release B must have a different Git tree from Release A"
     [[ -f "$prior_release_root/source-sha" && ! -L "$prior_release_root/source-sha" && "$(cat "$prior_release_root/source-sha")" == "$prior_source_sha" ]] || die "prior release ID is not bound to its approved source commit"
     [[ -f "$prior_build_evidence" && ! -L "$prior_build_evidence" && "$(stat -c '%a' "$prior_build_evidence")" == "600" && "$(stat -c '%u' "$prior_build_evidence")" == "0" ]] || die "prior release build evidence is unavailable or unsafe"
     prior_build_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$prior_build_evidence")" || die "prior build evidence hash is invalid"
     [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$prior_build_evidence" | sha256sum | awk '{print $1}')" == "$prior_build_hash" ]] || die "prior build evidence was modified"
     prior_api_digest="$(jq -er '.images.api.digest | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$prior_build_evidence")"
     prior_web_digest="$(jq -er '.images.web.digest | strings | select(test("^sha256:[0-9a-f]{64}$"))' "$prior_build_evidence")"
+    [[ "$prior_api_digest" != "$prior_web_digest" ]] || die "prior API and web images must have distinct immutable digests"
+    [[ "$LIVE_API_DIGEST" != "$LIVE_WEB_DIGEST" && "$LIVE_API_DIGEST" != "$prior_api_digest" && "$LIVE_API_DIGEST" != "$prior_web_digest" && "$LIVE_WEB_DIGEST" != "$prior_api_digest" && "$LIVE_WEB_DIGEST" != "$prior_web_digest" ]] || die "Release A/B API and web images must have four distinct immutable digests"
     jq -e --arg source_sha "$prior_source_sha" --arg release_id "$prior_release_id" --arg box_id "$GUARD_BOX_ID" --arg registry "$LIVE_REGISTRY" '
       .schema_version == 1 and .evidence_type == "protected-runner-build-push" and
       .source_sha == $source_sha and .build_release_id == $release_id and .box_id == $box_id and
@@ -3504,7 +3812,7 @@ PY
     recovery_evidence_file="$recovery_root/$recovery_phase-attestation.json"
     install -d -o root -g root -m 0700 "$recovery_root"
     [[ -f "$recovery_script" && ! -L "$recovery_script" ]] || die "committed release-recovery primitive is unavailable"
-    git -C "$repository_root" ls-files --error-unmatch infra/beta/release_recovery_acceptance.py >/dev/null 2>&1 || die "release-recovery primitive is not part of the approved commit"
+    git_isolated -C "$repository_root" ls-files --error-unmatch infra/beta/release_recovery_acceptance.py >/dev/null 2>&1 || die "release-recovery primitive is not part of the approved commit"
     approval_hash="$(jq -cS '.owner_approval' "$payload_file" | sha256sum | awk '{print $1}')"
     reviewer_hash="$(jq -jr '.owner_approval.reviewer_reference' "$payload_file" | sha256sum | awk '{print $1}')"
     rollback_state_sha256=""
@@ -3520,11 +3828,17 @@ PY
         --arg prior_source_sha "$prior_source_sha" --arg prior_release_id "$prior_release_id" \
         --arg current_api "$LIVE_API_DIGEST" --arg current_web "$LIVE_WEB_DIGEST" \
         --arg prior_api "$prior_api_digest" --arg prior_web "$prior_web_digest" \
+        --arg current_tree "$current_tree" --arg prior_tree "$prior_tree" \
         --arg rollback_evidence "$rollback_evidence_sha256" --arg rollback_state "$rollback_state_sha256" \
         --slurpfile rollback "$rollback_evidence_file" '
           $rollback[0].evidence_type == "protected-runner-release-recovery" and $rollback[0].recovery_phase == "rollback" and
           $rollback[0].source_sha == $source_sha and $rollback[0].release_id == $release_id and
           $rollback[0].prior_source_sha == $prior_source_sha and $rollback[0].prior_release_id == $prior_release_id and
+          $rollback[0].source_relationship.prior_is_ancestor == true and
+          $rollback[0].source_relationship.source_tree_differs == true and
+          $rollback[0].source_relationship.current_tree_sha1 == $current_tree and
+          $rollback[0].source_relationship.prior_tree_sha1 == $prior_tree and
+          $rollback[0].four_release_image_digests_distinct == true and
           $rollback[0].images.current.api_digest == $current_api and $rollback[0].images.current.web_digest == $current_web and
           $rollback[0].images.prior.api_digest == $prior_api and $rollback[0].images.prior.web_digest == $prior_web and
           .owner_approval.rollback_evidence_sha256 == $rollback_evidence and
@@ -3535,9 +3849,14 @@ PY
       [[ -f "$recovery_evidence_file" && ! -L "$recovery_evidence_file" && "$(stat -c '%a' "$recovery_evidence_file")" == "600" && "$(stat -c '%u' "$recovery_evidence_file")" == "0" ]] || die "stored release-recovery evidence is unsafe"
       existing_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$recovery_evidence_file")" || die "stored release-recovery evidence hash is invalid"
       [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$recovery_evidence_file" | sha256sum | awk '{print $1}')" == "$existing_hash" ]] || die "stored release-recovery evidence was modified"
-      jq -e --arg phase "$recovery_phase" --arg source_sha "$source_sha" --arg release_id "$release_id" --arg approval_hash "$approval_hash" '
+      jq -e --arg phase "$recovery_phase" --arg source_sha "$source_sha" --arg release_id "$release_id" \
+        --arg current_tree "$current_tree" --arg prior_tree "$prior_tree" --arg approval_hash "$approval_hash" '
         .evidence_type == "protected-runner-release-recovery" and .recovery_phase == $phase and
-        .source_sha == $source_sha and .release_id == $release_id and .owner_approval_sha256 == $approval_hash
+        .source_sha == $source_sha and .release_id == $release_id and .owner_approval_sha256 == $approval_hash and
+        .source_relationship.prior_is_ancestor == true and .source_relationship.source_tree_differs == true and
+        .source_relationship.current_tree_sha1 == $current_tree and
+        .source_relationship.prior_tree_sha1 == $prior_tree and $current_tree != $prior_tree and
+        .four_release_image_digests_distinct == true
       ' "$recovery_evidence_file" >/dev/null || die "stored release-recovery evidence belongs to a different approval or release"
       emit_sanitized_artifact "$recovery_evidence_file"
       exit 0
@@ -3605,6 +3924,7 @@ PY
     jq -cS -n \
       --arg completed_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --arg source_sha "$source_sha" --arg release_id "$release_id" \
       --arg prior_source_sha "$prior_source_sha" --arg prior_release_id "$prior_release_id" --arg recovery_phase "$recovery_phase" \
+      --arg current_tree_sha "$current_tree" --arg prior_tree_sha "$prior_tree" \
       --arg current_api_digest "$LIVE_API_DIGEST" --arg current_web_digest "$LIVE_WEB_DIGEST" \
       --arg prior_api_digest "$prior_api_digest" --arg prior_web_digest "$prior_web_digest" \
       --arg approval_sha256 "$approval_hash" --arg reviewer_reference_sha256 "$reviewer_hash" \
@@ -3620,6 +3940,11 @@ PY
           recovery_status: $recovery_output[0].status, completed_at: $completed_at,
           source_sha: $source_sha, release_id: $release_id,
           prior_source_sha: $prior_source_sha, prior_release_id: $prior_release_id,
+          source_relationship: {
+            prior_is_ancestor: true, source_tree_differs: true,
+            current_tree_sha1: $current_tree_sha, prior_tree_sha1: $prior_tree_sha
+          },
+          four_release_image_digests_distinct: true,
           images: {
             current: {api_digest: $current_api_digest, web_digest: $current_web_digest},
             prior: {api_digest: $prior_api_digest, web_digest: $prior_web_digest}
@@ -3924,7 +4249,6 @@ PY
         ([.bootstrap_manifest.clinic_display_name, .bootstrap_manifest.owner_display_name, .bootstrap_manifest.reviewed_by, .bootstrap_manifest.evidence_ref] | all(type == "string" and length >= 1 and . == ltrimstr(" ") and . == rtrimstr(" ")))
       ' "$payload_file" >/dev/null || die "protected identity-bootstrap envelope is invalid or not bound to this source/release"
     fresh_managed_identity_login
-    # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
     GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
     guard_find_terraform
@@ -3940,6 +4264,7 @@ PY
       .lineage == $evidence[0].state.lineage and .serial == $evidence[0].state.serial
     ' "$probe_state" >/dev/null || die "re-probe the protected network after the workload apply before bootstrapping identity"
     [[ "$GUARD_STATE_SHA256" == "$(jq -er '.state.sha256' "$network_evidence_file")" ]] || die "re-probe the protected network after the workload state changed"
+    verify_current_workload_attestation
     probe_outputs="$(mktemp /run/cosmas-identity-outputs.XXXXXX)"
     "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" output -json >"$probe_outputs"
     chmod 0600 "$probe_outputs"
@@ -3989,7 +4314,18 @@ PY
         .schema_version == 1 and .evidence_type == "protected-runner-beta-identity-bootstrap" and
         .source_sha == $source_sha and .release_id == $release_id and
         .protected_manifest_sha256 == $manifest_hash and
-        .identity_bootstrap_idempotent == true and .synthetic_seed_idempotent == true
+        .identity_bootstrap_idempotent == true and .synthetic_seed_idempotent == true and
+        .idempotence_invocation_count == 2 and
+        (.idempotence_readback_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        .stable_counts == {
+          active_baseline_agent_count: 3, active_owner_count: 1,
+          appointment_observation_count: 2,
+          box_count: 1, clerk_binding_audit_count: 1, clerk_binding_count: 1,
+          patient_link_count: 1, pending_ticket_count: 1,
+          total_ticket_count: 1, action_revision_count: 1,
+          decision_count: 0, operation_count: 0, artifact_count: 0,
+          capability_config_count: 0, audit_event_count: 3
+        }
       ' "$identity_evidence_file" >/dev/null || die "existing identity-bootstrap evidence belongs to a different reviewed manifest"
       emit_sanitized_artifact "$identity_evidence_file"
       exit 0
@@ -4112,6 +4448,59 @@ PY
       "$exact_image" python -m cosmas_os.cli seed-beta-synthetic --confirm-synthetic-only >>"$identity_log" 2>&1; then
       die "synthetic beta seed failed; private diagnostics remain root-only on the runner"
     fi
+    bootstrap_readback_first="$operation_temp_dir/bootstrap-readback-first.json"
+    if ! docker run --rm --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --user 10001:10001 --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+      --env-file "$runtime_env_file" \
+      --mount "type=bind,source=$runtime_manifest_file,target=/run/beta-bootstrap.json,readonly" \
+      "$exact_image" python -m cosmas_os.cli verify-beta-bootstrap-state /run/beta-bootstrap.json --confirm-synthetic-only >"$bootstrap_readback_first" 2>>"$identity_log"; then
+      die "first beta bootstrap readback failed; private diagnostics remain root-only on the runner"
+    fi
+    if ! docker run --rm --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --user 10001:10001 --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+      --env-file "$runtime_env_file" \
+      --mount "type=bind,source=$runtime_manifest_file,target=/run/beta-bootstrap.json,readonly" \
+      "$exact_image" python -m cosmas_os.cli bootstrap-beta-identity /run/beta-bootstrap.json --confirm-reviewed-human-deploy >>"$identity_log" 2>&1; then
+      die "second beta identity bootstrap invocation failed; private diagnostics remain root-only on the runner"
+    fi
+    if ! docker run --rm --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --user 10001:10001 --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+      --env-file "$runtime_env_file" \
+      "$exact_image" python -m cosmas_os.cli seed-beta-synthetic --confirm-synthetic-only >>"$identity_log" 2>&1; then
+      die "second synthetic beta seed invocation failed; private diagnostics remain root-only on the runner"
+    fi
+    bootstrap_readback_second="$operation_temp_dir/bootstrap-readback-second.json"
+    if ! docker run --rm --network bridge --read-only --cap-drop ALL --security-opt no-new-privileges \
+      --user 10001:10001 --tmpfs /tmp:rw,noexec,nosuid,nodev,size=64m \
+      --env-file "$runtime_env_file" \
+      --mount "type=bind,source=$runtime_manifest_file,target=/run/beta-bootstrap.json,readonly" \
+      "$exact_image" python -m cosmas_os.cli verify-beta-bootstrap-state /run/beta-bootstrap.json --confirm-synthetic-only >"$bootstrap_readback_second" 2>>"$identity_log"; then
+      die "second beta bootstrap readback failed; private diagnostics remain root-only on the runner"
+    fi
+    for bootstrap_readback in "$bootstrap_readback_first" "$bootstrap_readback_second"; do
+      chmod 0600 "$bootstrap_readback"
+      [[ "$(wc -l <"$bootstrap_readback" | tr -d ' ')" == "1" && "$(wc -c <"$bootstrap_readback")" -le 4096 ]] || die "bootstrap readback did not return one bounded sanitized record"
+      jq -e '
+        type == "object" and
+        (keys | sort) == (["action_revision_count", "active_baseline_agent_count", "active_owner_count", "appointment_observation_count", "artifact_count", "audit_event_count", "box_count", "capability_config_count", "clerk_binding_audit_count", "clerk_binding_count", "contract", "decision_count", "evidence_sha256", "identifiers_returned", "operation_count", "patient_link_count", "pending_ticket_count", "reviewed_manifest_matched", "status", "total_ticket_count"] | sort) and
+        .contract == "cosmas-os-d3-beta-bootstrap-readback-v1" and .status == "verified" and
+        .box_count == 1 and .active_owner_count == 1 and .active_baseline_agent_count == 3 and
+        .clerk_binding_count == 1 and .clerk_binding_audit_count == 1 and
+        .appointment_observation_count == 2 and
+        .patient_link_count == 1 and .pending_ticket_count == 1 and
+        .total_ticket_count == 1 and .action_revision_count == 1 and
+        .decision_count == 0 and .operation_count == 0 and
+        .artifact_count == 0 and .capability_config_count == 0 and
+        .audit_event_count == 3 and
+        .reviewed_manifest_matched == true and .identifiers_returned == false and
+        (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
+      ' "$bootstrap_readback" >/dev/null || die "bootstrap readback returned an invalid or over-broad contract"
+      readback_hash="$(jq -cSj 'del(.evidence_sha256)' "$bootstrap_readback" | sha256sum | awk '{print $1}')"
+      [[ "$(jq -er '.evidence_sha256' "$bootstrap_readback")" == "$readback_hash" ]] || die "bootstrap readback evidence self-hash is invalid"
+    done
+    cmp -s "$bootstrap_readback_first" "$bootstrap_readback_second" || die "second bootstrap invocation changed stable identity or seed counts"
+    bootstrap_readback_hash="$(jq -er '.evidence_sha256' "$bootstrap_readback_second")"
+    stable_counts="$(jq -cS '{box_count, active_owner_count, active_baseline_agent_count, clerk_binding_count, clerk_binding_audit_count, appointment_observation_count, patient_link_count, pending_ticket_count, total_ticket_count, action_revision_count, decision_count, operation_count, artifact_count, capability_config_count, audit_event_count}' "$bootstrap_readback_second")"
     docker logout "$acr_host" >/dev/null 2>&1 || true
     probe_payload="$(mktemp /run/cosmas-identity-evidence-payload.XXXXXX)"
     jq -cS -n \
@@ -4121,7 +4510,8 @@ PY
       --arg api_image_digest "$expected_api_digest" --arg box_id "$(jq -er '.box_id.value' "$probe_outputs")" \
       --arg protected_manifest_sha256 "$protected_manifest_hash" \
       --arg clerk_binding_sha256 "$(jq -cS '.bootstrap_manifest | {clerk_issuer,clerk_subject,clerk_organization_id}' "$payload_file" | sha256sum | awk '{print $1}')" \
-      --arg human_evidence_reference_sha256 "$manifest_evidence_hash" '
+      --arg human_evidence_reference_sha256 "$manifest_evidence_hash" \
+      --arg idempotence_readback_sha256 "$bootstrap_readback_hash" --argjson stable_counts "$stable_counts" '
         {
           schema_version: 1,
           evidence_type: "protected-runner-beta-identity-bootstrap",
@@ -4135,6 +4525,9 @@ PY
           human_evidence_reference_sha256: $human_evidence_reference_sha256,
           identity_bootstrap_idempotent: true,
           synthetic_seed_idempotent: true,
+          idempotence_invocation_count: 2,
+          idempotence_readback_sha256: $idempotence_readback_sha256,
+          stable_counts: $stable_counts,
           secrets_returned: false
         }
       ' >"$probe_payload"
@@ -4154,13 +4547,13 @@ PY
     jq -e '
       type == "object" and
       (.artifact_kind == "review" or .artifact_kind == "result" or .artifact_kind == "network" or
-       .artifact_kind == "build" or .artifact_kind == "database" or .artifact_kind == "runtime" or
+       .artifact_kind == "build" or .artifact_kind == "database" or .artifact_kind == "workload" or .artifact_kind == "runtime" or
        .artifact_kind == "domain" or .artifact_kind == "alert" or .artifact_kind == "pitr" or .artifact_kind == "recovery" or
        .artifact_kind == "offboarding" or .artifact_kind == "identity") and
       if .artifact_kind == "runtime" then
         (keys | sort) == (["acceptance_phase", "artifact_kind"] | sort) and
         (.acceptance_phase == "runtime" or .acceptance_phase == "workflow-baseline" or
-         .acceptance_phase == "workflow-verify" or .acceptance_phase == "purge-setup" or
+         .acceptance_phase == "workflow-verify" or .acceptance_phase == "audit-replay" or .acceptance_phase == "purge-setup" or
          .acceptance_phase == "purge-verify")
       elif .artifact_kind == "alert" then
         (keys | sort) == (["alert_phase", "artifact_kind"] | sort) and
@@ -4211,6 +4604,11 @@ PY
         execution_name="$(cat "$pointer")"
         [[ "$execution_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,255}$ ]] || die "database-attestation pointer is invalid"
         artifact_file="$release_root/executions/database/$execution_name/attestation.json"
+        ;;
+      workload)
+        [[ "$stage" == "workload-verification" ]] || die "workload-verification retrieval requires stage=workload-verification"
+        artifact_file="$release_root/executions/workload-verification/attestation.json"
+        jq -e '.contract == "cosmas-os-d3-workload-verification-v1" and .status == "verified"' "$artifact_file" >/dev/null || die "workload-verification artifact is invalid"
         ;;
       runtime)
         [[ "$stage" == "acceptance" ]] || die "runtime retrieval requires stage=acceptance"
@@ -4267,13 +4665,17 @@ PY
     esac
     [[ -f "$artifact_file" && ! -L "$artifact_file" && "$(stat -c '%a' "$artifact_file")" == "600" && "$(stat -c '%u' "$artifact_file")" == "0" ]] || die "requested sanitized artifact is unavailable or unsafe"
     if [[ "$artifact_kind" == "domain" ]]; then
-      # shellcheck source=deployment-guard-lib.sh
       source "$repository_root/infra/beta/deployment-guard-lib.sh"
       guard_validate_domain_verification_artifact "$artifact_file" "$source_sha" "$release_id"
     fi
-    if [[ "$artifact_kind" == "network" || "$artifact_kind" == "build" || "$artifact_kind" == "database" || "$artifact_kind" == "runtime" || "$artifact_kind" == "domain" || "$artifact_kind" == "alert" || "$artifact_kind" == "pitr" || "$artifact_kind" == "recovery" || "$artifact_kind" == "offboarding" || "$artifact_kind" == "identity" ]]; then
+    if [[ "$artifact_kind" == "network" || "$artifact_kind" == "build" || "$artifact_kind" == "database" || "$artifact_kind" == "workload" || "$artifact_kind" == "runtime" || "$artifact_kind" == "domain" || "$artifact_kind" == "alert" || "$artifact_kind" == "pitr" || "$artifact_kind" == "recovery" || "$artifact_kind" == "offboarding" || "$artifact_kind" == "identity" ]]; then
       artifact_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$artifact_file")" || die "stored evidence hash is invalid"
-      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$artifact_file" | sha256sum | awk '{print $1}')" == "$artifact_hash" ]] || die "stored evidence was modified"
+      if [[ "$artifact_kind" == "workload" ]]; then
+        artifact_actual_hash="$(jq -cSj 'del(.evidence_payload_sha256)' "$artifact_file" | sha256sum | awk '{print $1}')"
+      else
+        artifact_actual_hash="$(jq -cS 'del(.evidence_payload_sha256)' "$artifact_file" | sha256sum | awk '{print $1}')"
+      fi
+      [[ "$artifact_actual_hash" == "$artifact_hash" ]] || die "stored evidence was modified"
       jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" '.schema_version == 1 and .source_sha == $source_sha and ((.release_id // .build_release_id) == $release_id or .evidence_type == "protected-runner-build-push")' "$artifact_file" >/dev/null || die "stored evidence is not bound to this source/release"
     fi
     emit_sanitized_artifact "$artifact_file"
@@ -4289,12 +4691,6 @@ PY
     fresh_managed_identity_login
     private_log="$stage_root/plan.private.log"
     if [[ "$stage" == "foundation" ]]; then
-      # A fresh foundation uses the stricter no-state wrapper. If a prior
-      # approved apply was interrupted after persisting any canonical state,
-      # reconciliation uses the normal lineage-bound non-destructive wrapper.
-      # A zero-byte backend lock stub is not canonical and remains the first
-      # wrapper's responsibility.
-      # shellcheck source=deployment-guard-lib.sh
       source "$repository_root/infra/beta/deployment-guard-lib.sh"
       GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
       guard_find_terraform
@@ -4317,16 +4713,13 @@ PY
           foundation_plan_wrapper="$repository_root/infra/beta/subsequent-environment-plan.sh"
           foundation_state="$(mktemp /run/cosmas-foundation-state.XXXXXX)"
           guard_pull_state "$foundation_state"
-          # A fully completed foundation retry is a normal subsequent/no-op
-          # drift plan. Only a state missing required boundary outputs enters
-          # the deliberately bounded reconciliation path.
           if ! (guard_validate_environment_state "$foundation_state") >/dev/null 2>&1; then
             guard_validate_environment_state "$foundation_state" partial_foundation
             foundation_reconcile_flag=(--allow-partial-foundation)
           fi
         fi
       fi
-      if ! bash "$foundation_plan_wrapper" \
+      if ! /bin/bash --noprofile --norc -p "$foundation_plan_wrapper" \
           --bootstrap-outputs "$bootstrap_outputs" \
           --var-file "$stage_root/environment.tfvars.json" \
           --plan-out "$stage_root/plan.tfplan" \
@@ -4335,7 +4728,7 @@ PY
           die "foundation plan/reconciliation failed; sensitive diagnostics remain root-only on the runner"
         fi
     else
-      if ! bash "$repository_root/infra/beta/subsequent-environment-plan.sh" \
+      if ! /bin/bash --noprofile --norc -p "$repository_root/infra/beta/subsequent-environment-plan.sh" \
         --bootstrap-outputs "$bootstrap_outputs" \
         --var-file "$stage_root/environment.tfvars.json" \
         --plan-out "$stage_root/plan.tfplan" \
@@ -4362,35 +4755,175 @@ PY
     verify_pinned_toolchain
     [[ -f "$stage_root/plan.tfplan" && -f "$stage_root/review.json" ]] || die "reviewed stage plan/review are missing"
     [[ ! -e "$stage_root/result.json" ]] || die "stage result already exists; use guarded artifact retrieval"
-    jq -e 'type == "object" and .schema_version == 1' "$payload_file" >/dev/null || die "approval payload must be a schema-version-1 JSON object"
-    if [[ -e "$stage_root/approval.json" || -L "$stage_root/approval.json" ]]; then
-      [[ -f "$stage_root/approval.json" && ! -L "$stage_root/approval.json" && "$(stat -c '%a' "$stage_root/approval.json")" == "600" && "$(stat -c '%u' "$stage_root/approval.json")" == "0" ]] || die "existing approval has unsafe ownership or type"
-      [[ "$(sha256sum "$stage_root/approval.json" | awk '{print $1}')" == "$(sha256sum "$payload_file" | awk '{print $1}')" ]] || die "apply retry must provide the exact previously staged approval"
+    [[ ! -e "$stage_root/apply-attempt.claim" && ! -L "$stage_root/apply-attempt.claim" ]] || die "an apply attempt was already claimed; use explicit state inspection and recovery/reconciliation rather than retrying an ambiguous apply"
+    source "$repository_root/infra/beta/deployment-guard-lib.sh"
+    review_phase="$(jq -er '.phase | strings' "$stage_root/review.json")"
+    approval_state_exists="$(jq -er 'if .phase == "first" then .prior_state.exists else true end | booleans' "$stage_root/review.json")"
+    approval_state_lineage="$(jq -r 'if .prior_state.lineage == null then "" else .prior_state.lineage end' "$stage_root/review.json")"
+    approval_state_serial="$(jq -r 'if .prior_state.serial == null then "null" else (.prior_state.serial | tostring) end' "$stage_root/review.json")"
+    approval_state_sha256="$(jq -r 'if .prior_state.sha256 == null then "" else .prior_state.sha256 end' "$stage_root/review.json")"
+    operation_temp_dir="$(mktemp -d /run/cosmas-apply-authorization.XXXXXX)"
+    chmod 0700 "$operation_temp_dir"
+    incoming_approval_bundle="$(python3 - "$payload_file" "$operation_temp_dir" "$source_sha" "$release_id" "$stage" <<'PY'
+import base64
+import binascii
+import json
+import os
+import re
+import sys
+from pathlib import Path
+from typing import Any
+
+payload_path, staging_root_text, source_sha, release_id, stage = sys.argv[1:]
+staging_root = Path(staging_root_text)
+names = {
+    "approval-request.json",
+    "owner-authorization.json",
+    "claim.json",
+    "source-approval.json",
+    "manifest.json",
+}
+
+def fail(message: str) -> None:
+    print(f"D3 protected runner command refused: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+def unique(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            fail(f"duplicate JSON key: {key}")
+        value[key] = item
+    return value
+
+def load(raw: bytes, label: str) -> Any:
+    try:
+        return json.loads(
+            raw,
+            object_pairs_hook=unique,
+            parse_constant=lambda value: fail(f"invalid JSON constant in {label}: {value}"),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        fail(f"{label} is not strict JSON: {exc}")
+
+raw_payload = Path(payload_path).read_bytes()
+if len(raw_payload) > 393216:
+    fail("apply authorization transport exceeds 384 KiB")
+envelope = load(raw_payload, "apply authorization transport")
+if not isinstance(envelope, dict) or set(envelope) != {"contract", "files"}:
+    fail("apply authorization transport shape is invalid")
+if envelope["contract"] != "cosmas-os-d3-protected-apply-bundle-transport-v1":
+    fail("apply authorization transport contract is invalid")
+files = envelope["files"]
+if not isinstance(files, dict) or set(files) != names:
+    fail("apply authorization transport file set is invalid")
+decoded: dict[str, bytes] = {}
+for name in names:
+    encoded = files[name]
+    if not isinstance(encoded, str) or len(encoded) > 87384:
+        fail(f"transported {name} encoding is invalid")
+    try:
+        content = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        fail(f"transported {name} is not canonical base64")
+    if not content or len(content) > 65536:
+        fail(f"transported {name} size is invalid")
+    document = load(content, f"transported {name}")
+    if not isinstance(document, dict):
+        fail(f"transported {name} must be a JSON object")
+    decoded[name] = content
+source = load(decoded["source-approval.json"], "transported source approval")
+plan_sha = source.get("plan_sha256") if isinstance(source, dict) else None
+if not isinstance(plan_sha, str) or re.fullmatch(r"[0-9a-f]{64}", plan_sha) is None:
+    fail("transported source approval has no valid plan binding")
+if source.get("authorization_bundle_id") != plan_sha:
+    fail("transported source approval bundle ID is not its plan hash")
+if source.get("source_sha") != source_sha or source.get("release_id") != release_id or source.get("stage") != stage:
+    fail("transported source approval scope is invalid")
+bundle = staging_root / plan_sha
+bundle.mkdir(mode=0o700)
+for name, content in decoded.items():
+    path = bundle / name
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    descriptor = os.open(path, flags, 0o600)
+    try:
+        remaining = memoryview(content)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("approval bundle write made no progress")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+directory = os.open(bundle, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0))
+try:
+    os.fsync(directory)
+finally:
+    os.close(directory)
+print(bundle)
+PY
+)" || die "apply authorization bundle could not be decoded safely"
+    [[ -d "$incoming_approval_bundle" && ! -L "$incoming_approval_bundle" ]] || die "decoded apply authorization bundle is unavailable"
+    approval_file="$incoming_approval_bundle/source-approval.json"
+    guard_validate_apply_approval "$approval_file" "$incoming_approval_bundle" "$source_sha" "$release_id" "$stage" \
+      "$(sha256sum "$stage_root/plan.tfplan" | awk '{print $1}')" \
+      "$(sha256sum "$stage_root/review.json" | awk '{print $1}')" \
+      "$(sha256sum "$stage_root/environment.tfvars.json" | awk '{print $1}')" \
+      "$approval_state_exists" "$approval_state_lineage" "$approval_state_serial" "$approval_state_sha256"
+    approval_bundle_root="$stage_root/authorization-bundles"
+    approval_bundle="$approval_bundle_root/$(basename -- "$incoming_approval_bundle")"
+    install -d -o root -g root -m 0700 "$approval_bundle_root"
+    require_root_owned_nonsymlink_chain "$approval_bundle_root"
+    if [[ -e "$approval_bundle" || -L "$approval_bundle" ]]; then
+      [[ -d "$approval_bundle" && ! -L "$approval_bundle" && "$(stat -c '%a' "$approval_bundle")" == "700" && "$(stat -c '%u' "$approval_bundle")" == "0" ]] || die "existing approval bundle has unsafe ownership or type"
+      for approval_name in approval-request.json owner-authorization.json claim.json source-approval.json manifest.json; do
+        [[ -f "$approval_bundle/$approval_name" && ! -L "$approval_bundle/$approval_name" && "$(stat -c '%a' "$approval_bundle/$approval_name")" == "600" && "$(stat -c '%u' "$approval_bundle/$approval_name")" == "0" ]] || die "existing approval bundle file has unsafe ownership or type"
+        cmp -s "$incoming_approval_bundle/$approval_name" "$approval_bundle/$approval_name" || die "apply retry must provide the exact previously staged authorization bundle"
+      done
     else
-      install -o root -g root -m 0600 "$payload_file" "$stage_root/approval.json"
+      mv -- "$incoming_approval_bundle" "$approval_bundle"
+      fsync_path "$approval_bundle_root"
     fi
+    approval_file="$approval_bundle/source-approval.json"
+    guard_validate_apply_approval "$approval_file" "$approval_bundle" "$source_sha" "$release_id" "$stage" \
+      "$(sha256sum "$stage_root/plan.tfplan" | awk '{print $1}')" \
+      "$(sha256sum "$stage_root/review.json" | awk '{print $1}')" \
+      "$(sha256sum "$stage_root/environment.tfvars.json" | awk '{print $1}')" \
+      "$approval_state_exists" "$approval_state_lineage" "$approval_state_serial" "$approval_state_sha256"
     fresh_managed_identity_login
     private_log="$stage_root/apply.private.log"
-    review_phase="$(jq -er '.phase | strings' "$stage_root/review.json")"
     [[ "$review_phase" != "foundation_reconcile" || "$stage" == "foundation" ]] || die "partial-foundation reconciliation cannot be applied as a later stage"
     [[ "$stage" == "foundation" || "$review_phase" == "subsequent" ]] || die "database/workload applies require a normal complete-state review"
     if [[ "$stage" == "foundation" && "$review_phase" == "first" ]]; then
-      if ! bash "$repository_root/infra/beta/apply-first-environment-plan.sh" \
+      if ! /bin/bash --noprofile --norc -p "$repository_root/infra/beta/apply-first-environment-plan.sh" \
         --bootstrap-outputs "$bootstrap_outputs" \
         --var-file "$stage_root/environment.tfvars.json" \
         --plan "$stage_root/plan.tfplan" \
         --review "$stage_root/review.json" \
-        --approval "$stage_root/approval.json" \
+        --approval "$approval_file" \
+        --approval-bundle "$approval_bundle" \
+        --attempt-claim "$stage_root/apply-attempt.claim" \
+        --source-sha "$source_sha" \
+        --release-id "$release_id" \
+        --stage "$stage" \
         --result-out "$stage_root/result.json" >"$private_log" 2>&1; then
         die "foundation apply failed; sensitive diagnostics remain root-only on the runner"
       fi
     elif [[ "$review_phase" == "subsequent" || "$review_phase" == "foundation_reconcile" ]]; then
-      if ! bash "$repository_root/infra/beta/apply-environment-plan.sh" \
+      if ! /bin/bash --noprofile --norc -p "$repository_root/infra/beta/apply-environment-plan.sh" \
         --bootstrap-outputs "$bootstrap_outputs" \
         --var-file "$stage_root/environment.tfvars.json" \
         --plan "$stage_root/plan.tfplan" \
         --review "$stage_root/review.json" \
-        --approval "$stage_root/approval.json" \
+        --approval "$approval_file" \
+        --approval-bundle "$approval_bundle" \
+        --attempt-claim "$stage_root/apply-attempt.claim" \
+        --source-sha "$source_sha" \
+        --release-id "$release_id" \
+        --stage "$stage" \
         --result-out "$stage_root/result.json" >"$private_log" 2>&1; then
         die "$stage apply failed; sensitive diagnostics remain root-only on the runner"
       fi

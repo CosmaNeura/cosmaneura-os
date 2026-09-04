@@ -50,7 +50,7 @@ variable "beta_id" {
 
 variable "location" {
   type        = string
-  description = "Single region for ACA and private data services. Central US is provisional until region/quota evidence is recorded."
+  description = "Owner-selected single region for ACA and private data services. Central US remains fail-closed until current quota and service-capacity evidence is recorded."
   default     = "centralus"
 }
 

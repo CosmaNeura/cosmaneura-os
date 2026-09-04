@@ -1,4 +1,11 @@
-#!/usr/bin/env bash
+#!/bin/bash -p
+set +x
+_cosmas_wrapper_dir="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" && /bin/pwd -P)" || exit 1
+# shellcheck source=local-wrapper-env.sh
+. "$_cosmas_wrapper_dir/local-wrapper-env.sh"
+cosmas_isolate_local_wrapper_environment "$@"
+unset -f cosmas_isolate_local_wrapper_environment
+unset _cosmas_wrapper_dir
 set -euo pipefail
 
 umask 077
@@ -159,6 +166,7 @@ if [[ "$allow_partial_foundation" == "true" ]]; then
     --arg box "$GUARD_BOX_ID" \
     --arg mode "$GUARD_DEPLOYMENT_MODE" \
     --arg classification "$GUARD_DATA_CLASSIFICATION" \
+    --arg location "centralus" \
     --arg resource_group "$GUARD_WORKLOAD_RESOURCE_GROUP" \
     --arg state_vnet_id "$GUARD_STATE_VNET_ID" \
     --arg state_blob_private_dns_zone_id "$GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID" '
@@ -167,6 +175,7 @@ if [[ "$allow_partial_foundation" == "true" ]]; then
       ((($outputs | has("environment")) | not) or $outputs.environment.value == "early_adopter_beta") and
       ((($outputs | has("deployment_mode")) | not) or $outputs.deployment_mode.value == $mode) and
       ((($outputs | has("data_classification")) | not) or $outputs.data_classification.value == $classification) and
+      ((($outputs | has("location")) | not) or ($outputs.location.value | ascii_downcase) == $location) and
       ((($outputs | has("resource_group_name")) | not) or $outputs.resource_group_name.value == $resource_group) and
       ((($outputs | has("state_vnet_id")) | not) or $outputs.state_vnet_id.value == $state_vnet_id) and
       ((($outputs | has("state_blob_private_dns_zone_id")) | not) or $outputs.state_blob_private_dns_zone_id.value == $state_blob_private_dns_zone_id)
@@ -176,6 +185,7 @@ else
     --arg box "$GUARD_BOX_ID" \
     --arg mode "$GUARD_DEPLOYMENT_MODE" \
     --arg classification "$GUARD_DATA_CLASSIFICATION" \
+    --arg location "centralus" \
     --arg resource_group "$GUARD_WORKLOAD_RESOURCE_GROUP" \
     --arg state_vnet_id "$GUARD_STATE_VNET_ID" \
     --arg state_blob_private_dns_zone_id "$GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID" '
@@ -183,6 +193,7 @@ else
       .prior_state.values.outputs.environment.value == "early_adopter_beta" and
       .prior_state.values.outputs.deployment_mode.value == $mode and
       .prior_state.values.outputs.data_classification.value == $classification and
+      (.prior_state.values.outputs.location.value | ascii_downcase) == $location and
       .prior_state.values.outputs.resource_group_name.value == $resource_group and
       .prior_state.values.outputs.state_vnet_id.value == $state_vnet_id and
       .prior_state.values.outputs.state_blob_private_dns_zone_id.value == $state_blob_private_dns_zone_id

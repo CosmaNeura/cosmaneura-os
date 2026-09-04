@@ -9,12 +9,7 @@ from typing import Any
 
 import pytest
 
-_SCRIPT = (
-    Path(__file__).resolve().parents[2]
-    / "infra"
-    / "beta"
-    / "release_recovery_acceptance.py"
-)
+_SCRIPT = Path(__file__).resolve().parents[2] / "infra" / "beta" / "release_recovery_acceptance.py"
 _SPEC = importlib.util.spec_from_file_location("cosmas_release_recovery_acceptance", _SCRIPT)
 assert _SPEC is not None and _SPEC.loader is not None
 recovery = importlib.util.module_from_spec(_SPEC)
@@ -214,7 +209,9 @@ def _environment(
 def test_exact_digest_rollback_then_forward_is_resumable(tmp_path: Path) -> None:
     runner = FakeRunner()
     now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
-    rollback = run_recovery(Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now)
+    rollback = run_recovery(
+        Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now
+    )
 
     assert rollback["status"] == "rolled_back_healthy"
     assert rollback["mutable_tags_used"] is False
@@ -240,6 +237,11 @@ def test_exact_digest_rollback_then_forward_is_resumable(tmp_path: Path) -> None
 def test_recovery_rejects_mutable_or_same_release_inputs(tmp_path: Path) -> None:
     environment = _environment(tmp_path, "rollback")
     environment["COSMAS_RECOVERY_PRIOR_API_DIGEST"] = "latest"
+    with pytest.raises(RecoveryError, match="configuration invalid"):
+        Config.from_environment(environment)
+
+    environment = _environment(tmp_path, "rollback")
+    environment["COSMAS_RECOVERY_PRIOR_WEB_DIGEST"] = CURRENT_API
     with pytest.raises(RecoveryError, match="configuration invalid"):
         Config.from_environment(environment)
 
@@ -349,9 +351,7 @@ def test_partial_forward_accepts_fresh_authorization_for_same_rollback_checkpoin
     state_path = tmp_path / "state.private.json"
     interrupted = json.loads(state_path.read_text(encoding="utf-8"))
     assert interrupted["phase"] == "forward_requested"
-    assert [item["approval_sha256"] for item in interrupted["forward_authorizations"]] == [
-        "6" * 64
-    ]
+    assert [item["approval_sha256"] for item in interrupted["forward_authorizations"]] == ["6" * 64]
 
     runner.fail_patches = False
     fresh = _environment(
@@ -404,12 +404,8 @@ def test_partial_and_completed_rollback_accept_fresh_authorization(
     now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
     runner.fail_patches = True
     with pytest.raises(RecoveryError, match="update failed"):
-        run_recovery(
-            Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now
-        )
-    interrupted = json.loads(
-        (tmp_path / "state.private.json").read_text(encoding="utf-8")
-    )
+        run_recovery(Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now)
+    interrupted = json.loads((tmp_path / "state.private.json").read_text(encoding="utf-8"))
     assert interrupted["phase"] == "rollback_requested"
 
     runner.fail_patches = False
@@ -422,9 +418,7 @@ def test_partial_and_completed_rollback_accept_fresh_authorization(
     repeated = run_recovery(Config.from_environment(third), runner, now=now)
     assert repeated["approval_sha256"] == "7" * 64
     assert len(runner.patch_images) == patch_count
-    completed = json.loads(
-        (tmp_path / "state.private.json").read_text(encoding="utf-8")
-    )
+    completed = json.loads((tmp_path / "state.private.json").read_text(encoding="utf-8"))
     assert [item["approval_sha256"] for item in completed["rollback_authorizations"]] == [
         "5" * 64,
         "6" * 64,

@@ -41,7 +41,14 @@ the raw Box ID are never copied to that record.
    attention. While the quiet window is active it validates the distinct tagged
    target, captures F2 from the restore and F3 from the source, compares
    `F1 == F2 == F3`, validates the exact target again, deletes only that target,
-   proves a strict 404, then captures F4 and compares `F4 == F1`.
+   proves a strict 404, then captures F4 and compares `F4 == F1`. A terminal
+   completion record includes the bound write-freeze, restore-point,
+   restore-start, and first-observed-ready timestamps. The ready timestamp is
+   sampled from the current UTC clock only after a poll has returned and fully
+   validated the exact target in `Ready`, so time spent in readiness polling is
+   included in measured RTO. It reports measured RTO seconds from restore start
+   to observed readiness, and measured RPO seconds as
+   `max(0, write-freeze start - restore point)`.
 7. Invoke `cleanup` with the same approved manifest hash after any interrupted
    run. Cleanup does not require the database credential or an active quiet
    window, but it will delete only a live target whose exact ID, name, tags,
@@ -58,6 +65,11 @@ manifest and state and invoke the corresponding operation again. A generic
 never authorize deployment. Exit code 0 means only that the requested phase
 reached its named terminal status; only `complete` with status `verified` is the
 PITR acceptance result.
+
+Because this procedure requires the selected restore point to be at or after
+the write freeze and proves equal F1-F4 database fingerprints, a successful
+synthetic cycle reports a measured RPO of zero. The measured RTO is an observed
+upper bound at the configured poll interval, not a provider SLA.
 
 ## Invocation contract
 

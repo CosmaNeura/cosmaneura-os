@@ -19,10 +19,11 @@ import stat
 import sys
 import tempfile
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Literal
 
+UTC = timezone.utc  # noqa: UP017 -- protected runner supports Python 3.10.
 CONTRACT = "cosmas-os-d3-stage-generation-approval-v1"
 EVIDENCE_TYPE = "protected-runner-stage-generation-transition"
 CONFIRMATION = "AUTHORIZE D3 IMMUTABLE STAGE GENERATION TRANSITION"
@@ -70,8 +71,7 @@ class Config:
         payload_path = Path(argv[6])
         if (
             action not in {"inspect", "transition"}
-            or
-            not _SOURCE_SHA.fullmatch(source_sha)
+            or not _SOURCE_SHA.fullmatch(source_sha)
             or not _RELEASE.fullmatch(release_id)
             or stage not in {"foundation", "database", "workloads"}
             or not release_root.is_absolute()
@@ -116,7 +116,10 @@ def _timestamp(value: datetime) -> str:
 
 
 def _parse_timestamp(value: Any) -> datetime:
-    if not isinstance(value, str):
+    if (
+        not isinstance(value, str)
+        or re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", value) is None
+    ):
         raise StageTransitionError("stage authorization timestamp invalid")
     try:
         parsed = datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
@@ -138,9 +141,7 @@ def _load_json(path: Path, *, maximum: int = MAX_JSON_BYTES) -> Any:
         raise StageTransitionError("stage transition JSON invalid") from None
 
 
-def _safe_private_file(
-    path: Path, *, required: bool, allow_empty: bool = False
-) -> bool:
+def _safe_private_file(path: Path, *, required: bool, allow_empty: bool = False) -> bool:
     try:
         info = path.lstat()
     except FileNotFoundError:
@@ -185,15 +186,10 @@ def _artifact_inventory(stage_root: Path) -> dict[str, str | None]:
     return inventory
 
 
-def _successful_result_present(
-    stage_root: Path, inventory: dict[str, str | None]
-) -> bool:
+def _successful_result_present(stage_root: Path, inventory: dict[str, str | None]) -> bool:
     if inventory["result_sha256"] is None:
         return False
-    if any(
-        inventory[key] is None
-        for key in ("plan_sha256", "review_sha256", "approval_sha256")
-    ):
+    if any(inventory[key] is None for key in ("plan_sha256", "review_sha256", "approval_sha256")):
         return False
     try:
         review = _load_json(stage_root / "review.json")
@@ -285,9 +281,7 @@ def _validate_approval(
         if key == "environment_tfvars_sha256":
             if not isinstance(value, str) or not _SHA256.fullmatch(value):
                 raise StageTransitionError("stage owner authorization artifact hash invalid")
-        elif value is not None and (
-            not isinstance(value, str) or not _SHA256.fullmatch(value)
-        ):
+        elif value is not None and (not isinstance(value, str) or not _SHA256.fullmatch(value)):
             raise StageTransitionError("stage owner authorization artifact hash invalid")
     if mode == "planned_workloads_progression" and config.stage != "workloads":
         raise StageTransitionError("planned progression is limited to the workloads stage")
@@ -313,7 +307,9 @@ def _validate_planned_workload_progression(current: bytes, replacement: bytes) -
         or old.get("runner_live_network_evidence_reference")
         == new.get("runner_live_network_evidence_reference")
     ):
-        raise StageTransitionError("planned workloads progression is outside the DNS-ready boundary")
+        raise StageTransitionError(
+            "planned workloads progression is outside the DNS-ready boundary"
+        )
     ignored = {"web_custom_domain_dns_ready", "runner_live_network_evidence_reference"}
     if {key: value for key, value in old.items() if key not in ignored} != {
         key: value for key, value in new.items() if key not in ignored
@@ -329,9 +325,7 @@ def _write_exclusive(
     mode: int = 0o600,
 ) -> None:
     _safe_private_directory(temporary_root)
-    descriptor, temporary_name = tempfile.mkstemp(
-        prefix=f".{path.name}.", dir=temporary_root
-    )
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=temporary_root)
     temporary = Path(temporary_name)
     try:
         os.fchmod(descriptor, mode)
@@ -412,10 +406,7 @@ def _validate_replacement_generation(
         raise StageTransitionError("replacement stage generation is unavailable") from None
     if (not allow_additional and not entries.issubset(allowed)) or (
         complete
-        and (
-            not allowed.issubset(entries)
-            or (not allow_additional and entries != allowed)
-        )
+        and (not allowed.issubset(entries) or (not allow_additional and entries != allowed))
     ):
         raise StageTransitionError("replacement stage generation contains unexpected artifacts")
     if not complete:
@@ -423,9 +414,7 @@ def _validate_replacement_generation(
     _safe_private_file(path / "environment.tfvars.json", required=True)
     if _sha256_file(path / "environment.tfvars.json") != replacement_hash:
         raise StageTransitionError("pending replacement stage generation was modified")
-    _validate_generation_marker(
-        path / ".stage-generation.json", transition_id, replacement_hash
-    )
+    _validate_generation_marker(path / ".stage-generation.json", transition_id, replacement_hash)
 
 
 def _ensure_parent(path: Path) -> None:
@@ -466,8 +455,7 @@ def run_transition(config: Config, *, now: datetime) -> dict[str, Any]:
         or in_place_evidence.is_symlink()
     )
     if not durable_transition_exists and (
-        approved_at > now + timedelta(minutes=5)
-        or approved_at < now - timedelta(hours=4)
+        approved_at > now or approved_at <= now - timedelta(hours=4)
     ):
         raise StageTransitionError("stage owner authorization is outside its four-hour window")
 
@@ -482,7 +470,9 @@ def run_transition(config: Config, *, now: datetime) -> dict[str, Any]:
         if mode == "abandoned_retry" and archived_success:
             raise StageTransitionError("a successfully applied stage cannot be abandoned")
         if mode == "planned_workloads_progression" and not archived_success:
-            raise StageTransitionError("planned progression requires an applied workloads generation")
+            raise StageTransitionError(
+                "planned progression requires an applied workloads generation"
+            )
         if not config.stage_root.exists() and not config.stage_root.is_symlink():
             _validate_replacement_generation(
                 pending_root, transition_id, replacement_hash, complete=True
@@ -559,9 +549,7 @@ def run_transition(config: Config, *, now: datetime) -> dict[str, Any]:
             (_canonical_json(marker) + "\n").encode(),
             temporary_root=publication_parent,
         )
-    _validate_replacement_generation(
-        pending_root, transition_id, replacement_hash, complete=True
-    )
+    _validate_replacement_generation(pending_root, transition_id, replacement_hash, complete=True)
 
     evidence_payload = {
         "schema_version": 1,
@@ -575,9 +563,7 @@ def run_transition(config: Config, *, now: datetime) -> dict[str, Any]:
         "current_artifacts": current_inventory,
         "replacement_tfvars_sha256": replacement_hash,
         "owner_approval_sha256": approval_sha256,
-        "reviewer_reference_sha256": _sha256_bytes(
-            approval["reviewer_reference"].encode()
-        ),
+        "reviewer_reference_sha256": _sha256_bytes(approval["reviewer_reference"].encode()),
         "history_preserved": True,
         "successful_result_archived": successful_result,
         "secrets_returned": False,
@@ -634,7 +620,8 @@ def inspect_stage(config: Config, *, now: datetime) -> dict[str, Any]:
         marker = _load_json(marker_path)
         if (
             not isinstance(marker, dict)
-            or set(marker) != {
+            or set(marker)
+            != {
                 "archive_id",
                 "replacement_tfvars_sha256",
                 "schema_version",
@@ -642,22 +629,17 @@ def inspect_stage(config: Config, *, now: datetime) -> dict[str, Any]:
             or marker.get("schema_version") != 1
             or not isinstance(marker.get("archive_id"), str)
             or not _SHA256.fullmatch(marker["archive_id"])
-            or marker.get("replacement_tfvars_sha256")
-            != inventory["environment_tfvars_sha256"]
+            or marker.get("replacement_tfvars_sha256") != inventory["environment_tfvars_sha256"]
         ):
             raise StageTransitionError("current stage generation marker invalid")
-        archive_root = (
-            config.release_root / "stage-history" / config.stage / marker["archive_id"]
-        )
+        archive_root = config.release_root / "stage-history" / config.stage / marker["archive_id"]
         _safe_private_directory(archive_root)
         latest_transition = _validate_evidence(
             archive_root / ".stage-transition-attestation.json", marker["archive_id"]
         )
         if (
-            _artifact_inventory(archive_root)
-            != latest_transition.get("current_artifacts")
-            or
-            latest_transition.get("source_sha") != config.source_sha
+            _artifact_inventory(archive_root) != latest_transition.get("current_artifacts")
+            or latest_transition.get("source_sha") != config.source_sha
             or latest_transition.get("release_id") != config.release_id
             or latest_transition.get("stage") != config.stage
             or latest_transition.get("replacement_tfvars_sha256")
@@ -672,9 +654,7 @@ def inspect_stage(config: Config, *, now: datetime) -> dict[str, Any]:
         "release_id": config.release_id,
         "stage": config.stage,
         "current_artifacts": inventory,
-        "successful_result_present": _successful_result_present(
-            config.stage_root, inventory
-        ),
+        "successful_result_present": _successful_result_present(config.stage_root, inventory),
         "latest_transition": latest_transition,
         "secrets_returned": False,
     }

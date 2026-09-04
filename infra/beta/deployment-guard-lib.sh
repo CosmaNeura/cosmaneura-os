@@ -9,6 +9,34 @@ guard_die() {
   exit 1
 }
 
+guard_find_python() {
+  local candidate
+
+  if [[ -n "${GUARD_PYTHON_BIN:-}" ]]; then
+    return
+  fi
+  for candidate in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+    if [[ -x "$candidate" ]] && /usr/bin/env -i \
+      PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin \
+      HOME=/nonexistent LANG=C LC_ALL=C \
+      "$candidate" -I -E -s -c \
+        'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)' \
+        >/dev/null 2>&1; then
+      GUARD_PYTHON_BIN="$candidate"
+      return
+    fi
+  done
+  guard_die "fixed Python 3.10+ is required"
+}
+
+guard_python() {
+  guard_find_python
+  /usr/bin/env -i \
+    PATH=/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin \
+    HOME=/nonexistent LANG=C LC_ALL=C \
+    "$GUARD_PYTHON_BIN" -I -E -s "$@"
+}
+
 guard_lower() {
   printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
 }
@@ -64,6 +92,175 @@ guard_new_private_path() {
 
   [[ ! -e "$path" && ! -L "$path" ]] || guard_die "$label already exists"
   guard_private_directory "$(dirname -- "$path")" "parent directory for $label"
+}
+
+# Publish a fully written and validated private artifact without ever exposing
+# a partial final pathname. The candidate must live beside the destination so
+# the hard-link publication is atomic on the same filesystem. A pre-existing
+# destination is never replaced.
+guard_publish_private_file() {
+  local candidate="$1"
+  local destination="$2"
+  local label="$3"
+
+  guard_private_file "$candidate" "$label candidate"
+  guard_new_private_path "$destination" "$label"
+  [[ "$(dirname -- "$candidate")" == "$(dirname -- "$destination")" ]] || guard_die "$label candidate must be created beside its destination"
+  guard_python - "$candidate" "$destination" <<'PY' || guard_die "$label could not be published atomically"
+import os
+import stat
+import sys
+
+candidate, destination = sys.argv[1:]
+candidate_stat = os.lstat(candidate)
+if not stat.S_ISREG(candidate_stat.st_mode) or stat.S_ISLNK(candidate_stat.st_mode):
+    raise SystemExit("candidate is not a regular file")
+if candidate_stat.st_mode & 0o077:
+    raise SystemExit("candidate permissions are not private")
+if os.path.dirname(candidate) != os.path.dirname(destination):
+    raise SystemExit("candidate and destination are not on the same path boundary")
+
+with open(candidate, "rb", buffering=0) as handle:
+    os.fsync(handle.fileno())
+
+parent = os.path.dirname(destination)
+parent_descriptor = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+try:
+    os.link(candidate, destination, follow_symlinks=False)
+    os.fsync(parent_descriptor)
+    os.unlink(candidate)
+    os.fsync(parent_descriptor)
+finally:
+    os.close(parent_descriptor)
+PY
+  [[ -f "$destination" && ! -L "$destination" ]] || guard_die "$label was not published as a regular file"
+  chmod 0600 "$destination"
+}
+
+guard_validate_apply_approval() {
+  local approval_file="$1"
+  local approval_bundle="$2"
+  local source_sha="$3"
+  local release_id="$4"
+  local stage="$5"
+  local plan_sha256="$6"
+  local review_sha256="$7"
+  local variable_file_sha256="$8"
+  local state_exists="$9"
+  local state_lineage="${10}"
+  local state_serial="${11}"
+  local state_sha256="${12}"
+  local validator
+
+  validator="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)/validate_apply_approval.py"
+  [[ -f "$validator" && ! -L "$validator" ]] || guard_die "committed strict apply-approval validator is unavailable"
+  guard_python "$validator" "$approval_file" \
+    --bundle-dir "$approval_bundle" \
+    --source-sha "$source_sha" \
+    --release-id "$release_id" \
+    --stage "$stage" \
+    --plan-sha256 "$plan_sha256" \
+    --review-sha256 "$review_sha256" \
+    --variable-file-sha256 "$variable_file_sha256" \
+    --state-exists "$state_exists" \
+    --state-lineage "$state_lineage" \
+    --state-serial "$state_serial" \
+    --state-sha256 "$state_sha256" || guard_die "apply approval failed strict contract, binding, hash, or freshness validation"
+}
+
+guard_claim_apply_attempt() {
+  local claim_file="$1"
+  local source_sha="$2"
+  local release_id="$3"
+  local stage="$4"
+  local plan_sha256="$5"
+  local approval_sha256="$6"
+  local authorization_binding_sha256="$7"
+  local authorization_binding_type="$8"
+
+  guard_new_private_path "$claim_file" "apply-attempt claim"
+  [[ "$authorization_binding_sha256" =~ ^[0-9a-f]{64}$ ]] || guard_die "authorization binding hash is invalid"
+  [[ "$authorization_binding_type" == "causal-bundle-claim" || "$authorization_binding_type" == "direct-owner-authorization" ]] || guard_die "authorization binding type is invalid"
+  guard_python - "$claim_file" "$source_sha" "$release_id" "$stage" "$plan_sha256" "$approval_sha256" "$authorization_binding_sha256" "$authorization_binding_type" <<'PY'
+import json
+import os
+import sys
+import tempfile
+from datetime import datetime, timezone
+
+UTC = timezone.utc
+
+path, source_sha, release_id, stage, plan_sha256, approval_sha256, authorization_binding_sha256, authorization_binding_type = sys.argv[1:]
+payload = {
+    "schema_version": 2,
+    "contract": "cosmas-os-d3-apply-attempt-claim-v2",
+    "claimed_at": datetime.now(UTC).strftime("%Y-%m-%dT%H:%M:%SZ"),
+    "source_sha": source_sha,
+    "release_id": release_id,
+    "stage": stage,
+    "plan_sha256": plan_sha256,
+    "approval_sha256": approval_sha256,
+    "authorization_binding_sha256": authorization_binding_sha256,
+    "authorization_binding_type": authorization_binding_type,
+}
+encoded = (json.dumps(payload, sort_keys=True, separators=(",", ":")) + "\n").encode()
+parent = os.path.dirname(path)
+descriptor, temporary = tempfile.mkstemp(prefix=f".{os.path.basename(path)}.", dir=parent)
+parent_descriptor = -1
+try:
+    os.fchmod(descriptor, 0o600)
+    remaining = memoryview(encoded)
+    while remaining:
+        written = os.write(descriptor, remaining)
+        if written <= 0:
+            raise OSError("apply-attempt claim write made no progress")
+        remaining = remaining[written:]
+    os.fsync(descriptor)
+    os.close(descriptor)
+    descriptor = -1
+    parent_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+    parent_descriptor = os.open(parent, parent_flags)
+    os.link(temporary, path, follow_symlinks=False)
+    os.fsync(parent_descriptor)
+finally:
+    if descriptor >= 0:
+        os.close(descriptor)
+    try:
+        os.unlink(temporary)
+        if parent_descriptor >= 0:
+            os.fsync(parent_descriptor)
+    except FileNotFoundError:
+        pass
+    if parent_descriptor >= 0:
+        os.close(parent_descriptor)
+PY
+  [[ -f "$claim_file" && ! -L "$claim_file" ]] || guard_die "apply-attempt claim was not created atomically"
+  chmod 0600 "$claim_file"
+}
+
+guard_git_isolated() {
+  [[ -x /usr/bin/git ]] || guard_die "fixed Git binary is unavailable"
+  /usr/bin/env -i \
+    PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin \
+    HOME=/nonexistent LANG=C LC_ALL=C \
+    GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+    GIT_TERMINAL_PROMPT=0 GIT_NO_REPLACE_OBJECTS=1 \
+    /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false \
+      -c core.hooksPath=/dev/null -c credential.helper= "$@"
+}
+
+guard_validate_git_source_transition() {
+  local repository="$1"
+  local prior_source_sha="$2"
+  local source_sha="$3"
+
+  [[ -d "$repository" && ! -L "$repository" ]] || guard_die "source transition repository is invalid"
+  [[ "$(guard_git_isolated -C "$repository" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]] || guard_die "source transition repository is invalid"
+  [[ "$prior_source_sha" =~ ^[0-9a-f]{40}$ && "$source_sha" =~ ^[0-9a-f]{40}$ && "$prior_source_sha" != "$source_sha" ]] || guard_die "source transition commits are invalid"
+  guard_git_isolated -C "$repository" cat-file -e "$prior_source_sha^{commit}" 2>/dev/null || guard_die "bound prior source commit is absent from the full fetch"
+  guard_git_isolated -C "$repository" cat-file -e "$source_sha^{commit}" 2>/dev/null || guard_die "approved source commit is absent from the full fetch"
+  guard_git_isolated -C "$repository" merge-base --is-ancestor "$prior_source_sha" "$source_sha" || guard_die "approved source is not a descendant of the bound prior source"
+  [[ "$(guard_git_isolated -C "$repository" rev-parse "$prior_source_sha^{tree}")" != "$(guard_git_isolated -C "$repository" rev-parse "$source_sha^{tree}")" ]] || guard_die "approved source tree does not differ from the bound prior source"
 }
 
 guard_validate_alert_owner_confirmation() {
@@ -183,7 +380,7 @@ guard_reject_terraform_overrides() {
     esac
     if [[ -n "$repository_root" ]]; then
       relative_file="${config_file#"$repository_root"/}"
-      git -C "$repository_root" ls-files --error-unmatch -- "$relative_file" >/dev/null 2>&1 || guard_die "Terraform configuration is not committed in the reviewed source: $config_file"
+      guard_git_isolated -C "$repository_root" ls-files --error-unmatch -- "$relative_file" >/dev/null 2>&1 || guard_die "Terraform configuration is not committed in the reviewed source: $config_file"
     fi
   done < <(find "$module_dir" -path '*/.terraform' -prune -o \( -type f -o -type l \) \( -name '*.tf' -o -name '*.tf.json' \) -print)
 }
@@ -212,28 +409,105 @@ guard_sha256_stream() {
   printf '%s\n' "${hash%% *}"
 }
 
-guard_materialize_committed_file() {
+guard_validate_local_commit_repository() {
+  local repository_root="$1"
+  local source_sha="$2"
+  local expected_origin="$3"
+  local actual_origin
+  local alternates_path
+  local pack_path
+  local local_config
+  local status
+
+  [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "deployment source SHA must be a full lowercase commit"
+  [[ "$(guard_git_isolated -C "$repository_root" rev-parse --is-inside-work-tree 2>/dev/null)" == "true" ]] || guard_die "deployment source repository is invalid"
+  actual_origin="$(guard_git_isolated -C "$repository_root" remote get-url origin 2>/dev/null)" || guard_die "deployment repository has no origin"
+  [[ "$actual_origin" == "$expected_origin" ]] || guard_die "deployment repository origin is not the exact reviewed upstream"
+  [[ -z "$(guard_git_isolated -C "$repository_root" for-each-ref --format='%(refname)' refs/replace)" ]] || guard_die "deployment repository contains forbidden replace refs"
+  [[ "$(guard_git_isolated -C "$repository_root" rev-parse --is-shallow-repository)" == "false" ]] || guard_die "deployment repository is shallow"
+  alternates_path="$(guard_git_isolated -C "$repository_root" rev-parse --path-format=absolute --git-path objects/info/alternates)"
+  [[ ! -e "$alternates_path" && ! -L "$alternates_path" ]] || guard_die "deployment repository uses alternate objects"
+  local_config="$(guard_git_isolated -C "$repository_root" config --local --list)"
+  if awk -F= '{key=tolower($1); if (key == "extensions.partialclone" || key ~ /^remote\..*\.(promisor|partialclonefilter)$/) found=1} END {exit !found}' <<<"$local_config"; then
+    guard_die "deployment repository retains lazy-fetch configuration"
+  fi
+  pack_path="$(guard_git_isolated -C "$repository_root" rev-parse --path-format=absolute --git-path objects/pack)"
+  if find "$pack_path" -type f -name '*.promisor' -print -quit 2>/dev/null | grep -q .; then
+    guard_die "deployment repository contains promisor objects"
+  fi
+  [[ "$(guard_git_isolated -C "$repository_root" rev-parse --verify HEAD 2>/dev/null)" == "$source_sha" ]] || guard_die "local HEAD does not match the approved deployment source SHA"
+  status="$(guard_git_isolated -C "$repository_root" status --porcelain=v1 --untracked-files=all)"
+  [[ -z "$status" ]] || guard_die "deployment controller requires a completely clean checkout including untracked files"
+  guard_git_isolated -C "$repository_root" fsck --full --no-dangling "$source_sha" >/dev/null 2>&1 || guard_die "local deployment source object graph is incomplete"
+}
+
+guard_materialize_authenticated_committed_file() {
   local repository_root="$1"
   local source_sha="$2"
   local repository_path="$3"
   local destination="$4"
   local expected_origin="$5"
-  local actual_origin
-  local status
+  local deploy_key="$6"
+  local known_hosts="$7"
+  local prior_source_sha="${8:-}"
+  local authenticated_repository
+  local local_tree
+  local authenticated_tree
+  local -a clean_git_env
 
-  command -v git >/dev/null 2>&1 || guard_die "git is required to materialize committed deployment code"
+  [[ -x /usr/bin/git ]] || guard_die "fixed Git binary is required to authenticate committed deployment code"
   [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "deployment source SHA must be a full lowercase commit"
-  actual_origin="$(git -C "$repository_root" remote get-url origin 2>/dev/null)" || guard_die "deployment repository has no origin"
-  [[ "$actual_origin" == "$expected_origin" ]] || guard_die "deployment repository origin is not the exact reviewed upstream"
-  [[ "$(git -C "$repository_root" rev-parse --verify HEAD 2>/dev/null)" == "$source_sha" ]] || guard_die "local HEAD does not match the approved deployment source SHA"
-  status="$(git -C "$repository_root" status --porcelain=v1 --untracked-files=all)"
-  [[ -z "$status" ]] || guard_die "deployment controller requires a completely clean checkout including untracked files"
+  [[ -z "$prior_source_sha" || ( "$prior_source_sha" =~ ^[0-9a-f]{40}$ && "$prior_source_sha" != "$source_sha" ) ]] || guard_die "deployment prior source SHA is invalid"
+  guard_private_file "$deploy_key" "ephemeral deploy private key"
+  guard_private_file "$known_hosts" "reviewed GitHub known-hosts file"
+  guard_validate_local_commit_repository "$repository_root" "$source_sha" "$expected_origin"
+  local_tree="$(guard_git_isolated -C "$repository_root" rev-parse "$source_sha^{tree}")" || guard_die "local deployment source tree cannot be resolved"
+
+  authenticated_repository="$(mktemp -d "$(dirname -- "$destination")/authenticated-source.XXXXXX")"
+  chmod 0700 "$authenticated_repository"
+  clean_git_env=(/usr/bin/env -i PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin HOME=/nonexistent LANG=C LC_ALL=C GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_TERMINAL_PROMPT=0 GIT_NO_REPLACE_OBJECTS=1)
+  "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" -c init.templateDir= init --quiet
+  "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" remote add origin ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git
+  "${clean_git_env[@]}" "GIT_SSH_COMMAND=/usr/bin/ssh -F /dev/null -i $deploy_key -o IdentitiesOnly=yes -o IdentityAgent=none -o BatchMode=yes -o PasswordAuthentication=no -o KbdInteractiveAuthentication=no -o ProxyCommand=none -o ProxyJump=none -o GlobalKnownHostsFile=/dev/null -o UserKnownHostsFile=$known_hosts -o StrictHostKeyChecking=yes -p 443" \
+    /usr/bin/git --no-pager -c protocol.allow=never -c protocol.ssh.allow=always -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" fetch --quiet --no-tags origin "$source_sha"
+  [[ "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" rev-parse --verify 'FETCH_HEAD^{commit}')" == "$source_sha" ]] || guard_die "authenticated GitHub fetch did not return the exact approved commit"
+  authenticated_tree="$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" rev-parse "$source_sha^{tree}")" || guard_die "authenticated deployment source tree cannot be resolved"
+  [[ "$authenticated_tree" == "$local_tree" ]] || guard_die "local deployment tree differs from the authenticated GitHub commit"
+  if [[ -n "$prior_source_sha" ]]; then
+    guard_validate_git_source_transition "$authenticated_repository" "$prior_source_sha" "$source_sha"
+  fi
+  "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" remote remove origin
+  [[ -z "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" remote)" ]] || guard_die "authenticated deployment checkout retained a network-capable remote"
+  [[ ! -e "$authenticated_repository/.git/shallow" && ! -e "$authenticated_repository/.git/objects/info/alternates" ]] || guard_die "authenticated deployment checkout is shallow or uses alternate objects"
+  [[ -z "$("${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" for-each-ref --format='%(refname)' refs/replace)" ]] || guard_die "authenticated deployment checkout contains replace refs"
+  if "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" config --local --list | awk -F= '{key=tolower($1); if (key == "extensions.partialclone" || key ~ /^remote\..*\.(promisor|partialclonefilter)$/) found=1} END {exit !found}'; then
+    guard_die "authenticated deployment checkout retained lazy-fetch configuration"
+  fi
+  if find "$authenticated_repository/.git/objects/pack" -type f -name '*.promisor' -print -quit 2>/dev/null | grep -q .; then
+    guard_die "authenticated deployment checkout retained promisor objects"
+  fi
+  "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" fsck --full --no-dangling "$source_sha" >/dev/null 2>&1 || guard_die "authenticated deployment checkout is incomplete"
   guard_new_private_path "$destination" "materialized deployment command"
-  git -C "$repository_root" show "$source_sha:$repository_path" >"$destination" || {
+  "${clean_git_env[@]}" /usr/bin/git --no-pager -c protocol.allow=never -c core.fsmonitor=false -c core.hooksPath=/dev/null -c credential.helper= -C "$authenticated_repository" show "$source_sha:$repository_path" >"$destination" || {
     rm -f -- "$destination"
     guard_die "approved commit does not contain the protected runner command"
   }
   chmod 600 "$destination"
+}
+
+guard_materialize_local_committed_file() {
+  local repository_root="$1"
+  local source_sha="$2"
+  local repository_path="$3"
+  local destination="$4"
+  local expected_origin="$5"
+  guard_validate_local_commit_repository "$repository_root" "$source_sha" "$expected_origin"
+  guard_new_private_path "$destination" "materialized deployment command reference"
+  guard_git_isolated -C "$repository_root" show "$source_sha:$repository_path" >"$destination" || {
+    rm -f -- "$destination"
+    guard_die "approved commit does not contain the protected runner command"
+  }
+  chmod 0600 "$destination"
 }
 
 guard_source_metadata() {
@@ -242,12 +516,13 @@ guard_source_metadata() {
   local lock_file="$module_dir/.terraform.lock.hcl"
   local status
 
-  command -v git >/dev/null 2>&1 || guard_die "git is required to bind a plan to reviewed source"
+  [[ -x /usr/bin/git && ! -L /usr/bin/git ]] || guard_die "fixed Git binary is required to bind a plan to reviewed source"
   guard_reject_terraform_overrides "$module_dir" "$repository_root"
   [[ -f "$lock_file" ]] || guard_die "provider lock file is missing for guarded module $module_dir"
-  GUARD_SOURCE_SHA="$(git -C "$repository_root" rev-parse --verify HEAD 2>/dev/null)" || guard_die "repository HEAD cannot be resolved"
+  [[ -z "$(guard_git_isolated -C "$repository_root" for-each-ref --format='%(refname)' refs/replace)" ]] || guard_die "deployment source contains forbidden Git replace refs"
+  GUARD_SOURCE_SHA="$(guard_git_isolated -C "$repository_root" rev-parse --verify HEAD 2>/dev/null)" || guard_die "repository HEAD cannot be resolved"
   [[ "$GUARD_SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]] || guard_die "repository HEAD is not a full Git SHA"
-  status="$(git -C "$repository_root" status --short --untracked-files=normal)"
+  status="$(guard_git_isolated -C "$repository_root" status --short --untracked-files=normal)"
   [[ -z "$status" ]] || guard_die "deployment plans require a clean, committed source checkout"
   GUARD_PROVIDER_LOCK_SHA256="$(guard_sha256 "$lock_file")"
   GUARD_TERRAFORM_VERSION="$("$GUARD_TERRAFORM_BIN" version -json | jq -er '.terraform_version')" || guard_die "cannot read Terraform/OpenTofu version"
@@ -270,6 +545,7 @@ guard_load_bootstrap_outputs() {
   GUARD_DEPLOY_PRINCIPAL_ID="$(guard_read_bootstrap_output deploy_identity_principal_id)"
   GUARD_DEPLOYMENT_MODE="$(guard_read_bootstrap_output deployment_mode)"
   GUARD_DATA_CLASSIFICATION="$(guard_read_bootstrap_output data_classification)"
+  GUARD_LOCATION="$(guard_read_bootstrap_output location)"
   GUARD_BOX_ID="$(guard_read_bootstrap_output box_id)"
   GUARD_STATE_VNET_ID="$(guard_read_bootstrap_output state_vnet_id)"
   GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID="$(guard_read_bootstrap_output state_blob_private_dns_zone_id)"
@@ -303,6 +579,7 @@ guard_load_bootstrap_outputs() {
     expected_classification="phi-authorized"
   fi
   [[ "$GUARD_DATA_CLASSIFICATION" == "$expected_classification" ]] || guard_die "bootstrap deployment mode and data classification do not match"
+  [[ "$(guard_lower "$GUARD_LOCATION")" == "centralus" ]] || guard_die "bootstrap location is not the exact Central US deployment boundary"
   GUARD_DEPLOY_IDENTITY_NAME="id-cosmas-os-beta-deploy-$GUARD_BETA_ID"
   [[ "$(guard_lower "$GUARD_STATE_VNET_ID")" == "$(guard_lower "/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_STATE_RESOURCE_GROUP/providers/Microsoft.Network/virtualNetworks/vnet-cosmas-os-beta-state-$GUARD_BETA_ID")" ]] || guard_die "bootstrap state VNet ID is outside the D3 beta boundary"
   [[ "$(guard_lower "$GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID")" == "$(guard_lower "/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_STATE_RESOURCE_GROUP/providers/Microsoft.Network/privateDnsZones/privatelink.blob.core.windows.net")" ]] || guard_die "bootstrap state Blob private DNS zone ID is outside the D3 beta boundary"
@@ -330,10 +607,12 @@ guard_verify_resource_group() {
   expected_id="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$resource_group"
   jq -e \
     --arg expected_id "$(guard_lower "$expected_id")" \
+    --arg expected_location "$(guard_lower "$GUARD_LOCATION")" \
     --arg mode "$GUARD_DEPLOYMENT_MODE" \
     --arg classification "$GUARD_DATA_CLASSIFICATION" \
     --arg box "$GUARD_BOX_ID" '
       (.id | ascii_downcase) == $expected_id and
+      ((.location // "") | ascii_downcase) == $expected_location and
       .tags.track == "B" and
       .tags.product == "cosmas-os" and
       .tags.env == "early_adopter_beta" and
@@ -342,7 +621,7 @@ guard_verify_resource_group() {
       .tags.box_scope == "dedicated" and
       .tags.box_id == $box and
       .tags.managed == "terraform"
-    ' <<<"$group_json" >/dev/null || guard_die "resource group $resource_group is outside the exact D3 mode/Box boundary"
+    ' <<<"$group_json" >/dev/null || guard_die "resource group $resource_group is outside the exact D3 centralus mode/Box boundary"
 }
 
 guard_verify_azure_context_and_boundary() {
@@ -516,6 +795,7 @@ guard_validate_environment_state() {
       --arg box "$GUARD_BOX_ID" \
       --arg mode "$GUARD_DEPLOYMENT_MODE" \
       --arg classification "$GUARD_DATA_CLASSIFICATION" \
+      --arg location "centralus" \
       --arg resource_group "$GUARD_WORKLOAD_RESOURCE_GROUP" \
       --arg state_vnet_id "$GUARD_STATE_VNET_ID" \
       --arg state_blob_private_dns_zone_id "$GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID" '
@@ -527,6 +807,7 @@ guard_validate_environment_state() {
           ((($outputs | has("environment")) | not) or $outputs.environment.value == "early_adopter_beta") and
           ((($outputs | has("deployment_mode")) | not) or $outputs.deployment_mode.value == $mode) and
           ((($outputs | has("data_classification")) | not) or $outputs.data_classification.value == $classification) and
+          ((($outputs | has("location")) | not) or ($outputs.location.value | ascii_downcase) == $location) and
           ((($outputs | has("resource_group_name")) | not) or $outputs.resource_group_name.value == $resource_group) and
           ((($outputs | has("state_vnet_id")) | not) or $outputs.state_vnet_id.value == $state_vnet_id) and
           ((($outputs | has("state_blob_private_dns_zone_id")) | not) or $outputs.state_blob_private_dns_zone_id.value == $state_blob_private_dns_zone_id))
@@ -537,6 +818,7 @@ guard_validate_environment_state() {
       --arg box "$GUARD_BOX_ID" \
       --arg mode "$GUARD_DEPLOYMENT_MODE" \
       --arg classification "$GUARD_DATA_CLASSIFICATION" \
+      --arg location "centralus" \
       --arg resource_group "$GUARD_WORKLOAD_RESOURCE_GROUP" \
       --arg state_vnet_id "$GUARD_STATE_VNET_ID" \
       --arg state_blob_private_dns_zone_id "$GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID" '
@@ -546,6 +828,7 @@ guard_validate_environment_state() {
       .outputs.environment.value == "early_adopter_beta" and
       .outputs.deployment_mode.value == $mode and
       .outputs.data_classification.value == $classification and
+      (.outputs.location.value | ascii_downcase) == $location and
       .outputs.resource_group_name.value == $resource_group and
       .outputs.state_vnet_id.value == $state_vnet_id and
       .outputs.state_blob_private_dns_zone_id.value == $state_blob_private_dns_zone_id
@@ -589,6 +872,7 @@ guard_validate_planned_boundary() {
     --arg box "$GUARD_BOX_ID" \
     --arg mode "$GUARD_DEPLOYMENT_MODE" \
     --arg classification "$GUARD_DATA_CLASSIFICATION" \
+    --arg location "centralus" \
     --arg resource_group "$GUARD_WORKLOAD_RESOURCE_GROUP" \
     --arg state_vnet_id "$GUARD_STATE_VNET_ID" \
     --arg state_blob_private_dns_zone_id "$GUARD_STATE_BLOB_PRIVATE_DNS_ZONE_ID" '
@@ -596,6 +880,7 @@ guard_validate_planned_boundary() {
       .planned_values.outputs.environment.value == "early_adopter_beta" and
       .planned_values.outputs.deployment_mode.value == $mode and
       .planned_values.outputs.data_classification.value == $classification and
+      (.planned_values.outputs.location.value | ascii_downcase) == $location and
       .planned_values.outputs.resource_group_name.value == $resource_group and
       .planned_values.outputs.state_vnet_id.value == $state_vnet_id and
       .planned_values.outputs.state_blob_private_dns_zone_id.value == $state_blob_private_dns_zone_id
@@ -636,7 +921,82 @@ guard_write_security_posture() {
   local output_file="$2"
 
   jq '
-    def projection($type; $value):
+    . as $plan |
+    def normalize_reference:
+      if startswith("data.") then
+        capture("^(?<address>data\\.[^.]+\\.[^.\\[]+(?:\\[[^]]+\\])?)").address
+      else
+        capture("^(?<address>[^.]+\\.[^.\\[]+(?:\\[[^]]+\\])?)").address
+      end | sub("\\[[^]]+\\]$"; "");
+    def configuration_references($address; $field):
+      ($address | sub("\\[[^]]+\\]$"; "")) as $base |
+      [$plan.configuration.root_module
+       | recurse((.module_calls // {})[]?.module)
+       | (.resources // [])[]
+       | select(.address == $base)
+       | .expressions[$field].references[]?
+       | normalize_reference];
+    def expected_role_references($address):
+      ($address | sub("\\[[^]]+\\]$"; "")) as $base |
+      ({
+        "azurerm_role_assignment.runtime_acr_pull": {
+          scope: "azurerm_container_registry.beta",
+          principal: "azurerm_user_assigned_identity.runtime"
+        },
+        "azurerm_role_assignment.web_acr_pull": {
+          scope: "azurerm_container_registry.beta",
+          principal: "azurerm_user_assigned_identity.web"
+        },
+        "azurerm_role_assignment.database_preparation_acr_pull": {
+          scope: "azurerm_container_registry.beta",
+          principal: "azurerm_user_assigned_identity.database_preparation"
+        },
+        "azurerm_role_assignment.deploy_acr_push": {
+          scope: "azurerm_container_registry.beta",
+          principal: "data.azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.deploy_blob_data": {
+          scope: "azurerm_storage_account.beta",
+          principal: "data.azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.runtime_blob": {
+          scope: "azurerm_storage_container.artifacts",
+          principal: "azurerm_user_assigned_identity.runtime"
+        },
+        "azurerm_role_assignment.runtime_key_vault_secrets": {
+          scope: "azurerm_key_vault.beta",
+          principal: "azurerm_user_assigned_identity.runtime"
+        },
+        "azurerm_role_assignment.deploy_key_vault_secrets": {
+          scope: "azurerm_key_vault.beta",
+          principal: "data.azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.deploy_state": {
+          scope: "azurerm_storage_account.state",
+          principal: "azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.deploy_state_reader": {
+          scope: "azurerm_resource_group.state",
+          principal: "azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.deploy_state_network": {
+          scope: "azurerm_virtual_network.state",
+          principal: "azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.deploy_state_private_dns": {
+          scope: "azurerm_private_dns_zone.state_blob",
+          principal: "azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.deploy_workload": {
+          scope: "azurerm_resource_group.workload",
+          principal: "azurerm_user_assigned_identity.deploy"
+        },
+        "azurerm_role_assignment.deploy_workload_rbac": {
+          scope: "azurerm_resource_group.workload",
+          principal: "azurerm_user_assigned_identity.deploy"
+        }
+      }[$base]) // error("role assignment lacks an exact dependency contract: " + $base);
+    def projection($type; $value; $address):
       if $value == null then null
       elif $type == "azurerm_resource_group" then
         {name: $value.name, location: $value.location, tags: $value.tags}
@@ -733,10 +1093,23 @@ guard_write_security_posture() {
          }],
          private_dns_zone_ids: [($value.private_dns_zone_group // [])[]?.private_dns_zone_ids[]?] | sort}
       elif $type == "azurerm_role_assignment" then
-        {scope: $value.scope, role_definition_name: $value.role_definition_name,
-         skip_service_principal_aad_check: $value.skip_service_principal_aad_check}
+        expected_role_references($address) as $expected |
+        configuration_references($address; "scope") as $scope_references |
+        configuration_references($address; "principal_id") as $principal_references |
+        if $scope_references != [$expected.scope] or
+           $principal_references != [$expected.principal] then
+          error("role assignment dependency references differ from the exact contract: " + $address)
+        else
+          {scope: $value.scope, role_definition_name: $value.role_definition_name,
+           principal_id: $value.principal_id,
+           principal_type: $value.principal_type,
+           scope_reference_address: $scope_references[0],
+           principal_reference_address: $principal_references[0],
+           skip_service_principal_aad_check: $value.skip_service_principal_aad_check}
+        end
       elif $type == "azurerm_user_assigned_identity" then
-        {name: $value.name, resource_group_name: $value.resource_group_name}
+        {name: $value.name, resource_group_name: $value.resource_group_name,
+         principal_id: $value.principal_id}
       elif $type == "azurerm_container_app_environment" then
         {name: $value.name, infrastructure_subnet_id: $value.infrastructure_subnet_id,
          internal_load_balancer_enabled: $value.internal_load_balancer_enabled,
@@ -864,8 +1237,8 @@ guard_write_security_posture() {
     [.resource_changes[]?
       | select(.mode == "managed")
       | {address, type, actions: .change.actions,
-         before: projection(.type; .change.before),
-         after: projection(.type; .change.after)}]
+         before: projection(.type; .change.before; .address),
+         after: projection(.type; .change.after; .address)}]
     | sort_by(.address)
   ' "$plan_json" >"$output_file" || guard_die "cannot generate strict non-secret security-posture review"
   chmod 600 "$output_file"
@@ -880,6 +1253,7 @@ guard_write_critical_planned_values() {
 
   jq '{
     environment: .planned_values.outputs.environment.value,
+    location: .planned_values.outputs.location.value,
     box_id: .planned_values.outputs.box_id.value,
     deployment_mode: .planned_values.outputs.deployment_mode.value,
     data_classification: .planned_values.outputs.data_classification.value,
@@ -904,12 +1278,12 @@ guard_operation_returns_hashed_evidence() {
   local artifact_kind="${2:-}"
 
   case "$operation" in
-    probe-network|build-push|database-prepare|runtime-acceptance|domain-verification|alert-delivery|pitr-*|release-rollback|release-forward|inspect-stage|stage-generation|offboarding-acceptance|bootstrap-identity)
+    probe-network|build-push|database-prepare|workload-verify|runtime-acceptance|domain-verification|alert-delivery|pitr-*|release-rollback|release-forward|inspect-stage|stage-generation|offboarding-acceptance|bootstrap-identity)
       return 0
       ;;
     retrieve)
       case "$artifact_kind" in
-        network|build|database|runtime|domain|alert|pitr|recovery|offboarding|identity)
+        network|build|database|workload|runtime|domain|alert|pitr|recovery|offboarding|identity)
           return 0
           ;;
       esac

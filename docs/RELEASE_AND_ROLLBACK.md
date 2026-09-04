@@ -1,7 +1,7 @@
-# Release and rollback (synthetic D1 / Azure D2 / prepared D3)
+# Release and rollback (synthetic D1 / Azure D2 / isolated D3)
 
-Status: D1 local release flow and D2 Azure runtime verified; D3 source prepared, not deployed
-Updated: 2026-09-03
+Status: D1 local release flow and D2 Azure runtime verified; D3 bootstrap deployed, application not deployed
+Updated: 2026-09-04
 
 The D1 workflow produces a **pinned local container image and release
 manifest** without a registry push or deployment. The separately authorized D2
@@ -166,12 +166,14 @@ The source can be checked locally without cloud credentials:
 The protected D3 workflow now provides `release-rollback` and
 `release-forward`; the exact command and approval schemas are documented in
 [`infra/beta/README.md`](../infra/beta/README.md). The live demonstration still
-requires two genuinely distinct protected-runner releases. Both releases must
-have source-bound, scan-clean, immutable ACR API and web digests; a relabel of
-one image is not a rollback candidate. The rollback operation records the old
-and new revision IDs and proves exact routing/readiness. The forward operation
-restores the Terraform-declared digests and must finish with a refresh-backed
-zero-change plan.
+requires two genuinely distinct protected-runner releases. Release B must be a
+descendant of Release A and its Git tree must differ. The A API, A web, B API,
+and B web digests must be pairwise distinct, source-bound, scan-clean, and
+immutable; a relabel or cross-role digest reuse is not a rollback candidate.
+The rollback operation records the verified A/B tree relationship, old and new
+revision IDs, and exact routing/readiness. The forward operation restores the
+Terraform-declared digests and must finish with a refresh-backed zero-change
+plan.
 
 Database changes remain forward-only: if the prior application digest is not
 compatible with schema head, use `release-forward` immediately and deploy a

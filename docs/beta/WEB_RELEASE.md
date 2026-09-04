@@ -13,18 +13,21 @@ hosting, identity, state, or domain.
 - Azure Container Apps provides the public HTTPS certificates and external
   origins. Plain HTTP is disabled for both web and API ingress.
 - The foundation creates the Container Apps environment while
-  `deploy_workloads=false`. For production Clerk, the recommended pending owner
-  decision selects `web_custom_domain = "beta.cosmaneura.com"` with
-  `web_custom_domain_dns_ready = false`; once accepted, its `web_origin` and
-  `api_origin` outputs reserve the final owned web origin and deterministic API
-  hostname before either workload exists.
-- The human must configure the production Cosmas OS Clerk instance for that
-  exact `web_origin`. The workload plan refuses any different approved origin.
+  `deploy_workloads=false`. The accepted production decision sets
+  `web_custom_domain = "beta.cosmaneura.com"` with
+  `web_custom_domain_dns_ready = false`; its outputs bind the selected owned
+  web origin and foundation-derived deterministic API hostname before either
+  workload exists.
+- Before the initial workload, the human configures the preliminary production
+  Cosmas OS Clerk app/Organization policy and records its publishable key. The
+  exact custom origin and redirects are verified after the first web revision
+  yields DNS material and before the DNS-ready workload promotion. The workload
+  plans refuse any different approved origin.
 - The API derives `CORS_ALLOWED_ORIGINS` and `CLERK_AUTHORIZED_PARTIES` from
   the same Terraform origin; wildcard or caller-selected origins are not used.
 - `web_custom_domain` remains nullable for non-production validation, but D3
-  production Clerk must use the dedicated hostname accepted by the exact owner
-  decision; the current recommendation is `beta.cosmaneura.com`. It cannot use
+  production Clerk must use the accepted dedicated hostname,
+  `beta.cosmaneura.com`. It cannot use
   the shared `azurecontainerapps.io` default. Terraform rejects
   uppercase/invalid hostnames and explicitly refuses the existing
   `app.cosmaneura.com`, `staging-app.cosmaneura.com`, `chat.cosmaneura.com`,
@@ -55,8 +58,8 @@ session token is unavailable.
 
 ## Human-owned release sequence
 
-1. After the pending exact owner decision accepts the hostname, apply only the
-   reviewed foundation plan with `deploy_workloads=false`,
+1. Using the accepted hostname decision, apply only the reviewed foundation
+   plan with `deploy_workloads=false`,
    `web_custom_domain="beta.cosmaneura.com"`, and
    `web_custom_domain_dns_ready=false`.
 2. Run the protected `probe-network` operation and record the non-secret
@@ -65,9 +68,12 @@ session token is unavailable.
    self-hashed artifact. Confirm the hostnames are inside the new D3 Container
    Apps environment. Do not inspect or export raw Terraform state to obtain
    them.
-3. Create/configure the production Cosmas OS Clerk instance for the exact web
-   origin, recreate the empty Cosmas Beta Lab Organization there, and retain
-   Clerk secrets only in the human-controlled service. Do not invite testers.
+3. Create/configure the production Cosmas OS Clerk instance and empty Cosmas
+   Beta Lab Organization with the approved preliminary authentication,
+   Organization, issuer, and audience policy. Retain Clerk secrets only in the
+   human-controlled service and record only the reviewed publishable key for
+   the web build. Final custom-origin and redirect setup occurs in the required
+   domain stage below. Do not invite testers.
 4. At one clean reviewed source SHA, build the API image from `Dockerfile` and
    the web image from `Dockerfile.web`. For the web build, provide only the
    three public values above. A representative human-run command is:
@@ -95,10 +101,10 @@ session token is unavailable.
    `runner_live_network_evidence_reference` to the reviewed workload plan.
    Mutable tags are forbidden; the API/worker and web resources pull their
    distinct digest references.
-7. Apply the exact reviewed plan, then verify HTTPS-only ingress, `/healthz`,
-   security headers, the signed-out zero-API-call behavior, production Clerk
-   login, required Beta Lab Organization membership, exact-origin CORS, and
-   authenticated API access using invented data only.
+7. Apply the exact reviewed initial plan, then verify its immutable digests,
+   HTTPS-only default-host ingress, `/healthz`, security headers, and signed-out
+   zero-API-call behavior. Do not perform tester login or claim that the custom
+   origin is ready until the domain stage below succeeds.
 
 ## Required production custom-domain stage
 

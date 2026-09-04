@@ -51,9 +51,11 @@ requirements without inventing values:
 
 - one dedicated logical Box UUID and human owner/approver;
 - the separate Cosmas OS Clerk development application and Beta Lab design;
-- before workloads are enabled, human approval of the Terraform-derived beta
-  web HTTPS origin and the production Clerk application, Organization,
-  issuer/audience/origin, with that one Organization mapped to the one Box;
+- before the initial workload, human approval of the selected dedicated beta
+  HTTPS origin and preliminary production Clerk application, Organization, and
+  issuer/audience policy, with that one Organization mapped to the one Box;
+  before the DNS-ready workload promotion, exact DNS, certificate, Clerk
+  origin, and redirect readback for that hostname;
 - a region, residency, quota, SKU, and current calculator review;
 - an explicit registry network posture and its cost/routing evidence, or a
   reviewed public-registry exception for `synthetic_lab` only;
@@ -111,14 +113,16 @@ after account-scope Blob RBAC propagates. Environment planning and apply then
 run on that VM. Do not expose the state account or substitute an interactive
 identity as a workaround.
 
-## Provisional region
+## Pinned region
 
-`centralus` is a provisional default because the sponsorship subscription
-rejected PostgreSQL Flexible Server in `eastus`/`eastus2` during D2. D3 uses a
-single region so Container Apps and private PostgreSQL can share one VNet.
-The human must confirm residency, Container Apps, PostgreSQL, Redis, private
-endpoint, zone, and SKU availability before any plan. A different verified
-region may be supplied.
+This D3 source and the approved synthetic-lab decision pin the deployment to
+`centralus`; the bootstrap and protected deployment guards reject every other
+location. D3 uses one region so Container Apps and private PostgreSQL can share
+one VNet. Before any plan, the human must confirm residency plus current
+Container Apps, PostgreSQL, Managed Redis, private-endpoint, zone, SKU, and
+quota availability in Central US. Selecting another region is not an input
+override: it requires a reviewed source change, a new plan, and fresh owner
+authorization.
 
 ## Broker decision
 
@@ -303,6 +307,10 @@ exact D3 resource groups (plus the exact subscription budget), with its
 lineage, serial, and hash bound to a non-destructive reviewed plan. It rejects
 Terraform workspaces,
 `TF_CLI_ARGS*`, `TF_VAR_*`, implicit/auto tfvars, or an uncommitted source tree.
+Invoke every human-side deployment wrapper exactly as `/bin/bash -p SCRIPT ...`;
+the privileged-shell flag suppresses ambient `BASH_ENV`, imported functions,
+and shell-option injection before the wrapper re-executes under its empty,
+allowlisted environment and fixed Bash 5+/Python 3.10+ tool paths.
 The bootstrap tfvars must select the reviewed immutable Jammy Gen2 image
 `runner_image_version = "22.04.202608060"`; `latest` or a different version is
 not accepted:
@@ -310,7 +318,7 @@ not accepted:
 ```text
 umask 077
 mkdir -m 0700 /protected/ephemeral
-bash ./bootstrap-local-state.sh plan \
+/bin/bash -p ./bootstrap-local-state.sh plan \
   --state /protected/ephemeral/d3-bootstrap.tfstate \
   --var-file /protected/ephemeral/bootstrap.tfvars.json \
   --plan-out /protected/ephemeral/d3-bootstrap.tfplan \
@@ -318,32 +326,61 @@ bash ./bootstrap-local-state.sh plan \
 
 # A named human reviews the source/tool/lock/tfvars hashes, exact boundary,
 # every address/type/action, and the whitelisted before/after security posture
-# for the state account, runner, networking, UAMI/RBAC, and budget. The private
+# for the state account, runner, networking, exact RBAC scope/role/principal,
+# UAMI, and budget. The private
 # approval binds plan, review, and source.
-bash ./bootstrap-local-state.sh apply \
+/bin/bash -p ./bootstrap-local-state.sh apply \
   --state /protected/ephemeral/d3-bootstrap.tfstate \
   --var-file /protected/ephemeral/bootstrap.tfvars.json \
   --plan /protected/ephemeral/d3-bootstrap.tfplan \
   --review /protected/ephemeral/d3-bootstrap-review.json \
-  --approval /protected/ephemeral/d3-bootstrap-approval.json
+  --approval /protected/ephemeral/d3-bootstrap-approval.json \
+  --attempt-claim /protected/ephemeral/d3-bootstrap-apply-attempt.claim
 
-bash ./bootstrap-local-state.sh outputs \
+/bin/bash -p ./bootstrap-local-state.sh outputs \
   --state /protected/ephemeral/d3-bootstrap.tfstate \
   --output /protected/ephemeral/bootstrap-outputs.json
 ```
 
-The bootstrap approval is a private mode-`0600` JSON object:
+The bootstrap approval is a private mode-`0600`, duplicate-free v2 JSON
+object. The initial create uses the null state tuple shown below; a later
+reconciliation must instead bind the exact current state lineage, serial, and
+SHA-256. `approved_at` and `expires_at` are whole-second UTC timestamps, the
+window must be positive and no longer than 30 minutes, and the approval must
+still be live when apply starts:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
+  "contract": "cosmas-os-d3-bootstrap-protected-apply-authorization-v2",
+  "authorization_status": "APPROVED",
+  "source_sha": "FULL_REVIEWED_GIT_COMMIT",
+  "release_id": "bootstrap",
+  "stage": "bootstrap",
   "plan_sha256": "REVIEW_MANIFEST_PLAN_HASH",
   "review_sha256": "SHA256_OF_REVIEW_JSON",
-  "source_sha": "FULL_REVIEWED_GIT_COMMIT",
+  "variable_file_sha256": "SHA256_OF_BOOTSTRAP_TFVARS",
+  "state": {
+    "exists": false,
+    "lineage": null,
+    "serial": null,
+    "sha256": null
+  },
   "reviewer": "NAMED_HUMAN",
-  "review_reference": "APPROVAL_RECORD"
+  "owner_assertion": "AUTHORIZE D3 BOOTSTRAP APPLY REVIEW_MANIFEST_PLAN_HASH SHA256_OF_REVIEW_JSON",
+  "review_reference": "APPROVAL_RECORD",
+  "approved_at": "WHOLE_SECOND_UTC_TIMESTAMP",
+  "expires_at": "WHOLE_SECOND_UTC_TIMESTAMP_WITHIN_30_MINUTES",
+  "evidence_payload_sha256": "SHA256_OF_CANONICAL_OBJECT_WITH_THIS_FIELD_REMOVED"
 }
 ```
+
+Compute `evidence_payload_sha256` over compact, key-sorted JSON with that field
+removed and with no trailing newline (equivalent to
+`jq -cSj 'del(.evidence_payload_sha256)'`). The exact assertion is
+`AUTHORIZE D3 BOOTSTRAP APPLY <plan_sha256> <review_sha256>`. The apply wrapper
+validates every field and atomically creates the supplied one-use attempt-claim;
+an existing claim is never reusable.
 
 The bootstrap state remains local, encrypted, and private. It is never migrated
 to the environment backend and never copied into the repository.
@@ -370,7 +407,7 @@ ten minutes. No token or secret is an argument, and the temporary Azure CLI
 token cache is removed when the command exits.
 
 ```text
-bash ./prepare-protected-runner.sh \
+/bin/bash -p ./prepare-protected-runner.sh \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
   --tofu-version 1.12.5 \
@@ -389,17 +426,26 @@ GitHub token. Create a one-use Ed25519 key locally, add only its public half as
 a temporary **read-only** repository deploy key, and create a mode-`0600`
 known-hosts file containing the independently verified GitHub Ed25519 host key
 for `[ssh.github.com]:443`. The only implemented source ingress is the guarded
-managed Run Command path below; it fixes the origin to the CosmaNeura repo,
-uses SSH over the NSG-permitted port 443, checks out the exact full commit,
-disables the push URL, and deletes the private key from `/run` when done:
+managed Run Command path below; it fixes the fetch URL to the CosmaNeura repo,
+uses SSH over the NSG-permitted port 443 for one full (non-lazy) authenticated
+fetch, removes the remote, checks out the exact commit with all Git transports
+disabled, and deletes the private key from `/run` when done:
 
 ```text
-bash ./transport-to-protected-runner.sh stage-source \
+/bin/bash -p ./transport-to-protected-runner.sh stage-source \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --prior-source-sha CURRENT_ACCEPTED_RELEASE_A_COMMIT \
   --deploy-key /protected/ephemeral/github-readonly-deploy-key \
   --known-hosts /protected/ephemeral/github-known-hosts
 ```
+
+Omit `--prior-source-sha` only for the first source ever staged on an empty
+runner or an idempotent reread of that exact staged commit. When any different
+source is already present, the runner requires the exact prior SHA, verifies
+that it is clean, verifies the candidate is its descendant with a different
+Git tree, strips any legacy remote from the prior checkout, and retains both
+full object stores for recovery.
 
 Remove the public deploy key from GitHub immediately after this command
 succeeds. Never reuse it and never grant write access. For each stage, prepare
@@ -408,20 +454,27 @@ an Azure managed Run Command **protected parameter**. The controller builds an
 `@file` ARM request so secret values do not enter shell process arguments or
 Azure command output:
 
-```text
-bash ./transport-to-protected-runner.sh stage-vars \
-  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
-  --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
-  --stage foundation \
-  --var-file /protected/ephemeral/foundation.tfvars.json
+`RELEASE_ID_FROM_SEALED_TRANSITION_PLAN` below is a placeholder, not a literal
+release ID. Replace it with the exact lowercase value in the private transition
+plan (the current controller derives `initial-beta-<seven-hex-source-label>`),
+and use that same value for every later operation in the release. Any later
+example that displays `initial-beta` is shorthand for this exact bound value,
+not permission to change it.
 
-bash ./transport-to-protected-runner.sh plan \
+```text
+/bin/bash -p ./transport-to-protected-runner.sh stage-vars \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --stage foundation \
-  --artifact-out /protected/ephemeral/d3-beta-foundation-review.json
+  --var-file /owner-private/environment/foundation-<BASE_SHA>.tfvars.json
+
+/bin/bash -p ./transport-to-protected-runner.sh plan \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
+  --stage foundation \
+  --artifact-out /owner-private/environment/d3-beta-foundation-review-<BASE_SHA>.json
 ```
 
 The binary plan, tfvars, logs, and backend data stay on the root-owned,
@@ -442,33 +495,61 @@ foundation reconciliation path. It initializes with Azure AD only, forces
 rejects any managed plan action other than `create`. It performs Azure reads
 and a Terraform plan when the authorized
 human runs it; it is not a static/offline check. Do not bypass it with a
-handwritten backend file. After reviewing its sanitized manifest, create a
-private approval file that binds the named reviewer and evidence reference to
-the exact hash:
-
-```json
-{
-  "schema_version": 1,
-  "plan_sha256": "REVIEWED_64_HEX_HASH",
-  "state_lineage": null,
-  "state_serial": null,
-  "reviewer": "NAMED_HUMAN",
-  "review_reference": "APPROVAL_RECORD"
-}
-```
-
-Apply only through the corresponding protected transport. The approval file
-is itself sent as a protected parameter and the result is the only returned
-artifact:
+handwritten backend file. After reviewing its sanitized manifest, use the
+reviewed release controller to create a private content-addressed approval
+bundle. Its mode-`0700` directory name is the exact plan SHA-256 and it contains
+exactly five mode-`0600` regular files: `approval-request.json`,
+`owner-authorization.json`, `claim.json`, `source-approval.json`, and
+`manifest.json`. No standalone approval or schema-v1 `source-approval.json` is
+accepted; the private foundation controller validates the intentionally
+schema-v1 supporting records before it emits the schema-v2 source approval.
+The foundation controller is deliberately kept with the owner-private evidence,
+not in git. Use only the exact controller path and SHA-256 recorded in that
+deployment's sealed transition plan. It exposes these two non-applying steps
+(replace every placeholder with the plan's fixed private path):
 
 ```text
-bash ./transport-to-protected-runner.sh apply \
+/owner-private/environment/post_capacity_foundation_transition_<BASE_SHA>.py \
+  prepare-foundation-plan-request \
+  --review /owner-private/environment/d3-beta-foundation-review-<BASE_SHA>.json \
+  --tfvars /owner-private/environment/foundation-<BASE_SHA>.tfvars.json \
+  --readiness /owner-private/environment/post-capacity-readiness/<READINESS_SHA256>.json \
+  --capacity-resolution /owner-private/environment/capacity-resolutions/<RESOLUTION_SHA256>.json \
+  --capacity-execution /owner-private/capacity/azure-capacity-request-<BASE_SHA>.execution.json \
+  --package /owner-private/environment/foundation-packages/<READINESS_SHA256>
+
+# A named owner reviews the printed request and supplies its exact, unexpired
+# authorization at the path prescribed by the sealed transition plan.
+/owner-private/environment/post_capacity_foundation_transition_<BASE_SHA>.py \
+  materialize-apply-bundle \
+  --review /owner-private/environment/d3-beta-foundation-review-<BASE_SHA>.json \
+  --tfvars /owner-private/environment/foundation-<BASE_SHA>.tfvars.json \
+  --readiness /owner-private/environment/post-capacity-readiness/<READINESS_SHA256>.json \
+  --capacity-resolution /owner-private/environment/capacity-resolutions/<RESOLUTION_SHA256>.json \
+  --capacity-execution /owner-private/capacity/azure-capacity-request-<BASE_SHA>.execution.json \
+  --package /owner-private/environment/foundation-packages/<READINESS_SHA256> \
+  --request /owner-private/environment/foundation-plan-approval-requests/<PLAN_SHA256>.json \
+  --authorization /owner-private/approvals/foundation-plan-<BASE_SHA>-<PLAN_SHA256>.authorization.json
+```
+
+Use the content-addressed bundle path printed by the second command for
+`--approval-bundle`, and its fixed `source-approval.json` member for
+`--approval`. The controller validates all upstream hashes and expiries,
+creates the claim atomically, writes the manifest last, and never runs apply.
+
+Apply only through the corresponding protected transport. Both the exact
+bundle and its fixed `source-approval.json` member are sent as protected
+parameters; the sanitized result is the only returned artifact:
+
+```text
+/bin/bash -p ./transport-to-protected-runner.sh apply \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --stage foundation \
-  --approval /protected/ephemeral/d3-beta-foundation-approval.json \
-  --artifact-out /protected/ephemeral/d3-beta-foundation-result.json
+  --approval-bundle /owner-private/environment/foundation-apply-authorizations/<PLAN_SHA256> \
+  --approval /owner-private/environment/foundation-apply-authorizations/<PLAN_SHA256>/source-approval.json \
+  --artifact-out /owner-private/environment/d3-beta-foundation-result-<BASE_SHA>.json
 ```
 
 After each state-changing apply, create a fresh state-generation-bound network
@@ -481,16 +562,16 @@ Trivy gates, immutable source-SHA tags, and both tag-level and manifest-digest
 write/delete locks with readback:
 
 ```text
-bash ./transport-to-protected-runner.sh probe-network \
+/bin/bash -p ./transport-to-protected-runner.sh probe-network \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
-  --artifact-out /protected/ephemeral/d3-beta-network.json
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
+  --artifact-out /owner-private/environment/d3-beta-network-<BASE_SHA>.json
 
-bash ./transport-to-protected-runner.sh build-push \
+/bin/bash -p ./transport-to-protected-runner.sh build-push \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --web-build-config /protected/ephemeral/public-web-build.json \
   --artifact-out /protected/ephemeral/d3-beta-build.json
 ```
@@ -517,11 +598,15 @@ browser build. Next push the reviewed application digest, plan the manual job
 with `enable_database_preparation_job = true`, start it once, and retain its
 sanitized successful role/migration evidence as described in
 [`docs/beta/DATABASE_PREPARATION.md`](../../docs/beta/DATABASE_PREPARATION.md).
-A human also configures production Clerk and follows
-[`docs/beta/WEB_RELEASE.md`](../../docs/beta/WEB_RELEASE.md). Only then may a
-human produce the workload plan with `deploy_workloads = true`, both immutable
-image digests, exact origin and web evidence, protected runtime URL, the
-structured database attestation, and live-runner network evidence. Do not use
+A human also creates the empty production Clerk Organization, configures the
+approved preliminary auth/Org policy, records its reviewed publishable key,
+and follows [`docs/beta/WEB_RELEASE.md`](../../docs/beta/WEB_RELEASE.md). Only
+then may a human produce the initial workload plan with
+`deploy_workloads = true`, both immutable image digests, selected custom origin
+and web evidence, protected runtime URL, the structured database attestation,
+and live-runner network evidence. Exact Clerk custom-origin/redirect and DNS
+verification follow the initial web revision and precede the separately
+approved DNS-ready workload generation. Do not use
 targeted applies, the administrator
 URL, or a mutable tag to bypass this ordering gate. The first-plan wrapper
 deliberately refuses canonical existing state. A complete foundation retry uses
@@ -531,22 +616,28 @@ pre/post-plan state lineage, serial, and hash.
 
 The production web custom domain is selected before the foundation plan because
 Clerk production cannot use the shared `azurecontainerapps.io` hostname. The
-pending exact owner decision recommends `beta.cosmaneura.com`; once accepted,
-set it in the foundation and retain it in every later tfvars object with
-`web_custom_domain_dns_ready = false`. The app-specific verification value does
-not exist before the web Container App, so custom-domain activation remains a
-two-plan workload sequence. In the first workload plan, also set
+approved named Beta Lab decision selects `beta.cosmaneura.com`; set it in the
+foundation and retain it in every later tfvars object with
+`web_custom_domain_dns_ready = false`. The reusable Terraform module permits a
+null custom domain while workloads are
+disabled, but rejects it whenever `deploy_workloads = true`. For this named
+Beta Lab deployment, the separately sealed private foundation controller also
+requires the already approved `beta.cosmaneura.com` value in the foundation
+review; that is a deployment-specific pre-foundation gate, not a generic module
+default. The app-specific verification value does not exist before the web
+Container App, so custom-domain activation remains a two-plan workload
+sequence. In the first workload plan, also set
 `web_origin = "https://beta.cosmaneura.com"`. That creates the web app but no
 domain binding; do not admit testers yet. Re-run `probe-network` for the
-resulting state, then retrieve the
-exact public DNS material through the protected runner:
+resulting state, then retrieve the exact public DNS material through the
+protected runner:
 
 ```text
-bash ./transport-to-protected-runner.sh domain-verification \
-  --bootstrap-outputs /protected/bootstrap-outputs.json \
+/bin/bash -p ./transport-to-protected-runner.sh domain-verification \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha <40-hex-reviewed-sha> \
   --release-id <immutable-release-id> \
-  --artifact-out /protected/evidence/domain-verification.json
+  --artifact-out /protected/ephemeral/domain-verification.json
 ```
 
 The mode-`0600`, self-hashed artifact exposes only the selected hostname, ACA
@@ -564,16 +655,16 @@ separately owner-authorized `stage-generation` operation with
 append-only and installs the hash-bound replacement:
 
 ```text
-bash ./transport-to-protected-runner.sh inspect-stage \
+/bin/bash -p ./transport-to-protected-runner.sh inspect-stage \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta --stage workloads \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN --stage workloads \
   --artifact-out /protected/ephemeral/workloads-generation-inspection.json
 
-bash ./transport-to-protected-runner.sh stage-generation \
+/bin/bash -p ./transport-to-protected-runner.sh stage-generation \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta --stage workloads \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN --stage workloads \
   --stage-transition-mode planned_workloads_progression \
   --approval /protected/ephemeral/workloads-generation-approval.json \
   --var-file /protected/ephemeral/workloads-dns-ready.tfvars.json \
@@ -604,17 +695,17 @@ results:
 
 ```text
 umask 077
-bash ./transport-to-protected-runner.sh stage-vars \
+/bin/bash -p ./transport-to-protected-runner.sh stage-vars \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --stage database \
   --var-file /protected/ephemeral/database.tfvars.json
 
-bash ./transport-to-protected-runner.sh plan \
+/bin/bash -p ./transport-to-protected-runner.sh plan \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --stage database \
   --artifact-out /protected/ephemeral/d3-beta-database-review.json
 ```
@@ -630,8 +721,8 @@ The wrapper generates a sanitized review artifact containing only:
 - exact add/change/destroy totals;
 - critical non-secret outputs; and
 - a strict before/after security-posture projection covering network exposure,
-  identity/RBAC scopes, retention, SKU/scale, ingress/probes, runtime mode, and
-  monitoring. Any new managed resource type fails closed until it receives an
+  identity and each RBAC scope/role/principal tuple, retention, SKU/scale,
+  ingress/probes, runtime mode, and monitoring. Any new managed resource type fails closed until it receives an
   explicit non-secret projection.
 
 Do not include unfiltered `before`, `after`, planned values, variables,
@@ -639,23 +730,91 @@ child-module values, secret URIs, clinic identifiers, or provider
 configuration. The first foundation plan must contain creates only. Any
 delete, replacement, forget action, D2 resource address, pre-existing
 synth, Track A identifier, unexpected subscription, or state lineage/serial
-change is a hard stop. After a named human reviews the manifest, create the same
-approval JSON shape with its exact `plan_sha256`, `prior_state.lineage`, and
-`prior_state.serial`, then apply that exact binary:
+change is a hard stop. The critical projection includes `location`, and the
+plan, current state, and both live resource groups must all remain exactly
+`centralus`.
+
+After a named human reviews the manifest, use the controller-produced,
+duplicate-free v2 approval. The foundation contract is
+`cosmas-os-d3-foundation-protected-apply-authorization-v2`; it binds the exact
+source SHA, release ID, `foundation` stage, plan/review/tfvars hashes, complete
+prior-state tuple, owner authorization and claim hashes, content-addressed
+bundle ID, readiness/human/cost/package/request hashes, reviewer, and exact
+`AUTHORIZE D3 FOUNDATION APPLY <plan_sha256> <review_sha256>` assertion. Its
+self-hash covers canonical JSON excluding only `evidence_payload_sha256`, and
+its effective expiry must equal the earliest owner, readiness, human-review,
+or cost expiry. Database/workload stages use the corresponding strict v2
+contract without foundation-only readiness fields. Each stage uses its own
+mode-`0700` directory named by the plan hash and the same exact five-file
+bundle shape described above. For `database` and `workloads`, create the
+non-authoritative request with the committed helper (substitute the same stage
+in every path and argument):
 
 ```text
-bash ./transport-to-protected-runner.sh apply \
+mkdir -m 0700 /protected/ephemeral/approvals
+/usr/bin/python3 -I -E -s ./later_apply_approval_bundle.py request \
+  --review /protected/ephemeral/d3-beta-database-review.json \
+  --var-file /protected/ephemeral/database.tfvars.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
+  --stage database \
+  --request-out /protected/ephemeral/database-approval-request.json
+```
+
+This command creates only a mode-`0600` `PENDING_OWNER_AUTHORIZATION` request
+and prints its exact owner assertion; it grants no authority. After reviewing
+it, the named owner separately creates a mode-`0600` authorization with exactly
+these fields: `schema_version: 2`, contract
+`cosmas-os-d3-protected-owner-authorization-v2`,
+`authorization_status: "APPROVED"`, the request's exact `source_sha`,
+`release_id`, `stage`, `plan_sha256`, `review_sha256`,
+`variable_file_sha256`, and `state`, `owner_assertion` copied exactly from
+`exact_owner_assertion`, a non-email `reviewer`, and whole-second UTC
+`approved_at`/`expires_at` values forming a live window no longer than 30
+minutes. The helper never creates this owner authorization. Claim it only once:
+
+```text
+/usr/bin/python3 -I -E -s ./later_apply_approval_bundle.py materialize \
+  --review /protected/ephemeral/d3-beta-database-review.json \
+  --var-file /protected/ephemeral/database.tfvars.json \
+  --request /protected/ephemeral/database-approval-request.json \
+  --owner-authorization /protected/ephemeral/database-owner-authorization.json \
+  --bundle-root /protected/ephemeral/approvals \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
+  --stage database
+```
+
+All inputs must be absolute owner-controlled, non-symlink, single-link
+mode-`0600` files outside the repository; their parent and bundle-root
+directories must be mode `0700`. Create the bundle root once as shown; if it
+already exists, verify its owner and exact mode rather than replacing it. The
+helper validates the review and authority, validates the staged bundle with
+`validate_apply_approval.py`, atomically reserves
+`/protected/ephemeral/approvals/<PLAN_SHA256>`, and writes its manifest last.
+Existing or interrupted output is a replay and is never
+resumed, removed, or overwritten. Use `--stage workloads` and stage-specific
+paths for the workload plan. Then apply that exact binary:
+
+```text
+/bin/bash -p ./transport-to-protected-runner.sh apply \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --stage database \
-  --approval /protected/ephemeral/d3-beta-approval.json \
+  --approval-bundle /protected/ephemeral/approvals/REVIEWED_64_HEX_PLAN_HASH \
+  --approval /protected/ephemeral/approvals/REVIEWED_64_HEX_PLAN_HASH/source-approval.json \
   --artifact-out /protected/ephemeral/d3-beta-result.json
 ```
 
-The apply wrapper rechecks the UAMI token claims, actual resource-group tags,
+The apply wrapper rechecks the UAMI token claims, actual resource-group tags
+and `centralus` location,
 Box/mode/network boundary, plan hash and action counts, and current remote-state
-lineage/serial before applying. It requires the backend lock's own saved-plan
+lineage/serial before applying. Immediately before a changing apply it creates
+an atomic, root-owned one-use attempt claim and rechecks every approval expiry.
+An interrupted or ambiguous attempt cannot reuse that claim through the
+ordinary apply path; inspect state and use the explicit recovery/reconciliation
+flow. It requires the backend lock's own saved-plan
 freshness check to pass, then records only the post-apply lineage, serial, state
 hash, plan hash, reviewer, and evidence reference. The wrappers never print raw
 plan/state JSON and categorically refuse delete/replacement plans; such a change
@@ -679,10 +838,10 @@ the same protected channel; do not use `az containerapp exec` or return raw job
 logs:
 
 ```text
-bash ./transport-to-protected-runner.sh database-prepare \
+/bin/bash -p ./transport-to-protected-runner.sh database-prepare \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --artifact-out /protected/ephemeral/d3-beta-database-attestation.json
 ```
 
@@ -691,6 +850,51 @@ server, execution ID, and one self-hashed credential-free result. Its log
 stream uses the same undocumented preview endpoints as the pinned official
 Azure CLI Container Apps extension; a live preflight failure is a hard stop.
 
+For a custom-domain release, complete both workload generations first: apply
+the staged `web_custom_domain_dns_ready = false` generation, publish and verify
+the exact DNS/Clerk records, authorize the immutable stage progression, and
+apply the final DNS-ready generation. Immediately after that final workload
+apply, run a fresh `probe-network` for its state and verify the realized
+workload before `bootstrap-identity` or any `runtime-acceptance` phase:
+
+```text
+/bin/bash -p ./transport-to-protected-runner.sh workload-verify \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
+  --artifact-out /protected/ephemeral/d3-beta-workload-verification.json
+```
+
+The sanitized workload record intentionally carries the synthetic Lab Box UUID so the
+attestation stays bound to the reviewed tenant.  It reports
+`synthetic_box_id_returned=true` and
+`person_or_patient_identifiers_returned=false`; resource IDs, hostnames, person/patient
+identifiers, response bodies, and secrets are not emitted.
+
+This read-only operation always performs fresh ARM reads and HTTPS probes; only
+`retrieve --artifact-kind workload` may reuse its most recent artifact. It
+proves the exact API, worker, and web revision/image bindings,
+managed-environment ID, Central US subnet/internal-mode/Log Analytics binding,
+complete tag set, min/max scale, the configured maximum of three retained
+inactive revisions,
+CPU/memory and Azure's CPU-derived ephemeral-storage default, command/args, runtime
+environment allowlist, Key Vault secret references, API/web/worker probe
+definitions, single-revision traffic, public API/web health, non-ingress
+healthy worker, managed identities, and source/release/state/Box binding.
+Azure's `Healthy` state for
+the sole active one-replica worker revision is the live observation that those
+private probes pass; no shell/exec access to the workload is used. It returns
+only hashes, counts, booleans, immutable digests, and the reviewed bindings in
+a self-hashed artifact. Resource IDs, hostnames, response bodies, credentials,
+and application records stay on the protected runner.
+
+The protected runner retains this attestation and revalidates its self-hash and
+exact source/release/current-state/Box/image bindings before `bootstrap-identity`
+or any `runtime-acceptance` phase. Missing, stale, or altered workload evidence
+is a hard stop. Its `completed_at` may be at most one hour old and no more than
+five minutes ahead of the runner clock; rerun `workload-verify` after any later
+workload state change or when that freshness window has elapsed.
+
 After workload apply and a fresh network probe, the first synthetic owner and
 fixed invented seed are created only by `bootstrap-identity` with a protected
 deployment envelope binding source SHA, release ID, state lineage/serial,
@@ -698,10 +902,10 @@ accepted API digest, Box, and Clerk values. Runtime database/Redis secrets are
 read inside the runner and never returned:
 
 ```text
-bash ./transport-to-protected-runner.sh bootstrap-identity \
+/bin/bash -p ./transport-to-protected-runner.sh bootstrap-identity \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --bootstrap-manifest /protected/ephemeral/beta-bootstrap-envelope.json \
   --artifact-out /protected/ephemeral/d3-beta-identity-bootstrap.json
 ```
@@ -717,29 +921,42 @@ then pass that artifact back only as a protected parameter. The signed state is
 bounded to 16 KiB and expires after four hours:
 
 ```text
-bash ./transport-to-protected-runner.sh runtime-acceptance \
+/bin/bash -p ./transport-to-protected-runner.sh runtime-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --acceptance-phase runtime \
   --artifact-out /protected/ephemeral/runtime-acceptance.json
 
-bash ./transport-to-protected-runner.sh runtime-acceptance \
+/bin/bash -p ./transport-to-protected-runner.sh runtime-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --acceptance-phase workflow-baseline \
   --artifact-out /protected/ephemeral/workflow-baseline.json
 
 # After the named human completes the reviewed browser approval:
-bash ./transport-to-protected-runner.sh runtime-acceptance \
+/bin/bash -p ./transport-to-protected-runner.sh runtime-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --acceptance-phase workflow-verify \
   --acceptance-state /protected/ephemeral/workflow-baseline.json \
   --artifact-out /protected/ephemeral/workflow-verified.json
+
+/bin/bash -p ./transport-to-protected-runner.sh runtime-acceptance \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
+  --acceptance-phase audit-replay \
+  --artifact-out /protected/ephemeral/audit-replay.json
 ```
+
+Run `audit-replay` only after the workflow verification has produced the one
+expected successful synthetic operation. It replays that ticket's audit
+timeline through the application service, proves ordered open/approve/succeed
+events and denial from an alternate Box, and returns counts and booleans only;
+row identifiers, audit details, payloads, and other content are not exported.
 
 Use the analogous `purge-setup` then `purge-verify` phases for the owner-
 authorized physical-purge check. The proof means that no exact-key current
@@ -760,10 +977,10 @@ have left the runner. If a send becomes ambiguous, inspect the current intent
 without repeating the POST:
 
 ```text
-bash ./transport-to-protected-runner.sh alert-delivery \
+/bin/bash -p ./transport-to-protected-runner.sh alert-delivery \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --alert-phase inspect-intent \
   --artifact-out /protected/ephemeral/alert-send-intent.json
 ```
@@ -783,7 +1000,7 @@ mode-`0600` JSON outside the repository and rerun `send` with
   "confirmation": "AUTHORIZE D3 ALERT RETRY AFTER AMBIGUOUS SEND PRIOR_INTENT_SHA256",
   "approved_at": "2026-09-03T16:00:00Z",
   "source_sha": "FULL_REVIEWED_GIT_COMMIT",
-  "release_id": "initial-beta",
+  "release_id": "RELEASE_ID_FROM_SEALED_TRANSITION_PLAN",
   "state": {
     "lineage": "TERRAFORM_STATE_LINEAGE_UUID",
     "serial": 1,
@@ -795,10 +1012,10 @@ mode-`0600` JSON outside the repository and rerun `send` with
 ```
 
 ```text
-bash ./transport-to-protected-runner.sh alert-delivery \
+/bin/bash -p ./transport-to-protected-runner.sh alert-delivery \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --alert-phase send \
   --alert-retry-approval /protected/ephemeral/alert-retry-approval.json \
   --artifact-out /protected/ephemeral/alert-send-retry.json
@@ -821,17 +1038,17 @@ hours of the exact send and returns hashes of the assertion/reference, never the
 recipient address:
 
 ```text
-bash ./transport-to-protected-runner.sh alert-delivery \
+/bin/bash -p ./transport-to-protected-runner.sh alert-delivery \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --alert-phase send \
   --artifact-out /protected/ephemeral/alert-send.json
 
-bash ./transport-to-protected-runner.sh alert-delivery \
+/bin/bash -p ./transport-to-protected-runner.sh alert-delivery \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --alert-phase confirm \
   --alert-test-state /protected/ephemeral/alert-send.json \
   --delivery-confirmation-reference /protected/ephemeral/alert-owner-confirmation.txt \
@@ -840,9 +1057,11 @@ bash ./transport-to-protected-runner.sh alert-delivery \
 
 Immutable release recovery is a two-phase live test with a distinct owner
 authorization for each mutation. It cannot run until **two distinct releases**
-have each been staged and built by this protected runner; both API digests and
-both web digests must be different, scan-clean, and locked against tag and
-manifest writes/deletes. Put the rollback authorization in a mode-`0600` file
+have each been staged and built by this protected runner. Release B must be a
+Git descendant of Release A and have a different Git tree. The four digests
+(A API, A web, B API, and B web) must be pairwise distinct, scan-clean, and
+locked against tag and manifest writes/deletes; reusing a digest across roles
+or releases is rejected. Put the rollback authorization in a mode-`0600` file
 outside the repository using the real values from the two sanitized build
 artifacts:
 
@@ -897,10 +1116,12 @@ rejects replay of an older superseded authorization. The runner accepts only
 the current and prior ACR locks and build evidence, preserves the non-image
 Container App configuration, proves the 100%-to-latest route, API `/ready`, web
 `/healthz`, and the worker's healthy ready revision, then requires a final
-refresh-backed Terraform plan with zero managed changes:
+refresh-backed Terraform plan with zero managed changes. Both sanitized
+recovery attestations also carry the verified A/B tree hashes, ancestry result,
+and four-digest-distinct result:
 
 ```text
-bash ./transport-to-protected-runner.sh release-rollback \
+/bin/bash -p ./transport-to-protected-runner.sh release-rollback \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha CURRENT_40_HEX_SHA \
   --release-id current-release \
@@ -909,7 +1130,7 @@ bash ./transport-to-protected-runner.sh release-rollback \
   --approval /protected/ephemeral/release-rollback-approval.json \
   --artifact-out /protected/ephemeral/release-rollback.json
 
-bash ./transport-to-protected-runner.sh release-forward \
+/bin/bash -p ./transport-to-protected-runner.sh release-forward \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha CURRENT_40_HEX_SHA \
   --release-id current-release \
@@ -927,7 +1148,7 @@ the repository contains exactly `schema_version: 1`, contract
 whole-second UTC `approved_at` and non-email `reviewer_reference`:
 
 ```text
-bash ./transport-to-protected-runner.sh offboarding-acceptance \
+/bin/bash -p ./transport-to-protected-runner.sh offboarding-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha CURRENT_40_HEX_SHA \
   --release-id current-release \
@@ -953,7 +1174,7 @@ all three booleans `clerk_organization_membership_removed`,
 `clerk_sessions_revoked`, and `live_access_denied` set to `true`. Then run:
 
 ```text
-bash ./transport-to-protected-runner.sh offboarding-acceptance \
+/bin/bash -p ./transport-to-protected-runner.sh offboarding-acceptance \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha CURRENT_40_HEX_SHA \
   --release-id current-release \
@@ -976,17 +1197,17 @@ quiet-window start. Wait at least five minutes, then select a restore timestamp
 inside the returned window:
 
 ```text
-bash ./transport-to-protected-runner.sh pitr-freeze \
+/bin/bash -p ./transport-to-protected-runner.sh pitr-freeze \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --quiet-window-end-utc 2026-09-03T18:30:00Z \
   --artifact-out /protected/ephemeral/pitr-freeze.json
 
-bash ./transport-to-protected-runner.sh pitr-manifest \
+/bin/bash -p ./transport-to-protected-runner.sh pitr-manifest \
   --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
-  --release-id initial-beta \
+  --release-id RELEASE_ID_FROM_SEALED_TRANSITION_PLAN \
   --restore-time-utc 2026-09-03T16:00:00Z \
   --preparer-reference /protected/ephemeral/pitr-manifest-preparer.txt \
   --artifact-out /protected/ephemeral/pitr-manifest.json
@@ -1003,7 +1224,15 @@ cryptographic human identity proof. Use that same approval for `pitr-start`,
 repeat `pitr-complete` while its sanitized status is `restore_pending` or
 `cleanup_pending`, and use `pitr-cleanup` after any interrupted/failed run. The
 private manifest, state, credentials, and restored server ID never leave the
-runner. Writers remain stopped until a terminal `verified` or `cleaned` record
+runner. A terminal `pitr-complete` record reports timestamp-bound measured RTO
+(first restore-start attempt to first observed `Ready`) and measured RPO
+(`max(0, write-freeze start - selected restore point)`), together with all four
+sanitized timestamps. The ready timestamp is sampled from the current UTC clock
+only after the exact target passes a live `Ready` poll, so readiness-polling
+time is included in RTO. The enforced post-freeze restore point and equal F1-F4
+fingerprints make the demonstrated synthetic-cycle RPO zero; the reported RTO
+is an observed upper bound at polling precision. Writers remain stopped until
+a terminal `verified` or `cleaned` record
 exists; then `pitr-resume` requires a separate mode-`0600` owner assertion with
 exact keys `schema_version: 1`, the freeze artifact's
 `freeze_evidence_sha256`, literal `confirmation: "RESUME D3 WRITERS"`,
@@ -1017,8 +1246,8 @@ After a completed PITR cycle, another cycle requires both a new source SHA and a
 new release ID because immutable build evidence is keyed by source SHA and bound
 to one release ID. If the controller loses connectivity after dispatch, use
 `retrieve` for the
-exact review/result/network/build/database/runtime/alert/PITR/recovery/
-offboarding/identity artifact; phase-specific artifacts require their exact
+exact review/result/network/build/database/workload/runtime/alert/PITR/
+recovery/offboarding/identity artifact; phase-specific artifacts require their exact
 phase selector. Use
 `cleanup-commands` only after it proves every exact `cosmas-d3-*` command on
 the protected VM is terminal; it deletes stale Run Command resources without

@@ -1,6 +1,8 @@
 # D3 isolated early-adopter beta readiness
 
-Status as of 2026-09-03: **SYNTHETIC LAB PATH APPROVED / LOCAL SOURCE GATES COMPLETE / RELEASE SHA AND CI BINDING REQUIRED / NOT DEPLOYED / D3 NOT COMPLETE**.
+Status as of 2026-09-04: **SYNTHETIC LAB PATH APPROVED / ISOLATED
+BOOTSTRAP AND PROTECTED RUNNER PRESENT / CURRENT WORKTREE GATES PASS / RELEASE
+SHA AND CI BINDING REQUIRED / APPLICATION NOT DEPLOYED / D3 NOT COMPLETE**.
 
 The owner authorized D3 planning and implementation with the exact gate
 `APPROVE D3 ISOLATED EARLY-ADOPTER BETA`. `DL-20260903-04` then selected the
@@ -8,20 +10,23 @@ first D3 slice: a strictly non-PHI **Cosmas Beta Lab** for the owner and invited
 outside testers. That decision removes the named-clinic and BAA prerequisites
 only from this synthetic path; it does not authorize PHI or a clinic deployment.
 
-**PHI is NOT AUTHORIZED. All live connectors are DARK.** No D3 Azure resources
-exist, and `cosmaneura-os-synth` must not be promoted in place. D3 requires a
-new resource group, identity, state boundary, logical Box, and data boundary.
+**PHI is NOT AUTHORIZED. All live connectors are DARK.** The isolated D3
+bootstrap/state boundary and protected runner exist. The application
+foundation, database-preparation job, workloads, custom-domain binding, and
+production Clerk instance do not. `cosmaneura-os-synth` must not be promoted in
+place or used as a D3 dependency.
 
-The complete local `./scripts/d3-self-test.sh` gate passed on 2026-09-03 with
-**209 Python** and **32 web** tests, bootstrap OpenTofu **6/6**, environment
-OpenTofu **32/32**, and clean deployment-guard, Bash-syntax, and ShellCheck
-results. Focused PITR/recovery/offboarding suites passed **31/31**. The
-protected-runner payload measured **61,132 / 65,536 bytes**. Final local
-Linux/amd64 API and web builds succeeded, current-database Trivy scans found
-**0 fixable HIGH/CRITICAL findings**, and the final source audit found no code
-blocker. These are local source results only. Any deployable release must use a
-committed SHA with green GitHub CI and bind that exact SHA in its external,
-protected release record. There is no live Azure or production Clerk evidence.
+The complete local `./scripts/d3-self-test.sh` gate passed on 2026-09-04 with
+**447 Python** and **32 web** tests, bootstrap OpenTofu **6/6**, environment
+OpenTofu **35/35**, clean deployment guards, and successful local Linux/amd64
+API and web builds. Ruff, Pyright, Bash syntax, ShellCheck, formatting, and diff
+integrity also pass. The latest current-database Trivy scans found **0 fixable
+HIGH/CRITICAL findings**, and independent adversarial reviews found no open
+P0-P2 source defect. These are worktree-local results only. Any deployable
+release must use a committed SHA with green GitHub CI and bind that exact SHA
+in its external protected release record. Live bootstrap/runner evidence
+exists; application-foundation, production Clerk, workload, and acceptance
+evidence remains pending.
 
 Every deployment record must select exactly one Terraform `deployment_mode`:
 
@@ -44,51 +49,60 @@ ordinary plan from relabeling retained PHI as synthetic.
 |---|---|---|
 | Deployment mode | **`synthetic_lab` APPROVED** | Record `synthetic_lab`; any later `authorized_beta` plan requires a new reviewed evidence set |
 | Legal name of first early-adopter clinic | **NOT REQUIRED FOR `synthetic_lab`; BLOCKED FOR `authorized_beta`** | Human-confirmed legal organization name, kept out of public resource names |
-| Dedicated Box identity | **PENDING GENERATION AND OWNER REVIEW** | Human-approved Box UUID and proof that one production Clerk Organization maps to one logical Box |
+| Dedicated Box identity | **ASSIGNED IN PROTECTED BOOTSTRAP EVIDENCE** | Exact UUID remains private; live production Clerk Organization-to-Box binding proof is still required |
 | BAA and PHI authorization prerequisites | **NOT REQUIRED FOR `synthetic_lab`; BLOCKED FOR `authorized_beta`** | Human/legal BAA confirmation plus a separate PHI release authorization for the PHI-capable mode |
-| Clerk application and Organization | **DEVELOPMENT STRUCTURE CREATED / PRODUCTION PENDING FOUNDATION** | Separate Cosmas OS development app and zero-member Beta Lab Org exist; after the foundation exposes the exact web origin, recreate the empty production Org and prove its Box binding before workloads |
-| Beta web host and exact origin | **SOURCE IMPLEMENTED / FOUNDATION OUTPUT PENDING** | Foundation-derived ACA HTTPS origin, production Clerk configuration, reviewed web digest, and human release evidence |
+| Clerk application and Organization | **DEVELOPMENT STRUCTURE CREATED / PRODUCTION POLICY CHOSEN, EXECUTION PENDING** | The dedicated hostname and strict production auth/Org policy are accepted inputs. After foundation-derived API/default-host evidence, create the empty production app/Org and use its publishable key for the initial web build; verify final custom-origin/redirect configuration before the DNS-ready workload promotion and any tester admission |
+| Beta web host and exact origin | **`beta.cosmaneura.com` ACCEPTED / FOUNDATION OUTPUT PENDING** | Foundation-derived API/default-host evidence, production Clerk configuration, reviewed web digest, DNS/certificate proof, and human release evidence |
 | Human deployer | **PENDING HUMAN RECORD** | Named accountable human, exact deployment identity, plan-bound approval records, and execution evidence |
-| Region and data residency | **CENTRAL US PROVISIONAL / OWNER APPROVAL PENDING** | Human approval after the recorded availability, residency, latency, and current cost review |
+| Region and data residency | **CENTRAL US ACCEPTED / LIVE CAPACITY BLOCKED** | The synthetic-lab operating choice is accepted; fresh evidence still shows Container Apps quota below requirement and Managed Redis `Balanced_B0` unavailable until the named capacity requests resolve |
 | Celery broker | **SOURCE SELECTED / DEPLOYMENT EVIDENCE REQUIRED** | Private Azure Managed Redis `Balanced_B0`, two-node HA, TLS, `NoCluster`, `NoEviction`, one-second AOF; refresh Central US availability, quota, and price before plan |
-| Network and operator access | **SOURCE IMPLEMENTED / LIVE PROOF PENDING** | Approved CIDRs and egress policy, protected-runner plan/apply evidence, then exact private DNS and endpoint reachability evidence from that runner |
+| Network and operator access | **BOOTSTRAP RUNNER PRESENT / FOUNDATION NETWORK PROOF PENDING** | The protected runner boundary exists; refresh its preflight before every operation, then prove exact private DNS and endpoint reachability after the foundation |
 | Database preparation | **SOURCE IMPLEMENTED / LIVE ATTESTATION PENDING** | Run the manual digest-pinned in-network job and keep workloads disabled until its structured `database_preparation_attestation` and the separate `runner_live_network_evidence_reference` are recorded |
-| RTO, RPO, retention, and purge | **BLOCKED / REQUIRED** | Clinic/owner-approved targets that determine HA, backup, and retention SKUs |
-| Monthly cost and alert posture | **PLANNING RANGE RECORDED / OWNER APPROVAL PENDING** | Approximately $170–260/month at low traffic without credits, plus a proposed $350 aggregate alert across both D3 resource groups; the alert is not a spending cap |
-| Support envelope | **BLOCKED / REQUIRED** | Named support owner, escalation route, and tester-support expectations |
+| RTO, RPO, retention, and purge | **BEST-EFFORT SYNTHETIC POLICY ACCEPTED / LIVE EXERCISES PENDING** | No quantified SLA; exact backup, PITR, purge, rollback, and forward-recovery acceptance remains mandatory before testers |
+| Monthly cost and alert posture | **OPERATING CHOICE ACCEPTED / EXACT-PLAN REFRESH AND RECIPIENT PENDING** | Approximately $170–260/month at low traffic without credits and a $350 aggregate notification alert across both D3 resource groups; the alert is not a spending cap |
+| Support envelope | **BEST-EFFORT POLICY ACCEPTED / PRIVATE OWNER AND ROUTE PENDING** | Record the accountable human and private escalation route before tester admission |
 
-Until the inputs that apply to the selected mode are recorded, work is limited
-to code, templates, synthetic tests, and read-only reconnaissance. A
-`synthetic_lab` deployment may proceed without inventing clinic or BAA evidence,
-but its fixtures and user-entered content must never contain real clinic
-identifiers, patient data, or production exports. Credentials and vendor tokens
-remain outside the repository and human-controlled.
+The bootstrap already ran under its consumed exact-plan approval. Until each
+remaining stage's inputs and exact authority are recorded, no capacity request,
+foundation, production Clerk, DNS, database, workload, or tester-admission
+mutation may proceed. Source work, synthetic tests, and read-only
+reconnaissance may continue. A `synthetic_lab` deployment does not require
+invented clinic or BAA evidence, but its fixtures and user-entered content must
+never contain real clinic identifiers, patient data, or production exports.
+Credentials and vendor tokens remain outside the repository and
+human-controlled.
 
 ## Remaining staged approvals
 
-The D3 phase and `synthetic_lab` mode are already authorized. They do not
-replace the human review that binds each irreversible cloud step to its exact
-saved plan or release evidence:
+The D3 phase and `synthetic_lab` mode are already authorized. The exact
+bootstrap plan was separately approved and applied; its one-use approval is
+consumed, and the isolated state/runner boundary is present. Those completed
+steps do not replace the human review that binds each remaining irreversible
+cloud step to its exact saved plan or release evidence:
 
 1. **Release eligibility:** select a committed SHA from the locally verified
    source, require green GitHub CI, and bind that exact SHA in the external
    protected release record. This step does not create D3 cloud resources.
-2. **Bootstrap apply:** review and approve the exact bootstrap plan/review
-   hashes, full source SHA, dedicated Box UUID, two new D3 resource-group
-   names, Central US decision, private-registry posture, protected deployer,
-   and the proposed $350 combined alert and human-owned recipient.
-3. **Foundation apply:** separately approve the exact create-only environment
+2. **Azure capacity:** approve and submit only the two named support requests,
+   then wait for fresh proof of at least four Container Apps sandbox cores and
+   stable Managed Redis `Balanced_B0` availability in Central US.
+3. **Foundation apply:** after capacity and refreshed cost evidence, separately
+   approve the exact create-only environment
    plan. It must leave the database-preparation job and all workloads disabled.
-4. **Identity and release preparation:** use the foundation-derived origins to
-   configure the production Cosmas OS Clerk instance and empty Beta Lab Org;
+4. **Identity and release preparation:** use the selected dedicated hostname
+   and foundation-derived API/default-host evidence to configure the
+   preliminary production Cosmas OS Clerk instance and empty Beta Lab Org;
    build, scan, push, and record the immutable API/worker and web digests.
 5. **Database preparation:** approve the exact subsequent plan, run the
    unscheduled job once, and review the structured
    `database_preparation_attestation` plus protected-runner live-network
    evidence.
-6. **Workload apply:** approve the exact saved workload plan and its current
-   state lineage/serial, image digests, web release evidence, capability
-   manifest hash, database attestation, and live-network evidence.
+6. **Workload and domain progression:** approve the exact initial workload
+   plan and its current state lineage/serial, image digests, web release
+   evidence, capability-manifest hash, database attestation, and live-network
+   evidence. After that web revision yields exact domain-verification material,
+   verify DNS and Clerk origin/redirect configuration, then separately approve
+   the DNS-ready workload generation.
 7. **Tester admission:** invite nobody until synthetic login/authority,
    readiness, audit/purge, restore, rollback, drift, monitoring, and
    offboarding evidence has been reviewed by the accountable human.
@@ -120,10 +134,19 @@ Subscription and tenant IDs are intentionally omitted here.
   additionally maps it to the approved clinic. Do not reuse or modify similarly
   named non-OS resources elsewhere in the subscription.
 
-### Provisional region and capacity
+### Accepted region and unresolved capacity
 
-**Central US is provisional only.** It is not a final residency or deployment
-decision.
+**Central US is the accepted single-region choice for this synthetic lab.** It
+is a resource-placement decision, not a legal-residency determination or a
+capacity guarantee. The refreshed 2026-09-04 monitor is fail-closed:
+
+- Container Apps `SandboxCores` is **1**, below the required **4**;
+- stable and preview catalogs do not advertise Managed Redis `Balanced_B0` in
+  Central US; and
+- neither of the two exact named capacity requests has been submitted.
+
+The observations below are earlier selection evidence, not proof that the
+current capacity gate is satisfied:
 
 - East US currently advertises Container Apps, Redis, ACR, Key Vault, Storage,
   and Log Analytics, but PostgreSQL Flexible Server reports provisioning
@@ -158,11 +181,12 @@ Read-only private-link discovery exposed these service subresources:
 | Key Vault | `vault` | `privatelink.vaultcore.azure.net` |
 | Storage | `blob` and other account services | `privatelink.blob.core.windows.net` for Blob |
 
-The current D2 Basic ACR exposed no private-link resource. The recommended D3
-posture is Premium/private ACR with Private Link, but the source requires an
-explicit choice; a lower-cost Basic/public exception is accepted only for
-`synthetic_lab` with an explicit human-reviewed risk reference. The final
-posture, routing, and cost evidence remain **REQUIRED** before a plan or apply.
+The current D2 Basic ACR exposed no private-link resource. The accepted D3
+posture is Premium/private ACR with Private Link. The source also supports a
+lower-cost Basic/public exception only for a separately reviewed
+`synthetic_lab` choice; it is not selected for this deployment. Live routing
+and refreshed exact-plan cost evidence remain **REQUIRED** before foundation
+approval.
 
 ## D3 cost posture and D2 shaping reference
 

@@ -1,7 +1,7 @@
 # Clerk setup and identity migration plan
 
-Status: **DEVELOPMENT STRUCTURE CREATED / PRODUCTION DOMAIN BLOCKED**
-Last reviewed: 2026-09-03
+Status: **DEVELOPMENT STRUCTURE CREATED / PRODUCTION HOSTNAME AND POLICY ACCEPTED / EXECUTION PENDING**
+Last reviewed: 2026-09-04
 
 This plan keeps Cosmas OS identity independent from MyCatholicDoctor while
 allowing selected people to enroll in both products. `DL-20260903-05`
@@ -13,16 +13,17 @@ Current non-secret state: the Cosmas OS development instance is B2B,
 email-verification-code, invite-only, Organization membership is required,
 users cannot create Organizations, and the session token includes audience
 `cosmas-os-beta-api`. The zero-member Cosmas Beta Lab Organization exists. The
-production instance is not created because Clerk requires an application domain
-owned by CosmaNeura; the shared `azurecontainerapps.io` hostname is not an
-acceptable production domain. The recommended D3 hostname is
-`beta.cosmaneura.com`. It must first be accepted in the exact owner decision
-package and selected in the foundation inputs. The custom-domain path then uses
-an initial workload plan and a separate DNS-ready binding plan so Azure can
-expose the app-specific DNS verification value before Terraform attempts the
-binding.
+production instance is not created. The accepted D3 hostname is
+`beta.cosmaneura.com`; the shared `azurecontainerapps.io` hostname is not an
+acceptable production domain. The accepted authentication and Organization
+policy is bounded input only: exact policy-package acceptance, fresh feature
+eligibility, foundation-derived host evidence, and separate one-use execution
+authority remain required before production mutation. The custom-domain path
+uses an initial workload plan and a separate DNS-ready binding plan so Azure
+can expose the app-specific DNS verification value before Terraform attempts
+the binding.
 
-## Recommended topology
+## Accepted initial topology
 
 1. Create a separate Clerk application named **Cosmas OS**. Do not reuse the
    MyCatholicDoctor application, keys, sessions, webhooks, or custom domain.
@@ -30,15 +31,14 @@ binding.
    data. Use its Production instance for external beta users from the first
    beta invitation; Clerk does not transfer users from Development to
    Production.
-3. Once the pending exact owner decision is accepted, give the production
-   instance the dedicated `beta.cosmaneura.com` application origin. Do not
+3. Use the accepted dedicated `beta.cosmaneura.com` application origin. Do not
    allow wildcard, shared `azurecontainerapps.io`, preview, or Track
-   A/MyCatholicDoctor origins.
-4. The pending decision package should disable open self-signup for D3 and
-   require a named human to create each Organization and send reviewed
-   invitations. Its recommended authentication policy is verified email, TOTP,
-   and recovery codes, with SMS disabled as an authentication or recovery
-   factor.
+   A/MyCatholicDoctor origins. Final origin and redirect verification follows
+   the initial web revision and exact DNS evidence.
+4. Disable open self-signup for D3 and require a named human to create each
+   Organization and send reviewed invitations. The accepted initial
+   authentication policy is verified email, TOTP, and recovery codes, with SMS
+   disabled as an authentication or recovery factor.
 5. For the approved first slice, create one synthetic-only **Cosmas Beta Lab**
    Organization and map it to exactly one Cosmas `box_id`. Never derive
    authority from email domain or public metadata.
@@ -49,7 +49,7 @@ Each D3 deployment is dedicated to one Organization/Box. Supporting more than
 one Organization in a deployment remains a later packing and tenancy decision,
 not an invitation shortcut.
 
-## Recommended first launch
+## Accepted first-launch model
 
 Use one Cosmas OS Production application with Organizations enabled, then keep
 the first two cohorts distinct:
@@ -69,31 +69,31 @@ the Cosmas binding.
 ## Human Clerk console checklist
 
 1. The separate **Cosmas OS** development application now exists in the
-   company-owned Clerk account. Activate its Production instance only after the
-   pending exact owner decision accepting `beta.cosmaneura.com` and the
-   authentication policy is recorded in the foundation inputs, and before
-   inviting anyone.
-2. Configure a dedicated Cosmas sign-in domain, the exact
-   `https://beta.cosmaneura.com` application origin, and exact redirect URLs. Do
-   not add wildcards, `azurecontainerapps.io`, or MyCatholicDoctor origins.
-3. After that decision is accepted, enable Organizations and
-   restricted/invitation-only enrollment. Require a verified email, TOTP, and
+   company-owned Clerk account. Activate its Production instance only after
+   exact policy-package acceptance, fresh feature eligibility, and the required
+   foundation-derived evidence. Do not invite anyone during setup.
+2. Before the initial workload, enable Organizations and
+   restricted/invitation-only enrollment. Require verified email, TOTP, and
    recovery codes; disable SMS; do not use email-domain matching as
-   authorization.
-4. Create the synthetic-only **Cosmas Beta Lab** Organization for unaffiliated
-   testers. Create a separate Organization only when a real practice and Box
-   have been approved.
-5. Add the custom session-token claim `aud: "cosmas-os-beta-api"` (or another
-   human-approved exact audience) and keep all clinic/patient data out of token
-   claims and Clerk metadata.
-6. Invite the first owner through the Clerk Dashboard. A human then records the
+   authorization. Create an empty synthetic-only **Cosmas Beta Lab**
+   Organization and record its protected Box mapping.
+3. Add the custom session-token claim `aud: "cosmas-os-beta-api"` and keep all
+   clinic/patient data out of token claims and Clerk metadata. Record only the
+   publishable key needed for the reviewed web build.
+4. After the initial web revision yields protected CNAME/`asuid` evidence,
+   independently verify those exact DNS records and Azure certificate state,
+   then configure and read back the exact `https://beta.cosmaneura.com` origin
+   and redirects. Do not add wildcards, `azurecontainerapps.io`, or
+   MyCatholicDoctor/Track A origins.
+5. Invite the first owner through the Clerk Dashboard only after the DNS-ready
+   workload and origin readback succeed. A human then records the
    resulting user subject, Organization ID, issuer, and matching Cosmas Box in
    the protected bootstrap manifest outside this repository.
-7. Inject runtime configuration through the approved secret/configuration path.
+6. Inject runtime configuration through the approved secret/configuration path.
    Do not commit Clerk values. Token verification uses the public JWKS and does
    not require a Clerk Secret Key; keep any future invitation API or webhook
    secrets in Key Vault.
-8. Test sign-in, Organization switching, denied Org access, offboarding, and
+7. Test sign-in, Organization switching, denied Org access, offboarding, and
    session revocation with invented data before any clinic-data authorization.
 
 For the required production web hostname, follow the staged sequence in
