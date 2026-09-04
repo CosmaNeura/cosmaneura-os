@@ -807,6 +807,26 @@ run "rejects_non_lowercase_custom_domain" {
   expect_failures = [var.web_custom_domain]
 }
 
+run "rejects_shared_azure_container_apps_custom_domain" {
+  command = plan
+
+  variables {
+    web_custom_domain = "borrowed.example.azurecontainerapps.io"
+  }
+
+  expect_failures = [var.web_custom_domain]
+}
+
+run "rejects_exact_azure_container_apps_domain" {
+  command = plan
+
+  variables {
+    web_custom_domain = "azurecontainerapps.io"
+  }
+
+  expect_failures = [var.web_custom_domain]
+}
+
 run "workloads_reject_missing_alert_contact" {
   command = plan
 

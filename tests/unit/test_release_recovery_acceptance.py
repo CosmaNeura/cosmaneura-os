@@ -163,7 +163,24 @@ class FakeRunner:
         return CommandResult(0, "")
 
 
-def _environment(tmp_path: Path, operation: str) -> dict[str, str]:
+class FailingPatchRunner(FakeRunner):
+    def __init__(self) -> None:
+        super().__init__()
+        self.fail_patches = False
+
+    def run(self, argv: list[str] | tuple[str, ...]) -> CommandResult:
+        if self.fail_patches and argv[0] == "az" and argv[3] == "patch":
+            return CommandResult(1, "", "simulated failure")
+        return super().run(argv)
+
+
+def _environment(
+    tmp_path: Path,
+    operation: str,
+    *,
+    approval_sha256: str = "5" * 64,
+    rollback_state_sha256: str | None = None,
+) -> dict[str, str]:
     tmp_path.chmod(0o700)
     return {
         "COSMAS_RECOVERY_OPERATION": operation,
@@ -183,11 +200,15 @@ def _environment(tmp_path: Path, operation: str) -> dict[str, str]:
         "COSMAS_RECOVERY_PRIOR_RELEASE_ID": "prior-release",
         "COSMAS_RECOVERY_PRIOR_API_DIGEST": PRIOR_API,
         "COSMAS_RECOVERY_PRIOR_WEB_DIGEST": PRIOR_WEB,
-        "COSMAS_RECOVERY_APPROVAL_SHA256": "5" * 64,
+        "COSMAS_RECOVERY_APPROVAL_SHA256": approval_sha256,
         "COSMAS_RECOVERY_STATE_PATH": str(tmp_path / "state.private.json"),
         "COSMAS_RECOVERY_POLL_ATTEMPTS": "1",
         "COSMAS_RECOVERY_POLL_INTERVAL_SECONDS": "0",
-    }
+    } | (
+        {"COSMAS_RECOVERY_ROLLBACK_STATE_SHA256": rollback_state_sha256}
+        if rollback_state_sha256 is not None
+        else {}
+    )
 
 
 def test_exact_digest_rollback_then_forward_is_resumable(tmp_path: Path) -> None:
@@ -200,12 +221,18 @@ def test_exact_digest_rollback_then_forward_is_resumable(tmp_path: Path) -> None
     assert set(rollback["result_revision_ids"]) == {"api", "worker", "web"}
     assert all("@sha256:" in image for image in runner.patch_images)
 
-    forward = run_recovery(Config.from_environment(_environment(tmp_path, "forward")), runner, now=now)
+    forward_environment = _environment(
+        tmp_path,
+        "forward",
+        approval_sha256="6" * 64,
+        rollback_state_sha256=rollback["state_sha256"],
+    )
+    forward = run_recovery(Config.from_environment(forward_environment), runner, now=now)
     assert forward["status"] == "forward_restored_healthy"
     assert forward["configuration_unchanged_except_exact_digest"] is True
     assert len(runner.patch_images) == 6
 
-    repeated = run_recovery(Config.from_environment(_environment(tmp_path, "forward")), runner, now=now)
+    repeated = run_recovery(Config.from_environment(forward_environment), runner, now=now)
     assert repeated["status"] == "forward_restored_healthy"
     assert len(runner.patch_images) == 6
 
@@ -226,10 +253,22 @@ def test_forward_rejects_configuration_drift(tmp_path: Path) -> None:
     runner = FakeRunner()
     now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
     run_recovery(Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now)
+    state = json.loads((tmp_path / "state.private.json").read_text(encoding="utf-8"))
     runner.apps["api"]["properties"]["configuration"]["ingress"]["targetPort"] = 9999
 
     with pytest.raises(RecoveryError):
-        run_recovery(Config.from_environment(_environment(tmp_path, "forward")), runner, now=now)
+        run_recovery(
+            Config.from_environment(
+                _environment(
+                    tmp_path,
+                    "forward",
+                    approval_sha256="6" * 64,
+                    rollback_state_sha256=state["state_sha256"],
+                )
+            ),
+            runner,
+            now=now,
+        )
 
 
 def test_forward_rejects_tampered_private_state(tmp_path: Path) -> None:
@@ -243,4 +282,151 @@ def test_forward_rejects_tampered_private_state(tmp_path: Path) -> None:
     config.state_path.chmod(0o600)
 
     with pytest.raises(RecoveryError, match="state invalid"):
-        run_recovery(Config.from_environment(_environment(tmp_path, "forward")), runner, now=now)
+        run_recovery(
+            Config.from_environment(
+                _environment(
+                    tmp_path,
+                    "forward",
+                    approval_sha256="6" * 64,
+                    rollback_state_sha256=state["state_sha256"],
+                )
+            ),
+            runner,
+            now=now,
+        )
+
+
+def test_forward_requires_distinct_authorization_bound_to_exact_rollback_state(
+    tmp_path: Path,
+) -> None:
+    runner = FakeRunner()
+    now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+    rollback = run_recovery(
+        Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now
+    )
+
+    with pytest.raises(RecoveryError, match="configuration invalid"):
+        Config.from_environment(_environment(tmp_path, "forward"))
+
+    wrong_state = _environment(
+        tmp_path,
+        "forward",
+        approval_sha256="6" * 64,
+        rollback_state_sha256="7" * 64,
+    )
+    with pytest.raises(RecoveryError, match="different rollback state"):
+        run_recovery(Config.from_environment(wrong_state), runner, now=now)
+
+    correct = _environment(
+        tmp_path,
+        "forward",
+        approval_sha256="6" * 64,
+        rollback_state_sha256=rollback["state_sha256"],
+    )
+    evidence = run_recovery(Config.from_environment(correct), runner, now=now)
+    assert evidence["approval_sha256"] == "6" * 64
+    assert evidence["rollback_state_sha256"] == rollback["state_sha256"]
+
+
+def test_partial_forward_accepts_fresh_authorization_for_same_rollback_checkpoint(
+    tmp_path: Path,
+) -> None:
+    runner = FailingPatchRunner()
+    now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+    rollback = run_recovery(
+        Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now
+    )
+    first = _environment(
+        tmp_path,
+        "forward",
+        approval_sha256="6" * 64,
+        rollback_state_sha256=rollback["state_sha256"],
+    )
+    runner.fail_patches = True
+    with pytest.raises(RecoveryError, match="update failed"):
+        run_recovery(Config.from_environment(first), runner, now=now)
+
+    state_path = tmp_path / "state.private.json"
+    interrupted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert interrupted["phase"] == "forward_requested"
+    assert [item["approval_sha256"] for item in interrupted["forward_authorizations"]] == [
+        "6" * 64
+    ]
+
+    runner.fail_patches = False
+    fresh = _environment(
+        tmp_path,
+        "forward",
+        approval_sha256="7" * 64,
+        rollback_state_sha256=rollback["state_sha256"],
+    )
+    evidence = run_recovery(Config.from_environment(fresh), runner, now=now)
+    assert evidence["status"] == "forward_restored_healthy"
+    completed = json.loads(state_path.read_text(encoding="utf-8"))
+    assert [item["approval_sha256"] for item in completed["forward_authorizations"]] == [
+        "6" * 64,
+        "7" * 64,
+    ]
+
+
+def test_completed_forward_accepts_fresh_authorization_if_wrapper_evidence_was_lost(
+    tmp_path: Path,
+) -> None:
+    runner = FakeRunner()
+    now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+    rollback = run_recovery(
+        Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now
+    )
+    first = _environment(
+        tmp_path,
+        "forward",
+        approval_sha256="6" * 64,
+        rollback_state_sha256=rollback["state_sha256"],
+    )
+    run_recovery(Config.from_environment(first), runner, now=now)
+    patch_count = len(runner.patch_images)
+
+    fresh = _environment(
+        tmp_path,
+        "forward",
+        approval_sha256="7" * 64,
+        rollback_state_sha256=rollback["state_sha256"],
+    )
+    evidence = run_recovery(Config.from_environment(fresh), runner, now=now)
+    assert evidence["approval_sha256"] == "7" * 64
+    assert len(runner.patch_images) == patch_count
+
+
+def test_partial_and_completed_rollback_accept_fresh_authorization(
+    tmp_path: Path,
+) -> None:
+    runner = FailingPatchRunner()
+    now = datetime(2026, 9, 3, 12, 0, tzinfo=UTC)
+    runner.fail_patches = True
+    with pytest.raises(RecoveryError, match="update failed"):
+        run_recovery(
+            Config.from_environment(_environment(tmp_path, "rollback")), runner, now=now
+        )
+    interrupted = json.loads(
+        (tmp_path / "state.private.json").read_text(encoding="utf-8")
+    )
+    assert interrupted["phase"] == "rollback_requested"
+
+    runner.fail_patches = False
+    second = _environment(tmp_path, "rollback", approval_sha256="6" * 64)
+    evidence = run_recovery(Config.from_environment(second), runner, now=now)
+    assert evidence["approval_sha256"] == "6" * 64
+
+    patch_count = len(runner.patch_images)
+    third = _environment(tmp_path, "rollback", approval_sha256="7" * 64)
+    repeated = run_recovery(Config.from_environment(third), runner, now=now)
+    assert repeated["approval_sha256"] == "7" * 64
+    assert len(runner.patch_images) == patch_count
+    completed = json.loads(
+        (tmp_path / "state.private.json").read_text(encoding="utf-8")
+    )
+    assert [item["approval_sha256"] for item in completed["rollback_authorizations"]] == [
+        "5" * 64,
+        "6" * 64,
+        "7" * 64,
+    ]

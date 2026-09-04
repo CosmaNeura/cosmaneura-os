@@ -65,6 +65,10 @@ below that can exist before the foundation is complete:
       the instance is TLS-only, `NoCluster`, `NoEviction`, AOF-persistent, and
       public-network-disabled.
 - [ ] Network/CIDR/private DNS/egress/operator-access design is approved.
+- [ ] The exact owner decision accepts a dedicated production web hostname and
+      Clerk authentication policy before foundation planning. The recommended
+      package is `beta.cosmaneura.com`, verified email + TOTP + recovery codes,
+      SMS disabled, and no wildcard/shared `azurecontainerapps.io` origin.
 - [ ] RTO/RPO, backup, retention, purge, monitoring, and support ownership are
       approved.
 - [ ] The current **$170–260/month low-traffic planning envelope** is refreshed
@@ -79,7 +83,9 @@ below that can exist before the foundation is complete:
 
 Before the **workload apply**, the human must additionally stop unless:
 
-- [ ] The foundation-derived `web_origin` and `api_origin` are recorded.
+- [ ] The foundation-derived dedicated `web_origin` and `api_origin` are
+      recorded; production Clerk does not use the shared
+      `azurecontainerapps.io` web hostname.
 - [ ] The production Cosmas OS Clerk instance and empty production Cosmas Beta
       Lab Organization are configured for that exact origin and map to the
       dedicated Box.
@@ -129,7 +135,7 @@ Record these non-secret facts:
 | Runner toolchain | **REQUIRED; exact Azure CLI, Docker 29, Docker Buildx 0.30.1, Git, and jq apt versions plus checksum-pinned OpenTofu/Trivy recorded by `prepare-protected-runner.sh`** |
 | Immutable API/worker and web image digests | **API/worker digest required for database preparation; both required before `deploy_workloads=true`; `sha256`, never `latest`** |
 | Web release evidence | **REQUIRED before workloads; source SHA, derived API/web origins, production Clerk publishable configuration, scan, and rollback digests** |
-| Optional custom-domain evidence | **If selected: protected self-hashed hostname/CNAME/asuid artifact bound to exact source, release, and post-apply state; external DNS and Clerk verification remain human steps** |
+| Production custom-domain evidence | **REQUIRED for production Clerk: protected self-hashed hostname/CNAME/asuid artifact bound to exact source, release, and post-initial-workload state; external DNS and Clerk verification remain human steps** |
 | Human deploy identity and scoped-role review | **REQUIRED** |
 
 Save any plan and state only in an approved encrypted/private location with

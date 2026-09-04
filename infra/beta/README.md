@@ -529,12 +529,16 @@ the ordinary subsequent/no-op drift path; an interrupted partial foundation
 uses the explicit `foundation_reconcile` phase. Both bind the backend and
 pre/post-plan state lineage, serial, and hash.
 
-The optional web custom domain is a two-plan workload stage because the
-app-specific verification value does not exist before the web Container App.
-In the first plan, select a new lowercase `web_custom_domain`, keep
-`web_custom_domain_dns_ready = false`, and set `web_origin` to the matching
-HTTPS origin. That creates the web app but no domain binding; do not admit
-testers yet. Re-run `probe-network` for the resulting state, then retrieve the
+The production web custom domain is selected before the foundation plan because
+Clerk production cannot use the shared `azurecontainerapps.io` hostname. The
+pending exact owner decision recommends `beta.cosmaneura.com`; once accepted,
+set it in the foundation and retain it in every later tfvars object with
+`web_custom_domain_dns_ready = false`. The app-specific verification value does
+not exist before the web Container App, so custom-domain activation remains a
+two-plan workload sequence. In the first workload plan, also set
+`web_origin = "https://beta.cosmaneura.com"`. That creates the web app but no
+domain binding; do not admit testers yet. Re-run `probe-network` for the
+resulting state, then retrieve the
 exact public DNS material through the protected runner:
 
 ```text
@@ -550,10 +554,40 @@ CNAME target, `asuid` TXT name/value, and its exact source/release/state
 binding. The TXT value is public DNS publication material, not an application
 credential; the raw Terraform output and all unrelated state remain on the
 runner. A human then creates and externally verifies those exact records in
-the Cloudflare-hosted zone and adds the exact origin/redirects to Clerk. A
-second state-bound plan may set `web_custom_domain_dns_ready = true` and create
-the managed-certificate binding. Terraform neither selects nor mutates public
-DNS, and it explicitly refuses the existing `app.cosmaneura.com`,
+the Cloudflare-hosted zone and adds the exact origin/redirects to Clerk. Before
+the second plan, create replacement workload tfvars that change only
+`web_custom_domain_dns_ready` from `false` to `true` and replace
+`runner_live_network_evidence_reference` with the fresh post-workload probe.
+Use `inspect-stage` to obtain the exact current artifact inventory, then the
+separately owner-authorized `stage-generation` operation with
+`planned_workloads_progression`; it archives the applied workload generation
+append-only and installs the hash-bound replacement:
+
+```text
+bash ./transport-to-protected-runner.sh inspect-stage \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id initial-beta --stage workloads \
+  --artifact-out /protected/ephemeral/workloads-generation-inspection.json
+
+bash ./transport-to-protected-runner.sh stage-generation \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id initial-beta --stage workloads \
+  --stage-transition-mode planned_workloads_progression \
+  --approval /protected/ephemeral/workloads-generation-approval.json \
+  --var-file /protected/ephemeral/workloads-dns-ready.tfvars.json \
+  --artifact-out /protected/ephemeral/workloads-generation-transition.json
+```
+
+The approval uses contract `cosmas-os-d3-stage-generation-approval-v1`, exact
+confirmation `AUTHORIZE D3 IMMUTABLE STAGE GENERATION TRANSITION`, the exact
+source/release/stage/mode and inspection `current_artifacts`, the replacement
+tfvars SHA-256, a whole-second UTC `approved_at`, and non-email reviewer/reason
+references. It is valid for four hours. Then run the ordinary workload
+plan/review/approval/apply sequence; the resulting state-bound plan may create
+only the managed-certificate binding. Terraform neither selects nor mutates
+public DNS, and it explicitly refuses the existing `app.cosmaneura.com`,
 `staging-app.cosmaneura.com`, `chat.cosmaneura.com`, and
 `staging-chat.cosmaneura.com` hosts. AzureRM 4.81 requires the managed-certificate
 binding's `certificate_binding_type` and
@@ -626,6 +660,19 @@ freshness check to pass, then records only the post-apply lineage, serial, state
 hash, plan hash, reviewer, and evidence reference. The wrappers never print raw
 plan/state JSON and categorically refuse delete/replacement plans; such a change
 requires a separate reviewed recovery procedure and code change.
+
+If an immutable stage generation is abandoned before a successful
+`result.json` exists, do not delete or overwrite its tfvars, plan, review,
+approval, or private apply material. Run `inspect-stage`, construct the same
+exact stage-generation approval described above with
+`transition_mode = "abandoned_retry"` and the replacement tfvars hash, then
+run `stage-generation --stage-transition-mode abandoned_retry`. The runner
+revalidates the replacement with the same stage-specific network, build, and
+database-attestation guards used by `stage-vars`, moves the entire old stage
+directory into append-only history, and installs the authorized replacement.
+The abandoned mode refuses any generation containing a successful result;
+only the narrowly constrained workload DNS progression mode may advance an
+already-applied generation.
 
 After applying the database stage, start and attest the unscheduled job through
 the same protected channel; do not use `az containerapp exec` or return raw job
@@ -706,6 +753,65 @@ exact email-only Action Group and both enabled API/worker replica alerts, then
 calls Azure's Action Group test API without putting the recipient address in an
 argument or returned evidence. It returns an unpredictable confirmation
 challenge, the exact send timestamp, and a hash of the Azure test operation.
+Before the external POST, the runner durably publishes a deterministic,
+exclusive send intent. That intent serializes concurrent commands and prevents
+an automatic duplicate email if the VM or command dies after request bytes may
+have left the runner. If a send becomes ambiguous, inspect the current intent
+without repeating the POST:
+
+```text
+bash ./transport-to-protected-runner.sh alert-delivery \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id initial-beta \
+  --alert-phase inspect-intent \
+  --artifact-out /protected/ephemeral/alert-send-intent.json
+```
+
+The sanitized inspection artifact returns the exact `intent_sha256`, a hash of
+the Azure client request ID, whether completed send evidence resolved the
+intent, and—only when unresolved—the exact required confirmation phrase. It
+never returns the recipient address or raw request ID. To authorize one
+possible duplicate after confirming that recovery is appropriate, place this
+mode-`0600` JSON outside the repository and rerun `send` with
+`--alert-retry-approval PATH`:
+
+```json
+{
+  "schema_version": 1,
+  "contract": "cosmas-os-d3-alert-ambiguous-retry-approval-v1",
+  "confirmation": "AUTHORIZE D3 ALERT RETRY AFTER AMBIGUOUS SEND PRIOR_INTENT_SHA256",
+  "approved_at": "2026-09-03T16:00:00Z",
+  "source_sha": "FULL_REVIEWED_GIT_COMMIT",
+  "release_id": "initial-beta",
+  "state": {
+    "lineage": "TERRAFORM_STATE_LINEAGE_UUID",
+    "serial": 1,
+    "sha256": "CURRENT_TERRAFORM_STATE_SHA256"
+  },
+  "prior_intent_sha256": "PRIOR_INTENT_SHA256",
+  "reviewer_reference": "owner-ledger:ambiguous-alert-retry-001"
+}
+```
+
+```text
+bash ./transport-to-protected-runner.sh alert-delivery \
+  --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+  --source-sha FULL_REVIEWED_GIT_COMMIT \
+  --release-id initial-beta \
+  --alert-phase send \
+  --alert-retry-approval /protected/ephemeral/alert-retry-approval.json \
+  --artifact-out /protected/ephemeral/alert-send-retry.json
+```
+
+The approval is valid for four hours, binds the exact unresolved intent and
+current protected state, and creates a new append-only intent that explicitly
+supersedes the prior one. Supplying it when there is no matching unresolved
+intent fails closed. Azure does not document an idempotency/readback guarantee
+for this test endpoint, so the recovery deliberately requires the owner to
+authorize the possibility of one duplicate email; it does not claim exactly-once
+delivery.
+
 The owner records receipt in a mode-`0600` JSON assertion containing exactly
 `schema_version`, the returned `challenge` and `send_evidence_sha256`, a
 whole-second UTC `confirmed_at`, the literal assertion
@@ -732,18 +838,19 @@ bash ./transport-to-protected-runner.sh alert-delivery \
   --artifact-out /protected/ephemeral/alert-confirmed.json
 ```
 
-Immutable release recovery is a separately owner-approved, two-phase live
-test. It cannot run until **two distinct releases** have each been staged and
-built by this protected runner; both API digests and both web digests must be
-different, scan-clean, and locked against tag and manifest writes/deletes. Put
-the following exact object in a mode-`0600` file outside the repository (using
-the real values from the two sanitized build artifacts):
+Immutable release recovery is a two-phase live test with a distinct owner
+authorization for each mutation. It cannot run until **two distinct releases**
+have each been staged and built by this protected runner; both API digests and
+both web digests must be different, scan-clean, and locked against tag and
+manifest writes/deletes. Put the rollback authorization in a mode-`0600` file
+outside the repository using the real values from the two sanitized build
+artifacts:
 
 ```json
 {
   "schema_version": 1,
-  "contract": "cosmas-os-d3-release-recovery-approval-v1",
-  "confirmation": "AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK AND FORWARD RECOVERY",
+  "contract": "cosmas-os-d3-release-rollback-approval-v1",
+  "confirmation": "AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK",
   "approved_at": "2026-09-03T16:00:00Z",
   "reviewer_reference": "owner-ledger:release-recovery-001",
   "current": {
@@ -761,10 +868,32 @@ the real values from the two sanitized build artifacts):
 }
 ```
 
-Run rollback, review its exact revision IDs and health evidence, and then run
-forward immediately with the same approval. `release-forward` is also the
-recovery command after an interrupted or unhealthy partial rollback. The
-runner accepts only `registry/repository@sha256:...` image references, verifies
+Run rollback and review its exact revision IDs, health evidence,
+`evidence_payload_sha256`, and `recovery_state_sha256`. Only then create a
+fresh mode-`0600` forward authorization with the same `current` and `prior`
+objects plus these exact rollback bindings:
+
+```json
+{
+  "schema_version": 1,
+  "contract": "cosmas-os-d3-release-forward-approval-v1",
+  "confirmation": "AUTHORIZE D3 IMMUTABLE DIGEST FORWARD RESTORATION",
+  "approved_at": "2026-09-03T16:15:00Z",
+  "reviewer_reference": "owner-ledger:release-forward-001",
+  "rollback_evidence_sha256": "ROLLBACK_EVIDENCE_PAYLOAD_64_HEX",
+  "rollback_state_sha256": "ROLLBACK_PRIVATE_STATE_CHECKPOINT_64_HEX",
+  "current": {"source_sha": "CURRENT_40_HEX_SHA", "release_id": "current-release", "api_digest": "sha256:CURRENT_64_HEX_API_DIGEST", "web_digest": "sha256:CURRENT_64_HEX_WEB_DIGEST"},
+  "prior": {"source_sha": "PRIOR_40_HEX_SHA", "release_id": "prior-release", "api_digest": "sha256:PRIOR_64_HEX_API_DIGEST", "web_digest": "sha256:PRIOR_64_HEX_WEB_DIGEST"}
+}
+```
+
+Both authorizations expire after four hours. If either primitive completed or
+partially changed revisions but the wrapper failed before storing its
+attestation, issue a fresh phase-specific authorization against the same exact
+release pair (and, for forward, the same rollback evidence/state checkpoint).
+The private recovery state retains the authorization hashes append-only and
+rejects replay of an older superseded authorization. The runner accepts only
+`registry/repository@sha256:...` image references, verifies
 the current and prior ACR locks and build evidence, preserves the non-image
 Container App configuration, proves the 100%-to-latest route, API `/ready`, web
 `/healthz`, and the worker's healthy ready revision, then requires a final
@@ -777,7 +906,7 @@ bash ./transport-to-protected-runner.sh release-rollback \
   --release-id current-release \
   --prior-source-sha PRIOR_40_HEX_SHA \
   --prior-release-id prior-release \
-  --approval /protected/ephemeral/release-recovery-approval.json \
+  --approval /protected/ephemeral/release-rollback-approval.json \
   --artifact-out /protected/ephemeral/release-rollback.json
 
 bash ./transport-to-protected-runner.sh release-forward \
@@ -786,7 +915,7 @@ bash ./transport-to-protected-runner.sh release-forward \
   --release-id current-release \
   --prior-source-sha PRIOR_40_HEX_SHA \
   --prior-release-id prior-release \
-  --approval /protected/ephemeral/release-recovery-approval.json \
+  --approval /protected/ephemeral/release-forward-approval.json \
   --artifact-out /protected/ephemeral/release-forward.json
 ```
 
@@ -859,13 +988,18 @@ bash ./transport-to-protected-runner.sh pitr-manifest \
   --source-sha FULL_REVIEWED_GIT_COMMIT \
   --release-id initial-beta \
   --restore-time-utc 2026-09-03T16:00:00Z \
+  --preparer-reference /protected/ephemeral/pitr-manifest-preparer.txt \
   --artifact-out /protected/ephemeral/pitr-manifest.json
 ```
 
 Review the returned manifest evidence and create a distinct-owner mode-`0600`
 approval with exactly `schema_version: 1`, its `manifest_sha256`, the literal
 `confirmation: "AUTHORIZE D3 BILLABLE PITR"`, a whole-second UTC `approved_at`,
-and a non-email `reviewer_reference`. Use that same approval for `pitr-start`,
+and a non-email `reviewer_reference`. The preparer file contains one non-email
+operator-ledger reference; the runner retains it privately, returns only its
+SHA-256, and rejects a billable-operation approval whose reviewer reference is
+identical. This is an enforced separation of asserted ledger identities, not
+cryptographic human identity proof. Use that same approval for `pitr-start`,
 repeat `pitr-complete` while its sanitized status is `restore_pending` or
 `cleanup_pending`, and use `pitr-cleanup` after any interrupted/failed run. The
 private manifest, state, credentials, and restored server ID never leave the
@@ -879,7 +1013,10 @@ approval or quiet window expires, run guarded cleanup and resume explicitly;
 never leave the beta writers stopped without an operator handoff. The primitive
 contract and recovery details are in `PITR_ACCEPTANCE.md`.
 
-If the controller loses connectivity after dispatch, use `retrieve` for the
+After a completed PITR cycle, another cycle requires both a new source SHA and a
+new release ID because immutable build evidence is keyed by source SHA and bound
+to one release ID. If the controller loses connectivity after dispatch, use
+`retrieve` for the
 exact review/result/network/build/database/runtime/alert/PITR/recovery/
 offboarding/identity artifact; phase-specific artifacts require their exact
 phase selector. Use

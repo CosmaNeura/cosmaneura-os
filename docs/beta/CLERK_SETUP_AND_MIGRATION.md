@@ -13,10 +13,14 @@ Current non-secret state: the Cosmas OS development instance is B2B,
 email-verification-code, invite-only, Organization membership is required,
 users cannot create Organizations, and the session token includes audience
 `cosmas-os-beta-api`. The zero-member Cosmas Beta Lab Organization exists. The
-production instance is not created because Clerk requires the exact hosted
-application domain; no placeholder domain was supplied. The optional custom-
-domain path uses two workload plans so Azure can expose the app-specific DNS
-verification value before Terraform attempts the binding.
+production instance is not created because Clerk requires an application domain
+owned by CosmaNeura; the shared `azurecontainerapps.io` hostname is not an
+acceptable production domain. The recommended D3 hostname is
+`beta.cosmaneura.com`. It must first be accepted in the exact owner decision
+package and selected in the foundation inputs. The custom-domain path then uses
+an initial workload plan and a separate DNS-ready binding plan so Azure can
+expose the app-specific DNS verification value before Terraform attempts the
+binding.
 
 ## Recommended topology
 
@@ -26,11 +30,15 @@ verification value before Terraform attempts the binding.
    data. Use its Production instance for external beta users from the first
    beta invitation; Clerk does not transfer users from Development to
    Production.
-3. Give the production instance a dedicated Cosmas OS domain and exact HTTPS
-   application origin. Do not allow wildcard or preview origins.
-4. Disable open self-signup for D3. A named human creates each Organization
-   and sends reviewed invitations. Require verified email and MFA under the
-   accepted security policy.
+3. Once the pending exact owner decision is accepted, give the production
+   instance the dedicated `beta.cosmaneura.com` application origin. Do not
+   allow wildcard, shared `azurecontainerapps.io`, preview, or Track
+   A/MyCatholicDoctor origins.
+4. The pending decision package should disable open self-signup for D3 and
+   require a named human to create each Organization and send reviewed
+   invitations. Its recommended authentication policy is verified email, TOTP,
+   and recovery codes, with SMS disabled as an authentication or recovery
+   factor.
 5. For the approved first slice, create one synthetic-only **Cosmas Beta Lab**
    Organization and map it to exactly one Cosmas `box_id`. Never derive
    authority from email domain or public metadata.
@@ -62,12 +70,16 @@ the Cosmas binding.
 
 1. The separate **Cosmas OS** development application now exists in the
    company-owned Clerk account. Activate its Production instance only after the
-   exact hosted application domain exists, and before inviting anyone.
-2. Configure a dedicated Cosmas sign-in domain, exact HTTPS application origin,
-   and exact redirect URLs. Do not add wildcards or MyCatholicDoctor origins.
-3. Enable Organizations and restricted/invitation-only enrollment. Require a
-   verified email and the approved MFA method; do not use email-domain matching
-   as authorization.
+   pending exact owner decision accepting `beta.cosmaneura.com` and the
+   authentication policy is recorded in the foundation inputs, and before
+   inviting anyone.
+2. Configure a dedicated Cosmas sign-in domain, the exact
+   `https://beta.cosmaneura.com` application origin, and exact redirect URLs. Do
+   not add wildcards, `azurecontainerapps.io`, or MyCatholicDoctor origins.
+3. After that decision is accepted, enable Organizations and
+   restricted/invitation-only enrollment. Require a verified email, TOTP, and
+   recovery codes; disable SMS; do not use email-domain matching as
+   authorization.
 4. Create the synthetic-only **Cosmas Beta Lab** Organization for unaffiliated
    testers. Create a separate Organization only when a real practice and Box
    have been approved.
@@ -84,8 +96,9 @@ the Cosmas binding.
 8. Test sign-in, Organization switching, denied Org access, offboarding, and
    session revocation with invented data before any clinic-data authorization.
 
-If a custom web hostname is desired, follow the staged sequence in
-[`WEB_RELEASE.md`](WEB_RELEASE.md): create the web app with the selected custom
+For the required production web hostname, follow the staged sequence in
+[`WEB_RELEASE.md`](WEB_RELEASE.md): select `beta.cosmaneura.com` in the
+foundation, then create the web app with that custom
 origin but the DNS-ready gate off, publish and verify the exact CNAME and
 `asuid` TXT records in Cloudflare, update Clerk with the exact custom HTTPS
 origin/redirects, and only then enable the binding gate. Do not admit testers

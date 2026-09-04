@@ -90,6 +90,7 @@ class Config:
     current: Release
     prior: Release
     approval_sha256: str
+    rollback_state_sha256: str | None
     state_path: Path
     poll_attempts: int
     poll_interval_seconds: int
@@ -114,6 +115,9 @@ class Config:
         api_ready_url = required("COSMAS_RECOVERY_API_READY_URL")
         web_health_url = required("COSMAS_RECOVERY_WEB_HEALTH_URL")
         approval_sha256 = required("COSMAS_RECOVERY_APPROVAL_SHA256")
+        rollback_state_sha256 = environment.get(
+            "COSMAS_RECOVERY_ROLLBACK_STATE_SHA256", ""
+        )
         state_path = Path(required("COSMAS_RECOVERY_STATE_PATH"))
 
         current = Release(
@@ -135,6 +139,14 @@ class Config:
             or not _BETA_ID.fullmatch(beta_id)
             or not _REGISTRY.fullmatch(registry)
             or not _SHA256.fullmatch(approval_sha256)
+            or (
+                operation == "rollback"
+                and rollback_state_sha256 != ""
+            )
+            or (
+                operation == "forward"
+                and not _SHA256.fullmatch(rollback_state_sha256)
+            )
             or not state_path.is_absolute()
             or current.source_sha == prior.source_sha
             or current.release_id == prior.release_id
@@ -183,6 +195,9 @@ class Config:
             current=current,
             prior=prior,
             approval_sha256=approval_sha256,
+            rollback_state_sha256=(
+                rollback_state_sha256 if operation == "forward" else None
+            ),
             state_path=state_path,
             poll_attempts=attempts,
             poll_interval_seconds=interval,
@@ -313,7 +328,6 @@ def _binding(config: Config) -> dict[str, Any]:
         "web_health_url": config.web_health_url,
         "current": vars(config.current),
         "prior": vars(config.prior),
-        "approval_sha256": config.approval_sha256,
     }
 
 
@@ -643,6 +657,10 @@ def _new_state(config: Config, baseline: dict[str, Any], now: datetime) -> dict[
         "phase": "rollback_requested",
         "created_at": _timestamp(now),
         "binding": _binding(config),
+        "rollback_authorizations": [
+            {"approval_sha256": config.approval_sha256},
+        ],
+        "forward_authorizations": [],
         "baseline": baseline,
         "rollback": None,
         "forward": None,
@@ -666,6 +684,17 @@ def run_recovery(
             state = _new_state(config, baseline, now)
             _save_state(config, state)
             state = _read_state(config)
+        rollback_authorization = {"approval_sha256": config.approval_sha256}
+        rollback_authorizations = state.get("rollback_authorizations")
+        if not isinstance(rollback_authorizations, list) or not rollback_authorizations:
+            raise RecoveryError("release rollback authorization history invalid")
+        if rollback_authorization in rollback_authorizations:
+            if rollback_authorizations[-1] != rollback_authorization:
+                raise RecoveryError("stale release rollback authorization replayed")
+        else:
+            rollback_authorizations.append(rollback_authorization)
+            _save_state(config, state)
+            state = _read_state(config)
         baseline_hashes = state["baseline"]["configuration_sha256"]
         result = _transition(config, runner, config.current, config.prior, baseline_hashes)
         state["phase"] = "rolled_back"
@@ -675,15 +704,50 @@ def run_recovery(
     else:
         state = _read_state(config)
         if state.get("phase") not in {
-            "rollback_requested",
             "rolled_back",
             "forward_requested",
             "forwarded",
         }:
             raise RecoveryError("release recovery phase invalid")
+        if not isinstance(state.get("rollback"), dict):
+            raise RecoveryError("release rollback state incomplete")
+        forward_authorization = {
+            "approval_sha256": config.approval_sha256,
+            "rollback_state_sha256": config.rollback_state_sha256,
+        }
+        forward_authorization_changed = False
+        if state.get("phase") == "rolled_back":
+            if not hmac.compare_digest(
+                str(state.get("state_sha256", "")),
+                str(config.rollback_state_sha256),
+            ):
+                raise RecoveryError("forward authorization targets a different rollback state")
+            state["forward_authorizations"] = [forward_authorization]
+            forward_authorization_changed = True
+        else:
+            authorizations = state.get("forward_authorizations")
+            if (
+                not isinstance(authorizations, list)
+                or not authorizations
+                or any(
+                    not isinstance(item, dict)
+                    or item.get("rollback_state_sha256")
+                    != config.rollback_state_sha256
+                    for item in authorizations
+                )
+            ):
+                raise RecoveryError("release forward authorization history invalid")
+            if forward_authorization in authorizations:
+                if authorizations[-1] != forward_authorization:
+                    raise RecoveryError("stale release forward authorization replayed")
+            else:
+                authorizations.append(forward_authorization)
+                forward_authorization_changed = True
         baseline_hashes = state["baseline"]["configuration_sha256"]
         if state.get("phase") != "forwarded":
             state["phase"] = "forward_requested"
+            forward_authorization_changed = True
+        if forward_authorization_changed:
             _save_state(config, state)
         result = _transition(config, runner, config.prior, config.current, baseline_hashes)
         state["phase"] = "forwarded"
@@ -701,6 +765,11 @@ def run_recovery(
         "current": vars(config.current),
         "prior": vars(config.prior),
         "approval_sha256": config.approval_sha256,
+        "rollback_state_sha256": (
+            config.rollback_state_sha256
+            if config.operation == "forward"
+            else saved["state_sha256"]
+        ),
         "baseline_revision_ids": saved["baseline"]["revision_ids"],
         "result_revision_ids": result["revision_ids"],
         "route_binding_verified": result["routes_verified"],

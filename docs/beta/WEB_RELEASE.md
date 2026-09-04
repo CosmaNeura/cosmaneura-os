@@ -13,13 +13,19 @@ hosting, identity, state, or domain.
 - Azure Container Apps provides the public HTTPS certificates and external
   origins. Plain HTTP is disabled for both web and API ingress.
 - The foundation creates the Container Apps environment while
-  `deploy_workloads=false`. Its `web_origin` and `api_origin` outputs reserve
-  the exact deterministic hostnames before either workload exists.
+  `deploy_workloads=false`. For production Clerk, the recommended pending owner
+  decision selects `web_custom_domain = "beta.cosmaneura.com"` with
+  `web_custom_domain_dns_ready = false`; once accepted, its `web_origin` and
+  `api_origin` outputs reserve the final owned web origin and deterministic API
+  hostname before either workload exists.
 - The human must configure the production Cosmas OS Clerk instance for that
   exact `web_origin`. The workload plan refuses any different approved origin.
 - The API derives `CORS_ALLOWED_ORIGINS` and `CLERK_AUTHORIZED_PARTIES` from
   the same Terraform origin; wildcard or caller-selected origins are not used.
-- `web_custom_domain` is optional and null by default. Terraform rejects
+- `web_custom_domain` remains nullable for non-production validation, but D3
+  production Clerk must use the dedicated hostname accepted by the exact owner
+  decision; the current recommendation is `beta.cosmaneura.com`. It cannot use
+  the shared `azurecontainerapps.io` default. Terraform rejects
   uppercase/invalid hostnames and explicitly refuses the existing
   `app.cosmaneura.com`, `staging-app.cosmaneura.com`, `chat.cosmaneura.com`,
   and `staging-chat.cosmaneura.com` names. This stack does
@@ -49,7 +55,10 @@ session token is unavailable.
 
 ## Human-owned release sequence
 
-1. Apply only the reviewed foundation plan with `deploy_workloads=false`.
+1. After the pending exact owner decision accepts the hostname, apply only the
+   reviewed foundation plan with `deploy_workloads=false`,
+   `web_custom_domain="beta.cosmaneura.com"`, and
+   `web_custom_domain_dns_ready=false`.
 2. Run the protected `probe-network` operation and record the non-secret
    `public_configuration.web_origin`, `public_configuration.api_origin`, and
    `public_configuration.acr_login_server` values from its validated,
@@ -91,19 +100,21 @@ session token is unavailable.
    login, required Beta Lab Organization membership, exact-origin CORS, and
    authenticated API access using invented data only.
 
-## Optional custom-domain stage
+## Required production custom-domain stage
 
 A managed-certificate custom domain uses two reviewed workload plans because
 Azure exposes the app-specific domain-verification value only after the web
 Container App exists.
 
-1. A human chooses a new lowercase hostname. Do not use or modify the existing
-   `app.cosmaneura.com`, `staging-app.cosmaneura.com`, `chat.cosmaneura.com`,
-   or `staging-chat.cosmaneura.com` records.
-2. In the initial workload plan, set `web_custom_domain = "<hostname>"`, keep
+1. The exact owner decision package selects `beta.cosmaneura.com` before the
+   foundation plan. Do not use or modify the existing `app.cosmaneura.com`,
+   `staging-app.cosmaneura.com`, `chat.cosmaneura.com`, or
+   `staging-chat.cosmaneura.com` records.
+2. Retain `web_custom_domain = "beta.cosmaneura.com"`, keep
    `web_custom_domain_dns_ready = false`, and set
-   `web_origin = "https://<hostname>"`. This creates the app without claiming
-   the custom-domain binding is ready. Do not admit testers during this stage.
+   `web_origin = "https://beta.cosmaneura.com"` in the initial workload plan.
+   This creates the app without claiming the custom-domain binding is ready. Do
+   not admit testers during this stage.
 3. Re-run the protected `probe-network` operation for the post-apply state,
    then run `transport-to-protected-runner.sh domain-verification` with the
    exact source SHA and release ID. Its mode-`0600`, self-hashed artifact
@@ -115,9 +126,15 @@ Container App exists.
 4. Verify both records externally, wait for propagation, and configure the
    production Cosmas OS Clerk application with the exact custom HTTPS origin
    and redirect URLs. Keep wildcard origins disabled.
-5. Create and review a second plan that changes only the expected state-bound
-   fields and sets `web_custom_domain_dns_ready = true`. That flag creates the
-   custom-domain binding and requests an Azure managed certificate.
+5. Run the protected `inspect-stage` operation for `workloads`. Prepare a new
+   mode-`0600` workload tfvars file that changes only
+   `web_custom_domain_dns_ready` from `false` to `true` and replaces
+   `runner_live_network_evidence_reference` with the fresh post-apply probe.
+   Have the owner approve the exact current artifact inventory and replacement
+   tfvars hash, then run `stage-generation` with transition mode
+   `planned_workloads_progression`. This archives the first successful stage
+   generation instead of overwriting it. Create and review the second plan
+   from the newly staged variables. Any other tfvars change fails closed.
 6. Apply only that reviewed plan, then verify the managed certificate, HTTPS,
    `/healthz`, Clerk login/redirects, exact-origin CORS, and authenticated API
    access. Record evidence without storing session tokens or user data.

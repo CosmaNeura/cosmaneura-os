@@ -26,7 +26,7 @@ that review invalidates the prior manifest reference.
 | Data | **Invented data only** | `synthetic_lab`; PHI, real clinic data, and production exports prohibited |
 | Identity topology | **Separate Cosmas OS Clerk application and one Beta Lab Organization mapped to one Box** | `DL-20260903-04` and `DL-20260903-05` |
 | Development Clerk state | **CONFIGURED** | B2B, email verification code, invite-only, Organizations required, user-created Organizations disabled, audience `cosmas-os-beta-api`; zero members |
-| Production Clerk state | **PENDING FOUNDATION-DERIVED WEB ORIGIN** | No production Organization, tester invitation, or placeholder domain |
+| Production Clerk state | **PENDING EXACT OWNER DECISION AND FOUNDATION-DERIVED WEB ORIGIN** | Recommended package: `beta.cosmaneura.com`, verified email + TOTP + recovery codes, SMS disabled, no wildcard/shared ACA origin; no production Organization or tester invitation yet |
 | MyCatholicDoctor users | **NO TRANSFER / NO SHARED SESSION** | Direct re-invitation may be reviewed later; bulk migration remains separately gated |
 | Mobile | **SCHEDULED AFTER BROWSER D3, BEFORE D4; NOT AUTHORIZED TO BUILD/UPLOAD HERE** | `DL-20260903-06` |
 | Track A | **OUT OF SCOPE / UNTOUCHED** | No shared state, identity, database, storage, credential, or direct call |
@@ -48,7 +48,8 @@ that review invalidates the prior manifest reference.
 | Deployable source revision | **REQUIRED PER RELEASE — exact committed SHA with green GitHub CI and external protected-record binding** |
 | API/worker image digest | **PENDING PROTECTED-RUNNER BUILD, SCAN, PUSH, AND READBACK** |
 | Web image digest | **PENDING EXACT-ORIGIN/PRODUCTION-CLERK BUILD, SCAN, PUSH, AND READBACK** |
-| API and web origins | **PENDING FOUNDATION OUTPUTS** |
+| Dedicated production web hostname | **PENDING EXACT OWNER DECISION — `beta.cosmaneura.com` RECOMMENDED** |
+| API and web origins | **PENDING FOUNDATION OUTPUTS; production web origin must use the accepted dedicated hostname** |
 | Named human deployer | **PENDING HUMAN RECORD** |
 | Capability manifest binding | **REQUIRED PER DEPLOYABLE RELEASE — exact committed SHA plus external SHA-256 evidence record** |
 
@@ -123,6 +124,10 @@ acceptance evidence do not exist.
 - [ ] Runtime identity has only ACR pull, secret read, and Box-container Blob
       rights; web identity has ACR pull only; database-job identity has ACR
       pull only.
+- [ ] The exact owner decision binds the dedicated production hostname and
+      authentication policy before the foundation; the recommended package is
+      `beta.cosmaneura.com`, verified email + TOTP + recovery codes, SMS
+      disabled, and no wildcard/shared `azurecontainerapps.io` origin.
 - [ ] Production Clerk issuer, JWKS, audience, authorized party, Organization,
       Box, and human-principal mapping pass positive and negative live tests.
 - [ ] The unscheduled database job emits a successful structured

@@ -12,10 +12,324 @@ die() {
   exit 1
 }
 
+fsync_path() {
+  local path="$1"
+  python3 - "$path" <<'PY'
+import os
+import sys
+
+path = sys.argv[1]
+flags = os.O_RDONLY
+if os.path.isdir(path):
+    flags |= os.O_DIRECTORY
+descriptor = os.open(path, flags)
+try:
+    os.fsync(descriptor)
+finally:
+    os.close(descriptor)
+PY
+}
+
 docker_buildx_output_matches_pin() {
   local actual_output="$1"
   local package_version="$2"
   [[ "$actual_output" == "github.com/docker/buildx 0.30.1 $package_version" ]]
+}
+
+attestation_generation_window_status() {
+  local evidence_kind="$1"
+  local evidence_file="$2"
+  local observed_at="${3:-}"
+  python3 - "$evidence_kind" "$evidence_file" "$observed_at" <<'PY'
+from datetime import UTC, datetime, timedelta
+import json
+import sys
+
+kind, evidence_path, observed_at = sys.argv[1:]
+with open(evidence_path, encoding="utf-8") as handle:
+    evidence = json.load(handle)
+
+def timestamp(value: object) -> datetime:
+    if not isinstance(value, str):
+        raise ValueError("timestamp must be a string")
+    return datetime.strptime(value, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+
+if kind == "alert-send":
+    issued = timestamp(evidence.get("completed_at"))
+    expires = issued + timedelta(hours=4)
+elif kind == "offboarding-baseline":
+    output = evidence.get("offboarding_output")
+    if not isinstance(output, dict):
+        raise ValueError("offboarding output is missing")
+    issued = timestamp(output.get("issued_at"))
+    expires = timestamp(output.get("expires_at"))
+    if expires - issued != timedelta(hours=4):
+        raise ValueError("offboarding lifetime is invalid")
+else:
+    raise ValueError("unsupported evidence kind")
+
+now = timestamp(observed_at) if observed_at else datetime.now(UTC)
+if now < issued:
+    raise ValueError("evidence was issued in the future")
+print("live" if now <= expires else "expired")
+PY
+}
+
+resolve_attestation_generation() {
+  local pointer="$1"
+  local evidence_dir="$2"
+  local evidence_label="$3"
+  local generation
+  local artifact
+  local stored_hash
+
+  [[ -d "$evidence_dir" && ! -L "$evidence_dir" ]] || die "$evidence_label directory is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$evidence_dir")" == "700" && "$(stat -c '%u' "$evidence_dir")" == "0" ]] || die "$evidence_label directory is not root-owned mode 0700"
+  [[ -f "$pointer" && ! -L "$pointer" ]] || die "$evidence_label pointer is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$pointer")" == "600" && "$(stat -c '%u' "$pointer")" == "0" ]] || die "$evidence_label pointer is not root-owned mode 0600"
+  [[ "$(wc -l <"$pointer" | tr -d ' ')" == "1" ]] || die "$evidence_label pointer is invalid"
+  generation="$(cat "$pointer")"
+  [[ "$generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "$evidence_label pointer is invalid"
+  artifact="$evidence_dir/$generation"
+  [[ -f "$artifact" && ! -L "$artifact" ]] || die "$evidence_label generation is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$artifact")" == "600" && "$(stat -c '%u' "$artifact")" == "0" ]] || die "$evidence_label generation is not root-owned mode 0600"
+  stored_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$artifact")" || die "$evidence_label generation hash is invalid"
+  [[ "$generation" == "$stored_hash.json" ]] || die "$evidence_label pointer does not match its generation hash"
+  [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$artifact" | sha256sum | awk '{print $1}')" == "$stored_hash" ]] || die "$evidence_label generation was modified"
+  printf '%s\n' "$artifact"
+}
+
+resolve_alert_send_intent_pointer() {
+  local pointer="$1"
+  local intent_dir="$2"
+  local generation
+  local intent_key
+  local artifact
+  local stored_hash
+
+  [[ -d "$intent_dir" && ! -L "$intent_dir" ]] || die "alert send-intent directory is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$intent_dir")" == "700" && "$(stat -c '%u' "$intent_dir")" == "0" ]] || die "alert send-intent directory is not root-owned mode 0700"
+  [[ -f "$pointer" && ! -L "$pointer" ]] || die "alert send-intent pointer is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$pointer")" == "600" && "$(stat -c '%u' "$pointer")" == "0" ]] || die "alert send-intent pointer is not root-owned mode 0600"
+  [[ "$(wc -l <"$pointer" | tr -d ' ')" == "1" ]] || die "alert send-intent pointer is invalid"
+  generation="$(cat "$pointer")"
+  [[ "$generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "alert send-intent pointer is invalid"
+  intent_key="${generation%.json}"
+  artifact="$intent_dir/$generation"
+  [[ -f "$artifact" && ! -L "$artifact" ]] || die "alert send-intent generation is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$artifact")" == "600" && "$(stat -c '%u' "$artifact")" == "0" ]] || die "alert send-intent generation is not root-owned mode 0600"
+  stored_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$artifact")" || die "alert send-intent generation hash is invalid"
+  [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$artifact" | sha256sum | awk '{print $1}')" == "$stored_hash" ]] || die "alert send-intent generation was modified"
+  jq -e --arg intent_key "$intent_key" '.intent_key_sha256 == $intent_key' "$artifact" >/dev/null || die "alert send-intent pointer does not match its deterministic generation key"
+  printf '%s\n' "$artifact"
+}
+
+find_reconcilable_alert_send_generation() {
+  local evidence_dir="$1"
+  local expected_source_sha="$2"
+  local expected_release_id="$3"
+  local expected_lineage="$4"
+  local expected_serial="$5"
+  local expected_state_sha256="$6"
+  local expected_action_group_id="$7"
+  local expected_api_alert_id="$8"
+  local expected_worker_alert_id="$9"
+  local observed_at="${10:-}"
+  local candidate
+  local generation
+  local stored_hash
+  local phase
+  local window_status
+  local completed_at
+  local live_generation=""
+  local live_count=0
+  local latest_expired_generation=""
+  local latest_expired_at=""
+  local latest_expired_count=0
+
+  [[ -d "$evidence_dir" && ! -L "$evidence_dir" ]] || die "alert-delivery evidence directory is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$evidence_dir")" == "700" && "$(stat -c '%u' "$evidence_dir")" == "0" ]] || die "alert-delivery evidence directory is not root-owned mode 0700"
+  for candidate in "$evidence_dir"/*.json; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    generation="${candidate##*/}"
+    [[ "$generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "alert-delivery evidence directory contains an invalid generation name"
+    [[ -f "$candidate" && ! -L "$candidate" ]] || die "alert-delivery evidence generation is unavailable or unsafe"
+    [[ "$(stat -c '%a' "$candidate")" == "600" && "$(stat -c '%u' "$candidate")" == "0" ]] || die "alert-delivery evidence generation is not root-owned mode 0600"
+    stored_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$candidate")" || die "alert-delivery evidence generation hash is invalid"
+    [[ "$generation" == "$stored_hash.json" ]] || die "alert-delivery evidence generation name does not match its payload hash"
+    [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$candidate" | sha256sum | awk '{print $1}')" == "$stored_hash" ]] || die "alert-delivery evidence generation was modified"
+    phase="$(jq -er '.alert_phase | select(. == "send" or . == "confirm")' "$candidate")" || die "alert-delivery evidence generation phase is invalid"
+    [[ "$phase" == "send" ]] || continue
+    window_status="$(attestation_generation_window_status alert-send "$candidate" "$observed_at")" || die "alert send evidence has an invalid confirmation window"
+    [[ "$window_status" == "live" || "$window_status" == "expired" ]] || die "alert send evidence has an invalid confirmation window state"
+    if jq -e \
+      --arg source_sha "$expected_source_sha" --arg release_id "$expected_release_id" \
+      --arg lineage "$expected_lineage" --argjson serial "$expected_serial" --arg state_sha256 "$expected_state_sha256" \
+      --arg action_group_id "${expected_action_group_id,,}" \
+      --arg api_alert_id "${expected_api_alert_id,,}" --arg worker_alert_id "${expected_worker_alert_id,,}" '
+        .schema_version == 1 and .evidence_type == "protected-runner-alert-delivery" and .alert_phase == "send" and
+        .source_sha == $source_sha and .release_id == $release_id and
+        .state == {lineage: $lineage, serial: $serial, sha256: $state_sha256} and
+        (.action_group.resource_id | ascii_downcase) == $action_group_id and
+        (.metric_alerts.api.resource_id | ascii_downcase) == $api_alert_id and
+        (.metric_alerts.worker.resource_id | ascii_downcase) == $worker_alert_id and
+        .notification_test == {
+          alert_type: "metricstaticthreshold", azure_operation_completed: true,
+          email_action_count: 1, email_action_succeeded: true,
+          delivery_confirmed_by_owner: false
+        } and
+        (.confirmation_challenge | strings | test("^[0-9a-f]{64}$")) and
+        (.send_intent_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.notification_operation_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        .recipient_address_returned == false and .secrets_returned == false
+      ' "$candidate" >/dev/null; then
+      if [[ "$window_status" == "live" ]]; then
+        live_generation="$candidate"
+        ((live_count += 1))
+      else
+        completed_at="$(jq -er '.completed_at' "$candidate")"
+        if [[ -z "$latest_expired_at" || "$completed_at" > "$latest_expired_at" ]]; then
+          latest_expired_at="$completed_at"
+          latest_expired_generation="$candidate"
+          latest_expired_count=1
+        elif [[ "$completed_at" == "$latest_expired_at" ]]; then
+          ((latest_expired_count += 1))
+        fi
+      fi
+    fi
+  done
+  (( live_count <= 1 )) || die "multiple live orphaned alert send generations match the exact current deployment"
+  if [[ -n "$live_generation" ]]; then
+    printf 'live|%s\n' "$live_generation"
+    return
+  fi
+  (( latest_expired_count <= 1 )) || die "multiple latest expired alert send generations match the exact current deployment"
+  [[ -z "$latest_expired_generation" ]] || printf 'expired|%s\n' "$latest_expired_generation"
+}
+
+find_unresolved_alert_send_intent() {
+  local intent_dir="$1"
+  local evidence_dir="$2"
+  local expected_source_sha="$3"
+  local expected_release_id="$4"
+  local expected_action_group_id="$5"
+  local expected_request_sha256="$6"
+  local candidate
+  local generation
+  local intent_key
+  local stored_hash
+  local evidence
+  local evidence_generation
+  local evidence_hash
+  local successor
+  local successor_generation
+  local successor_key
+  local successor_hash
+  local resolved
+  local matching_intent=""
+  local matching_count=0
+
+  [[ -d "$intent_dir" && ! -L "$intent_dir" ]] || die "alert send-intent directory is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$intent_dir")" == "700" && "$(stat -c '%u' "$intent_dir")" == "0" ]] || die "alert send-intent directory is not root-owned mode 0700"
+  [[ -d "$evidence_dir" && ! -L "$evidence_dir" ]] || die "alert-delivery evidence directory is unavailable or unsafe"
+  [[ "$(stat -c '%a' "$evidence_dir")" == "700" && "$(stat -c '%u' "$evidence_dir")" == "0" ]] || die "alert-delivery evidence directory is not root-owned mode 0700"
+  for candidate in "$intent_dir"/*.json; do
+    [[ -e "$candidate" || -L "$candidate" ]] || continue
+    generation="${candidate##*/}"
+    [[ "$generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "alert send-intent directory contains an invalid generation name"
+    intent_key="${generation%.json}"
+    [[ -f "$candidate" && ! -L "$candidate" ]] || die "alert send-intent generation is unavailable or unsafe"
+    [[ "$(stat -c '%a' "$candidate")" == "600" && "$(stat -c '%u' "$candidate")" == "0" ]] || die "alert send-intent generation is not root-owned mode 0600"
+    stored_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$candidate")" || die "alert send-intent generation hash is invalid"
+    [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$candidate" | sha256sum | awk '{print $1}')" == "$stored_hash" ]] || die "alert send-intent generation was modified"
+    if ! jq -e \
+      --arg source_sha "$expected_source_sha" --arg release_id "$expected_release_id" \
+      --arg action_group_id "${expected_action_group_id,,}" \
+      --arg request_sha256 "$expected_request_sha256" \
+      --arg intent_key "$intent_key" '
+        .schema_version == 1 and .evidence_type == "protected-runner-alert-send-intent" and
+        .intent_key_sha256 == $intent_key and
+        .source_sha == $source_sha and .release_id == $release_id and
+        (.state.lineage | strings | test("^[0-9a-fA-F-]{36}$")) and
+        (.state.serial | numbers | floor == . and . >= 0) and
+        (.state.sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.action_group_resource_id | ascii_downcase) == $action_group_id and
+        (.api_alert_resource_id | strings | startswith("/subscriptions/")) and
+        (.worker_alert_resource_id | strings | startswith("/subscriptions/")) and
+        .notification_request_sha256 == $request_sha256 and
+        (.predecessor_send_evidence_sha256 | strings | select(. == "none" or test("^[0-9a-f]{64}$"))) and
+        (((.supersedes_intent_sha256 == null) and (.retry_approval_sha256 == null)) or
+         ((.supersedes_intent_sha256 | strings | test("^[0-9a-f]{64}$")) and
+          (.retry_approval_sha256 | strings | test("^[0-9a-f]{64}$")))) and
+        (.issued_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+        (.client_request_id | strings | test("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")) and
+        (.confirmation_challenge | strings | test("^[0-9a-f]{64}$")) and
+        .post_may_have_started == true and .recipient_address_returned == false and .secrets_returned == false
+      ' "$candidate" >/dev/null; then
+      continue
+    fi
+    resolved=false
+    for evidence in "$evidence_dir"/*.json; do
+      [[ -e "$evidence" || -L "$evidence" ]] || continue
+      evidence_generation="${evidence##*/}"
+      [[ "$evidence_generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "alert-delivery evidence directory contains an invalid generation name"
+      [[ -f "$evidence" && ! -L "$evidence" ]] || die "alert-delivery evidence generation is unavailable or unsafe"
+      [[ "$(stat -c '%a' "$evidence")" == "600" && "$(stat -c '%u' "$evidence")" == "0" ]] || die "alert-delivery evidence generation is not root-owned mode 0600"
+      evidence_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$evidence")" || die "alert-delivery evidence generation hash is invalid"
+      [[ "$evidence_generation" == "$evidence_hash.json" ]] || die "alert-delivery evidence generation name does not match its payload hash"
+      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$evidence" | sha256sum | awk '{print $1}')" == "$evidence_hash" ]] || die "alert-delivery evidence generation was modified"
+      if jq -e --arg intent_hash "$stored_hash" '
+        .schema_version == 1 and .evidence_type == "protected-runner-alert-delivery" and
+        .alert_phase == "send" and .send_intent_sha256 == $intent_hash and
+        .notification_test.azure_operation_completed == true and
+        .notification_test.email_action_succeeded == true
+      ' "$evidence" >/dev/null; then
+        resolved=true
+        break
+      fi
+    done
+    if [[ "$resolved" == "false" ]]; then
+      for successor in "$intent_dir"/*.json; do
+        [[ -e "$successor" || -L "$successor" ]] || continue
+        [[ "$successor" != "$candidate" ]] || continue
+        successor_generation="${successor##*/}"
+        [[ "$successor_generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "alert send-intent directory contains an invalid generation name"
+        successor_key="${successor_generation%.json}"
+        [[ -f "$successor" && ! -L "$successor" ]] || die "alert send-intent generation is unavailable or unsafe"
+        [[ "$(stat -c '%a' "$successor")" == "600" && "$(stat -c '%u' "$successor")" == "0" ]] || die "alert send-intent generation is not root-owned mode 0600"
+        successor_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$successor")" || die "alert send-intent generation hash is invalid"
+        [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$successor" | sha256sum | awk '{print $1}')" == "$successor_hash" ]] || die "alert send-intent generation was modified"
+        if jq -e \
+          --arg source_sha "$expected_source_sha" --arg release_id "$expected_release_id" \
+          --arg action_group_id "${expected_action_group_id,,}" \
+          --arg request_sha256 "$expected_request_sha256" \
+          --arg intent_key "$successor_key" --arg superseded_hash "$stored_hash" '
+            .schema_version == 1 and .evidence_type == "protected-runner-alert-send-intent" and
+            .intent_key_sha256 == $intent_key and
+            .source_sha == $source_sha and .release_id == $release_id and
+            (.state.lineage | strings | test("^[0-9a-fA-F-]{36}$")) and
+            (.state.serial | numbers | floor == . and . >= 0) and
+            (.state.sha256 | strings | test("^[0-9a-f]{64}$")) and
+            (.action_group_resource_id | ascii_downcase) == $action_group_id and
+            (.api_alert_resource_id | strings | startswith("/subscriptions/")) and
+            (.worker_alert_resource_id | strings | startswith("/subscriptions/")) and
+            .notification_request_sha256 == $request_sha256 and
+            (.predecessor_send_evidence_sha256 | strings | select(. == "none" or test("^[0-9a-f]{64}$"))) and
+            .supersedes_intent_sha256 == $superseded_hash and
+            (.retry_approval_sha256 | strings | test("^[0-9a-f]{64}$"))
+          ' "$successor" >/dev/null; then
+          resolved=true
+          break
+        fi
+      done
+    fi
+    if [[ "$resolved" == "false" ]]; then
+      matching_intent="$candidate"
+      ((matching_count += 1))
+    fi
+  done
+  (( matching_count <= 1 )) || die "multiple unresolved alert send intents match the exact current deployment"
+  [[ -z "$matching_intent" ]] || printf '%s\n' "$matching_intent"
 }
 
 [[ "$(id -u)" == "0" ]] || die "Azure Run Command must execute as root"
@@ -31,7 +345,7 @@ source_sha="${COSMAS_SOURCE_SHA:-}"
 uuid_pattern='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 [[ "$subscription_id" =~ $uuid_pattern ]] || die "subscription ID is invalid"
 [[ "$deploy_client_id" =~ $uuid_pattern ]] || die "deploy identity client ID is invalid"
-[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
 [[ "$stage" == "source" || "$stage" == "network" || "$stage" == "images" || "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" || "$stage" == "acceptance" || "$stage" == "domain" || "$stage" == "alert" || "$stage" == "pitr" || "$stage" == "recovery" || "$stage" == "offboarding" || "$stage" == "identity" ]] || die "stage is invalid"
 [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || die "release ID must be 3-32 lowercase letters, digits, or hyphens"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || die "source SHA must be a full lowercase Git commit"
@@ -71,6 +385,10 @@ runtime_acceptance_evidence_tmp=""
 runtime_acceptance_pointer_tmp=""
 alert_delivery_evidence_tmp=""
 alert_delivery_pointer_tmp=""
+alert_send_intent_tmp=""
+alert_send_intent_pointer_tmp=""
+offboarding_evidence_tmp=""
+offboarding_pointer_tmp=""
 domain_verification_evidence_tmp=""
 identity_evidence_tmp=""
 foundation_state=""
@@ -101,6 +419,10 @@ cleanup() {
   [[ -z "$runtime_acceptance_pointer_tmp" ]] || rm -f -- "$runtime_acceptance_pointer_tmp"
   [[ -z "$alert_delivery_evidence_tmp" ]] || rm -f -- "$alert_delivery_evidence_tmp"
   [[ -z "$alert_delivery_pointer_tmp" ]] || rm -f -- "$alert_delivery_pointer_tmp"
+  [[ -z "$alert_send_intent_tmp" ]] || rm -f -- "$alert_send_intent_tmp"
+  [[ -z "$alert_send_intent_pointer_tmp" ]] || rm -f -- "$alert_send_intent_pointer_tmp"
+  [[ -z "$offboarding_evidence_tmp" ]] || rm -f -- "$offboarding_evidence_tmp"
+  [[ -z "$offboarding_pointer_tmp" ]] || rm -f -- "$offboarding_pointer_tmp"
   [[ -z "$domain_verification_evidence_tmp" ]] || rm -f -- "$domain_verification_evidence_tmp"
   [[ -z "$identity_evidence_tmp" ]] || rm -f -- "$identity_evidence_tmp"
   [[ -z "$foundation_state" ]] || rm -f -- "$foundation_state"
@@ -513,6 +835,18 @@ PROBE
   build_probe_dir=""
 }
 
+pitr_reviewer_references_are_distinct() {
+  local preparer_reference="$1"
+  local reviewer_reference="$2"
+  local reference_pattern='^[A-Za-z0-9][A-Za-z0-9._:/ ()-]{2,255}$'
+
+  [[ "$preparer_reference" =~ $reference_pattern ]] &&
+    [[ "$reviewer_reference" =~ $reference_pattern ]] &&
+    [[ "$preparer_reference" != *"@"* ]] &&
+    [[ "$reviewer_reference" != *"@"* ]] &&
+    [[ "$preparer_reference" != "$reviewer_reference" ]]
+}
+
 prepare_pitr_context() {
   validate_source
   verify_pinned_toolchain
@@ -559,6 +893,7 @@ prepare_pitr_context() {
   PITR_FREEZE_STATE="$PITR_ROOT/freeze-state.private.json"
   PITR_FREEZE_EVIDENCE="$PITR_ROOT/freeze-attestation.json"
   PITR_MANIFEST="$PITR_ROOT/manifest.private.json"
+  PITR_MANIFEST_PREPARER="$PITR_ROOT/manifest-preparer-reference.private"
   PITR_STATE="$PITR_ROOT/state.private.json"
   PITR_SCRIPT="$repository_root/infra/beta/pitr_acceptance.py"
   jq -e \
@@ -775,6 +1110,72 @@ recovery_no_drift_review() {
   sha256sum "$review_file" | awk '{print $1}'
 }
 
+validate_stage_tfvars_payload() {
+  local tfvars_file="$1"
+  local tfvars_stage="$2"
+  local expected_network_reference
+  local expected_api_digest
+  local expected_web_digest
+  local database_execution_id
+  local database_execution_name
+  local database_attestation_file
+  local database_attestation_hash
+
+  jq -e 'type == "object"' "$tfvars_file" >/dev/null || die "environment tfvars payload must be a JSON object"
+  case "$tfvars_stage" in
+    foundation) ;;
+    database)
+      verify_release_network_evidence
+      verify_release_build_evidence
+      expected_network_reference="runner-network:sha256:$(jq -er '.evidence_payload_sha256' "$VERIFIED_NETWORK_EVIDENCE")"
+      expected_api_digest="$(jq -er '.images.api.digest | sub("^sha256:"; "")' "$build_root/build-evidence.json")"
+      jq -e '
+        .enable_database_preparation_job == true and .deploy_workloads == false and
+        (.database_preparation_image_digest | strings | test("^[0-9a-f]{64}$")) and
+        (.runtime_database_url | strings | startswith("postgresql+psycopg://"))
+      ' "$tfvars_file" >/dev/null || die "database stage must enable only the preparation job with an immutable image and runtime database URL"
+      jq -e --arg expected "$expected_network_reference" '.runner_live_network_evidence_reference == $expected' "$tfvars_file" >/dev/null || die "database tfvars do not bind the live runner-network evidence from this release"
+      jq -e --arg expected "$expected_api_digest" '.database_preparation_image_digest == $expected' "$tfvars_file" >/dev/null || die "database tfvars do not bind the accepted API image digest from this release"
+      ;;
+    workloads)
+      verify_release_network_evidence
+      verify_release_build_evidence
+      expected_network_reference="runner-network:sha256:$(jq -er '.evidence_payload_sha256' "$VERIFIED_NETWORK_EVIDENCE")"
+      expected_api_digest="$(jq -er '.images.api.digest | sub("^sha256:"; "")' "$build_root/build-evidence.json")"
+      expected_web_digest="$(jq -er '.images.web.digest | sub("^sha256:"; "")' "$build_root/build-evidence.json")"
+      jq -e '
+        .enable_database_preparation_job == true and .deploy_workloads == true and
+        (.image_digest | strings | test("^[0-9a-f]{64}$")) and
+        (.web_image_digest | strings | test("^[0-9a-f]{64}$")) and
+        (.database_preparation_attestation | type == "object")
+      ' "$tfvars_file" >/dev/null || die "workload stage must retain database preparation and provide immutable images plus structured attestation"
+      jq -e --arg expected "$expected_network_reference" '.runner_live_network_evidence_reference == $expected' "$tfvars_file" >/dev/null || die "workload tfvars do not bind the live runner-network evidence from this release"
+      jq -e --arg api "$expected_api_digest" --arg web "$expected_web_digest" '.image_digest == $api and .web_image_digest == $web' "$tfvars_file" >/dev/null || die "workload tfvars do not bind both accepted image digests from this release"
+      database_execution_id="$(jq -er '.database_preparation_attestation.execution_id | strings' "$tfvars_file")"
+      database_execution_name="${database_execution_id##*/}"
+      [[ "$database_execution_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,255}$ ]] || die "workload database-preparation execution ID is invalid"
+      database_attestation_file="$release_root/executions/database/$database_execution_name/attestation.json"
+      [[ -f "$database_attestation_file" && ! -L "$database_attestation_file" && "$(stat -c '%a' "$database_attestation_file")" == "600" && "$(stat -c '%u' "$database_attestation_file")" == "0" ]] || die "workload stage has no protected attestation for the exact database execution"
+      database_attestation_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$database_attestation_file")" || die "stored database attestation hash is invalid"
+      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$database_attestation_file" | sha256sum | awk '{print $1}')" == "$database_attestation_hash" ]] || die "stored database attestation was modified"
+      jq -e \
+        --arg source_sha "$source_sha" \
+        --arg release_id "$release_id" \
+        --arg lineage "$(jq -er '.state.lineage' "$VERIFIED_NETWORK_EVIDENCE")" \
+        --argjson serial "$(jq -er '.state.serial' "$VERIFIED_NETWORK_EVIDENCE")" \
+        --arg api "$expected_api_digest" \
+        --slurpfile staged "$tfvars_file" '
+          .schema_version == 1 and .evidence_type == "protected-runner-database-preparation" and
+          .source_sha == $source_sha and .release_id == $release_id and
+          .state.lineage == $lineage and .state.serial == $serial and
+          .database_preparation_attestation == $staged[0].database_preparation_attestation and
+          .database_preparation_attestation.image_digest == $api
+        ' "$database_attestation_file" >/dev/null || die "workload database attestation is not bound to this source/release/state/image"
+      ;;
+    *) die "environment tfvars stage is invalid" ;;
+  esac
+}
+
 case "$operation" in
   stage-source)
     [[ "$stage" == "source" ]] || die "stage-source requires stage=source"
@@ -820,61 +1221,66 @@ case "$operation" in
     [[ "$stage" != "source" ]] || die "stage-vars requires an environment stage"
     validate_source
     bind_release_to_source
-    jq -e 'type == "object"' "$payload_file" >/dev/null || die "environment tfvars payload must be a JSON object"
-    case "$stage" in
-      database)
-        verify_release_network_evidence
-        verify_release_build_evidence
-        expected_network_reference="runner-network:sha256:$(jq -er '.evidence_payload_sha256' "$VERIFIED_NETWORK_EVIDENCE")"
-        expected_api_digest="$(jq -er '.images.api.digest | sub("^sha256:"; "")' "$build_root/build-evidence.json")"
-        jq -e '
-          .enable_database_preparation_job == true and .deploy_workloads == false and
-          (.database_preparation_image_digest | strings | test("^[0-9a-f]{64}$")) and
-          (.runtime_database_url | strings | startswith("postgresql+psycopg://"))
-        ' "$payload_file" >/dev/null || die "database stage must enable only the preparation job with an immutable image and runtime database URL"
-        jq -e --arg expected "$expected_network_reference" '.runner_live_network_evidence_reference == $expected' "$payload_file" >/dev/null || die "database tfvars do not bind the live runner-network evidence from this release"
-        jq -e --arg expected "$expected_api_digest" '.database_preparation_image_digest == $expected' "$payload_file" >/dev/null || die "database tfvars do not bind the accepted API image digest from this release"
-        ;;
-      workloads)
-        verify_release_network_evidence
-        verify_release_build_evidence
-        expected_network_reference="runner-network:sha256:$(jq -er '.evidence_payload_sha256' "$VERIFIED_NETWORK_EVIDENCE")"
-        expected_api_digest="$(jq -er '.images.api.digest | sub("^sha256:"; "")' "$build_root/build-evidence.json")"
-        expected_web_digest="$(jq -er '.images.web.digest | sub("^sha256:"; "")' "$build_root/build-evidence.json")"
-        jq -e '
-          .enable_database_preparation_job == true and .deploy_workloads == true and
-          (.image_digest | strings | test("^[0-9a-f]{64}$")) and
-          (.web_image_digest | strings | test("^[0-9a-f]{64}$")) and
-          (.database_preparation_attestation | type == "object")
-        ' "$payload_file" >/dev/null || die "workload stage must retain database preparation and provide immutable images plus structured attestation"
-        jq -e --arg expected "$expected_network_reference" '.runner_live_network_evidence_reference == $expected' "$payload_file" >/dev/null || die "workload tfvars do not bind the live runner-network evidence from this release"
-        jq -e --arg api "$expected_api_digest" --arg web "$expected_web_digest" '.image_digest == $api and .web_image_digest == $web' "$payload_file" >/dev/null || die "workload tfvars do not bind both accepted image digests from this release"
-        database_execution_id="$(jq -er '.database_preparation_attestation.execution_id | strings' "$payload_file")"
-        database_execution_name="${database_execution_id##*/}"
-        [[ "$database_execution_name" =~ ^[A-Za-z0-9][A-Za-z0-9._-]{2,255}$ ]] || die "workload database-preparation execution ID is invalid"
-        database_attestation_file="$release_root/executions/database/$database_execution_name/attestation.json"
-        [[ -f "$database_attestation_file" && ! -L "$database_attestation_file" && "$(stat -c '%a' "$database_attestation_file")" == "600" && "$(stat -c '%u' "$database_attestation_file")" == "0" ]] || die "workload stage has no protected attestation for the exact database execution"
-        database_attestation_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$database_attestation_file")" || die "stored database attestation hash is invalid"
-        [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$database_attestation_file" | sha256sum | awk '{print $1}')" == "$database_attestation_hash" ]] || die "stored database attestation was modified"
-        jq -e \
-          --arg source_sha "$source_sha" \
-          --arg release_id "$release_id" \
-          --arg lineage "$(jq -er '.state.lineage' "$VERIFIED_NETWORK_EVIDENCE")" \
-          --argjson serial "$(jq -er '.state.serial' "$VERIFIED_NETWORK_EVIDENCE")" \
-          --arg api "$expected_api_digest" \
-          --slurpfile staged "$payload_file" '
-            .schema_version == 1 and .evidence_type == "protected-runner-database-preparation" and
-            .source_sha == $source_sha and .release_id == $release_id and
-            .state.lineage == $lineage and .state.serial == $serial and
-            .database_preparation_attestation == $staged[0].database_preparation_attestation and
-            .database_preparation_attestation.image_digest == $api
-          ' "$database_attestation_file" >/dev/null || die "workload database attestation is not bound to this source/release/state/image"
-        ;;
-    esac
+    validate_stage_tfvars_payload "$payload_file" "$stage"
     install -d -o root -g root -m 0700 "$stage_root"
     [[ ! -e "$stage_root/environment.tfvars.json" && ! -L "$stage_root/environment.tfvars.json" ]] || die "stage variable file already exists; do not overwrite a reviewed stage"
     install -o root -g root -m 0600 "$payload_file" "$stage_root/environment.tfvars.json"
     printf '%s\n' "D3 protected runner stored the private $stage tfvars without returning their contents"
+    ;;
+  inspect-stage|stage-generation)
+    [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || die "$operation requires an environment stage"
+    validate_source
+    [[ -f "$release_root/source-sha" && ! -L "$release_root/source-sha" && "$(cat "$release_root/source-sha")" == "$source_sha" ]] || die "release ID is not bound to the approved source commit"
+    stage_transition_script="$repository_root/infra/beta/stage_generation_transition.py"
+    [[ -f "$stage_transition_script" && ! -L "$stage_transition_script" ]] || die "committed stage-generation primitive is unavailable"
+    git -C "$repository_root" ls-files --error-unmatch infra/beta/stage_generation_transition.py >/dev/null 2>&1 || die "stage-generation primitive is not part of the approved commit"
+    operation_temp_dir="$(mktemp -d /run/cosmas-stage-generation.XXXXXX)"
+    chmod 0700 "$operation_temp_dir"
+    if [[ "$operation" == "stage-generation" ]]; then
+      jq -e '
+        type == "object" and
+        (keys | sort) == (["owner_approval", "replacement_tfvars_base64", "transition_mode"] | sort) and
+        (.owner_approval | type == "object") and
+        (.replacement_tfvars_base64 | strings | test("^[A-Za-z0-9+/=]+$")) and
+        (.transition_mode == "abandoned_retry" or .transition_mode == "planned_workloads_progression")
+      ' "$payload_file" >/dev/null || die "stage-generation payload is invalid"
+      replacement_tfvars_file="$operation_temp_dir/replacement.tfvars.json"
+      jq -er '.replacement_tfvars_base64' "$payload_file" | base64 --decode >"$replacement_tfvars_file" || die "replacement stage tfvars could not be decoded"
+      chmod 0600 "$replacement_tfvars_file"
+      validate_stage_tfvars_payload "$replacement_tfvars_file" "$stage"
+      stage_transition_action="transition"
+    else
+      jq -e 'type == "object" and length == 0' "$payload_file" >/dev/null || die "stage inspection payload must be empty"
+      stage_transition_action="inspect"
+    fi
+    private_result_file="$operation_temp_dir/output.json"
+    set +e
+    python3 "$stage_transition_script" "$stage_transition_action" "$source_sha" "$release_id" "$stage" "$release_root" "$payload_file" >"$private_result_file" 2>"$operation_temp_dir/private.log"
+    stage_transition_status=$?
+    set -e
+    [[ "$stage_transition_status" == 0 ]] || die "stage-generation primitive failed; private diagnostics remain root-only on the runner"
+    [[ "$(wc -l <"$private_result_file" | tr -d ' ')" == "1" && "$(wc -c <"$private_result_file")" -le 16384 ]] || die "stage-generation primitive did not return one bounded sanitized record"
+    if [[ "$operation" == "stage-generation" ]]; then
+      jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg stage "$stage" '
+        type == "object" and .schema_version == 1 and
+        .evidence_type == "protected-runner-stage-generation-transition" and
+        .source_sha == $source_sha and .release_id == $release_id and .stage == $stage and
+        (.transition_mode == "abandoned_retry" or .transition_mode == "planned_workloads_progression") and
+        .history_preserved == true and .secrets_returned == false and
+        (.evidence_payload_sha256 | strings | test("^[0-9a-f]{64}$"))
+      ' "$private_result_file" >/dev/null || die "stage-generation primitive returned an invalid transition contract"
+    else
+      jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg stage "$stage" '
+        type == "object" and .schema_version == 1 and
+        .evidence_type == "protected-runner-stage-generation-inspection" and
+        .source_sha == $source_sha and .release_id == $release_id and .stage == $stage and
+        (.current_artifacts | type == "object") and .secrets_returned == false and
+        (.evidence_payload_sha256 | strings | test("^[0-9a-f]{64}$"))
+      ' "$private_result_file" >/dev/null || die "stage-generation primitive returned an invalid inspection contract"
+    fi
+    stage_transition_hash="$(jq -cSj 'del(.evidence_payload_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
+    [[ "$(jq -er '.evidence_payload_sha256' "$private_result_file")" == "$stage_transition_hash" ]] || die "stage-generation evidence self-hash is invalid"
+    emit_sanitized_artifact "$private_result_file"
     ;;
   probe-network)
     [[ "$stage" == "network" ]] || die "probe-network requires stage=network"
@@ -1452,7 +1858,7 @@ PY
       .runtime_ddl_denied == true and .audit_update_denied == true and .audit_delete_denied == true and
       (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
     ' "$operation_temp_dir/job-evidence.json" >/dev/null || die "database-preparation evidence did not prove the complete contract"
-    database_evidence_hash="$(jq -cS 'del(.evidence_sha256)' "$operation_temp_dir/job-evidence.json" | sha256sum | awk '{print $1}')"
+    database_evidence_hash="$(jq -cSj 'del(.evidence_sha256)' "$operation_temp_dir/job-evidence.json" | sha256sum | awk '{print $1}')"
     [[ "$(jq -er '.evidence_sha256' "$operation_temp_dir/job-evidence.json")" == "$database_evidence_hash" ]] || die "database-preparation evidence self-hash is invalid"
     execution_root="$release_root/executions/database/$execution_name"
     [[ ! -e "$execution_root" && ! -L "$execution_root" ]] || die "database-preparation execution evidence already exists"
@@ -1585,7 +1991,7 @@ PY
           .prior_attestation.acceptance_output.stage == $stage and
           .prior_attestation.acceptance_output.status == "ready_for_browser"
         ' "$payload_file" >/dev/null || die "prior acceptance state is not bound to this source/release/state/image/runtime identity"
-      prior_state_hash="$(jq -cS '.prior_attestation.acceptance_output | del(.evidence_sha256)' "$payload_file" | sha256sum | awk '{print $1}')"
+      prior_state_hash="$(jq -cSj '.prior_attestation.acceptance_output | del(.evidence_sha256)' "$payload_file" | sha256sum | awk '{print $1}')"
       [[ "$(jq -er '.prior_attestation.acceptance_output.evidence_sha256' "$payload_file")" == "$prior_state_hash" ]] || die "prior acceptance state self-hash is invalid"
       prior_state_json="$(jq -cS '.prior_attestation.acceptance_output' "$payload_file")"
       (( ${#prior_state_json} <= 16384 )) || die "prior acceptance state exceeds the bounded 16 KiB limit"
@@ -1899,7 +2305,7 @@ PY
         .blob_recoverable_absence_verified == true and .due_unpurged_probe_count == 0
       else false end
     ' "$operation_temp_dir/job-evidence.json" >/dev/null || die "runtime-acceptance evidence did not prove the exact requested synthetic contract"
-    runtime_evidence_hash="$(jq -cS 'del(.evidence_sha256)' "$operation_temp_dir/job-evidence.json" | sha256sum | awk '{print $1}')"
+    runtime_evidence_hash="$(jq -cSj 'del(.evidence_sha256)' "$operation_temp_dir/job-evidence.json" | sha256sum | awk '{print $1}')"
     [[ "$(jq -er '.evidence_sha256' "$operation_temp_dir/job-evidence.json")" == "$runtime_evidence_hash" ]] || die "runtime-acceptance evidence self-hash is invalid"
     execution_root="$release_root/executions/runtime-acceptance/$acceptance_phase/$execution_name"
     [[ ! -e "$execution_root" && ! -L "$execution_root" ]] || die "runtime-acceptance execution evidence already exists"
@@ -2027,7 +2433,11 @@ PY
     network_evidence_file="$VERIFIED_NETWORK_EVIDENCE"
     jq -e '
       type == "object" and
-      ((.alert_phase == "send" and keys == ["alert_phase"]) or
+      ((.alert_phase == "send" and
+        (keys == ["alert_phase"] or
+         ((keys | sort) == (["alert_phase", "ambiguous_retry_approval"] | sort) and
+          (.ambiguous_retry_approval | type == "object")))) or
+       (.alert_phase == "inspect-intent" and keys == ["alert_phase"]) or
        (.alert_phase == "confirm" and
         (keys | sort) == (["alert_phase", "confirmation", "prior_attestation"] | sort) and
         (.prior_attestation | type == "object") and
@@ -2041,7 +2451,7 @@ PY
         (.confirmation.confirmation_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
         (.confirmation.confirmation_reference | contains("@") | not)))
     ' "$payload_file" >/dev/null || die "alert-delivery protected payload is invalid"
-    alert_phase="$(jq -er '.alert_phase | select(. == "send" or . == "confirm")' "$payload_file")"
+    alert_phase="$(jq -er '.alert_phase | select(. == "send" or . == "confirm" or . == "inspect-intent")' "$payload_file")"
     fresh_managed_identity_login
     # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
@@ -2151,16 +2561,26 @@ PY
     done
 
     alert_root="$release_root/executions/alert-delivery"
-    install -d -o root -g root -m 0700 "$alert_root"
-    alert_delivery_file="$alert_root/$alert_phase-attestation.json"
+    alert_evidence_dir="$alert_root/evidence"
+    alert_send_intent_dir="$alert_root/send-intents"
+    alert_current_pointer="$alert_root/$alert_phase.current"
+    alert_send_intent_pointer="$alert_root/send-intent.current"
+    install -d -o root -g root -m 0700 "$alert_root" "$alert_evidence_dir" "$alert_send_intent_dir"
+    fsync_path "$alert_evidence_dir" || die "cannot durably synchronize the alert evidence directory"
+    fsync_path "$alert_send_intent_dir" || die "cannot durably synchronize the alert send-intent directory"
+    fsync_path "$alert_root" || die "cannot durably synchronize the alert-delivery directory"
+    fsync_path "${alert_root%/*}" || die "cannot durably synchronize the alert execution directory"
+    fsync_path "$release_root" || die "cannot durably synchronize the release directory"
     confirmation_reference_hash=""
     confirmation_assertion_hash=""
+    predecessor_send_evidence_sha256="none"
     if [[ "$alert_phase" == "confirm" ]]; then
       prior_evidence_hash="$(jq -er '.prior_attestation.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$payload_file")" || die "prior alert-delivery evidence hash is invalid"
       [[ "$(jq -cS '.prior_attestation | del(.evidence_payload_sha256)' "$payload_file" | sha256sum | awk '{print $1}')" == "$prior_evidence_hash" ]] || die "prior alert-delivery evidence was modified"
-      stored_send_file="$alert_root/send-attestation.json"
+      stored_send_file="$alert_evidence_dir/$prior_evidence_hash.json"
       [[ -f "$stored_send_file" && ! -L "$stored_send_file" && "$(stat -c '%a' "$stored_send_file")" == "600" && "$(stat -c '%u' "$stored_send_file")" == "0" ]] || die "protected alert send evidence is unavailable or unsafe"
       [[ "$(jq -er '.evidence_payload_sha256' "$stored_send_file")" == "$prior_evidence_hash" ]] || die "owner confirmation does not reference the protected runner's exact send evidence"
+      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$stored_send_file" | sha256sum | awk '{print $1}')" == "$prior_evidence_hash" ]] || die "protected alert send evidence was modified"
       cmp -s <(jq -cS . "$stored_send_file") <(jq -cS '.prior_attestation' "$payload_file") || die "owner confirmation supplied a forged or modified alert send artifact"
       jq -e \
         --arg source_sha "$source_sha" --arg release_id "$release_id" \
@@ -2180,6 +2600,7 @@ PY
             delivery_confirmed_by_owner: false
           } and
           (.prior_attestation.confirmation_challenge | strings | test("^[0-9a-f]{64}$")) and
+          (.prior_attestation.send_intent_sha256 | strings | test("^[0-9a-f]{64}$")) and
           (.prior_attestation.notification_operation_sha256 | strings | test("^[0-9a-f]{64}$")) and
           .prior_attestation.recipient_address_returned == false and
           .prior_attestation.secrets_returned == false
@@ -2197,45 +2618,323 @@ value = json.load(open(sys.argv[1], encoding="utf-8"))
 sent = datetime.strptime(value["prior_attestation"]["completed_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 confirmed = datetime.strptime(value["confirmation"]["confirmed_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
 now = datetime.now(UTC)
-if confirmed < sent or confirmed > sent + timedelta(hours=4) or confirmed > now + timedelta(minutes=5) or confirmed < now - timedelta(hours=4):
+if now > sent + timedelta(hours=4) or confirmed < sent or confirmed > sent + timedelta(hours=4) or confirmed > now + timedelta(minutes=5) or confirmed < now - timedelta(hours=4):
     raise SystemExit(1)
 PY
       confirmation_reference_hash="$(jq -j '.confirmation.confirmation_reference' "$payload_file" | sha256sum | awk '{print $1}')"
       confirmation_assertion_hash="$(jq -cS '.confirmation' "$payload_file" | sha256sum | awk '{print $1}')"
     fi
 
-    if [[ -e "$alert_delivery_file" || -L "$alert_delivery_file" ]]; then
-      [[ -f "$alert_delivery_file" && ! -L "$alert_delivery_file" && "$(stat -c '%a' "$alert_delivery_file")" == "600" && "$(stat -c '%u' "$alert_delivery_file")" == "0" ]] || die "existing alert-delivery attestation is unsafe"
-      stored_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$alert_delivery_file")" || die "existing alert-delivery attestation hash is invalid"
-      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$alert_delivery_file" | sha256sum | awk '{print $1}')" == "$stored_hash" ]] || die "existing alert-delivery attestation was modified"
+    if [[ "$alert_phase" == "send" || "$alert_phase" == "inspect-intent" ]]; then
+      jq -cS '{
+        alertType: "metricstaticthreshold",
+        emailReceivers: [.properties.emailReceivers[0] | {name, emailAddress, useCommonAlertSchema}]
+      }' "$operation_temp_dir/action-group.json" >"$operation_temp_dir/notification-request.json"
+      chmod 0600 "$operation_temp_dir/notification-request.json"
+      notification_request_sha256="$(sha256sum "$operation_temp_dir/notification-request.json" | awk '{print $1}')"
+    fi
+
+    if [[ "$alert_phase" == "inspect-intent" ]]; then
+      unresolved_alert_send_intent="$(find_unresolved_alert_send_intent \
+        "$alert_send_intent_dir" "$alert_evidence_dir" "$source_sha" "$release_id" \
+        "$action_group_id" "$notification_request_sha256")"
+      intent_resolved=true
+      retry_authorization_required=false
+      required_confirmation=""
+      if [[ -n "$unresolved_alert_send_intent" ]]; then
+        inspected_alert_send_intent="$unresolved_alert_send_intent"
+        intent_resolved=false
+        retry_authorization_required=true
+        if [[ -e "$alert_send_intent_pointer" || -L "$alert_send_intent_pointer" ]]; then
+          resolve_alert_send_intent_pointer "$alert_send_intent_pointer" "$alert_send_intent_dir" >/dev/null
+        fi
+        alert_send_intent_pointer_tmp="$(mktemp "$alert_root/.send-intent.current.XXXXXX")"
+        printf '%s\n' "${inspected_alert_send_intent##*/}" >"$alert_send_intent_pointer_tmp"
+        chmod 0600 "$alert_send_intent_pointer_tmp"
+        fsync_path "$alert_send_intent_pointer_tmp" || die "cannot durably synchronize the recovered alert send-intent pointer"
+        mv -f -- "$alert_send_intent_pointer_tmp" "$alert_send_intent_pointer"
+        alert_send_intent_pointer_tmp=""
+        fsync_path "$alert_root" || die "cannot durably publish the recovered alert send-intent pointer"
+      else
+        inspected_alert_send_intent="$(resolve_alert_send_intent_pointer "$alert_send_intent_pointer" "$alert_send_intent_dir")"
+      fi
+      inspected_intent_sha256="$(jq -er '.evidence_payload_sha256' "$inspected_alert_send_intent")"
+      inspected_predecessor_sha256="$(jq -er '.predecessor_send_evidence_sha256 | select(. == "none" or test("^[0-9a-f]{64}$"))' "$inspected_alert_send_intent")"
       jq -e \
-        --arg source_sha "$source_sha" --arg release_id "$release_id" --arg phase "$alert_phase" \
+        --arg source_sha "$source_sha" --arg release_id "$release_id" \
+        --arg action_group_id "${action_group_id,,}" \
+        --arg request_sha256 "$notification_request_sha256" '
+          .schema_version == 1 and .evidence_type == "protected-runner-alert-send-intent" and
+          .source_sha == $source_sha and .release_id == $release_id and
+          (.state.lineage | strings | test("^[0-9a-fA-F-]{36}$")) and
+          (.state.serial | numbers | floor == . and . >= 0) and
+          (.state.sha256 | strings | test("^[0-9a-f]{64}$")) and
+          (.action_group_resource_id | ascii_downcase) == $action_group_id and
+          (.api_alert_resource_id | strings | startswith("/subscriptions/")) and
+          (.worker_alert_resource_id | strings | startswith("/subscriptions/")) and
+          .notification_request_sha256 == $request_sha256 and
+          .post_may_have_started == true and .recipient_address_returned == false and .secrets_returned == false
+        ' "$inspected_alert_send_intent" >/dev/null || die "current alert send intent differs from the exact live deployment"
+      if [[ "$intent_resolved" == "false" ]]; then
+        required_confirmation="AUTHORIZE D3 ALERT RETRY AFTER AMBIGUOUS SEND $inspected_intent_sha256"
+      fi
+      intent_inspection_payload="$operation_temp_dir/send-intent-inspection-payload.json"
+      jq -cS -n \
+        --arg inspected_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+        --arg source_sha "$source_sha" --arg release_id "$release_id" \
         --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
-        --arg confirmation_hash "$confirmation_reference_hash" --arg assertion_hash "$confirmation_assertion_hash" '
+        --arg intent_sha256 "$inspected_intent_sha256" \
+        --arg intent_key_sha256 "$(jq -er '.intent_key_sha256' "$inspected_alert_send_intent")" \
+        --arg issued_at "$(jq -er '.issued_at' "$inspected_alert_send_intent")" \
+        --arg client_request_id_sha256 "$(jq -jr '.client_request_id' "$inspected_alert_send_intent" | sha256sum | awk '{print $1}')" \
+        --arg predecessor_sha256 "$inspected_predecessor_sha256" \
+        --arg intent_lineage "$(jq -er '.state.lineage' "$inspected_alert_send_intent")" \
+        --argjson intent_serial "$(jq -er '.state.serial' "$inspected_alert_send_intent")" \
+        --arg intent_state_sha256 "$(jq -er '.state.sha256' "$inspected_alert_send_intent")" \
+        --arg required_confirmation "$required_confirmation" \
+        --argjson intent_resolved "$intent_resolved" --argjson retry_authorization_required "$retry_authorization_required" '
+          {
+            schema_version: 1,
+            evidence_type: "protected-runner-alert-send-intent-inspection",
+            alert_phase: "inspect-intent",
+            inspected_at: $inspected_at,
+            source_sha: $source_sha,
+            release_id: $release_id,
+            current_state: {lineage: $lineage, serial: $serial, sha256: $state_sha256},
+            intent_state: {lineage: $intent_lineage, serial: $intent_serial, sha256: $intent_state_sha256},
+            intent_sha256: $intent_sha256,
+            intent_key_sha256: $intent_key_sha256,
+            issued_at: $issued_at,
+            client_request_id_sha256: $client_request_id_sha256,
+            predecessor_send_evidence_sha256: $predecessor_sha256,
+            post_may_have_started: true,
+            intent_resolved: $intent_resolved,
+            retry_authorization_required: $retry_authorization_required,
+            required_confirmation: (if $required_confirmation == "" then null else $required_confirmation end),
+            recipient_address_returned: false,
+            identifiers_returned: false,
+            secrets_returned: false
+          }
+        ' >"$intent_inspection_payload"
+      intent_inspection_hash="$(sha256sum "$intent_inspection_payload" | awk '{print $1}')"
+      probe_payload="$(mktemp /run/cosmas-alert-send-intent-inspection.XXXXXX)"
+      jq -S --arg hash "$intent_inspection_hash" '. + {evidence_payload_sha256: $hash}' "$intent_inspection_payload" >"$probe_payload"
+      chmod 0600 "$probe_payload"
+      emit_sanitized_artifact "$probe_payload"
+      exit 0
+    fi
+
+    if [[ -e "$alert_current_pointer" || -L "$alert_current_pointer" ]]; then
+      alert_delivery_file="$(resolve_attestation_generation "$alert_current_pointer" "$alert_evidence_dir" "current alert-delivery $alert_phase evidence")"
+      jq -e \
+        --arg source_sha "$source_sha" --arg release_id "$release_id" --arg phase "$alert_phase" '
           .schema_version == 1 and .evidence_type == "protected-runner-alert-delivery" and
           .source_sha == $source_sha and .release_id == $release_id and .alert_phase == $phase and
-          .state == {lineage: $lineage, serial: $serial, sha256: $state_sha256} and
-          (if $phase == "confirm" then
-             .delivery_confirmation_reference_sha256 == $confirmation_hash and
-             .owner_confirmation_assertion_sha256 == $assertion_hash
-           else true end)
-        ' "$alert_delivery_file" >/dev/null || die "existing alert-delivery attestation is not the exact requested evidence"
-    else
+          (.completed_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+          (.state.lineage | strings | test("^[0-9a-fA-F-]{36}$")) and
+          (.state.serial | numbers | floor == . and . >= 0) and (.state.sha256 | strings | test("^[0-9a-f]{64}$")) and
+          .recipient_address_returned == false and .secrets_returned == false and
+          if $phase == "send" then
+            .notification_test == {
+              alert_type: "metricstaticthreshold", azure_operation_completed: true,
+              email_action_count: 1, email_action_succeeded: true,
+              delivery_confirmed_by_owner: false
+            } and
+            (.confirmation_challenge | strings | test("^[0-9a-f]{64}$")) and
+            (.send_intent_sha256 | strings | test("^[0-9a-f]{64}$")) and
+            (.notification_operation_sha256 | strings | test("^[0-9a-f]{64}$"))
+          else
+            .delivery_confirmed_by_owner == true and
+            (.send_evidence_sha256 | strings | test("^[0-9a-f]{64}$")) and
+            (.delivery_confirmation_reference_sha256 | strings | test("^[0-9a-f]{64}$")) and
+            (.owner_confirmation_assertion_sha256 | strings | test("^[0-9a-f]{64}$"))
+          end
+        ' "$alert_delivery_file" >/dev/null || die "current alert-delivery evidence contract is invalid"
       if [[ "$alert_phase" == "send" ]]; then
-        jq -cS '{
-          alertType: "metricstaticthreshold",
-          emailReceivers: [.properties.emailReceivers[0] | {name, emailAddress, useCommonAlertSchema}]
-        }' "$operation_temp_dir/action-group.json" >"$operation_temp_dir/notification-request.json"
-        chmod 0600 "$operation_temp_dir/notification-request.json"
+        predecessor_send_evidence_sha256="$(jq -er '.evidence_payload_sha256' "$alert_delivery_file")"
+        alert_window_status="$(attestation_generation_window_status alert-send "$alert_delivery_file")" || die "current alert send evidence has an invalid confirmation window"
+        if [[ "$alert_window_status" == "live" ]]; then
+          jq -e \
+            --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
+            --arg action_group_id "${action_group_id,,}" --arg api_alert_id "${api_alert_id,,}" --arg worker_alert_id "${worker_alert_id,,}" '
+              .state == {lineage: $lineage, serial: $serial, sha256: $state_sha256} and
+              (.action_group.resource_id | ascii_downcase) == $action_group_id and
+              (.metric_alerts.api.resource_id | ascii_downcase) == $api_alert_id and
+              (.metric_alerts.worker.resource_id | ascii_downcase) == $worker_alert_id
+            ' "$alert_delivery_file" >/dev/null || die "unexpired alert send evidence differs from the exact live alert binding"
+          emit_sanitized_artifact "$alert_delivery_file"
+          exit 0
+        fi
+        [[ "$alert_window_status" == "expired" ]] || die "current alert send evidence has an invalid confirmation window state"
+      elif jq -e \
+        --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
+        --arg action_group_id "${action_group_id,,}" --arg send_hash "$prior_evidence_hash" \
+        --arg confirmation_hash "$confirmation_reference_hash" --arg assertion_hash "$confirmation_assertion_hash" '
+          .state == {lineage: $lineage, serial: $serial, sha256: $state_sha256} and
+          (.action_group.resource_id | ascii_downcase) == $action_group_id and
+          .send_evidence_sha256 == $send_hash and
+          .delivery_confirmation_reference_sha256 == $confirmation_hash and
+          .owner_confirmation_assertion_sha256 == $assertion_hash
+        ' "$alert_delivery_file" >/dev/null; then
+        emit_sanitized_artifact "$alert_delivery_file"
+        exit 0
+      fi
+    fi
+
+    if [[ "$alert_phase" == "send" ]]; then
+        reconciled_alert_send="$(find_reconcilable_alert_send_generation \
+          "$alert_evidence_dir" \
+          "$source_sha" \
+          "$release_id" \
+          "$GUARD_STATE_LINEAGE" \
+          "$GUARD_STATE_SERIAL" \
+          "$GUARD_STATE_SHA256" \
+          "$action_group_id" \
+          "$api_alert_id" \
+          "$worker_alert_id")"
+        if [[ -n "$reconciled_alert_send" ]]; then
+          reconciled_alert_status="${reconciled_alert_send%%|*}"
+          orphaned_alert_send="${reconciled_alert_send#*|}"
+          [[ "$reconciled_alert_status" == "live" || "$reconciled_alert_status" == "expired" ]] || die "reconciled alert send generation has an invalid window state"
+          alert_delivery_name="${orphaned_alert_send##*/}"
+          alert_delivery_pointer_tmp="$(mktemp "$alert_root/.send.current.XXXXXX")"
+          printf '%s\n' "$alert_delivery_name" >"$alert_delivery_pointer_tmp"
+          chmod 0600 "$alert_delivery_pointer_tmp"
+          fsync_path "$alert_delivery_pointer_tmp" || die "cannot durably synchronize the reconciled alert pointer"
+          mv -f -- "$alert_delivery_pointer_tmp" "$alert_current_pointer"
+          alert_delivery_pointer_tmp=""
+          fsync_path "$alert_root" || die "cannot durably publish the reconciled alert pointer"
+          predecessor_send_evidence_sha256="$(jq -er '.evidence_payload_sha256' "$orphaned_alert_send")"
+          if [[ "$reconciled_alert_status" == "live" ]]; then
+            emit_sanitized_artifact "$orphaned_alert_send"
+            exit 0
+          fi
+        fi
+        unresolved_alert_send_intent="$(find_unresolved_alert_send_intent \
+          "$alert_send_intent_dir" \
+          "$alert_evidence_dir" \
+          "$source_sha" \
+          "$release_id" \
+          "$action_group_id" \
+          "$notification_request_sha256")"
+        supersedes_intent_sha256=""
+        retry_approval_sha256=""
+        if [[ -n "$unresolved_alert_send_intent" ]]; then
+          unresolved_intent_hash="$(jq -er '.evidence_payload_sha256' "$unresolved_alert_send_intent")"
+          jq -e \
+            --arg source_sha "$source_sha" --arg release_id "$release_id" \
+            --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
+            --arg prior_intent_sha256 "$unresolved_intent_hash" \
+            --arg confirmation "AUTHORIZE D3 ALERT RETRY AFTER AMBIGUOUS SEND $unresolved_intent_hash" '
+              .ambiguous_retry_approval |
+              type == "object" and
+              (keys | sort) == (["approved_at", "confirmation", "contract", "prior_intent_sha256", "release_id", "reviewer_reference", "schema_version", "source_sha", "state"] | sort) and
+              .schema_version == 1 and .contract == "cosmas-os-d3-alert-ambiguous-retry-approval-v1" and
+              .confirmation == $confirmation and .prior_intent_sha256 == $prior_intent_sha256 and
+              .source_sha == $source_sha and .release_id == $release_id and
+              .state == {lineage: $lineage, serial: $serial, sha256: $state_sha256} and
+              (.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+              (.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+              (.reviewer_reference | contains("@") | not)
+            ' "$payload_file" >/dev/null || die "alert send intent $unresolved_intent_hash may already have produced an email; automatic re-POST requires its exact fresh owner approval"
+          ambiguous_retry_approval_file="$operation_temp_dir/ambiguous-retry-approval.json"
+          jq -cS '.ambiguous_retry_approval' "$payload_file" >"$ambiguous_retry_approval_file"
+          chmod 0600 "$ambiguous_retry_approval_file"
+          python3 - "$ambiguous_retry_approval_file" <<'PY' || die "ambiguous alert retry approval is outside its four-hour window"
+from datetime import UTC, datetime, timedelta
+import json
+import sys
+
+value = json.load(open(sys.argv[1], encoding="utf-8"))
+approved = datetime.strptime(value["approved_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=UTC)
+now = datetime.now(UTC)
+if approved > now + timedelta(minutes=5) or approved < now - timedelta(hours=4):
+    raise SystemExit(1)
+PY
+          supersedes_intent_sha256="$unresolved_intent_hash"
+          retry_approval_sha256="$(sha256sum "$ambiguous_retry_approval_file" | awk '{print $1}')"
+        elif jq -e 'has("ambiguous_retry_approval")' "$payload_file" >/dev/null; then
+          die "ambiguous alert retry approval was supplied without an exact unresolved send intent"
+        fi
+        alert_client_request_id="$(cat /proc/sys/kernel/random/uuid)"
+        [[ "$alert_client_request_id" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die "cannot generate an alert client request ID"
+        confirmation_challenge="$(dd if=/dev/urandom bs=32 count=1 status=none | sha256sum | awk '{print $1}')"
+        [[ "$confirmation_challenge" =~ ^[0-9a-f]{64}$ ]] || die "cannot generate an unpredictable alert confirmation challenge"
+        alert_send_intent_key="$(jq -cSj -n \
+          --arg source_sha "$source_sha" --arg release_id "$release_id" \
+          --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
+          --arg action_group_id "${action_group_id,,}" --arg api_alert_id "${api_alert_id,,}" --arg worker_alert_id "${worker_alert_id,,}" \
+          --arg request_sha256 "$notification_request_sha256" --arg predecessor_sha256 "$predecessor_send_evidence_sha256" \
+          --arg supersedes_intent_sha256 "${supersedes_intent_sha256:-none}" '
+            {
+              source_sha: $source_sha, release_id: $release_id,
+              state: {lineage: $lineage, serial: $serial, sha256: $state_sha256},
+              action_group_resource_id: $action_group_id,
+              api_alert_resource_id: $api_alert_id,
+              worker_alert_resource_id: $worker_alert_id,
+              notification_request_sha256: $request_sha256,
+              predecessor_send_evidence_sha256: $predecessor_sha256,
+              supersedes_intent_sha256: $supersedes_intent_sha256
+            }
+          ' | sha256sum | awk '{print $1}')"
+        [[ "$alert_send_intent_key" =~ ^[0-9a-f]{64}$ ]] || die "cannot derive the deterministic alert send-intent key"
         az account get-access-token --resource https://management.azure.com/ --query accessToken --output tsv >"$operation_temp_dir/arm-token" 2>/dev/null || die "cannot obtain an ephemeral ARM token for the Action Group delivery test"
         chmod 0600 "$operation_temp_dir/arm-token"
         arm_token="$(cat "$operation_temp_dir/arm-token")"
         [[ "$arm_token" =~ ^[A-Za-z0-9._~-]+$ ]] || die "ephemeral ARM token has an invalid shape"
         curl_config_file="$operation_temp_dir/curl.conf"
-        printf 'silent\nshow-error\nfail-with-body\nmax-time = 30\nheader = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\nheader = "Accept: application/json"\n' "$arm_token" >"$curl_config_file"
+        printf 'silent\nshow-error\nfail-with-body\nmax-time = 30\nheader = "Authorization: Bearer %s"\nheader = "Content-Type: application/json"\nheader = "Accept: application/json"\nheader = "x-ms-client-request-id: %s"\nheader = "x-ms-return-client-request-id: true"\n' "$arm_token" "$alert_client_request_id" >"$curl_config_file"
         chmod 0600 "$curl_config_file"
         unset arm_token
         rm -f -- "$operation_temp_dir/arm-token"
+        alert_send_intent_payload="$operation_temp_dir/send-intent-payload.json"
+        jq -cS -n \
+          --arg issued_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
+          --arg intent_key_sha256 "$alert_send_intent_key" \
+          --arg source_sha "$source_sha" --arg release_id "$release_id" \
+          --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
+          --arg action_group_id "$action_group_id" --arg api_alert_id "$api_alert_id" --arg worker_alert_id "$worker_alert_id" \
+          --arg request_sha256 "$notification_request_sha256" --arg predecessor_sha256 "$predecessor_send_evidence_sha256" \
+          --arg client_request_id "$alert_client_request_id" --arg confirmation_challenge "$confirmation_challenge" \
+          --arg supersedes_intent_sha256 "$supersedes_intent_sha256" --arg retry_approval_sha256 "$retry_approval_sha256" '
+            {
+              schema_version: 1, evidence_type: "protected-runner-alert-send-intent",
+              issued_at: $issued_at, intent_key_sha256: $intent_key_sha256,
+              source_sha: $source_sha, release_id: $release_id,
+              state: {lineage: $lineage, serial: $serial, sha256: $state_sha256},
+              action_group_resource_id: $action_group_id,
+              api_alert_resource_id: $api_alert_id,
+              worker_alert_resource_id: $worker_alert_id,
+              notification_request_sha256: $request_sha256,
+              predecessor_send_evidence_sha256: $predecessor_sha256,
+              supersedes_intent_sha256: (if $supersedes_intent_sha256 == "" then null else $supersedes_intent_sha256 end),
+              retry_approval_sha256: (if $retry_approval_sha256 == "" then null else $retry_approval_sha256 end),
+              client_request_id: $client_request_id,
+              confirmation_challenge: $confirmation_challenge,
+              post_may_have_started: true,
+              recipient_address_returned: false,
+              secrets_returned: false
+            }
+          ' >"$alert_send_intent_payload"
+        alert_send_intent_sha256="$(sha256sum "$alert_send_intent_payload" | awk '{print $1}')"
+        alert_send_intent_file="$alert_send_intent_dir/$alert_send_intent_key.json"
+        alert_send_intent_tmp="$(mktemp "$alert_send_intent_dir/.intent.XXXXXX")"
+        jq -S --arg evidence_payload_sha256 "$alert_send_intent_sha256" '. + {evidence_payload_sha256: $evidence_payload_sha256}' "$alert_send_intent_payload" >"$alert_send_intent_tmp"
+        chmod 0600 "$alert_send_intent_tmp"
+        fsync_path "$alert_send_intent_tmp" || die "cannot durably synchronize the alert send intent"
+        if ! ln -- "$alert_send_intent_tmp" "$alert_send_intent_file"; then
+          die "a concurrent or unresolved alert send intent already owns this exact external side effect"
+        fi
+        fsync_path "$alert_send_intent_dir" || die "cannot durably publish the alert send intent"
+        rm -f -- "$alert_send_intent_tmp"
+        alert_send_intent_tmp=""
+        alert_send_intent_pointer_tmp="$(mktemp "$alert_root/.send-intent.current.XXXXXX")"
+        printf '%s\n' "$alert_send_intent_key.json" >"$alert_send_intent_pointer_tmp"
+        chmod 0600 "$alert_send_intent_pointer_tmp"
+        fsync_path "$alert_send_intent_pointer_tmp" || die "cannot durably synchronize the alert send-intent pointer"
+        mv -f -- "$alert_send_intent_pointer_tmp" "$alert_send_intent_pointer"
+        alert_send_intent_pointer_tmp=""
+        fsync_path "$alert_root" || die "cannot durably publish the alert send-intent pointer"
         notification_url="https://management.azure.com${action_group_id}/createNotifications?api-version=2024-10-01-preview"
         notification_status="$(curl --config "$curl_config_file" --request POST --data-binary "@$operation_temp_dir/notification-request.json" --dump-header "$operation_temp_dir/notification-headers" --output "$operation_temp_dir/notification-response.json" --write-out '%{http_code}' "$notification_url" 2>/dev/null)" || die "Azure Action Group delivery test request failed"
         [[ "$notification_status" == "200" || "$notification_status" == "202" ]] || die "Azure Action Group delivery test returned an unexpected status"
@@ -2266,13 +2965,12 @@ PY
           ((.actionDetails[0].MechanismType // .actionDetails[0].mechanismType // "") | ascii_downcase) == "email" and
           ((.actionDetails[0].Status // .actionDetails[0].status // "") | ascii_downcase) == "succeeded"
         ' "$operation_temp_dir/notification-response.json" >/dev/null || die "Action Group test did not prove exactly one succeeded email action"
-        confirmation_challenge="$(dd if=/dev/urandom bs=32 count=1 status=none | sha256sum | awk '{print $1}')"
-        [[ "$confirmation_challenge" =~ ^[0-9a-f]{64}$ ]] || die "cannot generate an unpredictable alert confirmation challenge"
         notification_operation_sha256="$(jq -cS -n \
-          --arg request_sha256 "$(sha256sum "$operation_temp_dir/notification-request.json" | awk '{print $1}')" \
+          --arg request_sha256 "$notification_request_sha256" \
           --arg response_sha256 "$(sha256sum "$operation_temp_dir/notification-response.json" | awk '{print $1}')" \
-          --arg http_status "$notification_status" \
-          '{request_sha256: $request_sha256, response_sha256: $response_sha256, final_http_status: $http_status}' | sha256sum | awk '{print $1}')"
+          --arg http_status "$notification_status" --arg send_intent_sha256 "$alert_send_intent_sha256" \
+          --arg client_request_id_sha256 "$(printf '%s' "$alert_client_request_id" | sha256sum | awk '{print $1}')" \
+          '{request_sha256: $request_sha256, response_sha256: $response_sha256, final_http_status: $http_status, send_intent_sha256: $send_intent_sha256, client_request_id_sha256: $client_request_id_sha256}' | sha256sum | awk '{print $1}')"
         probe_payload="$(mktemp /run/cosmas-alert-delivery-attestation.XXXXXX)"
         jq -cS -n \
           --arg completed_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --arg source_sha "$source_sha" --arg release_id "$release_id" \
@@ -2280,7 +2978,8 @@ PY
           --arg box_id "$GUARD_BOX_ID" --arg deployment_mode "$GUARD_DEPLOYMENT_MODE" \
           --arg action_group_id "$action_group_id" --arg api_alert_id "$api_alert_id" --arg api_scope "$expected_api_scope" \
           --arg worker_alert_id "$worker_alert_id" --arg worker_scope "$expected_worker_scope" \
-          --arg confirmation_challenge "$confirmation_challenge" --arg notification_operation_sha256 "$notification_operation_sha256" '
+          --arg confirmation_challenge "$confirmation_challenge" --arg notification_operation_sha256 "$notification_operation_sha256" \
+          --arg send_intent_sha256 "$alert_send_intent_sha256" '
             {
               schema_version: 1,
               evidence_type: "protected-runner-alert-delivery",
@@ -2304,14 +3003,15 @@ PY
                 delivery_confirmed_by_owner: false
               },
               confirmation_challenge: $confirmation_challenge,
+              send_intent_sha256: $send_intent_sha256,
               notification_operation_sha256: $notification_operation_sha256,
               recipient_address_returned: false,
               secrets_returned: false
             }
           ' >"$probe_payload"
-      else
-        probe_payload="$(mktemp /run/cosmas-alert-delivery-confirmation.XXXXXX)"
-        jq -cS -n \
+    else
+      probe_payload="$(mktemp /run/cosmas-alert-delivery-confirmation.XXXXXX)"
+      jq -cS -n \
           --arg completed_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" --arg source_sha "$source_sha" --arg release_id "$release_id" \
           --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
           --arg box_id "$GUARD_BOX_ID" --arg deployment_mode "$GUARD_DEPLOYMENT_MODE" \
@@ -2339,17 +3039,27 @@ PY
               recipient_address_returned: false,
               secrets_returned: false
             }
-          ' >"$probe_payload"
-      fi
-      evidence_hash="$(sha256sum "$probe_payload" | awk '{print $1}')"
-      alert_delivery_evidence_tmp="$(mktemp "$alert_root/.$alert_phase-attestation.XXXXXX")"
-      jq -S --arg evidence_payload_sha256 "$evidence_hash" '. + {evidence_payload_sha256: $evidence_payload_sha256}' "$probe_payload" >"$alert_delivery_evidence_tmp"
-      chmod 0600 "$alert_delivery_evidence_tmp"
-      jq -e --arg hash "$evidence_hash" '.schema_version == 1 and .evidence_payload_sha256 == $hash and .recipient_address_returned == false and .secrets_returned == false' "$alert_delivery_evidence_tmp" >/dev/null || die "generated alert-delivery evidence is invalid"
-      ln -- "$alert_delivery_evidence_tmp" "$alert_delivery_file" || die "alert-delivery evidence appeared concurrently"
-      rm -f -- "$alert_delivery_evidence_tmp"
-      alert_delivery_evidence_tmp=""
+        ' >"$probe_payload"
     fi
+    evidence_hash="$(sha256sum "$probe_payload" | awk '{print $1}')"
+    alert_delivery_name="$evidence_hash.json"
+    alert_delivery_file="$alert_evidence_dir/$alert_delivery_name"
+    alert_delivery_evidence_tmp="$(mktemp "$alert_evidence_dir/.attestation.XXXXXX")"
+    jq -S --arg evidence_payload_sha256 "$evidence_hash" '. + {evidence_payload_sha256: $evidence_payload_sha256}' "$probe_payload" >"$alert_delivery_evidence_tmp"
+    chmod 0600 "$alert_delivery_evidence_tmp"
+    jq -e --arg hash "$evidence_hash" '.schema_version == 1 and .evidence_payload_sha256 == $hash and .recipient_address_returned == false and .secrets_returned == false' "$alert_delivery_evidence_tmp" >/dev/null || die "generated alert-delivery evidence is invalid"
+    fsync_path "$alert_delivery_evidence_tmp" || die "cannot durably synchronize alert-delivery evidence"
+    ln -- "$alert_delivery_evidence_tmp" "$alert_delivery_file" || die "alert-delivery evidence generation appeared concurrently"
+    fsync_path "$alert_evidence_dir" || die "cannot durably publish alert-delivery evidence"
+    rm -f -- "$alert_delivery_evidence_tmp"
+    alert_delivery_evidence_tmp=""
+    alert_delivery_pointer_tmp="$(mktemp "$alert_root/.$alert_phase.current.XXXXXX")"
+    printf '%s\n' "$alert_delivery_name" >"$alert_delivery_pointer_tmp"
+    chmod 0600 "$alert_delivery_pointer_tmp"
+    fsync_path "$alert_delivery_pointer_tmp" || die "cannot durably synchronize the alert-delivery pointer"
+    mv -f -- "$alert_delivery_pointer_tmp" "$alert_current_pointer"
+    alert_delivery_pointer_tmp=""
+    fsync_path "$alert_root" || die "cannot durably publish the alert-delivery pointer"
     emit_sanitized_artifact "$alert_delivery_file"
     ;;
   pitr-freeze|pitr-manifest|pitr-start|pitr-complete|pitr-cleanup|pitr-resume)
@@ -2361,8 +3071,10 @@ PY
         keys == ["pitr_phase", "quiet_window_end_utc"] and
         (.quiet_window_end_utc | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
       elif $phase == "manifest" then
-        keys == ["pitr_phase", "restore_time_utc"] and
-        (.restore_time_utc | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"))
+        (keys | sort) == (["pitr_phase", "preparer_reference", "restore_time_utc"] | sort) and
+        (.restore_time_utc | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+        (.preparer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ ()-]{2,255}$")) and
+        (.preparer_reference | contains("@") | not)
       elif $phase == "resume" then
         (keys | sort) == (["owner_approval", "pitr_phase"] | sort) and
         (.owner_approval | type == "object") and
@@ -2428,7 +3140,7 @@ PY
         rm -f -- "$freeze_payload" "$freeze_complete"
       fi
       pitr_validate_freeze_state
-      [[ "$(jq -er '.phase' "$PITR_FREEZE_STATE")" != "resumed" ]] || die "this release already completed its PITR writer-freeze cycle; use a new release ID"
+      [[ "$(jq -er '.phase' "$PITR_FREEZE_STATE")" != "resumed" ]] || die "this release already completed its PITR writer-freeze cycle; use a new source SHA and release ID with new build evidence"
       [[ "$(jq -er '.quiet_window_end_utc' "$PITR_FREEZE_STATE")" == "$quiet_window_end" ]] || die "PITR freeze retry changed the immutable quiet-window end"
       api_revision="$(jq -er '.writers.api.revision' "$PITR_FREEZE_STATE")"
       worker_revision="$(jq -er '.writers.worker.revision' "$PITR_FREEZE_STATE")"
@@ -2558,14 +3270,27 @@ PY
         ' >"$probe_payload"
     else
       if [[ "$pitr_phase" == "manifest" ]]; then
-        jq -e 'keys == ["pitr_phase", "restore_time_utc"]' "$payload_file" >/dev/null || die "PITR manifest accepts only the exact restore timestamp"
-        [[ ! -e "$PITR_MANIFEST" && ! -L "$PITR_MANIFEST" ]] || die "PITR manifest already exists; retrieve it or use a new release"
+        jq -e '(keys | sort) == (["pitr_phase", "preparer_reference", "restore_time_utc"] | sort)' "$payload_file" >/dev/null || die "PITR manifest accepts only the exact restore timestamp and preparer reference"
+        [[ ! -e "$PITR_MANIFEST" && ! -L "$PITR_MANIFEST" ]] || die "PITR manifest already exists; retrieve it or use a new source SHA and release ID"
+        manifest_preparer_reference="$(jq -er '.preparer_reference' "$payload_file")"
+        if [[ -e "$PITR_MANIFEST_PREPARER" || -L "$PITR_MANIFEST_PREPARER" ]]; then
+          [[ -f "$PITR_MANIFEST_PREPARER" && ! -L "$PITR_MANIFEST_PREPARER" && "$(stat -c '%a' "$PITR_MANIFEST_PREPARER")" == "600" && "$(stat -c '%u' "$PITR_MANIFEST_PREPARER")" == "0" ]] || die "PITR manifest-preparer reference is unsafe"
+          [[ "$(cat "$PITR_MANIFEST_PREPARER")" == "$manifest_preparer_reference" ]] || die "PITR manifest retry changed the immutable preparer reference"
+        else
+          manifest_preparer_tmp="$(mktemp "$PITR_ROOT/.manifest-preparer-reference.XXXXXX")"
+          printf '%s\n' "$manifest_preparer_reference" >"$manifest_preparer_tmp"
+          chmod 0600 "$manifest_preparer_tmp"
+          ln -- "$manifest_preparer_tmp" "$PITR_MANIFEST_PREPARER" || die "PITR manifest-preparer reference appeared concurrently"
+          rm -f -- "$manifest_preparer_tmp"
+        fi
+        manifest_preparer_reference_sha256="$(printf '%s' "$manifest_preparer_reference" | sha256sum | awk '{print $1}')"
+        approval_reviewer_reference_sha256=""
         pitr_restore_time="$(jq -er '.restore_time_utc' "$payload_file")"
         owner_approval_sha256=""
       else
         [[ -f "$PITR_MANIFEST" && ! -L "$PITR_MANIFEST" && "$(stat -c '%a' "$PITR_MANIFEST")" == "400" && "$(stat -c '%u' "$PITR_MANIFEST")" == "0" ]] || die "approved private PITR manifest is unavailable or unsafe"
         manifest_sha256="$(jq -er '.manifest_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$PITR_MANIFEST")" || die "private PITR manifest hash is invalid"
-        [[ "$(jq -cS 'del(.manifest_sha256)' "$PITR_MANIFEST" | sha256sum | awk '{print $1}')" == "$manifest_sha256" ]] || die "private PITR manifest was modified"
+        [[ "$(jq -cSj 'del(.manifest_sha256)' "$PITR_MANIFEST" | sha256sum | awk '{print $1}')" == "$manifest_sha256" ]] || die "private PITR manifest was modified"
         jq -e --arg manifest_sha256 "$manifest_sha256" '
           .owner_approval.schema_version == 1 and
           .owner_approval.confirmation == "AUTHORIZE D3 BILLABLE PITR" and
@@ -2574,6 +3299,12 @@ PY
           (.owner_approval.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
           (.owner_approval.reviewer_reference | contains("@") | not)
         ' "$payload_file" >/dev/null || die "PITR owner approval does not bind the exact private manifest"
+        [[ -f "$PITR_MANIFEST_PREPARER" && ! -L "$PITR_MANIFEST_PREPARER" && "$(stat -c '%a' "$PITR_MANIFEST_PREPARER")" == "600" && "$(stat -c '%u' "$PITR_MANIFEST_PREPARER")" == "0" ]] || die "PITR manifest-preparer reference is unavailable or unsafe"
+        manifest_preparer_reference="$(cat "$PITR_MANIFEST_PREPARER")"
+        approval_reviewer_reference="$(jq -er '.owner_approval.reviewer_reference' "$payload_file")"
+        pitr_reviewer_references_are_distinct "$manifest_preparer_reference" "$approval_reviewer_reference" || die "PITR billable-operation reviewer must be distinct from the manifest preparer reference"
+        manifest_preparer_reference_sha256="$(printf '%s' "$manifest_preparer_reference" | sha256sum | awk '{print $1}')"
+        approval_reviewer_reference_sha256="$(printf '%s' "$approval_reviewer_reference" | sha256sum | awk '{print $1}')"
         python3 - "$payload_file" "$PITR_MANIFEST" "$pitr_phase" <<'PY' || die "PITR owner approval timestamp is invalid for this phase"
 from datetime import UTC, datetime, timedelta
 import json
@@ -2637,7 +3368,7 @@ PY
         .operation == $phase and (.status | strings) and
         (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
       ' "$private_result_file" >/dev/null || die "PITR primitive returned an invalid sanitized contract"
-      pitr_output_hash="$(jq -cS 'del(.evidence_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
+      pitr_output_hash="$(jq -cSj 'del(.evidence_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
       [[ "$(jq -er '.evidence_sha256' "$private_result_file")" == "$pitr_output_hash" ]] || die "PITR primitive evidence self-hash is invalid"
       pitr_status="$(jq -er '.status' "$private_result_file")"
       case "$pitr_phase:$pitr_status_code:$pitr_status" in
@@ -2651,6 +3382,8 @@ PY
         --arg pitr_phase "$pitr_phase" --arg pitr_status "$pitr_status" --arg pitr_output_sha256 "$pitr_output_hash" \
         --arg pitr_script_sha256 "$(sha256sum "$PITR_SCRIPT" | awk '{print $1}')" --arg freeze_evidence_sha256 "$freeze_evidence_hash" \
         --arg owner_approval_sha256 "$owner_approval_sha256" --argjson writers_resumed "$writers_resumed" \
+        --arg manifest_preparer_reference_sha256 "$manifest_preparer_reference_sha256" \
+        --arg approval_reviewer_reference_sha256 "$approval_reviewer_reference_sha256" \
         --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" \
         --slurpfile pitr_output "$private_result_file" '
           {
@@ -2660,6 +3393,8 @@ PY
             state: {lineage: $lineage, serial: $serial, sha256: $state_sha256},
             freeze_evidence_sha256: $freeze_evidence_sha256,
             owner_approval_sha256: (if $owner_approval_sha256 == "" then null else $owner_approval_sha256 end),
+            manifest_preparer_reference_sha256: $manifest_preparer_reference_sha256,
+            approval_reviewer_reference_sha256: (if $approval_reviewer_reference_sha256 == "" then null else $approval_reviewer_reference_sha256 end),
             pitr_script_sha256: $pitr_script_sha256,
             pitr_output_sha256: $pitr_output_sha256,
             pitr_output: $pitr_output[0],
@@ -2692,10 +3427,20 @@ PY
       (.prior_source_sha | strings | test("^[0-9a-f]{40}$")) and .prior_source_sha != $source_sha and
       (.prior_release_id | strings | test("^[a-z0-9][a-z0-9-]{2,31}$")) and .prior_release_id != $release_id and
       (.owner_approval | type == "object") and
-      (.owner_approval | keys | sort) == (["approved_at", "confirmation", "contract", "current", "prior", "reviewer_reference", "schema_version"] | sort) and
+      (if $phase == "rollback" then
+        (.owner_approval | keys | sort) == (["approved_at", "confirmation", "contract", "current", "prior", "reviewer_reference", "schema_version"] | sort) and
+        .owner_approval.contract == "cosmas-os-d3-release-rollback-approval-v1" and
+        .owner_approval.confirmation == "AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK"
+      else
+        (.owner_approval | keys | sort) == (["approved_at", "confirmation", "contract", "current", "prior", "reviewer_reference", "rollback_evidence_sha256", "rollback_state_sha256", "schema_version"] | sort) and
+        .owner_approval.contract == "cosmas-os-d3-release-forward-approval-v1" and
+        .owner_approval.confirmation == "AUTHORIZE D3 IMMUTABLE DIGEST FORWARD RESTORATION" and
+        (.owner_approval.rollback_evidence_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.owner_approval.rollback_state_sha256 | strings | test("^[0-9a-f]{64}$"))
+      end) and
       .owner_approval.schema_version == 1 and
-      .owner_approval.contract == "cosmas-os-d3-release-recovery-approval-v1" and
-      .owner_approval.confirmation == "AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK AND FORWARD RECOVERY" and
+      (.owner_approval.current | keys | sort) == (["api_digest", "release_id", "source_sha", "web_digest"] | sort) and
+      (.owner_approval.prior | keys | sort) == (["api_digest", "release_id", "source_sha", "web_digest"] | sort) and
       .owner_approval.current.source_sha == $source_sha and .owner_approval.current.release_id == $release_id and
       .owner_approval.prior.source_sha == .prior_source_sha and .owner_approval.prior.release_id == .prior_release_id and
       (.owner_approval.current.api_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
@@ -2707,7 +3452,7 @@ PY
       (.owner_approval.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
       (.owner_approval.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
       (.owner_approval.reviewer_reference | contains("@") | not)
-    ' "$payload_file" >/dev/null || die "protected release-recovery payload is invalid"
+    ' "$payload_file" >/dev/null || die "protected phase-specific release-recovery payload is invalid"
     python3 - "$payload_file" <<'PY' || die "release-recovery owner approval is outside its bounded four-hour window"
 import datetime
 import json
@@ -2762,6 +3507,30 @@ PY
     git -C "$repository_root" ls-files --error-unmatch infra/beta/release_recovery_acceptance.py >/dev/null 2>&1 || die "release-recovery primitive is not part of the approved commit"
     approval_hash="$(jq -cS '.owner_approval' "$payload_file" | sha256sum | awk '{print $1}')"
     reviewer_hash="$(jq -jr '.owner_approval.reviewer_reference' "$payload_file" | sha256sum | awk '{print $1}')"
+    rollback_state_sha256=""
+    rollback_evidence_sha256=""
+    if [[ "$recovery_phase" == "forward" ]]; then
+      rollback_evidence_file="$recovery_root/rollback-attestation.json"
+      [[ -f "$rollback_evidence_file" && ! -L "$rollback_evidence_file" && "$(stat -c '%a' "$rollback_evidence_file")" == "600" && "$(stat -c '%u' "$rollback_evidence_file")" == "0" ]] || die "forward recovery requires the protected rollback attestation"
+      rollback_evidence_sha256="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$rollback_evidence_file")" || die "rollback attestation hash is invalid"
+      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$rollback_evidence_file" | sha256sum | awk '{print $1}')" == "$rollback_evidence_sha256" ]] || die "rollback attestation was modified"
+      rollback_state_sha256="$(jq -er '.recovery_state_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$rollback_evidence_file")" || die "rollback attestation lacks its immutable recovery-state checkpoint"
+      jq -e \
+        --arg source_sha "$source_sha" --arg release_id "$release_id" \
+        --arg prior_source_sha "$prior_source_sha" --arg prior_release_id "$prior_release_id" \
+        --arg current_api "$LIVE_API_DIGEST" --arg current_web "$LIVE_WEB_DIGEST" \
+        --arg prior_api "$prior_api_digest" --arg prior_web "$prior_web_digest" \
+        --arg rollback_evidence "$rollback_evidence_sha256" --arg rollback_state "$rollback_state_sha256" \
+        --slurpfile rollback "$rollback_evidence_file" '
+          $rollback[0].evidence_type == "protected-runner-release-recovery" and $rollback[0].recovery_phase == "rollback" and
+          $rollback[0].source_sha == $source_sha and $rollback[0].release_id == $release_id and
+          $rollback[0].prior_source_sha == $prior_source_sha and $rollback[0].prior_release_id == $prior_release_id and
+          $rollback[0].images.current.api_digest == $current_api and $rollback[0].images.current.web_digest == $current_web and
+          $rollback[0].images.prior.api_digest == $prior_api and $rollback[0].images.prior.web_digest == $prior_web and
+          .owner_approval.rollback_evidence_sha256 == $rollback_evidence and
+          .owner_approval.rollback_state_sha256 == $rollback_state
+        ' "$payload_file" >/dev/null || die "forward authorization is not bound to the exact completed rollback evidence/state/releases/digests"
+    fi
     if [[ -e "$recovery_evidence_file" || -L "$recovery_evidence_file" ]]; then
       [[ -f "$recovery_evidence_file" && ! -L "$recovery_evidence_file" && "$(stat -c '%a' "$recovery_evidence_file")" == "600" && "$(stat -c '%u' "$recovery_evidence_file")" == "0" ]] || die "stored release-recovery evidence is unsafe"
       existing_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$recovery_evidence_file")" || die "stored release-recovery evidence hash is invalid"
@@ -2799,6 +3568,10 @@ PY
     export COSMAS_RECOVERY_PRIOR_API_DIGEST="$prior_api_digest"
     export COSMAS_RECOVERY_PRIOR_WEB_DIGEST="$prior_web_digest"
     export COSMAS_RECOVERY_APPROVAL_SHA256="$approval_hash"
+    unset COSMAS_RECOVERY_ROLLBACK_STATE_SHA256
+    if [[ "$recovery_phase" == "forward" ]]; then
+      export COSMAS_RECOVERY_ROLLBACK_STATE_SHA256="$rollback_state_sha256"
+    fi
     export COSMAS_RECOVERY_STATE_PATH="$recovery_state"
     export COSMAS_RECOVERY_POLL_ATTEMPTS=60
     export COSMAS_RECOVERY_POLL_INTERVAL_SECONDS=10
@@ -2811,14 +3584,16 @@ PY
     set -e
     [[ "$recovery_status_code" == 0 ]] || die "release-recovery primitive failed; private diagnostics remain root-only on the runner"
     [[ "$(wc -l <"$private_result_file" | tr -d ' ')" == "1" && "$(wc -c <"$private_result_file")" -le 32768 ]] || die "release-recovery primitive did not return one bounded sanitized record"
-    jq -e --arg phase "$recovery_phase" --arg approval_hash "$approval_hash" '
+    jq -e --arg phase "$recovery_phase" --arg approval_hash "$approval_hash" --arg rollback_state "$rollback_state_sha256" '
       type == "object" and .schema_version == 1 and .contract == "cosmas-os-d3-release-recovery-acceptance-v1" and
       .operation == $phase and .approval_sha256 == $approval_hash and .mutable_tags_used == false and
+      (.rollback_state_sha256 | strings | test("^[0-9a-f]{64}$")) and
+      (if $phase == "forward" then .rollback_state_sha256 == $rollback_state else true end) and
       .route_binding_verified == true and .readiness_verified == true and .public_health_verified == true and
       .configuration_unchanged_except_exact_digest == true and
       (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
     ' "$private_result_file" >/dev/null || die "release-recovery primitive returned an invalid sanitized contract"
-    recovery_output_hash="$(jq -cS 'del(.evidence_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
+    recovery_output_hash="$(jq -cSj 'del(.evidence_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
     [[ "$(jq -er '.evidence_sha256' "$private_result_file")" == "$recovery_output_hash" ]] || die "release-recovery primitive evidence self-hash is invalid"
     forward_no_drift_hash=""
     terraform_no_drift=false
@@ -2833,6 +3608,7 @@ PY
       --arg current_api_digest "$LIVE_API_DIGEST" --arg current_web_digest "$LIVE_WEB_DIGEST" \
       --arg prior_api_digest "$prior_api_digest" --arg prior_web_digest "$prior_web_digest" \
       --arg approval_sha256 "$approval_hash" --arg reviewer_reference_sha256 "$reviewer_hash" \
+      --arg rollback_evidence_sha256 "$rollback_evidence_sha256" \
       --arg current_build_evidence_sha256 "$(jq -er '.evidence_payload_sha256' "$build_root/build-evidence.json")" \
       --arg prior_build_evidence_sha256 "$prior_build_hash" --arg pre_no_drift_review_sha256 "$pre_no_drift_hash" \
       --arg forward_no_drift_review_sha256 "$forward_no_drift_hash" --argjson terraform_no_drift "$terraform_no_drift" \
@@ -2851,6 +3627,8 @@ PY
           revision_ids: {baseline: $recovery_output[0].baseline_revision_ids, result: $recovery_output[0].result_revision_ids},
           state: {lineage: $lineage, serial: $serial, sha256: $state_sha256},
           owner_approval_sha256: $approval_sha256, reviewer_reference_sha256: $reviewer_reference_sha256,
+          rollback_evidence_sha256: (if $rollback_evidence_sha256 == "" then null else $rollback_evidence_sha256 end),
+          recovery_state_sha256: $recovery_output[0].rollback_state_sha256,
           build_evidence_sha256: {current: $current_build_evidence_sha256, prior: $prior_build_evidence_sha256},
           pre_no_drift_review_sha256: $pre_no_drift_review_sha256,
           forward_no_drift_review_sha256: (if $forward_no_drift_review_sha256 == "" then null else $forward_no_drift_review_sha256 end),
@@ -2884,22 +3662,54 @@ PY
     offboarding_phase="$(jq -er '.offboarding_phase | select(. == "baseline" or . == "verify")' "$payload_file")"
     prepare_live_acceptance_context
     offboarding_root="$release_root/executions/offboarding"
-    offboarding_evidence_file="$offboarding_root/$offboarding_phase-attestation.json"
-    install -d -o root -g root -m 0700 "$offboarding_root"
+    offboarding_evidence_dir="$offboarding_root/evidence"
+    offboarding_current_pointer="$offboarding_root/$offboarding_phase.current"
+    install -d -o root -g root -m 0700 "$offboarding_root" "$offboarding_evidence_dir"
     input_hash="$(jq -cS '.' "$payload_file" | sha256sum | awk '{print $1}')"
-    if [[ -e "$offboarding_evidence_file" || -L "$offboarding_evidence_file" ]]; then
-      [[ -f "$offboarding_evidence_file" && ! -L "$offboarding_evidence_file" && "$(stat -c '%a' "$offboarding_evidence_file")" == "600" && "$(stat -c '%u' "$offboarding_evidence_file")" == "0" ]] || die "stored offboarding evidence is unsafe"
-      existing_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$offboarding_evidence_file")" || die "stored offboarding evidence hash is invalid"
-      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$offboarding_evidence_file" | sha256sum | awk '{print $1}')" == "$existing_hash" ]] || die "stored offboarding evidence was modified"
-      jq -e --arg phase "$offboarding_phase" --arg source_sha "$source_sha" --arg release_id "$release_id" --arg input_hash "$input_hash" '
-        .evidence_type == "protected-runner-offboarding-acceptance" and .offboarding_phase == $phase and
-        .source_sha == $source_sha and .release_id == $release_id and .protected_input_sha256 == $input_hash
-      ' "$offboarding_evidence_file" >/dev/null || die "stored offboarding evidence belongs to a different protected input"
-      emit_sanitized_artifact "$offboarding_evidence_file"
-      exit 0
-    fi
     expected_api_digest="$LIVE_API_DIGEST"
     exact_image="$LIVE_API_IMAGE"
+    if [[ -e "$offboarding_current_pointer" || -L "$offboarding_current_pointer" ]]; then
+      offboarding_evidence_file="$(resolve_attestation_generation "$offboarding_current_pointer" "$offboarding_evidence_dir" "current offboarding $offboarding_phase evidence")"
+      jq -e --arg phase "$offboarding_phase" --arg source_sha "$source_sha" --arg release_id "$release_id" '
+        .evidence_type == "protected-runner-offboarding-acceptance" and .offboarding_phase == $phase and
+        .source_sha == $source_sha and .release_id == $release_id and
+        (.completed_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+        (.state.lineage | strings | test("^[0-9a-fA-F-]{36}$")) and
+        (.state.serial | numbers | floor == . and . >= 0) and (.state.sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.workload.api_image_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
+        .workload.deployment_mode == "synthetic_lab" and
+        (.protected_input_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.offboarding_output_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        .offboarding_output.contract == "cosmas-os-d3-offboarding-acceptance-v1" and
+        ((($phase == "baseline") and .offboarding_output.stage == "baseline" and .offboarding_output.status == "ready_for_owner") or
+         (($phase == "verify") and .offboarding_output.stage == "post_browser" and .offboarding_output.status == "verified")) and
+        .human_clerk_browser_steps_machine_verified == false and .identifiers_returned == false and .secrets_returned == false
+      ' "$offboarding_evidence_file" >/dev/null || die "current offboarding evidence contract is invalid"
+      current_offboarding_output_hash="$(jq -cSj '.offboarding_output | del(.evidence_sha256)' "$offboarding_evidence_file" | sha256sum | awk '{print $1}')"
+      [[ "$(jq -er '.offboarding_output.evidence_sha256' "$offboarding_evidence_file")" == "$current_offboarding_output_hash" && "$(jq -er '.offboarding_output_sha256' "$offboarding_evidence_file")" == "$current_offboarding_output_hash" ]] || die "current offboarding output self-hash is invalid"
+      if [[ "$offboarding_phase" == "baseline" ]]; then
+        offboarding_window_status="$(attestation_generation_window_status offboarding-baseline "$offboarding_evidence_file")" || die "current offboarding baseline has an invalid handoff window"
+        if [[ "$offboarding_window_status" == "live" ]]; then
+          jq -e \
+            --arg input_hash "$input_hash" --arg digest "$expected_api_digest" \
+            --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" '
+              .protected_input_sha256 == $input_hash and .workload.api_image_digest == $digest and
+              .state == {lineage: $lineage, serial: $serial, sha256: $state_sha256}
+            ' "$offboarding_evidence_file" >/dev/null || die "an unexpired offboarding baseline is already bound to a different protected request or live state"
+          emit_sanitized_artifact "$offboarding_evidence_file"
+          exit 0
+        fi
+        [[ "$offboarding_window_status" == "expired" ]] || die "current offboarding baseline has an invalid handoff window state"
+      elif jq -e \
+        --arg input_hash "$input_hash" --arg digest "$expected_api_digest" \
+        --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" '
+          .protected_input_sha256 == $input_hash and .workload.api_image_digest == $digest and
+          .state == {lineage: $lineage, serial: $serial, sha256: $state_sha256}
+        ' "$offboarding_evidence_file" >/dev/null; then
+        emit_sanitized_artifact "$offboarding_evidence_file"
+        exit 0
+      fi
+    fi
     if [[ "$offboarding_phase" == "baseline" ]]; then
       jq -e \
         --arg box_id "$(jq -er '.box_id.value' "$probe_outputs")" \
@@ -2915,6 +3725,11 @@ PY
     else
       prior_wrapper_hash="$(jq -er '.prior_attestation.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$payload_file")" || die "offboarding baseline wrapper hash is invalid"
       [[ "$(jq -cS '.prior_attestation | del(.evidence_payload_sha256)' "$payload_file" | sha256sum | awk '{print $1}')" == "$prior_wrapper_hash" ]] || die "offboarding baseline wrapper was modified"
+      stored_baseline_file="$offboarding_evidence_dir/$prior_wrapper_hash.json"
+      [[ -f "$stored_baseline_file" && ! -L "$stored_baseline_file" && "$(stat -c '%a' "$stored_baseline_file")" == "600" && "$(stat -c '%u' "$stored_baseline_file")" == "0" ]] || die "protected offboarding baseline evidence is unavailable or unsafe"
+      [[ "$(jq -er '.evidence_payload_sha256' "$stored_baseline_file")" == "$prior_wrapper_hash" ]] || die "offboarding verification does not reference the protected runner's exact baseline evidence"
+      [[ "$(jq -cS 'del(.evidence_payload_sha256)' "$stored_baseline_file" | sha256sum | awk '{print $1}')" == "$prior_wrapper_hash" ]] || die "protected offboarding baseline evidence was modified"
+      cmp -s <(jq -cS . "$stored_baseline_file") <(jq -cS '.prior_attestation' "$payload_file") || die "offboarding verification supplied a forged or modified baseline artifact"
       jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg lineage "$GUARD_STATE_LINEAGE" --argjson serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" --arg digest "$expected_api_digest" '
         .prior_attestation.schema_version == 1 and .prior_attestation.evidence_type == "protected-runner-offboarding-acceptance" and
         .prior_attestation.offboarding_phase == "baseline" and .prior_attestation.source_sha == $source_sha and
@@ -2928,8 +3743,9 @@ PY
         .owner_confirmation.clerk_organization_membership_removed == true and
         .owner_confirmation.clerk_sessions_revoked == true and .owner_confirmation.live_access_denied == true
       ' "$payload_file" >/dev/null || die "offboarding verification is not bound to the exact live release/baseline/human handoff"
-      prior_state_hash="$(jq -cS '.prior_attestation.offboarding_output | del(.evidence_sha256)' "$payload_file" | sha256sum | awk '{print $1}')"
+      prior_state_hash="$(jq -cSj '.prior_attestation.offboarding_output | del(.evidence_sha256)' "$payload_file" | sha256sum | awk '{print $1}')"
       [[ "$(jq -er '.prior_attestation.offboarding_output.evidence_sha256' "$payload_file")" == "$prior_state_hash" ]] || die "offboarding baseline state self-hash is invalid"
+      [[ "$(jq -er '.prior_attestation.offboarding_output_sha256' "$payload_file")" == "$prior_state_hash" ]] || die "offboarding baseline wrapper does not bind its exact state hash"
     fi
     operation_temp_dir="$(mktemp -d /run/cosmas-offboarding-acceptance.XXXXXX)"
     chmod 0700 "$operation_temp_dir"
@@ -3032,7 +3848,7 @@ PY
        (($phase == "verify") and .stage == "post_browser" and .status == "verified")) and
       (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
     ' "$private_result_file" >/dev/null || die "offboarding acceptance returned an invalid sanitized contract"
-    offboarding_output_hash="$(jq -cS 'del(.evidence_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
+    offboarding_output_hash="$(jq -cSj 'del(.evidence_sha256)' "$private_result_file" | sha256sum | awk '{print $1}')"
     [[ "$(jq -er '.evidence_sha256' "$private_result_file")" == "$offboarding_output_hash" ]] || die "offboarding acceptance evidence self-hash is invalid"
     for private_value in \
       "$(jq -r '.offboarding_request.box_id // empty' "$payload_file")" \
@@ -3062,11 +3878,20 @@ PY
         }
       ' >"$probe_payload"
     evidence_hash="$(sha256sum "$probe_payload" | awk '{print $1}')"
-    evidence_tmp="$(mktemp "$offboarding_root/.$offboarding_phase-attestation.XXXXXX")"
-    jq -S --arg hash "$evidence_hash" '. + {evidence_payload_sha256: $hash}' "$probe_payload" >"$evidence_tmp"
-    chmod 0600 "$evidence_tmp"
-    ln -- "$evidence_tmp" "$offboarding_evidence_file" || die "offboarding evidence appeared concurrently"
-    rm -f -- "$evidence_tmp" "$offboarding_log"
+    offboarding_evidence_name="$evidence_hash.json"
+    offboarding_evidence_file="$offboarding_evidence_dir/$offboarding_evidence_name"
+    offboarding_evidence_tmp="$(mktemp "$offboarding_evidence_dir/.attestation.XXXXXX")"
+    jq -S --arg hash "$evidence_hash" '. + {evidence_payload_sha256: $hash}' "$probe_payload" >"$offboarding_evidence_tmp"
+    chmod 0600 "$offboarding_evidence_tmp"
+    jq -e --arg hash "$evidence_hash" '.schema_version == 1 and .evidence_payload_sha256 == $hash and .identifiers_returned == false and .secrets_returned == false' "$offboarding_evidence_tmp" >/dev/null || die "generated offboarding evidence is invalid"
+    ln -- "$offboarding_evidence_tmp" "$offboarding_evidence_file" || die "offboarding evidence generation appeared concurrently"
+    rm -f -- "$offboarding_evidence_tmp" "$offboarding_log"
+    offboarding_evidence_tmp=""
+    offboarding_pointer_tmp="$(mktemp "$offboarding_root/.$offboarding_phase.current.XXXXXX")"
+    printf '%s\n' "$offboarding_evidence_name" >"$offboarding_pointer_tmp"
+    chmod 0600 "$offboarding_pointer_tmp"
+    mv -f -- "$offboarding_pointer_tmp" "$offboarding_current_pointer"
+    offboarding_pointer_tmp=""
     emit_sanitized_artifact "$offboarding_evidence_file"
     ;;
   bootstrap-identity)
@@ -3404,7 +4229,8 @@ PY
       alert)
         [[ "$stage" == "alert" ]] || die "alert retrieval requires stage=alert"
         alert_phase="$(jq -er '.alert_phase | select(. == "send" or . == "confirm")' "$payload_file")"
-        artifact_file="$release_root/executions/alert-delivery/$alert_phase-attestation.json"
+        pointer="$release_root/executions/alert-delivery/$alert_phase.current"
+        artifact_file="$(resolve_attestation_generation "$pointer" "$release_root/executions/alert-delivery/evidence" "current alert-delivery $alert_phase evidence")"
         jq -e --arg phase "$alert_phase" '.alert_phase == $phase' "$artifact_file" >/dev/null || die "alert-delivery artifact phase differs from the requested phase"
         ;;
       pitr)
@@ -3430,7 +4256,8 @@ PY
       offboarding)
         [[ "$stage" == "offboarding" ]] || die "offboarding retrieval requires stage=offboarding"
         offboarding_phase="$(jq -er '.offboarding_phase | select(. == "baseline" or . == "verify")' "$payload_file")"
-        artifact_file="$release_root/executions/offboarding/$offboarding_phase-attestation.json"
+        pointer="$release_root/executions/offboarding/$offboarding_phase.current"
+        artifact_file="$(resolve_attestation_generation "$pointer" "$release_root/executions/offboarding/evidence" "current offboarding $offboarding_phase evidence")"
         jq -e --arg phase "$offboarding_phase" '.evidence_type == "protected-runner-offboarding-acceptance" and .offboarding_phase == $phase' "$artifact_file" >/dev/null || die "offboarding artifact phase differs from the requested phase"
         ;;
       identity)

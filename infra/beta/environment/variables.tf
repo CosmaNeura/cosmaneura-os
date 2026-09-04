@@ -178,7 +178,7 @@ variable "web_origin" {
 
 variable "web_custom_domain" {
   type        = string
-  description = "Optional new lowercase hostname for the D3 web app. Existing app/chat and staging-app/staging-chat cosmaneura.com hostnames are explicitly reserved and unmanaged here."
+  description = "Optional during non-production validation; for production Clerk, select the dedicated lowercase hostname accepted in the exact owner decision in the foundation and retain it through workload/domain-binding stages. Shared azurecontainerapps.io and existing app/chat and staging-app/staging-chat cosmaneura.com hostnames are explicitly unavailable here."
   default     = null
   nullable    = true
 
@@ -187,10 +187,12 @@ variable "web_custom_domain" {
       var.web_custom_domain == lower(trimspace(var.web_custom_domain)) &&
       length(var.web_custom_domain) <= 253 &&
       can(regex("^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$", var.web_custom_domain)) &&
+      var.web_custom_domain != "azurecontainerapps.io" &&
+      !endswith(var.web_custom_domain, ".azurecontainerapps.io") &&
       !contains(["app.cosmaneura.com", "staging-app.cosmaneura.com", "chat.cosmaneura.com", "staging-chat.cosmaneura.com"], var.web_custom_domain),
       false,
     )
-    error_message = "web_custom_domain must be a valid lowercase hostname and must not collide with app.cosmaneura.com, staging-app.cosmaneura.com, chat.cosmaneura.com, or staging-chat.cosmaneura.com."
+    error_message = "web_custom_domain must be a valid dedicated lowercase hostname, not azurecontainerapps.io, and must not collide with app.cosmaneura.com, staging-app.cosmaneura.com, chat.cosmaneura.com, or staging-chat.cosmaneura.com."
   }
 }
 

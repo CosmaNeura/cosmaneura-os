@@ -136,6 +136,7 @@ isolated Azure execution proves the deployment.
   `database_preparation_image_digest`. Run and review that candidate job, then
   promote the API/worker digest in a second plan with the new matching
   attestation. Never disable workloads as a migration-staging shortcut.
-- Restore testing uses the administrator path from the protected runner, never
-  the runtime credential. A restored database must pass this job again before
-  it can receive traffic.
+- Restore fingerprinting uses the protected non-admin runtime `database-url`
+  from Key Vault and passes it to the digest-pinned image through a short-lived
+  mode-`0600` env file. The administrator URL is not used by PITR acceptance. A
+  restored database must pass this job again before it can receive traffic.

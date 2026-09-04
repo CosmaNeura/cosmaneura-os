@@ -262,6 +262,8 @@ jq -n '
 guard_validate_network_public_configuration "$network_public_configuration" "$(printf 'a%.0s' {1..40})" release-a lab01
 
 guard_operation_returns_hashed_evidence probe-network ""
+guard_operation_returns_hashed_evidence inspect-stage ""
+guard_operation_returns_hashed_evidence stage-generation ""
 guard_operation_returns_hashed_evidence retrieve network
 for unhashed_operation in plan apply; do
   if guard_operation_returns_hashed_evidence "$unhashed_operation" ""; then
@@ -583,12 +585,79 @@ if (guard_validate_pitr_revision_set "$test_dir/pitr-not-frozen.json" ca-api--re
   exit 1
 fi
 
-compressed_command_size="$(gzip -9 -c "$beta_dir/protected-runner-command.sh" | base64 | tr -d '\n' | wc -c | tr -d '[:space:]')"
+pitr_distinct_reviewer_helper="$test_dir/pitr-distinct-reviewer-helper.sh"
+sed -n '/^pitr_reviewer_references_are_distinct() {$/,/^}$/p' "$beta_dir/protected-runner-command.sh" >"$pitr_distinct_reviewer_helper"
+chmod 0600 "$pitr_distinct_reviewer_helper"
+[[ "$(grep -c '^pitr_reviewer_references_are_distinct() {$' "$pitr_distinct_reviewer_helper")" == "1" ]] || {
+  printf '%s\n' "PITR distinct-reviewer helper could not be isolated for behavioral tests" >&2
+  exit 1
+}
+# shellcheck disable=SC1090 # Extracted committed function is the test subject.
+source "$pitr_distinct_reviewer_helper"
+pitr_reviewer_references_are_distinct "operator-ledger:pitr-001" "owner-ledger:pitr-002"
+if pitr_reviewer_references_are_distinct "owner-ledger:pitr-001" "owner-ledger:pitr-001"; then
+  printf '%s\n' "PITR accepted the manifest preparer as the billable-operation reviewer" >&2
+  exit 1
+fi
+for invalid_reference in 'owner@example.test' ' two-leading' 'ab'; do
+  if pitr_reviewer_references_are_distinct "$invalid_reference" "owner-ledger:pitr-002"; then
+    printf '%s\n' "PITR accepted an invalid manifest-preparer reference" >&2
+    exit 1
+  fi
+done
+unset -f pitr_reviewer_references_are_distinct
+
+# Python primitives hash compact canonical JSON bytes without a trailing line
+# feed. Shell-generated evidence retains the established jq-line convention.
+# Exercise both contracts so a missing `jq -j` cannot silently strand live
+# evidence at the protected-runner boundary.
+python_evidence="$test_dir/python-evidence.json"
+python_payload='{"contract":"python-helper","schema_version":1}'
+python_payload_hash="$(printf '%s' "$python_payload" | sha256sum | awk '{print $1}')"
+printf '%s\n' "$python_payload" | jq -S --arg hash "$python_payload_hash" '. + {evidence_payload_sha256: $hash}' >"$python_evidence"
+guard_validate_python_sanitized_evidence_hash "$python_evidence"
+[[ "$GUARD_EVIDENCE_PAYLOAD_SHA256" == "$python_payload_hash" ]]
+if guard_validate_sanitized_evidence_hash "$python_evidence"; then
+  printf '%s\n' "shell-newline evidence validator accepted Python canonical bytes" >&2
+  exit 1
+fi
+
+shell_evidence="$test_dir/shell-evidence.json"
+printf '%s\n' "$python_payload" >"$test_dir/shell-evidence-payload.json"
+shell_payload_hash="$(sha256sum "$test_dir/shell-evidence-payload.json" | awk '{print $1}')"
+jq -S --arg hash "$shell_payload_hash" '. + {evidence_payload_sha256: $hash}' "$test_dir/shell-evidence-payload.json" >"$shell_evidence"
+guard_validate_sanitized_evidence_hash "$shell_evidence"
+[[ "$GUARD_EVIDENCE_PAYLOAD_SHA256" == "$shell_payload_hash" ]]
+if guard_validate_python_sanitized_evidence_hash "$shell_evidence"; then
+  printf '%s\n' "Python canonical evidence validator accepted shell newline bytes" >&2
+  exit 1
+fi
+
+for python_hash_binding in \
+  'stage_transition_hash="$(jq -cSj' \
+  'database_evidence_hash="$(jq -cSj' \
+  'prior_state_hash="$(jq -cSj '\''.prior_attestation.acceptance_output' \
+  'runtime_evidence_hash="$(jq -cSj' \
+  '"$(jq -cSj '\''del(.manifest_sha256)' \
+  'pitr_output_hash="$(jq -cSj' \
+  'recovery_output_hash="$(jq -cSj' \
+  'current_offboarding_output_hash="$(jq -cSj' \
+  'prior_state_hash="$(jq -cSj '\''.prior_attestation.offboarding_output' \
+  'offboarding_output_hash="$(jq -cSj'; do
+  grep -F "$python_hash_binding" "$beta_dir/protected-runner-command.sh" >/dev/null || {
+    printf '%s\n' "protected runner lost a newline-free Python evidence hash binding: $python_hash_binding" >&2
+    exit 1
+  }
+done
+
+compressed_command_size="$(bzip2 -9 -c "$beta_dir/protected-runner-command.sh" | base64 | tr -d '\n' | wc -c | tr -d '[:space:]')"
 [[ "$compressed_command_size" =~ ^[0-9]+$ && "$compressed_command_size" -le 65536 ]] || {
   printf '%s\n' "protected runner command no longer fits the bounded protected-parameter transport" >&2
   exit 1
 }
-grep -F '{name: "COSMAS_COMMAND_GZIP_BASE64", value: $protected_command}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F '{name: "COSMAS_COMMAND_BZIP2_BASE64", value: $protected_command}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'decoder=bz2.BZ2Decompressor(); decoded=decoder.decompress(data,524289)' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'len(data) <= 49152 and len(decoded) <= 524288 and decoder.eof and not decoder.unused_data' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F '{name: "COSMAS_PROTECTED_PAYLOAD_BASE64", value: $protected_payload}' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 
 managed_cleanup_helpers="$test_dir/managed-run-command-cleanup-helpers.sh"
@@ -1126,19 +1195,333 @@ for buildx_script in runner-bootstrap.sh protected-runner-command.sh; do
   done
   unset -f docker_buildx_output_matches_pin
 done
+
+attestation_window_helper="$test_dir/attestation-window-helper.sh"
+sed -n '/^attestation_generation_window_status() {$/,/^}$/p' "$beta_dir/protected-runner-command.sh" >"$attestation_window_helper"
+[[ "$(grep -c '^attestation_generation_window_status() {$' "$attestation_window_helper")" == "1" ]] || {
+  printf '%s\n' "protected runner must define one executable attestation generation window validator" >&2
+  exit 1
+}
+# shellcheck disable=SC1090 # The extracted committed function is the test subject.
+source "$attestation_window_helper"
+alert_window_evidence="$test_dir/alert-window-evidence.json"
+jq -n '{completed_at: "2030-01-01T00:00:00Z"}' >"$alert_window_evidence"
+[[ "$(attestation_generation_window_status alert-send "$alert_window_evidence" '2030-01-01T04:00:00Z')" == "live" ]]
+[[ "$(attestation_generation_window_status alert-send "$alert_window_evidence" '2030-01-01T04:00:01Z')" == "expired" ]]
+if attestation_generation_window_status alert-send "$alert_window_evidence" '2029-12-31T23:59:59Z' >/dev/null 2>&1; then
+  printf '%s\n' "alert generation validator accepted evidence issued in the future" >&2
+  exit 1
+fi
+offboarding_window_evidence="$test_dir/offboarding-window-evidence.json"
+jq -n '{offboarding_output: {issued_at: "2030-01-01T00:00:00Z", expires_at: "2030-01-01T04:00:00Z"}}' >"$offboarding_window_evidence"
+[[ "$(attestation_generation_window_status offboarding-baseline "$offboarding_window_evidence" '2030-01-01T04:00:00Z')" == "live" ]]
+[[ "$(attestation_generation_window_status offboarding-baseline "$offboarding_window_evidence" '2030-01-01T04:00:01Z')" == "expired" ]]
+jq '.offboarding_output.expires_at = "2030-01-01T03:59:59Z"' "$offboarding_window_evidence" >"$test_dir/offboarding-invalid-window.json"
+if attestation_generation_window_status offboarding-baseline "$test_dir/offboarding-invalid-window.json" '2030-01-01T04:00:01Z' >/dev/null 2>&1; then
+  printf '%s\n' "offboarding generation validator accepted a non-four-hour handoff window" >&2
+  exit 1
+fi
+
+generation_resolver="$test_dir/attestation-generation-resolver.sh"
+sed -n '/^resolve_attestation_generation() {$/,/^}$/p' "$beta_dir/protected-runner-command.sh" >"$generation_resolver"
+[[ "$(grep -c '^resolve_attestation_generation() {$' "$generation_resolver")" == "1" ]] || {
+  printf '%s\n' "protected runner must define one executable attestation generation resolver" >&2
+  exit 1
+}
+# The production helper requires Linux stat and root ownership. These focused
+# tests isolate its pointer/name/hash behavior while the runner enforces root.
+stat() {
+  [[ "$1" == "-c" ]] || return 1
+  case "$2" in
+    %a)
+      if [[ -d "$3" ]]; then
+        printf '%s\n' "700"
+      else
+        printf '%s\n' "600"
+      fi
+      ;;
+    %u) printf '%s\n' "0" ;;
+    *) return 1 ;;
+  esac
+}
+die() {
+  printf '%s\n' "$1" >&2
+  exit 1
+}
+# shellcheck disable=SC1090 # The extracted committed function is the test subject.
+source "$generation_resolver"
+generation_dir="$test_dir/generations"
+mkdir "$generation_dir"
+generation_payload="$test_dir/generation-payload.json"
+jq -cS -n '{schema_version: 1, evidence_type: "test-generation"}' >"$generation_payload"
+generation_hash="$(sha256sum "$generation_payload" | awk '{print $1}')"
+generation_name="$generation_hash.json"
+jq -S --arg hash "$generation_hash" '. + {evidence_payload_sha256: $hash}' "$generation_payload" >"$generation_dir/$generation_name"
+chmod 600 "$generation_dir/$generation_name"
+printf '%s\n' "$generation_name" >"$test_dir/generation.current"
+chmod 600 "$test_dir/generation.current"
+[[ "$(resolve_attestation_generation "$test_dir/generation.current" "$generation_dir" "test evidence")" == "$generation_dir/$generation_name" ]]
+printf '%s\n' '../outside.json' >"$test_dir/generation.current"
+if (resolve_attestation_generation "$test_dir/generation.current" "$generation_dir" "test evidence" >/dev/null 2>&1); then
+  printf '%s\n' "attestation generation resolver accepted path traversal" >&2
+  exit 1
+fi
+printf '%s\n' "$generation_name" >"$test_dir/generation.current"
+jq '.schema_version = 2' "$generation_dir/$generation_name" >"$test_dir/tampered-generation.json"
+mv "$test_dir/tampered-generation.json" "$generation_dir/$generation_name"
+chmod 600 "$generation_dir/$generation_name"
+if (resolve_attestation_generation "$test_dir/generation.current" "$generation_dir" "test evidence" >/dev/null 2>&1); then
+  printf '%s\n' "attestation generation resolver accepted modified evidence" >&2
+  exit 1
+fi
+
+alert_orphan_helper="$test_dir/alert-orphan-helper.sh"
+sed -n '/^find_reconcilable_alert_send_generation() {$/,/^}$/p' "$beta_dir/protected-runner-command.sh" >"$alert_orphan_helper"
+[[ "$(grep -c '^find_reconcilable_alert_send_generation() {$' "$alert_orphan_helper")" == "1" ]] || {
+  printf '%s\n' "alert orphan-reconciliation helper could not be isolated for behavioral tests" >&2
+  exit 1
+}
+# shellcheck disable=SC1090 # Extracted committed function is the test subject.
+source "$alert_orphan_helper"
+alert_orphan_dir="$test_dir/alert-orphans"
+mkdir "$alert_orphan_dir"
+alert_source_sha="$(printf 'a%.0s' {1..40})"
+alert_state_sha256="$(printf 'b%.0s' {1..64})"
+alert_action_group="/subscriptions/$subscription_id/resourceGroups/$workload_rg/providers/Microsoft.Insights/actionGroups/ag-cosmas-beta-lab01"
+alert_api_id="/subscriptions/$subscription_id/resourceGroups/$workload_rg/providers/Microsoft.Insights/metricAlerts/ma-api"
+alert_worker_id="/subscriptions/$subscription_id/resourceGroups/$workload_rg/providers/Microsoft.Insights/metricAlerts/ma-worker"
+write_alert_send_generation() {
+  local completed_at="$1"
+  local challenge="$2"
+  local payload_file="$test_dir/alert-generation-payload.json"
+  local payload_hash
+
+  jq -cS -n \
+    --arg completed_at "$completed_at" --arg source_sha "$alert_source_sha" --arg release_id "candidate-one" \
+    --arg lineage "$lineage" --argjson serial 7 --arg state_sha256 "$alert_state_sha256" \
+    --arg action_group "$alert_action_group" --arg api_alert "$alert_api_id" --arg worker_alert "$alert_worker_id" \
+    --arg challenge "$challenge" --arg operation_hash "$(printf 'd%.0s' {1..64})" \
+    --arg send_intent_hash "$(printf '1%.0s' {1..64})" '
+      {
+        schema_version: 1, evidence_type: "protected-runner-alert-delivery", alert_phase: "send",
+        completed_at: $completed_at, source_sha: $source_sha, release_id: $release_id,
+        state: {lineage: $lineage, serial: $serial, sha256: $state_sha256},
+        action_group: {resource_id: $action_group},
+        metric_alerts: {api: {resource_id: $api_alert}, worker: {resource_id: $worker_alert}},
+        notification_test: {
+          alert_type: "metricstaticthreshold", azure_operation_completed: true,
+          email_action_count: 1, email_action_succeeded: true,
+          delivery_confirmed_by_owner: false
+        },
+        confirmation_challenge: $challenge, send_intent_sha256: $send_intent_hash,
+        notification_operation_sha256: $operation_hash,
+        recipient_address_returned: false, secrets_returned: false
+      }
+    ' >"$payload_file"
+  payload_hash="$(sha256sum "$payload_file" | awk '{print $1}')"
+  jq -S --arg hash "$payload_hash" '. + {evidence_payload_sha256: $hash}' "$payload_file" >"$alert_orphan_dir/$payload_hash.json"
+  chmod 600 "$alert_orphan_dir/$payload_hash.json"
+  printf '%s\n' "$alert_orphan_dir/$payload_hash.json"
+}
+expired_orphan="$(write_alert_send_generation '2029-12-31T20:00:00Z' "$(printf 'f%.0s' {1..64})")"
+first_orphan="$(write_alert_send_generation '2030-01-01T00:00:00Z' "$(printf 'c%.0s' {1..64})")"
+discovered_orphan="$(find_reconcilable_alert_send_generation \
+  "$alert_orphan_dir" "$alert_source_sha" candidate-one "$lineage" 7 "$alert_state_sha256" \
+  "$alert_action_group" "$alert_api_id" "$alert_worker_id" '2030-01-01T01:00:00Z')"
+[[ "$discovered_orphan" == "live|$first_orphan" ]] || {
+  printf '%s\n' "alert send orphan reconciliation did not recover the exact live generation" >&2
+  exit 1
+}
+[[ -f "$expired_orphan" ]]
+expired_only_dir="$test_dir/alert-expired-orphans"
+mkdir "$expired_only_dir"
+cp "$expired_orphan" "$expired_only_dir/${expired_orphan##*/}"
+expired_reconciliation="$(find_reconcilable_alert_send_generation \
+  "$expired_only_dir" "$alert_source_sha" candidate-one "$lineage" 7 "$alert_state_sha256" \
+  "$alert_action_group" "$alert_api_id" "$alert_worker_id" '2030-01-01T01:00:00Z')"
+[[ "$expired_reconciliation" == "expired|$expired_only_dir/${expired_orphan##*/}" ]] || {
+  printf '%s\n' "alert send orphan reconciliation did not restore the latest expired successful generation" >&2
+  exit 1
+}
+second_orphan="$(write_alert_send_generation '2030-01-01T00:01:00Z' "$(printf 'e%.0s' {1..64})")"
+if (find_reconcilable_alert_send_generation \
+  "$alert_orphan_dir" "$alert_source_sha" candidate-one "$lineage" 7 "$alert_state_sha256" \
+  "$alert_action_group" "$alert_api_id" "$alert_worker_id" '2030-01-01T01:00:00Z' >/dev/null 2>&1); then
+  printf '%s\n' "alert send orphan reconciliation accepted multiple matching live generations" >&2
+  exit 1
+fi
+[[ -f "$second_orphan" ]]
+
+alert_intent_helper="$test_dir/alert-intent-helper.sh"
+sed -n '/^find_unresolved_alert_send_intent() {$/,/^}$/p' "$beta_dir/protected-runner-command.sh" >"$alert_intent_helper"
+[[ "$(grep -c '^find_unresolved_alert_send_intent() {$' "$alert_intent_helper")" == "1" ]] || {
+  printf '%s\n' "alert send-intent helper could not be isolated for behavioral tests" >&2
+  exit 1
+}
+# shellcheck disable=SC1090 # Extracted committed function is the test subject.
+source "$alert_intent_helper"
+alert_request_sha256="$(printf '2%.0s' {1..64})"
+write_alert_send_intent() {
+  local target_dir="$1"
+  local intent_key="$2"
+  local supersedes="$3"
+  local retry_approval="$4"
+  local payload_file="$test_dir/alert-intent-payload.json"
+  local payload_hash
+
+  jq -cS -n \
+    --arg intent_key "$intent_key" --arg source_sha "$alert_source_sha" --arg release_id "candidate-one" \
+    --arg lineage "$lineage" --argjson serial 7 --arg state_sha256 "$alert_state_sha256" \
+    --arg action_group "$alert_action_group" --arg api_alert "$alert_api_id" --arg worker_alert "$alert_worker_id" \
+    --arg request_sha256 "$alert_request_sha256" --arg supersedes "$supersedes" --arg retry_approval "$retry_approval" '
+      {
+        schema_version: 1, evidence_type: "protected-runner-alert-send-intent",
+        issued_at: "2030-01-01T00:00:00Z", intent_key_sha256: $intent_key,
+        source_sha: $source_sha, release_id: $release_id,
+        state: {lineage: $lineage, serial: $serial, sha256: $state_sha256},
+        action_group_resource_id: $action_group,
+        api_alert_resource_id: $api_alert,
+        worker_alert_resource_id: $worker_alert,
+        notification_request_sha256: $request_sha256,
+        predecessor_send_evidence_sha256: "none",
+        supersedes_intent_sha256: (if $supersedes == "" then null else $supersedes end),
+        retry_approval_sha256: (if $retry_approval == "" then null else $retry_approval end),
+        client_request_id: "123e4567-e89b-12d3-a456-426614174000",
+        confirmation_challenge: ("3" * 64),
+        post_may_have_started: true,
+        recipient_address_returned: false,
+        secrets_returned: false
+      }
+    ' >"$payload_file"
+  payload_hash="$(sha256sum "$payload_file" | awk '{print $1}')"
+  jq -S --arg hash "$payload_hash" '. + {evidence_payload_sha256: $hash}' "$payload_file" >"$target_dir/$intent_key.json"
+  chmod 600 "$target_dir/$intent_key.json"
+  printf '%s|%s\n' "$target_dir/$intent_key.json" "$payload_hash"
+}
+
+intent_dir="$test_dir/alert-intents"
+intent_evidence_dir="$test_dir/alert-intent-evidence"
+mkdir "$intent_dir" "$intent_evidence_dir"
+intent_record="$(write_alert_send_intent "$intent_dir" "$(printf '4%.0s' {1..64})" "" "")"
+intent_path="${intent_record%%|*}"
+intent_hash="${intent_record##*|}"
+unresolved_intent="$(find_unresolved_alert_send_intent \
+  "$intent_dir" "$intent_evidence_dir" "$alert_source_sha" candidate-one \
+  "$alert_action_group" "$alert_request_sha256")"
+[[ "$unresolved_intent" == "$intent_path" ]] || {
+  printf '%s\n' "alert send-intent helper did not return the exact unresolved intent" >&2
+  exit 1
+}
+resolved_payload="$test_dir/resolved-alert-intent-evidence.json"
+jq -cS -n --arg intent_hash "$intent_hash" '{
+  schema_version: 1, evidence_type: "protected-runner-alert-delivery", alert_phase: "send",
+  send_intent_sha256: $intent_hash,
+  notification_test: {azure_operation_completed: true, email_action_succeeded: true}
+}' >"$resolved_payload"
+resolved_hash="$(sha256sum "$resolved_payload" | awk '{print $1}')"
+jq -S --arg hash "$resolved_hash" '. + {evidence_payload_sha256: $hash}' "$resolved_payload" >"$intent_evidence_dir/$resolved_hash.json"
+chmod 600 "$intent_evidence_dir/$resolved_hash.json"
+[[ -z "$(find_unresolved_alert_send_intent \
+  "$intent_dir" "$intent_evidence_dir" "$alert_source_sha" candidate-one \
+  "$alert_action_group" "$alert_request_sha256")" ]] || {
+  printf '%s\n' "resolved alert send intent remained blocking" >&2
+  exit 1
+}
+
+supersession_dir="$test_dir/alert-intent-supersession"
+empty_evidence_dir="$test_dir/alert-empty-evidence"
+mkdir "$supersession_dir" "$empty_evidence_dir"
+first_intent_record="$(write_alert_send_intent "$supersession_dir" "$(printf '5%.0s' {1..64})" "" "")"
+first_intent_hash="${first_intent_record##*|}"
+second_intent_record="$(write_alert_send_intent "$supersession_dir" "$(printf '6%.0s' {1..64})" "$first_intent_hash" "$(printf '7%.0s' {1..64})")"
+second_intent_path="${second_intent_record%%|*}"
+[[ "$(find_unresolved_alert_send_intent \
+  "$supersession_dir" "$empty_evidence_dir" "$alert_source_sha" candidate-one \
+  "$alert_action_group" "$alert_request_sha256")" == "$second_intent_path" ]] || {
+  printf '%s\n' "owner-authorized alert intent supersession did not leave exactly the new attempt unresolved" >&2
+  exit 1
+}
+
+multiple_dir="$test_dir/alert-intent-multiple"
+mkdir "$multiple_dir"
+write_alert_send_intent "$multiple_dir" "$(printf '8%.0s' {1..64})" "" "" >/dev/null
+write_alert_send_intent "$multiple_dir" "$(printf '9%.0s' {1..64})" "" "" >/dev/null
+if (find_unresolved_alert_send_intent \
+  "$multiple_dir" "$empty_evidence_dir" "$alert_source_sha" candidate-one \
+  "$alert_action_group" "$alert_request_sha256" >/dev/null 2>&1); then
+  printf '%s\n' "alert send-intent helper accepted multiple unresolved attempts" >&2
+  exit 1
+fi
+tampered_intent="$(find "$multiple_dir" -type f -name '*.json' | head -n 1)"
+jq '.post_may_have_started = false' "$tampered_intent" >"$test_dir/tampered-intent.json"
+mv "$test_dir/tampered-intent.json" "$tampered_intent"
+chmod 600 "$tampered_intent"
+if (find_unresolved_alert_send_intent \
+  "$multiple_dir" "$empty_evidence_dir" "$alert_source_sha" candidate-one \
+  "$alert_action_group" "$alert_request_sha256" >/dev/null 2>&1); then
+  printf '%s\n' "alert send-intent helper accepted a modified intent" >&2
+  exit 1
+fi
+unset -f write_alert_send_intent find_unresolved_alert_send_intent write_alert_send_generation find_reconcilable_alert_send_generation resolve_attestation_generation attestation_generation_window_status stat die
+
 grep -F '.phase == "foundation_reconcile" and $stage == "foundation"' "$beta_dir/protected-runner-command.sh" >/dev/null
-for guarded_operation in release-rollback release-forward offboarding-acceptance; do
+for guarded_operation in release-rollback release-forward inspect-stage stage-generation offboarding-acceptance; do
   grep -F "\"$guarded_operation\"" "$beta_dir/transport-to-protected-runner.sh" >/dev/null
   grep -F "\"$guarded_operation\"" "$beta_dir/protected-runner-command.sh" >/dev/null
 done
-grep -F 'AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK AND FORWARD RECOVERY' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
-grep -F 'AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK AND FORWARD RECOVERY' "$beta_dir/protected-runner-command.sh" >/dev/null
+for recovery_confirmation in \
+  'AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK' \
+  'AUTHORIZE D3 IMMUTABLE DIGEST FORWARD RESTORATION'; do
+  grep -F "$recovery_confirmation" "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+  grep -F "$recovery_confirmation" "$beta_dir/protected-runner-command.sh" >/dev/null
+done
+grep -F 'rollback_state_sha256' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'rollback_state_sha256' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'AUTHORIZE D3 IMMUTABLE STAGE GENERATION TRANSITION' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'stage_generation_transition.py' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'validate_stage_tfvars_payload "$replacement_tfvars_file" "$stage"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F '"$execution_state" == "TimedOut"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F '"$provisioning_state" == "Canceled"' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
 grep -F 'mutable_tags_used: false' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'terraform_no_drift: $terraform_no_drift' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'human_clerk_browser_steps_machine_verified: false' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'identifiers_returned: false, secrets_returned: false' "$beta_dir/protected-runner-command.sh" >/dev/null
 grep -F 'artifact_file="$release_root/executions/recovery/$recovery_phase-attestation.json"' "$beta_dir/protected-runner-command.sh" >/dev/null
-grep -F 'artifact_file="$release_root/executions/offboarding/$offboarding_phase-attestation.json"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'alert_current_pointer="$alert_root/$alert_phase.current"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'alert_delivery_name="$evidence_hash.json"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'stored_send_file="$alert_evidence_dir/$prior_evidence_hash.json"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'reconciled_alert_send="$(find_reconcilable_alert_send_generation' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'mv -f -- "$alert_delivery_pointer_tmp" "$alert_current_pointer"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'AUTHORIZE D3 ALERT RETRY AFTER AMBIGUOUS SEND' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F -- '--alert-retry-approval' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'protected-runner-alert-send-intent-inspection' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'protected-runner-alert-send-intent-inspection' "$beta_dir/transport-to-protected-runner.sh" >/dev/null
+grep -F 'fsync_path "$alert_delivery_evidence_tmp"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'fsync_path "$alert_evidence_dir"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'fsync_path "$alert_root"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'fsync_path "$release_root"' "$beta_dir/protected-runner-command.sh" >/dev/null
+alert_orphan_reconcile_line="$(grep -nF 'reconciled_alert_send="$(find_reconcilable_alert_send_generation' "$beta_dir/protected-runner-command.sh" | cut -d: -f1)"
+alert_intent_publish_line="$(grep -nF 'ln -- "$alert_send_intent_tmp" "$alert_send_intent_file"' "$beta_dir/protected-runner-command.sh" | cut -d: -f1)"
+alert_notification_post_line="$(grep -nF 'notification_status="$(curl --config "$curl_config_file" --request POST' "$beta_dir/protected-runner-command.sh" | cut -d: -f1)"
+[[ "$alert_orphan_reconcile_line" =~ ^[0-9]+$ && "$alert_notification_post_line" =~ ^[0-9]+$ && "$alert_orphan_reconcile_line" -lt "$alert_notification_post_line" ]] || {
+  printf '%s\n' "alert orphan reconciliation must run before any replacement notification POST" >&2
+  exit 1
+}
+[[ "$alert_intent_publish_line" =~ ^[0-9]+$ && "$alert_notification_post_line" =~ ^[0-9]+$ && "$alert_intent_publish_line" -lt "$alert_notification_post_line" ]] || {
+  printf '%s\n' "durable alert send intent must be published before any notification POST" >&2
+  exit 1
+}
+inspect_intent_start_line="$(grep -nF 'if [[ "$alert_phase" == "inspect-intent" ]]; then' "$beta_dir/protected-runner-command.sh" | cut -d: -f1)"
+inspect_intent_discovery_line="$(awk -v start="$inspect_intent_start_line" 'NR > start && /unresolved_alert_send_intent="\$\(find_unresolved_alert_send_intent/ {print NR; exit}' "$beta_dir/protected-runner-command.sh")"
+inspect_intent_pointer_line="$(awk -v start="$inspect_intent_start_line" 'NR > start && /inspected_alert_send_intent="\$\(resolve_alert_send_intent_pointer/ {print NR; exit}' "$beta_dir/protected-runner-command.sh")"
+[[ "$inspect_intent_discovery_line" =~ ^[0-9]+$ && "$inspect_intent_pointer_line" =~ ^[0-9]+$ && "$inspect_intent_discovery_line" -lt "$inspect_intent_pointer_line" ]] || {
+  printf '%s\n' "alert intent inspection must discover a pointerless unresolved attempt before requiring pointer metadata" >&2
+  exit 1
+}
+grep -F 'mv -f -- "$alert_send_intent_pointer_tmp" "$alert_send_intent_pointer"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'offboarding_current_pointer="$offboarding_root/$offboarding_phase.current"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'offboarding_evidence_name="$evidence_hash.json"' "$beta_dir/protected-runner-command.sh" >/dev/null
+grep -F 'stored_baseline_file="$offboarding_evidence_dir/$prior_wrapper_hash.json"' "$beta_dir/protected-runner-command.sh" >/dev/null
 if grep -Eq 'az acr repository delete .*\$attempt_tag' "$beta_dir/protected-runner-command.sh"; then
   printf '%s\n' "candidate cleanup must never delete an aliased ACR manifest by tag" >&2
   exit 1

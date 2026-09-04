@@ -22,11 +22,13 @@ usage() {
     "  $0 database-prepare --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
     "  $0 runtime-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --acceptance-phase runtime|workflow-baseline|workflow-verify|purge-setup|purge-verify [--acceptance-state PATH] --artifact-out PATH" \
     "  $0 domain-verification --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
-    "  $0 alert-delivery --bootstrap-outputs PATH --source-sha SHA --release-id ID --alert-phase send|confirm [--alert-test-state PATH --delivery-confirmation-reference PATH] --artifact-out PATH" \
+    "  $0 alert-delivery --bootstrap-outputs PATH --source-sha SHA --release-id ID --alert-phase send|confirm|inspect-intent [--alert-retry-approval PATH | --alert-test-state PATH --delivery-confirmation-reference PATH] --artifact-out PATH" \
     "  $0 pitr-freeze --bootstrap-outputs PATH --source-sha SHA --release-id ID --quiet-window-end-utc TIMESTAMP --artifact-out PATH" \
-    "  $0 pitr-manifest --bootstrap-outputs PATH --source-sha SHA --release-id ID --restore-time-utc TIMESTAMP --artifact-out PATH" \
+    "  $0 pitr-manifest --bootstrap-outputs PATH --source-sha SHA --release-id ID --restore-time-utc TIMESTAMP --preparer-reference PATH --artifact-out PATH" \
     "  $0 pitr-start|pitr-complete|pitr-cleanup|pitr-resume --bootstrap-outputs PATH --source-sha SHA --release-id ID --approval PATH --artifact-out PATH" \
     "  $0 release-rollback|release-forward --bootstrap-outputs PATH --source-sha SHA --release-id ID --prior-source-sha SHA --prior-release-id ID --approval PATH --artifact-out PATH" \
+    "  $0 inspect-stage --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --artifact-out PATH" \
+    "  $0 stage-generation --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --stage-transition-mode abandoned_retry|planned_workloads_progression --approval PATH --var-file PATH --artifact-out PATH" \
     "  $0 offboarding-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --offboarding-phase baseline|verify [--offboarding-request PATH | --offboarding-state PATH --offboarding-confirmation PATH] --artifact-out PATH" \
     "  $0 bootstrap-identity --bootstrap-outputs PATH --source-sha SHA --release-id ID --bootstrap-manifest PATH --artifact-out PATH" \
     "  $0 retrieve --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage STAGE --artifact-kind review|result|network|build|database|runtime|domain|alert|pitr|recovery|offboarding|identity [--acceptance-phase PHASE | --alert-phase send|confirm | --pitr-phase PHASE | --recovery-phase rollback|forward | --offboarding-phase baseline|verify] --artifact-out PATH" \
@@ -59,13 +61,16 @@ acceptance_phase=""
 acceptance_state=""
 alert_phase=""
 alert_test_state=""
+alert_retry_approval=""
 delivery_confirmation_reference=""
 pitr_phase=""
 restore_time_utc=""
 quiet_window_end_utc=""
+pitr_preparer_reference=""
 prior_source_sha=""
 prior_release_id=""
 recovery_phase=""
+stage_transition_mode=""
 offboarding_phase=""
 offboarding_request=""
 offboarding_state=""
@@ -89,13 +94,16 @@ while [[ $# -gt 0 ]]; do
     --acceptance-state) acceptance_state="${2:-}"; shift 2 ;;
     --alert-phase) alert_phase="${2:-}"; shift 2 ;;
     --alert-test-state) alert_test_state="${2:-}"; shift 2 ;;
+    --alert-retry-approval) alert_retry_approval="${2:-}"; shift 2 ;;
     --delivery-confirmation-reference) delivery_confirmation_reference="${2:-}"; shift 2 ;;
     --pitr-phase) pitr_phase="${2:-}"; shift 2 ;;
     --restore-time-utc) restore_time_utc="${2:-}"; shift 2 ;;
     --quiet-window-end-utc) quiet_window_end_utc="${2:-}"; shift 2 ;;
+    --preparer-reference) pitr_preparer_reference="${2:-}"; shift 2 ;;
     --prior-source-sha) prior_source_sha="${2:-}"; shift 2 ;;
     --prior-release-id) prior_release_id="${2:-}"; shift 2 ;;
     --recovery-phase) recovery_phase="${2:-}"; shift 2 ;;
+    --stage-transition-mode) stage_transition_mode="${2:-}"; shift 2 ;;
     --offboarding-phase) offboarding_phase="${2:-}"; shift 2 ;;
     --offboarding-request) offboarding_request="${2:-}"; shift 2 ;;
     --offboarding-state) offboarding_state="${2:-}"; shift 2 ;;
@@ -105,13 +113,13 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" || "$operation" == "cleanup-commands" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" ]] || guard_die "operation is invalid"
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" || "$operation" == "cleanup-commands" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" ]] || guard_die "operation is invalid"
 if [[ "$operation" == pitr-* ]]; then
   [[ "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" ]] || guard_die "PITR operation is invalid"
 fi
 [[ -n "$bootstrap_outputs" ]] || guard_die "--bootstrap-outputs is required"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "--source-sha must be a full lowercase Git commit"
-for command_name in az jq stat base64 gzip git; do
+for command_name in az jq stat base64 bzip2 gzip git; do
   command -v "$command_name" >/dev/null 2>&1 || guard_die "$command_name is required"
 done
 
@@ -123,7 +131,7 @@ guard_load_bootstrap_outputs "$bootstrap_outputs"
 transport_temp_dir="$(mktemp -d "${TMPDIR:-/tmp}/cosmas-d3-protected-transport.XXXXXX")"
 chmod 700 "$transport_temp_dir"
 command_script_file="$transport_temp_dir/protected-runner-command.sh"
-command_script_gzip_b64_file="$transport_temp_dir/protected-runner-command.sh.gz.b64"
+command_script_bzip2_b64_file="$transport_temp_dir/protected-runner-command.sh.bz2.b64"
 command_launcher_file="$transport_temp_dir/protected-runner-launcher.sh"
 early_cleanup() {
   rm -rf -- "$transport_temp_dir"
@@ -388,8 +396,8 @@ guard_materialize_committed_file \
   "$command_script_file" \
   "git@github.com:CosmaNeura/cosmaneura-os.git"
 command_script_sha256="$(guard_sha256 "$command_script_file")"
-gzip -9 -c "$command_script_file" | base64 | tr -d '\n' >"$command_script_gzip_b64_file"
-chmod 0600 "$command_script_gzip_b64_file"
+bzip2 -9 -c "$command_script_file" | base64 | tr -d '\n' >"$command_script_bzip2_b64_file"
+chmod 0600 "$command_script_bzip2_b64_file"
 cat >"$command_launcher_file" <<'LAUNCHER'
 #!/usr/bin/env bash
 set -euo pipefail
@@ -403,17 +411,21 @@ trap cleanup_launcher EXIT
   printf '%s\n' 'D3 protected command launcher refused: invalid committed-command hash' >&2
   exit 1
 }
-[[ "${COSMAS_COMMAND_GZIP_BASE64:-}" =~ ^[A-Za-z0-9+/=]+$ ]] || {
+[[ "${COSMAS_COMMAND_BZIP2_BASE64:-}" =~ ^[A-Za-z0-9+/=]+$ ]] || {
   printf '%s\n' 'D3 protected command launcher refused: invalid protected command encoding' >&2
   exit 1
 }
-printf '%s' "$COSMAS_COMMAND_GZIP_BASE64" | base64 --decode | gzip -d >"$command_file"
+(( ${#COSMAS_COMMAND_BZIP2_BASE64} <= 65536 )) || {
+  printf '%s\n' 'D3 protected command launcher refused: protected command exceeds its bound' >&2
+  exit 1
+}
+printf '%s' "$COSMAS_COMMAND_BZIP2_BASE64" | base64 --decode | python3 -c 'import bz2,sys; data=sys.stdin.buffer.read(49153); decoder=bz2.BZ2Decompressor(); decoded=decoder.decompress(data,524289); (len(data) <= 49152 and len(decoded) <= 524288 and decoder.eof and not decoder.unused_data) or sys.exit(1); sys.stdout.buffer.write(decoded)' >"$command_file"
 chmod 0700 "$command_file"
 [[ "$(sha256sum "$command_file" | awk '{print $1}')" == "$COSMAS_COMMAND_SHA256" ]] || {
   printf '%s\n' 'D3 protected command launcher refused: committed-command hash mismatch' >&2
   exit 1
 }
-unset COSMAS_COMMAND_GZIP_BASE64 COSMAS_COMMAND_SHA256
+unset COSMAS_COMMAND_BZIP2_BASE64 COSMAS_COMMAND_SHA256
 set +e
 /usr/bin/env bash "$command_file"
 status=$?
@@ -422,7 +434,7 @@ exit "$status"
 LAUNCHER
 chmod 0700 "$command_launcher_file"
 (( $(wc -c <"$command_launcher_file") <= 65536 )) || guard_die "managed Run Command launcher exceeds Azure's 64 KiB inline-script limit"
-(( $(wc -c <"$command_script_gzip_b64_file") <= 65536 )) || guard_die "compressed committed runner command exceeds the bounded protected-parameter transport"
+(( $(wc -c <"$command_script_bzip2_b64_file") <= 65536 )) || guard_die "compressed committed runner command exceeds the bounded protected-parameter transport"
 
 case "$operation" in
   stage-source)
@@ -503,12 +515,13 @@ case "$operation" in
   alert-delivery)
     stage="alert"
     [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "alert-delivery requires a 3-32 character lowercase --release-id"
-    [[ "$alert_phase" == "send" || "$alert_phase" == "confirm" ]] || guard_die "alert-delivery requires --alert-phase send|confirm"
+    [[ "$alert_phase" == "send" || "$alert_phase" == "confirm" || "$alert_phase" == "inspect-intent" ]] || guard_die "alert-delivery requires --alert-phase send|confirm|inspect-intent"
     [[ -n "$artifact_out" ]] || guard_die "alert-delivery requires --artifact-out"
     artifact_out="$(guard_absolute_path "$artifact_out")"
     guard_outside_repository "$artifact_out" "$repository_root" "sanitized alert-delivery attestation"
     guard_new_private_path "$artifact_out" "sanitized alert-delivery attestation"
     if [[ "$alert_phase" == "confirm" ]]; then
+      [[ -z "$alert_retry_approval" ]] || guard_die "alert confirmation does not accept --alert-retry-approval"
       [[ -n "$alert_test_state" && -n "$delivery_confirmation_reference" ]] || guard_die "alert delivery confirmation requires --alert-test-state and --delivery-confirmation-reference"
       alert_test_state="$(guard_absolute_path "$alert_test_state")"
       delivery_confirmation_reference="$(guard_absolute_path "$delivery_confirmation_reference")"
@@ -519,8 +532,21 @@ case "$operation" in
       (( $(wc -c <"$alert_test_state") <= 16384 )) || guard_die "protected alert test state exceeds 16 KiB"
       jq -e 'type == "object" and .schema_version == 1 and .evidence_type == "protected-runner-alert-delivery" and .alert_phase == "send"' "$alert_test_state" >/dev/null || guard_die "--alert-test-state is not a protected alert send artifact"
       guard_validate_alert_owner_confirmation "$delivery_confirmation_reference" "$alert_test_state"
+    elif [[ "$alert_phase" == "inspect-intent" ]]; then
+      [[ -z "$alert_test_state" && -z "$delivery_confirmation_reference" && -z "$alert_retry_approval" ]] || guard_die "alert intent inspection does not accept send or confirmation inputs"
     else
       [[ -z "$alert_test_state" && -z "$delivery_confirmation_reference" ]] || guard_die "alert send does not accept confirmation inputs"
+      if [[ -n "$alert_retry_approval" ]]; then
+        alert_retry_approval="$(guard_absolute_path "$alert_retry_approval")"
+        guard_outside_repository "$alert_retry_approval" "$repository_root" "private ambiguous-alert retry approval"
+        guard_private_file "$alert_retry_approval" "private ambiguous-alert retry approval"
+        (( $(wc -c <"$alert_retry_approval") <= 16384 )) || guard_die "ambiguous-alert retry approval exceeds 16 KiB"
+        jq -e '
+          type == "object" and .schema_version == 1 and
+          .contract == "cosmas-os-d3-alert-ambiguous-retry-approval-v1" and
+          (.prior_intent_sha256 | strings | test("^[0-9a-f]{64}$"))
+        ' "$alert_retry_approval" >/dev/null || guard_die "--alert-retry-approval is not a D3 ambiguous-alert retry approval"
+      fi
     fi
     ;;
   pitr-freeze)
@@ -538,10 +564,20 @@ case "$operation" in
     pitr_phase="manifest"
     [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "pitr-manifest requires a 3-32 character lowercase --release-id"
     [[ "$restore_time_utc" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]] || guard_die "pitr-manifest requires a whole-second UTC --restore-time-utc"
-    [[ -n "$artifact_out" ]] || guard_die "pitr-manifest requires --artifact-out"
+    [[ -n "$pitr_preparer_reference" && -n "$artifact_out" ]] || guard_die "pitr-manifest requires --preparer-reference and --artifact-out"
+    pitr_preparer_reference="$(guard_absolute_path "$pitr_preparer_reference")"
     artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$pitr_preparer_reference" "$repository_root" "private PITR manifest-preparer reference"
     guard_outside_repository "$artifact_out" "$repository_root" "sanitized PITR manifest evidence"
+    guard_private_file "$pitr_preparer_reference" "private PITR manifest-preparer reference"
     guard_new_private_path "$artifact_out" "sanitized PITR manifest evidence"
+    (( $(wc -c <"$pitr_preparer_reference") <= 512 )) || guard_die "PITR manifest-preparer reference exceeds 512 bytes"
+    jq -Rs -e '
+      (if endswith("\n") then rtrimstr("\n") else . end) as $value |
+      ($value | contains("\n") | not) and
+      ($value | test("^[A-Za-z0-9][A-Za-z0-9._:/ ()-]{2,255}$")) and
+      ($value | contains("@") | not)
+    ' "$pitr_preparer_reference" >/dev/null || guard_die "PITR manifest-preparer reference must contain one bounded non-email reviewer reference"
     ;;
   pitr-start|pitr-complete|pitr-cleanup|pitr-resume)
     stage="pitr"
@@ -590,11 +626,20 @@ case "$operation" in
     guard_private_file "$approval_file" "private release-recovery owner approval"
     guard_new_private_path "$artifact_out" "sanitized release-recovery evidence"
     (( $(wc -c <"$approval_file") <= 16384 )) || guard_die "release-recovery approval exceeds 16 KiB"
-    jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg prior_source_sha "$prior_source_sha" --arg prior_release_id "$prior_release_id" '
+    jq -e --arg phase "$recovery_phase" --arg source_sha "$source_sha" --arg release_id "$release_id" --arg prior_source_sha "$prior_source_sha" --arg prior_release_id "$prior_release_id" '
       type == "object" and
-      (keys | sort) == (["approved_at", "confirmation", "contract", "current", "prior", "reviewer_reference", "schema_version"] | sort) and
-      .schema_version == 1 and .contract == "cosmas-os-d3-release-recovery-approval-v1" and
-      .confirmation == "AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK AND FORWARD RECOVERY" and
+      (if $phase == "rollback" then
+        (keys | sort) == (["approved_at", "confirmation", "contract", "current", "prior", "reviewer_reference", "schema_version"] | sort) and
+        .contract == "cosmas-os-d3-release-rollback-approval-v1" and
+        .confirmation == "AUTHORIZE D3 IMMUTABLE DIGEST ROLLBACK"
+      else
+        (keys | sort) == (["approved_at", "confirmation", "contract", "current", "prior", "reviewer_reference", "rollback_evidence_sha256", "rollback_state_sha256", "schema_version"] | sort) and
+        .contract == "cosmas-os-d3-release-forward-approval-v1" and
+        .confirmation == "AUTHORIZE D3 IMMUTABLE DIGEST FORWARD RESTORATION" and
+        (.rollback_evidence_sha256 | strings | test("^[0-9a-f]{64}$")) and
+        (.rollback_state_sha256 | strings | test("^[0-9a-f]{64}$"))
+      end) and
+      .schema_version == 1 and
       (.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
       (.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
       (.reviewer_reference | contains("@") | not) and
@@ -607,7 +652,55 @@ case "$operation" in
       (.prior.api_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
       (.prior.web_digest | strings | test("^sha256:[0-9a-f]{64}$")) and
       .current.api_digest != .prior.api_digest and .current.web_digest != .prior.web_digest
-    ' "$approval_file" >/dev/null || guard_die "release-recovery approval is not the exact two-release owner assertion"
+    ' "$approval_file" >/dev/null || guard_die "release-recovery approval is not the exact phase-specific two-release owner assertion"
+    ;;
+  inspect-stage)
+    [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "inspect-stage requires a valid --stage"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "inspect-stage requires a valid --release-id"
+    [[ -n "$artifact_out" ]] || guard_die "inspect-stage requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized immutable-stage inventory"
+    guard_new_private_path "$artifact_out" "sanitized immutable-stage inventory"
+    ;;
+  stage-generation)
+    [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "stage-generation requires a valid --stage"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "stage-generation requires a valid --release-id"
+    [[ "$stage_transition_mode" == "abandoned_retry" || "$stage_transition_mode" == "planned_workloads_progression" ]] || guard_die "stage-generation requires --stage-transition-mode abandoned_retry|planned_workloads_progression"
+    [[ "$stage_transition_mode" != "planned_workloads_progression" || "$stage" == "workloads" ]] || guard_die "planned progression is permitted only for the workloads stage"
+    [[ -n "$approval_file" && -n "$var_file" && -n "$artifact_out" ]] || guard_die "stage-generation requires --approval, --var-file, and --artifact-out"
+    approval_file="$(guard_absolute_path "$approval_file")"
+    var_file="$(guard_absolute_path "$var_file")"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$approval_file" "$repository_root" "private stage-generation owner approval"
+    guard_outside_repository "$var_file" "$repository_root" "private replacement stage tfvars"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized stage-generation evidence"
+    guard_private_file "$approval_file" "private stage-generation owner approval"
+    guard_private_file "$var_file" "private replacement stage tfvars"
+    guard_new_private_path "$artifact_out" "sanitized stage-generation evidence"
+    (( $(wc -c <"$approval_file") <= 16384 )) || guard_die "stage-generation approval exceeds 16 KiB"
+    (( $(wc -c <"$var_file") <= 32768 )) || guard_die "replacement stage tfvars exceed the 32 KiB protected transition bound"
+    jq -e 'type == "object"' "$var_file" >/dev/null || guard_die "replacement --var-file must be a JSON object"
+    replacement_tfvars_sha256="$(guard_sha256 "$var_file")"
+    jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg stage "$stage" --arg mode "$stage_transition_mode" --arg replacement "$replacement_tfvars_sha256" '
+      type == "object" and
+      (keys | sort) == (["approved_at", "confirmation", "contract", "current_artifacts", "reason_reference", "release_id", "replacement_tfvars_sha256", "reviewer_reference", "schema_version", "source_sha", "stage", "transition_mode"] | sort) and
+      .schema_version == 1 and .contract == "cosmas-os-d3-stage-generation-approval-v1" and
+      .confirmation == "AUTHORIZE D3 IMMUTABLE STAGE GENERATION TRANSITION" and
+      .source_sha == $source_sha and .release_id == $release_id and .stage == $stage and
+      .transition_mode == $mode and .replacement_tfvars_sha256 == $replacement and
+      (.approved_at | strings | test("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")) and
+      (.reviewer_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+      (.reason_reference | strings | test("^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,511}$")) and
+      ([.reviewer_reference, .reason_reference] | all(contains("@") | not)) and
+      (.current_artifacts | type == "object") and
+      (.current_artifacts | keys | sort) == (["approval_sha256", "environment_tfvars_sha256", "plan_sha256", "result_sha256", "review_sha256"] | sort) and
+      (.current_artifacts.environment_tfvars_sha256 | strings | test("^[0-9a-f]{64}$")) and
+      ([.current_artifacts.plan_sha256, .current_artifacts.review_sha256, .current_artifacts.approval_sha256, .current_artifacts.result_sha256] |
+        all(. == null or (strings | test("^[0-9a-f]{64}$")))) and
+      (if $mode == "planned_workloads_progression" then
+         $stage == "workloads" and (.current_artifacts.result_sha256 | strings | test("^[0-9a-f]{64}$"))
+       else true end)
+    ' "$approval_file" >/dev/null || guard_die "stage-generation approval is not the exact current/replacement owner assertion"
     ;;
   offboarding-acceptance)
     stage="offboarding"
@@ -888,8 +981,8 @@ if [[ "$operation" == "cleanup-commands" ]]; then
     provisioning_state="$(jq -r '.provisioningState // .properties.provisioningState // ""' "$stale_view_file")"
     execution_state="$(jq -r '.instanceView.executionState // .properties.instanceView.executionState // ""' "$stale_view_file")"
     rm -f -- "$stale_view_file" || guard_die "cannot remove local stale-command result material"
-    if [[ "$execution_state" == "Succeeded" || "$execution_state" == "Failed" || "$execution_state" == "Canceled" ]]; then
-      [[ "$provisioning_state" == "Succeeded" || "$provisioning_state" == "Failed" ]] || guard_die "stale command has a terminal execution but nonterminal provisioning state"
+    if [[ "$execution_state" == "Succeeded" || "$execution_state" == "Failed" || "$execution_state" == "Canceled" || "$execution_state" == "TimedOut" ]]; then
+      [[ "$provisioning_state" == "Succeeded" || "$provisioning_state" == "Failed" || "$provisioning_state" == "Canceled" ]] || guard_die "stale command has a terminal execution but nonterminal provisioning state"
       if ! managed_run_command_delete_and_verify_absent \
         "$runner_id" \
         "$stale_command_id" \
@@ -931,6 +1024,11 @@ case "$operation" in
       '{deploy_key_base64: ($deploy_key | @base64), known_hosts_base64: ($known_hosts | @base64)}' >"$payload_file"
     ;;
   stage-vars) install -m 0600 "$var_file" "$payload_file" ;;
+  inspect-stage) printf '{}' >"$payload_file" ;;
+  stage-generation)
+    jq -n --arg transition_mode "$stage_transition_mode" --rawfile replacement_tfvars "$var_file" --slurpfile owner_approval "$approval_file" \
+      '{transition_mode: $transition_mode, replacement_tfvars_base64: ($replacement_tfvars | @base64), owner_approval: $owner_approval[0]}' >"$payload_file"
+    ;;
   build-push) install -m 0600 "$web_build_config" "$payload_file" ;;
   bootstrap-identity) install -m 0600 "$bootstrap_manifest" "$payload_file" ;;
   retrieve)
@@ -960,6 +1058,9 @@ case "$operation" in
     if [[ "$alert_phase" == "confirm" ]]; then
       jq -n --arg alert_phase "$alert_phase" --slurpfile prior_attestation "$alert_test_state" --slurpfile confirmation "$delivery_confirmation_reference" \
         '{alert_phase: $alert_phase, prior_attestation: $prior_attestation[0], confirmation: $confirmation[0]}' >"$payload_file"
+    elif [[ -n "$alert_retry_approval" ]]; then
+      jq -n --arg alert_phase "$alert_phase" --slurpfile ambiguous_retry_approval "$alert_retry_approval" \
+        '{alert_phase: $alert_phase, ambiguous_retry_approval: $ambiguous_retry_approval[0]}' >"$payload_file"
     else
       jq -n --arg alert_phase "$alert_phase" '{alert_phase: $alert_phase}' >"$payload_file"
     fi
@@ -969,8 +1070,8 @@ case "$operation" in
       '{pitr_phase: $pitr_phase, quiet_window_end_utc: $quiet_window_end_utc}' >"$payload_file"
     ;;
   pitr-manifest)
-    jq -n --arg pitr_phase "$pitr_phase" --arg restore_time_utc "$restore_time_utc" \
-      '{pitr_phase: $pitr_phase, restore_time_utc: $restore_time_utc}' >"$payload_file"
+    jq -n --arg pitr_phase "$pitr_phase" --arg restore_time_utc "$restore_time_utc" --rawfile preparer_reference "$pitr_preparer_reference" \
+      '{pitr_phase: $pitr_phase, restore_time_utc: $restore_time_utc, preparer_reference: ($preparer_reference | rtrimstr("\n"))}' >"$payload_file"
     ;;
   pitr-start|pitr-complete|pitr-cleanup|pitr-resume)
     jq -n --arg pitr_phase "$pitr_phase" --slurpfile owner_approval "$approval_file" \
@@ -1004,7 +1105,7 @@ jq -n \
   --arg release_id "$release_id" \
   --arg source_sha "$source_sha" \
   --arg command_sha256 "$command_script_sha256" \
-  --rawfile protected_command "$command_script_gzip_b64_file" \
+  --rawfile protected_command "$command_script_bzip2_b64_file" \
   --rawfile protected_payload "$payload_b64_file" '
     {
       location: $location,
@@ -1020,7 +1121,7 @@ jq -n \
           {name: "COSMAS_COMMAND_SHA256", value: $command_sha256}
         ],
         protectedParameters: [
-          {name: "COSMAS_COMMAND_GZIP_BASE64", value: $protected_command},
+          {name: "COSMAS_COMMAND_BZIP2_BASE64", value: $protected_command},
           {name: "COSMAS_PROTECTED_PAYLOAD_BASE64", value: $protected_payload}
         ],
         asyncExecution: false,
@@ -1060,7 +1161,7 @@ done
 [[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]] || guard_die "protected runner command did not succeed within 90 minutes"
 
 command_output=""
-if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   command_output="$(jq -r '.instanceView.output // .properties.instanceView.output // ""' "$view_file")"
 fi
 rm -f -- "$view_file" || guard_die "cannot remove local protected Run Command result material"
@@ -1074,7 +1175,7 @@ if ! transport_complete_managed_command_cleanup; then
   exit "$managed_run_command_cleanup_failure_status"
 fi
 
-if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   artifact_base64="$(awk -F= '/^COSMAS_SANITIZED_ARTIFACT_B64=/{sub(/^COSMAS_SANITIZED_ARTIFACT_B64=/, ""); print; exit}' <<<"$command_output")"
   [[ "$artifact_base64" =~ ^[A-Za-z0-9+/=]+$ ]] || guard_die "protected runner did not return a complete sanitized artifact"
   printf '%s' "$artifact_base64" | base64 --decode | gzip -d >"$artifact_out" || {
@@ -1087,7 +1188,18 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
     guard_die "returned artifact is not a schema-version-1 sanitized object"
   }
   if guard_operation_returns_hashed_evidence "$operation" "$artifact_kind"; then
-    if ! guard_validate_sanitized_evidence_hash "$artifact_out"; then
+    if [[ "$operation" == "inspect-stage" || "$operation" == "stage-generation" ]]; then
+      evidence_hash_valid=false
+      if guard_validate_python_sanitized_evidence_hash "$artifact_out"; then
+        evidence_hash_valid=true
+      fi
+    else
+      evidence_hash_valid=false
+      if guard_validate_sanitized_evidence_hash "$artifact_out"; then
+        evidence_hash_valid=true
+      fi
+    fi
+    if [[ "$evidence_hash_valid" != true ]]; then
       rm -f -- "$artifact_out"
       guard_die "returned evidence hash does not match its canonical payload"
     fi
@@ -1111,7 +1223,18 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
       guard_validate_domain_verification_artifact "$artifact_out" "$source_sha" "$release_id"
       printf 'State-bound public DNS verification material is recorded in evidence sha256:%s.\n' "$expected_evidence_hash"
     elif [[ "$operation" == "alert-delivery" ]]; then
-      jq -e --arg phase "$alert_phase" '.evidence_type == "protected-runner-alert-delivery" and .alert_phase == $phase and .recipient_address_returned == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
+      jq -e --arg phase "$alert_phase" '
+        .alert_phase == $phase and .recipient_address_returned == false and .secrets_returned == false and
+        if $phase == "inspect-intent" then
+          .evidence_type == "protected-runner-alert-send-intent-inspection" and
+          (.intent_sha256 | strings | test("^[0-9a-f]{64}$")) and
+          (.client_request_id_sha256 | strings | test("^[0-9a-f]{64}$")) and
+          (.intent_resolved | type == "boolean") and (.retry_authorization_required | type == "boolean") and
+          .identifiers_returned == false
+        else
+          .evidence_type == "protected-runner-alert-delivery"
+        end
+      ' "$artifact_out" >/dev/null || {
         rm -f -- "$artifact_out"
         guard_die "returned alert-delivery artifact differs from the requested PHI-safe phase"
       }
@@ -1128,6 +1251,26 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
         guard_die "returned release-recovery artifact differs from the requested exact-digest phase"
       }
       printf 'Immutable-digest release %s evidence is recorded as sha256:%s.\n' "$recovery_phase" "$expected_evidence_hash"
+    elif [[ "$operation" == "inspect-stage" ]]; then
+      jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg stage "$stage" '
+        .evidence_type == "protected-runner-stage-generation-inspection" and
+        .source_sha == $source_sha and .release_id == $release_id and .stage == $stage and
+        (.current_artifacts | type == "object") and .secrets_returned == false
+      ' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned immutable-stage inventory differs from the requested source/release/stage"
+      }
+      printf 'Immutable %s stage inventory is recorded as sha256:%s.\n' "$stage" "$expected_evidence_hash"
+    elif [[ "$operation" == "stage-generation" ]]; then
+      jq -e --arg source_sha "$source_sha" --arg release_id "$release_id" --arg stage "$stage" --arg mode "$stage_transition_mode" '
+        .evidence_type == "protected-runner-stage-generation-transition" and
+        .source_sha == $source_sha and .release_id == $release_id and .stage == $stage and
+        .transition_mode == $mode and .history_preserved == true and .secrets_returned == false
+      ' "$artifact_out" >/dev/null || {
+        rm -f -- "$artifact_out"
+        guard_die "returned stage-generation evidence differs from the authorized transition"
+      }
+      printf 'Append-only %s stage generation transition is recorded as sha256:%s.\n' "$stage" "$expected_evidence_hash"
     elif [[ "$operation" == "offboarding-acceptance" ]]; then
       jq -e --arg phase "$offboarding_phase" '.evidence_type == "protected-runner-offboarding-acceptance" and .offboarding_phase == $phase and .identifiers_returned == false and .secrets_returned == false' "$artifact_out" >/dev/null || {
         rm -f -- "$artifact_out"

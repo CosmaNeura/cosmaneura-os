@@ -904,7 +904,7 @@ guard_operation_returns_hashed_evidence() {
   local artifact_kind="${2:-}"
 
   case "$operation" in
-    probe-network|build-push|database-prepare|runtime-acceptance|domain-verification|alert-delivery|pitr-*|release-rollback|release-forward|offboarding-acceptance|bootstrap-identity)
+    probe-network|build-push|database-prepare|runtime-acceptance|domain-verification|alert-delivery|pitr-*|release-rollback|release-forward|inspect-stage|stage-generation|offboarding-acceptance|bootstrap-identity)
       return 0
       ;;
     retrieve)
@@ -925,6 +925,21 @@ guard_validate_sanitized_evidence_hash() {
 
   expected_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$artifact_file")" || return 1
   actual_hash="$(jq -cS 'del(.evidence_payload_sha256)' "$artifact_file" | guard_sha256_stream)" || return 1
+  [[ "$actual_hash" == "$expected_hash" ]] || return 1
+  GUARD_EVIDENCE_PAYLOAD_SHA256="$expected_hash"
+}
+
+# Evidence emitted directly by a Python primitive uses Python's canonical JSON
+# bytes without jq's trailing line feed. Keep this separate from the established
+# shell-generated evidence contract above so the two conventions cannot be
+# accepted interchangeably by accident.
+guard_validate_python_sanitized_evidence_hash() {
+  local artifact_file="$1"
+  local expected_hash
+  local actual_hash
+
+  expected_hash="$(jq -er '.evidence_payload_sha256 | strings | select(test("^[0-9a-f]{64}$"))' "$artifact_file")" || return 1
+  actual_hash="$(jq -cSj 'del(.evidence_payload_sha256)' "$artifact_file" | guard_sha256_stream)" || return 1
   [[ "$actual_hash" == "$expected_hash" ]] || return 1
   GUARD_EVIDENCE_PAYLOAD_SHA256="$expected_hash"
 }

@@ -28,9 +28,11 @@ the raw Box ID are never copied to that record.
    provider's `earliestRestoreDate`, at least five minutes old, and within the
    declared write-freeze window. At least fifteen minutes must remain in that
    window.
-4. Present only the sanitized manifest evidence to the owner. The owner must
-   separately approve its exact `manifest_sha256`. Do not derive approval from
-   a release label or a prior approval.
+4. Present only the sanitized manifest evidence to an owner whose asserted
+   ledger reference differs from the manifest preparer's private reference. The
+   wrapper enforces that the two bounded references differ before it accepts the
+   exact `manifest_sha256`. Do not derive approval from a release label or a
+   prior approval.
 5. Invoke `start` with that exact approved hash. This is the first billable
    operation. It verifies the approval and live source, captures F1, and sends
    one exact private `PointInTimeRestore` PUT whose request hash is persisted in
@@ -93,6 +95,11 @@ All operations require these exact environment values:
 `manifest` additionally requires `COSMAS_PITR_RESTORE_TIME_UTC` and rejects a
 set `COSMAS_PITR_APPROVED_MANIFEST_SHA256`.
 
+The protected transport also requires `--preparer-reference` to name a
+mode-`0600` file containing one non-email operator-ledger reference. The wrapper
+retains that value privately and returns only its SHA-256. `start`, `complete`,
+and `cleanup` reject an approval with the same `reviewer_reference`.
+
 `start` and `complete` additionally require:
 
 - `COSMAS_PITR_APPROVED_MANIFEST_SHA256`: the exact owner-approved manifest
@@ -139,11 +146,13 @@ and any other provider/CLI failure fail closed instead of being treated as
 deletion.
 
 The script cannot itself prove that all application writers remain stopped or
-that the approving person is distinct from the invoker. The wrapper must create
-the write-freeze attestation from observed API/worker/scheduler state, preserve
-the owner's separate approval evidence, serialize PITR invocations, and resume
-writers only after terminal cleanup. The script binds the attestation hash and
-checks the bounded quiet window on every start/complete invocation;
+cryptographically authenticate the human identities represented by operator
+ledger references. The wrapper requires distinct manifest-preparer and
+billable-operation reviewer references, creates the write-freeze attestation
+from observed API/worker/scheduler state, preserves the owner's separate
+approval evidence, serializes PITR invocations, and resumes writers only after
+terminal cleanup. The script binds the attestation hash and checks the bounded
+quiet window on every start/complete invocation;
 `F1 == F2 == F3` also fails safely on intervening persisted writes, but it is
 verification rather than a substitute for the operational freeze.
 
