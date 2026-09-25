@@ -218,10 +218,25 @@ A separate internal Redis Container App was rejected for D3. A single
 $19.71/month if continuously active before subscription-wide free grants, but
 it would have no managed failover, durable volume, or TLS setup. Multiple
 ordinary replicas would split broker state rather than provide Redis HA. The
-application currently writes the authoritative operation row before enqueue,
-but it has no scanner that re-enqueues a `PENDING` operation after complete
-broker loss. That cheaper shape therefore does not meet the D3 worker
-reliability requirement.
+legacy notification workflow writes the authoritative operation row before
+enqueue, but it has no scanner that re-enqueues a `PENDING` notification after
+complete broker loss. That cheaper shape therefore does not meet the retained
+D3 notification-worker reliability requirement.
+
+Current CosmaBot workspace work uses a different execution path. Chat and
+connector operations use durable PostgreSQL claims; the ordinary API lifespan
+starts PostgreSQL-polling workers for teammate handoffs and scheduled briefs.
+The legacy Celery worker does not process those handoffs. An interrupted model
+dispatch remains uncertain and requires explicit retry; restarting must not
+silently repeat an external call. See [API startup](../../src/cosmas_os/api/app.py),
+[model-work recovery](../../src/cosmas_os/application/model_work.py), and
+[routine processing](../../src/cosmas_os/application/routines.py).
+
+A future hosting alternative must preserve both the enabled workspace workers
+and the retained legacy queue. Generic replay of every `PENDING` operation is
+not a substitute for the current workflow-specific recovery rules. This
+distinction does not change the selected managed broker or authorize a
+deployment with lower availability.
 
 Evidence links:
 
