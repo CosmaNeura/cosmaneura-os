@@ -212,6 +212,22 @@ def test_render_runs_real_settings_and_compose_parser_without_secret_output(inst
     assert result.returncode == 0, result.stderr
 
 
+def test_only_proxy_adds_capability_required_by_official_caddy(installed):
+    config, root, output = installed
+    services = vm.compose(config, output, root, Path("/var/lib/cosmabot"))["services"]
+    for name, service in services.items():
+        assert service["cap_drop"] == ["ALL"]
+        assert service.get("cap_add", []) == (["NET_BIND_SERVICE"] if name == "proxy" else [])
+        assert service["security_opt"] == ["no-new-privileges:true"]
+        assert service["read_only"] is True
+    proxy = services["proxy"]
+    assert proxy["user"] == "10001:10001"
+    assert proxy["ports"] == ["80:8080", "443:8443"]
+    assert set(proxy["networks"]) == {"frontend", "egress"}
+    assert "http_port 8080" in vm.caddy(config)
+    assert "https_port 8443" in vm.caddy(config)
+
+
 @pytest.mark.parametrize(
     "change",
     [

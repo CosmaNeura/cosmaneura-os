@@ -102,7 +102,13 @@ of real Linux networking. Root host compromise remains outside this isolation.
 Only proxy 80/443 are published; private database/broker/health/management ports
 are not. Preserve the foundation NSG and narrow administrative access. Caddy uses
 unprivileged internal ports and durable certificate storage; no administrator API
-is enabled. Public certificate issuance/renewal and private certificate rotation
+is enabled. Its official binary carries `cap_net_bind_service=ep`, which Linux
+refuses to execute when that capability is outside the bounding set. Only the
+proxy adds `NET_BIND_SERVICE` after dropping all capabilities; it retains UID
+10001, `no-new-privileges`, a read-only root filesystem and ports 8080/8443.
+Every other service drops all capabilities and adds none. Native amd64 execution
+of Caddy 2.11.4 confirmed this requirement; full proxy/TLS operation still needs
+runtime acceptance. Public certificate issuance/renewal and private certificate rotation
 must be exercised and monitored. Registry pulls and backup custody are host-only;
 the runtime identity must not acquire deployment, registry-admin or backup powers.
 

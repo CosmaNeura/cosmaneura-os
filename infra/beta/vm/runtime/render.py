@@ -370,6 +370,8 @@ def compose(value: dict, release: Path, protected: Path, data: Path) -> dict:
         **common,
         "image": images["proxy"],
         "user": "10001:10001",
+        # Official Caddy's file capability needs this bounding-set bit even on high ports.
+        "cap_add": ["NET_BIND_SERVICE"],
         "cpus": 0.1,
         "mem_limit": "128m",
         "command": ["caddy", "run", "--config", f"{runtime}/Caddyfile", "--adapter", "caddyfile"],
