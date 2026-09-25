@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 from sqlalchemy import func, select
+from sqlalchemy.engine import make_url
 
 from cosmas_os.api.routine_brief_schemas import IncomingSection
 from cosmas_os.api.vendor_work_schemas import bounded
@@ -23,7 +24,14 @@ from cosmas_os.ports.routines import BriefSchedule
 
 
 def _local(s):
-    follow_up._local(s)
+    if settings.workspace_hosted_enabled:
+        # Private routine records may use the configured synthetic staging DB.
+        # Only routine source reads opt in; delivery keeps its separate gate.
+        if (not settings.workspace_available or settings.data_mode != "synthetic"
+                or s.get_bind().engine.url != make_url(settings.database_url)):
+            raise ws.WorkspaceError("routines_connection_required", 403)
+    else:
+        follow_up._local(s)
     if not settings.workspace_routines_enabled:
         raise ws.WorkspaceError("routines_unavailable", 404)
 
@@ -170,7 +178,7 @@ def _snapshot(s, box, owner, day):
     items, cursor = [], None
     # Bound every run; a partial result is explicitly identified.
     for _ in range(4):
-        page = shared_work.catalog(s, box, owner, after=cursor, vendor=True)
+        page = shared_work.catalog(s, box, owner, after=cursor, vendor=True, _routine_read=True)
         for item in page["items"]:
             kind, state = item.get("work_kind"), item["state"]
             supported = {"follow_up": {"sent", "closed"},
@@ -262,7 +270,8 @@ def read_run(s, box, owner, address, run_id, *, contract=1, incoming_sources=Non
     # Historical reports do not bypass current source or tenant authority.
     for item in generic["items"]:
         try:
-            current = shared_work.read(s, box, owner, item["ticket_id"], vendor=True)
+            current = shared_work.read(s, box, owner, item["ticket_id"], vendor=True,
+                                       _routine_read=True)
             if (current["revision_id"], current["payload_hash"]) != (item["revision_id"], item["payload_hash"]):
                 withheld = True
                 continue

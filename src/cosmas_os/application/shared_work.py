@@ -41,8 +41,20 @@ def _visible(actor, source, records):
     return source.owner_id == actor or any(actor in {row.from_id, row.to_id} for row in records)
 
 
-def _target(s, box, actor, tid, *, writing=False, recipient=None):
-    follow._local(s)
+def _read_connection(s, routine):
+    if routine:
+        # Only the private report reader opts in; delivery keeps its own gate.
+        from cosmas_os.application.routines import _local
+
+        _local(s)
+    else:
+        follow._local(s)
+
+
+def _target(s, box, actor, tid, *, writing=False, recipient=None, _routine_read=False):
+    if _routine_read and (writing or recipient is not None):
+        raise ws.WorkspaceError("routine_read_only", 403)
+    _read_connection(s, _routine_read)
     for pid in sorted({actor, recipient} - {None}):
         try:
             ws._human(s, box, pid)
@@ -108,7 +120,9 @@ def _view(s, actor, ticket, revision, records):
                     FollowUpReceipt.created_at, FollowUpReceipt.kind.desc(), FollowUpReceipt.id))]}
 
 
-def read(s, box, actor, tid, *, vendor=False):
+def read(s, box, actor, tid, *, vendor=False, _routine_read=False):
+    if _routine_read:
+        _read_connection(s, True)
     source = s.get(FollowUpSource, tid)
     if source is not None and source.source_kind == "incoming_message":
         raise ws.WorkspaceError("inbox_handoff_contract_required", 426)
@@ -117,12 +131,12 @@ def read(s, box, actor, tid, *, vendor=False):
             raise ws.WorkspaceError("vendor_contract_required", 426)
         from cosmas_os.application import vendor_shared
         return vendor_shared.read(s, box, actor, tid)
-    _, ticket, revision, records = _target(s, box, actor, tid)
+    _, ticket, revision, records = _target(s, box, actor, tid, _routine_read=_routine_read)
     return _view(s, actor, ticket, revision, records)
 
 
-def catalog(s, box, actor, *, after=None, vendor=False):
-    follow._local(s)
+def catalog(s, box, actor, *, after=None, vendor=False, _routine_read=False):
+    _read_connection(s, _routine_read)
     ws._human(s, box, actor)
     participation = exists(select(WorkHandoff.id).where(WorkHandoff.ticket_id == Ticket.id,
         WorkHandoff.box_id == box, or_(WorkHandoff.from_id == actor, WorkHandoff.to_id == actor)))
@@ -140,7 +154,7 @@ def catalog(s, box, actor, *, after=None, vendor=False):
     items = []
     for tid in ids[:50]:
         try:
-            items.append(read(s, box, actor, tid, vendor=vendor))
+            items.append(read(s, box, actor, tid, vendor=vendor, _routine_read=_routine_read))
         except ws.WorkspaceError as exc:
             if exc.status != 404:
                 raise
