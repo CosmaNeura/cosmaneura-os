@@ -36,3 +36,24 @@ it('clears a replaced account and permits a fresh status request while an old re
  await mount();await mount({...browser,getToken:async()=>null});
  await act(async()=>finish(connected));expect(host.textContent).not.toContain('Connected to Scheduling.');expect(schedulingLoginRequest).toHaveBeenCalledTimes(2);
 });
+it('cancels a newly started sign-in through the existing disconnect action',async()=>{
+ vi.mocked(schedulingLoginRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link).mockResolvedValueOnce({state:'disconnected'});
+ await mount();await click('Connect with Google');expect(host.querySelector('a')).not.toBeNull();
+ await click('Cancel Scheduling sign-in');expect(host.querySelector('a')).toBeNull();
+ expect(host.textContent).toContain('Scheduling disconnected from CosmasOS.');
+ expect(vi.mocked(schedulingLoginRequest).mock.calls.map(call=>call[1])).toEqual(['status','start','disconnect']);
+});
+it.each(['sign_in_pending','completing_sign_in'] as const)('cancels a restored %s attempt once while keeping other actions blocked',async state=>{
+ let finish!:(value:{state:'disconnected'})=>void;
+ vi.mocked(schedulingLoginRequest).mockResolvedValueOnce({...disconnected,state}).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ const native:AuthenticatedWorkspaceIdentity={mode:'desktop_native',revision:'12345678-1234-4234-8234-123456789abc',isCurrent:()=>true};
+ await mount(native);expect(host.querySelector('[data-scheduling-sign-in]')).toBeNull();
+ await click('Cancel Scheduling sign-in');
+ const cancel=[...host.querySelectorAll('button')].find(button=>button.textContent==='Cancel Scheduling sign-in')!;
+ expect(cancel.disabled).toBe(true);expect([...host.querySelectorAll('button')].every(button=>button.disabled)).toBe(true);
+ await act(async()=>cancel.click());expect(schedulingLoginRequest).toHaveBeenCalledTimes(2);
+ await act(async()=>finish({state:'disconnected'}));
+ expect(host.textContent).toContain('Scheduling disconnected from CosmasOS.');
+ expect(host.textContent).not.toContain('Cancel Scheduling sign-in');
+ expect(vi.mocked(schedulingLoginRequest).mock.calls.map(call=>call[1])).toEqual(['status','disconnect']);
+});

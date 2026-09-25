@@ -86,7 +86,7 @@ export function SchedulingConnectionPanel({identity,onBusyChange,onAuthenticatio
       onClick={begin}>{opening?'Opening Google…':'Continue with Google'}</button>:
       <a style={{display:'inline-flex',alignItems:'center',minHeight:44}} className="team-primary" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Google</a>}</p>}
     {!nativeReady&&<p>Google sign-in is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
-    {status?.state==='connected'&&<button disabled={blocked} onClick={()=>void run('disconnect')}>Disconnect Scheduling</button>}
+    {(start||status&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>void run('disconnect')}>{status?.state==='connected'?'Disconnect Scheduling':'Cancel Scheduling sign-in'}</button>}
     {enrollmentOwner===identity&&!busy&&<SchedulingEnrollmentPanel identity={identity} onBusyChange={setEnrollmentBusy} onAuthenticationLost={onAuthenticationLost} onConnected={()=>{setEnrollmentOwner(null);void run('status');}}/>}
     {message&&<p role="status">{message}</p>}
   </section>;

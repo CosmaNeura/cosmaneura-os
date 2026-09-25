@@ -8,7 +8,7 @@ import {teamSetupApi} from './team-setup-api';
 import {teamFixture,catalogFixture,projectionFixture,rehearsalFixture} from './team-setup-test-fixture';
 import {setupChange,type SetupProjection} from './team-setup-request';
 import {type ReviewedTeamDraft} from './TeamSetupPanel';
-import {botAddress,type ProviderTeam,type TeamConfiguration} from './workspace-api';
+import {botAddress,WorkspaceApiError,type ProviderTeam,type TeamConfiguration} from './workspace-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 vi.mock('./model-activity-api',()=>({modelActivityApi:{read:vi.fn()}}));
 vi.mock('./team-setup-api',()=>({teamSetupApi:{read:vi.fn(),rehearse:vi.fn(),resources:vi.fn(),usage:vi.fn()}}));
@@ -120,4 +120,69 @@ it('waits for the current source inventory before automatically checking a polic
   await wait(()=>expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(1));
   expect(vi.mocked(teamSetupApi.rehearse).mock.calls[0][1]).toMatchObject({scenario_id:'team_policy_setup.v1',configuration:{model_work:{version:1,max_attempts_per_24h:0}}});
   expect(input('I reviewed these team changes').checked).toBe(false);expect(saved).toBeNull();
+});
+
+it('retries a failed initial setup load from Review while preserving edits and explicit save',async()=>{
+  const draft=teamFixture().configuration;draft.bots[3].blocked_capabilities=['model_answer'];
+  vi.mocked(teamSetupApi.read).mockRejectedValueOnce(new WorkspaceApiError(503));
+  await mount({initialDraft:draft});await click('Review changes');
+  expect(teamSetupApi.read).toHaveBeenCalledTimes(1);expect(teamSetupApi.rehearse).not.toHaveBeenCalled();
+  expect(button('Save team changes').disabled).toBe(true);expect(latest).toEqual(draft);
+  await act(async()=>root.render(<Harness initialDraft={draft} locked/>));
+  expect(button('Retry connection check').disabled).toBe(true);
+  await act(async()=>button('Retry connection check').click());expect(teamSetupApi.read).toHaveBeenCalledTimes(1);
+  await act(async()=>root.render(<Harness initialDraft={draft}/>));await click('Retry connection check');
+  await wait(()=>expect(input('I reviewed these team changes').checked).toBe(false));
+  expect(teamSetupApi.read).toHaveBeenCalledTimes(2);expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(1);
+  expect(latest).toEqual(draft);expect(refresh).not.toHaveBeenCalled();expect(review).toBeNull();expect(saved).toBeNull();
+  expect(button('Save team changes').disabled).toBe(true);
+  await act(async()=>input('I reviewed these team changes').click());await click('Save team changes');
+  expect(saved?.draft).toEqual(draft);expect(saved?.review).toEqual(review);
+});
+
+it('reloads missing source choices from Review before checking the same unsaved policy',async()=>{
+  const {policySetupFixture,policyRehearsalFixture,resourcesFixture,usageFixture}=await import('./team-policy-test-fixture');
+  const draft=teamFixture().configuration;draft.model_work={version:1,max_attempts_per_24h:10};
+  draft.bots[1].resources={version:1,allowed:[{purpose:'core_preparation',resource_ref:resourcesFixture.resources[0].resource_ref}]};
+  vi.mocked(teamSetupApi.read).mockResolvedValue(await policySetupFixture());
+  vi.mocked(teamSetupApi.resources).mockResolvedValue(resourcesFixture).mockRejectedValueOnce(new WorkspaceApiError(503));
+  vi.mocked(teamSetupApi.usage).mockResolvedValue(usageFixture);
+  vi.mocked(teamSetupApi.rehearse).mockImplementation(async(_,body)=>policyRehearsalFixture(body.configuration,body.expected_revision));
+  await mount({initialDraft:draft});await click('Review changes');
+  expect(teamSetupApi.rehearse).not.toHaveBeenCalled();expect(button('Check team settings').disabled).toBe(true);
+  expect(latest).toEqual(draft);expect(review).toBeNull();
+  await click('← Back');await click('Team preferences');await click('AI work limit');
+  await fill('Team attempts per 24 hours','15');await click('Done editing');await click('← Back');await click('Review changes');
+  const edited=structuredClone(latest);expect(edited.model_work?.max_attempts_per_24h).toBe(15);
+  expect(teamSetupApi.rehearse).not.toHaveBeenCalled();await click('Retry connection check');
+  await wait(()=>expect(input('I reviewed these team changes').checked).toBe(false));
+  expect(teamSetupApi.read).toHaveBeenCalledTimes(2);expect(teamSetupApi.resources).toHaveBeenCalledTimes(2);
+  expect(teamSetupApi.usage).toHaveBeenCalledTimes(2);expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(teamSetupApi.rehearse).mock.calls[0][1].configuration).toEqual(edited);
+  expect(latest).toEqual(edited);expect(button('Save team changes').disabled).toBe(true);expect(saved).toBeNull();
+});
+
+it('keeps informational count failures from blocking the server check when sources are available',async()=>{
+  const {policySetupFixture,policyRehearsalFixture,resourcesFixture}=await import('./team-policy-test-fixture');
+  const draft=teamFixture().configuration;draft.model_work={version:1,max_attempts_per_24h:10};
+  vi.mocked(teamSetupApi.read).mockResolvedValue(await policySetupFixture());
+  vi.mocked(teamSetupApi.resources).mockResolvedValue(resourcesFixture);
+  vi.mocked(teamSetupApi.usage).mockRejectedValueOnce(new WorkspaceApiError(503));
+  vi.mocked(teamSetupApi.rehearse).mockImplementation(async(_,body)=>policyRehearsalFixture(body.configuration,body.expected_revision));
+  await mount({initialDraft:draft});await click('Review changes');
+  await wait(()=>expect(input('I reviewed these team changes').checked).toBe(false));
+  expect(teamSetupApi.read).toHaveBeenCalledTimes(1);expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(1);
+  expect(latest).toEqual(draft);expect(review).toBeNull();expect(saved).toBeNull();
+});
+
+it('withholds retry and automatic review when the prerequisite read loses account access',async()=>{
+  const {policySetupFixture,resourcesFixture}=await import('./team-policy-test-fixture');
+  const draft=teamFixture().configuration;draft.model_work={version:1,max_attempts_per_24h:10};
+  vi.mocked(teamSetupApi.read).mockResolvedValue(await policySetupFixture());
+  vi.mocked(teamSetupApi.resources).mockResolvedValue(resourcesFixture);
+  vi.mocked(teamSetupApi.usage).mockRejectedValueOnce(new WorkspaceApiError(403));
+  await mount({initialDraft:draft});await click('Review changes');
+  expect(buttons().some(node=>buttonName(node)==='Retry connection check')).toBe(false);
+  expect(button('Check team settings').disabled).toBe(true);expect(button('Save team changes').disabled).toBe(true);
+  expect(teamSetupApi.rehearse).not.toHaveBeenCalled();expect(latest).toEqual(draft);expect(saved).toBeNull();
 });

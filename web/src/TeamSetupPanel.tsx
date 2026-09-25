@@ -37,6 +37,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
   onCurrentTeam:(value:ProviderTeam,setup:SetupProjection)=>void;onReviewChange:(value:ReviewedTeamDraft|null)=>void;onAccessLost:(cause:unknown)=>void;
 }) {
   const [loaded,setLoaded]=useState<TeamSetup|null>(null),[unavailable,setUnavailable]=useState(false),[error,setError]=useState("");
+  const [prerequisitesFailure,setPrerequisitesFailure]=useState<'retry'|'denied'|null>(null);
   const [reading,setReading]=useState(false),[rehearsing,setRehearsing]=useState(false),[preview,setPreview]=useState<PresetId|null>(null);
   const [replacement,setReplacement]=useState<{id:PresetId;slot:SlotName}|null>(null);
   const [result,setResult]=useState<{key:string;revision:number;value:TeamRehearsal}|null>(null),[reviewed,setReviewed]=useState(false);
@@ -53,7 +54,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
     return()=>callbacks.current.onReviewChange(null);
   },[active,reviewed,configurationKey,team.revision]);
   useEffect(()=>{
-    const controller=new AbortController();automaticAttempt.current=null;prerequisitesReady.current=false;setReading(true);setError("");setLoaded(null);setResult(null);setReviewed(false);setResources(null);setUsage(null);
+    const controller=new AbortController();automaticAttempt.current=null;prerequisitesReady.current=false;setPrerequisitesFailure(null);setReading(true);setError("");setLoaded(null);setResult(null);setReviewed(false);setResources(null);setUsage(null);
     rehearsalController.current?.abort();setRehearsing(false);
     void teamSetupApi.read(identity,controller.signal).then(async value=>{
       if(controller.signal.aborted||value.team.revision<live.current.revision)return;
@@ -63,17 +64,26 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
         if(controller.signal.aborted||value.team.revision!==live.current.revision)return;
         if(inventory.status==='fulfilled')setResources(inventory.value);
         if(counts.status==='fulfilled'&&counts.value.team_revision===value.team.revision)setUsage(counts.value);
-        for(const result of [inventory,counts])if(result.status==='rejected'&&result.reason instanceof WorkspaceApiError&&[401,403,426].includes(result.reason.status))callbacks.current.onAccessLost(result.reason);
-        if(inventory.status==='rejected'||counts.status==='rejected')setError("Current source inventory or attempt counts could not be checked. Your saved policies and editable draft are retained.");
+        let denied=false;
+        for(const result of [inventory,counts])if(result.status==='rejected'&&result.reason instanceof WorkspaceApiError&&[401,403,426].includes(result.reason.status)){denied=true;callbacks.current.onAccessLost(result.reason);}
+        if(inventory.status==='rejected'||counts.status==='rejected'){
+          setPrerequisitesFailure(denied?'denied':'retry');
+          setError("Current source inventory or attempt counts could not be checked. Your saved policies and editable draft are retained.");
+        }
       }
     }).catch(cause=>{
       if(controller.signal.aborted)return;
       if(cause instanceof WorkspaceApiError&&cause.status===404){setUnavailable(true);return;}
-      if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status)){callbacks.current.onAccessLost(cause);return;}
+      if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status)){setPrerequisitesFailure('denied');callbacks.current.onAccessLost(cause);return;}
+      setPrerequisitesFailure('retry');
       setError("Team setup prerequisites could not be checked. Your editable draft is retained.");
     }).finally(()=>{if(!controller.signal.aborted){prerequisitesReady.current=true;setReading(false);}});
     return()=>{controller.abort();rehearsalController.current?.abort();};
   },[identity,team.revision,refresh,refreshToken]);
+  function refreshPrerequisites(){
+    if(locked||reading||rehearsing||prerequisitesFailure==='denied')return;
+    setReviewed(false);setResult(null);callbacks.current.onReviewChange(null);setRefresh(value=>value+1);
+  }
   function update(next:TeamConfiguration){setResult(null);setReviewed(false);setError("");callbacks.current.onReviewChange(null);callbacks.current.setDraft(next);}
   function add(){if(!loaded||!preview||locked)return;try{update(applyPreset(draft,loaded.catalog,preview));setPreview(null);onAdded?.();}catch{setError("The complete group cannot be added. Check the current team and retained history limits.");}}
   function replace(){if(!loaded||!replacement||locked)return;try{update(replacePresetSlot(draft,team.configuration,loaded.catalog,replacement.id,replacement.slot));setReplacement(null);}catch{setError("Save the coworker's retirement first and check there is room for a replacement. Its history is retained.");}}
@@ -87,7 +97,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
       team.configuration.bots.find(saved=>botAddress(saved)===botAddress(bot))?.resources?.allowed.some(saved=>saved.purpose===binding.purpose&&saved.resource_ref===binding.resource_ref)));
   }
   async function rehearse(){
-    if(!loaded||locked||rehearsing||!validTeamConfiguration(draft))return;
+    if(!loaded||locked||reading||rehearsing||prerequisitesFailure==='denied'||!validTeamConfiguration(draft))return;
     if(loaded.catalog.version>=2&&!sourceBindingsCurrent()){setError("Refresh source choices before reviewing a new or changed binding. Existing saved unavailable selections may be retained unchanged.");return;}
     const controller=new AbortController();rehearsalController.current?.abort();rehearsalController.current=controller;
     const key=configurationKey,revision=team.revision;setRehearsing(true);setError("");setResult(null);setReviewed(false);callbacks.current.onReviewChange(null);
@@ -104,12 +114,12 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
     }finally{if(rehearsalController.current===controller){rehearsalController.current=null;setRehearsing(false);}}
   }
   useEffect(()=>{
-    if(view!=="review"||!prerequisitesReady.current||!loaded||loaded.team.revision!==team.revision||reading||locked||rehearsing||active||!validTeamConfiguration(draft))return;
+    if(view!=="review"||!prerequisitesReady.current||prerequisitesFailure==='denied'||!loaded||loaded.catalog.version>=2&&!resources||loaded.team.revision!==team.revision||reading||locked||rehearsing||active||!validTeamConfiguration(draft))return;
     const attempt=JSON.stringify([team.revision,configurationKey,refresh,refreshToken]);
     if(automaticAttempt.current===attempt)return;
     automaticAttempt.current=attempt;
     void rehearse();
-  },[view,loaded,reading,locked,rehearsing,active,configurationKey,team.revision,refresh,refreshToken]);
+  },[view,loaded,reading,locked,rehearsing,active,configurationKey,team.revision,refresh,refreshToken,prerequisitesFailure,resources]);
   if(unavailable)return null;
   const chosen=loaded?.catalog.presets.find(p=>p.preset_id===preview);
   const installed=!!chosen&&draft.presets?.some(p=>p.preset_id===chosen.preset_id);
@@ -119,8 +129,9 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
   return <section hidden={view==='hidden'} className={`team-setup${all?'':' team-setup-focused'}`} aria-label="Team groups and activation review">
     {all&&<div className="team-section-heading"><div><p className="team-kicker">BUILD YOUR PRIVATE TEAM</p><h2>Choose the help your practice needs</h2>
       <p>Start with your Provider team. Add coworkers, review their limits, then save the configuration you want.</p></div>
-      <button disabled={locked||reading||rehearsing} onClick={()=>{setReviewed(false);setResult(null);setRefresh(v=>v+1);}}>Refresh setup prerequisites</button></div>}
+      <button disabled={locked||reading||rehearsing||prerequisitesFailure==='denied'} onClick={refreshPrerequisites}>Refresh setup prerequisites</button></div>}
     {error&&<p role="alert">{error}</p>}{reading&&<p role="status">Checking current team prerequisites…</p>}
+    {!all&&prerequisitesFailure==='retry'&&<button disabled={locked||reading||rehearsing} onClick={refreshPrerequisites}>Retry connection check</button>}
     {loaded&&<>
       {(all||view==='groups')&&<><div className="team-preset-options">{loaded.catalog.presets.map(p=><button key={p.preset_id} aria-pressed={preview===p.preset_id}
         disabled={locked||rehearsing} onClick={()=>{setPreview(p.preset_id);setReplacement(null);}}><strong>{p.label}</strong><span>{p.purpose}</span>
@@ -174,7 +185,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
       {(all||view==='review')&&<div className="team-rehearsal"><h3>Review team access</h3>
         <p>{all?"Check your settings, then review the available capabilities before saving.":"We check these settings automatically. Review the available capabilities before saving."} Each action still checks its current account and encounter access.</p>
         {rehearsing&&<p role="status">Checking team settings…</p>}
-        {(all||!!error||!!active)&&<button disabled={locked||reading||rehearsing||!validTeamConfiguration(draft)} onClick={()=>void rehearse()}>{active?"Check settings again":"Check team settings"}</button>}
+        {(all||!!error||!!active)&&<button disabled={locked||reading||rehearsing||prerequisitesFailure==='denied'||loaded.catalog.version>=2&&!resources||!validTeamConfiguration(draft)} onClick={()=>void rehearse()}>{active?"Check settings again":"Check team settings"}</button>}
         {!validTeamConfiguration(draft)&&<p>Finish each coworker's name and required job before checking settings.</p>}
         {active&&<><p role="status">Settings checked. Review the capability summary and confirm these changes.</p>
           <SetupReadiness configuration={active.value.configuration} setup={active.value.setup} label="Capabilities with these settings"/>
