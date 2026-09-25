@@ -1,0 +1,7 @@
+.microsoft-connection {min-width:0;overflow-wrap:anywhere}
+.microsoft-connection button,.microsoft-continue {min-height:44px}
+.microsoft-continue {display:inline-flex;align-items:center}
+.microsoft-actions {display:flex;flex-wrap:wrap;gap:.6rem;margin:1rem 0}
+.microsoft-items {list-style:none;margin:0;padding:0}
+.microsoft-items li {display:flex;flex-direction:column;gap:.35rem;padding:1rem 0;border-bottom:1px solid #d9ddd9}
+.microsoft-items span,.microsoft-items small {font-size:.9rem}

@@ -1,0 +1,99 @@
+{
+  "owner": {
+    "id": "44fdf006-8b83-47cd-b474-95f71c0e8252",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [],
+      "matching_items": 0,
+      "counts": {
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "complete",
+      "reason": null,
+      "items": [
+        {
+          "ticket_id": "96e318af-489c-4ac1-9493-2d9401e05b10",
+          "revision_id": "ae0594f1-12d3-4bd7-bc5e-b42d681f6754",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 1,
+          "state": "pending_approval",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "ba5629f1-20a7-48e0-a7b2-4a51c85efba9",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "ba5629f1-20a7-48e0-a7b2-4a51c85efba9",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": null,
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        }
+      ],
+      "matching_items": 1,
+      "counts": {
+        "pending_approval": 1,
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "awaiting_review": 0,
+        "verified_complete": 0,
+        "source_unavailable": 0,
+        "work_changed": 0
+      },
+      "withheld_sources": false
+    },
+    "model_used": false
+  },
+  "staff": {
+    "id": "bb71af7a-6fe3-45be-9aa7-1b95496c45f1",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [],
+      "matching_items": 0,
+      "counts": {
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "unavailable",
+      "reason": "source_unavailable",
+      "items": [],
+      "matching_items": 0,
+      "counts": null,
+      "withheld_sources": true
+    },
+    "model_used": false
+  },
+  "ticket_id": "96e318af-489c-4ac1-9493-2d9401e05b10"
+}

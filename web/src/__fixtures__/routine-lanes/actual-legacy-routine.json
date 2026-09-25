@@ -1,0 +1,150 @@
+{
+  "report": {
+    "id": "e1e74862-7078-4a43-becf-0c048a543b75",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "kind": "practice_work_brief",
+    "items": [
+      {
+        "body": "Invented routine prep_ready",
+        "state": "approved",
+        "version": 3,
+        "due_date": "2026-09-29",
+        "ticket_id": "62cc4df2-4ba8-4e57-9636-79926e199082",
+        "responsible": {
+          "id": "55792772-3cdb-4fc8-8428-e94da59711f8",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "186ac48b-522d-4dd0-919e-f36eb832202d",
+        "payload_hash": "417b87d811f118c5225846c4c44e775690fc4a44c8eeedb8454ece10d6d17a98",
+        "pending_offer": false,
+        "human_completion": false
+      },
+      {
+        "body": "Invented routine prep_active",
+        "state": "approved",
+        "version": 4,
+        "due_date": "2026-09-29",
+        "ticket_id": "c0bd0c03-0ede-437a-a97e-a71c13b60586",
+        "responsible": {
+          "id": "4312b5da-e9af-4ca2-bc44-09745965fb2b",
+          "name": "Invented preparation staff",
+          "available": true
+        },
+        "revision_id": "2c6a31c3-177a-4349-a533-4f4ba1276403",
+        "payload_hash": "88798bf8a04de3312bfcec4af5a3629ef332432a7a1e8b59fab269bceaf1c8c9",
+        "pending_offer": false,
+        "human_completion": false
+      },
+      {
+        "body": "Invented routine vendor_active",
+        "state": "approved",
+        "version": 3,
+        "due_date": "2026-10-01",
+        "ticket_id": "41f3849d-a7ed-4536-8169-e8bc5694f4a9",
+        "responsible": {
+          "id": "55792772-3cdb-4fc8-8428-e94da59711f8",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "98b2269e-fa84-44ce-be12-ba6b89211e98",
+        "payload_hash": "f126f4899db2d84327d9c0f17cd58c8d1bb1a6ce468ba3c2e427d32b455bca3f",
+        "pending_offer": true,
+        "human_completion": false
+      },
+      {
+        "body": "Invented routine vendor_ready",
+        "state": "approved",
+        "version": 3,
+        "due_date": "2026-10-01",
+        "ticket_id": "c42d8055-f772-4a9c-918f-48c46e030d4e",
+        "responsible": {
+          "id": "55792772-3cdb-4fc8-8428-e94da59711f8",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "60129356-1285-437e-b93a-bbb83af40be2",
+        "payload_hash": "1f313851e6c15e540845c788590048db984968e568bcb0ac12cbfd65dd6efb72",
+        "pending_offer": false,
+        "human_completion": false
+      },
+      {
+        "body": "Invented routine prep_closed",
+        "state": "closed",
+        "version": 4,
+        "due_date": "2026-09-29",
+        "ticket_id": "d675f7c0-bc3b-45f3-8c85-febec2f8e1f6",
+        "responsible": {
+          "id": "55792772-3cdb-4fc8-8428-e94da59711f8",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "d3c60a1a-d8e9-4d30-801c-72ca57c2dc45",
+        "payload_hash": "4fa9058d8ee1b12db48363ffb7b2c0b9ff7846d453774adae904ae3f41d121d6",
+        "pending_offer": false,
+        "human_completion": true
+      },
+      {
+        "body": "Invented routine vendor_withdrawn",
+        "state": "withdrawn",
+        "version": 3,
+        "due_date": "2026-10-01",
+        "ticket_id": "241f4fc1-e899-48ca-a27a-ce16ae15ce28",
+        "responsible": {
+          "id": "55792772-3cdb-4fc8-8428-e94da59711f8",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "deaefbd9-ac85-4371-bc3d-24e8a96b561a",
+        "payload_hash": "ee4f6d7fe2491eb2c46a32e3f255889510a7497c196602c9e47f7e07f571849f",
+        "pending_offer": false,
+        "human_completion": false
+      },
+      {
+        "body": "Invented routine vendor_closed",
+        "state": "closed",
+        "version": 4,
+        "due_date": "2026-10-01",
+        "ticket_id": "7970f6db-02ad-4980-882b-a383f9d262ec",
+        "responsible": {
+          "id": "55792772-3cdb-4fc8-8428-e94da59711f8",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "01977989-d625-4cf8-bcca-e12e6cc6c389",
+        "payload_hash": "b3e3d68f842f9bca6b1d7a33790db2d7ae0fa51a2783ca0e322e3533ea60b904",
+        "pending_offer": false,
+        "human_completion": true
+      },
+      {
+        "body": "Invented routine vendor_superseded",
+        "state": "superseded",
+        "version": 4,
+        "due_date": "2026-10-01",
+        "ticket_id": "c422fd5c-eb0e-436f-a14e-9b66ad53ddb9",
+        "responsible": {
+          "id": "55792772-3cdb-4fc8-8428-e94da59711f8",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "eff46f6d-3764-4db8-b1db-fecea782ace1",
+        "payload_hash": "6388d0a563848f8bb24e964b2c1c358d560611dd8954f7037f47396520c9b524",
+        "pending_offer": false,
+        "human_completion": false
+      }
+    ],
+    "matching_items": 8,
+    "counts": {
+      "open": 4,
+      "overdue": 0,
+      "awaiting_acceptance": 1,
+      "responsible_unavailable": 0,
+      "verified_complete": 2
+    },
+    "withheld_sources": false,
+    "truncated": false,
+    "model_used": false
+  }
+}

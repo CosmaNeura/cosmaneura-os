@@ -1,0 +1,7 @@
+.practice-hub { min-width: 0; max-width: 980px; margin-inline: auto; padding: 24px; box-sizing: border-box; }
+.practice-hub > nav { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: 1.25rem; }
+.practice-hub > nav button { min-height: 44px; padding: .6rem 1rem; border-radius: .75rem; }
+.team-workspace .practice-hub > nav button[aria-pressed="true"] { background: #315c4c; color: white; border-color: #315c4c; }
+.practice-hub .practice-work, .practice-hub .inbox-panel.inbox-focused { padding: 0; }
+.practice-hub [hidden] { display: none !important; }
+@media (max-width: 600px) { .practice-hub { padding: 16px; } .practice-hub > nav button { flex: 1 1 0; min-width: 0; padding-inline: .6rem; overflow-wrap: anywhere; } }

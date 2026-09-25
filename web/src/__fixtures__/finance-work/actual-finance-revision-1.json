@@ -1,0 +1,256 @@
+{
+  "prior_detail": {
+    "contract_version": 1,
+    "workspace_id": "a636361c-24e1-4a51-97af-6477f95c41ea",
+    "summary": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "version": 2,
+      "revision_id": "4b77be75-d066-4925-9f38-5541cd72fbba",
+      "operation_id": "86eddc04-d59c-4ba4-b1f2-f44fb26b5af3",
+      "payload_hash": "d30aadbeb5730000c68ec93ca5af9154b70a95f6eb20300729123130896e0391",
+      "state": "approved",
+      "amount": 12500,
+      "currency": "usd",
+      "creation": "not_observed",
+      "payment_state": "not_observed",
+      "amount_received": 0,
+      "submit_claimed": false,
+      "conflicting_evidence": false,
+      "result": "none",
+      "verification": "pending",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "a2d4c6ff17fd5b2eb0879351e47c46447b86a5f3eca0610ad63ea194b26bf26e"
+      },
+      "evidence_sha256": "0ec3e5714698583fcb7bd57c7518dc6bf860572f4f78aa13fe59a0871798b02f"
+    },
+    "review": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "revision_id": "4b77be75-d066-4925-9f38-5541cd72fbba",
+      "operation_id": "86eddc04-d59c-4ba4-b1f2-f44fb26b5af3",
+      "connection": {
+        "id": "5f16fa33-b46c-42dd-a38e-62a21f84b5a0",
+        "revision": 1,
+        "environment": "sandbox",
+        "label": "Invented Stripe sandbox",
+        "availability": "enabled",
+        "public_sha256": "dfc5ba7a94e7e5c321589d6bd46212c6d9c71109862fb5babaa42a61cb036eac"
+      },
+      "customer": {
+        "id": "e19c1e5c-49ef-4df3-b560-e0c492ac6bab",
+        "revision": 1,
+        "connection_id": "5f16fa33-b46c-42dd-a38e-62a21f84b5a0",
+        "label": "Invented patient billing account",
+        "availability": "reviewed",
+        "public_sha256": "6b0add4e6fd63489732ebf57d56b93fef22bb7e5152edfc35f27f057bace4c8e"
+      },
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "ed432394-ebc5-4259-84d0-568e4c0d6924",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "89cde46660ca72db4052aa195ad4604f774de96f393436ebeb6de1ad0b94d8cf"
+      },
+      "amount": 12500,
+      "currency": "usd",
+      "due_date": "2026-10-01",
+      "expected_outcome": "Invented patient completes the reviewed payment request.",
+      "expires_at": "2026-09-22T01:13:05.861191Z",
+      "processor_confirmation": "not_requested"
+    },
+    "review_sha256": "8ce375072847503cd6f84d058cc312ffb24c5e250cbfeed1b6badddda60ba9ca",
+    "latest_result": null
+  },
+  "revision_request": {
+    "expected_workspace_revision": 3,
+    "idempotency_key": "finance-proposal-a6d107a4-9b28-487b-b501-eeec36b69c8d",
+    "proposed_operation_id": "4f72e4a7-57e5-41ed-9b4e-2df062000cb1",
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "ed432394-ebc5-4259-84d0-568e4c0d6924",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "89cde46660ca72db4052aa195ad4604f774de96f393436ebeb6de1ad0b94d8cf"
+    },
+    "connection": {
+      "id": "5f16fa33-b46c-42dd-a38e-62a21f84b5a0",
+      "revision": 1,
+      "public_sha256": "dfc5ba7a94e7e5c321589d6bd46212c6d9c71109862fb5babaa42a61cb036eac"
+    },
+    "customer": {
+      "id": "9789b3a4-ec5f-4283-8c25-0f913c5f9155",
+      "revision": 1,
+      "public_sha256": "1d04dddec00631313044e22164de7ede5f898e185c7103dbc9a94257b6a48dee"
+    },
+    "amount": 23456,
+    "currency": "usd",
+    "due_date": "2026-10-03",
+    "expected_outcome": "Invented revised payment amount and review.",
+    "revises": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "expected_version": 2,
+      "revision_id": "4b77be75-d066-4925-9f38-5541cd72fbba",
+      "payload_hash": "d30aadbeb5730000c68ec93ca5af9154b70a95f6eb20300729123130896e0391"
+    }
+  },
+  "revision_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "a636361c-24e1-4a51-97af-6477f95c41ea"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "finance-proposal-a6d107a4-9b28-487b-b501-eeec36b69c8d",
+    "request_sha256": "ac08ae961ce2d40fee472b74f79b5a5de91f6a4999bd2c7d8e4f36de5d69a798",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "revision_id": "5108e3bc-9083-4a8e-b70f-a74c775c0601",
+      "operation_id": "4f72e4a7-57e5-41ed-9b4e-2df062000cb1",
+      "payload_hash": "8a605f3c032ad57b6db16231a58e5260085824b6bdd62d72add6c20dc997b41d",
+      "receipt_id": "e003742d-58ac-47b2-8521-5132f189e61c",
+      "effect_version": 3,
+      "recorded_at": "2026-09-22T00:58:05.890503Z",
+      "effect": "proposed"
+    },
+    "receipt_sha256": "5a928af8780e66342378c0ade7699037508dc836a53ae6e848e37cbb461de425",
+    "observed_at": "2026-09-22T00:58:05.892126Z"
+  },
+  "pending_detail": {
+    "contract_version": 1,
+    "workspace_id": "a636361c-24e1-4a51-97af-6477f95c41ea",
+    "summary": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "version": 3,
+      "revision_id": "5108e3bc-9083-4a8e-b70f-a74c775c0601",
+      "operation_id": "4f72e4a7-57e5-41ed-9b4e-2df062000cb1",
+      "payload_hash": "8a605f3c032ad57b6db16231a58e5260085824b6bdd62d72add6c20dc997b41d",
+      "state": "pending_approval",
+      "amount": 23456,
+      "currency": "usd",
+      "creation": "not_observed",
+      "payment_state": "not_observed",
+      "amount_received": 0,
+      "submit_claimed": false,
+      "conflicting_evidence": false,
+      "result": "none",
+      "verification": "pending",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "d1a97619f4c5461f97f19590ddd9bd652edfe6e921e12e83f25a777be67fdeba"
+      },
+      "evidence_sha256": "9b12d4ce78e050a9989ad9ce39f1864a41ae00b846271ca227fcff2ba30ebd41"
+    },
+    "review": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "revision_id": "5108e3bc-9083-4a8e-b70f-a74c775c0601",
+      "operation_id": "4f72e4a7-57e5-41ed-9b4e-2df062000cb1",
+      "connection": {
+        "id": "5f16fa33-b46c-42dd-a38e-62a21f84b5a0",
+        "revision": 1,
+        "environment": "sandbox",
+        "label": "Invented Stripe sandbox",
+        "availability": "enabled",
+        "public_sha256": "dfc5ba7a94e7e5c321589d6bd46212c6d9c71109862fb5babaa42a61cb036eac"
+      },
+      "customer": {
+        "id": "9789b3a4-ec5f-4283-8c25-0f913c5f9155",
+        "revision": 1,
+        "connection_id": "5f16fa33-b46c-42dd-a38e-62a21f84b5a0",
+        "label": "Invented revised customer mapping",
+        "availability": "reviewed",
+        "public_sha256": "1d04dddec00631313044e22164de7ede5f898e185c7103dbc9a94257b6a48dee"
+      },
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "ed432394-ebc5-4259-84d0-568e4c0d6924",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "89cde46660ca72db4052aa195ad4604f774de96f393436ebeb6de1ad0b94d8cf"
+      },
+      "amount": 23456,
+      "currency": "usd",
+      "due_date": "2026-10-03",
+      "expected_outcome": "Invented revised payment amount and review.",
+      "expires_at": "2026-09-22T01:13:05.888376Z",
+      "processor_confirmation": "not_requested"
+    },
+    "review_sha256": "797e8a500a206f394d92231dbce9a3b4ea9bf497f907233b8535df2eb7046e9b",
+    "latest_result": null
+  },
+  "revision_replayed": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "a636361c-24e1-4a51-97af-6477f95c41ea"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "finance-proposal-a6d107a4-9b28-487b-b501-eeec36b69c8d",
+    "request_sha256": "ac08ae961ce2d40fee472b74f79b5a5de91f6a4999bd2c7d8e4f36de5d69a798",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "revision_id": "5108e3bc-9083-4a8e-b70f-a74c775c0601",
+      "operation_id": "4f72e4a7-57e5-41ed-9b4e-2df062000cb1",
+      "payload_hash": "8a605f3c032ad57b6db16231a58e5260085824b6bdd62d72add6c20dc997b41d",
+      "receipt_id": "e003742d-58ac-47b2-8521-5132f189e61c",
+      "effect_version": 3,
+      "recorded_at": "2026-09-22T00:58:05.890503Z",
+      "effect": "proposed"
+    },
+    "receipt_sha256": "5a928af8780e66342378c0ade7699037508dc836a53ae6e848e37cbb461de425",
+    "observed_at": "2026-09-22T00:58:05.904421Z"
+  },
+  "old_resolved": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "a636361c-24e1-4a51-97af-6477f95c41ea"
+    },
+    "command_kind": "decide",
+    "idempotency_key": "finance-command-793145be-3859-423b-88b4-4ac49e77907b",
+    "request_sha256": "20999853fa73f60ca3fc65d5e533cd072215ac7d925122908585d1bade00bf4f",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "revision_id": "4b77be75-d066-4925-9f38-5541cd72fbba",
+      "operation_id": "86eddc04-d59c-4ba4-b1f2-f44fb26b5af3",
+      "payload_hash": "d30aadbeb5730000c68ec93ca5af9154b70a95f6eb20300729123130896e0391",
+      "receipt_id": "af38711f-e5c4-473e-a1fb-2182347581b2",
+      "effect_version": 2,
+      "recorded_at": "2026-09-22T00:58:05.871760Z",
+      "effect": "approved"
+    },
+    "receipt_sha256": "c92406899f10594afe852f7b2fb94c79caf4ca1a07ea3dd2ec397c5a6c9c7f5d",
+    "observed_at": "2026-09-22T00:58:05.908095Z"
+  },
+  "approval_request": {
+    "expected_version": 3,
+    "operation_id": "4f72e4a7-57e5-41ed-9b4e-2df062000cb1",
+    "revision_id": "5108e3bc-9083-4a8e-b70f-a74c775c0601",
+    "payload_hash": "8a605f3c032ad57b6db16231a58e5260085824b6bdd62d72add6c20dc997b41d",
+    "idempotency_key": "finance-command-4917a279-5fb3-4024-806c-f1df5f456de2",
+    "review_sha256": "797e8a500a206f394d92231dbce9a3b4ea9bf497f907233b8535df2eb7046e9b",
+    "choice": "approve"
+  },
+  "approval_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "a636361c-24e1-4a51-97af-6477f95c41ea"
+    },
+    "command_kind": "decide",
+    "idempotency_key": "finance-command-4917a279-5fb3-4024-806c-f1df5f456de2",
+    "request_sha256": "8a775216382832f43728c03a008d7a49f2252a3947e460a0180270eca1003809",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "1b332f7d-81cd-490b-8b5f-6c0d7e855be9",
+      "revision_id": "5108e3bc-9083-4a8e-b70f-a74c775c0601",
+      "operation_id": "4f72e4a7-57e5-41ed-9b4e-2df062000cb1",
+      "payload_hash": "8a605f3c032ad57b6db16231a58e5260085824b6bdd62d72add6c20dc997b41d",
+      "receipt_id": "a978facd-e70f-4a48-b2b0-e62f21e9f580",
+      "effect_version": 4,
+      "recorded_at": "2026-09-22T00:58:05.927861Z",
+      "effect": "approved"
+    },
+    "receipt_sha256": "f5c0ad8597ef391092dd8e3de717d71a60c44a9c1930a475fecb213d4568a3f9",
+    "observed_at": "2026-09-22T00:58:05.929844Z"
+  }
+}

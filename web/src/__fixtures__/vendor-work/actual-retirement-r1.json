@@ -1,0 +1,243 @@
+{
+  "request": {
+    "command_kind": "verify",
+    "request": {
+      "expected_version": 5,
+      "operation_id": "2795e7e2-2ac2-4059-9413-aeb4da87a358",
+      "revision_id": "8db05968-332b-4ed6-9a3c-a720e95972a6",
+      "payload_hash": "f1c4abda745151320719c1eb6fe8ce1313546d77fd9212279a02a8ec9cc34f25",
+      "idempotency_key": "command-d2ee75cd-0dbc-4622-ad89-fdbb4553ba2d",
+      "result_receipt_id": "4f442d17-863a-41be-a162-2aafd50d0551",
+      "result_receipt_sha256": "6e58947a164cc9bcd21ea1e7618455fb2977547e3f9290b8bbd11b25e34e9c49",
+      "observation_head": {
+        "sequence": 1,
+        "sha256": "d789ea7494b9cafd76e1e9f154d0c8275bcd9c34e11cfc46da19bef8b4990267"
+      },
+      "evidence_sha256": "efe0330ef329c4dd5f0ca0b94ea855fe4bb3ca5f11e136b44e61d7b5ffaa464e",
+      "reviewed_result": true,
+      "reviewed_observations": true,
+      "outcome_confirmed": true,
+      "reviewed_conflicting_evidence": false
+    },
+    "request_sha256": "405fe2992a395574348a2a0977fdfd2c9c68e340c7ce01973c08530622e299ed"
+  },
+  "retired": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "ce2ab43e-da17-44c3-94f4-48bcc805ca23"
+    },
+    "command_kind": "verify",
+    "idempotency_key": "command-d2ee75cd-0dbc-4622-ad89-fdbb4553ba2d",
+    "request_sha256": "405fe2992a395574348a2a0977fdfd2c9c68e340c7ce01973c08530622e299ed",
+    "outcome": "retired",
+    "effect": null,
+    "summary": null,
+    "retirement": {
+      "receipt_id": "c8e70c5f-52e2-4909-9063-36dc4fbb2c86",
+      "ticket_id": "dfbf9507-45bb-47c5-a5ac-531bc4fb419b",
+      "revision_id": "8db05968-332b-4ed6-9a3c-a720e95972a6",
+      "operation_id": "2795e7e2-2ac2-4059-9413-aeb4da87a358",
+      "payload_hash": "f1c4abda745151320719c1eb6fe8ce1313546d77fd9212279a02a8ec9cc34f25",
+      "retired_at": "2026-09-22T00:47:52.926097Z",
+      "receipt_sha256": "76792cb7a95896396e76e06e2ed927d84c625e223bf334271446bdf9f7043d8b"
+    },
+    "observed_at": "2026-09-22T00:47:52.931574Z"
+  },
+  "resolved": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "ce2ab43e-da17-44c3-94f4-48bcc805ca23"
+    },
+    "command_kind": "verify",
+    "idempotency_key": "command-d2ee75cd-0dbc-4622-ad89-fdbb4553ba2d",
+    "request_sha256": "405fe2992a395574348a2a0977fdfd2c9c68e340c7ce01973c08530622e299ed",
+    "outcome": "retired",
+    "effect": null,
+    "summary": null,
+    "retirement": {
+      "receipt_id": "c8e70c5f-52e2-4909-9063-36dc4fbb2c86",
+      "ticket_id": "dfbf9507-45bb-47c5-a5ac-531bc4fb419b",
+      "revision_id": "8db05968-332b-4ed6-9a3c-a720e95972a6",
+      "operation_id": "2795e7e2-2ac2-4059-9413-aeb4da87a358",
+      "payload_hash": "f1c4abda745151320719c1eb6fe8ce1313546d77fd9212279a02a8ec9cc34f25",
+      "retired_at": "2026-09-22T00:47:52.926097Z",
+      "receipt_sha256": "76792cb7a95896396e76e06e2ed927d84c625e223bf334271446bdf9f7043d8b"
+    },
+    "observed_at": "2026-09-22T00:47:52.947155Z"
+  },
+  "late_verify": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "ce2ab43e-da17-44c3-94f4-48bcc805ca23"
+    },
+    "command_kind": "verify",
+    "idempotency_key": "command-d2ee75cd-0dbc-4622-ad89-fdbb4553ba2d",
+    "request_sha256": "405fe2992a395574348a2a0977fdfd2c9c68e340c7ce01973c08530622e299ed",
+    "outcome": "retired",
+    "effect": null,
+    "summary": null,
+    "retirement": {
+      "receipt_id": "c8e70c5f-52e2-4909-9063-36dc4fbb2c86",
+      "ticket_id": "dfbf9507-45bb-47c5-a5ac-531bc4fb419b",
+      "revision_id": "8db05968-332b-4ed6-9a3c-a720e95972a6",
+      "operation_id": "2795e7e2-2ac2-4059-9413-aeb4da87a358",
+      "payload_hash": "f1c4abda745151320719c1eb6fe8ce1313546d77fd9212279a02a8ec9cc34f25",
+      "retired_at": "2026-09-22T00:47:52.926097Z",
+      "receipt_sha256": "76792cb7a95896396e76e06e2ed927d84c625e223bf334271446bdf9f7043d8b"
+    },
+    "observed_at": "2026-09-22T00:47:52.943275Z"
+  },
+  "manual_detail": {
+    "contract_version": 1,
+    "workspace_id": "ce2ab43e-da17-44c3-94f4-48bcc805ca23",
+    "view_version": 6,
+    "observed_at": "2026-09-22T00:47:52.961155Z",
+    "summary": {
+      "ticket_id": "dfbf9507-45bb-47c5-a5ac-531bc4fb419b",
+      "version": 6,
+      "revision_id": "8db05968-332b-4ed6-9a3c-a720e95972a6",
+      "operation_id": "2795e7e2-2ac2-4059-9413-aeb4da87a358",
+      "payload_hash": "f1c4abda745151320719c1eb6fe8ce1313546d77fd9212279a02a8ec9cc34f25",
+      "action": "spruce_secure_message",
+      "state": "approved",
+      "published": false,
+      "submit_claimed": true,
+      "dispatch": "response_observed",
+      "acceptance": "accepted",
+      "transport": "not_observed",
+      "conflicting_evidence": false,
+      "result": "recorded_success",
+      "verification": "pending",
+      "due_date": "2026-10-01",
+      "outcome_excerpt": "Invented patient receives the reviewed follow-up.",
+      "responsible_id": "2232a0ed-7c4f-4702-acd0-949f27573302",
+      "observation_head": {
+        "sequence": 1,
+        "sha256": "d789ea7494b9cafd76e1e9f154d0c8275bcd9c34e11cfc46da19bef8b4990267"
+      },
+      "evidence_sha256": "983006857f6bc9e4cde4c83da6bfa268aa4188aba5fb227635c545c4a4682121"
+    },
+    "review": {
+      "ticket_id": "dfbf9507-45bb-47c5-a5ac-531bc4fb419b",
+      "revision_id": "8db05968-332b-4ed6-9a3c-a720e95972a6",
+      "operation_id": "2795e7e2-2ac2-4059-9413-aeb4da87a358",
+      "action": "spruce_secure_message",
+      "connection": {
+        "id": "d3bb4dc3-0859-4948-a52f-c5ed46c3d734",
+        "revision": 1,
+        "vendor": "spruce",
+        "environment": "production",
+        "label": "Invented Spruce practice",
+        "actions": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ],
+        "availability": "enabled",
+        "public_sha256": "f73fa45636e0bdc152040c1c76ee6ad29b9f6ff7831ae161b83e3a1ce11f14d5"
+      },
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "141d1ca7-3488-42d3-a654-f7b1c34313eb",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "9401bc50765c7faeea1abfcebc244fe77973a3d2be805b30caef3f2fd93a91a7"
+      },
+      "correspondence": {
+        "id": "74403313-a45e-4317-8c35-82134b77a3d8",
+        "revision": 1,
+        "connection_id": "d3bb4dc3-0859-4948-a52f-c5ed46c3d734",
+        "channel": "secure",
+        "recipient_label": "Invented recipient",
+        "destination_display": "Reviewed invented portal contact",
+        "permission": "reviewed",
+        "expires_at": "2026-09-24T00:47:52.835300Z",
+        "public_sha256": "e37321ffa57ecc5055d3a8de21341254d16481affc0f038cc0eca83dd3bde53e"
+      },
+      "message": "Invented secure message.",
+      "due_date": "2026-10-01",
+      "expected_outcome": "Invented patient receives the reviewed follow-up.",
+      "share_to_practice": false,
+      "expires_at": "2026-09-23T00:47:52.843149Z"
+    },
+    "review_sha256": "03f611b5a63d0f330ac3673f8fc4219939294d5f4e834dc89df261064334310b",
+    "latest_result": {
+      "receipt_id": "aac742b1-eb19-4b94-8adc-f470ad7923d5",
+      "receipt_sha256": "181b0c2f3c98b12c172626cbe2f5f1028fc1ab11025f488073908dddce9220e7",
+      "actor": {
+        "id": "2232a0ed-7c4f-4702-acd0-949f27573302",
+        "name": "Alex Owner",
+        "available": true
+      },
+      "disposition": "verified_in_vendor",
+      "evidence": "Invented human reviewed the outcome.",
+      "recorded_at": "2026-09-22T00:47:52.955761Z",
+      "observation_head": {
+        "sequence": 1,
+        "sha256": "d789ea7494b9cafd76e1e9f154d0c8275bcd9c34e11cfc46da19bef8b4990267"
+      }
+    },
+    "availability": {
+      "approve": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "reject": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "withdraw": {
+        "allowed": false,
+        "reason": "submit_already_claimed"
+      },
+      "publish": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "submit": {
+        "allowed": false,
+        "reason": "submit_already_claimed"
+      },
+      "reconcile": {
+        "allowed": false,
+        "reason": "reference_unavailable"
+      },
+      "result": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "verify": {
+        "allowed": true,
+        "reason": "available"
+      }
+    }
+  },
+  "completed": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "ce2ab43e-da17-44c3-94f4-48bcc805ca23"
+    },
+    "command_kind": "verify",
+    "idempotency_key": "command-896d83f1-9182-447a-a736-541bc89b3ceb",
+    "request_sha256": "38e84adce217955bc69ba010cd7913fe3d3b46f942e51b5000d5a471ff85ea8b",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "dfbf9507-45bb-47c5-a5ac-531bc4fb419b",
+      "operation_id": "2795e7e2-2ac2-4059-9413-aeb4da87a358",
+      "revision_id": "8db05968-332b-4ed6-9a3c-a720e95972a6",
+      "payload_hash": "f1c4abda745151320719c1eb6fe8ce1313546d77fd9212279a02a8ec9cc34f25",
+      "receipt_id": "01c3e76c-efca-45f9-8f8f-f3ca1340bbc4",
+      "effect_version": 7,
+      "recorded_at": "2026-09-22T00:47:52.968664Z",
+      "receipt_sha256": "fcced4d7b6649e4df0e92977d781474cdfa133bb49721f7a288aa453f9986c43"
+    },
+    "summary": {
+      "effect": "verified",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:47:52.971535Z"
+  }
+}

@@ -1,7 +1,12 @@
+import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
+import {PracticeAccessGate} from './PracticeAccessGate';
+import {hostedWorkspaceRequested} from './hosted-workspace';
 import { OrganizationSwitcher, SignIn, UserButton, useAuth } from "@clerk/react";
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BetaIdentityAdmin } from "./BetaIdentityAdmin";
-import { api, type ApiIdentity, type QueueItem, type Seed } from "./api";
+import { api, COMPACT_LOCAL, type ApiIdentity, type QueueItem, type Seed } from "./api";
+import { EncounterWorkspace } from "./EncounterWorkspace";
+import { WORKSPACE_BUILD } from "./workspace-api";
 
 export type AppRuntimeMode = "synth_os" | "early_adopter_beta" | "unconfigured";
 
@@ -83,6 +88,16 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
     const queue = await api.queue(currentIdentity);
     setItems(queue);
   }
+
+  useEffect(() => {
+    if (!COMPACT_LOCAL || !identity || !items.some(item => ["pending", "running"].includes(item.execution_status ?? ""))) return;
+    let active = true;
+    const timer = window.setInterval(() => {
+      void api.queue(identity).then(queue => { if (active) setItems(queue); })
+        .catch(() => { if (active) setError("The local worker is unavailable. Your approval is saved; do not resend."); });
+    }, 1000);
+    return () => { active = false; window.clearInterval(timer); };
+  }, [identity, items]);
 
   useEffect(() => {
     // React StrictMode replays effects in development. Reuse the same request so
@@ -197,6 +212,11 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
             </h2>
             <p className="meta">Lane: {item.lane.replaceAll("_", " ")}</p>
             <div className="message">{item.proposed_message}</div>
+            {item.execution_status === "unknown" && (
+              <p role="alert">Needs review: the outcome is uncertain. No automatic resend will occur.</p>
+            )}
+            {item.execution_status === "pending" && <p>Approved and waiting for the local worker.</p>}
+            {item.execution_status === "running" && <p>Processing the approved synthetic action.</p>}
             {item.state === "pending_approval" ? (
               <>
                 <textarea
@@ -312,7 +332,24 @@ function BetaOrganizationQueue({ getToken }: { getToken: BetaTokenGetter }) {
   );
 }
 
-export function ClerkBetaApp() {
+function SignedInWorkspace({ getToken }: { getToken: BetaTokenGetter }) {
+  const active = useRef(true);
+  const tokenGetter = useRef(getToken);
+  tokenGetter.current = getToken;
+  useEffect(() => { active.current = true; return () => { active.current = false; }; }, []);
+  const identity = useMemo(() => ({mode: "clerk_jwt" as const, getToken: async (options: { skipCache: true }) => {
+    if (!active.current) return null;
+    const token = await tokenGetter.current(options);
+    return active.current ? token : null;
+  }}), []);
+  const controls=<div className="row account-controls" aria-label="Account and organization">
+    <OrganizationSwitcher hidePersonal /><UserButton /></div>;
+  return hostedWorkspaceRequested()
+    ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls}>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
+    : <EncounterWorkspace authenticated={identity} accountControls={controls}/>;
+}
+
+export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
   const auth = useAuth();
 
   if (!auth.isLoaded) {
@@ -355,6 +392,12 @@ export function ClerkBetaApp() {
     );
   }
 
+  if (workspace) {
+    if (!auth.sessionId || !auth.userId) return <StatusScreen title="Secure session unavailable"
+      detail="Sign out and sign in again. No work has been loaded." />;
+    return <SignedInWorkspace key={`${auth.userId}:${auth.sessionId}:${auth.orgId}`} getToken={auth.getToken} />;
+  }
+
   return (
     <BetaOrganizationQueue
       key={`${auth.sessionId}:${auth.orgId}`}
@@ -364,6 +407,9 @@ export function ClerkBetaApp() {
 }
 
 export function App({ runtimeMode: selectedMode = runtimeMode }: { runtimeMode?: AppRuntimeMode }) {
+  const [showProof, setShowProof] = useState(false);
   if (selectedMode !== "synth_os") return <BlockedRuntime mode={selectedMode} />;
+  if (WORKSPACE_BUILD && !showProof) return <EncounterWorkspace onExit={() => setShowProof(true)} />;
+  if (WORKSPACE_BUILD) return <><div className="workspace-return"><button onClick={() => setShowProof(false)}>Open encounter notebook</button></div><SyntheticQueue /></>;
   return <SyntheticQueue />;
 }

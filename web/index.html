@@ -2,11 +2,19 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cosmas OS — Work queue</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>CosmasOS · Provider workspace</title>
+    <link rel="stylesheet" href="/startup.css" />
   </head>
   <body>
-    <div id="root"></div>
+    <div id="root">
+      <main class="startup-screen" role="status">
+        <h1>CosmasOS</h1>
+        <h2>Opening your workspace…</h2>
+        <p>If this screen remains, close and reopen CosmasOS. Your saved work has not been reset.</p>
+        <p>Check any unconfirmed requests before retrying. If the app still cannot open, contact your beta administrator.</p>
+      </main>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

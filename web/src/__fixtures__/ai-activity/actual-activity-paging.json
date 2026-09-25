@@ -1,0 +1,1283 @@
+{
+  "first": {
+    "contract_version": 1,
+    "box_id": "0c764937-3f87-4ffc-8792-f86491b8d4a9",
+    "owner_id": "eb3c1e78-177a-4455-b542-6ba564880bce",
+    "recovery_scope": "bd696666d4f3e26e24686d5c5a14955678a70457d12984b2102e2dd8352f061e",
+    "view": "attention",
+    "as_of": "2026-09-22T15:36:33.074760Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": "a100065c142199864800065bafd025b5de9e926aaeff0546e59c71af6a5c03700fae34bfe931f452a549df5eb53d7a47b28e4aa4ea0f90e87b36512aeb050179dc",
+      "has_more": true
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 23,
+      "recent_total": 51,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:33.074760Z",
+      "window_start": "2026-09-21T15:36:33.074760Z",
+      "admitted_units": 51,
+      "occupied_units": 51,
+      "remaining_units": null,
+      "pending_units": 0,
+      "unknown_units": 0,
+      "verified_input_tokens": null,
+      "verified_output_tokens": null,
+      "usage_complete": false,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "9087a41c-ef92-4210-87a9-bf596d500429",
+          "appointment_id": "58585463-6dc1-42ef-80cb-e8492fd3525d",
+          "label": "Invented encounter",
+          "starts_at": "2026-09-22T11:36:29.752554-04:00",
+          "entry_id": "67129e62-9351-4610-96d9-dbff03dcd33b"
+        },
+        "admission": {
+          "id": "55719b1e-f0d9-4f5f-8195-c66222bb4e78",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:36:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "4783d89f-5c22-46e0-93d1-8c14a28df0d7",
+          "appointment_id": "a4055adb-5281-486f-984a-48364a5a63f4",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:29.840119-04:00",
+          "entry_id": "eab9fd87-89fd-4f48-a54c-8f6d883c9537"
+        },
+        "admission": {
+          "id": "f8ed7594-2cbe-4b6a-8d76-4fe5d79cdbbe",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:37:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "0a879f92-bd72-4d6c-85da-9712c63eb620",
+          "appointment_id": "7f379f1a-81d0-4426-aaa3-102f91c3d6e0",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:29.894319-04:00",
+          "entry_id": "deaadfe3-5d8a-489c-a3a9-96fc9de0b410"
+        },
+        "admission": {
+          "id": "3096cd56-2bdc-47f7-a366-538fa31c0b16",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:38:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "a463bc9f-87f7-4f06-93c8-47d39d35c84c",
+          "appointment_id": "79c94cac-cf32-4c7e-9a67-0d9bc995fe7e",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:29.946032-04:00",
+          "entry_id": "ce53d438-4561-4e9e-916b-c1e98737ffcf"
+        },
+        "admission": {
+          "id": "28b3ef13-4aa9-4dce-88c5-8d0ff4970c7d",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:39:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "8e3fe616-3f6f-4474-82f6-ff54b23ca7fc",
+          "appointment_id": "2d87b2a8-a981-4f96-a360-14220c8e07c1",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.009673-04:00",
+          "entry_id": "dc27a152-1c4b-4933-b798-8ec373382e98"
+        },
+        "admission": {
+          "id": "ff1d4cb7-a639-4884-89d1-a305d47454e4",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:40:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "2b8fce91-5e8f-4112-8f64-d2aa36cef491",
+          "appointment_id": "2a7d29d8-35bd-4b34-969c-717a77c064e2",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.068921-04:00",
+          "entry_id": "6aefd035-6a9c-4495-ab67-6614f728b447"
+        },
+        "admission": {
+          "id": "0b631044-81f1-4237-9e68-f6cbacb649a3",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:41:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "004cd1a1-8f1a-4388-9b0d-0a7006fb8595",
+          "appointment_id": "cc147893-9549-4a3c-987f-fea9451cc4a3",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.122495-04:00",
+          "entry_id": "68581bf4-c9e0-4213-827c-513b89e62d4b"
+        },
+        "admission": {
+          "id": "b6430378-a6d7-4ba1-ae01-f52c2af40264",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:42:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "24a86a23-7f7c-4cf2-9f0f-75625539d274",
+          "appointment_id": "88da406f-6042-42e8-972f-55a79631e7fe",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.179021-04:00",
+          "entry_id": "5dfa4a67-36de-44ee-b726-ba713f2dce27"
+        },
+        "admission": {
+          "id": "936cf748-05c9-4931-960d-82071f1340ab",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:43:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "786f1489-3878-4818-b7fa-53dd16c2d86d",
+          "appointment_id": "786d47eb-8d13-4667-ae34-9768f0bc689a",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.232091-04:00",
+          "entry_id": "b5a789e5-17ec-4c3f-80e2-f82dc70783f1"
+        },
+        "admission": {
+          "id": "736c46c4-07e4-45d8-b6e1-98cf08a933f8",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:44:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "bd42d665-c056-4d9a-935b-aa0abde290ca",
+          "appointment_id": "26b48097-51d3-459e-a467-6217e6233419",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.288558-04:00",
+          "entry_id": "46907121-62ea-47da-b1d0-02a32307b1f5"
+        },
+        "admission": {
+          "id": "f44b9646-b2d9-4d98-96d3-1d2bedd29398",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:45:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "de456311-330e-4095-97dd-7f47a53133a6",
+          "appointment_id": "2d1c329a-0b1f-40c1-9e3a-808d412d79bd",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.351573-04:00",
+          "entry_id": "f8e7f2d8-71de-4ef5-9b0a-2cf30a1c7a64"
+        },
+        "admission": {
+          "id": "50fddd9d-cc16-45ba-b7be-f44077a34a1a",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:46:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "8ddb4d71-9277-4f32-a4a5-118ca879c1ef",
+          "appointment_id": "aa1ae036-b8e8-4c1c-8618-5ed73e74de5e",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.407404-04:00",
+          "entry_id": "faf26460-22d9-4dff-b9df-f72307081a47"
+        },
+        "admission": {
+          "id": "f3350a85-df2e-42db-b3d7-1f2fbdcdf93b",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:47:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "48aff344-7501-4b0d-905b-a29c60192b90",
+          "appointment_id": "2bebba01-260d-4164-8466-4508bcfcc807",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.461944-04:00",
+          "entry_id": "bb466495-bb3d-4e9e-a354-2be5238b9576"
+        },
+        "admission": {
+          "id": "cb9db10b-ca0c-448b-a27f-c2e8f00014cb",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:48:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "e6259bcc-73d5-4a78-a9ff-e300bea09586",
+          "appointment_id": "4222cf39-a6a0-4fc3-a22b-19542ca1990b",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.515709-04:00",
+          "entry_id": "fbabc791-316c-448c-9c49-2c689982f76e"
+        },
+        "admission": {
+          "id": "8fa8fa68-4a17-484b-842a-15ddcdc346f0",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:49:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "22639cb4-1764-4399-8cf1-bb3c2211a5da",
+          "appointment_id": "4873fb93-9b40-4aae-aa99-0a801a46c949",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.573474-04:00",
+          "entry_id": "5b1a29ef-cfb4-49e2-b63b-9c26cb3d250e"
+        },
+        "admission": {
+          "id": "ac60ec01-8688-42bb-8b84-9df4840b5357",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:50:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "9ebd2d00-4fe5-4a98-a6f7-b11060512342",
+          "appointment_id": "5d7040a4-41d5-4220-9c08-4e3be8db9727",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.631777-04:00",
+          "entry_id": "4e20f021-4010-4fc2-a1e0-a32cc4ce73c8"
+        },
+        "admission": {
+          "id": "75f18c98-2705-41ad-bb3c-44ae76185e38",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:51:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "3b10e231-2965-488d-911f-7f01663f6be0",
+          "appointment_id": "a3ec82d6-8269-4151-9dca-af8d8bce8474",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.687764-04:00",
+          "entry_id": "7c89d6ba-ac93-4363-ba5c-b944950a230f"
+        },
+        "admission": {
+          "id": "dd959ff6-d124-4cfb-8fb2-2a18bf4b32cd",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:52:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "ccb42a7c-050a-4843-a004-6c186422c36e",
+          "appointment_id": "71fa040c-3cd1-43ca-a7ac-093881be9043",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.744142-04:00",
+          "entry_id": "cc5f24ee-3b4e-4876-a720-66e3afb2453d"
+        },
+        "admission": {
+          "id": "f595dab9-144f-40e1-b922-34c10e76c212",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:53:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "e3d1c2e4-fcbe-4b97-af38-3c763fdd42ff",
+          "appointment_id": "fb7fe34a-0855-49bd-ac34-3065ab1742b7",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.798738-04:00",
+          "entry_id": "7061d026-ab7e-4e75-8bb7-26f6981d4da0"
+        },
+        "admission": {
+          "id": "1cfc530a-75e1-4fc7-b936-6f34aca50dea",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:54:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "6a877169-10f5-47c3-96d6-bca86dc6fb1a",
+          "appointment_id": "2b6a9d20-3745-4636-b5f7-cda441f228a5",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.860543-04:00",
+          "entry_id": "92f240e0-2832-433b-a426-35ece0403385"
+        },
+        "admission": {
+          "id": "9e926aae-ff05-46e5-9c71-af6a5c03700f",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:55:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    ]
+  },
+  "second": {
+    "contract_version": 1,
+    "box_id": "0c764937-3f87-4ffc-8792-f86491b8d4a9",
+    "owner_id": "eb3c1e78-177a-4455-b542-6ba564880bce",
+    "recovery_scope": "bd696666d4f3e26e24686d5c5a14955678a70457d12984b2102e2dd8352f061e",
+    "view": "attention",
+    "as_of": "2026-09-22T15:36:33.244906Z",
+    "page": {
+      "limit": 20,
+      "cursor": "a100065c142199864800065bafd025b5de9e926aaeff0546e59c71af6a5c03700fae34bfe931f452a549df5eb53d7a47b28e4aa4ea0f90e87b36512aeb050179dc",
+      "next_cursor": null,
+      "has_more": false
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 23,
+      "recent_total": 51,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:33.244906Z",
+      "window_start": "2026-09-21T15:36:33.244906Z",
+      "admitted_units": 51,
+      "occupied_units": 51,
+      "remaining_units": null,
+      "pending_units": 0,
+      "unknown_units": 0,
+      "verified_input_tokens": null,
+      "verified_output_tokens": null,
+      "usage_complete": false,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "1264e8bf-e4ed-45c1-817d-4946e65598e8",
+          "appointment_id": "d10f6484-359b-4dc5-afb8-6d2251ee5eb6",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.924483-04:00",
+          "entry_id": "6dfe0c2f-bc6e-4ba2-8f6e-8b11f8d6484b"
+        },
+        "admission": {
+          "id": "8472e5cd-841b-4704-a505-b83d28a8a776",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:56:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "c723d029-73a1-4009-b4c5-2b61a32f1596",
+          "appointment_id": "8046706f-b766-4e74-a2ec-2005f3663a76",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:30.983081-04:00",
+          "entry_id": "e93db151-a971-49b1-bdbd-22cf902af094"
+        },
+        "admission": {
+          "id": "e783d5d8-ef2f-489a-bf1f-46884fc4140b",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:57:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "900f8389-dffd-488c-985e-2e8c2a803b54",
+          "appointment_id": "c7e2d97f-d51f-42ed-a2b4-b9b03a2c6f3f",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:31.040699-04:00",
+          "entry_id": "c6eba191-131d-44b8-8cd5-0781e015e29b"
+        },
+        "admission": {
+          "id": "05380812-7805-4fea-9c6e-6fe0a291e1cf",
+          "state": "unknown",
+          "unit": 1,
+          "admitted_at": "2026-09-17T11:58:29.800670-04:00",
+          "dispatch": "unconfirmed",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    ]
+  },
+  "recent": {
+    "contract_version": 1,
+    "box_id": "0c764937-3f87-4ffc-8792-f86491b8d4a9",
+    "owner_id": "eb3c1e78-177a-4455-b542-6ba564880bce",
+    "recovery_scope": "bd696666d4f3e26e24686d5c5a14955678a70457d12984b2102e2dd8352f061e",
+    "view": "recent",
+    "as_of": "2026-09-22T15:36:33.294041Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": "a100065c14219cded900065c141df8fe454307894aee5049808de1fa4176318fed00d8903ca98b269594f87cb0495d5c9a9c65a9ef06e1c6d1dfe0100c773813b1",
+      "has_more": true
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 23,
+      "recent_total": 51,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:33.294041Z",
+      "window_start": "2026-09-21T15:36:33.294041Z",
+      "admitted_units": 51,
+      "occupied_units": 51,
+      "remaining_units": null,
+      "pending_units": 0,
+      "unknown_units": 0,
+      "verified_input_tokens": null,
+      "verified_output_tokens": null,
+      "usage_complete": false,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "b2c4db4f-bb13-4d99-b411-7b0ebaf51892",
+          "appointment_id": "2b9e3b33-a357-430c-b6d9-2ed5051bc2c2",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:33.016268-04:00",
+          "entry_id": "95035de2-bc8d-44cd-a6a1-bf6794b5ca68"
+        },
+        "admission": {
+          "id": "edf9422e-f9df-412d-90ee-7d11c4a8da40",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:33.015406-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "ff0c2601-f354-4ad5-892b-08345388b89d",
+          "appointment_id": "de80e50e-5669-4e30-afc3-cf77a6a34da7",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.973422-04:00",
+          "entry_id": "697098d2-e9fc-4249-9a49-76fb3c6354dc"
+        },
+        "admission": {
+          "id": "cea6957a-bd29-40b8-8096-9b47e4e0fc56",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.972606-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "820be0d5-67f2-42a4-be0f-be30275655f2",
+          "appointment_id": "a58ee38e-50f9-4e9a-baba-9005f98f53d4",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.931587-04:00",
+          "entry_id": "55c56585-4300-4a0a-9a74-3eb9982d18e6"
+        },
+        "admission": {
+          "id": "6c2ec4bc-e96c-48ab-ab84-0fd85f531018",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.930801-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "e7bec504-780b-4374-a599-b0121f684ca3",
+          "appointment_id": "62950325-ddf3-4b7f-b852-ec6ea5a01120",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.891026-04:00",
+          "entry_id": "bf8ea96d-585a-46dc-950b-c1bb538fc71c"
+        },
+        "admission": {
+          "id": "4e2273fc-ae85-4d2e-a613-e4e874a5d0af",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.890006-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "c1a67f2c-ea83-4194-8968-bce4c39c0b73",
+          "appointment_id": "f6163f04-3ecd-46b9-949b-08f92c91aaea",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.847511-04:00",
+          "entry_id": "e19e6757-4e0e-4c23-bb6f-8cb77a9658d4"
+        },
+        "admission": {
+          "id": "1980fab0-d2f3-497b-90ca-f43da2508498",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.846666-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "145966a5-ee11-4726-887e-2a9ffdc04eed",
+          "appointment_id": "d0859156-08d1-4397-9934-0dd3d7073ca1",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.803692-04:00",
+          "entry_id": "76e326fa-e622-4f71-ba9e-6edeb6ea1787"
+        },
+        "admission": {
+          "id": "387a5447-4728-43f2-8be9-a672c63d58ea",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.802755-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "015aed01-32f8-4e44-9530-fdbfa9cabfc5",
+          "appointment_id": "2e9785f7-03ee-4e46-a1f3-6f1849b22980",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.757849-04:00",
+          "entry_id": "86c10342-3bf9-487d-b773-f6321dfc1ab2"
+        },
+        "admission": {
+          "id": "15368031-ffe9-4ba0-a30b-6ad98e255817",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.756984-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "5088d0d2-b5a6-4574-aed3-575c8feaf3ab",
+          "appointment_id": "a9841d0e-7118-4ac1-8a8c-a3fc07dbdea1",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.719370-04:00",
+          "entry_id": "36c3c915-98da-49a9-94f6-a34b34db6c33"
+        },
+        "admission": {
+          "id": "89d5bd91-5687-40f5-8edc-b2f2f98f6378",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.718576-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "0f6f0b91-dbf3-4734-804d-04a225841d72",
+          "appointment_id": "1137db39-a111-4ff1-b5b6-7a0f631c2593",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.680666-04:00",
+          "entry_id": "a4c2a3d7-c7bb-4193-a3f8-837449171848"
+        },
+        "admission": {
+          "id": "85f88419-8f1d-435c-8ea3-bca26589c9fb",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.679789-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "ade7b047-b87f-4f9e-8eda-d4287fad8e76",
+          "appointment_id": "52cc1aa9-ef5c-4015-93f9-f267a2e72a0b",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.642240-04:00",
+          "entry_id": "9532268c-2115-485a-bbd1-f86c2ddb4854"
+        },
+        "admission": {
+          "id": "ddb06f6f-a07d-4cbc-b765-fcad6c254c5c",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.640808-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "4829de61-01c1-4173-bbcd-21d05f0e4ba0",
+          "appointment_id": "e5dc8eb7-1e78-41af-a2f4-a34b8343a050",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.598443-04:00",
+          "entry_id": "1b4edba0-562a-4f80-ad18-7c2bb7a48b77"
+        },
+        "admission": {
+          "id": "e56f2089-7960-4127-96a9-12d3fe0032d5",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.597650-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "c35c5463-cd8e-41a7-8246-f93c7a2852dd",
+          "appointment_id": "1183afb1-4d55-48c3-8d43-63c548cbea31",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.553549-04:00",
+          "entry_id": "a4216d4a-8535-40ea-8d96-c856b46c5a44"
+        },
+        "admission": {
+          "id": "f6784bb9-a2d5-4d4e-8e19-42520244ce1c",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.552743-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "f54279b1-a013-4a80-9f85-171ebffb5d5d",
+          "appointment_id": "a6077343-d5dd-44af-9a7d-2703e53afe2b",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.512317-04:00",
+          "entry_id": "fb8d96c5-3dce-410a-a292-863123f00cce"
+        },
+        "admission": {
+          "id": "c241eb94-dda8-4918-b47f-3c0fe5fbe028",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.511595-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "e2d7e0fc-82f2-4711-b47c-7d7616e5a019",
+          "appointment_id": "6d5da224-4675-46a9-9cc8-edce34579686",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.469777-04:00",
+          "entry_id": "a4e19553-4975-43de-b25d-66cecf75c305"
+        },
+        "admission": {
+          "id": "094975b5-e248-4798-977f-ca93906995a6",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.468982-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "50dc5916-7751-4c7b-9bd4-e2812a0b2388",
+          "appointment_id": "ba263504-13d8-4506-99d7-581aa2615a62",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.431101-04:00",
+          "entry_id": "4d44f7c1-322d-4ed7-a1cd-c270ee428b58"
+        },
+        "admission": {
+          "id": "4154f1fd-4e1b-4036-8367-3a530571c22b",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.430439-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "d6e89acf-0f2a-4bd4-acb1-139ed14ac247",
+          "appointment_id": "6d4ec14d-ffb0-4dcf-823f-e513fc0631aa",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.393057-04:00",
+          "entry_id": "aea7739a-c4f1-403a-bf44-09124d3fda32"
+        },
+        "admission": {
+          "id": "9866ecce-c17b-4c8c-8bad-5ea60e23c00f",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.391748-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "f132a996-740b-4694-a688-168b136c7371",
+          "appointment_id": "7590e608-924c-4c34-be46-86d87d06ebb9",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.342903-04:00",
+          "entry_id": "ade069e2-677c-41e7-a058-d79b17d1f11d"
+        },
+        "admission": {
+          "id": "a9d2afa1-b0ac-4358-82a2-e7a865eb20af",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.341942-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "2ca59683-940a-4cbf-a1ed-b7fc6ce9cdbe",
+          "appointment_id": "53923d44-524e-4830-b197-8c09a4235392",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.301482-04:00",
+          "entry_id": "fff46a34-9d69-478d-b2b6-72f9bfdea24a"
+        },
+        "admission": {
+          "id": "1424a535-4e98-4f43-b217-589a1d4a0428",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.300239-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "d0cbba70-a13e-45de-8232-474c17f85430",
+          "appointment_id": "5173c32f-caf0-4715-9643-539cdedef6af",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.260433-04:00",
+          "entry_id": "e46dc218-298a-4c3a-b467-2a668b07fd43"
+        },
+        "admission": {
+          "id": "a934edd1-4b4e-4068-9fbf-b9063f2df867",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.259156-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      },
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "e6de6790-880e-4f74-ae9a-06e08fd2d45f",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "71336914-b102-4932-9b0c-16a7e6dc5680",
+          "appointment_id": "88ea832d-1c0c-48a4-a47e-ce42f525bbf0",
+          "label": "Invented second workspace",
+          "starts_at": "2026-09-22T11:36:32.223309-04:00",
+          "entry_id": "eabc7a1b-b82c-4b19-af69-825f6a03089b"
+        },
+        "admission": {
+          "id": "4307894a-ee50-4980-8de1-fa4176318fed",
+          "state": "abandoned",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:35:32.222533-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    ]
+  }
+}

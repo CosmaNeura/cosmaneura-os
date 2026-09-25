@@ -1,0 +1,76 @@
+[
+  {
+    "request": {
+      "command_kind": "decide",
+      "request": {
+        "operation_id": "c10d20af-a4b0-4f4e-9231-cd384923d7e7",
+        "revision_id": "64ac9013-e757-4dd3-9c82-40d48061e8bf",
+        "payload_hash": "3c20fe406be2bf2b42fa0133548a433c5b12c20ea911b438059e8cd35607c784",
+        "expected_version": 1,
+        "idempotency_key": "e74d83ad-4cd3-4164-a71f-6c5126a91ee2",
+        "review_sha256": "8a4f8bb44ad76a52f49be62cfcc0e5dee83e20bf30052f5bd6346afc3f341c2e",
+        "choice": "approve"
+      },
+      "request_sha256": "e46eb0090e9aa1c6cc38b4d8083b445a681f21e595df45d75cad0f268c7d2e7a"
+    },
+    "proof": {
+      "contract_version": 1,
+      "scope": {
+        "kind": "workspace",
+        "id": "3bcffbe7-8767-43b3-b204-6face62ac457"
+      },
+      "command_kind": "decide",
+      "idempotency_key": "e74d83ad-4cd3-4164-a71f-6c5126a91ee2",
+      "request_sha256": "e46eb0090e9aa1c6cc38b4d8083b445a681f21e595df45d75cad0f268c7d2e7a",
+      "outcome": "retired",
+      "effect": null,
+      "summary": null,
+      "retirement": {
+        "receipt_id": "b8d5a082-c42b-4a7f-8e31-02c862602fe0",
+        "ticket_id": "d360a41e-67a5-4e6e-bffc-4b455a39f3d0",
+        "revision_id": "64ac9013-e757-4dd3-9c82-40d48061e8bf",
+        "operation_id": "c10d20af-a4b0-4f4e-9231-cd384923d7e7",
+        "payload_hash": "3c20fe406be2bf2b42fa0133548a433c5b12c20ea911b438059e8cd35607c784",
+        "retired_at": "2026-09-24T18:38:24.055885Z",
+        "receipt_sha256": "8faefa6b8102c2d2074f408748c5f126193ac7ed6111732ae03e9bbf3c6f3f08"
+      },
+      "observed_at": "2026-09-24T18:38:24.063398Z"
+    }
+  },
+  {
+    "request": {
+      "command_kind": "submit",
+      "request": {
+        "operation_id": "19aa00fa-ca4b-4abe-bfad-0d8cf140aad1",
+        "revision_id": "00f314b6-55c5-4c37-b5d7-d80addda8155",
+        "payload_hash": "27be28f364a8d4e3b7e48567521c8ee27f74f57740807539950a3273daa8375f",
+        "expected_version": 2,
+        "idempotency_key": "e52777cb-6fff-4d8c-9f60-36f769dc8ba9"
+      },
+      "request_sha256": "f568b6901070db209abcb04d8d266604770b6b12eab9443cd6e2a54d8ece33a6"
+    },
+    "proof": {
+      "contract_version": 1,
+      "scope": {
+        "kind": "workspace",
+        "id": "3bcffbe7-8767-43b3-b204-6face62ac457"
+      },
+      "command_kind": "submit",
+      "idempotency_key": "e52777cb-6fff-4d8c-9f60-36f769dc8ba9",
+      "request_sha256": "f568b6901070db209abcb04d8d266604770b6b12eab9443cd6e2a54d8ece33a6",
+      "outcome": "retired",
+      "effect": null,
+      "summary": null,
+      "retirement": {
+        "receipt_id": "278fdd93-79c4-4abf-a6c4-6ab88f744f85",
+        "ticket_id": "c5ed585b-a82f-4725-aa3e-524e3f53b7e7",
+        "revision_id": "00f314b6-55c5-4c37-b5d7-d80addda8155",
+        "operation_id": "19aa00fa-ca4b-4abe-bfad-0d8cf140aad1",
+        "payload_hash": "27be28f364a8d4e3b7e48567521c8ee27f74f57740807539950a3273daa8375f",
+        "retired_at": "2026-09-24T18:38:24.128493Z",
+        "receipt_sha256": "52de7aa7858503e76a693bacb077ecc1398b2e25f8139fc4b00ead76dcfbd66e"
+      },
+      "observed_at": "2026-09-24T18:38:24.133857Z"
+    }
+  }
+]

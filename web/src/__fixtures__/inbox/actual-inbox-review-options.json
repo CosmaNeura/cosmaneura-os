@@ -1,0 +1,22 @@
+{
+  "contract_version": 1,
+  "scope": {
+    "box_id": "0b8302fa-dde1-498c-8c50-80b1613fbe51",
+    "owner_id": "458fc87c-d584-4f97-84b7-4e4ef78084ca"
+  },
+  "item_id": "958b8f36-09b4-450d-884b-70b304c94027",
+  "item_version": 1,
+  "source_id": "15c35005-7c17-4df2-9508-d67d591c1afa",
+  "source_sha256": "09883dcfee70ab15d7c602e5bb675d8bbdcde7fa0ecf879d523b1022790e08a1",
+  "patient_link_id": "903ebe0a-e227-42f9-a062-835f0653e14f",
+  "choices": [
+    {
+      "workspace_id": "0a83eff0-978f-4609-b011-978a5ad8184a",
+      "expected_workspace_revision": 3,
+      "appointment_id": "9c900cdb-b5c7-4866-83ec-67b541dd3bae",
+      "label": "Invented W36 visit",
+      "start_at": "2026-09-22T12:29:49.851780Z"
+    }
+  ],
+  "options_sha256": "c72725a5dd7b1d4d6ed2f5b4b8a0c86b51221af455446d2fbfa76b5888a75612"
+}

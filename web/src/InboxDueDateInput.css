@@ -1,0 +1,46 @@
+.inbox-due-date {
+  display: grid;
+  gap: .4rem;
+  min-width: 0;
+}
+
+.inbox-due-date > label {
+  display: grid;
+  gap: .4rem;
+  margin: 0;
+}
+
+.inbox-due-date > label > input {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: .65rem;
+  border: 1px solid var(--border, #a9bdc6);
+  border-radius: .4rem;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.inbox-due-date__controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .4rem .7rem;
+  min-width: 0;
+}
+
+.inbox-due-date .inbox-due-date__controls > button {
+  width: auto;
+  flex: 0 0 auto;
+  min-height: 44px;
+  max-width: 100%;
+  padding: .5rem .75rem;
+  white-space: normal;
+}
+
+.inbox-due-date__hint {
+  margin: 0;
+  font-size: .9rem;
+  overflow-wrap: anywhere;
+}

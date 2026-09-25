@@ -1,0 +1,78 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import {createHash} from 'node:crypto';
+import {mkdtemp,mkdir,readFile,realpath,writeFile} from 'node:fs/promises';
+import {join} from 'node:path';
+import {tmpdir} from 'node:os';
+import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity} from './package-desktop-release.mjs';
+import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
+const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
+
+test('desktop recording helpers remain executable outside ASAR with exact matching manifests',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-capture-asar-'))),source=join(root,'input');
+  const files={};
+  for(const name of CAPTURE_HELPERS)for(const [path,value] of [[`Contents/MacOS/${name}`,'invented binary'],['Contents/Info.plist','invented config']]){
+    const relative=`${name}.app/${path}`;
+    await mkdir(join(source,'native-capture',relative,'..'),{recursive:true});
+    await writeFile(join(source,'native-capture',relative),value,{mode:0o755});
+    files[relative]=createHash('sha256').update(value).digest('hex');
+  }
+  const manifest={version:1,files};await writeFile(join(source,'native-capture/manifest.json'),JSON.stringify(manifest));
+  const authFiles={};
+  for(const [path,value] of [['Contents/MacOS/CosmasDesktopAuth','invented auth'],['Contents/Info.plist','invented auth config']]){
+    const relative=`CosmasDesktopAuth.app/${path}`;
+    await mkdir(join(source,'native-auth',relative,'..'),{recursive:true});
+    await writeFile(join(source,'native-auth',relative),value,{mode:0o755});
+    authFiles[relative]=createHash('sha256').update(value).digest('hex');
+  }
+  await writeFile(join(source,'native-auth/manifest.json'),JSON.stringify({version:1,
+    executable:'CosmasDesktopAuth.app/Contents/MacOS/CosmasDesktopAuth',files:authFiles}));
+  await writeFile(join(source,'workspace-native-capture.mjs'),'export const invented=true;');
+  const expected=await inventory(source),archive=join(root,'app.asar');
+  await tools.asar.createPackageWithOptions(source,archive,{smartUnpack:false,
+    unpackDir:'{native-auth/CosmasDesktopAuth.app,native-capture/ScribeDesktopAudioHelper.app,native-capture/ScribeProviderPresentationHelper.app}'});
+  const checked=await verifyArchive(tools.asar,archive,expected);assert.equal(checked.unpackedFiles,6);assert.equal(checked.packedFiles,3);
+  await verifyDesktopCapturePackage(join(archive+'.unpacked','native-capture'),manifest);
+});
+
+test('real ASAR preserves executable custody and catches changed packed and unpacked bytes',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-real-asar-'))), source=join(root,'input');
+  const native={'CosmasDesktopAuth.app/Contents/MacOS/CosmasDesktopAuth':'invented executable',
+    'CosmasDesktopAuth.app/Contents/Info.plist':'invented config'};
+  for (const [name,bytes] of Object.entries(native)) {
+    await mkdir(join(source,'native-auth',name,'..'),{recursive:true});await writeFile(join(source,'native-auth',name),bytes,{mode:0o755});
+  }
+  const manifest={version:1,executable:'CosmasDesktopAuth.app/Contents/MacOS/CosmasDesktopAuth',
+    files:Object.fromEntries(Object.entries(native).map(([k,v])=>[k,createHash('sha256').update(v).digest('hex')]))};
+  await writeFile(join(source,'native-auth/manifest.json'),JSON.stringify(manifest));
+  await writeFile(join(source,'main.mjs'),'console.log("UNIQUE_INVENTED_PACKED_CONTENT");');
+  const expected=await inventory(source), archive=join(root,'app.asar');
+  await tools.asar.createPackageWithOptions(source,archive,{smartUnpack:false,unpackDir:'native-auth/CosmasDesktopAuth.app'});
+  const result=await verifyArchive(tools.asar,archive,expected);
+  assert.equal(result.packedFiles,2);assert.equal(result.unpackedFiles,2);
+  const bytes=await readFile(archive), index=bytes.indexOf('UNIQUE_INVENTED_PACKED_CONTENT');assert.ok(index>0);
+  bytes[index]^=1;await writeFile(archive,bytes);
+  await assert.rejects(verifyArchive(tools.asar,archive,expected));
+  bytes[index]^=1;await writeFile(archive,bytes);
+  await writeFile(join(archive+'.unpacked','native-auth',manifest.executable),'changed executable');
+  await assert.rejects(verifyArchive(tools.asar,archive,expected));
+});
+test('fuse adaptation keeps all Scribe restrictions and never requests automatic signing',()=>{
+  const f=fuseConfiguration(tools.fuses),o=tools.fuses.FuseV1Options;
+  assert.equal(f.resetAdHocDarwinSignature,false);assert.equal(f.strictlyRequireAllFuses,true);
+  assert.equal(f[o.RunAsNode],false);assert.equal(f[o.EnableNodeOptionsEnvironmentVariable],false);
+  assert.equal(f[o.EnableNodeCliInspectArguments],false);assert.equal(f[o.OnlyLoadAppFromAsar],true);
+  assert.equal(f[o.EnableEmbeddedAsarIntegrityValidation],true);
+});
+
+test('official default-app metadata must match its actual header before replacement',async()=>{
+  const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-template-asar-'))),input=join(root,'source'),app=join(root,'Template.app');
+  await mkdir(input);await writeFile(join(input,'main.js'),'invented template');
+  const archive=join(app,'Contents/Resources/default_app.asar');
+  await tools.asar.createPackageWithOptions(input,archive,{});
+  const hash=createHash('sha256').update(tools.asar.getRawHeader(archive).headerString).digest('hex');
+  const info={ElectronAsarIntegrity:{'Resources/default_app.asar':{algorithm:'SHA256',hash}}};
+  assert.equal(await validateTemplateIntegrity(tools.asar,app,info),true);
+  await assert.rejects(validateTemplateIntegrity(tools.asar,app,{ElectronAsarIntegrity:{'Resources/default_app.asar':{algorithm:'SHA256',hash:'0'.repeat(64)}}}));
+  await assert.rejects(validateTemplateIntegrity(tools.asar,app,{}));
+});

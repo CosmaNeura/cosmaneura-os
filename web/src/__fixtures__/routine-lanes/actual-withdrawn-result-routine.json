@@ -1,0 +1,185 @@
+{
+  "report": {
+    "id": "c7f469d7-0130-4154-98d9-4c4880a1c4b2",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "kind": "practice_work_brief",
+    "items": [
+      {
+        "body": "Invented routine prep_active",
+        "state": "approved",
+        "version": 4,
+        "due_date": "2026-09-29",
+        "ticket_id": "98b336d0-a913-4dc9-9ee0-1bb0e35b4218",
+        "work_kind": "visit_preparation",
+        "responsible": {
+          "id": "6323c120-d66e-4b2e-bdca-d45647d2b6b9",
+          "name": "Invented preparation staff",
+          "available": true
+        },
+        "revision_id": "86ad099d-4440-4454-86e0-0af834c6e400",
+        "payload_hash": "e2083cd0334aaec9342f80fb05f595aaf0d8449edff0986b711e69e05fd8b5d1",
+        "pending_offer": false,
+        "human_completion": false,
+        "ready_for_review": false
+      },
+      {
+        "body": "Invented routine prep_ready",
+        "state": "approved",
+        "version": 3,
+        "due_date": "2026-09-29",
+        "ticket_id": "d4be11b2-8169-4419-899d-0ef1922f191a",
+        "work_kind": "visit_preparation",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "e767fa70-b750-4929-802a-9fd8ee59eac2",
+        "payload_hash": "637f8543e11087a64b97732b2cdde3fe63b8af471120f280ba6cb8722777097d",
+        "pending_offer": false,
+        "human_completion": false,
+        "ready_for_review": true
+      },
+      {
+        "body": "Invented routine vendor_active",
+        "state": "approved",
+        "version": 3,
+        "due_date": "2026-10-01",
+        "ticket_id": "589f3d5c-3b42-4a95-92b2-cc18ebbb891e",
+        "work_kind": "vendor_delivery",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "8914e9a8-e838-4af1-822a-7338e06a0718",
+        "payload_hash": "3dfba9312de112edfaf229e37491231f73ea8890d343dbc7bc2635fb97a47cb8",
+        "pending_offer": true,
+        "human_completion": false,
+        "ready_for_review": false
+      },
+      {
+        "body": "Invented routine vendor_ready",
+        "state": "approved",
+        "version": 3,
+        "due_date": "2026-10-01",
+        "ticket_id": "6422696d-97ca-4d1e-967e-9da4987155ca",
+        "work_kind": "vendor_delivery",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "2875dc9d-a234-4e84-ada1-af22fa315f3c",
+        "payload_hash": "917e6ebfadb4626587cff6dedba3be9aa346e2cf25a576c98881a6ab98d9079e",
+        "pending_offer": false,
+        "human_completion": false,
+        "ready_for_review": true
+      },
+      {
+        "body": "Invented routine prep_closed",
+        "state": "closed",
+        "version": 4,
+        "due_date": "2026-09-29",
+        "ticket_id": "a87d0d07-0893-4423-aac7-41713d42ed80",
+        "work_kind": "visit_preparation",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "5a0aa81d-cc68-4fd3-b1f4-fa69e05996b6",
+        "payload_hash": "5b83dfb4b5938eb2fa00a22bf4d341301488b0112ce6200fc141499629d20866",
+        "pending_offer": false,
+        "human_completion": true,
+        "ready_for_review": false
+      },
+      {
+        "body": "Invented routine withdrawn with result",
+        "state": "withdrawn",
+        "version": 4,
+        "due_date": "2026-10-01",
+        "ticket_id": "72036bdc-7502-41c5-9cbc-25780720dd8a",
+        "work_kind": "vendor_delivery",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "bca6de04-dcb5-4a0c-b8be-332ccdbc4f2e",
+        "payload_hash": "a84d458e7e25f03e13f61ccd0d1159f141e38d7b9a891ba669d8cc3fc416caad",
+        "pending_offer": false,
+        "human_completion": false,
+        "ready_for_review": false
+      },
+      {
+        "body": "Invented routine vendor_closed",
+        "state": "closed",
+        "version": 4,
+        "due_date": "2026-10-01",
+        "ticket_id": "75bcd299-0b3b-4192-8d88-37b6b9e259c1",
+        "work_kind": "vendor_delivery",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "2c9197ee-070c-4f13-b8ec-8d37ccfed832",
+        "payload_hash": "bdf109614d6a64acb95e433694bcb01d832dad2788bde0e7f0b336cd0e7afa19",
+        "pending_offer": false,
+        "human_completion": true,
+        "ready_for_review": false
+      },
+      {
+        "body": "Invented routine vendor_superseded",
+        "state": "superseded",
+        "version": 4,
+        "due_date": "2026-10-01",
+        "ticket_id": "8ea7a746-c837-4574-b0f4-3a4edc7110ea",
+        "work_kind": "vendor_delivery",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "8fdd1256-0be7-485f-a338-f481378ab915",
+        "payload_hash": "8743175146febae1749330e483bfe0cad4fbd4049bee0d74653604228090c447",
+        "pending_offer": false,
+        "human_completion": false,
+        "ready_for_review": false
+      },
+      {
+        "body": "Invented routine vendor_withdrawn",
+        "state": "withdrawn",
+        "version": 3,
+        "due_date": "2026-10-01",
+        "ticket_id": "911089fa-3461-4267-a974-1678206c06a6",
+        "work_kind": "vendor_delivery",
+        "responsible": {
+          "id": "8286eb8a-19b2-4d24-aaf5-9fc5db9f68fe",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "revision_id": "b096e0a8-584f-465b-93aa-2467232e5943",
+        "payload_hash": "adc9b3369f88ed8a8c4eabaa3eabdf3e44ef66e92c5bbb2218dd924d69b1b66f",
+        "pending_offer": false,
+        "human_completion": false,
+        "ready_for_review": false
+      }
+    ],
+    "matching_items": 9,
+    "counts": {
+      "open": 4,
+      "overdue": 0,
+      "awaiting_acceptance": 1,
+      "responsible_unavailable": 0,
+      "verified_complete": 2
+    },
+    "withheld_sources": false,
+    "truncated": false,
+    "model_used": false
+  },
+  "withdrawn_ticket_id": "72036bdc-7502-41c5-9cbc-25780720dd8a"
+}

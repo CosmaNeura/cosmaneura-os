@@ -1,0 +1,15 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"], "strict": true, "skipLibCheck": true,
+    "noEmit": true, "allowImportingTsExtensions": true,
+    "types": ["node", "vitest/globals", "vite/client"],
+    "paths": {
+      "@cosmaneura-scribe/capture-protocol": ["./protocol/generated.ts"],
+      "@cosmaneura-scribe/capture-preview-domain": ["./test-fixtures/preview-constants.ts"],
+      "@cosmaneura-scribe/capacitor-ios-pcm": ["./plugins/ios-pcm/index.ts"],
+      "@cosmaneura-scribe/capacitor-secure-queue": ["./plugins/secure-queue/index.ts"]
+    }
+  },
+  "include": ["src", "protocol", "plugins", "test-fixtures"]
+}

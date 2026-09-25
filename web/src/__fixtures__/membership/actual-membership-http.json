@@ -1,0 +1,110 @@
+{
+  "options": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "e74e078f-3f87-40c8-8f2c-049e385f76cf",
+      "owner_id": "001ba974-b9ea-40d8-a68d-2e44f482ea69",
+      "workspace_id": "b0713dcd-c0df-4ea5-b64b-e7429dbb2ce2"
+    },
+    "patient_link_id": "734681c2-23f8-4b42-ae15-a410bf0355de",
+    "expected_workspace_revision": 3,
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "16b41fa1-1919-4e19-bf7d-6e08edc8c035",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "c3b7651a653ed3ba18e67ff2db40d13b1c226b3b20553885b8ec56daff44a856"
+    },
+    "enabled": true,
+    "installed_membership_service": "not_selected"
+  },
+  "proposal_request": {
+    "expected_workspace_revision": 3,
+    "idempotency_key": "membership-propose-0350a8de-e16a-4373-88b3-6517d4ec225d",
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "16b41fa1-1919-4e19-bf7d-6e08edc8c035",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "c3b7651a653ed3ba18e67ff2db40d13b1c226b3b20553885b8ec56daff44a856"
+    },
+    "patient_link_id": "734681c2-23f8-4b42-ae15-a410bf0355de",
+    "purpose": "enrollment_assistance",
+    "due_date": "2026-09-30",
+    "expected_outcome": "Review invented enrollment information",
+    "instructions": "Prepare a local review; no patient enrollment or charge."
+  },
+  "receipt": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "e74e078f-3f87-40c8-8f2c-049e385f76cf",
+      "owner_id": "001ba974-b9ea-40d8-a68d-2e44f482ea69",
+      "workspace_id": "b0713dcd-c0df-4ea5-b64b-e7429dbb2ce2"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-0350a8de-e16a-4373-88b3-6517d4ec225d",
+    "request_sha256": "97c3ed41f0fe954acb2c1f0351696e2dfb3076aac4cd1866b9e6eebfd476df3d",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "003afbc2-1362-4aea-986a-8ba7985d990f",
+      "revision_id": "c0a429cd-0fb0-4e37-aa54-715ade5738eb",
+      "payload_hash": "892609504c3a8cae613d4a66eb64b79bd069c6be5b9d4925751fe6c2de328eb3",
+      "version": 1,
+      "receipt_id": "1fa7302a-f39c-40f9-841c-2c7fb8fc5da2",
+      "recorded_at": "2026-09-22T01:54:01.767291Z",
+      "effect": "proposed",
+      "state": "pending_approval",
+      "evidence_classification": "local_unreconciled",
+      "external_service_verified": false
+    },
+    "receipt_sha256": "1f95053156834409ec8ee925fd518aca109a500b1e7456b787dfd833852b4b6f"
+  },
+  "detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "e74e078f-3f87-40c8-8f2c-049e385f76cf",
+      "owner_id": "001ba974-b9ea-40d8-a68d-2e44f482ea69",
+      "workspace_id": "b0713dcd-c0df-4ea5-b64b-e7429dbb2ce2"
+    },
+    "summary": {
+      "ticket_id": "003afbc2-1362-4aea-986a-8ba7985d990f",
+      "version": 1,
+      "revision_id": "c0a429cd-0fb0-4e37-aa54-715ade5738eb",
+      "payload_hash": "892609504c3a8cae613d4a66eb64b79bd069c6be5b9d4925751fe6c2de328eb3",
+      "purpose": "enrollment_assistance",
+      "due_date": "2026-09-30",
+      "state": "pending_approval",
+      "evidence_classification": "local_unreconciled",
+      "evidence_current": "none",
+      "result": "none",
+      "verification": "pending",
+      "external_service_verified": false,
+      "membership_authority": "not_established",
+      "source_current": true,
+      "can_verify": false
+    },
+    "review": {
+      "ticket_id": "003afbc2-1362-4aea-986a-8ba7985d990f",
+      "revision_id": "c0a429cd-0fb0-4e37-aa54-715ade5738eb",
+      "patient_link_id": "734681c2-23f8-4b42-ae15-a410bf0355de",
+      "proposal": {
+        "expected_workspace_revision": 3,
+        "idempotency_key": "membership-propose-0350a8de-e16a-4373-88b3-6517d4ec225d",
+        "source": {
+          "kind": "reviewed_note",
+          "note_id": "16b41fa1-1919-4e19-bf7d-6e08edc8c035",
+          "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+          "source_fingerprint": "c3b7651a653ed3ba18e67ff2db40d13b1c226b3b20553885b8ec56daff44a856"
+        },
+        "patient_link_id": "734681c2-23f8-4b42-ae15-a410bf0355de",
+        "purpose": "enrollment_assistance",
+        "due_date": "2026-09-30",
+        "expected_outcome": "Review invented enrollment information",
+        "instructions": "Prepare a local review; no patient enrollment or charge."
+      },
+      "authority": "local_human_review_only",
+      "automatic_membership_changes": false,
+      "automatic_messages_or_money_movement": false
+    },
+    "review_sha256": "bfe38f867bcb0ecc76e28a00bd346e7a37acf6a9cd5c012cd7c31577c3af51db",
+    "latest_result": null
+  }
+}

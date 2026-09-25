@@ -1,0 +1,63 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtemp,writeFile,readFile,rm,symlink} from 'node:fs/promises';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {workspaceIdentityInputs,prepareWorkspaceIdentity,identityDigest} from './prepare-workspace-identity.mjs';
+
+const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
+  publishableKey:'pk_live_'+Buffer.from('identity.example.invalid$').toString('base64'),
+  frontendOrigin:'https://identity.example.invalid',organizationId:'org_w75_invented',audience:'cosmas-beta-api'};
+const options={webOrigin:'https://workspace.example.invalid',coreWebOrigin:'https://core.example.invalid',captureUploadOrigins:['https://uploads.example.invalid']};
+
+test('one existing identity creates consistent full web/desktop/iPhone inputs without activation',()=>{
+  const files=workspaceIdentityInputs(identity,options);
+  assert.equal(Object.keys(files).length,8);
+  assert.deepEqual(files['desktop-identity.json'],identity);
+  assert.deepEqual(files['apple-identity.json'],{...identity,client:'apple'});
+  const os=files['os.identity.tfvars.json'];
+  assert.equal(os.clerk_org_id,identity.organizationId);
+  assert.equal(os.clerk_jwks_url,identity.frontendOrigin+'/.well-known/jwks.json');
+  assert.equal(os.clerk_audience,identity.audience);
+  for(const client of ['web','desktop','apple']){
+    const env=files[client+'-build-env.json'];
+    assert.equal(env.VITE_WORKSPACE_DATA_MODE,'authorized_beta');
+    assert.equal(env.VITE_WORKSPACE_HOSTED_API_ORIGIN,identity.apiOrigin);
+    assert.equal(env.VITE_CLERK_PUBLISHABLE_KEY,identity.publishableKey);
+    assert.equal(env.VITE_WORKSPACE_FEATURE_PROFILE,'operational-beta-v1');
+    assert.equal(env.VITE_ATHENA_CONNECTION_ENABLED,'true');
+  }
+  assert.equal(files['apple-build-env.json'].VITE_WORKSPACE_CAPTURE_MODE,'ios_native');
+  assert.equal(files['desktop-build-env.json'].VITE_API_BASE,'app://cosmas/api');
+  assert.equal(files['web-build-arguments.json'].VITE_WORKSPACE_WEB_ORIGIN,options.webOrigin);
+  for(const key of ['workspace_native_release','deploy_workloads','workspace_hosted_enabled','workspace_apple_enabled','workspace_desktop_enabled'])assert.equal(key in os,false);
+  assert.equal(files['identity-bindings.json'].activation_authorized,false);
+});
+
+test('public identity mismatch and invalid companion/upload origins are rejected',()=>{
+  for(const changed of [{client:'apple'},{publishableKey:'pk_test_x'},{frontendOrigin:'https://other.example.invalid'},
+    {apiOrigin:'http://localhost:8000'},{audience:'contains spaces'},{secret:'not accepted'}])
+    assert.throws(()=>workspaceIdentityInputs({...identity,...changed},options));
+  for(const changed of [{webOrigin:'http://localhost:3000'},{coreWebOrigin:'https://core.example.invalid/path'},
+    {captureUploadOrigins:[]},{captureUploadOrigins:['https://uploads.example.invalid','https://uploads.example.invalid']}])
+    assert.throws(()=>workspaceIdentityInputs(identity,{...options,...changed}));
+});
+
+test('identity digest is key-order independent and changes with review-relevant identity',()=>{
+  assert.equal(identityDigest(identity),identityDigest(Object.fromEntries(Object.entries(identity).reverse())));
+  assert.notEqual(identityDigest(identity),identityDigest({...identity,audience:'other-api'}));
+  assert.match(identityDigest({...identity,audience:'urn:cosmas:<a>&b'}),/^[0-9a-f]{64}$/);
+});
+
+test('file preparation refuses duplicate keys and existing output without replacement',async t=>{
+  const root=await mkdtemp(join(tmpdir(),'cosmas-w75-identity-'));t.after(()=>rm(root,{recursive:true,force:true}));
+  const path=join(root,'identity.json'),output=join(root,'prepared');
+  await writeFile(path,JSON.stringify(identity));
+  await prepareWorkspaceIdentity({identityPath:path,...options,output});
+  assert.deepEqual(JSON.parse(await readFile(join(output,'desktop-identity.json'),'utf8')),identity);
+  await assert.rejects(()=>prepareWorkspaceIdentity({identityPath:path,...options,output}));
+  await writeFile(path,JSON.stringify(identity).replace('"version":1','"version":1,"version":1'));
+  await assert.rejects(()=>prepareWorkspaceIdentity({identityPath:path,...options,output:join(root,'duplicate')}));
+  const linked=join(root,'linked');await symlink(path,linked);
+  await assert.rejects(()=>prepareWorkspaceIdentity({identityPath:linked,...options,output:join(root,'linked-output')}));
+});

@@ -1,0 +1,36 @@
+{
+  "status": "actual_signed_test_api_outputs",
+  "limits": "Offline signed JWT/JWKS + real isolated PostgreSQL via ASGI TestClient; model response injected; not real model or loopback HTTP acceptance",
+  "files": [
+    {
+      "path": "model-saved.json",
+      "sha256": "34f8618f8144981196c88af129c49bc6f3678a05b2a99c9a60512374fc577057",
+      "bytes": 553
+    },
+    {
+      "path": "model-workspace.json",
+      "sha256": "e217c5cd0b673024d0575daf6090f7c751257b4682b16156f56f4619ce82b5df",
+      "bytes": 2044
+    },
+    {
+      "path": "team-setup-v2.json",
+      "sha256": "e44339430e756fa307fd7702e673d37d062be3b1a74cc1add33121f8f6f93fb0",
+      "bytes": 23991
+    },
+    {
+      "path": "team-resources-v1.json",
+      "sha256": "292d6710eee4f757b45238e89bedde09eb095fe251dc561da33d60964cd0e4eb",
+      "bytes": 292
+    },
+    {
+      "path": "team-usage-v1.json",
+      "sha256": "34ece8fb5de5160b6a9b7ba0f3c042588c097058284df9a4c8e0c629fb07ca9b",
+      "bytes": 436
+    },
+    {
+      "path": "team-rehearsal-v2.json",
+      "sha256": "5b459de0b5eb1b116f8dfee5ce9037fe1e5de8f42149e04f62d033a57deccbce",
+      "bytes": 15887
+    }
+  ]
+}

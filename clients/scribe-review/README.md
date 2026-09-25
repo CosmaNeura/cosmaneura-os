@@ -1,0 +1,1 @@
+Scribe creator-review source reused from W96, main 61571474789874039b2df0b2e1c6e8ebc1cda88a plus retained beta integration. Only generated API type import relocated. The host supplies authenticated OS requests and the existing encrypted journal.

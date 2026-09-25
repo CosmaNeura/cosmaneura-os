@@ -1,39 +1,19 @@
-# Strict allowlist for Docker and Azure CLI's local ACR context packer.
-# Terraform state, credentials, tools, docs, and VCS data stay out. Only the
-# reviewed web build inputs needed by Dockerfile.web are admitted.
 *
 !Dockerfile
-!Dockerfile.web
 !.dockerignore
 !pyproject.toml
 !uv.lock
 !README.md
 !alembic.ini
-!src
+!src/
 !src/**
-!migrations
+!migrations/
 !migrations/**
-!fixtures
+!fixtures/
 !fixtures/**
-!web
-!web/index.html
-!web/nginx.conf
-!web/package.json
-!web/pnpm-lock.yaml
-!web/tsconfig.json
-!web/vite.config.ts
-!web/scripts
-!web/scripts/**
-!web/src
-!web/src/**
-
-# Re-exclude generated or sensitive files nested under allowed source trees.
+!docs/
+!docs/third-party/
+!docs/third-party/**
 **/__pycache__
 **/*.py[cod]
-**/.DS_Store
-**/.env
-**/.env.*
-**/*.log
-web/dist
-web/node_modules
-web/tsconfig.tsbuildinfo
+**/.env*

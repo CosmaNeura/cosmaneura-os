@@ -1,4 +1,22 @@
-# Cosmas OS (Track B)
+# CosmaBot / CosmasOS
+
+CosmaBot is a standalone desktop and mobile app for a configurable team of
+clinical and practice coworkers. Its workspace combines private notes, chat,
+team settings, research and tracked operational work.
+
+CosmaBot connects to the main Cosmaneura platform through authenticated APIs.
+Platform features such as SOAP notes remain owned by Cosmaneura. Scribe is a
+main capture and documentation connector for CosmaBot users. This repository
+does not contain the Core or Scribe server applications or share their databases.
+See [application boundaries](docs/COSMABOT_ARCHITECTURE.md).
+
+**Source integration, September 25:** this branch brings previously local
+CosmaBot implementation into the owning repository. It is an integration
+candidate, not a deployed or fully qualified operational beta. Desktop and mobile
+are both required for initial release. See [scope and validation](docs/beta/COSMABOT_SOURCE_INTEGRATION.md).
+
+The commands and deployment descriptions below describe the earlier foundation.
+They do not establish the current beta's deployment state.
 
 Cosmas OS Track B: a locally runnable synthetic practice computer plus the
 fail-closed source and infrastructure preparation for an isolated D3
@@ -94,7 +112,7 @@ CORS, and retains the D2 public PostgreSQL `AllowAzureServices` rule. Blob
 bytes use ephemeral per-replica `/tmp/cosmas-os-blobs`; the provisioned Azure
 Blob container is not yet consumed.
 
-## D3 isolated beta candidate (source-prepared, not deployed)
+## D3 isolated beta candidate (bootstrap deployed; application pending)
 
 The owner authorized D3 planning and implementation in `DL-20260903-03`;
 `DL-20260903-04` selected the strictly non-PHI Cosmas Beta Lab as the first
@@ -121,18 +139,21 @@ The repository now contains:
   recovery, tester offboarding, and staged custom-domain binding; and
 - prerequisite, capability-manifest, human-deploy, recovery, and cost gates.
 
-This is deliberately **not an Azure deployment**. The approved synthetic-lab
-path still needs its dedicated Box, production Cosmas OS Clerk instance and
-Organization, approved HTTPS origin, final region/cost choices, deployed
-private human-runner path, and human deployment evidence. The separate
-development Clerk application and zero-member development Beta Lab Organization
-are configured but provide no production authority. A named clinic, clinic
-approval, BAA evidence, and PHI-authorization reference are not prerequisites
-for this strictly synthetic path; common service, region, network, and
-deployment evidence remains required. Those clinic/PHI-specific prerequisites
-remain mandatory for any clinic or PHI-capable beta. Startup and workload
-deployment fail closed when the evidence for the selected mode is incomplete.
-PHI remains unauthorized; all external connectors remain dark.
+This is deliberately **not yet an application deployment**. The isolated D3
+bootstrap/state boundary, dedicated Box assignment, and private protected
+runner exist. The application path still needs Azure capacity resolution, a
+committed and CI-green successor release, the separately approved foundation,
+production Cosmas OS Clerk instance and Organization, database preparation,
+workload/domain plans, and human acceptance evidence. `centralus`, private ACR,
+`beta.cosmaneura.com`, and the strict Clerk/cost/recovery operating choices are
+accepted inputs; live capacity, routing, exact-plan cost, and service evidence
+remain required. The separate development Clerk application and zero-member
+development Beta Lab Organization provide no production authority. A named
+clinic, clinic approval, BAA evidence, and PHI-authorization reference are not
+prerequisites for this strictly synthetic path; they remain mandatory for any
+clinic or PHI-capable beta. Startup and workload deployment fail closed when
+the selected mode's evidence is incomplete. PHI remains unauthorized; all
+external connectors remain dark.
 See [`docs/beta/README.md`](docs/beta/README.md) and
 [`infra/beta/README.md`](infra/beta/README.md). The staged database runbook is
 [`docs/beta/DATABASE_PREPARATION.md`](docs/beta/DATABASE_PREPARATION.md).
@@ -184,3 +205,7 @@ D2 destruction, Track A edits, Clerk invitations/production activation beyond
 `DL-20260903-05`, other live-vendor activation, and an application LLM. D3
 source preparation and the empty Clerk development structure are authorized;
 those later actions are not implied.
+
+Private incoming-message handoffs use the existing F8 work/responsibility engine.
+INBOX_WORK_ENABLED and INBOX_HANDOFF_ENABLED default to false; the installed inbound
+read registry remains empty. Source-bound internal publication is not a vendor send.

@@ -27,6 +27,7 @@ from cosmas_os.domain.enums import (
     TicketState,
 )
 from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.domain.work_lanes import PRIVATE_CONNECTOR_LANES
 from cosmas_os.domain.rules import (
     AuthorizationError,
     DomainError,
@@ -44,6 +45,7 @@ from cosmas_os.models import (
     BoxContext,
     CapabilityConfig,
     Decision,
+    FollowUpSource,
     Operation,
     PatientLink,
     Principal,
@@ -356,6 +358,8 @@ def attest_patient_link(
 ) -> PatientLink:
     human = c.session.get(Principal, human_id)
     _require_active_human(human, box_id=box_id)
+    if source_pair_key.startswith("core-private:"):
+        raise DomainError("private patient reference cannot be attested as shared")
     existing = c.session.scalar(
         select(PatientLink).where(
             PatientLink.box_id == box_id,
@@ -363,6 +367,8 @@ def attest_patient_link(
             PatientLink.revoked_at.is_(None),
         )
     )
+    if existing and existing.source_owner_id is not None:
+        raise DomainError("private patient reference unavailable")
     if existing and existing.state == "confirmed":
         return existing
     if existing:
@@ -422,6 +428,8 @@ def detect_and_open_chase(
         raise DomainError("appointment missing")
     if not link or link.box_id != box_id or link.state != "confirmed" or link.revoked_at is not None:
         raise DomainError("unconfirmed PatientLink blocks chase")
+    if appt.source_owner_id is not None or link.source_owner_id is not None:
+        raise DomainError("private appointment cannot enter shared artifact chase")
     if appt.coverage_status not in {
         CoverageStatus.MISSING.value,
         CoverageStatus.STALE.value,
@@ -486,11 +494,25 @@ def detect_and_open_chase(
     return ticket
 
 
+def _require_legacy_work_path(c: Container, ticket: Ticket) -> None:
+    from cosmas_os.models import AppointmentWork
+
+    appointment = c.session.get(AppointmentObservation, ticket.appointment_id) if ticket.appointment_id else None
+    link = c.session.get(PatientLink, ticket.patient_link_id) if ticket.patient_link_id else None
+    if appointment is not None and appointment.source_owner_id is not None or link is not None and link.source_owner_id is not None:
+        raise AuthorizationError("private reference requires its workspace review path")
+    if ticket.lane == "scheduling_appointment" or c.session.get(AppointmentWork, ticket.id):
+        raise AuthorizationError("appointment actions require their private workspace review path")
+    if ticket.lane in {"encounter_follow_up", "visit_preparation"} | PRIVATE_CONNECTOR_LANES or c.session.get(FollowUpSource, ticket.id):
+        raise AuthorizationError("follow-up requires its private workspace review path")
+
+
 def edit_revision(c: Container, ticket_id: str, human_id: str, new_body: str) -> ActionRevision:
     ticket = _lock_ticket(c, ticket_id)
     human = c.session.get(Principal, human_id)
     if not ticket or not human:
         raise DomainError("missing")
+    _require_legacy_work_path(c, ticket)
     _require_active_human(human, box_id=ticket.box_id)
     if ticket.state != TicketState.PENDING_APPROVAL.value:
         raise DomainError("edit only while pending approval")
@@ -559,6 +581,7 @@ def decide(
     human = c.session.get(Principal, human_id)
     if not ticket or not human:
         raise DomainError("missing")
+    _require_legacy_work_path(c, ticket)
     _require_active_human(human, box_id=ticket.box_id)
 
     if kind == DecisionKind.APPROVE and not resolve_policy(
@@ -656,7 +679,7 @@ def decide(
         ticket_id=ticket.id,
         action_revision_id=rev.id,
         idempotency_key=f"op:{rev.id}",
-        adapter="notify",
+        adapter="compact_fake" if settings.execution_backend == "postgres_local" else "notify",
         status=OperationStatus.PENDING.value,
     )
     c.session.add(op)
@@ -687,6 +710,12 @@ def decide(
 def _dispatch_operation(c: Container, operation: Operation) -> None:
     """Dispatch one durable pending operation without creating a replacement."""
 
+    if settings.execution_backend == "postgres_local":
+        settings.validate_runtime_configuration()
+        # Approval already committed the intent. The independent DB worker
+        # discovers it even if the API exits immediately: no publish gap.
+        return
+
     if settings.sync_worker:
         execute_operation(c, operation.id)
         c.session.refresh(operation)
@@ -701,10 +730,14 @@ def execute_operation(c: Container, operation_id: str) -> Operation:
     op = c.session.get(Operation, operation_id)
     if not op:
         raise DomainError("operation missing")
+    if settings.execution_backend == "postgres_local" or op.adapter != "notify":
+        raise DomainError("operation requires its configured execution backend")
 
     rev = c.session.get(ActionRevision, op.action_revision_id)
     ticket = c.session.get(Ticket, op.ticket_id)
     rev, ticket = _require_operation_scope(op, rev, ticket)
+
+    _require_legacy_work_path(c, ticket)
 
     if op.status in {OperationStatus.SUCCEEDED.value}:
         return op
@@ -779,10 +812,13 @@ def reconcile_unknown(c: Container, operation_id: str) -> Operation:
     op = c.session.get(Operation, operation_id)
     if not op:
         raise DomainError("missing op")
+    if settings.execution_backend == "postgres_local" or op.adapter != "notify":
+        raise DomainError("operation requires its configured execution backend")
     prior = c.notify.sent.get(op.id)
     ticket = c.session.get(Ticket, op.ticket_id)
     rev = c.session.get(ActionRevision, op.action_revision_id)
     rev, ticket = _require_operation_scope(op, rev, ticket)
+    _require_legacy_work_path(c, ticket)
     if prior and prior.status == "succeeded" and ticket and rev:
         op.status = OperationStatus.SUCCEEDED.value
         op.external_reference = prior.external_reference
@@ -816,6 +852,7 @@ def simulate_upload_and_verify(
     human = c.session.get(Principal, human_id)
     if not ticket:
         raise DomainError("ticket missing")
+    _require_legacy_work_path(c, ticket)
     _require_active_human(human, box_id=ticket.box_id)
     appt = c.session.get(AppointmentObservation, ticket.appointment_id) if ticket.appointment_id else None
     if appt and appt.box_id != ticket.box_id:
@@ -858,6 +895,7 @@ def close_ticket(c: Container, ticket_id: str, human_id: str) -> Ticket:
     human = c.session.get(Principal, human_id)
     if not ticket or not human:
         raise DomainError("missing")
+    _require_legacy_work_path(c, ticket)
     _require_active_human(human, box_id=ticket.box_id)
     current = TicketState(ticket.state)
     if current not in {TicketState.CONFIRMED, TicketState.REJECTED, TicketState.ESCALATED, TicketState.FAILED}:
@@ -945,7 +983,9 @@ def purge_due_artifacts(
 
 def list_queue(c: Container, box_id: str) -> list[dict[str, Any]]:
     tickets = c.session.scalars(
-        select(Ticket).where(Ticket.box_id == box_id).order_by(Ticket.created_at.desc())
+        select(Ticket).where(Ticket.box_id == box_id, Ticket.lane.not_in(PRIVATE_CONNECTOR_LANES),
+            ~select(FollowUpSource.ticket_id).where(FollowUpSource.ticket_id == Ticket.id,
+                FollowUpSource.source_kind == "vendor_reviewed_note").exists()).order_by(Ticket.created_at.desc())
     ).all()
     out = []
     for t in tickets:
@@ -971,9 +1011,13 @@ def audit_timeline(c: Container, box_id: str, ticket_id: str) -> list[dict[str, 
         raise DomainError("ticket missing")
     if ticket.box_id != box_id:
         raise AuthorizationError("ticket is outside the Box")
+    source = c.session.get(FollowUpSource, ticket_id)
+    if ticket.lane in PRIVATE_CONNECTOR_LANES or source and source.source_kind == "vendor_reviewed_note":
+        raise AuthorizationError("connector work requires its private or published review path")
     events = c.session.scalars(
         select(AuditEvent)
-        .where(AuditEvent.box_id == box_id, AuditEvent.aggregate_id == ticket_id)
+        .where(AuditEvent.box_id == box_id, AuditEvent.aggregate_type == "ticket",
+            AuditEvent.aggregate_id == ticket_id)
         .order_by(AuditEvent.created_at.asc())
     ).all()
     ops = c.session.scalars(

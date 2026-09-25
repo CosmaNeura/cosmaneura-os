@@ -1,0 +1,32 @@
+{
+  "source": "/Users/jw/Desktop/Cosmas/cosmaneura-scribe",
+  "commit": "fe22a435b6201c2d8013348927ea6a349e0b48c6",
+  "files": {
+    "apps/desktop-companion/release/package-policy.json": {
+      "sha256": "4a0396ba35013bbcd8d782a39a52e720db46f6b8e1ef4479694fcef3ecc1493f",
+      "bytes": 4369,
+      "local": "research/release/package-policy.json"
+    },
+    "apps/desktop-companion/scripts/assemble-electron-package.mjs": {
+      "sha256": "704bfb8d1ab08ab088d8a51269e14ad68fb7a6ac68caf503f3e46cd7754a9353",
+      "bytes": 25575,
+      "local": "research/scripts/assemble-electron-package.mjs"
+    },
+    "apps/desktop-companion/scripts/harden-electron-package.mjs": {
+      "sha256": "96501c259cb34d3117e6568fab1b4079d343fe52db111cffb1ede9deda1c4fd6",
+      "bytes": 16862,
+      "local": "research/scripts/harden-electron-package.mjs"
+    },
+    "apps/desktop-companion/scripts/sign-notarize-macos-package.mjs": {
+      "sha256": "2e8efab9e54cf7d9a87a12aef8d6ca655616a61bab094a8343f077685b2961f8",
+      "bytes": 18973,
+      "local": "research/scripts/sign-notarize-macos-package.mjs"
+    },
+    "apps/desktop-companion/archive-safety.mjs": {
+      "sha256": "d31fc41c020e528def7ad54b7ac898c28c1fc1b05ad7f436c8862c635c3432b0",
+      "bytes": 2038,
+      "local": "research/archive-safety.mjs"
+    }
+  },
+  "executed": false
+}

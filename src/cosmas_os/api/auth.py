@@ -32,6 +32,7 @@ class RequestIdentity:
     principal_id: str
     auth_mode: str
     organization_id: str | None = None
+    external_identity_id: str | None = None
 
 
 class TokenVerifier(Protocol):
@@ -348,4 +349,5 @@ def authenticate_request(
         principal_id=binding.principal_id,
         auth_mode="clerk_jwt",
         organization_id=organization_id,
+        external_identity_id=binding.id,
     )

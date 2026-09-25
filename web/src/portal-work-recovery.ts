@@ -1,0 +1,31 @@
+import type {ArtifactMetadata,ArtifactResponse,PreparationArtifactRetirementResponse,ReviewedSource} from './vendor-schema';
+import {validateVendor,vendorBytes,vendorCanonical,vendorUuid} from './vendor-contract';
+import {validateVendorOperation,verifyOperationReceipt,type VendorOperation} from './vendor-operation';
+import {portalWorkFail,portalWorkKeys,portalWorkScope,validatePortalWorkOperation,verifyPortalWorkReceipt,type PortalWorkOperation,type PortalWorkReceipt,type PortalWorkScope,type PortalWorkResult} from './portal-work-contract';
+export const PORTAL_WORK_RECOVERY_BYTES=65536;
+export type PortalWorkDraft={connection_id:string;action:'document.upload'|'referral.submit';source:ReviewedSource|null;uploaded_operation_id:string;summary:string;due_date:string;expected_outcome:string;result_disposition:PortalWorkResult['disposition'];result_evidence:string};
+export type PortalWorkPending={lane:'portal_work';operation:PortalWorkOperation}|{lane:'artifact';operation:VendorOperation};
+export type PortalWorkSavedReceipt=PortalWorkReceipt|ArtifactResponse|PreparationArtifactRetirementResponse;
+export type PortalWorkSaved={pending:PortalWorkPending;receipt:PortalWorkSavedReceipt};
+export type PortalWorkRecoveryRecord={version:1;scope:PortalWorkScope;draft:PortalWorkDraft;selected_ticket_id:string|null;artifact:ArtifactMetadata|null;pending:PortalWorkPending|null;receipt:PortalWorkSavedReceipt|null;history:PortalWorkSaved[]};
+export type PortalWorkRecoveryAccess={load():Promise<unknown>;persist(value:PortalWorkRecoveryRecord|null):Promise<void>;authorize():Promise<void>;denied?(error:unknown):void};
+export const emptyPortalWorkDraft=():PortalWorkDraft=>({connection_id:'',action:'document.upload',source:null,uploaded_operation_id:'',summary:'',due_date:'',expected_outcome:'',result_disposition:'unable_to_establish',result_evidence:''});
+export const emptyPortalWorkRecovery=(scope:PortalWorkScope):PortalWorkRecoveryRecord=>({version:1,scope:structuredClone(scope),draft:emptyPortalWorkDraft(),selected_ticket_id:null,artifact:null,pending:null,receipt:null,history:[]});
+export async function validatePortalWorkPending(value:unknown,scope:PortalWorkScope):Promise<PortalWorkPending>{portalWorkKeys(value,['lane','operation']);const v=value as PortalWorkPending;if(v.lane==='portal_work')return {lane:v.lane,operation:await validatePortalWorkOperation(v.operation,scope)};if(v.lane!=='artifact')return portalWorkFail();const op=await validateVendorOperation(v.operation);if(!['artifact_intent','artifact_content'].includes(op.kind)||vendorCanonical(op.scope)!==vendorCanonical(scope))portalWorkFail();return {lane:'artifact',operation:op};}
+export async function verifyPortalWorkSaved(pending:PortalWorkPending,value:unknown){if(pending.lane==='portal_work')return verifyPortalWorkReceipt(value,pending.operation);const receipt=await verifyOperationReceipt(pending.operation,value);if(!('artifact'in receipt))return portalWorkFail();return receipt;}
+const terminal=(r:PortalWorkSavedReceipt|null)=>r?.outcome==='recorded'||r?.outcome==='retired';
+export const hasUnresolvedPortalWork=(r:PortalWorkRecoveryRecord)=>r.pending!==null&&!terminal(r.receipt);
+export const canClosePortalPdfPreparation=(r:PortalWorkRecoveryRecord)=>r.pending?.lane==='artifact'&&['artifact_intent','artifact_content'].includes(r.pending.operation.kind)&&r.receipt?.outcome==='not_found';
+export async function validatePortalWorkRecovery(value:unknown,scope?:PortalWorkScope):Promise<PortalWorkRecoveryRecord>{
+ portalWorkKeys(value,['version','scope','draft','selected_ticket_id','artifact','pending','receipt','history']);const r=value as PortalWorkRecoveryRecord;portalWorkScope(r.scope);if(r.version!==1||vendorBytes(r)>PORTAL_WORK_RECOVERY_BYTES||scope&&vendorCanonical(scope)!==vendorCanonical(r.scope))portalWorkFail();portalWorkKeys(r.draft,Object.keys(emptyPortalWorkDraft()));const d=r.draft;
+ for(const k of ['connection_id','uploaded_operation_id'] as const)if(d[k]!==''&&!vendorUuid(d[k]))portalWorkFail();if(!['document.upload','referral.submit'].includes(d.action)||!['verified_in_portal','reported_exception','unable_to_establish'].includes(d.result_disposition))portalWorkFail();for(const [k,max] of [['summary',4000],['due_date',10],['expected_outcome',500],['result_evidence',2000]] as const)if(typeof d[k]!=='string'||Array.from(d[k]).length>max)portalWorkFail();if(d.source!==null)validateVendor('ReviewedSource',d.source);
+ if(r.selected_ticket_id!==null&&!vendorUuid(r.selected_ticket_id))portalWorkFail();if(r.artifact!==null)validateVendor('ArtifactMetadata',r.artifact);
+ if(r.pending!==null)await validatePortalWorkPending(r.pending,r.scope);if(r.receipt!==null){if(!r.pending)return portalWorkFail();await verifyPortalWorkSaved(r.pending,r.receipt);}
+ if(!Array.isArray(r.history)||r.history.length>100)portalWorkFail();const ids=new Set<string>();for(const old of r.history){portalWorkKeys(old,['pending','receipt']);await validatePortalWorkPending(old.pending,r.scope);await verifyPortalWorkSaved(old.pending,old.receipt);if(!terminal(old.receipt)||ids.has(old.pending.operation.request_sha256)||old.pending.operation.request_sha256===r.pending?.operation.request_sha256)portalWorkFail();ids.add(old.pending.operation.request_sha256);}
+ const saved=[...r.history,...(r.pending&&r.receipt?[{pending:r.pending,receipt:r.receipt}]:[])];if(r.artifact&&!saved.some(v=>v.pending.lane==='artifact'&&'artifact'in v.receipt&&vendorCanonical(v.receipt.artifact)===vendorCanonical(r.artifact)))portalWorkFail();
+ return structuredClone(r);
+}
+export function withPortalWorkCommand(r:PortalWorkRecoveryRecord,pending:PortalWorkPending):PortalWorkRecoveryRecord{
+ if(hasUnresolvedPortalWork(r))portalWorkFail();const history=[...r.history];if(r.pending&&r.receipt&&terminal(r.receipt))history.push({pending:r.pending,receipt:r.receipt});const next={...r,history,pending,receipt:null};if(history.length>100||vendorBytes(next)>PORTAL_WORK_RECOVERY_BYTES)portalWorkFail();return next;
+}
+export async function persistPortalWorkRecovery(access:PortalWorkRecoveryAccess,record:PortalWorkRecoveryRecord,{local=false}:{local?:boolean}={}){const exact=await validatePortalWorkRecovery(record,record.scope);if(!local)await access.authorize();await access.persist(exact);}

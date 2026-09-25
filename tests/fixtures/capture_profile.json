@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.0",
+  "receipt_id": "00000000-0000-4000-8000-000000000060",
+  "session_id": "00000000-0000-4000-8000-000000000003",
+  "request": {
+    "schema_version": "1.0",
+    "profile_id": "visit-60m-v1",
+    "channels": [
+      "microphone"
+    ]
+  },
+  "request_sha256": "aaa37b2acf69a34875c0e42ac5c92525fbc0980b3d000733e0b7be2e9706ef07",
+  "created_at": "2026-09-20T10:00:00.000000Z",
+  "maximum_aggregate_plaintext_bytes": 268435456,
+  "maximum_chunks": 720,
+  "maximum_chunks_per_channel": 360,
+  "maximum_track_duration_ms": 3600000
+}

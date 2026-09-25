@@ -1,0 +1,339 @@
+diff --git a/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift b/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
+--- a/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
++++ b/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
+@@ -26,10 +26,30 @@
+     ]
+ 
+     private var transport: IOSPCMCapacitorTransport?
++    private let recoveryLock = NSLock()
++    private var rendererLost = false
+ 
+     public override func load() {
+-      let publisher = IOSPCMCapacitorEventPublisher(emitter: self)
+-      transport = IOSPCMCapacitorTransport(bridge: IOSPCMBridgeCore(events: publisher))
++      recoveryLock.withLock {
++        guard !rendererLost, transport == nil else { return }
++        let publisher = IOSPCMCapacitorEventPublisher(emitter: self)
++        transport = IOSPCMCapacitorTransport(bridge: IOSPCMBridgeCore(events: publisher))
++      }
++    }
++
++    /// Native UI only. This is deliberately absent from pluginMethods.
++    /// An old plugin stays fenced even if failure precedes its first load.
++    @nonobjc public func fenceAndStopForRendererLoss() async throws {
++      let retained = recoveryLock.withLock {
++        rendererLost = true
++        return transport
++      }
++      try await retained?.fenceAndStopForRendererLoss()
++    }
++
++    /// Includes pending permission and failed closure in every bridge instance.
++    @nonobjc public static func confirmProcessCaptureIdle() -> Bool {
++      IOSPCMBridgeCore.confirmProcessCaptureIdle()
+     }
+ 
+     @objc public func getAppState(_ call: CAPPluginCall) {
+diff --git a/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitorTransport/IOSPCMCapacitorTransport.swift b/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitorTransport/IOSPCMCapacitorTransport.swift
+--- a/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitorTransport/IOSPCMCapacitorTransport.swift
++++ b/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitorTransport/IOSPCMCapacitorTransport.swift
+@@ -79,6 +79,7 @@
+ 
+ public protocol IOSPCMBridgeServing: Sendable {
+   func confirmCaptureIdle() -> Bool
++  func fenceAndStopForRendererLoss() async throws
+   var supportsRenewableCapture: Bool { get }
+   func appState() async -> IOSPCMBridgeAppState
+   func begin(configuration: IOSPCMBridgeConfiguration) throws -> IOSPCMBridgeSessionToken
+@@ -101,6 +102,9 @@
+ 
+ extension IOSPCMBridgeServing {
+   public func confirmCaptureIdle() -> Bool { false }
++  public func fenceAndStopForRendererLoss() async throws {
++    throw IOSPCMBridgeFailure(.stopFailed)
++  }
+   public var supportsRenewableCapture: Bool { false }
+   public func extend(_ token: IOSPCMBridgeSessionToken, value: PCMSourceExtension) async throws {
+     throw IOSPCMBridgeFailure(.captureFailed)
+@@ -247,6 +251,12 @@
+   public var supportsRenewableCapture: Bool { bridge.supportsRenewableCapture }
+   public func confirmCaptureIdle() -> Bool { bridge.confirmCaptureIdle() }
+ 
++  /// Swift-only renderer recovery; no session token or audio crosses this API.
++  public func fenceAndStopForRendererLoss() async throws {
++    do { try await bridge.fenceAndStopForRendererLoss() }
++    catch { throw IOSPCMCapacitorErrorCode.stopFailed }
++  }
++
+   public func extend(sessionToken: String, value: PCMSourceExtension) async throws {
+     let token = try Self.token(sessionToken)
+     guard bridge.supportsRenewableCapture else { throw IOSPCMCapacitorErrorCode.captureFailed }
+diff --git a/apps/capture/native-plugins/ios-pcm-capacitor/Tests/CosmaneuraIOSPCMCapacitorTransportTests/IOSPCMCapacitorTransportTests.swift b/apps/capture/native-plugins/ios-pcm-capacitor/Tests/CosmaneuraIOSPCMCapacitorTransportTests/IOSPCMCapacitorTransportTests.swift
+--- a/apps/capture/native-plugins/ios-pcm-capacitor/Tests/CosmaneuraIOSPCMCapacitorTransportTests/IOSPCMCapacitorTransportTests.swift
++++ b/apps/capture/native-plugins/ios-pcm-capacitor/Tests/CosmaneuraIOSPCMCapacitorTransportTests/IOSPCMCapacitorTransportTests.swift
+@@ -1,11 +1,49 @@
+ import CosmaneuraIOSPCMBridgeCore
+ import CosmaneuraIOSPCMCore
++import CosmaneuraIOSAVFoundationDriver
+ import Foundation
+ import XCTest
+ 
+ @testable import CosmaneuraIOSPCMCapacitorTransport
+ 
+ final class IOSPCMCapacitorTransportTests: XCTestCase {
++  func testRendererLossRealBridgeRetainsFailedOwnerAndRejectsLateStart() async throws {
++    let audio = RendererRecoveryAudio()
++    let emitter = RecordingEmitter()
++    let core = IOSPCMBridgeCore(permission: RendererRecoveryPermission(), audio: audio,
++      foreground: RendererRecoveryForeground(), events: IOSPCMCapacitorEventPublisher(emitter: emitter))
++    let transport = IOSPCMCapacitorTransport(bridge: core)
++    let token = try transport.start(configuration: configuration())
++    try await transport.ready(sessionToken: token)
++    XCTAssertFalse(transport.confirmCaptureIdle())
++    do {
++      try await transport.fenceAndStopForRendererLoss()
++      XCTFail("A failed native release cannot confirm shutdown")
++    } catch { XCTAssertEqual(error as? IOSPCMCapacitorErrorCode, .stopFailed) }
++    XCTAssertFalse(transport.confirmCaptureIdle())
++    XCTAssertThrowsError(try transport.start(configuration: configuration()))
++    try await transport.fenceAndStopForRendererLoss()
++    try await transport.fenceAndStopForRendererLoss()
++    XCTAssertTrue(transport.confirmCaptureIdle())
++    XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++    XCTAssertEqual(audio.startCalls, 1)
++    XCTAssertEqual(audio.releaseCalls, 2)
++    XCTAssertThrowsError(try transport.start(configuration: configuration()))
++    XCTAssertTrue(emitter.events.isEmpty)
++  }
++
++  func testRendererLossLegacyBridgeFailsClosedWithoutInventingStopOrIdle() async {
++    let bridge = FakeBridge()
++    let transport = IOSPCMCapacitorTransport(bridge: bridge)
++    do {
++      try await transport.fenceAndStopForRendererLoss()
++      XCTFail("Legacy bridge cannot confirm renderer-loss shutdown")
++    } catch { XCTAssertEqual(error as? IOSPCMCapacitorErrorCode, .stopFailed) }
++    XCTAssertFalse(transport.confirmCaptureIdle())
++    XCTAssertNil(bridge.configuration)
++    XCTAssertNil(bridge.stopMode)
++  }
++
+   func testLegacyBridgeDoesNotInventProcessIdleProof() {
+     let bridge = FakeBridge()
+     let transport = IOSPCMCapacitorTransport(bridge: bridge)
+@@ -241,6 +279,29 @@
+   }
+ }
+ 
++private struct RendererRecoveryPermission: MicrophonePermissionAuthorizing {
++  func requestPermission(cancellation: StartupCancellation) async -> MicrophonePermission { .granted }
++}
++
++private struct RendererRecoveryForeground: AppleApplicationForegroundProviding {
++  func isForegroundActive() async -> Bool { true }
++}
++
++private final class RendererRecoveryAudio: PCMAudioDriving, @unchecked Sendable {
++  private let lock = NSLock()
++  private var starts = 0
++  private var releases = 0
++  var startCalls: Int { lock.withLock { starts } }
++  var releaseCalls: Int { lock.withLock { releases } }
++  func start(sessionID: UInt64, callbacks: PCMAudioCallbacks,
++             cancellation: StartupCancellation) async throws { lock.withLock { starts += 1 } }
++  func freezeInput(sessionID: UInt64) async throws {}
++  func release(sessionID: UInt64) async throws {
++    let first = lock.withLock { releases += 1; return releases == 1 }
++    if first { throw IOSPCMBridgeFailure(.stopFailed) }
++  }
++}
++
+ private final class FakeBridge: IOSPCMBridgeServing, @unchecked Sendable {
+   var supportsRenewableCapture = false
+   var extensionToken: IOSPCMBridgeSessionToken?
+diff --git a/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift b/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift
+--- a/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift
+@@ -313,6 +313,7 @@
+   private let tokenSource: @Sendable () -> String
+   private var nextGeneration: UInt64 = 0
+   private var session: SessionRecord?
++  private var rendererLost = false
+   private var lastClosedToken: IOSPCMBridgeSessionToken?
+   private var pending: PendingPacket?
+   private var lastAcknowledged: (token: IOSPCMBridgeSessionToken, sequence: UInt64)?
+@@ -362,7 +363,23 @@
+   /// Includes every bridge instance in this native process, including pending
+   /// permission/startup and failed Stop. A new WebView cannot hide an old owner.
+   public func confirmCaptureIdle() -> Bool {
++    Self.confirmProcessCaptureIdle()
++  }
++
++  /// Native recovery can check ownership even before a plugin has loaded.
++  public static func confirmProcessCaptureIdle() -> Bool {
+     CaptureProcessOwnership.shared.isIdle
++  }
++
++  /// Permanently retires this bridge's admission authority, then closes only
++  /// its current session. Failed closure retains ownership for an explicit retry.
++  /// Volatile, unacknowledged audio is discarded; durable stores are untouched.
++  public func fenceAndStopForRendererLoss() async throws {
++    let token = lock.withLock { () -> IOSPCMBridgeSessionToken? in
++      rendererLost = true
++      return session?.token
++    }
++    if let token { _ = try await stop(token, mode: .discard) }
+   }
+ 
+   /// Claims the single bridge slot and returns its opaque token before native
+@@ -395,7 +412,7 @@
+     // observe a successfully claimed token in an unbound intermediate state.
+     lock.lock()
+     defer { lock.unlock() }
+-    guard session == nil, nextGeneration < UInt64.max else {
++    guard !rendererLost, session == nil, nextGeneration < UInt64.max else {
+       throw IOSPCMBridgeStartFailure(.startFailed)
+     }
+     if let runID = configuration.authority?.runID, usedRunIDs.contains(runID) {
+diff --git a/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/IOSPCMBridgeCoreTests.swift b/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/IOSPCMBridgeCoreTests.swift
+--- a/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/IOSPCMBridgeCoreTests.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/IOSPCMBridgeCoreTests.swift
+@@ -6,6 +6,138 @@
+ @testable import CosmaneuraIOSPCMCore
+ 
+ final class IOSPCMBridgeCoreTests: XCTestCase, @unchecked Sendable {
++  func testRendererLossBeforeBeginPermanentlyFencesOnlyThatBridge() async throws {
++    let lost = BridgeHarness(), fresh = BridgeHarness()
++    try await lost.bridge.fenceAndStopForRendererLoss()
++    try await lost.bridge.fenceAndStopForRendererLoss()
++    await assertStartFailure(.startFailed) {
++      _ = try lost.bridge.begin(configuration: lost.configuration)
++    }
++    XCTAssertEqual(lost.audio.startCalls, 0)
++    XCTAssertEqual(lost.audio.releaseCalls, 0)
++    XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++    let token = try await fresh.readyToken()
++    XCTAssertFalse(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++    try await lost.bridge.fenceAndStopForRendererLoss()
++    XCTAssertEqual(fresh.audio.releaseCalls, 0)
++    _ = try await fresh.bridge.stop(token, mode: .discard)
++    XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++  }
++
++  func testRendererLossCancelsPendingPermissionAndKeepsStartFenced() async throws {
++    let permission = WaitingPermission()
++    let h = BridgeHarness(permission: permission)
++    let token = try h.bridge.begin(configuration: h.configuration)
++    let readiness = Task { try await h.bridge.ready(token) }
++    try await waitUntil { permission.isWaiting }
++    XCTAssertFalse(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++    try await h.bridge.fenceAndStopForRendererLoss()
++    await assertStartFailure(.startFailed) { try await readiness.value }
++    try await h.bridge.fenceAndStopForRendererLoss()
++    await assertStartFailure(.startFailed) {
++      _ = try h.bridge.begin(configuration: h.configuration)
++    }
++    XCTAssertEqual(h.audio.startCalls, 0)
++    XCTAssertEqual(h.audio.releaseCalls, 1)
++    XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++  }
++
++  func testRendererLossFreezeAndReleaseFailuresKeepOwnershipUntilExplicitRetry() async throws {
++    for audio in [FakeBridgeAudioDriver(freezeFailures: 1),
++                  FakeBridgeAudioDriver(releaseFailures: 1)] {
++      let h = BridgeHarness(audio: audio)
++      _ = try await h.readyToken()
++      await assertBridgeFailure(.stopFailed) { try await h.bridge.fenceAndStopForRendererLoss() }
++      XCTAssertFalse(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++      await assertStartFailure(.startFailed) {
++        _ = try h.bridge.begin(configuration: h.configuration)
++      }
++      try await h.bridge.fenceAndStopForRendererLoss()
++      XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++      let freezes = audio.freezeCalls, releases = audio.releaseCalls
++      try await h.bridge.fenceAndStopForRendererLoss()
++      XCTAssertEqual(audio.freezeCalls, freezes)
++      XCTAssertEqual(audio.releaseCalls, releases)
++      await assertStartFailure(.startFailed) {
++        _ = try h.bridge.begin(configuration: h.configuration)
++      }
++    }
++  }
++
++  func testRendererLossFailedPermissionClosureRetainsOwnerForRetry() async throws {
++    let permission = WaitingPermission()
++    let h = BridgeHarness(permission: permission, audio: FakeBridgeAudioDriver(freezeFailures: 1))
++    let token = try h.bridge.begin(configuration: h.configuration)
++    let readiness = Task { try await h.bridge.ready(token) }
++    try await waitUntil { permission.isWaiting }
++    await assertBridgeFailure(.stopFailed) { try await h.bridge.fenceAndStopForRendererLoss() }
++    await assertStartFailure(.startFailed) { try await readiness.value }
++    XCTAssertFalse(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++    try await h.bridge.fenceAndStopForRendererLoss()
++    XCTAssertEqual(h.audio.startCalls, 0)
++    XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++  }
++
++  func testRendererLossStopsOnlyOwnActiveSessionAndLeavesOtherOwnerRegistered() async throws {
++    let lost = BridgeHarness(), other = BridgeHarness()
++    _ = try await lost.readyToken()
++    let otherToken = try await other.readyToken()
++    try await lost.bridge.fenceAndStopForRendererLoss()
++    try await lost.bridge.fenceAndStopForRendererLoss()
++    XCTAssertEqual(lost.audio.releaseCalls, 1)
++    XCTAssertEqual(other.audio.freezeCalls, 0)
++    XCTAssertEqual(other.audio.releaseCalls, 0)
++    XCTAssertFalse(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++    try await other.bridge.heartbeat(otherToken)
++    _ = try await other.bridge.stop(otherToken, mode: .discard)
++    XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++  }
++
++  func testRendererLossConcurrentCallsCoalesceDiscardAndRejectLateAudio() async throws {
++    let gate = ManualGate<Void>()
++    let audio = FakeBridgeAudioDriver(releaseGate: gate)
++    let h = BridgeHarness(audio: audio, targetFrames: 4)
++    let token = try await h.readyToken()
++    await audio.emitLatest(OwnedAudioFrames(sampleRateHz: 16_000, channels: [[0.5]]))
++    let callers = (0..<16).map { _ in Task { try await h.bridge.fenceAndStopForRendererLoss() } }
++    try await waitUntil { audio.releaseCalls == 1 }
++    XCTAssertFalse(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++    await assertStartFailure(.startFailed) { _ = try h.bridge.begin(configuration: h.configuration) }
++    gate.resolve(())
++    for caller in callers { try await caller.value }
++    XCTAssertEqual(audio.freezeCalls, 1)
++    XCTAssertEqual(audio.releaseCalls, 1)
++    XCTAssertTrue(h.events.packets.isEmpty)
++    let oldFrames = OwnedAudioFrames(sampleRateHz: 16_000, channels: [[1, 1, 1, 1]])
++    await audio.emitRetained(index: 0, frames: oldFrames)
++    XCTAssertTrue(oldFrames.isZeroed)
++    XCTAssertTrue(h.events.packets.isEmpty)
++    let explicit = try await h.bridge.stop(token, mode: .drain)
++    XCTAssertNil(explicit.finalPacket)
++    XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++  }
++
++  func testRendererLossRacingBeginCannotLeaveAnOwnerOrRestart() async throws {
++    for _ in 0..<64 {
++      let h = BridgeHarness(permission: WaitingPermission())
++      let bridge = h.bridge, configuration = h.configuration
++      try await withThrowingTaskGroup(of: Void.self) { group in
++        group.addTask {
++          do { _ = try bridge.begin(configuration: configuration) }
++          catch let failure as IOSPCMBridgeStartFailure {
++            guard failure.code == .startFailed else { throw failure }
++          }
++        }
++        for _ in 0..<4 { group.addTask { try await bridge.fenceAndStopForRendererLoss() } }
++        try await group.waitForAll()
++      }
++      XCTAssertTrue(IOSPCMBridgeCore.confirmProcessCaptureIdle())
++      await assertStartFailure(.startFailed) { _ = try bridge.begin(configuration: configuration) }
++      XCTAssertEqual(h.audio.startCalls, 0)
++      XCTAssertLessThanOrEqual(h.audio.releaseCalls, 1)
++    }
++  }
++
+   func testIdleProofIncludesOtherBridgePermissionWaitAndFailedClose() async throws {
+     let permission = WaitingPermission()
+     let first = BridgeHarness(permission: permission, audio: FakeBridgeAudioDriver(freezeFailures: 1))

@@ -7,7 +7,24 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from cosmas_os import models  # noqa: F401
+from cosmas_os import (  # noqa: F401
+    finance_models,
+    finance_setup_models,
+    google_connection_models,
+    inbox_handoff_models,
+    inbox_models,
+    membership_models,
+    microsoft_connection_models,
+    models,
+    portal_models,
+    portal_work_models,
+    practice_access_models,
+    research_models,
+    scheduling_enrollment_models,
+    scheduling_login_models,
+    vendor_models,
+    vendor_setup_models,
+)
 from cosmas_os.config import settings
 from cosmas_os.db import Base
 

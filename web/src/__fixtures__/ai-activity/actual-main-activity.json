@@ -1,0 +1,542 @@
+{
+  "disabled": {
+    "status": 404,
+    "body": {
+      "detail": "activity_unavailable"
+    }
+  },
+  "enabled": {
+    "contract_version": 1,
+    "box_id": "b4eadb55-8ea9-4621-b6a9-9534ebf16f77",
+    "owner_id": "7f784be3-6e1a-4cf7-9512-1313a2d09675",
+    "recovery_scope": "59717ad5652c4936d6eaae16b88c5e9de282e592000d642d5fa6d53a1fd6f6c4",
+    "view": "attention",
+    "as_of": "2026-09-22T16:01:27.633102Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 1,
+      "recent_total": 0,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T16:01:27.633102Z",
+      "window_start": "2026-09-21T16:01:27.633102Z",
+      "admitted_units": 1,
+      "occupied_units": 1,
+      "remaining_units": null,
+      "pending_units": 1,
+      "unknown_units": 0,
+      "verified_input_tokens": null,
+      "verified_output_tokens": null,
+      "usage_complete": false,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "2b5d6ca7-0770-4212-ba75-2980a3ccf0f7",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "4674c8f3-fb88-4303-a3c3-466459024758",
+          "appointment_id": "fe64a2fe-c41d-4241-88ac-16855c6ce285",
+          "label": "Invented encounter",
+          "starts_at": "2026-09-22T12:01:27.560139-04:00",
+          "entry_id": "bcf3caa5-7e07-4628-adf8-ceb0379db3e8"
+        },
+        "admission": {
+          "id": "71775c0f-d290-45d1-b145-80044e5c78de",
+          "state": "reserved",
+          "unit": 1,
+          "admitted_at": "2026-09-22T12:01:27.620247-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    ]
+  },
+  "signed_identity": {
+    "contract_version": 1,
+    "box_id": "b4eadb55-8ea9-4621-b6a9-9534ebf16f77",
+    "actor_id": "7f784be3-6e1a-4cf7-9512-1313a2d09675",
+    "recovery_scope": "59717ad5652c4936d6eaae16b88c5e9de282e592000d642d5fa6d53a1fd6f6c4"
+  },
+  "fresh_encounter": {
+    "id": "4674c8f3-fb88-4303-a3c3-466459024758",
+    "appointment_id": "fe64a2fe-c41d-4241-88ac-16855c6ce285",
+    "label": "Invented encounter",
+    "revision": 2,
+    "entries": [
+      {
+        "id": "76fbed03-c981-4621-bd1b-8dee9f1e6d8b",
+        "revision": 1,
+        "kind": "synthetic_source",
+        "content": "Invented visit preparation: discuss access to the practice and agree on next steps. No chart, medications, diagnoses or clinical history were retrieved. This fixed example is evidence for the workspace rehearsal only.",
+        "source_label": "Invented preparation \u00b7 v1",
+        "origin": "synthetic_fixture",
+        "ticket": null,
+        "created_at": "2026-09-22T12:01:27.561885-04:00",
+        "reply": null
+      },
+      {
+        "id": "bcf3caa5-7e07-4628-adf8-ceb0379db3e8",
+        "revision": 2,
+        "kind": "conversation",
+        "content": "Summarize the invented agenda.",
+        "source_label": null,
+        "origin": "authenticated_human",
+        "ticket": null,
+        "created_at": "2026-09-22T12:01:27.604266-04:00",
+        "reply": null,
+        "model_request": {
+          "contract_version": 1,
+          "request_sha256": "58b561baa41ae8388ef14992e544c3a18c4a49c770886b678b066e9fafb4c75e",
+          "request": {
+            "kind": "conversation",
+            "expected_revision": 1,
+            "team_revision": 1,
+            "idempotency_key": "invented-question",
+            "role": "visit_prep"
+          },
+          "bot": {
+            "address": "visit_prep",
+            "agent_id": "2b5d6ca7-0770-4212-ba75-2980a3ccf0f7",
+            "role": "visit_prep",
+            "name": "Visit Prep",
+            "team_revision": 1
+          },
+          "admission": {
+            "id": "71775c0f-d290-45d1-b145-80044e5c78de",
+            "state": "reserved",
+            "unit": 1,
+            "admitted_at": "2026-09-22T12:01:27.620247-04:00",
+            "dispatch": "not_started",
+            "usage": "unknown",
+            "input_tokens": null,
+            "output_tokens": null
+          },
+          "reason": null
+        }
+      }
+    ],
+    "handoffs": [],
+    "note": {
+      "latest": null,
+      "history": []
+    },
+    "follow_ups": [],
+    "work_candidates": [],
+    "model_contract_version": 1,
+    "model_observed_at": "2026-09-22T16:01:27.659283+00:00"
+  },
+  "current_team": {
+    "revision": 1,
+    "template_version": "provider-team-v4",
+    "configuration": {
+      "bots": [
+        {
+          "name": "Scribe",
+          "role": "scribe",
+          "enabled": true,
+          "response_style": "brief",
+          "include_evidence": true,
+          "include_notebook": true
+        },
+        {
+          "name": "Visit Prep",
+          "role": "visit_prep",
+          "enabled": true,
+          "response_style": "brief",
+          "include_evidence": true,
+          "include_notebook": true
+        },
+        {
+          "name": "Follow-up",
+          "role": "follow_up",
+          "enabled": true,
+          "response_style": "brief",
+          "include_evidence": true,
+          "include_notebook": true
+        },
+        {
+          "name": "Chief",
+          "role": "chief",
+          "enabled": true,
+          "response_style": "brief",
+          "include_evidence": true,
+          "include_notebook": true
+        }
+      ],
+      "practice_context": "Direct Primary Care"
+    },
+    "members": [
+      {
+        "role": "scribe",
+        "agent_id": "862aabd2-875f-4cbc-8db6-68e9a711629f",
+        "name": "Scribe",
+        "initials": "Sc",
+        "description": "Your notes, clearly kept.",
+        "prompt": "Review my saved draft",
+        "capabilities": [
+          {
+            "key": "workspace.notebook.read",
+            "label": "Saved notebook review",
+            "state": "local",
+            "connector": "workspace",
+            "contract": "workspace.read.v1"
+          },
+          {
+            "key": "scribe.capture",
+            "label": "Consented recording",
+            "state": "enabled",
+            "connector": "Scribe",
+            "contract": null
+          },
+          {
+            "key": "scribe.transcript.read",
+            "label": "Visit transcript",
+            "state": "enabled",
+            "connector": "Scribe",
+            "contract": null
+          },
+          {
+            "key": "core.note.draft",
+            "label": "SOAP draft generation",
+            "state": "awaiting_connection",
+            "connector": "Core",
+            "contract": null
+          },
+          {
+            "key": "assistant.answer",
+            "label": "GPT-4.1 conversation",
+            "state": "awaiting_connection",
+            "connector": "CosmasCode \u00b7 GPT-4.1",
+            "contract": "openai.chat.completions.v1"
+          }
+        ]
+      },
+      {
+        "role": "visit_prep",
+        "agent_id": "2b5d6ca7-0770-4212-ba75-2980a3ccf0f7",
+        "name": "Visit Prep",
+        "initials": "Vp",
+        "description": "Context before the conversation.",
+        "prompt": "Review the saved preparation",
+        "capabilities": [
+          {
+            "key": "workspace.sources.review",
+            "label": "Saved source review",
+            "state": "local",
+            "connector": "workspace",
+            "contract": "workspace.read.v1"
+          },
+          {
+            "key": "core.session_prep.read",
+            "label": "Saved intake and prior visit drafts",
+            "state": "enabled",
+            "connector": "Core",
+            "contract": "core.encounter-context.v1"
+          },
+          {
+            "key": "assistant.answer",
+            "label": "GPT-4.1 conversation",
+            "state": "awaiting_connection",
+            "connector": "CosmasCode \u00b7 GPT-4.1",
+            "contract": "openai.chat.completions.v1"
+          }
+        ]
+      },
+      {
+        "role": "follow_up",
+        "agent_id": "e6497120-2487-4d39-ab15-700317d97cd6",
+        "name": "Follow-up",
+        "initials": "Fu",
+        "description": "Keep the next step in sight.",
+        "prompt": "Show my linked follow-up work",
+        "capabilities": [
+          {
+            "key": "workspace.work.read",
+            "label": "Linked work status",
+            "state": "local",
+            "connector": "F-8",
+            "contract": "workspace.work.read.v1"
+          },
+          {
+            "key": "followup.propose",
+            "label": "Proposals in the Work tab",
+            "state": "local",
+            "connector": "F-8",
+            "contract": "workspace.follow_up.v1"
+          },
+          {
+            "key": "followup.local_receipts.read",
+            "label": "Local delivery & human results",
+            "state": "local",
+            "connector": "F-8",
+            "contract": "workspace.follow_up.v1"
+          },
+          {
+            "key": "scheduling.coordinate",
+            "label": "Scheduling coordination",
+            "state": "awaiting_connection",
+            "connector": "Scheduling",
+            "contract": null
+          },
+          {
+            "key": "followup.deliver",
+            "label": "Delivery & outcome receipts",
+            "state": "awaiting_connection",
+            "connector": "Secure messaging",
+            "contract": null
+          },
+          {
+            "key": "assistant.answer",
+            "label": "GPT-4.1 conversation",
+            "state": "awaiting_connection",
+            "connector": "CosmasCode \u00b7 GPT-4.1",
+            "contract": "openai.chat.completions.v1"
+          }
+        ]
+      },
+      {
+        "role": "chief",
+        "agent_id": "76e889f7-d650-4583-ba00-509b9417cbcb",
+        "name": "Chief",
+        "initials": "Ch",
+        "description": "A clear view of what is open.",
+        "prompt": "Review this encounter's status",
+        "capabilities": [
+          {
+            "key": "workspace.status.read",
+            "label": "Encounter status review",
+            "state": "local",
+            "connector": "workspace",
+            "contract": "workspace.read.v1"
+          },
+          {
+            "key": "team.routines",
+            "label": "Routines & quiet hours",
+            "state": "awaiting_connection",
+            "connector": "Durable scheduler",
+            "contract": null
+          },
+          {
+            "key": "team.handoff",
+            "label": "Accepted staff handoffs",
+            "state": "awaiting_connection",
+            "connector": "F-8",
+            "contract": null
+          },
+          {
+            "key": "assistant.answer",
+            "label": "GPT-4.1 conversation",
+            "state": "awaiting_connection",
+            "connector": "CosmasCode \u00b7 GPT-4.1",
+            "contract": "openai.chat.completions.v1"
+          },
+          {
+            "key": "workspace.draft.handoff",
+            "label": "Private bot draft handoffs",
+            "state": "awaiting_connection",
+            "connector": "Provider Team",
+            "contract": "workspace.draft.handoff.v1"
+          }
+        ]
+      }
+    ],
+    "templates": [
+      {
+        "role": "scribe",
+        "agent_id": null,
+        "name": "Scribe",
+        "initials": "Sc",
+        "description": "Your notes, clearly kept.",
+        "prompt": "Review my saved draft",
+        "capabilities": [
+          {
+            "key": "workspace.notebook.read",
+            "label": "Saved notebook review",
+            "state": "local",
+            "connector": "workspace",
+            "contract": "workspace.read.v1"
+          },
+          {
+            "key": "scribe.capture",
+            "label": "Consented recording",
+            "state": "enabled",
+            "connector": "Scribe",
+            "contract": null
+          },
+          {
+            "key": "scribe.transcript.read",
+            "label": "Visit transcript",
+            "state": "enabled",
+            "connector": "Scribe",
+            "contract": null
+          },
+          {
+            "key": "core.note.draft",
+            "label": "SOAP draft generation",
+            "state": "awaiting_connection",
+            "connector": "Core",
+            "contract": null
+          },
+          {
+            "key": "assistant.answer",
+            "label": "GPT-4.1 conversation",
+            "state": "awaiting_connection",
+            "connector": "CosmasCode \u00b7 GPT-4.1",
+            "contract": "openai.chat.completions.v1"
+          }
+        ]
+      },
+      {
+        "role": "visit_prep",
+        "agent_id": null,
+        "name": "Visit Prep",
+        "initials": "Vp",
+        "description": "Context before the conversation.",
+        "prompt": "Review the saved preparation",
+        "capabilities": [
+          {
+            "key": "workspace.sources.review",
+            "label": "Saved source review",
+            "state": "local",
+            "connector": "workspace",
+            "contract": "workspace.read.v1"
+          },
+          {
+            "key": "core.session_prep.read",
+            "label": "Saved intake and prior visit drafts",
+            "state": "enabled",
+            "connector": "Core",
+            "contract": "core.encounter-context.v1"
+          },
+          {
+            "key": "assistant.answer",
+            "label": "GPT-4.1 conversation",
+            "state": "awaiting_connection",
+            "connector": "CosmasCode \u00b7 GPT-4.1",
+            "contract": "openai.chat.completions.v1"
+          }
+        ]
+      },
+      {
+        "role": "follow_up",
+        "agent_id": null,
+        "name": "Follow-up",
+        "initials": "Fu",
+        "description": "Keep the next step in sight.",
+        "prompt": "Show my linked follow-up work",
+        "capabilities": [
+          {
+            "key": "workspace.work.read",
+            "label": "Linked work status",
+            "state": "local",
+            "connector": "F-8",
+            "contract": "workspace.work.read.v1"
+          },
+          {
+            "key": "followup.propose",
+            "label": "Proposals in the Work tab",
+            "state": "local",
+            "connector": "F-8",
+            "contract": "workspace.follow_up.v1"
+          },
+          {
+            "key": "followup.local_receipts.read",
+            "label": "Local delivery & human results",
+            "state": "local",
+            "connector": "F-8",
+            "contract": "workspace.follow_up.v1"
+          },
+          {
+            "key": "scheduling.coordinate",
+            "label": "Scheduling coordination",
+            "state": "awaiting_connection",
+            "connector": "Scheduling",
+            "contract": null
+          },
+          {
+            "key": "followup.deliver",
+            "label": "Delivery & outcome receipts",
+            "state": "awaiting_connection",
+            "connector": "Secure messaging",
+            "contract": null
+          },
+          {
+            "key": "assistant.answer",
+            "label": "GPT-4.1 conversation",
+            "state": "awaiting_connection",
+            "connector": "CosmasCode \u00b7 GPT-4.1",
+            "contract": "openai.chat.completions.v1"
+          }
+        ]
+      }
+    ],
+    "custom_skills": [
+      {
+        "key": "saved_context",
+        "label": "Saved context review",
+        "state": "local",
+        "connector": "Workspace",
+        "contract": "workspace.read.v1"
+      },
+      {
+        "key": "work_status",
+        "label": "Work status and receipts",
+        "state": "local",
+        "connector": "F-8",
+        "contract": "workspace.work.read.v1"
+      },
+      {
+        "key": "encounter_prep",
+        "label": "Saved intake and prior visit drafts",
+        "state": "enabled",
+        "connector": "Core",
+        "contract": "core.encounter-context.v1"
+      },
+      {
+        "key": "calendar_availability",
+        "label": "Calendar availability",
+        "state": "awaiting_connection",
+        "connector": "Scheduling",
+        "contract": "scheduling.availability.v1"
+      }
+    ],
+    "llm": {
+      "enabled": false,
+      "model": "gpt-4.1"
+    },
+    "scheduling": {
+      "enabled": false
+    },
+    "capture": {
+      "enabled": true,
+      "prep_enabled": true,
+      "prep_work_enabled": false,
+      "notes_enabled": false,
+      "corrections_enabled": false
+    },
+    "recovery_scope": "59717ad5652c4936d6eaae16b88c5e9de282e592000d642d5fa6d53a1fd6f6c4"
+  },
+  "model_calls": 0,
+  "ledger_unchanged": true
+}

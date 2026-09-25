@@ -1,0 +1,359 @@
+{
+  "backend_source_manifest_sha256": "b9073f362c8cb77dad60dc577837d60e2239a0cac562cc956aaf28b5cefee06d",
+  "actual_helpers": [
+    "ConversationRequest.model_validate/model_dump",
+    "conversation_request_hash"
+  ],
+  "database_network_calls": false,
+  "cases": [
+    {
+      "case": "one_packet",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2."
+      },
+      "request_sha256": "b4942a88b019067f519af3e8d68b6228c3f03531fec908033d440c5467d12082"
+    },
+    {
+      "case": "unicode_trim",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "\u0085 Compare caf\u00e9 \u03b2.\u00a0",
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare caf\u00e9 \u03b2."
+      },
+      "request_sha256": "03a51381bb13842ef9dd08214ce5d0293b2b9343ee200db1c14177193efe0a5f"
+    },
+    {
+      "case": "bom_preserved",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "\ufeffCompare sources.",
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "\ufeffCompare sources."
+      },
+      "request_sha256": "6960952b15610b0c542fcdeb9e9fbee5e176c9acb2c5994db0987a37a05a73a0"
+    },
+    {
+      "case": "legacy_absent",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2."
+      },
+      "accepted": true,
+      "normalized": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2."
+      },
+      "request_sha256": "634ebcbc51f13a260248084c92bb787e038aa982849d6995840615db16e3e6b0"
+    },
+    {
+      "case": "null",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": null
+      },
+      "accepted": false
+    },
+    {
+      "case": "numeric_consent",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": {
+          "version": 1,
+          "consented": 1,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "case": "numeric_bool_version",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": {
+          "version": true,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "case": "extra",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ],
+          "extra": true
+        }
+      },
+      "accepted": false
+    },
+    {
+      "case": "duplicate",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "case": "over_revision",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 501,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": false
+    },
+    {
+      "case": "three_packets",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2.",
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000076",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000077",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        }
+      },
+      "accepted": true,
+      "normalized": {
+        "research_analysis": {
+          "version": 1,
+          "consented": true,
+          "entries": [
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000075",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000076",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            },
+            {
+              "entry_id": "00000000-0000-4000-8000-000000000077",
+              "entry_revision": 3,
+              "run_id": "00000000-0000-4000-8000-000000000073",
+              "save_request_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+            }
+          ]
+        },
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-model-key",
+        "role": "00000000-0000-4000-8000-000000000072",
+        "content": "Compare source evidence caf\u00e9 \u03b2."
+      },
+      "request_sha256": "ad962c1aa82578289f51b4ac67e7497da60e1fbd5327e89cffc8f377fe28182d"
+    }
+  ]
+}

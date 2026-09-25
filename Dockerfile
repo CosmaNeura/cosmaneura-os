@@ -14,10 +14,11 @@ RUN printf '%s\n' 'uv==0.12.5 --hash=sha256:3e195ccf1ed60c8bb24a6447ce306441a418
 COPY src ./src
 COPY migrations ./migrations
 COPY alembic.ini ./
-COPY fixtures ./fixtures
 RUN --network=none python -m pip install --no-index --find-links=/wheels --require-hashes --requirement /tmp/requirements.lock \
     && rm -rf /wheels /tmp/requirements.lock /tmp/uv-bootstrap.lock /root/.cache/uv \
     && /usr/local/bin/python -m pip uninstall --yes uv setuptools pip
+COPY fixtures ./fixtures
+COPY docs/third-party ./docs/third-party
 RUN groupadd --gid 10001 cosmas \
     && useradd --uid 10001 --gid cosmas --no-create-home --shell /usr/sbin/nologin cosmas \
     && mkdir -p /data/blobs \

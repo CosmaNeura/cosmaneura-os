@@ -15,9 +15,32 @@
 }
 
 * { box-sizing: border-box; }
+html {
+  scroll-padding-top: env(safe-area-inset-top, 0px);
+  scroll-padding-bottom: env(safe-area-inset-bottom, 0px);
+}
 body {
   margin: 0;
   min-height: 100vh;
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+    env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+}
+body::before, body::after {
+  content: "";
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 1000;
+  background: Canvas;
+  pointer-events: none;
+}
+body::before {
+  top: 0;
+  height: env(safe-area-inset-top, 0px);
+}
+body::after {
+  bottom: 0;
+  height: env(safe-area-inset-bottom, 0px);
 }
 button, input, textarea {
   font: inherit;
@@ -151,3 +174,36 @@ button:disabled { opacity: 0.5; cursor: not-allowed; }
 .retention-admin h3 {
   margin: 0 0 0.35rem;
 }
+
+.workspace-shell { max-width: 1200px; margin: auto; padding: 2.5rem 1.5rem 4rem; }
+.workspace-header { display: flex; justify-content: space-between; align-items: flex-start; gap: 1.5rem; }
+.workspace-header h1 { margin: 0; font-size: clamp(2rem, 4vw, 3rem); letter-spacing: -0.03em; }
+.workspace-eyebrow { margin: 0 0 .5rem; color: var(--accent); font-size: .9rem; }
+.workspace-welcome { margin-top: 2rem; max-width: 45rem; }
+.workspace-heading { justify-content: space-between; margin-top: 1rem; }
+.workspace-heading h2 { margin: .5rem 0; }
+.workspace-tabs { margin: 1rem 0 1.5rem; }
+.workspace-columns { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(0, 1fr); gap: 1.25rem; }
+.workspace-columns > *, .workspace-columns .panel { min-width: 0; }
+.workspace-shell h3 { margin-top: 0; }
+.workspace-shell form, .workspace-shell label { display: grid; gap: .5rem; }
+.workspace-shell form { gap: .9rem; }
+.workspace-shell input, .workspace-shell textarea { width: 100%; border: 1px solid var(--line); background: #fffefa; border-radius: .4rem; padding: .7rem; color: var(--ink); }
+.workspace-notepad { line-height: 1.6; resize: vertical; min-height: 15rem; }
+.workspace-shell button { min-height: 44px; }
+.workspace-shell :focus-visible { outline: 3px solid var(--accent); outline-offset: 3px; }
+.workspace-source { border-left: 3px solid var(--accent); padding: .2rem 0 .5rem .9rem; margin: 0 0 1.25rem; }
+.workspace-source p, .workspace-history p, .workspace-conversation p { white-space: pre-wrap; overflow-wrap: anywhere; }
+.workspace-history { margin-top: 1.25rem; }
+.workspace-shell summary { cursor: pointer; padding: .4rem 0; }
+.workspace-history article, .workspace-conversation article { border-bottom: 1px solid var(--line); padding: .8rem 0; }
+.workspace-conversation { max-height: 25rem; overflow-y: auto; margin-bottom: 1rem; }
+.workspace-return { max-width: 920px; padding: 1rem; margin: auto; }
+@media (max-width: 760px) {
+  .workspace-shell { padding: 1.25rem .85rem 3rem; }
+  .workspace-header { flex-direction: column; gap: .6rem; }
+  .workspace-columns { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .workspace-shell .panel { padding: 1rem; }
+  .workspace-shell input, .workspace-shell textarea { font-size: 16px; }
+}
+.beta-environment-notice { margin: 0; padding: .5rem 1rem; text-align: center; background: #fff3cd; color: #614a08; font-size: .875rem; }

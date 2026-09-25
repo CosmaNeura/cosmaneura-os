@@ -1,0 +1,14 @@
+.startup-screen {
+  box-sizing: border-box;
+  max-width: 42rem;
+  margin: 8vh auto;
+  padding: max(1.5rem, env(safe-area-inset-top)) max(1.5rem, env(safe-area-inset-right)) max(1.5rem, env(safe-area-inset-bottom)) max(1.5rem, env(safe-area-inset-left));
+  color: #24362e;
+  background: #f7f8f6;
+  border: 1px solid #dce3dc;
+  border-radius: 1rem;
+  font: 1rem/1.6 system-ui, sans-serif;
+  overflow-wrap: anywhere;
+}
+.startup-screen h1 { font-size: 1.4rem; }
+.startup-screen h2 { font-size: 1.25rem; line-height: 1.4; }

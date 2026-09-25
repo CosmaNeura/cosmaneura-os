@@ -1,0 +1,198 @@
+{
+  "scope": {
+    "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+    "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+    "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+  },
+  "old_options": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+      "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+      "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+    },
+    "patient_link_id": "2208a84c-233a-430b-b0ea-1ff8d82518ad",
+    "expected_workspace_revision": 3,
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "525ae5ae-d64a-4df2-b9f6-efffca122add",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "df6bd2d4c8c3c00cd9198167845eb539bec4d810c3553f4b1b4debfc50637c54"
+    },
+    "enabled": true,
+    "installed_membership_service": "not_selected"
+  },
+  "old_request": {
+    "expected_workspace_revision": 3,
+    "idempotency_key": "membership-propose-ecd153de-64c2-4db9-8f5f-ef6cab2d85e4",
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "525ae5ae-d64a-4df2-b9f6-efffca122add",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "df6bd2d4c8c3c00cd9198167845eb539bec4d810c3553f4b1b4debfc50637c54"
+    },
+    "patient_link_id": "2208a84c-233a-430b-b0ea-1ff8d82518ad",
+    "purpose": "enrollment_assistance",
+    "due_date": "2026-09-30",
+    "expected_outcome": "Review invented enrollment information",
+    "instructions": "Prepare a local review; no patient enrollment or charge."
+  },
+  "retire_request": {
+    "command_kind": "propose",
+    "request": {
+      "expected_workspace_revision": 3,
+      "idempotency_key": "membership-propose-ecd153de-64c2-4db9-8f5f-ef6cab2d85e4",
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "525ae5ae-d64a-4df2-b9f6-efffca122add",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "df6bd2d4c8c3c00cd9198167845eb539bec4d810c3553f4b1b4debfc50637c54"
+      },
+      "patient_link_id": "2208a84c-233a-430b-b0ea-1ff8d82518ad",
+      "purpose": "enrollment_assistance",
+      "due_date": "2026-09-30",
+      "expected_outcome": "Review invented enrollment information",
+      "instructions": "Prepare a local review; no patient enrollment or charge."
+    },
+    "request_sha256": "0cf4dfb034eb21294d42a00d919a136d61c8f21e0f94aed8f6a1e6d24c051938"
+  },
+  "rejection": {
+    "status": 409,
+    "body": {
+      "contract_version": 1,
+      "error": {
+        "code": "membership_source_changed"
+      }
+    }
+  },
+  "missing": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+      "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+      "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-ecd153de-64c2-4db9-8f5f-ef6cab2d85e4",
+    "request_sha256": "0cf4dfb034eb21294d42a00d919a136d61c8f21e0f94aed8f6a1e6d24c051938",
+    "outcome": "not_found",
+    "effect": null,
+    "receipt_sha256": null
+  },
+  "retired": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+      "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+      "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-ecd153de-64c2-4db9-8f5f-ef6cab2d85e4",
+    "request_sha256": "0cf4dfb034eb21294d42a00d919a136d61c8f21e0f94aed8f6a1e6d24c051938",
+    "outcome": "retired",
+    "effect": null,
+    "retirement": {
+      "receipt_id": "db465a6d-2224-42d7-90e0-5465b72e4980",
+      "reason": "membership_source_changed",
+      "retired_at": "2026-09-22T11:32:51.751497Z"
+    },
+    "receipt_sha256": "077346054c896dff78ef638d049c41e18b8666e54ce235c876ce77c40cd0c950"
+  },
+  "resolved": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+      "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+      "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-ecd153de-64c2-4db9-8f5f-ef6cab2d85e4",
+    "request_sha256": "0cf4dfb034eb21294d42a00d919a136d61c8f21e0f94aed8f6a1e6d24c051938",
+    "outcome": "retired",
+    "effect": null,
+    "retirement": {
+      "receipt_id": "db465a6d-2224-42d7-90e0-5465b72e4980",
+      "reason": "membership_source_changed",
+      "retired_at": "2026-09-22T11:32:51.751497Z"
+    },
+    "receipt_sha256": "077346054c896dff78ef638d049c41e18b8666e54ce235c876ce77c40cd0c950"
+  },
+  "late_original": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+      "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+      "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-ecd153de-64c2-4db9-8f5f-ef6cab2d85e4",
+    "request_sha256": "0cf4dfb034eb21294d42a00d919a136d61c8f21e0f94aed8f6a1e6d24c051938",
+    "outcome": "retired",
+    "effect": null,
+    "retirement": {
+      "receipt_id": "db465a6d-2224-42d7-90e0-5465b72e4980",
+      "reason": "membership_source_changed",
+      "retired_at": "2026-09-22T11:32:51.751497Z"
+    },
+    "receipt_sha256": "077346054c896dff78ef638d049c41e18b8666e54ce235c876ce77c40cd0c950"
+  },
+  "current_options": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+      "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+      "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+    },
+    "patient_link_id": "2208a84c-233a-430b-b0ea-1ff8d82518ad",
+    "expected_workspace_revision": 5,
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "e78fe8fd-bbe5-477b-8d72-257d34da0074",
+      "content_sha256": "642be0dbeeb1d9c9602b9733484e17b4743f2bd9d0578e9b3bcc755db6b079ed",
+      "source_fingerprint": "df6bd2d4c8c3c00cd9198167845eb539bec4d810c3553f4b1b4debfc50637c54"
+    },
+    "enabled": true,
+    "installed_membership_service": "not_selected"
+  },
+  "fresh_request": {
+    "expected_workspace_revision": 5,
+    "idempotency_key": "membership-propose-4d544465-7c46-425e-bad0-b2edb86e8514",
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "e78fe8fd-bbe5-477b-8d72-257d34da0074",
+      "content_sha256": "642be0dbeeb1d9c9602b9733484e17b4743f2bd9d0578e9b3bcc755db6b079ed",
+      "source_fingerprint": "df6bd2d4c8c3c00cd9198167845eb539bec4d810c3553f4b1b4debfc50637c54"
+    },
+    "patient_link_id": "2208a84c-233a-430b-b0ea-1ff8d82518ad",
+    "purpose": "enrollment_assistance",
+    "due_date": "2026-09-30",
+    "expected_outcome": "Review invented enrollment information",
+    "instructions": "Prepare a local review; no patient enrollment or charge."
+  },
+  "fresh_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "0908248f-1b51-4a73-ae8c-0c5f9380666d",
+      "owner_id": "2efbcb51-de2b-4399-852f-4aa5908f7a34",
+      "workspace_id": "cf5b9b0c-6723-4f7e-9ed4-cf042151e7c5"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-4d544465-7c46-425e-bad0-b2edb86e8514",
+    "request_sha256": "26665bbea2e2247c683982d491a136e61a41648740ba1a66f88304a737ede184",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "59be9508-39fb-446f-bd93-bc4704287bb5",
+      "revision_id": "0b260d4e-0e08-4a05-b5b8-927a6822e445",
+      "payload_hash": "727b3deb93751910f11b2db496371ce55468618acbe441b5b6b3df8e5f78efaf",
+      "version": 1,
+      "receipt_id": "d9020e25-cb29-4b5a-99dc-1814570ad8b3",
+      "recorded_at": "2026-09-22T11:32:51.778387Z",
+      "effect": "proposed",
+      "state": "pending_approval",
+      "evidence_classification": "local_unreconciled",
+      "external_service_verified": false
+    },
+    "receipt_sha256": "5314b9e72ba041ae268fc8bd703d9ed37eb0f0108dfb5a62667d3741624c91aa"
+  },
+  "external_operations_created": 0
+}

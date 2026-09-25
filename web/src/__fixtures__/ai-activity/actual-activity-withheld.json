@@ -1,0 +1,39 @@
+{
+  "contract_version": 1,
+  "box_id": "e365cf4b-9599-40eb-9a9b-b1190761fa81",
+  "owner_id": "021d713a-6e35-4f0b-87c0-d0aa37eed003",
+  "recovery_scope": "1583e502c41c010ef8cf67092a3b12602e7048394b3e7d86dad179d5339a9b4c",
+  "view": "attention",
+  "as_of": "2026-09-22T15:36:33.584654Z",
+  "page": {
+    "limit": 20,
+    "cursor": null,
+    "next_cursor": null,
+    "has_more": false
+  },
+  "coverage": {
+    "rows": "durable_admissions_only",
+    "paging": "live_current_access",
+    "attention_total": 0,
+    "recent_total": 0,
+    "withheld_total": 1,
+    "legacy_rows_included": false
+  },
+  "usage": {
+    "contract_version": 1,
+    "policy": null,
+    "team_revision": 1,
+    "as_of": "2026-09-22T15:36:33.584654Z",
+    "window_start": "2026-09-21T15:36:33.584654Z",
+    "admitted_units": 1,
+    "occupied_units": 1,
+    "remaining_units": null,
+    "pending_units": 1,
+    "unknown_units": 0,
+    "verified_input_tokens": null,
+    "verified_output_tokens": null,
+    "usage_complete": false,
+    "coverage": "new_admissions_and_retained_legacy_records"
+  },
+  "rows": []
+}

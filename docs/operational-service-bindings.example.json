@@ -1,0 +1,49 @@
+{
+  "version": 2,
+  "entra_tenant_id": "00000000-0000-4000-8000-000000000001",
+  "os_runtime_client_id": "00000000-0000-4000-8000-000000000002",
+  "core": {
+    "origin": "https://core-api.example.invalid",
+    "web_origin": "https://core.example.invalid",
+    "api_audience": "00000000-0000-4000-8000-000000000003",
+    "authority_tenant_ref": "authority_tenant_01arz3ndektsv4rrffq69g5fav",
+    "scribe_workflow_client_id": "00000000-0000-4000-8000-000000000004",
+    "sovereign_client_id": "00000000-0000-4000-8000-000000000010",
+    "scribe_receiver_client_id": "00000000-0000-4000-8000-000000000011"
+  },
+  "scribe": {
+    "origin": "https://scribe.example.invalid",
+    "api_audience": "00000000-0000-4000-8000-000000000005",
+    "practice_id": "00000000-0000-4000-8000-000000000006"
+  },
+  "scheduling": {
+    "origin": "https://scheduling.example.invalid",
+    "practice_id": "00000000-0000-4000-8000-000000000007",
+    "staff_api_audience": "00000000-0000-4000-8000-000000000008",
+    "google_staff_client_id": "invented-w76-staff.apps.googleusercontent.com",
+    "google_calendar_client_id": "invented-w76-calendar.apps.googleusercontent.com"
+  },
+  "translation_provider": {
+    "resource_id": "/subscriptions/00000000-0000-4000-8000-000000000009/resourceGroups/synthetic/providers/Microsoft.CognitiveServices/accounts/invented-w76",
+    "endpoint": "https://invented-w76.openai.azure.com/openai/v1",
+    "deployment": "reviewed-gpt41-es-en"
+  },
+  "capture_upload_origins": [
+    "https://uploads.example.invalid"
+  ],
+  "secret_references": {
+    "SCHEDULING_GOOGLE_CLIENT_SECRET": {
+      "secret_name": "invented-scheduling-google-client",
+      "version": "11111111111111111111111111111111"
+    },
+    "SCHEDULING_LOGIN_ENCRYPTION_KEY": {
+      "secret_name": "invented-scheduling-login-custody",
+      "version": "22222222222222222222222222222222"
+    },
+    "WORKSPACE_LLM_API_KEY": {
+      "secret_name": "invented-workspace-model",
+      "version": "33333333333333333333333333333333"
+    }
+  },
+  "web_origin": "https://workspace.example.invalid"
+}

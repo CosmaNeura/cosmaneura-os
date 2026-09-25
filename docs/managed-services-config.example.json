@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "box_id": "00000000-0000-4000-8000-000000000001",
+  "delivery": [
+    {
+      "selection": {
+        "vendor": "documo",
+        "connection_id": "00000000-0000-4000-8000-000000000002",
+        "box_id": "00000000-0000-4000-8000-000000000001",
+        "owner_id": "00000000-0000-4000-8000-000000000003",
+        "environment": "sandbox",
+        "remote_account_id": "00000000-0000-4000-8000-000000000004",
+        "credential_ref": "00000000-0000-4000-8000-000000000005",
+        "configuration_sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      },
+      "label": "Invented Documo sandbox",
+      "sender_label": "Invented fax sender",
+      "routing": { "caller_id": "2125550199" },
+      "capabilities": ["documo_fax"],
+      "credential": {
+        "environment": "COSMAS_MANAGED_SECRET_DOCUMO_API",
+        "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "payments": [],
+  "events": [],
+  "artifacts": {
+    "backend": "azure_sas",
+    "account_url": "https://inventedstore.blob.core.windows.net",
+    "container_name": "vendor-artifacts",
+    "credential": {
+      "environment": "COSMAS_MANAGED_SECRET_DOCUMENTS_SAS",
+      "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+    }
+  }
+}

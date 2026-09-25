@@ -1,0 +1,94 @@
+{
+  "preview": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_01m386s6g4ehkbwwpx7bbfkbng",
+      "expected_actor_ref": "authority_actor_01m386s6g6eg3bqq4emwnad1vf",
+      "connection_sha256": "24ad57ba1d5a93405aaa621fb79e2b0c767872ce7dabe142e95e81ed04c92af2",
+      "request_nonce": "c436dc25-4b41-4f9e-a9d5-a5f635880fe7",
+      "action": "preview",
+      "window": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-25"
+      },
+      "cursor": null,
+      "plan_sha256": null
+    },
+    "response": {
+      "contract_version": "1",
+      "action": "preview",
+      "request_nonce": "c436dc25-4b41-4f9e-a9d5-a5f635880fe7",
+      "checked_at": "2026-09-23T22:39:33.499151Z",
+      "connection": {
+        "actor_ref": "authority_actor_01m386s6g6eg3bqq4emwnad1vf",
+        "tenant_ref": "authority_tenant_01m386s6g4ehkbwwpx7bbfkbng",
+        "provider_link_ref": "scribe_provider_link_01m386s6gcfmxbc7b34sphpa3x",
+        "practice_ref": "practice_01m386s6g5e4a8j9zm9de7btdw",
+        "practice_label": "Invented W48 practice",
+        "review_sha256": "24d939e0eec976e97143b46c854b44d7479af59c851ef2324decdbc3c51d0126",
+        "connection_sha256": "24ad57ba1d5a93405aaa621fb79e2b0c767872ce7dabe142e95e81ed04c92af2"
+      },
+      "window": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-25"
+      },
+      "plan_sha256": "bca8b396e66b582e52903a1429d51a5113a86bb09617db1d49c008df1058ddfc",
+      "scanned_count": 25,
+      "eligible_count": 25,
+      "already_connected_count": 0,
+      "review_required_count": 0,
+      "connected_now_count": 0,
+      "next_cursor": {
+        "window_sha256": "16c40218cdfec0e1428211aeb743b06de80a3802aa1283a2345c595b3a2c4978",
+        "connection_sha256": "24ad57ba1d5a93405aaa621fb79e2b0c767872ce7dabe142e95e81ed04c92af2",
+        "appointment_date": "2026-09-24T09:24:00",
+        "appointment_ref": "appointment_01m386s6h5evmbm7j5qdn60c6q"
+      }
+    }
+  },
+  "connect": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_01m386s6g4ehkbwwpx7bbfkbng",
+      "expected_actor_ref": "authority_actor_01m386s6g6eg3bqq4emwnad1vf",
+      "connection_sha256": "24ad57ba1d5a93405aaa621fb79e2b0c767872ce7dabe142e95e81ed04c92af2",
+      "request_nonce": "35c022bf-b068-4cef-ba0f-2bf234e74ba0",
+      "action": "connect",
+      "window": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-25"
+      },
+      "cursor": null,
+      "plan_sha256": "bca8b396e66b582e52903a1429d51a5113a86bb09617db1d49c008df1058ddfc"
+    },
+    "response": {
+      "contract_version": "1",
+      "action": "connect",
+      "request_nonce": "35c022bf-b068-4cef-ba0f-2bf234e74ba0",
+      "checked_at": "2026-09-23T22:39:33.626893Z",
+      "connection": {
+        "actor_ref": "authority_actor_01m386s6g6eg3bqq4emwnad1vf",
+        "tenant_ref": "authority_tenant_01m386s6g4ehkbwwpx7bbfkbng",
+        "provider_link_ref": "scribe_provider_link_01m386s6gcfmxbc7b34sphpa3x",
+        "practice_ref": "practice_01m386s6g5e4a8j9zm9de7btdw",
+        "practice_label": "Invented W48 practice",
+        "review_sha256": "24d939e0eec976e97143b46c854b44d7479af59c851ef2324decdbc3c51d0126",
+        "connection_sha256": "24ad57ba1d5a93405aaa621fb79e2b0c767872ce7dabe142e95e81ed04c92af2"
+      },
+      "window": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-25"
+      },
+      "plan_sha256": "bca8b396e66b582e52903a1429d51a5113a86bb09617db1d49c008df1058ddfc",
+      "scanned_count": 25,
+      "eligible_count": 25,
+      "already_connected_count": 0,
+      "review_required_count": 0,
+      "connected_now_count": 25,
+      "next_cursor": {
+        "window_sha256": "16c40218cdfec0e1428211aeb743b06de80a3802aa1283a2345c595b3a2c4978",
+        "connection_sha256": "24ad57ba1d5a93405aaa621fb79e2b0c767872ce7dabe142e95e81ed04c92af2",
+        "appointment_date": "2026-09-24T09:24:00",
+        "appointment_ref": "appointment_01m386s6h5evmbm7j5qdn60c6q"
+      }
+    }
+  }
+}

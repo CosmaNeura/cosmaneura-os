@@ -1,30 +1,42 @@
-FROM node:22-alpine@sha256:76789712cd1ae89a1225eac9077010d68987a423588042dac30446f502f1858c AS build
-
+# Node 24.19 matches the hosted client runtime and is pinned by registry digest.
+ARG NODE_BUILD_IMAGE=node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
+FROM ${NODE_BUILD_IMAGE} AS build
 WORKDIR /build/web
 COPY web/package.json web/pnpm-lock.yaml ./
-RUN corepack enable \
-    && pnpm config set store-dir /pnpm/store \
-    && pnpm fetch --frozen-lockfile --ignore-scripts
-
-RUN --network=none pnpm install --frozen-lockfile --offline
-
+RUN corepack enable && pnpm config set store-dir /pnpm/store && pnpm fetch --frozen-lockfile --ignore-scripts
+RUN --network=none pnpm install --frozen-lockfile --offline --ignore-scripts
+WORKDIR /build/clients/capture
+COPY clients/capture/package.json clients/capture/pnpm-lock.yaml ./
+RUN pnpm fetch --frozen-lockfile --ignore-scripts
+RUN --network=none pnpm install --frozen-lockfile --offline --ignore-scripts
+WORKDIR /build/web
 COPY web/ ./
-
-# These are public client configuration, not credentials. The beta build
-# validator requires a production Clerk publishable key and exact HTTPS API
-# origin, and it intentionally refuses a partially configured artifact.
-ARG VITE_COSMAS_ENV
+COPY clients/capture/ /build/clients/capture/
+COPY clients/shared/ /build/clients/shared/
+COPY clients/desktop/google-navigation.mjs /build/clients/desktop/google-navigation.mjs
+COPY clients/desktop/google-navigation.d.mts /build/clients/desktop/google-navigation.d.mts
+COPY tests/fixtures/ /build/tests/fixtures/
 ARG VITE_CLERK_PUBLISHABLE_KEY
-ARG VITE_API_BASE
-ENV VITE_COSMAS_ENV=${VITE_COSMAS_ENV} \
+ARG VITE_WORKSPACE_HOSTED_API_ORIGIN
+ARG VITE_WORKSPACE_WEB_ORIGIN
+ARG VITE_WORKSPACE_DATA_MODE=synthetic
+ARG VITE_COSMANEURA_WEB_ORIGIN
+ARG VITE_CAPTURE_UPLOAD_ORIGINS
+ARG VITE_WORKSPACE_CAPTURE_MODE=browser_microphone
+ENV VITE_WORKSPACE_FEATURE_PROFILE=operational-beta-v1 \
+    VITE_WORKSPACE_HOSTED_CLIENT=web \
+    VITE_WORKSPACE_DATA_MODE=${VITE_WORKSPACE_DATA_MODE} \
+    VITE_WORKSPACE_CAPTURE_MODE=${VITE_WORKSPACE_CAPTURE_MODE} \
+    VITE_CAPTURE_UPLOAD_ORIGINS=${VITE_CAPTURE_UPLOAD_ORIGINS} \
+    VITE_COSMANEURA_WEB_ORIGIN=${VITE_COSMANEURA_WEB_ORIGIN} \
     VITE_CLERK_PUBLISHABLE_KEY=${VITE_CLERK_PUBLISHABLE_KEY} \
-    VITE_API_BASE=${VITE_API_BASE}
+    VITE_API_BASE=${VITE_WORKSPACE_HOSTED_API_ORIGIN} \
+    VITE_WORKSPACE_HOSTED_API_ORIGIN=${VITE_WORKSPACE_HOSTED_API_ORIGIN} \
+    VITE_WORKSPACE_WEB_ORIGIN=${VITE_WORKSPACE_WEB_ORIGIN}
 RUN --network=none pnpm run build:beta
-
 FROM nginxinc/nginx-unprivileged:stable-alpine@sha256:ee1643aef6b99d1058aa79b74679ba3e63094a98a1144a4326def7bae77d293b
-
-COPY web/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /build/web/.beta/nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /build/web/dist /usr/share/nginx/html
-
+COPY docs/third-party/activepieces-LICENSE.txt /usr/share/nginx/html/licenses/activepieces-LICENSE.txt
 USER 101:101
 EXPOSE 8080

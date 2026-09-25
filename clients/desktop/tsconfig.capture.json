@@ -1,0 +1,5 @@
+{
+  "extends": "../capture/tsconfig.json",
+  "compilerOptions": {"typeRoots": ["../capture/node_modules/@types"], "types": ["node"]},
+  "include": ["recorder/**/*.ts", "../capture/protocol", "../capture/test-fixtures"]
+}

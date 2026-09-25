@@ -1,0 +1,14 @@
+{
+  "id": "11111111-1111-4111-8111-111111111111",
+  "revision": 2147483647,
+  "vendor": "spruce",
+  "environment": "production",
+  "label": "🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦🟦",
+  "actions": [
+    "spruce_secure_message",
+    "spruce_media_upload",
+    "spruce_fax"
+  ],
+  "availability": "read_only",
+  "public_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+}

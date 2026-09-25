@@ -1,0 +1,425 @@
+{
+  "catalog": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+      "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+    },
+    "enabled": true,
+    "installed_accounts": [
+      {
+        "installation_id": "b7b227fe-68f1-4330-b5da-8ca9f4e0d4ad",
+        "installation_sha256": "3f6c971d811f4cb0c082e0896109e80ff04aa8daae01fdf9d07073ebd9f67927",
+        "label": "Invented installed Stripe sandbox",
+        "environment": "sandbox",
+        "account_reference": "acct_SettingsInvented"
+      }
+    ],
+    "patients": [
+      {
+        "patient_link_id": "f2594a38-2182-4fe7-acb7-148ffd410c04",
+        "label": "Invented W36 patient"
+      }
+    ],
+    "setups": []
+  },
+  "commands": [
+    {
+      "kind": "propose_account",
+      "request": {
+        "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+        "expected_version": 0,
+        "idempotency_key": "account-proposal-35e3a541-ada8-4566-ab15-19c51cc6c240",
+        "installation_id": "b7b227fe-68f1-4330-b5da-8ca9f4e0d4ad",
+        "installation_sha256": "3f6c971d811f4cb0c082e0896109e80ff04aa8daae01fdf9d07073ebd9f67927",
+        "label": "Invented reviewed billing account",
+        "permissions": {
+          "read_status": true,
+          "create_unconfirmed_intents": true
+        }
+      }
+    },
+    {
+      "kind": "activate",
+      "request": {
+        "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+        "expected_version": 1,
+        "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+        "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513",
+        "idempotency_key": "finance-setup-992e5d6e-868e-47c0-8807-49b93264afdf",
+        "reviewed_account": true,
+        "reviewed_environment": true,
+        "confirm_local_activation": true
+      }
+    },
+    {
+      "kind": "propose_customer",
+      "request": {
+        "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+        "expected_version": 0,
+        "idempotency_key": "customer-proposal-35f9f85d-b427-4ce4-866a-1f0780aed61b",
+        "account": {
+          "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+          "expected_version": 2,
+          "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+          "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513"
+        },
+        "patient_link_id": "f2594a38-2182-4fe7-acb7-148ffd410c04",
+        "customer_id": "cus_SettingsInvented",
+        "label": "Invented verified billing customer"
+      }
+    },
+    {
+      "kind": "activate",
+      "request": {
+        "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+        "expected_version": 1,
+        "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+        "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+        "idempotency_key": "finance-setup-a543019e-517d-43f3-b976-0dead1d34498",
+        "reviewed_account": true,
+        "reviewed_environment": true,
+        "reviewed_patient_customer": true,
+        "confirm_local_activation": true
+      }
+    }
+  ],
+  "receipts": [
+    {
+      "contract_version": 1,
+      "outcome": "recorded",
+      "scope": {
+        "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+        "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+      },
+      "command_kind": "propose_account",
+      "idempotency_key": "account-proposal-35e3a541-ada8-4566-ab15-19c51cc6c240",
+      "request_sha256": "38443e9e7833b1158f8657d3b657c8da326475c51046aaa77c4ab980fdd1e9e5",
+      "receipt_id": "1ac2c4f6-331b-4902-8faa-1c6ffb3b5f02",
+      "recorded_at": "2026-09-22T01:18:15.614311Z",
+      "effect": {
+        "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+        "kind": "account",
+        "version": 1,
+        "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+        "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513",
+        "state": "pending_review"
+      },
+      "receipt_sha256": "e9c18425a1117ae82316a0581dfb4ee52c8af038bd2279791d45f2c928063a57"
+    },
+    {
+      "contract_version": 1,
+      "outcome": "recorded",
+      "scope": {
+        "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+        "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+      },
+      "command_kind": "activate",
+      "idempotency_key": "finance-setup-992e5d6e-868e-47c0-8807-49b93264afdf",
+      "request_sha256": "3e26e13e4ca5be55970592109f9042aaef7fc92c4cf7120f597dc7eedc26e513",
+      "receipt_id": "e2337315-62d4-4f84-a776-4d4625e56f03",
+      "recorded_at": "2026-09-22T01:18:15.625979Z",
+      "effect": {
+        "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+        "kind": "account",
+        "version": 2,
+        "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+        "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513",
+        "state": "active"
+      },
+      "receipt_sha256": "9ebdd022e33fa2007d2a7b545d699e8ce409985d03c2b51e1d975b9806943518"
+    },
+    {
+      "contract_version": 1,
+      "outcome": "recorded",
+      "scope": {
+        "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+        "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+      },
+      "command_kind": "propose_customer",
+      "idempotency_key": "customer-proposal-35f9f85d-b427-4ce4-866a-1f0780aed61b",
+      "request_sha256": "e643a12390819d85614cf658b769d566d33d4c503d2d02aa843422cbbdaab4d4",
+      "receipt_id": "a60301a4-b028-42cd-9606-91de4f99cce8",
+      "recorded_at": "2026-09-22T01:18:15.639768Z",
+      "effect": {
+        "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+        "kind": "customer",
+        "version": 1,
+        "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+        "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+        "state": "pending_review"
+      },
+      "receipt_sha256": "b9d97a110cc37ee41d380b8ef7f33f62050d69bd65df621c6df1c4e02fa486cb"
+    },
+    {
+      "contract_version": 1,
+      "outcome": "recorded",
+      "scope": {
+        "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+        "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+      },
+      "command_kind": "activate",
+      "idempotency_key": "finance-setup-a543019e-517d-43f3-b976-0dead1d34498",
+      "request_sha256": "7848af33be718553acfa91fcd080048d2763f43d4609dbb21e2b368ed7bbbb6d",
+      "receipt_id": "d3a7bb24-f5bc-4684-84ef-d6543ce1ded2",
+      "recorded_at": "2026-09-22T01:18:15.650158Z",
+      "effect": {
+        "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+        "kind": "customer",
+        "version": 2,
+        "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+        "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+        "state": "active"
+      },
+      "receipt_sha256": "edce922b211764b3c37973aee858f575e31deb353e1c484e0fef10d34d93e31b"
+    }
+  ],
+  "details": [
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+        "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+      },
+      "summary": {
+        "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+        "kind": "account",
+        "version": 2,
+        "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+        "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513",
+        "state": "active",
+        "target": {
+          "kind": "account",
+          "installation_id": "b7b227fe-68f1-4330-b5da-8ca9f4e0d4ad"
+        },
+        "label": "Invented reviewed billing account",
+        "usable_locally": true,
+        "availability": "available"
+      },
+      "review": {
+        "kind": "account",
+        "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+        "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+        "revision": 1,
+        "installed": {
+          "installation_id": "b7b227fe-68f1-4330-b5da-8ca9f4e0d4ad",
+          "installation_sha256": "3f6c971d811f4cb0c082e0896109e80ff04aa8daae01fdf9d07073ebd9f67927",
+          "label": "Invented installed Stripe sandbox",
+          "environment": "sandbox",
+          "account_reference": "acct_SettingsInvented"
+        },
+        "label": "Invented reviewed billing account",
+        "permissions": {
+          "read_status": true,
+          "create_unconfirmed_intents": true
+        },
+        "connection_version_id": "8ead3f43-110f-4509-a527-f460e08db638"
+      },
+      "last_receipt": {
+        "contract_version": 1,
+        "outcome": "recorded",
+        "scope": {
+          "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+          "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+        },
+        "command_kind": "activate",
+        "idempotency_key": "finance-setup-992e5d6e-868e-47c0-8807-49b93264afdf",
+        "request_sha256": "3e26e13e4ca5be55970592109f9042aaef7fc92c4cf7120f597dc7eedc26e513",
+        "receipt_id": "e2337315-62d4-4f84-a776-4d4625e56f03",
+        "recorded_at": "2026-09-22T01:18:15.625979Z",
+        "effect": {
+          "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+          "kind": "account",
+          "version": 2,
+          "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+          "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513",
+          "state": "active"
+        },
+        "receipt_sha256": "9ebdd022e33fa2007d2a7b545d699e8ce409985d03c2b51e1d975b9806943518"
+      }
+    },
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+        "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+      },
+      "summary": {
+        "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+        "kind": "customer",
+        "version": 2,
+        "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+        "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+        "state": "active",
+        "target": {
+          "kind": "customer",
+          "account_setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+          "patient_link_id": "f2594a38-2182-4fe7-acb7-148ffd410c04"
+        },
+        "label": "Invented verified billing customer",
+        "usable_locally": true,
+        "availability": "available"
+      },
+      "review": {
+        "kind": "customer",
+        "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+        "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+        "revision": 1,
+        "installed": {
+          "installation_id": "b7b227fe-68f1-4330-b5da-8ca9f4e0d4ad",
+          "installation_sha256": "3f6c971d811f4cb0c082e0896109e80ff04aa8daae01fdf9d07073ebd9f67927",
+          "label": "Invented installed Stripe sandbox",
+          "environment": "sandbox",
+          "account_reference": "acct_SettingsInvented"
+        },
+        "label": "Invented verified billing customer",
+        "account": {
+          "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+          "expected_version": 2,
+          "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+          "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513"
+        },
+        "account_label": "Invented reviewed billing account",
+        "connection_version_id": "8ead3f43-110f-4509-a527-f460e08db638",
+        "customer_version_id": "2619d6b2-b27f-4537-8232-2c92ac057697",
+        "patient": {
+          "patient_link_id": "f2594a38-2182-4fe7-acb7-148ffd410c04",
+          "label": "Invented W36 patient"
+        },
+        "customer_id": "cus_SettingsInvented"
+      },
+      "last_receipt": {
+        "contract_version": 1,
+        "outcome": "recorded",
+        "scope": {
+          "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+          "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+        },
+        "command_kind": "activate",
+        "idempotency_key": "finance-setup-a543019e-517d-43f3-b976-0dead1d34498",
+        "request_sha256": "7848af33be718553acfa91fcd080048d2763f43d4609dbb21e2b368ed7bbbb6d",
+        "receipt_id": "d3a7bb24-f5bc-4684-84ef-d6543ce1ded2",
+        "recorded_at": "2026-09-22T01:18:15.650158Z",
+        "effect": {
+          "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+          "kind": "customer",
+          "version": 2,
+          "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+          "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+          "state": "active"
+        },
+        "receipt_sha256": "edce922b211764b3c37973aee858f575e31deb353e1c484e0fef10d34d93e31b"
+      }
+    }
+  ],
+  "active_catalog": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+      "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+    },
+    "enabled": true,
+    "installed_accounts": [
+      {
+        "installation_id": "b7b227fe-68f1-4330-b5da-8ca9f4e0d4ad",
+        "installation_sha256": "3f6c971d811f4cb0c082e0896109e80ff04aa8daae01fdf9d07073ebd9f67927",
+        "label": "Invented installed Stripe sandbox",
+        "environment": "sandbox",
+        "account_reference": "acct_SettingsInvented"
+      }
+    ],
+    "patients": [
+      {
+        "patient_link_id": "f2594a38-2182-4fe7-acb7-148ffd410c04",
+        "label": "Invented W36 patient"
+      }
+    ],
+    "setups": [
+      {
+        "setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+        "kind": "account",
+        "version": 2,
+        "revision_id": "f2c53c18-6dfd-4ba9-b419-5ab1360cf6db",
+        "review_sha256": "ee2b59afe8dea8a261f56cf6394007207ab30619295b8f022cf52858359b5513",
+        "state": "active",
+        "target": {
+          "kind": "account",
+          "installation_id": "b7b227fe-68f1-4330-b5da-8ca9f4e0d4ad"
+        },
+        "label": "Invented reviewed billing account",
+        "usable_locally": true,
+        "availability": "available"
+      },
+      {
+        "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+        "kind": "customer",
+        "version": 2,
+        "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+        "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+        "state": "active",
+        "target": {
+          "kind": "customer",
+          "account_setup_id": "e004e391-8132-402e-847b-45ed83f30cb9",
+          "patient_link_id": "f2594a38-2182-4fe7-acb7-148ffd410c04"
+        },
+        "label": "Invented verified billing customer",
+        "usable_locally": true,
+        "availability": "available"
+      }
+    ]
+  },
+  "history": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+      "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+    },
+    "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+    "receipts": [
+      {
+        "contract_version": 1,
+        "outcome": "recorded",
+        "scope": {
+          "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+          "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+        },
+        "command_kind": "propose_customer",
+        "idempotency_key": "customer-proposal-35f9f85d-b427-4ce4-866a-1f0780aed61b",
+        "request_sha256": "e643a12390819d85614cf658b769d566d33d4c503d2d02aa843422cbbdaab4d4",
+        "receipt_id": "a60301a4-b028-42cd-9606-91de4f99cce8",
+        "recorded_at": "2026-09-22T01:18:15.639768Z",
+        "effect": {
+          "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+          "kind": "customer",
+          "version": 1,
+          "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+          "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+          "state": "pending_review"
+        },
+        "receipt_sha256": "b9d97a110cc37ee41d380b8ef7f33f62050d69bd65df621c6df1c4e02fa486cb"
+      },
+      {
+        "contract_version": 1,
+        "outcome": "recorded",
+        "scope": {
+          "box_id": "05024fe7-bb7d-418f-9ee2-4ef6ad7fe723",
+          "owner_id": "9590bc82-bc18-4e72-aa6e-905bad66776f"
+        },
+        "command_kind": "activate",
+        "idempotency_key": "finance-setup-a543019e-517d-43f3-b976-0dead1d34498",
+        "request_sha256": "7848af33be718553acfa91fcd080048d2763f43d4609dbb21e2b368ed7bbbb6d",
+        "receipt_id": "d3a7bb24-f5bc-4684-84ef-d6543ce1ded2",
+        "recorded_at": "2026-09-22T01:18:15.650158Z",
+        "effect": {
+          "setup_id": "e87c86e0-4652-4829-977d-3c02c33eb417",
+          "kind": "customer",
+          "version": 2,
+          "revision_id": "cd22ac81-3c12-4941-a4fd-55919d1af8b5",
+          "review_sha256": "cde2d567f8ea9951cd5f21b410b168ffa843b9cf38f88ae305788f40c93680af",
+          "state": "active"
+        },
+        "receipt_sha256": "edce922b211764b3c37973aee858f575e31deb353e1c484e0fef10d34d93e31b"
+      }
+    ]
+  }
+}

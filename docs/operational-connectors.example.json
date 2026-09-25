@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "google": {
+    "client_id": "invented-w77-gmail.apps.googleusercontent.com",
+    "client_secret": {"secret_name": "invented-gmail-client", "version": "44444444444444444444444444444444"},
+    "encryption_key": {"secret_name": "invented-gmail-custody", "version": "55555555555555555555555555555555"}
+  },
+  "microsoft": {
+    "tenant_id": "00000000-0000-4000-8000-000000000001",
+    "client_id": "00000000-0000-4000-8000-000000000011",
+    "client_secret": {"secret_name": "invented-microsoft-client", "version": "66666666666666666666666666666666"},
+    "encryption_key": {"secret_name": "invented-microsoft-custody", "version": "77777777777777777777777777777777"}
+  },
+  "managed_services": {
+    "manifest": {
+      "secret_name": "invented-managed-account-manifest",
+      "version": "88888888888888888888888888888888",
+      "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    },
+    "secret_references": {
+      "COSMAS_MANAGED_SECRET_DOCUMO_API": {"secret_name": "invented-documo-api", "version": "99999999999999999999999999999999"}
+    },
+    "enabled": {"vendor_io": false, "vendor_events": false, "finance_io": false, "finance_events": false}
+  }
+}

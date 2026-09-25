@@ -1,0 +1,49 @@
+{
+  "source": "w96-service-source-integration-r1/scribe-source",
+  "files": {
+    "ios-pcm-capture/Package.swift": {
+      "source_sha256": "276b2b544f6746ff6a32177386bcd5ab3f00687a33c7b022f253f371b7d3e811",
+      "sha256": "276b2b544f6746ff6a32177386bcd5ab3f00687a33c7b022f253f371b7d3e811"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift": {
+      "source_sha256": "e4aa314d90d5fc27cf4332898334b5e3e6ea97346c7bfd474edc9727beab7f14",
+      "sha256": "e4aa314d90d5fc27cf4332898334b5e3e6ea97346c7bfd474edc9727beab7f14"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift": {
+      "source_sha256": "62de3a2cf8d7d2fddce44f2617d06a02da7bf3f85583c1448320b14bb61b28cd",
+      "sha256": "62de3a2cf8d7d2fddce44f2617d06a02da7bf3f85583c1448320b14bb61b28cd"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift": {
+      "source_sha256": "e7ca858f0f7e4967790dfcdb16d12c793409b0b422a61143f4177f18c2f04b05",
+      "sha256": "e7ca858f0f7e4967790dfcdb16d12c793409b0b422a61143f4177f18c2f04b05"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/AreaWeightedResampler.swift": {
+      "source_sha256": "edcdb3199766d71b917df03daac04b5888b4dfde6b3724699756cdcb0c986934",
+      "sha256": "edcdb3199766d71b917df03daac04b5888b4dfde6b3724699756cdcb0c986934"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMSourceAuthority.swift": {
+      "source_sha256": "e96e7f843aa250aabdd54ce97cf1640c922355c73afc776385e30cb189032bed",
+      "sha256": "295986e0561c0066e40c34a15b5e7fb649e6d6ca93dc389129dcfd83271e7cbb"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMTypes.swift": {
+      "source_sha256": "a3aa3af6f32d2466333ea8c8f1713216ff401e45bf786341d33b53f4bb1db35c",
+      "sha256": "a3aa3af6f32d2466333ea8c8f1713216ff401e45bf786341d33b53f4bb1db35c"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift": {
+      "source_sha256": "366188f58b78a24c083853296a97f1bf3d2387243a42c966f4db4c0f19435f7e",
+      "sha256": "4779785788be46d539979ae85ce2f5fdaeab43d8c6524e17f066472614495061"
+    },
+    "ios-pcm-capacitor/Package.swift": {
+      "source_sha256": "24087efa8db58e9988ec9de919d9eda46660bbf1392a3fd84da04dd2ef219251",
+      "sha256": "20ac6ca73b3559bb067a96d630bf1a5121303170b2940195219651b134eb09c1"
+    },
+    "ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitorTransport/IOSPCMCapacitorTransport.swift": {
+      "source_sha256": "962ae27ddbe8cdf591374e76bc4798fb7fa89c8d60b7526aadc62f44c1a68587",
+      "sha256": "8d623f13bf259775dd83c39bf8e9fea5c84f6c74126cb96a6957ebe13615fac9"
+    },
+    "ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift": {
+      "source_sha256": "bf083158f9cd74fcecb74ce0c07daa7e18fd3a1e706df5c578b8729d4552a353",
+      "sha256": "3f6554a7627dba79055c65ba084a088ae16f21cea4fc13b62026b851b0ae8911"
+    }
+  }
+}

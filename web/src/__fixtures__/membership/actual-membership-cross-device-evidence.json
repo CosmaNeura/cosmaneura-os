@@ -1,0 +1,406 @@
+{
+  "response": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "e562f0af-ca6d-405c-a721-397f7d52980d",
+      "owner_id": "219ccea0-6845-47ea-836c-cb69e12cb1e6",
+      "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+    },
+    "membership": {
+      "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+      "version": 4,
+      "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+      "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+      "result_receipt_id": "afa54b4a-13f6-4b8a-b320-b3cbf914e707",
+      "result_receipt_sha256": "29ea4f7912f8807eede7fc3f5d8c981158f6ed19d00b34d9a89e1c56fea90818"
+    },
+    "request": {
+      "expected_version": 8,
+      "operation_id": "6f19ecc1-a28d-4a91-ae96-f98451a66d3c",
+      "revision_id": "36b8829e-bdcd-49dd-851f-4b5b6557f9da",
+      "payload_hash": "76514451f0593d90533d1da4defb9bf4b884a791d9fba6481c1e564cd8b603f7",
+      "idempotency_key": "finance-command-3f8278a3-83a9-414e-82d8-884826e45df3",
+      "result_receipt_id": "37e6622f-d676-4737-bed1-de3675ae3678",
+      "result_receipt_sha256": "ac31bbdd12c0d03552ec8e16b33e9e180ccb39b5997d54501f2aa0199f8875f3",
+      "observation_head": {
+        "sequence": 3,
+        "sha256": "80966ea79b39a6ee81f5e80f897f97fc3de33495d8a5322e5859e8114a2f2bff"
+      },
+      "evidence_sha256": "26d98d0f423ace5e24fbc9525e6a4636ffbdc375da97fbc92661f4e01cbb0ff2",
+      "reviewed_result": true,
+      "reviewed_observations": true,
+      "outcome_confirmed": true,
+      "reviewed_conflicting_evidence": false
+    },
+    "receipt": {
+      "contract_version": 1,
+      "scope": {
+        "kind": "workspace",
+        "id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+      },
+      "command_kind": "verify",
+      "idempotency_key": "finance-command-3f8278a3-83a9-414e-82d8-884826e45df3",
+      "request_sha256": "5bc58c872eab96bc354230aa3485698e5bca9a6e0928055c1894209d45ea2736",
+      "outcome": "recorded",
+      "effect": {
+        "ticket_id": "06e61a00-bf65-4661-baa5-4ec0c138b597",
+        "revision_id": "36b8829e-bdcd-49dd-851f-4b5b6557f9da",
+        "operation_id": "6f19ecc1-a28d-4a91-ae96-f98451a66d3c",
+        "payload_hash": "76514451f0593d90533d1da4defb9bf4b884a791d9fba6481c1e564cd8b603f7",
+        "receipt_id": "bb85a2b7-8e0c-41b6-bdf8-62fc79fa8588",
+        "effect_version": 9,
+        "recorded_at": "2026-09-22T12:17:50.518530Z",
+        "effect": "verified"
+      },
+      "receipt_sha256": "1ae45c602a221ac3fa0e569b918e7e8aa8ca24e02dfad7fecaaa14d107779f6f",
+      "observed_at": "2026-09-22T12:17:50.644039Z"
+    },
+    "detail": {
+      "contract_version": 1,
+      "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7",
+      "summary": {
+        "ticket_id": "06e61a00-bf65-4661-baa5-4ec0c138b597",
+        "version": 9,
+        "revision_id": "36b8829e-bdcd-49dd-851f-4b5b6557f9da",
+        "operation_id": "6f19ecc1-a28d-4a91-ae96-f98451a66d3c",
+        "payload_hash": "76514451f0593d90533d1da4defb9bf4b884a791d9fba6481c1e564cd8b603f7",
+        "state": "closed",
+        "amount": 12500,
+        "currency": "usd",
+        "creation": "accepted",
+        "payment_state": "succeeded",
+        "amount_received": 12500,
+        "submit_claimed": true,
+        "conflicting_evidence": false,
+        "result": "reported_paid",
+        "verification": "verified",
+        "observation_head": {
+          "sequence": 3,
+          "sha256": "80966ea79b39a6ee81f5e80f897f97fc3de33495d8a5322e5859e8114a2f2bff"
+        },
+        "evidence_sha256": "26d98d0f423ace5e24fbc9525e6a4636ffbdc375da97fbc92661f4e01cbb0ff2"
+      },
+      "review": {
+        "ticket_id": "06e61a00-bf65-4661-baa5-4ec0c138b597",
+        "revision_id": "36b8829e-bdcd-49dd-851f-4b5b6557f9da",
+        "operation_id": "6f19ecc1-a28d-4a91-ae96-f98451a66d3c",
+        "connection": {
+          "id": "76cceb48-5a5e-44e8-aa5d-e5abdb45e3a5",
+          "revision": 1,
+          "environment": "sandbox",
+          "label": "Invented Stripe sandbox",
+          "availability": "enabled",
+          "public_sha256": "4422d31e46012a1a845b891b8a793aef46399730e5efd0d28670c35c27dc1ba4"
+        },
+        "customer": {
+          "id": "de0beaba-3213-4609-91fc-a52a23fc60de",
+          "revision": 1,
+          "connection_id": "76cceb48-5a5e-44e8-aa5d-e5abdb45e3a5",
+          "label": "Invented patient billing account",
+          "availability": "reviewed",
+          "public_sha256": "2e67b70f94c06fc6eed278611fa109d88798ce7c6259b7964748a217a1ef53a1"
+        },
+        "source": {
+          "kind": "reviewed_note",
+          "note_id": "eb46d87f-5815-4c7b-83a1-28caf5730a6e",
+          "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+          "source_fingerprint": "cc6eb14c2c5c87b1bf275b8b36c6af1f2998e979741589fd435f9c71770a8372"
+        },
+        "amount": 12500,
+        "currency": "usd",
+        "due_date": "2026-10-01",
+        "expected_outcome": "Invented patient completes the reviewed payment request.",
+        "expires_at": "2026-09-22T12:32:50.414431Z",
+        "processor_confirmation": "not_requested"
+      },
+      "review_sha256": "088049a707414a11433a5104d835d00f3030db3733592f8df50d06ee1186689c",
+      "latest_result": {
+        "receipt_id": "37e6622f-d676-4737-bed1-de3675ae3678",
+        "receipt_sha256": "ac31bbdd12c0d03552ec8e16b33e9e180ccb39b5997d54501f2aa0199f8875f3",
+        "disposition": "reported_paid",
+        "evidence": "Invented owner observed payment result.",
+        "observation_head": {
+          "sequence": 3,
+          "sha256": "80966ea79b39a6ee81f5e80f897f97fc3de33495d8a5322e5859e8114a2f2bff"
+        },
+        "recorded_at": "2026-09-22T12:17:50.510525Z"
+      }
+    }
+  },
+  "membership_detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "e562f0af-ca6d-405c-a721-397f7d52980d",
+      "owner_id": "219ccea0-6845-47ea-836c-cb69e12cb1e6",
+      "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+    },
+    "summary": {
+      "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+      "version": 4,
+      "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+      "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+      "purpose": "enrollment_assistance",
+      "due_date": "2026-09-30",
+      "state": "closed",
+      "evidence_classification": "manual_ledger_and_finance_review",
+      "evidence_current": "available",
+      "result": "record_reviewed",
+      "verification": "review_verified",
+      "external_service_verified": false,
+      "membership_authority": "not_established",
+      "source_current": true,
+      "can_verify": false
+    },
+    "review": {
+      "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+      "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+      "patient_link_id": "0f188e3e-948a-4c18-9398-b3f291afce24",
+      "proposal": {
+        "expected_workspace_revision": 3,
+        "idempotency_key": "membership-propose-b9feae97-26b4-42c7-8c60-6dd1dee637f9",
+        "source": {
+          "kind": "reviewed_note",
+          "note_id": "eb46d87f-5815-4c7b-83a1-28caf5730a6e",
+          "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+          "source_fingerprint": "cc6eb14c2c5c87b1bf275b8b36c6af1f2998e979741589fd435f9c71770a8372"
+        },
+        "patient_link_id": "0f188e3e-948a-4c18-9398-b3f291afce24",
+        "purpose": "enrollment_assistance",
+        "due_date": "2026-09-30",
+        "expected_outcome": "Review invented enrollment information",
+        "instructions": "Prepare a local review; no patient enrollment or charge."
+      },
+      "authority": "local_human_review_only",
+      "automatic_membership_changes": false,
+      "automatic_messages_or_money_movement": false
+    },
+    "review_sha256": "fc3e8fcf938348bc7cebe1731617a6f6f84dc99dc37ac01bd8325c9b01ccfb3f",
+    "latest_result": {
+      "receipt_id": "afa54b4a-13f6-4b8a-b320-b3cbf914e707",
+      "receipt_sha256": "29ea4f7912f8807eede7fc3f5d8c981158f6ed19d00b34d9a89e1c56fea90818",
+      "request": {
+        "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+        "expected_version": 2,
+        "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+        "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+        "idempotency_key": "membership-command-5ddfa899-f926-4429-bb0b-d608dd344d56",
+        "disposition": "record_reviewed",
+        "evidence": "Invented local information was reviewed; membership is unreconciled.",
+        "ledger": {
+          "source_label": "Invented practice membership ledger",
+          "system_kind": "practice_owned_ledger",
+          "record_reference": "invented-member-001",
+          "observed_at": "2026-09-22T12:17:50.552150Z",
+          "document": {
+            "artifact_id": "b75a27f3-840f-4c8a-97cb-e61bc385fdcf",
+            "sha256": "9927eeb3f2acf04d79bd7698546fea1ec342d08d5917ffd66cd8997353525afe",
+            "byte_length": 2179,
+            "media_type": "application/pdf"
+          },
+          "observed_membership_state": "pending_enrollment",
+          "observed_billing_state": "unknown",
+          "reviewed_record_matches_patient": true,
+          "reviewed_document": true,
+          "finance": {
+            "ticket_id": "06e61a00-bf65-4661-baa5-4ec0c138b597",
+            "verification_receipt_id": "bb85a2b7-8e0c-41b6-bdf8-62fc79fa8588",
+            "verification_receipt_sha256": "1ae45c602a221ac3fa0e569b918e7e8aa8ca24e02dfad7fecaaa14d107779f6f",
+            "evidence_sha256": "26d98d0f423ace5e24fbc9525e6a4636ffbdc375da97fbc92661f4e01cbb0ff2"
+          }
+        }
+      }
+    }
+  },
+  "membership_history": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "e562f0af-ca6d-405c-a721-397f7d52980d",
+      "owner_id": "219ccea0-6845-47ea-836c-cb69e12cb1e6",
+      "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+    },
+    "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+    "items": [
+      {
+        "request": {
+          "expected_workspace_revision": 3,
+          "idempotency_key": "membership-propose-b9feae97-26b4-42c7-8c60-6dd1dee637f9",
+          "source": {
+            "kind": "reviewed_note",
+            "note_id": "eb46d87f-5815-4c7b-83a1-28caf5730a6e",
+            "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+            "source_fingerprint": "cc6eb14c2c5c87b1bf275b8b36c6af1f2998e979741589fd435f9c71770a8372"
+          },
+          "patient_link_id": "0f188e3e-948a-4c18-9398-b3f291afce24",
+          "purpose": "enrollment_assistance",
+          "due_date": "2026-09-30",
+          "expected_outcome": "Review invented enrollment information",
+          "instructions": "Prepare a local review; no patient enrollment or charge."
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "e562f0af-ca6d-405c-a721-397f7d52980d",
+            "owner_id": "219ccea0-6845-47ea-836c-cb69e12cb1e6",
+            "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+          },
+          "command_kind": "propose",
+          "idempotency_key": "membership-propose-b9feae97-26b4-42c7-8c60-6dd1dee637f9",
+          "request_sha256": "9fc9281a05e8cff79d94d2ae184ff3f1ea51d3ad933dcb8db2660a19c48aaa7f",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+            "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+            "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+            "version": 1,
+            "receipt_id": "8152171f-3f36-450e-8810-4b787b9f66fa",
+            "recorded_at": "2026-09-22T12:17:50.527029Z",
+            "effect": "proposed",
+            "state": "pending_approval",
+            "evidence_classification": "local_unreconciled",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "109eddbd1b024ef82d7f41c3138e3146971bdcfa20826337bfbcc190bc5bcc2a"
+        }
+      },
+      {
+        "request": {
+          "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+          "expected_version": 1,
+          "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+          "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+          "idempotency_key": "membership-command-7da29948-fd50-4f2d-8d73-47ae63273d06",
+          "review_sha256": "fc3e8fcf938348bc7cebe1731617a6f6f84dc99dc37ac01bd8325c9b01ccfb3f",
+          "choice": "approve",
+          "reviewed_patient": true,
+          "reviewed_local_only_authority": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "e562f0af-ca6d-405c-a721-397f7d52980d",
+            "owner_id": "219ccea0-6845-47ea-836c-cb69e12cb1e6",
+            "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+          },
+          "command_kind": "decide",
+          "idempotency_key": "membership-command-7da29948-fd50-4f2d-8d73-47ae63273d06",
+          "request_sha256": "45b5c83c85157691d1290582b386a03f6aa36ebe81cfe8bd68dc387594879b66",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+            "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+            "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+            "version": 2,
+            "receipt_id": "69d8dc84-f7ff-4fc1-a783-4c78491ef3e3",
+            "recorded_at": "2026-09-22T12:17:50.535940Z",
+            "effect": "approved",
+            "state": "approved",
+            "evidence_classification": "local_unreconciled",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "2d51d24a99e51cf90d0d4920abaaa7da1942cda8ef0c632860ee870c8abca5fc"
+        }
+      },
+      {
+        "request": {
+          "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+          "expected_version": 2,
+          "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+          "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+          "idempotency_key": "membership-command-5ddfa899-f926-4429-bb0b-d608dd344d56",
+          "disposition": "record_reviewed",
+          "evidence": "Invented local information was reviewed; membership is unreconciled.",
+          "ledger": {
+            "source_label": "Invented practice membership ledger",
+            "system_kind": "practice_owned_ledger",
+            "record_reference": "invented-member-001",
+            "observed_at": "2026-09-22T12:17:50.552150Z",
+            "document": {
+              "artifact_id": "b75a27f3-840f-4c8a-97cb-e61bc385fdcf",
+              "sha256": "9927eeb3f2acf04d79bd7698546fea1ec342d08d5917ffd66cd8997353525afe",
+              "byte_length": 2179,
+              "media_type": "application/pdf"
+            },
+            "observed_membership_state": "pending_enrollment",
+            "observed_billing_state": "unknown",
+            "reviewed_record_matches_patient": true,
+            "reviewed_document": true,
+            "finance": {
+              "ticket_id": "06e61a00-bf65-4661-baa5-4ec0c138b597",
+              "verification_receipt_id": "bb85a2b7-8e0c-41b6-bdf8-62fc79fa8588",
+              "verification_receipt_sha256": "1ae45c602a221ac3fa0e569b918e7e8aa8ca24e02dfad7fecaaa14d107779f6f",
+              "evidence_sha256": "26d98d0f423ace5e24fbc9525e6a4636ffbdc375da97fbc92661f4e01cbb0ff2"
+            }
+          }
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "e562f0af-ca6d-405c-a721-397f7d52980d",
+            "owner_id": "219ccea0-6845-47ea-836c-cb69e12cb1e6",
+            "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+          },
+          "command_kind": "result",
+          "idempotency_key": "membership-command-5ddfa899-f926-4429-bb0b-d608dd344d56",
+          "request_sha256": "462059e17740fc033f8a9b6e65f1e2f102764f10e6b2415b1df84b7ec168682b",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+            "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+            "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+            "version": 3,
+            "receipt_id": "afa54b4a-13f6-4b8a-b320-b3cbf914e707",
+            "recorded_at": "2026-09-22T12:17:50.560096Z",
+            "effect": "result_recorded",
+            "state": "approved",
+            "evidence_classification": "manual_ledger_and_finance_review",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "29ea4f7912f8807eede7fc3f5d8c981158f6ed19d00b34d9a89e1c56fea90818"
+        }
+      },
+      {
+        "request": {
+          "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+          "expected_version": 3,
+          "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+          "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+          "idempotency_key": "membership-command-53b206c4-35b1-4f30-8a1c-d044cb66b314",
+          "result_receipt_id": "afa54b4a-13f6-4b8a-b320-b3cbf914e707",
+          "result_receipt_sha256": "29ea4f7912f8807eede7fc3f5d8c981158f6ed19d00b34d9a89e1c56fea90818",
+          "evidence_classification": "manual_ledger_and_finance_review",
+          "reviewed_patient": true,
+          "reviewed_result": true,
+          "reviewed_evidence_limits": true,
+          "confirm_review_completion": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "e562f0af-ca6d-405c-a721-397f7d52980d",
+            "owner_id": "219ccea0-6845-47ea-836c-cb69e12cb1e6",
+            "workspace_id": "d5c4873f-8b46-4a45-8457-47037749b3f7"
+          },
+          "command_kind": "verify",
+          "idempotency_key": "membership-command-53b206c4-35b1-4f30-8a1c-d044cb66b314",
+          "request_sha256": "6197d8617cc051af5eb0c9e8ccf6d1251cfede94c1d558105f40d13bd64e1ed1",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "826ce428-75c2-457c-a04f-10ba18e7141b",
+            "revision_id": "3a94c664-8cd4-4c32-9124-7ffc1d2096eb",
+            "payload_hash": "5ae9a50362bf46c36858a3889f9b7fb9e2746daa27feef72a7ae562e2b1bb300",
+            "version": 4,
+            "receipt_id": "3291facd-dd53-4a96-a617-19ace5f2b3a4",
+            "recorded_at": "2026-09-22T12:17:50.573586Z",
+            "effect": "review_verified",
+            "state": "closed",
+            "evidence_classification": "manual_ledger_and_finance_review",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "cd2c58b7e8138288d4530295900c584abc7aed8cf3da16844e832f6478cab15f"
+        }
+      }
+    ]
+  },
+  "pdf_base64": "JVBERi0xLjMKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDYxMiA3OTIgXSAvUGFyZW50IDcgMCBSIC9SZXNvdXJjZXMgPDwKL0ZvbnQgMSAwIFIgL1Byb2NTZXQgWyAvUERGIC9UZXh0IC9JbWFnZUIgL0ltYWdlQyAvSW1hZ2VJIF0KPj4gL1JvdGF0ZSAwIC9UcmFucyA8PAoKPj4gCiAgL1R5cGUgL1BhZ2UKPj4KZW5kb2JqCjUgMCBvYmoKPDwKL1BhZ2VNb2RlIC9Vc2VOb25lIC9QYWdlcyA3IDAgUiAvVHlwZSAvQ2F0YWxvZwo+PgplbmRvYmoKNiAwIG9iago8PAovQXV0aG9yIChhbm9ueW1vdXMpIC9DcmVhdGlvbkRhdGUgKEQ6MjAwMDAxMDEwMDAwMDArMDAnMDAnKSAvQ3JlYXRvciAoYW5vbnltb3VzKSAvS2V5d29yZHMgKCkgL01vZERhdGUgKEQ6MjAwMDAxMDEwMDAwMDArMDAnMDAnKSAvUHJvZHVjZXIgKFJlcG9ydExhYiBQREYgTGlicmFyeSAtIFwob3BlbnNvdXJjZVwpKSAKICAvU3ViamVjdCAodW5zcGVjaWZpZWQpIC9UaXRsZSAoSW52ZW50ZWQgbWVtYmVyc2hpcCBsZWRnZXIgcmVjb3JkKSAvVHJhcHBlZCAvRmFsc2UKPj4KZW5kb2JqCjcgMCBvYmoKPDwKL0NvdW50IDEgL0tpZHMgWyA0IDAgUiBdIC9UeXBlIC9QYWdlcwo+PgplbmRvYmoKOCAwIG9iago8PAovRmlsdGVyIFsgL0FTQ0lJODVEZWNvZGUgL0ZsYXRlRGVjb2RlIF0gL0xlbmd0aCA3NzEKPj4Kc3RyZWFtCkdhdG4kOW9uIV4mNCNeXS8qPjJHW29zcCIoVVE+JjcrSVJOWV8jZ2hkUm9jciMmcCdhV1U1NjJwRGs2XEtwTSpVO0ZMX0YsSlNNcSkmaWMkSUAwb1cudEEtSiRwSEZTNSVKRzpANl1EckpTQjtmYGRSQDBFU1FXT3JwT2lNNkEtUiMicWJBXF1ZOV5vUFNPWSpZWmRfWT4+W2JFYDxKMjViYHNldStvO2MmUmtsZ0BBLzc5dHAwKUpsUnVBIl8vQ1d0NzFxVEFGMkkwaUk5OVVbbytKJD5yOG9MV2xJJFElTVZeXTxJX28kX0VdXjZbbk5yMWYwb0RXZWxIWj1BaT9gKWd1JjQ8UkZERktTYEE5PCFQN1cwO2htWkwsTz5iYWNWQHFXRCVERio4bWY1JChkcV1QPFAqcFlIQGEsXW8wWFdWInErInQ/a1htPDItQVxwRUdZaEAwbGhWaGhkcDdiN3VbWFxQNGVoby9WcloxYlQvV3M/LUxANzU4YFlFNk5vMEo5MkRiSHBWRkxOTWQ+S140N2JJdT4sMyNLJykwbTIoWGlVTm5NVnNPW1xRQTxOOGNBazFFXVFARDhaNHE/Lj8nKUllOFlgN25tSmYhN0xaLUBaakA8Q3UmKE5DYmBnc25uQjI6YSxFSl9oYCQqT0U2Oks+ajxaVSYqWV9tcVIkVSw8ZTJELkNAPEgmYyEzRClLV0NdSDMpJUQ7RE0iMFZsRUtUXGtYTUw2cSJRVy0pQVEkPjFlS2QiNy84P0xQZUZLZ01JNldAWC1hPTxFJlxHcT0/VE11L2hWa09BVzlpaFp1c0MsSTtHY09IUHNXaGNWPE89UCYwS1E9UCtYdUAmIUMiUitlPGtVaFZDTFBJUHBvSFhOXikxcXEiZmtpJj4pT0VPTFYzNkBYP09GMm5bLE9XOGk/Ny5YL1tmIiQ3Mj0qNl5SKmNBTF9TMCRbNWRBSz0iak9RXzQ8Qmx0TCs4OT07TjBNU2NTbiJbQ0JPJSxoJ0VLOj81UF0mIjJ+PmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDkKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwOSAwMDAwMCBuIAowMDAwMDAwMzIxIDAwMDAwIG4gCjAwMDAwMDA1MTQgMDAwMDAgbiAKMDAwMDAwMDU4MiAwMDAwMCBuIAowMDAwMDAwODY4IDAwMDAwIG4gCjAwMDAwMDA5MjcgMDAwMDAgbiAKdHJhaWxlcgo8PAovSUQgCls8ZTMxZWM1YTM1ODRkYjI5OWIxOGU1MmRiMjZkYmU4NjU+PGUzMWVjNWEzNTg0ZGIyOTliMThlNTJkYjI2ZGJlODY1Pl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyA2IDAgUgovUm9vdCA1IDAgUgovU2l6ZSA5Cj4+CnN0YXJ0eHJlZgoxNzg4CiUlRU9GCg==",
+  "response_bytes": 4525
+}

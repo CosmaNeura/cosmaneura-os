@@ -6,6 +6,7 @@
     "module": "ESNext",
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "resolveJsonModule": true,
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",
@@ -15,7 +16,12 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
-    "types": ["vitest/globals"]
+    "types": ["vitest/globals"],
+    "paths": {
+      "@cosmaneura-scribe/capture-protocol": ["../clients/capture/protocol/generated.ts"],
+      "@cosmaneura-scribe/capacitor-ios-pcm": ["../clients/capture/plugins/ios-pcm/index.ts"],
+      "@cosmaneura-scribe/capacitor-secure-queue": ["../clients/capture/plugins/secure-queue/index.ts"]
+    }
   },
   "include": ["src"]
 }

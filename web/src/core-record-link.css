@@ -1,0 +1,5 @@
+.core-record-link { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; }
+.team-workspace .core-record-link button, .core-record-link a { min-height: 44px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.core-record-link a { color: inherit; border: 1px solid currentColor; border-radius: 12px; padding: 8px 14px; text-decoration: none; box-sizing: border-box; }
+.core-record-link a[aria-disabled="true"] { opacity: .5; cursor: default; }
+.core-record-link small { font-size: .8rem; max-width: 32rem; }

@@ -1,0 +1,132 @@
+{
+  "owner": {
+    "id": "867f9157-f948-4923-9ccc-51b4c9bbf456",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [],
+      "matching_items": 0,
+      "counts": {
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "complete",
+      "reason": null,
+      "items": [
+        {
+          "ticket_id": "d8095eb7-26b2-4168-9494-ab17b5a7a3ac",
+          "revision_id": "daae139a-3d5b-4f03-a47a-22184c2a83de",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 3,
+          "state": "approved",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "347ce26b-0b3f-423b-b691-2a157fd4c3e7",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "347ce26b-0b3f-423b-b691-2a157fd4c3e7",
+          "requires_owner_attention": false,
+          "pending_offer": true,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": "1a134fda-60e8-4e99-a5d9-8af9c4949d7a",
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        }
+      ],
+      "matching_items": 1,
+      "counts": {
+        "pending_approval": 0,
+        "open": 1,
+        "overdue": 0,
+        "awaiting_acceptance": 1,
+        "responsible_unavailable": 0,
+        "awaiting_review": 0,
+        "verified_complete": 0,
+        "source_unavailable": 0,
+        "work_changed": 0
+      },
+      "withheld_sources": false
+    },
+    "model_used": false
+  },
+  "staff": {
+    "id": "954afa97-427a-4c20-a173-3011cf67d116",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [],
+      "matching_items": 0,
+      "counts": {
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "complete",
+      "reason": null,
+      "items": [
+        {
+          "ticket_id": "d8095eb7-26b2-4168-9494-ab17b5a7a3ac",
+          "revision_id": "daae139a-3d5b-4f03-a47a-22184c2a83de",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 3,
+          "state": "approved",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "347ce26b-0b3f-423b-b691-2a157fd4c3e7",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "347ce26b-0b3f-423b-b691-2a157fd4c3e7",
+          "requires_owner_attention": false,
+          "pending_offer": true,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": "1a134fda-60e8-4e99-a5d9-8af9c4949d7a",
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        }
+      ],
+      "matching_items": 1,
+      "counts": {
+        "pending_approval": 0,
+        "open": 1,
+        "overdue": 0,
+        "awaiting_acceptance": 1,
+        "responsible_unavailable": 0,
+        "awaiting_review": 0,
+        "verified_complete": 0,
+        "source_unavailable": 0,
+        "work_changed": 0
+      },
+      "withheld_sources": false
+    },
+    "model_used": false
+  }
+}

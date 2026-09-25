@@ -1,0 +1,105 @@
+{
+  "connection": {
+    "command": {
+      "action": "athena_connection",
+      "request_nonce": "686c889f-ca5d-481f-a0c6-cfc384e140e5",
+      "connection_sha256": "ebbe05813447488453e4c0fddfbc692f1734bdcdba5c96e0676dd2a1c12c29e8"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_connection",
+      "connection_status": "connected",
+      "athena_discovery": {
+        "action": "connection",
+        "request_nonce": "686c889f-ca5d-481f-a0c6-cfc384e140e5",
+        "checked_at": "2026-09-23T22:06:48.490242Z",
+        "connection": {
+          "actor_ref": "authority_actor_01m384x69hf1kbbpfcc7fwbhr7",
+          "tenant_ref": "authority_tenant_01m384x69jecarqv7zj9pynj2x",
+          "provider_link_ref": "scribe_provider_link_01m384x69rfa8tbzkyskf06and",
+          "practice_ref": "practice_01m384x69mezna0s1gpe37d120",
+          "practice_label": "Invented W46 practice",
+          "review_sha256": "e90b71e73379eaaf3cd1ecc9f0b8231b9d6fc8c3816f02c50958adf286cac7c8",
+          "connection_sha256": "ebbe05813447488453e4c0fddfbc692f1734bdcdba5c96e0676dd2a1c12c29e8"
+        },
+        "account": {
+          "account_ref": "184f0f3f-95c4-4e0e-a585-39672d2c1731",
+          "account_sha256": "33d5bdb636d6cb935eb6d323c22e02cfa1d6ad98f5e8fc924298bba377f6dd8b",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "appointments": [],
+        "total_count": null,
+        "next_offset": null,
+        "complete": false,
+        "truncated": false
+      }
+    }
+  },
+  "appointments": {
+    "command": {
+      "action": "athena_appointments",
+      "request_nonce": "fc0f6890-b330-4bdf-aac9-b0e9a4d9d063",
+      "connection_sha256": "ebbe05813447488453e4c0fddfbc692f1734bdcdba5c96e0676dd2a1c12c29e8",
+      "account_sha256": "33d5bdb636d6cb935eb6d323c22e02cfa1d6ad98f5e8fc924298bba377f6dd8b",
+      "start_date": "2026-09-24",
+      "end_date": "2026-09-24",
+      "offset": 0
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_appointments",
+      "connection_status": "connected",
+      "athena_discovery": {
+        "action": "appointments",
+        "request_nonce": "fc0f6890-b330-4bdf-aac9-b0e9a4d9d063",
+        "checked_at": "2026-09-23T22:06:48.533247Z",
+        "connection": {
+          "actor_ref": "authority_actor_01m384x69hf1kbbpfcc7fwbhr7",
+          "tenant_ref": "authority_tenant_01m384x69jecarqv7zj9pynj2x",
+          "provider_link_ref": "scribe_provider_link_01m384x69rfa8tbzkyskf06and",
+          "practice_ref": "practice_01m384x69mezna0s1gpe37d120",
+          "practice_label": "Invented W46 practice",
+          "review_sha256": "e90b71e73379eaaf3cd1ecc9f0b8231b9d6fc8c3816f02c50958adf286cac7c8",
+          "connection_sha256": "ebbe05813447488453e4c0fddfbc692f1734bdcdba5c96e0676dd2a1c12c29e8"
+        },
+        "account": {
+          "account_ref": "184f0f3f-95c4-4e0e-a585-39672d2c1731",
+          "account_sha256": "33d5bdb636d6cb935eb6d323c22e02cfa1d6ad98f5e8fc924298bba377f6dd8b",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "appointments": [
+          {
+            "appointment_ref": "8001",
+            "patient_ref": "9001",
+            "source_local_start": "2026-09-24T09:30:00",
+            "department_timezone": "America/New_York",
+            "duration_minutes": 30,
+            "source_status": "f",
+            "source_sha256": "e8c3f3258c09e5a1612009199c2d111082c3fcb89204e231820df7987306e599"
+          },
+          {
+            "appointment_ref": "8002",
+            "patient_ref": "9002",
+            "source_local_start": "2026-09-24T14:00:00",
+            "department_timezone": "America/New_York",
+            "duration_minutes": 45,
+            "source_status": "x",
+            "source_sha256": "5193d1dd9f9617e3c584129b8107643e748633a691edab516eb506c698533dd2"
+          }
+        ],
+        "total_count": 2,
+        "next_offset": null,
+        "complete": true,
+        "truncated": false
+      }
+    }
+  }
+}

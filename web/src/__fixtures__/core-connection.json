@@ -1,0 +1,107 @@
+{
+  "connection": {
+    "command": {
+      "action": "connection",
+      "request_nonce": "1402e7e1-76e2-459e-9a03-3ef80cf6ef83"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "connection",
+      "connection_status": "ready_to_connect",
+      "discovery": {
+        "contract_version": "1",
+        "action": "connection",
+        "request_nonce": "1402e7e1-76e2-459e-9a03-3ef80cf6ef83",
+        "checked_at": "2026-09-23T20:27:38.000409Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented W41 practice",
+          "review_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "connection_sha256": "00102da9758cf80b3d2db444b94b66122dc49fa4796b498320c234ee25e4e488"
+        },
+        "encounters": [],
+        "next_cursor": null
+      }
+    }
+  },
+  "connect": {
+    "command": {
+      "action": "connect",
+      "request_nonce": "4ab099cf-d13c-403a-81f9-efa9ac338586",
+      "connection_sha256": "00102da9758cf80b3d2db444b94b66122dc49fa4796b498320c234ee25e4e488"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "connect",
+      "connection_status": "connected",
+      "discovery": {
+        "contract_version": "1",
+        "action": "connection",
+        "request_nonce": "4ab099cf-d13c-403a-81f9-efa9ac338586",
+        "checked_at": "2026-09-23T20:27:38.019385Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented W41 practice",
+          "review_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "connection_sha256": "00102da9758cf80b3d2db444b94b66122dc49fa4796b498320c234ee25e4e488"
+        },
+        "encounters": [],
+        "next_cursor": null
+      }
+    }
+  },
+  "encounters": {
+    "command": {
+      "action": "encounters",
+      "request_nonce": "d9cc6e13-851d-4c3c-b334-24810b224320",
+      "connection_sha256": "00102da9758cf80b3d2db444b94b66122dc49fa4796b498320c234ee25e4e488",
+      "window": {
+        "start_date": "2026-09-23",
+        "end_date": "2026-09-24"
+      }
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "encounters",
+      "connection_status": "connected",
+      "discovery": {
+        "contract_version": "1",
+        "action": "encounters",
+        "request_nonce": "d9cc6e13-851d-4c3c-b334-24810b224320",
+        "checked_at": "2026-09-23T20:27:38.028107Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented W41 practice",
+          "review_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "connection_sha256": "00102da9758cf80b3d2db444b94b66122dc49fa4796b498320c234ee25e4e488"
+        },
+        "encounters": [
+          {
+            "connection_sha256": "00102da9758cf80b3d2db444b94b66122dc49fa4796b498320c234ee25e4e488",
+            "patient": {
+              "patient_ref": "patient_00000000000000000000000001",
+              "display_name": "Invented W41 person"
+            },
+            "appointment": {
+              "appointment_ref": "appointment_00000000000000000000000001",
+              "patient_ref": "patient_00000000000000000000000001",
+              "appointment_date": "2026-09-23T09:00:00",
+              "timezone_known": false
+            },
+            "source_sha256": "40e1a2e19042cd7178aea98757814e7ef03b42c71a8d0b998cbeba2c8128fadf"
+          }
+        ],
+        "next_cursor": null
+      }
+    }
+  }
+}

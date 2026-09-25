@@ -1,0 +1,385 @@
+{
+  "options": {
+    "contract_version": 1,
+    "workspace_id": "7a36e2fb-47d7-46ab-801f-e56e25f6516e",
+    "entry_revision": 3,
+    "enabled": true,
+    "connections": [
+      {
+        "id": "c4cde686-d22b-4d1c-9807-fcd86bf459e0",
+        "revision": 1,
+        "vendor": "spruce",
+        "environment": "production",
+        "label": "Invented Spruce practice",
+        "actions": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ],
+        "availability": "enabled",
+        "public_sha256": "5a00cea83c6d97d893308dc562dd40815513dd1bb1625051b3c52d0cefb808d9"
+      }
+    ],
+    "correspondences": [
+      {
+        "id": "d65e4c7f-6eb1-431d-af06-665a287fe88d",
+        "revision": 1,
+        "connection_id": "c4cde686-d22b-4d1c-9807-fcd86bf459e0",
+        "channel": "secure",
+        "recipient_label": "Invented recipient",
+        "destination_display": "Reviewed invented portal contact",
+        "permission": "reviewed",
+        "expires_at": "2026-09-24T00:02:42.010415Z",
+        "public_sha256": "a357564aaee40f068e668e37fa204d4ba311f4c4033794712c6e891b8e533891"
+      }
+    ],
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "b0cc5d43-6183-4f4f-ace7-b2b84ff90b4f",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "2058a4ef797442ba4d8f5c5c230540a30a4c8b67f940c422820fcbcf2901e337"
+    },
+    "observed_at": "2026-09-22T00:02:42.016143Z"
+  },
+  "proposal_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "7a36e2fb-47d7-46ab-801f-e56e25f6516e"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "proposal-6c0d0db0-4620-4112-bb72-ac2d288199dd",
+    "request_sha256": "8d8b800660fed2c4e3e6bf02c7a2d8bce0d29bd1e7164ac4436bc18e3e3296e0",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+      "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+      "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+      "payload_hash": "d6b22d3e6a0cdf19060b34429dea06e700200a3e6ba96a5c587f476058f3e9ae",
+      "receipt_id": "c146fab9-9739-41bd-9a66-6e7d1da215d5",
+      "effect_version": 1,
+      "recorded_at": "2026-09-22T00:02:42.039076Z",
+      "receipt_sha256": "3f94fff287dd2121ec7f9e44ee9d8cb02024eef93897a8bada4f136d22d71662"
+    },
+    "summary": {
+      "effect": "proposed",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:02:42.041231Z"
+  },
+  "detail_pending": {
+    "contract_version": 1,
+    "workspace_id": "7a36e2fb-47d7-46ab-801f-e56e25f6516e",
+    "view_version": 1,
+    "observed_at": "2026-09-22T00:02:42.053014Z",
+    "summary": {
+      "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+      "version": 1,
+      "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+      "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+      "payload_hash": "d6b22d3e6a0cdf19060b34429dea06e700200a3e6ba96a5c587f476058f3e9ae",
+      "action": "spruce_secure_message",
+      "state": "pending_approval",
+      "published": false,
+      "submit_claimed": false,
+      "dispatch": "not_started",
+      "acceptance": "not_observed",
+      "transport": "not_observed",
+      "conflicting_evidence": false,
+      "result": "none",
+      "verification": "pending",
+      "due_date": "2026-10-01",
+      "outcome_excerpt": "Invented patient receives the reviewed follow-up.",
+      "responsible_id": "2b67f976-b67b-4b90-93c2-9c7fda5fe1c9",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "7130ca8c3800c341ed5df9aa57e47420e10d281d3512e66add032d99c94b5e32"
+      },
+      "evidence_sha256": "b3d37986ff1e7d45533ac1f56c6373b58beb4efe145a7ee73fe9c30910d8fb50"
+    },
+    "review": {
+      "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+      "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+      "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+      "action": "spruce_secure_message",
+      "connection": {
+        "id": "c4cde686-d22b-4d1c-9807-fcd86bf459e0",
+        "revision": 1,
+        "vendor": "spruce",
+        "environment": "production",
+        "label": "Invented Spruce practice",
+        "actions": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ],
+        "availability": "enabled",
+        "public_sha256": "5a00cea83c6d97d893308dc562dd40815513dd1bb1625051b3c52d0cefb808d9"
+      },
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "b0cc5d43-6183-4f4f-ace7-b2b84ff90b4f",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "2058a4ef797442ba4d8f5c5c230540a30a4c8b67f940c422820fcbcf2901e337"
+      },
+      "correspondence": {
+        "id": "d65e4c7f-6eb1-431d-af06-665a287fe88d",
+        "revision": 1,
+        "connection_id": "c4cde686-d22b-4d1c-9807-fcd86bf459e0",
+        "channel": "secure",
+        "recipient_label": "Invented recipient",
+        "destination_display": "Reviewed invented portal contact",
+        "permission": "reviewed",
+        "expires_at": "2026-09-24T00:02:42.010415Z",
+        "public_sha256": "a357564aaee40f068e668e37fa204d4ba311f4c4033794712c6e891b8e533891"
+      },
+      "message": "Invented secure message.",
+      "due_date": "2026-10-01",
+      "expected_outcome": "Invented patient receives the reviewed follow-up.",
+      "share_to_practice": false,
+      "expires_at": "2026-09-23T00:02:42.030893Z"
+    },
+    "review_sha256": "9dfb32bbff425a5103c243b81e1fd497b8b4dbf8c919cf3c5c477f3289ffa6a8",
+    "latest_result": null,
+    "availability": {
+      "approve": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "reject": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "withdraw": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "publish": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "submit": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "reconcile": {
+        "allowed": false,
+        "reason": "feature_disabled"
+      },
+      "result": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "verify": {
+        "allowed": false,
+        "reason": "result_required"
+      }
+    }
+  },
+  "approval_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "7a36e2fb-47d7-46ab-801f-e56e25f6516e"
+    },
+    "command_kind": "decide",
+    "idempotency_key": "command-a4510e39-e71b-4611-acc8-d13220e3cda3",
+    "request_sha256": "a30e76719e64fef024974387c86b61e1b5b3695a108f68301f862668c1031bcc",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+      "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+      "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+      "payload_hash": "d6b22d3e6a0cdf19060b34429dea06e700200a3e6ba96a5c587f476058f3e9ae",
+      "receipt_id": "1cca6f7d-21d5-4851-92fa-eb9346cd0db1",
+      "effect_version": 2,
+      "recorded_at": "2026-09-22T00:02:42.066714Z",
+      "receipt_sha256": "0eed33e60acb22f3c3026277eb73efbe7ca95d9a08ff94202fb42b245dfe839d"
+    },
+    "summary": {
+      "effect": "approved",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:02:42.070070Z"
+  },
+  "resolved_proposal": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "7a36e2fb-47d7-46ab-801f-e56e25f6516e"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "proposal-6c0d0db0-4620-4112-bb72-ac2d288199dd",
+    "request_sha256": "8d8b800660fed2c4e3e6bf02c7a2d8bce0d29bd1e7164ac4436bc18e3e3296e0",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+      "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+      "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+      "payload_hash": "d6b22d3e6a0cdf19060b34429dea06e700200a3e6ba96a5c587f476058f3e9ae",
+      "receipt_id": "c146fab9-9739-41bd-9a66-6e7d1da215d5",
+      "effect_version": 1,
+      "recorded_at": "2026-09-22T00:02:42.039076Z",
+      "receipt_sha256": "3f94fff287dd2121ec7f9e44ee9d8cb02024eef93897a8bada4f136d22d71662"
+    },
+    "summary": {
+      "effect": "proposed",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:02:42.074239Z"
+  },
+  "detail_approved": {
+    "contract_version": 1,
+    "workspace_id": "7a36e2fb-47d7-46ab-801f-e56e25f6516e",
+    "view_version": 2,
+    "observed_at": "2026-09-22T00:02:42.087333Z",
+    "summary": {
+      "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+      "version": 2,
+      "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+      "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+      "payload_hash": "d6b22d3e6a0cdf19060b34429dea06e700200a3e6ba96a5c587f476058f3e9ae",
+      "action": "spruce_secure_message",
+      "state": "approved",
+      "published": false,
+      "submit_claimed": false,
+      "dispatch": "not_started",
+      "acceptance": "not_observed",
+      "transport": "not_observed",
+      "conflicting_evidence": false,
+      "result": "none",
+      "verification": "pending",
+      "due_date": "2026-10-01",
+      "outcome_excerpt": "Invented patient receives the reviewed follow-up.",
+      "responsible_id": "2b67f976-b67b-4b90-93c2-9c7fda5fe1c9",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "7130ca8c3800c341ed5df9aa57e47420e10d281d3512e66add032d99c94b5e32"
+      },
+      "evidence_sha256": "b3d37986ff1e7d45533ac1f56c6373b58beb4efe145a7ee73fe9c30910d8fb50"
+    },
+    "review": {
+      "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+      "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+      "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+      "action": "spruce_secure_message",
+      "connection": {
+        "id": "c4cde686-d22b-4d1c-9807-fcd86bf459e0",
+        "revision": 1,
+        "vendor": "spruce",
+        "environment": "production",
+        "label": "Invented Spruce practice",
+        "actions": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ],
+        "availability": "enabled",
+        "public_sha256": "5a00cea83c6d97d893308dc562dd40815513dd1bb1625051b3c52d0cefb808d9"
+      },
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "b0cc5d43-6183-4f4f-ace7-b2b84ff90b4f",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "2058a4ef797442ba4d8f5c5c230540a30a4c8b67f940c422820fcbcf2901e337"
+      },
+      "correspondence": {
+        "id": "d65e4c7f-6eb1-431d-af06-665a287fe88d",
+        "revision": 1,
+        "connection_id": "c4cde686-d22b-4d1c-9807-fcd86bf459e0",
+        "channel": "secure",
+        "recipient_label": "Invented recipient",
+        "destination_display": "Reviewed invented portal contact",
+        "permission": "reviewed",
+        "expires_at": "2026-09-24T00:02:42.010415Z",
+        "public_sha256": "a357564aaee40f068e668e37fa204d4ba311f4c4033794712c6e891b8e533891"
+      },
+      "message": "Invented secure message.",
+      "due_date": "2026-10-01",
+      "expected_outcome": "Invented patient receives the reviewed follow-up.",
+      "share_to_practice": false,
+      "expires_at": "2026-09-23T00:02:42.030893Z"
+    },
+    "review_sha256": "9dfb32bbff425a5103c243b81e1fd497b8b4dbf8c919cf3c5c477f3289ffa6a8",
+    "latest_result": null,
+    "availability": {
+      "approve": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "reject": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "withdraw": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "publish": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "submit": {
+        "allowed": false,
+        "reason": "feature_disabled"
+      },
+      "reconcile": {
+        "allowed": false,
+        "reason": "feature_disabled"
+      },
+      "result": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "verify": {
+        "allowed": false,
+        "reason": "result_required"
+      }
+    }
+  },
+  "catalog": {
+    "contract_version": 1,
+    "workspace_id": "7a36e2fb-47d7-46ab-801f-e56e25f6516e",
+    "items": [
+      {
+        "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+        "version": 2,
+        "revision_id": "01ef74ed-c2da-4ec0-ad3b-41163779a0b7",
+        "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+        "payload_hash": "d6b22d3e6a0cdf19060b34429dea06e700200a3e6ba96a5c587f476058f3e9ae",
+        "action": "spruce_secure_message",
+        "state": "approved",
+        "published": false,
+        "submit_claimed": false,
+        "dispatch": "not_started",
+        "acceptance": "not_observed",
+        "transport": "not_observed",
+        "conflicting_evidence": false,
+        "result": "none",
+        "verification": "pending",
+        "due_date": "2026-10-01",
+        "outcome_excerpt": "Invented patient receives the reviewed follow-up.",
+        "responsible_id": "2b67f976-b67b-4b90-93c2-9c7fda5fe1c9",
+        "observation_head": {
+          "sequence": 0,
+          "sha256": "7130ca8c3800c341ed5df9aa57e47420e10d281d3512e66add032d99c94b5e32"
+        },
+        "evidence_sha256": "b3d37986ff1e7d45533ac1f56c6373b58beb4efe145a7ee73fe9c30910d8fb50"
+      }
+    ],
+    "next_cursor": null,
+    "observed_at": "2026-09-22T00:02:42.094854Z"
+  },
+  "observations_empty": {
+    "contract_version": 1,
+    "ticket_id": "deeb5502-0686-41ae-940c-4d2b92b06664",
+    "operation_id": "433e63a8-03a3-43b7-aa80-7ca3d4f0ec9e",
+    "observations": [],
+    "head": {
+      "sequence": 0,
+      "sha256": "7130ca8c3800c341ed5df9aa57e47420e10d281d3512e66add032d99c94b5e32"
+    },
+    "next_cursor": null,
+    "observed_at": "2026-09-22T00:02:42.100030Z"
+  }
+}

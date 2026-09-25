@@ -1,0 +1,24 @@
+import {beforeEach,afterEach,it,expect,vi} from 'vitest';
+import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
+import {openDraftStore} from './draft-store';
+import {DraftJournal,type NotebookDraft} from './draft-journal';
+import {modelRequestHash} from './model-work-request';
+import membership from './__fixtures__/membership-analysis-w88.json';
+import payment from './__fixtures__/payment-analysis-w88.json';
+import type {ConversationInput} from './workspace-api';
+const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+let idb:IDBFactory;
+const store=(scope='1'.repeat(64))=>openDraftStore({scope,native:false,indexedDB:idb,crypto:webcrypto});
+beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);idb=new IDBFactory();});afterEach(()=>vi.unstubAllGlobals());
+for(const fixture of [membership,payment])it(`encrypted recovery retains exact ${fixture.request.membership_analysis.kind} consent and rejects changed history`,async()=>{
+  const body=fixture.request as ConversationInput,wid=fixture.workspace.id,address=`workspace:${wid}`;
+  const pending={type:'ask' as const,model_contract:1 as const,origin:'durable_admission_v1' as const,body};
+  const notebook:NotebookDraft={kind:'workspace',workspaceId:wid,baseRevision:3,note:'Unsent notes',thought:'Unsent question',evidence:'',source:'',pending};
+  const first=new DraftJournal(await store());await first.load(address);await first.persist(address,notebook);first.close();
+  const second=new DraftJournal(await store());expect(await second.load(address)).toEqual(notebook);
+  const retained={...notebook,pending:null,previous_model_request:{workspace_id:wid,operation:{type:'ask' as const,body},request_sha256:await modelRequestHash(body),outcome:'unknown' as const,observed_at:'2026-09-24T11:00:00Z',origin:'durable_admission_v1' as const,legacy_uncertainty_acknowledged:true}};
+  await second.persist(address,retained);const altered=structuredClone(retained);altered.previous_model_request.operation.body.membership_analysis!.snapshot_sha256='0'.repeat(64);
+  await expect(second.persist(address,altered)).rejects.toMatchObject({code:'integrity'});second.close();
+  const third=new DraftJournal(await store());expect(await third.load(address)).toEqual(retained);third.close();
+  const foreign=new DraftJournal(await store('2'.repeat(64)));expect(await foreign.load(address)).toBeNull();foreign.close();
+});

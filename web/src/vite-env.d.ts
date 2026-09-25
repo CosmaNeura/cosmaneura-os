@@ -1,9 +1,16 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
+  readonly VITE_WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED?: string;
+  readonly VITE_ATHENA_VISIT_LINK_ENABLED?: string;
+  readonly VITE_COSMANEURA_RECORD_ENABLED?: string;
+  readonly VITE_COSMANEURA_WEB_ORIGIN?: string;
   readonly VITE_API_BASE?: string;
   readonly VITE_CLERK_PUBLISHABLE_KEY?: string;
   readonly VITE_COSMAS_ENV?: "synth_os" | "early_adopter_beta";
+  readonly VITE_VENDOR_SETUP_ENABLED?: string;
+  readonly VITE_INBOX_ENABLED?: string;
+  readonly VITE_INBOX_HANDOFF_ENABLED?: string;
 }
 
 interface ImportMeta {

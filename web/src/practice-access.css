@@ -1,0 +1,18 @@
+.practice-access-gate { max-width: 42rem; margin: 0 auto; padding: max(1.25rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) max(2rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left)); }
+.practice-access-gate nav { display: flex; justify-content: flex-end; gap: .75rem; flex-wrap: wrap; margin-bottom: 2rem; }
+.practice-access-gate form, .practice-access-gate label { display: grid; gap: .75rem; }
+.practice-access-gate form { margin: 1.5rem 0; }
+.practice-access-gate input { width: 100%; box-sizing: border-box; padding: .75rem; font: inherit; }
+.practice-access-gate button, .practice-access-panel button { min-height: 44px; padding: .6rem 1rem; font: inherit; cursor: pointer; }
+.practice-access-gate button:disabled, .practice-access-panel button:disabled { cursor: default; opacity: .55; }
+.practice-access-gate > button { margin-top: 1rem; }
+.practice-access-panel { max-width: 48rem; }
+.practice-access-panel ul { padding: 0; list-style: none; }
+.practice-access-panel li { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .75rem; padding: .75rem 0; border-bottom: 1px solid #ccd4d4; }
+.practice-access-panel li > span { overflow-wrap: anywhere; }
+.practice-access-review { border: 1px solid #ccd4d4; border-radius: .75rem; padding: 1rem; margin-top: 1rem; overflow-wrap: anywhere; }
+.practice-access-review label { display: flex; gap: .75rem; align-items: flex-start; margin: 1rem 0; }
+.practice-access-review input { width: 1.25rem; height: 1.25rem; flex-shrink: 0; }
+.practice-access-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
+.practice-access-code { font-family: ui-monospace, monospace; letter-spacing: .04em; white-space: nowrap; }
+.practice-access-gate [role=alert], .practice-access-panel [role=alert] { padding: .75rem; border: 1px solid #98674a; border-radius: .5rem; }
