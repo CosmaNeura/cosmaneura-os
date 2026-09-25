@@ -452,6 +452,72 @@ def _started_restore(
     return environment, manifest
 
 
+@pytest.mark.parametrize(
+    ("phase", "target_exists"),
+    [("restore_started", True), ("restore_started", False), ("f1_captured", True)],
+)
+def test_start_rejects_missing_historical_timestamp_without_mutation(
+    tmp_path, phase: str, target_exists: bool,
+) -> None:
+    environment, manifest = _started_restore(tmp_path)
+    environment["COSMAS_PITR_OPERATION"] = "start"
+    config = pitr.Config.from_environment(environment)
+    state_path = Path(environment["COSMAS_PITR_STATE_PATH"])
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    state["phase"] = phase
+    state.pop("restore_started_at_utc")
+    state.pop("restore_ready_at_utc")
+    pitr._save_state(config, state)
+    original_state = state_path.read_bytes()
+    target_id = manifest["restore"]["target_resource_id"]
+
+    def handle(command: list[str]) -> Any:
+        if command[0:4] == ["az", "rest", "--method", "get"]:
+            url = command[command.index("--url") + 1]
+            if SOURCE_ID in url:
+                return pitr.CommandResult(0, json.dumps(_source()))
+            if target_id in url:
+                return (
+                    pitr.CommandResult(0, json.dumps(_target(manifest)))
+                    if target_exists else _not_found()
+                )
+        return pytest.fail("historical timestamp failure must not create, delete, or fingerprint")
+
+    runner = FakeRunner(handle)
+    with pytest.raises(pitr.PitrError, match="restore start timestamp missing"):
+        pitr.start_restore(config, runner, now=NOW + timedelta(minutes=2))
+
+    assert state_path.read_bytes() == original_state
+    assert all(call[0:4] == ["az", "rest", "--method", "get"] for call in runner.calls)
+
+
+def test_start_retry_preserves_original_timestamp(tmp_path) -> None:
+    environment, manifest = _started_restore(tmp_path)
+    environment["COSMAS_PITR_OPERATION"] = "start"
+    config = pitr.Config.from_environment(environment)
+    state_path = Path(environment["COSMAS_PITR_STATE_PATH"])
+    original_state = state_path.read_bytes()
+    target_id = manifest["restore"]["target_resource_id"]
+
+    def handle(command: list[str]) -> Any:
+        if command[0:4] == ["az", "rest", "--method", "get"]:
+            url = command[command.index("--url") + 1]
+            if SOURCE_ID in url:
+                return pitr.CommandResult(0, json.dumps(_source()))
+            if target_id in url:
+                return pitr.CommandResult(0, json.dumps(_target(manifest, state="Creating")))
+        return pytest.fail("an existing restore must not be recreated, deleted, or fingerprinted")
+
+    runner = FakeRunner(handle)
+    evidence = pitr.start_restore(config, runner, now=NOW + timedelta(minutes=2))
+
+    assert evidence["status"] == "restore_started"
+    assert state_path.read_bytes() == original_state
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["restore_started_at_utc"] == "2026-09-03T17:01:00Z"
+    assert all(call[0:4] == ["az", "rest", "--method", "get"] for call in runner.calls)
+
+
 def test_complete_proves_f1_f2_f3_deletes_exact_target_then_proves_f4(tmp_path) -> None:
     environment, manifest = _started_restore(tmp_path)
     config = pitr.Config.from_environment(environment)
