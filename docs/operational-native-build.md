@@ -94,6 +94,11 @@ all retained files. A hand-written receipt or historical W90/W92 binary is not
 evidence that the wrapper compiled the current qualification. The renderer
 receipt above provides no native compiler evidence.
 
+The Mac compiler can emit ad-hoc signatures on its executable and resource
+bundle without a signing identity or TeamIdentifier. Packaging preserves those
+compiler products; these signatures do not establish release signing,
+notarization or distribution acceptance.
+
 Operational packaging uses `--native-identity-config` with no verification
 variant. Synthetic packaging instead requires its existing `--verification-variant`
 and keeps the SDK disabled; it still requires the compiler receipt.
@@ -112,6 +117,53 @@ Keychain group uses the actual provisioning AppIdentifierPrefix; no invented
 Simulator team is embedded. The minimum remains iOS17. The generated project
 sets no developer team and performs no signing. An unsigned device build can be
 compiled with CODE_SIGNING_ALLOWED=NO; it is not installable or distributable.
+
+For the Xcode 27 offline build, retain the exact `Package.resolved` in the
+composed project and copy the verified pinned package cache into a fresh
+`apple-packages` directory. Use a fresh build root with owned `home`, `tmp`,
+`xdg-cache`, `xdg-config`, `module-cache` and `swift-module-cache` directories.
+Pass an explicit environment: `HOME` and `CFFIXED_USER_HOME` select that home;
+`TMPDIR`, `XDG_CACHE_HOME`, `XDG_CONFIG_HOME`, `CLANG_MODULE_CACHE_PATH` and
+`SWIFTPM_MODULECACHE_OVERRIDE` select the corresponding owned directories.
+Set `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer` and a fixed `PATH`
+containing Node 24, that developer directory's `usr/bin`, and system tools.
+Do not inherit credentials or package/compiler settings.
+
+With `build_root`, `network_profile` and `environment` set to those explicit
+paths and settings, pass this argument list directly to Python's subprocess API:
+
+```python
+subprocess.run([
+    "/usr/bin/sandbox-exec", "-f", str(network_profile),
+    "/Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild",
+    "-IDEPackageSupportDisableManifestSandbox=YES",
+    "-project", str(build_root / "apple-composed/apps/capture/ios/App/App.xcodeproj"),
+    "-scheme", "App", "-configuration", "Debug", "-sdk", "iphoneos",
+    "-destination", "generic/platform=iOS",
+    "-derivedDataPath", str(build_root / "DerivedData"),
+    "-clonedSourcePackagesDirPath", str(build_root / "apple-packages"),
+    "-packageCachePath", str(build_root / "package-cache"),
+    "-disablePackageRepositoryCache", "-disableAutomaticPackageResolution",
+    "-skipPackageUpdates", "-onlyUsePackageVersionsFromResolvedFile",
+    "-resultBundlePath", str(build_root / "apple-build.xcresult"),
+    "CODE_SIGNING_ALLOWED=NO", "CODE_SIGNING_REQUIRED=NO", "DEVELOPMENT_TEAM=",
+    "ONLY_ACTIVE_ARCH=NO", "ARCHS=arm64",
+    "CLANG_MODULE_CACHE_PATH=" + str(build_root / "module-cache"),
+    "OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -disable-sandbox",
+    "build",
+], cwd=build_root, env=environment, shell=False, check=True, timeout=1200)
+```
+
+The two sandbox controls apply only to this invocation: the single argument
+`-IDEPackageSupportDisableManifestSandbox=YES` avoids the nested SwiftPM manifest
+sandbox; the single literal build-setting argument
+`OTHER_SWIFT_FLAGS=$(inherited) -Xfrontend -disable-sandbox` avoids the nested Swift
+macro subprocess sandbox. Do not split this setting into separate arguments or
+shell-evaluate `$(inherited)`. The outer sandbox must still deny external network
+access while allowing loopback build IPC. Pinned package and signature validation,
+resolution/update restrictions and unsigned generic-device compilation remain in
+force; no persistent Xcode defaults change. Retain the argv, explicit environment,
+log and product inventory as local compilation evidence.
 
 Both paths reuse the pinned Scribe sources and ClerkKit1.5.5. Public production
 configuration in an unlaunched development artifact does not establish real login,
