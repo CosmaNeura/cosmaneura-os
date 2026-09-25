@@ -8,9 +8,9 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
-from fastapi import HTTPException
+from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, select, text
+from sqlalchemy import MetaData, Table, create_engine, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.orm import Session
@@ -325,6 +325,7 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
     admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
     target = create_engine(url.set(database=name))
     root = Path(__file__).resolve().parents[2]
+    request = Request({"type": "http", "app": api_module.app})
     with admin.connect() as c:
         c.execute(text(f'CREATE DATABASE "{name}"'))
 
@@ -339,14 +340,30 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
         migrate("0002_external_identities")
         with Session(target) as s:
             seed = svc.provision_box(svc.Container(s), "Migration invented practice")
-            a = encounter(s, seed["box_id"], seed["owner_id"])
-            appointment_id = a.id
+            # Seed the historical schema's columns, before current ORM fields
+            # such as private source ownership have been introduced.
+            historical = MetaData()
+            links = Table("patient_links", historical, autoload_with=s.connection())
+            appointments = Table("appointment_observations", historical, autoload_with=s.connection())
+            link_id, appointment_id = str(uuid4()), str(uuid4())
+            now = datetime.now(UTC)
+            s.execute(links.insert().values(
+                id=link_id, box_id=seed["box_id"], source_pair_key="invented:" + str(uuid4()),
+                label="Invented person", state="confirmed",
+                confirmed_by_principal_id=seed["owner_id"], attested_at=now,
+            ))
+            s.execute(appointments.insert().values(
+                id=appointment_id, box_id=seed["box_id"], external_id="invented-" + str(uuid4()),
+                source="synthetic", start_at=now, patient_label="Invented person",
+                patient_link_id=link_id, coverage_status="missing",
+            ))
+            s.commit()
             with pytest.raises(HTTPException) as error:
-                api_module.ready(s)
+                api_module.ready(request, session=s)
             assert error.value.status_code == 503
         migrate("head")
         with Session(target) as s:
-            assert api_module.ready(s)["status"] == "ready"
+            assert api_module.ready(request, session=s)["status"] == "ready"
             w = ws.create(s, seed["box_id"], seed["owner_id"], appointment_id, "migration-create")
             ws.append(
                 s,
@@ -360,7 +377,7 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
             )
         with pytest.raises(
             RuntimeError,
-            match="Preserve incoming publication and responsibility history; disable the route instead",
+            match="Preparation retirement history must remain forward-compatible",
         ):
             migrate("0002_external_identities", downgrade=True)
         with Session(target) as s:
@@ -368,7 +385,7 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
                 ws.read(s, seed["box_id"], seed["owner_id"], w["id"])["entries"][-1]["content"]
                 == "Survives recovery"
             )
-            assert api_module.ready(s)["status"] == "ready"
+            assert api_module.ready(request, session=s)["status"] == "ready"
     finally:
         target.dispose()
         with admin.connect() as c:

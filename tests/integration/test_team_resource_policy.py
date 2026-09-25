@@ -1,5 +1,6 @@
 """Saved source restrictions never grant correspondence or bypass existing checks."""
 
+from contextvars import Context
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
@@ -134,7 +135,9 @@ def test_restriction_added_during_core_io_withholds_receipt(case):
     def restrict(phase):
         if phase == "exchange":
             config["bots"][1]["resources"] = {"version": 1, "allowed": []}
-            save_policy(f, config, 1)
+            # A separate user request must not inherit the in-flight Core
+            # request's session ownership or serialization budget.
+            Context().run(save_policy, f, config, 1)
 
     f.port.after = restrict
     result = read_prep(f, {"address": "visit_prep", "team_revision": 1})

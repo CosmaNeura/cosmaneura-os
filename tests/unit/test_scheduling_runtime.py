@@ -302,7 +302,7 @@ def test_existing_worker_is_settled_if_later_worker_setup_fails(configuration, m
     configuration.workspace_routines_enabled = True
     monkeypatch.setattr(api, "settings", configuration)
     settled = []
-    async def worker(_sessions, stop):
+    async def worker(_sessions, stop, *, progress=None):
         await stop.wait()
         settled.append("handoff")
     def fail_sources():
@@ -324,7 +324,7 @@ def test_one_worker_failure_does_not_skip_other_worker_shutdown(configuration, m
     configuration.workspace_routines_enabled = True
     monkeypatch.setattr(api, "settings", configuration)
     settled = []
-    async def handoff(_sessions, stop):
+    async def handoff(_sessions, stop, *, progress=None):
         await stop.wait()
         raise RuntimeError("synthetic handoff shutdown failure")
     async def routine(_sessions, stop, **_kwargs):

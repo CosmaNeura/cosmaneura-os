@@ -440,7 +440,7 @@ def test_api_retry_scope_and_validation_do_not_echo_briefs(session, case, monkey
     h = result["workspace"]["handoffs"][0]
     box, owner, w, _, _ = case
 
-    async def paused_worker(factory, stop):
+    async def paused_worker(factory, stop, *, progress=None):
         await stop.wait()
 
     monkeypatch.setattr(handoffs, "run_worker", paused_worker)

@@ -71,12 +71,17 @@ def actual_record(monkeypatch):
     monkeypatch.setattr(product, 'authenticate_request', authenticate)
     monkeypatch.setattr(product, 'settings', SimpleNamespace(workspace_available=True,
         workspace_core_record_available=True, workspace_draft_recovery_required=True,
+        workspace_hosted_enabled=True,
         auth_mode='dev_headers', core_web_origin='https://core.example.invalid'))
     monkeypatch.setattr(product, 'core_record_connection', connection)
     monkeypatch.setattr(record, 'session_deadline', no_database)
     monkeypatch.setattr(record.workspace_capture, 'admit', admit)
     monkeypatch.setattr(record.ws, '_workspace', lambda *a: SimpleNamespace(appointment_id=uuid4(), patient_link_id=uuid4()))
-    monkeypatch.setattr(record.ws, '_encounter', lambda *a: SimpleNamespace(source='cosmaneura_core', external_id=selected.appointment_ref))
+    def encounter(*args, owner):
+        assert owner == identity.principal_id
+        return SimpleNamespace(source='cosmaneura_core', external_id=selected.appointment_ref)
+
+    monkeypatch.setattr(record.ws, '_encounter', encounter)
     monkeypatch.setattr(record, 'DEADLINE_SECONDS', BUDGET)
     monkeypatch.setattr(record, 'ERROR_SEND_SECONDS', GRACE)
     monkeypatch.setattr(boundary, '_workers', BoundedSemaphore(1))
@@ -95,7 +100,7 @@ def scope(f, *, method='GET', path=None):
     return {'type':'http', 'asgi':{'version':'3.0'}, 'http_version':'1.1', 'method':method,
             'scheme':'http', 'path':value, 'raw_path':value.encode(), 'root_path':'', 'query_string':b'',
             'headers':[(b'authorization',b'Bearer invented'),(b'x-cosmas-record-contract',b'1'),
-                       (b'x-cosmas-draft-recovery',b'2')],
+                       (b'x-cosmas-draft-recovery',b'2'),(b'x-cosmas-workspace-protocol',b'1')],
             'client':('127.0.0.1',1), 'server':('owned',1)}
 
 

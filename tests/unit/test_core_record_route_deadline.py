@@ -5,6 +5,7 @@ import inspect
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
+from datetime import UTC, datetime
 from threading import get_ident
 from types import SimpleNamespace
 from typing import Any
@@ -14,7 +15,8 @@ import httpx
 import pytest
 from fastapi import Depends, FastAPI, Header, Request, Response
 from fastapi.testclient import TestClient
-from tests.unit.test_core_capture_admission import NOW, core_handler, selection
+from tests.unit import test_core_capture_admission as core_fixture
+from tests.unit.test_core_capture_admission import core_handler, selection
 
 from cosmas_os.adapters.core_record_connection import BoundedCoreRecordConnection
 from cosmas_os.api import core_record_routes as route
@@ -111,6 +113,8 @@ def test_slow_initial_identity_cannot_begin_core_work(monkeypatch):
 @pytest.fixture
 def fixture(monkeypatch):
     selected = selection()
+    now = datetime.now(UTC)
+    monkeypatch.setattr(core_fixture, "NOW", now)
     f = SimpleNamespace(
         events=[],
         dispatches=[],
@@ -133,7 +137,9 @@ def fixture(monkeypatch):
         core_actor_ref=selected.expected_actor_ref,
         core_tenant_ref=selected.expected_tenant_ref,
     )
-    workspace = SimpleNamespace(appointment_id=uuid4(), patient_link_id=uuid4())
+    workspace = SimpleNamespace(
+        appointment_id=uuid4(), patient_link_id=uuid4(), owner_id=f.identity.principal_id
+    )
     appointment = SimpleNamespace(source="cosmaneura_core", external_id=selected.appointment_ref)
 
     class Session:
@@ -180,7 +186,8 @@ def fixture(monkeypatch):
         f.events.append(("auth", get_ident()))
         return f.identity
 
-    def encounter(*args):
+    def encounter(*args, owner):
+        assert owner == f.identity.principal_id
         if not f.patient_valid:
             raise route.ws.WorkspaceError("encounter_unavailable", 404)
         return appointment
@@ -208,7 +215,7 @@ def fixture(monkeypatch):
             "https://core.example.invalid",
             lambda: "synthetic_PRIVATE_workload",
             budget,
-            now=lambda: NOW,
+            now=lambda: now,
             transport_factory=lambda: httpx.MockTransport(handler),
         )
         try:

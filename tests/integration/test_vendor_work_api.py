@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session
 from tests.integration.test_vendor_work import (  # noqa: F401
     bound,
     call,
@@ -22,9 +23,25 @@ from cosmas_os.application import vendor_artifacts, vendor_work
 
 @pytest.fixture
 def client(session):
-    api.app.dependency_overrides[api.get_session] = lambda: session
+    connection = session.connection()
+
+    def request_session():
+        # Each request owns its Session while sharing the fixture's outer transaction.
+        with Session(bind=connection, autoflush=False,
+                     join_transaction_mode="create_savepoint") as current:
+            yield current
+
+    class FixtureClient(TestClient):
+        def request(self, *args, **kwargs):
+            session.flush()
+            try:
+                return super().request(*args, **kwargs)
+            finally:
+                session.expire_all()
+
+    api.app.dependency_overrides[api.get_session] = request_session
     try:
-        with TestClient(api.app) as client:
+        with FixtureClient(api.app) as client:
             yield client
     finally:
         api.app.dependency_overrides.clear()
@@ -217,8 +234,6 @@ def test_explicit_pdf_preview_returns_exact_bytes_and_no_public_storage_path(
 def test_committed_http_raw_pdf_ingest_exact_replay_and_bad_retry(engine, tmp_path):
     import json
     import time
-
-    from sqlalchemy.orm import Session
 
     from cosmas_os.adapters.local import LocalBlobAdapter
     from cosmas_os.adapters.vendor_artifacts import LocalVendorArtifactStore
