@@ -1,0 +1,19 @@
+[Unit]
+Description=CosmaBot synthetic staging runtime
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+RequiresMountsFor=/var/lib/cosmabot
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Root-owned, public file containing only RELEASE_DIR=/opt/cosmabot/releases/<id>.
+EnvironmentFile=/etc/cosmabot/active-release
+ExecStart=/bin/sh ${RELEASE_DIR}/start.sh ${RELEASE_DIR} run
+ExecStop=/bin/sh ${RELEASE_DIR}/start.sh ${RELEASE_DIR} stop
+TimeoutStartSec=240
+TimeoutStopSec=180
+
+[Install]
+WantedBy=multi-user.target
