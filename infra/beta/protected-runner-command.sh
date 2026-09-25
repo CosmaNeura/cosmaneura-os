@@ -1468,13 +1468,8 @@ case "$operation" in
     verify_release_network_evidence
     network_evidence_file="$VERIFIED_NETWORK_EVIDENCE"
     install -d -o root -g root -m 0700 "$runner_root/builds" "$build_root"
-    jq -e '
-      type == "object" and
-      .vite_cosmas_env == "early_adopter_beta" and
-      (.vite_clerk_publishable_key | strings | test("^pk_live_[^[:space:]]+$")) and
-      (.vite_api_base | strings | test("^https://[^/?#]+$")) and
-      (keys | sort) == (["vite_api_base", "vite_clerk_publishable_key", "vite_cosmas_env"] | sort)
-    ' "$payload_file" >/dev/null || die "build payload must contain only the exact public D3 web build arguments"
+    web_build_validator="$repository_root/infra/beta/validate_web_build.py"
+    python3 "$web_build_validator" validate "$payload_file" || die "build payload must contain only the exact public D3 web build arguments"
     fresh_managed_identity_login
     # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
@@ -1496,7 +1491,12 @@ case "$operation" in
     "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" output -json >"$probe_outputs"
     chmod 0600 "$probe_outputs"
     api_origin="$(jq -er '.api_origin.value | strings' "$probe_outputs")"
-    jq -e --arg api_origin "$api_origin" '.vite_api_base == $api_origin' "$payload_file" >/dev/null || die "web build API origin differs from the exact foundation output"
+    web_origin="$(jq -er '.web_origin.value | strings' "$probe_outputs")"
+    web_build_argument_lines="$(python3 "$web_build_validator" docker-args "$payload_file" --api-origin "$api_origin" --web-origin "$web_origin")" || die "web build configuration differs from the exact foundation outputs"
+    web_build_args=()
+    while IFS= read -r argument; do
+      web_build_args+=(--build-arg "$argument")
+    done <<<"$web_build_argument_lines"
     acr_host="$(jq -er '.acr_login_server.value | strings' "$probe_outputs")"
     acr_id="$(jq -er '.acr_resource_id.value | strings' "$probe_outputs")"
     acr_name="${acr_host%%.*}"
@@ -1510,7 +1510,7 @@ case "$operation" in
     api_repository="cosmas-os"
     web_repository="cosmas-os-web"
     immutable_tag="git-$source_sha"
-    public_config_hash="$(jq -cS '{vite_cosmas_env, vite_clerk_publishable_key, vite_api_base}' "$payload_file" | sha256sum | awk '{print $1}')"
+    public_config_hash="$(python3 "$web_build_validator" sha256 "$payload_file" --api-origin "$api_origin" --web-origin "$web_origin")" || die "web build configuration cannot be hashed"
     if [[ -e "$build_root/build-evidence.json" || -L "$build_root/build-evidence.json" ]]; then
       verify_release_build_evidence
       jq -e --arg expected "$public_config_hash" '.public_web_build_config_sha256 == $expected' "$build_root/build-evidence.json" >/dev/null || die "accepted source build used different public web build inputs"
@@ -1573,9 +1573,7 @@ case "$operation" in
         --label "com.cosmaneura.cosmas-os.public-config-sha256=$public_config_hash" \
         --file "$repository_root/Dockerfile.web" \
         --tag "$web_image" \
-        --build-arg VITE_COSMAS_ENV=early_adopter_beta \
-        --build-arg "VITE_CLERK_PUBLISHABLE_KEY=$(jq -er '.vite_clerk_publishable_key' "$payload_file")" \
-        --build-arg "VITE_API_BASE=$api_origin" \
+        "${web_build_args[@]}" \
         "$repository_root" >>"$build_log" 2>&1; then
         die "web image build failed; diagnostics remain root-only on the runner"
       fi

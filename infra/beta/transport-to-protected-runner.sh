@@ -475,7 +475,7 @@ case "$operation" in
     guard_outside_repository "$artifact_out" "$repository_root" "sanitized build evidence"
     guard_private_file "$web_build_config" "public web build configuration"
     guard_new_private_path "$artifact_out" "sanitized build evidence"
-    jq -e 'type == "object"' "$web_build_config" >/dev/null || guard_die "--web-build-config must be a JSON object"
+    python3 "$script_dir/validate_web_build.py" validate "$web_build_config" || guard_die "--web-build-config must contain the exact public D3 web build arguments"
     ;;
   database-prepare)
     stage="database"

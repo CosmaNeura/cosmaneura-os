@@ -37,13 +37,38 @@ hosting, identity, state, or domain.
 
 ## Fail-closed frontend artifact
 
-`Dockerfile.web` builds the checked-in React application and
-`web/scripts/validate-beta-build.mjs` refuses the D3 artifact unless all of
-these public build inputs are present:
+`Dockerfile.web` builds the checked-in React application with the fixed
+`operational-beta-v1` feature profile and `web` client. The existing feature
+compiler supplies `VITE_COSMAS_ENV=early_adopter_beta` and the feature gates.
+The protected builder consumes exactly the seven uppercase fields used by
+`web-build-arguments.json`:
 
-- `VITE_COSMAS_ENV=early_adopter_beta`;
-- a production Clerk **publishable** key beginning `pk_live_`; and
-- `VITE_API_BASE` equal to one credential-free HTTPS origin.
+```json
+{
+  "VITE_CLERK_PUBLISHABLE_KEY": "<PK_LIVE_PUBLISHABLE_KEY>",
+  "VITE_WORKSPACE_HOSTED_API_ORIGIN": "<D3_API_ORIGIN>",
+  "VITE_WORKSPACE_WEB_ORIGIN": "<D3_WEB_ORIGIN>",
+  "VITE_WORKSPACE_DATA_MODE": "synthetic",
+  "VITE_COSMANEURA_WEB_ORIGIN": "<REVIEWED_CORE_WEB_ORIGIN>",
+  "VITE_CAPTURE_UPLOAD_ORIGINS": "<REVIEWED_CAPTURE_UPLOAD_ORIGIN>",
+  "VITE_WORKSPACE_CAPTURE_MODE": "browser_microphone"
+}
+```
+
+Replace the placeholders with explicit public configuration. API and web origins
+must match the verified foundation outputs. Core and upload values must be exact,
+credential-free HTTPS origins without ports, paths, queries or fragments. Uploads
+accept one to four distinct origins separated by commas without spaces. Web
+capture mode is `browser_microphone` or `synthetic`.
+
+`infra/beta/validate_web_build.py` runs in both the human-side transport and the
+protected builder using Python 3.10+. It rejects duplicate, extra, missing,
+overlarge and malformed inputs. This D3 path still requires a production
+`pk_live_` publishable key and **synthetic** data mode; it refuses an
+`authorized_beta` build file until that separate deployment gate is implemented
+and approved. The image label and accepted build evidence hash all seven public
+inputs. `web/scripts/validate-beta-build.mjs` independently checks the complete
+feature/origin profile during the offline Docker build.
 
 The Clerk secret key (`sk_live_...`), session tokens, user records, Box IDs,
 database credentials, and Azure credentials must never be build arguments,
@@ -68,24 +93,26 @@ session token is unavailable.
 3. Create/configure the production Cosmas OS Clerk instance for the exact web
    origin, recreate the empty Cosmas Beta Lab Organization there, and retain
    Clerk secrets only in the human-controlled service. Do not invite testers.
-4. At one clean reviewed source SHA, build the API image from `Dockerfile` and
-   the web image from `Dockerfile.web`. For the web build, provide only the
-   three public values above. A representative human-run command is:
+4. At one clean reviewed source SHA, prepare the seven-field public configuration
+   above as a mode-`0600` file outside the repository. Validate it locally, then
+   use the existing protected build/push path for the API and web images:
 
    ```text
-   docker build \
-     --tag <D3_ACR_LOGIN_SERVER>/cosmas-os-web:<FULL_SOURCE_SHA> \
-     --file Dockerfile.web \
-     --build-arg VITE_COSMAS_ENV=early_adopter_beta \
-     --build-arg VITE_CLERK_PUBLISHABLE_KEY=<PK_LIVE_PUBLISHABLE_KEY> \
-     --build-arg VITE_API_BASE=<D3_API_ORIGIN> \
-     .
-   docker push <D3_ACR_LOGIN_SERVER>/cosmas-os-web:<FULL_SOURCE_SHA>
+   python3 infra/beta/validate_web_build.py validate \
+     /protected/ephemeral/web-build-arguments.json
+   bash infra/beta/transport-to-protected-runner.sh build-push \
+     --bootstrap-outputs /protected/ephemeral/bootstrap-outputs.json \
+     --source-sha <FULL_REVIEWED_SOURCE_SHA> \
+     --release-id <REVIEWED_RELEASE_ID> \
+     --web-build-config /protected/ephemeral/web-build-arguments.json \
+     --artifact-out /protected/ephemeral/d3-beta-build.json
    ```
 
-   The authenticated push is a cloud mutation and must run from the approved
-   human-controlled path that can reach the selected ACR network posture. Do
-   not run it during source validation.
+   Only the validator is a local source check. `build-push` performs cloud
+   mutations and must run from the approved human-controlled path; do not run it
+   during source validation. The protected builder binds both origins to live
+   foundation outputs and preserves source/network checks, immutable tags,
+   vulnerability scans and offline dependency installation/build steps.
 5. Scan both images and the static bundle. Record the source SHA, immutable
    `sha256` digests, public build configuration, scan result, and rollback
    digests in protected release evidence. Do not record any token or secret.

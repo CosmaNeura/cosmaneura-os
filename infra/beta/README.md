@@ -501,9 +501,25 @@ The self-hashed network artifact includes a strictly whitelisted
 and ACR login server. Use those values for Clerk and the public web build;
 never export or inspect raw Terraform state to discover them.
 
-`public-web-build.json` contains only `vite_cosmas_env`,
-`vite_clerk_publishable_key`, and the exact foundation `vite_api_base`. A
-different state serial requires a new append-only network probe generation;
+`public-web-build.json` uses the existing `web-build-arguments.json` schema:
+exactly `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_WORKSPACE_HOSTED_API_ORIGIN`,
+`VITE_WORKSPACE_WEB_ORIGIN`, `VITE_WORKSPACE_DATA_MODE`,
+`VITE_COSMANEURA_WEB_ORIGIN`, `VITE_CAPTURE_UPLOAD_ORIGINS`, and
+`VITE_WORKSPACE_CAPTURE_MODE`. Validate it locally with
+`python3 infra/beta/validate_web_build.py validate /absolute/path/to/public-web-build.json`
+from the repository root. The shared Python 3.10+ validator rejects duplicate,
+extra, missing and malformed fields. The protected builder binds API and web
+origins to the exact foundation outputs and hashes all seven values in its image
+label and accepted evidence. The Dockerfile fixes the operational feature profile
+and web client; arbitrary feature gates and image overrides are not inputs.
+
+This protected D3 path requires `pk_live_`, data mode `synthetic`, exact public
+HTTPS origins, and web capture mode `synthetic` or `browser_microphone`.
+`authorized_beta` remains a separate deployment gate; an operational identity
+preparer's authorized-beta output is not accepted here. See
+[`docs/beta/WEB_RELEASE.md`](../../docs/beta/WEB_RELEASE.md) for the complete input
+example and unchanged human-owned release sequence. A different state serial
+requires a new append-only network probe generation;
 the already accepted source/digest build evidence remains reusable after its
 ACR tags and digests are revalidated.
 

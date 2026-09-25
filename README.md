@@ -15,8 +15,19 @@ CosmaBot implementation into the owning repository. It is an integration
 candidate, not a deployed or fully qualified operational beta. Desktop and mobile
 are both required for initial release. See [scope and validation](docs/beta/COSMABOT_SOURCE_INTEGRATION.md).
 
-The commands and deployment descriptions below describe the earlier foundation.
-They do not establish the current beta's deployment state.
+## Build the current standalone app
+
+- Hosted workspace: [complete beta build](docs/operational-beta-build.md) and
+  [public release inputs](docs/beta/WEB_RELEASE.md). `Dockerfile.web` selects the
+  complete `operational-beta-v1` profile; use its current public build arguments.
+- Mac and iPhone: [native build inputs](docs/operational-native-build.md), then
+  [Mac archive packaging](docs/desktop-release-packaging.md). Both clients are
+  required for release. Existing capture components remain at the paused snapshot.
+- Backend validation: [local checks](docs/local-checks.md). Record the exact
+  reviewed commit and results locally; GitHub is used for source and PR evidence.
+
+The foundation commands and D1–D3 history below describe earlier synthetic slices.
+They do not establish current operational-beta deployment or device acceptance.
 
 Cosmas OS Track B: a locally runnable synthetic practice computer plus the
 fail-closed source and infrastructure preparation for an isolated D3
@@ -150,7 +161,7 @@ The repository now contains:
 This is deliberately **not yet an application deployment**. The isolated D3
 bootstrap/state boundary, dedicated Box assignment, and private protected
 runner exist. The application path still needs Azure capacity resolution, a
-committed and CI-green successor release, the separately approved foundation,
+committed and locally reviewed/tested successor release, the separately approved foundation,
 production Cosmas OS Clerk instance and Organization, database preparation,
 workload/domain plans, and human acceptance evidence. `centralus`, private ACR,
 `beta.cosmaneura.com`, and the strict Clerk/cost/recovery operating choices are
