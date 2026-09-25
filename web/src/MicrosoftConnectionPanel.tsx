@@ -12,6 +12,7 @@ const when=(value:string)=>new Date(value).toLocaleString(undefined,{dateStyle:'
 export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthenticationLost}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void}){
   const [data,setData]=useState<PrivateState|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[opening,setOpening]=useState(false);
   const [requestId,setRequestId]=useState(()=>crypto.randomUUID());
+  const [unavailableFor,setUnavailableFor]=useState<AuthenticatedWorkspaceIdentity|null>(null);
   const owner=useRef(identity);owner.current=identity;
   // Hide prior-account values during render, before identity-change effects run.
   const visible=data?.owner===identity?data:null,status=visible?.status,start=visible?.start,view=visible?.view;
@@ -23,7 +24,7 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
   useSetupNavigationBusy(busy||opening,onBusyChange);
   useEffect(()=>{
     epoch.current++;pending.current?.abort();pending.current=null;navigationPending.current=null;awaitingReturn.current=false;
-    setData(null);setMessage('');setBusy(false);setOpening(false);
+    setData(null);setMessage('');setBusy(false);setOpening(false);setUnavailableFor(null);
     return()=>{epoch.current++;pending.current?.abort();pending.current=null;};
   },[identity]);
   const run=useCallback(async(action:MicrosoftAction)=>{
@@ -33,6 +34,7 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
     try{
       const result=await microsoftConnectionRequest(identity,action,controller.signal);
       if(epoch.current!==current||owner.current!==identity)return;
+      setUnavailableFor(null);
       if('authorization_url' in result){setData({owner:identity,status:null,start:result,view:null});setRequestId(crypto.randomUUID());setMessage('Continue with Microsoft, then return here. Your connection will be checked when you return.');}
       else if('kind' in result)setData(previous=>({owner:identity,status:previous?.owner===identity?previous.status:null,start:null,view:result}));
       else if(result.state==='disconnected'){setData(null);setMessage('Microsoft disconnected from CosmasOS. You can reconnect when ready.');}
@@ -42,7 +44,7 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
       setData(null);
       if(error instanceof WorkspaceApiError&&[401,403].includes(error.status)){setMessage('Sign in to CosmasOS again to continue.');denied.current(error);}
       else if(error instanceof WorkspaceApiError&&error.status===409)setMessage('Microsoft sign-in needs to finish or be renewed. Check your connection, then reconnect if needed.');
-      else if(error instanceof WorkspaceApiError&&error.status===404)setMessage('Microsoft email and calendar are not enabled for this practice yet.');
+      else if(error instanceof WorkspaceApiError&&error.status===404){setUnavailableFor(identity);setMessage('Microsoft email and calendar are not enabled for this practice yet.');}
       else setMessage('The result could not be confirmed. Check your connection before trying again.');
     }finally{if(epoch.current===current&&owner.current===identity){pending.current=null;setBusy(false);}}
   },[identity]);
@@ -86,7 +88,7 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Microsoft connected.':status.state==='completing_sign_in'?'Completing Microsoft sign-in…':status.state==='sign_in_pending'?'Microsoft sign-in is ready to continue.':'Connect your Microsoft account to continue.'}</p>
     </div>}
-    {(!status||status.state!=='completing_sign_in')&&!start&&<button disabled={blocked||!nativeReady} onClick={()=>void run('start')}>{status?.state==='connected'?'Reconnect Microsoft':'Connect with Microsoft'}</button>}
+    {(!status||status.state!=='completing_sign_in')&&!start&&<button disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>void run('start')}>{status?.state==='connected'?'Reconnect Microsoft':'Connect with Microsoft'}</button>}
     {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||!nativeReady}
       data-microsoft-connection={blocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
       onClick={begin}>{opening?'Opening Microsoft…':'Continue with Microsoft'}</button>:
