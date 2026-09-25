@@ -9,10 +9,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from alembic import command
-from alembic.config import Config
 from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.orm import Session
+from tests.helpers.compact_database import isolated_compact_database
 
 from cosmas_os.application import services as svc
 from cosmas_os.application.seed import seed_synth_work_queue
@@ -30,14 +29,16 @@ from cosmas_os.models import (
     Principal,
     Ticket,
 )
+from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 
 @pytest.fixture
 def compact(monkeypatch):
-    # Only a dedicated, newly provisioned local test DB; never the base fixture DB.
+    # Current migrations contain explicit public objects. Use the checker's
+    # freshly migrated DB, with ownership checked before any test or cleanup.
     url = os.environ.get("COMPACT_TEST_DATABASE_URL")
     if not url:
-        pytest.skip("set COMPACT_TEST_DATABASE_URL for real PostgreSQL claim/recovery tests")
+        pytest.fail("run scripts/check-backend-local.py --profile compact")
     for key, value in {
         "execution_backend": "postgres_local",
         "sync_worker": False,
@@ -51,32 +52,21 @@ def compact(monkeypatch):
         "cors_allowed_origins": "http://127.0.0.1:8008",
     }.items():
         monkeypatch.setattr(settings, key, value)
-    admin = create_engine(url)
-    require_local_engine(admin)
-    schema = "compact_test_" + uuid4().hex
-    with admin.begin() as connection:
-        connection.exec_driver_sql(f'CREATE SCHEMA "{schema}"')
     engine = create_engine(
-        url, connect_args={"options": f"-c search_path={schema} -c statement_timeout=5000"}
+        url, connect_args={"options": "-c search_path=public -c statement_timeout=5000"}
     )
-    config = Config("alembic.ini")
-    config.attributes["configure_logger"] = False
     try:
-        with engine.begin() as connection:
-            config.attributes["connection"] = connection
-            command.upgrade(config, "head")
-            install_extension(connection)
-        with Session(engine) as session:
-            seeded = seed_synth_work_queue(session)
-            ticket = session.get(Ticket, seeded["ticket_id"])
-            seeded["revision_id"] = ticket.current_revision_id
-        yield engine, seeded
+        require_local_engine(engine)
+        with isolated_compact_database(engine, os.environ.get("COMPACT_TEST_DATABASE_TOKEN")):
+            with engine.begin() as connection:
+                install_extension(connection)
+            with Session(engine) as session:
+                seeded = seed_synth_work_queue(session)
+                ticket = session.get(Ticket, seeded["ticket_id"])
+                seeded["revision_id"] = ticket.current_revision_id
+            yield engine, seeded
     finally:
         engine.dispose()
-        with admin.begin() as connection:
-            # Exact schema created above, never public or a user-supplied identifier.
-            connection.exec_driver_sql(f'DROP SCHEMA "{schema}" CASCADE')
-        admin.dispose()
 
 
 def approve(compact):
@@ -208,7 +198,7 @@ def test_sigkill_after_committed_effect_is_recovered_without_duplicate(compact):
         "COMPACT_CRASH_TEST_BOX": seeded["box_id"],
     }
     # No production fault-injection hook. The test-owned subprocess commits the
-    # fake receipt in the isolated schema, then dies before acknowledging it.
+    # fake receipt in the owned database, then dies before acknowledging it.
     result = subprocess.run(
         [
             sys.executable,
@@ -369,10 +359,12 @@ def test_receipt_mismatch_cannot_reconcile_or_resend(compact):
 def test_extension_migration_is_idempotent_and_leaves_core_head_unchanged(compact):
     engine, _ = compact
     with engine.begin() as connection:
+        before = connection.scalar(text("SELECT version_num FROM alembic_version"))
+        assert before == EXPECTED_SCHEMA_REVISION
         install_extension(connection)
         assert (
             connection.scalar(text("SELECT version_num FROM alembic_version"))
-            == "0002_external_identities"
+            == before
         )
         assert connection.scalar(text("SELECT version FROM compact_schema_version")) == 1
         assert Path("src/cosmas_os/compact/schema.sql").is_file()
