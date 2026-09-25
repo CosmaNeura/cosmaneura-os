@@ -97,6 +97,13 @@ deadlines. The key also carries OpenSSH source `/32` and expiry restrictions.
 A reboot immediately invalidates it even before the enabled boot cleanup runs.
 The timer uses UTC and boot-relative deadlines to handle wall-clock changes.
 
+Ubuntu 22.04's OpenSSH 8.9 requires the key expiry in suffixless
+`YYYYMMDDHHMMSS` format. Before installation or controlled key replacement,
+root must verify that host local time is UTC and the SSH master has no `TZ`
+override, and preserve that configuration through the window. The stamp is
+formatted from the same absolute UTC deadline; the active-state checks and
+timer keep their existing UTC and monotonic deadlines.
+
 Closure denies new authentication and removes only the exact owned key, then
 locks/expires the dedicated account and kills its UID's processes plus its exact
 privileged SSH monitor. PID-bound signals prevent PID-reuse mistakes. Other

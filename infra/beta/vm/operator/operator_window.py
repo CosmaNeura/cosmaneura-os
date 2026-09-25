@@ -185,7 +185,8 @@ def active(state):
 
 
 def key_line(state):
-    stamp = datetime.fromtimestamp(state["expiry"], timezone.utc).strftime("%Y%m%d%H%M%SZ")
+    # OpenSSH 8.9 requires a suffixless stamp; the operator host must be verified UTC.
+    stamp = datetime.fromtimestamp(state["expiry"], timezone.utc).strftime("%Y%m%d%H%M%S")
     return (
         f'from="{state["source_ipv4"]}/32",restrict,port-forwarding,'
         f'permitopen="{state["vault_host"]}:443",permitopen="{state["acr_host"]}:443",'

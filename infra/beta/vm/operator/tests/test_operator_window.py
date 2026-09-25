@@ -98,6 +98,17 @@ def test_key_denied_at_expiry_on_reboot_and_during_failed_setup(local, monkeypat
     assert (op.window_path(WINDOW) / "authorized_key").exists()  # Gate works before removal.
 
 
+def test_openssh_89_key_expiry_is_suffixless_and_preserves_utc_deadline(local, monkeypatch):
+    state = prepared(local)
+    stamp = op.key_line(state).split('expiry-time="', 1)[1].split('"', 1)[0]
+    assert len(stamp) == 14 and stamp.isascii() and stamp.isdigit()
+    parsed = datetime.strptime(stamp, "%Y%m%d%H%M%S").replace(tzinfo=timezone.utc)
+    assert parsed.timestamp() == state["expiry"]
+    assert op.active(state)
+    monkeypatch.setattr(op.time, "time", lambda: parsed.timestamp())
+    assert not op.active(state)
+
+
 @pytest.mark.parametrize(
     ("environment_config", "refused"),
     [
