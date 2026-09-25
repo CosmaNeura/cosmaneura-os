@@ -88,6 +88,8 @@ resource "random_string" "suffix" {
 resource "terraform_data" "prerequisite_guard" {
   input = {
     environment       = "early_adopter_beta"
+    location          = var.location
+    api_max_replicas  = var.api_max_replicas
     deployment_mode   = var.deployment_mode
     runtime_data_mode = local.runtime_data_mode
     evidence_digest = nonsensitive(sha256(join("|", [

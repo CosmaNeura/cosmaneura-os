@@ -600,6 +600,30 @@ guard_validate_planned_boundary() {
       .planned_values.outputs.state_vnet_id.value == $state_vnet_id and
       .planned_values.outputs.state_blob_private_dns_zone_id.value == $state_blob_private_dns_zone_id
     ' "$plan_json" >/dev/null || guard_die "planned outputs do not match the exact D3 mode/Box boundary"
+
+  # Compare placement and scale with resolved saved-plan inputs, never with
+  # resource-group metadata or a live value being verified. Missing variables
+  # retain the historical module defaults; explicit null/malformed values fail.
+  jq -e '
+    (if ((.variables // {}) | has("location")) then .variables.location.value else "centralus" end) as $location |
+    (if ((.variables // {}) | has("api_max_replicas")) then .variables.api_max_replicas.value else 2 end) as $cap |
+    ($location | type == "string" and test("^[a-z][a-z0-9]{2,31}$")) and
+    ($cap | type == "number" and (. == 1 or . == 2)) and
+    .planned_values.outputs.location.value == $location and
+    .planned_values.outputs.api_max_replicas.value == $cap and
+    ([.resource_changes[]? |
+      select(.mode == "managed") |
+      select(.type | IN(
+        "azurerm_container_registry", "azurerm_storage_account", "azurerm_key_vault",
+        "azurerm_postgresql_flexible_server", "azurerm_managed_redis", "azurerm_virtual_network",
+        "azurerm_private_endpoint", "azurerm_user_assigned_identity",
+        "azurerm_container_app_environment", "azurerm_container_app_job",
+        "azurerm_log_analytics_workspace")) |
+      .change.after.location == $location] | all) and
+    ([.resource_changes[]? |
+      select(.mode == "managed" and .type == "azurerm_container_app" and .name == "api") |
+      .change.after.template[0].max_replicas == $cap] | all)
+  ' "$plan_json" >/dev/null || guard_die "planned workload location or API replica cap differs from the reviewed inputs"
 }
 
 guard_validate_safe_plan_actions() {
@@ -880,6 +904,8 @@ guard_write_critical_planned_values() {
 
   jq '{
     environment: .planned_values.outputs.environment.value,
+    location: .planned_values.outputs.location.value,
+    api_max_replicas: .planned_values.outputs.api_max_replicas.value,
     box_id: .planned_values.outputs.box_id.value,
     deployment_mode: .planned_values.outputs.deployment_mode.value,
     data_classification: .planned_values.outputs.data_classification.value,

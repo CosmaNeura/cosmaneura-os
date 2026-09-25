@@ -1,7 +1,7 @@
 resource "azurerm_storage_account" "beta" {
   name                              = local.storage_name
   resource_group_name               = data.azurerm_resource_group.beta.name
-  location                          = data.azurerm_resource_group.beta.location
+  location                          = var.location
   account_tier                      = "Standard"
   account_replication_type          = var.storage_replication_type
   min_tls_version                   = "TLS1_2"
@@ -49,7 +49,7 @@ resource "azurerm_role_assignment" "deploy_blob_data" {
 resource "azurerm_private_endpoint" "blob" {
   name                = "pe-blob-${var.beta_id}"
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   subnet_id           = azurerm_subnet.private_endpoints.id
   tags                = local.tags
 

@@ -1,7 +1,7 @@
 resource "azurerm_managed_redis" "beta" {
   name                      = local.redis_name
   resource_group_name       = data.azurerm_resource_group.beta.name
-  location                  = data.azurerm_resource_group.beta.location
+  location                  = var.location
   sku_name                  = var.redis_sku_name
   high_availability_enabled = true
   public_network_access     = "Disabled"
@@ -25,7 +25,7 @@ resource "azurerm_managed_redis" "beta" {
 resource "azurerm_private_endpoint" "redis" {
   name                = "pe-redis-${var.beta_id}"
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   subnet_id           = azurerm_subnet.private_endpoints.id
   tags                = local.tags
 

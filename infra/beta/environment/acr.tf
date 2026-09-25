@@ -1,7 +1,7 @@
 resource "azurerm_container_registry" "beta" {
   name                          = local.acr_name
   resource_group_name           = data.azurerm_resource_group.beta.name
-  location                      = data.azurerm_resource_group.beta.location
+  location                      = var.location
   sku                           = local.registry_is_private ? "Premium" : "Basic"
   admin_enabled                 = false
   anonymous_pull_enabled        = false
@@ -19,7 +19,7 @@ resource "azurerm_private_endpoint" "acr" {
 
   name                = "pe-acr-${var.beta_id}"
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   subnet_id           = azurerm_subnet.private_endpoints.id
   tags                = local.tags
 

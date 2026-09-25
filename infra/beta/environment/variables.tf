@@ -50,8 +50,13 @@ variable "beta_id" {
 
 variable "location" {
   type        = string
-  description = "Owner-selected single region for ACA and private data services. Central US remains fail-closed until current quota and service-capacity evidence is recorded."
+  description = "Reviewed workload region for ACA and private data services, independent of existing resource-group and bootstrap/state locations. Current quota and service-capacity evidence remains required."
   default     = "centralus"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]{2,31}$", var.location))
+    error_message = "location must be the canonical lowercase Azure region name selected in the reviewed plan."
+  }
 }
 
 variable "deployment_mode" {
@@ -559,8 +564,13 @@ variable "api_min_replicas" {
 
 variable "api_max_replicas" {
   type        = number
-  description = "API maximum replicas."
+  description = "Reviewed API maximum replicas: one for bounded staging capacity or two for the default beta profile."
   default     = 2
+
+  validation {
+    condition     = contains([1, 2], var.api_max_replicas)
+    error_message = "api_max_replicas must be exactly 1 or 2 to match the workload verification contract."
+  }
 }
 
 variable "web_cpu" {

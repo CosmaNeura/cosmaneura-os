@@ -7,7 +7,7 @@ resource "azurerm_container_app_job" "runtime_acceptance" {
 
   name                         = local.runtime_acceptance_job_name
   resource_group_name          = data.azurerm_resource_group.beta.name
-  location                     = data.azurerm_resource_group.beta.location
+  location                     = var.location
   container_app_environment_id = azurerm_container_app_environment.beta.id
   replica_timeout_in_seconds   = 900
   replica_retry_limit          = 0

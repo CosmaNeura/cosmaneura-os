@@ -65,7 +65,7 @@ requirements without inventing values:
 - a reviewed D3 capability manifest with every external connector dark;
 - a human-owned `alert_contact_email` before workloads, followed by a delivered
   Azure Action Group test containing no application data; and
-- a reviewed Central US availability and cost record for the selected Azure
+- a reviewed selected-region availability and cost record for the selected Azure
   Managed Redis `Balanced_B0` broker and its private endpoint.
 
 For `synthetic_lab`, a named clinic, clinic approval, BAA evidence, and PHI
@@ -111,14 +111,67 @@ after account-scope Blob RBAC propagates. Environment planning and apply then
 run on that VM. Do not expose the state account or substitute an interactive
 identity as a workaround.
 
-## Provisional region
+## Selected staging region and capacity
 
-`centralus` is a provisional default because the sponsorship subscription
-rejected PostgreSQL Flexible Server in `eastus`/`eastus2` during D2. D3 uses a
-single region so Container Apps and private PostgreSQL can share one VNet.
-The human must confirm residency, Container Apps, PostgreSQL, Redis, private
-endpoint, zone, and SKU availability before any plan. A different verified
-region may be supplied.
+The owner selected **East US 2 (`eastus2`)** on September 25, 2026 for
+`staging.cosmas.ai`. Set these values explicitly in the reviewed environment
+inputs; the retained `centralus`/two-replica defaults are for compatibility with
+earlier deployments and do not select the new staging profile:
+
+```hcl
+location         = "eastus2"
+api_max_replicas = 1
+```
+
+Environment resources use the selected `location`, independently of resource
+group metadata. Keep the existing Central US bootstrap/state/runner boundary;
+do not recreate it or change its location to move workloads. Workload Container
+Apps, PostgreSQL, Redis and private endpoints share the East US 2 workload VNet.
+The two explicit peerings connect that VNet to the retained runner/state VNet.
+Private DNS, routing, global-peering cost and exact endpoint access still need
+current review and the protected live network probe before deployment proceeds.
+
+With current container sizes, one API replica uses 0.5 vCPU, the worker 0.5 and
+the web host at most 0.25: 1.25 total. Conservative overlapping old/new revisions
+use 2.5; one 0.25-vCPU manual job brings the envelope to 2.75. **Three total cores**
+are therefore the proposed low-traffic staging quota. This requires the reviewed
+API cap of one and at most one active manual job. It is a quota ceiling, not
+three continuously allocated or billed cores. The default two-replica API has a
+3.75-core envelope under the same assumptions and needs four total cores.
+
+The protected runner checks the exact beta job inventory and execution status
+before either manual job starts and before a workload apply. Active, unknown,
+incompletely enumerated or unexpected jobs block that operation. It preserves
+surviving jobs for explicit recovery; a released local process lock is not
+treated as proof that a remote execution ended. Keep starts within this
+serialized deployment path.
+
+The September 25 subscription readback still showed East US 2 `SandboxCores`
+usage 0 / limit 1, an explicit PostgreSQL `OfferRestricted` response, and no
+`Balanced_B0` entry for East US 2 in the stable Redis SKU catalog. The Redis
+catalog conflicts with earlier portal evidence; EastUS2EUAP is a different
+region. These observations do not establish provisioning eligibility. Obtain
+current quota, exact PostgreSQL/Redis SKU, private endpoint, zone and cost
+confirmation before a real plan. The selected PostgreSQL source version is 16;
+do not substitute a different major version based on an older support summary.
+
+The saved plan guard binds both `location` and `api_max_replicas` to its resolved
+variables, outputs and planned resources. Its sanitized
+`critical_planned_values` projection carries both values. A reviewed protected
+caller of `workload_verification.py` must supply those exact saved-plan values
+as `COSMAS_WORKLOAD_LOCATION` and `COSMAS_WORKLOAD_API_MAX_REPLICAS`, alongside
+the existing source, release, state, Box and image bindings. Never derive the
+expected values from the live resources being checked. Both variables must be
+supplied together; only a legacy invocation with neither supplied retains the
+Central US/two-replica expectation.
+
+Current workload receipts contain both values. Pass the same expected location
+and API cap as the final argument pair to `validate_workload_attestation.py`;
+a mismatch fails even if the receipt hash is recomputed. Legacy receipts without
+either field are valid only for an expected Central US/two-replica deployment.
+These are resident primitives: this repository does not yet provide an automatic
+protected-runner caller for them. Their availability alone does not establish
+that a deployed workload was verified.
 
 ## Broker decision
 

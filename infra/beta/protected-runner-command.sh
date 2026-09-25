@@ -913,6 +913,63 @@ prepare_pitr_context() {
   install -d -o root -g root -m 0700 "$PITR_ROOT" "$PITR_ROOT/evidence"
 }
 
+verify_manual_jobs_idle() {
+  local outputs_file="$1"
+  local target_dir="$2"
+  local jobs_scope="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_WORKLOAD_RESOURCE_GROUP/providers/Microsoft.App/jobs"
+  local database_name="caj-dbprep-cosmas-beta-$GUARD_BETA_ID"
+  local acceptance_name="caj-runtime-accept-$GUARD_BETA_ID"
+  local prefix job_name expected_id enabled
+  mkdir -m 0700 "$target_dir" || die "cannot create private manual-job preflight directory"
+  # A failed resource GET is never evidence that an optional job is absent.
+  # Require a complete inventory, including no unreviewed third job in this RG.
+  az rest --method get --url "https://management.azure.com${jobs_scope}?api-version=2023-11-02-preview" --only-show-errors --output json >"$target_dir/jobs.json" || die "cannot establish an idle manual-job boundary"
+  jq -e --arg database_id "${jobs_scope,,}/${database_name}" --arg acceptance_id "${jobs_scope,,}/${acceptance_name}" '
+    type == "object" and (.value | type) == "array" and
+    (.nextLink == null or .nextLink == "") and (has("error") | not) and
+    all(.value[];
+      (.id | type) == "string" and
+      ((.id | ascii_downcase) == $database_id or (.id | ascii_downcase) == $acceptance_id)) and
+    ([.value[].id | ascii_downcase] | length == (unique | length))
+  ' "$target_dir/jobs.json" >/dev/null || die "manual-job inventory is incomplete or outside the exact beta boundary"
+  for prefix in database_preparation runtime_acceptance; do
+    if [[ "$prefix" == "database_preparation" ]]; then
+      job_name="$database_name"
+    else
+      job_name="$acceptance_name"
+    fi
+    expected_id="$jobs_scope/$job_name"
+    jq -e --arg prefix "$prefix" --arg expected_name "$job_name" --arg expected_id "${expected_id,,}" --slurpfile jobs "$target_dir/jobs.json" '
+      .[$prefix + "_job_enabled"].value as $enabled |
+      .[$prefix + "_job_name"].value as $name |
+      .[$prefix + "_job_resource_id"].value as $id |
+      [$jobs[0].value[] | select((.id | ascii_downcase) == $expected_id)] as $matches |
+      ($enabled | type) == "boolean" and
+      (if $enabled then
+        $name == $expected_name and ($id | type) == "string" and
+        ($id | ascii_downcase) == $expected_id and ($matches | length) == 1 and
+        $matches[0].name == $name and $matches[0].properties.configuration.triggerType == "Manual"
+      else
+        $name == null and $id == null and ($matches | length) == 0
+      end)
+    ' "$outputs_file" >/dev/null || die "manual-job stage outputs and live inventory disagree"
+    enabled="$(jq -r --arg prefix "$prefix" '.[$prefix + "_job_enabled"].value' "$outputs_file")"
+    [[ "$enabled" == "true" ]] || continue
+    az rest --method get --url "https://management.azure.com${expected_id}/executions?api-version=2023-11-02-preview" --only-show-errors --output json >"$target_dir/$prefix-executions.json" || die "cannot establish an idle manual-job boundary"
+    # Running/Processing/Starting/Waiting/Queued/Pending are the existing PITR
+    # active states. Only explicit terminal states are safe; unknown is blocked.
+    jq -e --arg job_id "${expected_id,,}" '
+      type == "object" and (.value | type) == "array" and
+      (.nextLink == null or .nextLink == "") and (has("error") | not) and
+      all(.value[];
+        (.name | type) == "string" and (.name | test("^[a-z0-9][a-z0-9-]{2,255}$")) and
+        (.id | type) == "string" and (.id | ascii_downcase) == ($job_id + "/executions/" + .name) and
+        (.properties.status == "Succeeded" or .properties.status == "Failed" or .properties.status == "Stopped")) and
+      ([.value[].id | ascii_downcase] | length == (unique | length))
+    ' "$target_dir/$prefix-executions.json" >/dev/null || die "a manual job is active or its complete terminal state is unverified"
+  done
+}
+
 pitr_get_live_topology() {
   local target_dir="$1"
   local resource
@@ -1765,6 +1822,7 @@ for name, value in values.items():
 if parsed["database-admin-url"] == parsed["database-runtime-url"]:
     raise SystemExit(1)
 PY
+    verify_manual_jobs_idle "$probe_outputs" "$operation_temp_dir/manual-job-preflight"
     az rest --method post --url "https://management.azure.com${job_id}/start?api-version=2023-11-02-preview" --body '{}' --only-show-errors --output json >"$operation_temp_dir/start.json" || die "database-preparation execution did not start"
     chmod 0600 "$operation_temp_dir/start.json"
     execution_name="$(jq -er '.name | strings | select(test("^[a-z0-9][a-z0-9-]{2,255}$"))' "$operation_temp_dir/start.json")" || die "database-preparation start response lacks an exact execution name"
@@ -2105,6 +2163,7 @@ PY
         ]}}
       ' >"$operation_temp_dir/start-request.json" || die "cannot construct the enumerated runtime-acceptance execution override"
     chmod 0600 "$operation_temp_dir/start-request.json"
+    verify_manual_jobs_idle "$probe_outputs" "$operation_temp_dir/manual-job-preflight"
     az rest --method post --url "https://management.azure.com${job_id}/start?api-version=2023-11-02-preview" --body @"$operation_temp_dir/start-request.json" --only-show-errors --output json >"$operation_temp_dir/start.json" || die "runtime-acceptance execution did not start"
     chmod 0600 "$operation_temp_dir/start.json"
     execution_name="$(jq -er '.name | strings | select(test("^[a-z0-9][a-z0-9-]{2,255}$"))' "$operation_temp_dir/start.json")" || die "runtime-acceptance start response lacks an exact execution name"
@@ -4374,6 +4433,29 @@ PY
     review_phase="$(jq -er '.phase | strings' "$stage_root/review.json")"
     [[ "$review_phase" != "foundation_reconcile" || "$stage" == "foundation" ]] || die "partial-foundation reconciliation cannot be applied as a later stage"
     [[ "$stage" == "foundation" || "$review_phase" == "subsequent" ]] || die "database/workload applies require a normal complete-state review"
+    if [[ "$stage" == "workloads" ]]; then
+      # The process lock cannot stop a prior remote execution surviving a
+      # controller timeout. Check the live jobs before overlapping revisions.
+      # shellcheck source=deployment-guard-lib.sh
+      source "$repository_root/infra/beta/deployment-guard-lib.sh"
+      GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
+      guard_find_terraform
+      guard_source_metadata "$repository_root"
+      guard_load_bootstrap_outputs "$bootstrap_outputs"
+      guard_verify_azure_context_and_boundary
+      export TF_DATA_DIR="$stage_root/manual-job-preflight-terraform-data"
+      guard_backend_init >/dev/null
+      probe_state="$(mktemp /run/cosmas-manual-job-preflight-state.XXXXXX)"
+      guard_pull_state "$probe_state"
+      guard_validate_environment_state "$probe_state"
+      jq -e --arg hash "$GUARD_STATE_SHA256" --slurpfile state "$probe_state" '
+        .prior_state == {lineage: $state[0].lineage, serial: $state[0].serial, sha256: $hash}
+      ' "$stage_root/review.json" >/dev/null || die "manual-job preflight state differs from the reviewed workload plan"
+      probe_outputs="$(mktemp /run/cosmas-manual-job-preflight-outputs.XXXXXX)"
+      jq '.outputs' "$probe_state" >"$probe_outputs"
+      operation_temp_dir="$(mktemp -d /run/cosmas-manual-job-preflight.XXXXXX)"
+      verify_manual_jobs_idle "$probe_outputs" "$operation_temp_dir/jobs"
+    fi
     if [[ "$stage" == "foundation" && "$review_phase" == "first" ]]; then
       if ! bash "$repository_root/infra/beta/apply-first-environment-plan.sh" \
         --bootstrap-outputs "$bootstrap_outputs" \

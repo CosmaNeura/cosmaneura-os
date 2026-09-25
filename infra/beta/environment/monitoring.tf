@@ -1,7 +1,7 @@
 resource "azurerm_log_analytics_workspace" "beta" {
   name                = local.law_name
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   sku                 = "PerGB2018"
   retention_in_days   = var.log_retention_days
   daily_quota_gb      = var.log_daily_quota_gb

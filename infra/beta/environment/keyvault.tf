@@ -1,7 +1,7 @@
 resource "azurerm_key_vault" "beta" {
   name                          = local.key_vault_name
   resource_group_name           = data.azurerm_resource_group.beta.name
-  location                      = data.azurerm_resource_group.beta.location
+  location                      = var.location
   tenant_id                     = data.azurerm_client_config.current.tenant_id
   sku_name                      = "standard"
   soft_delete_retention_days    = 90
@@ -23,7 +23,7 @@ resource "azurerm_key_vault" "beta" {
 resource "azurerm_private_endpoint" "key_vault" {
   name                = "pe-key-vault-${var.beta_id}"
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   subnet_id           = azurerm_subnet.private_endpoints.id
   tags                = local.tags
 

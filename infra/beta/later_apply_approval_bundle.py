@@ -28,6 +28,7 @@ from uuid import UUID
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
 SOURCE_RE = re.compile(r"^[0-9a-f]{40}$")
 RELEASE_RE = re.compile(r"^[a-z0-9][a-z0-9-]{2,31}$")
+LOCATION_RE = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 REVIEWER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/ -]{2,127}$")
 TIME_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 TIME_RE = re.compile(r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$")
@@ -429,11 +430,24 @@ def _validate_review(
         fail("sanitized review actions and security posture are not congruent")
 
     critical = review["critical_planned_values"]
-    if not isinstance(critical, dict) or set(critical) != CRITICAL_VALUE_KEYS:
+    if not isinstance(critical, dict) or set(critical) not in (
+        CRITICAL_VALUE_KEYS,
+        CRITICAL_VALUE_KEYS | {"api_max_replicas"},
+    ):
         fail("sanitized review critical planned-value shape is invalid")
+    # The plan guard matches these values to resolved plan variables/resources;
+    # the immutable review and tfvars hashes bind them into owner authorization.
+    # Historical reviews without a cap were only valid for Central US/cap 2.
+    if (
+        not isinstance(critical["location"], str)
+        or LOCATION_RE.fullmatch(critical["location"]) is None
+        or type(critical.get("api_max_replicas", 2)) is not int
+        or critical.get("api_max_replicas", 2) not in {1, 2}
+        or ("api_max_replicas" not in critical and critical["location"] != "centralus")
+    ):
+        fail("sanitized review workload profile is invalid")
     if (
         critical["environment"] != "early_adopter_beta"
-        or str(critical["location"]).lower() != "centralus"
         or critical["box_id"] != boundary["box_id"]
         or critical["deployment_mode"] != "synthetic_lab"
         or critical["data_classification"] != "synthetic-only"

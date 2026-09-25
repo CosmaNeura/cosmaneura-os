@@ -554,3 +554,49 @@ def test_no_ambient_environment_can_change_authority(monkeypatch: pytest.MonkeyP
     )
     assert not hasattr(parsed, "reviewer")
     assert not hasattr(parsed, "owner_assertion")
+
+
+@pytest.mark.parametrize("location,cap", [("eastus2", 1), ("eastus2", 2), ("centralus", 1)])
+def test_selected_profile_is_bound_into_owner_approval(
+    tmp_path: Path, location: str, cap: int
+) -> None:
+    inputs = _inputs(tmp_path, stage="workloads")
+    variables = {"deployment_mode": "synthetic_lab", "location": location, "api_max_replicas": cap}
+    _write_private(Path(inputs["variable_file"]), variables)
+    review = _review(
+        hashlib.sha256(Path(inputs["variable_file"]).read_bytes()).hexdigest(), "workloads"
+    )
+    review["critical_planned_values"].update(location=location, api_max_replicas=cap)
+    _write_private(Path(inputs["review_file"]), review)
+    assert tool.main(_request_args(inputs)) == 0
+    owner = _prepare_owner(inputs)
+    # The owner approved exactly this profile's immutable review.
+    review["critical_planned_values"]["api_max_replicas"] = 3 - cap
+    _write_private(Path(inputs["review_file"]), review)
+    with pytest.raises(ValueError, match="approval request contract/binding"):
+        tool.main(_materialize_args(inputs, owner))
+    review["critical_planned_values"]["api_max_replicas"] = cap
+    _write_private(Path(inputs["review_file"]), review)
+    assert tool.main(_materialize_args(inputs, owner)) == 0
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [
+        {"location": "eastus2"},
+        {"location": "East US 2", "api_max_replicas": 1},
+        {"location": None, "api_max_replicas": 1},
+        {"location": "eastus2", "api_max_replicas": True},
+        {"location": "eastus2", "api_max_replicas": "1"},
+        {"location": "eastus2", "api_max_replicas": 1.0},
+        {"location": "eastus2", "api_max_replicas": 3},
+    ],
+)
+def test_approval_rejects_invalid_or_unbound_profile(tmp_path: Path, profile: dict) -> None:
+    inputs = _inputs(tmp_path)
+    review = json.loads(Path(inputs["review_file"]).read_text())
+    review["critical_planned_values"].update(profile)
+    _write_private(Path(inputs["review_file"]), review)
+    with pytest.raises(ValueError, match="workload profile"):
+        tool.main(_request_args(inputs))
+    assert not Path(inputs["request"]).exists()

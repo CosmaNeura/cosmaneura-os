@@ -1,7 +1,7 @@
 resource "azurerm_virtual_network" "beta" {
   name                = local.vnet_name
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   address_space       = var.vnet_address_space
   tags                = local.tags
 }

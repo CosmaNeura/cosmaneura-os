@@ -1,7 +1,7 @@
 resource "azurerm_container_app_environment" "beta" {
   name                           = local.cae_name
   resource_group_name            = data.azurerm_resource_group.beta.name
-  location                       = data.azurerm_resource_group.beta.location
+  location                       = var.location
   infrastructure_subnet_id       = azurerm_subnet.container_apps.id
   log_analytics_workspace_id     = azurerm_log_analytics_workspace.beta.id
   internal_load_balancer_enabled = false

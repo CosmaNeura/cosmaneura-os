@@ -22,6 +22,7 @@ _MAX_AGE = timedelta(hours=1)
 _MAX_FUTURE_SKEW = timedelta(minutes=5)
 _UTC = timezone.utc  # noqa: UP017 -- protected runner supports Python 3.10.
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_LOCATION = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 _RELEASE = re.compile(r"^[a-z0-9][a-z0-9-]{2,31}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _SOURCE_SHA = re.compile(r"^[0-9a-f]{40}$")
@@ -62,6 +63,7 @@ _TRUE_ASSERTIONS = {
     "worker_probe_configuration_verified",
 }
 _FALSE_ASSERTIONS = {"person_or_patient_identifiers_returned", "secrets_returned"}
+_PROFILE_KEYS = {"location", "api_max_replicas"}
 
 
 class WorkloadAttestationError(RuntimeError):
@@ -78,6 +80,8 @@ class ExpectedBinding:
     box_id: str
     api_digest: str
     web_digest: str
+    location: str = "centralus"
+    api_max_replicas: int = 2
 
     def validated(self) -> ExpectedBinding:
         if not all(
@@ -90,6 +94,7 @@ class ExpectedBinding:
                 self.box_id,
                 self.api_digest,
                 self.web_digest,
+                self.location,
             )
         ):
             raise WorkloadAttestationError("invalid expected binding")
@@ -107,6 +112,9 @@ class ExpectedBinding:
             or not _DIGEST.fullmatch(self.api_digest)
             or not _DIGEST.fullmatch(self.web_digest)
             or self.api_digest == self.web_digest
+            or not _LOCATION.fullmatch(self.location)
+            or type(self.api_max_replicas) is not int
+            or self.api_max_replicas not in {1, 2}
         ):
             raise WorkloadAttestationError("invalid expected binding")
         return ExpectedBinding(
@@ -118,6 +126,8 @@ class ExpectedBinding:
             box_id=box_id,
             api_digest=self.api_digest,
             web_digest=self.web_digest,
+            location=self.location,
+            api_max_replicas=self.api_max_replicas,
         )
 
 
@@ -150,8 +160,19 @@ def validate_attestation(
     if observed_at.tzinfo is None:
         raise WorkloadAttestationError("invalid workload attestation observation time")
     observed_at = observed_at.astimezone(_UTC)
-    if not isinstance(evidence, dict) or set(evidence) != _TOP_LEVEL_KEYS:
+    if not isinstance(evidence, dict) or set(evidence) not in (
+        _TOP_LEVEL_KEYS,
+        _TOP_LEVEL_KEYS | _PROFILE_KEYS,
+    ):
         raise WorkloadAttestationError("invalid workload attestation shape")
+    # Old v1 attestations proved only Central US with a two-replica API cap.
+    # They cannot qualify another region or cap. Current producers bind both.
+    if (
+        evidence.get("location", "centralus") != expected.location
+        or type(evidence.get("api_max_replicas", 2)) is not int
+        or evidence.get("api_max_replicas", 2) != expected.api_max_replicas
+    ):
+        raise WorkloadAttestationError("stale workload attestation profile binding")
     if (
         type(evidence["schema_version"]) is not int
         or evidence["schema_version"] != 1
@@ -270,9 +291,11 @@ def load_and_validate_attestation(
 
 def main(argv: Sequence[str] | None = None) -> int:
     arguments = list(sys.argv[1:] if argv is None else argv)
-    if len(arguments) != 9:
+    if len(arguments) not in {9, 11}:
         return 1
     try:
+        if len(arguments) == 11 and arguments[10] not in {"1", "2"}:
+            return 1
         state_serial = int(arguments[4])
         expected = ExpectedBinding(
             source_sha=arguments[1],
@@ -283,6 +306,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             box_id=arguments[6],
             api_digest=arguments[7],
             web_digest=arguments[8],
+            location=arguments[9] if len(arguments) == 11 else "centralus",
+            api_max_replicas=int(arguments[10]) if len(arguments) == 11 else 2,
         )
         load_and_validate_attestation(Path(arguments[0]), expected)
     except (ValueError, WorkloadAttestationError):

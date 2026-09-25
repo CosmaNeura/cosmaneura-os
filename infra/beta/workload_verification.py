@@ -32,6 +32,7 @@ _COMMAND_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 _BETA_ID = re.compile(r"^[a-z0-9][a-z0-9-]{2,20}$")
 _DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
+_LOCATION = re.compile(r"^[a-z][a-z0-9]{2,31}$")
 _MANAGED_CERTIFICATE_NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,259}$")
 _REGISTRY = re.compile(r"^[a-z0-9]{5,50}\.azurecr\.io$")
 _RELEASE = re.compile(r"^[a-z0-9][a-z0-9-]{2,31}$")
@@ -116,12 +117,20 @@ class Config:
     state_lineage: str
     state_serial: int
     state_sha256: str
+    # Legacy callers selected this exact profile before these inputs existed.
+    location: str = "centralus"
+    api_max_replicas: int = 2
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str]) -> Config:
         def required(name: str) -> str:
             value = environment.get(name, "")
-            if not value or value != value.strip() or any(c in value for c in "\r\n\x00"):
+            if (
+                not isinstance(value, str)
+                or not value
+                or value != value.strip()
+                or any(c in value for c in "\r\n\x00")
+            ):
                 raise WorkloadVerificationError("workload verification configuration invalid")
             return value
 
@@ -152,6 +161,19 @@ class Config:
         web_digest = required("COSMAS_WORKLOAD_WEB_DIGEST")
         state_lineage = required("COSMAS_WORKLOAD_STATE_LINEAGE").lower()
         state_sha256 = required("COSMAS_WORKLOAD_STATE_SHA256")
+        # Only omission of both new inputs preserves the exact legacy profile.
+        # Current invocations must take the pair from the reviewed plan, never ARM.
+        if (
+            not {"COSMAS_WORKLOAD_LOCATION", "COSMAS_WORKLOAD_API_MAX_REPLICAS"}
+            & environment.keys()
+        ):
+            location, api_max_replicas = "centralus", 2
+        else:
+            location = required("COSMAS_WORKLOAD_LOCATION")
+            cap = required("COSMAS_WORKLOAD_API_MAX_REPLICAS")
+            if not _LOCATION.fullmatch(location) or cap not in {"1", "2"}:
+                raise WorkloadVerificationError("workload verification configuration invalid")
+            api_max_replicas = int(cap)
         try:
             state_serial = int(required("COSMAS_WORKLOAD_STATE_SERIAL"))
         except ValueError:
@@ -233,6 +255,8 @@ class Config:
             state_lineage=state_lineage,
             state_serial=state_serial,
             state_sha256=state_sha256,
+            location=location,
+            api_max_replicas=api_max_replicas,
         )
 
 
@@ -311,10 +335,11 @@ def _is_null_or_empty_list(value: object) -> bool:
     return value is None or (isinstance(value, list) and not value)
 
 
-def _is_centralus(value: object) -> bool:
-    """Accept only Azure's two wire spellings for the exact centralus region."""
+def _is_expected_location(value: object, expected: str) -> bool:
+    """Match the reviewed region, including known ARM display spellings."""
 
-    return isinstance(value, str) and value in {"centralus", "Central US"}
+    display_names = {"centralus": "Central US", "eastus2": "East US 2"}
+    return isinstance(value, str) and (value == expected or value == display_names.get(expected))
 
 
 def _arm_url(resource_id: str, *, revisions: bool = False) -> str:
@@ -376,7 +401,7 @@ def _validate_managed_environment(config: Config, environment: dict[str, Any]) -
         str(environment.get("id", "")).lower() != config.managed_environment_id.lower()
         or environment.get("name") != expected_name
         or str(environment.get("type", "")).lower() != "microsoft.app/managedenvironments"
-        or not _is_centralus(environment.get("location"))
+        or not _is_expected_location(environment.get("location"), config.location)
         or not isinstance(properties, dict)
         or properties.get("provisioningState") != "Succeeded"
         or not isinstance(vnet, dict)
@@ -414,8 +439,8 @@ def _validate_registry(
         raise WorkloadVerificationError(f"{kind} registry binding invalid")
 
 
-def _validate_scale(kind: str, scale: object) -> tuple[int, int]:
-    minimum, maximum = {"api": (1, 2), "worker": (1, 1), "web": (0, 1)}[kind]
+def _validate_scale(config: Config, kind: str, scale: object) -> tuple[int, int]:
+    minimum, maximum = {"api": (1, config.api_max_replicas), "worker": (1, 1), "web": (0, 1)}[kind]
     if (
         not isinstance(scale, dict)
         or not {"minReplicas", "maxReplicas"}.issubset(scale)
@@ -775,7 +800,7 @@ def _validate_app(
     scale = template.get("scale") if isinstance(template, dict) else None
     if (
         str(app.get("id", "")).lower() != resource_id.lower()
-        or not _is_centralus(app.get("location"))
+        or not _is_expected_location(app.get("location"), config.location)
         or _identity_id(app) != expected_identity.lower()
         or tags != expected_tags
         or str(properties.get("managedEnvironmentId", "")).lower()
@@ -821,7 +846,7 @@ def _validate_app(
     if not _is_exact_int(maximum_inactive, 3):
         raise WorkloadVerificationError("Container App configuration contract invalid")
     _validate_registry(config, kind, registries, expected_identity)
-    minimum_replicas, maximum_replicas = _validate_scale(kind, scale)
+    minimum_replicas, maximum_replicas = _validate_scale(config, kind, scale)
     _validate_secrets(config, kind, configuration)
     _validate_container_contract(config, kind, containers[0])
     latest = properties.get("latestRevisionName")
@@ -906,7 +931,7 @@ def _validate_app(
         not isinstance(revision_suffix, str) or not latest.endswith(f"--{revision_suffix}")
     ):
         raise WorkloadVerificationError("Container App revision template contract invalid")
-    _validate_scale(kind, revision_scale)
+    _validate_scale(config, kind, revision_scale)
     _validate_container_contract(config, kind, revision_containers[0])
     _validate_route(config, kind, app)
     return hashlib.sha256(str(revision["id"]).lower().encode()).hexdigest()
@@ -962,6 +987,13 @@ def verify_workload(
     *,
     now: datetime,
 ) -> dict[str, Any]:
+    if (
+        not isinstance(config.location, str)
+        or not _LOCATION.fullmatch(config.location)
+        or type(config.api_max_replicas) is not int
+        or config.api_max_replicas not in {1, 2}
+    ):
+        raise WorkloadVerificationError("workload verification configuration invalid")
     _validate_managed_environment(
         config,
         _get_json(runner, config.managed_environment_id),
@@ -986,6 +1018,8 @@ def verify_workload(
         "source_sha": config.source_sha,
         "release_id": config.release_id,
         "box_id": config.box_id,
+        "location": config.location,
+        "api_max_replicas": config.api_max_replicas,
         "state": {
             "exists": True,
             "lineage": config.state_lineage,

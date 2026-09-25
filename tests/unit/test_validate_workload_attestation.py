@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 import sys
+from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -179,3 +180,64 @@ def test_state_type_confusion_is_rejected(field: str, value: object) -> None:
         match="state binding",
     ):
         validator.validate_attestation(evidence, _expected(), observed_at=OBSERVED_AT)
+
+
+@pytest.mark.parametrize(
+    "expected_location,actual_location", [("eastus2", "centralus"), ("centralus", "eastus2")]
+)
+def test_rehashed_cross_region_attestation_is_rejected(
+    expected_location: str, actual_location: str
+) -> None:
+    evidence = _attestation() | {"location": actual_location, "api_max_replicas": 2}
+    payload = {key: value for key, value in evidence.items() if key != "evidence_payload_sha256"}
+    evidence["evidence_payload_sha256"] = validator._canonical_sha256(payload)
+    with pytest.raises(validator.WorkloadAttestationError, match="profile binding"):
+        validator.validate_attestation(
+            evidence, replace(_expected(), location=expected_location), observed_at=OBSERVED_AT
+        )
+
+
+@pytest.mark.parametrize("profile", [[], ["eastus2", "1"], ["centralus", "2"]])
+def test_cli_passes_exact_expected_profile(monkeypatch, profile: list[str]) -> None:
+    observed = []
+    monkeypatch.setattr(
+        validator, "load_and_validate_attestation", lambda path, expected: observed.append(expected)
+    )
+    arguments = [
+        "evidence.json",
+        SOURCE_SHA,
+        RELEASE_ID,
+        LINEAGE,
+        "42",
+        STATE_SHA256,
+        BOX_ID,
+        API_DIGEST,
+        WEB_DIGEST,
+    ]
+    assert validator.main(arguments + profile) == 0
+    assert len(observed) == 1
+    assert observed[0].location == (profile[0] if profile else "centralus")
+    assert observed[0].api_max_replicas == (int(profile[1]) if profile else 2)
+
+
+@pytest.mark.parametrize(
+    "profile",
+    [["eastus2"], ["eastus2", "01"], ["eastus2", "1.0"], ["eastus2", "true"], ["eastus2", " 1"]],
+)
+def test_cli_rejects_partial_or_noncanonical_profile(monkeypatch, profile: list[str]) -> None:
+    def unexpected_read(*args, **kwargs):
+        pytest.fail("invalid profile must fail before reading evidence")
+
+    monkeypatch.setattr(validator, "load_and_validate_attestation", unexpected_read)
+    arguments = [
+        "evidence.json",
+        SOURCE_SHA,
+        RELEASE_ID,
+        LINEAGE,
+        "42",
+        STATE_SHA256,
+        BOX_ID,
+        API_DIGEST,
+        WEB_DIGEST,
+    ]
+    assert validator.main(arguments + profile) == 1

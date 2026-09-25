@@ -204,6 +204,9 @@ run "synthetic_lab_omits_clinic_baa_and_phi_evidence" {
 
   assert {
     condition = (
+      output.location == "centralus" &&
+      azurerm_container_app_environment.beta.location == "centralus" &&
+      output.api_max_replicas == 2 &&
       output.deployment_mode == "synthetic_lab" &&
       output.data_classification == "synthetic-only" &&
       output.runtime_data_mode == "synthetic"
@@ -1185,4 +1188,103 @@ run "rejects_obsolete_practice_access_schema_attestation" {
     }
   }
   expect_failures = [var.database_preparation_attestation]
+}
+
+run "eastus2_workloads_preserve_centralus_bootstrap_boundary" {
+  command = plan
+
+  variables {
+    location                               = "eastus2"
+    api_max_replicas                       = 1
+    deploy_workloads                       = true
+    enable_database_preparation_job        = true
+    database_preparation_image_digest      = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    image_digest                           = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    web_image_digest                       = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+    web_custom_domain                      = "app.beta.cosmaneura.com"
+    web_origin                             = "https://app.beta.cosmaneura.com"
+    web_release_evidence_reference         = "web-release:test"
+    runtime_database_url                   = "postgresql+psycopg://cosmas_runtime:synthetic-runtime-password@pg-cosmas-beta-lab01-abc123.postgres.database.azure.com:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
+    runner_live_network_evidence_reference = "network-live:workloads:test"
+    database_preparation_attestation = {
+      image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+      schema_revision    = "c83a2f19b650"
+      evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+      execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
+      box_id             = "00000000-0000-4000-8000-000000000004"
+      database_server_id = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-cosmas-beta-lab01-abc123"
+    }
+  }
+
+  assert {
+    condition = alltrue([
+      azurerm_container_registry.beta.location == "eastus2",
+      azurerm_private_endpoint.acr[0].location == "eastus2",
+      azurerm_container_app_environment.beta.location == "eastus2",
+      azurerm_container_app_job.database_preparation[0].location == "eastus2",
+      azurerm_container_app_job.runtime_acceptance[0].location == "eastus2",
+      azurerm_user_assigned_identity.runtime.location == "eastus2",
+      azurerm_user_assigned_identity.web.location == "eastus2",
+      azurerm_user_assigned_identity.database_preparation[0].location == "eastus2",
+      azurerm_key_vault.beta.location == "eastus2",
+      azurerm_private_endpoint.key_vault.location == "eastus2",
+      azurerm_log_analytics_workspace.beta.location == "eastus2",
+      azurerm_virtual_network.beta.location == "eastus2",
+      azurerm_postgresql_flexible_server.beta.location == "eastus2",
+      azurerm_managed_redis.beta.location == "eastus2",
+      azurerm_private_endpoint.redis.location == "eastus2",
+      azurerm_storage_account.beta.location == "eastus2",
+      azurerm_private_endpoint.blob.location == "eastus2",
+    ])
+    error_message = "Every regional workload resource and manual job must use the reviewed East US 2 region."
+  }
+
+  assert {
+    condition = (
+      data.azurerm_resource_group.beta.location == "centralus" &&
+      output.location == "eastus2" &&
+      terraform_data.prerequisite_guard.input.location == "eastus2" &&
+      azurerm_virtual_network_peering.beta_to_state.remote_virtual_network_id == var.state_vnet_id &&
+      output.state_blob_private_dns_zone_id == var.state_blob_private_dns_zone_id &&
+      azurerm_virtual_network_peering.state_to_beta.resource_group_name == "rg-cosmas-os-beta-state-lab01"
+    )
+    error_message = "Selected workload placement must not change the existing Central US resource-group metadata or bootstrap/state network bindings."
+  }
+
+  assert {
+    condition = (
+      output.api_max_replicas == 1 &&
+      azurerm_container_app.api[0].template[0].min_replicas == 1 &&
+      azurerm_container_app.api[0].template[0].max_replicas == 1 &&
+      azurerm_container_app.worker[0].template[0].min_replicas == 1 &&
+      azurerm_container_app.worker[0].template[0].max_replicas == 1 &&
+      azurerm_container_app.web[0].template[0].min_replicas == 0 &&
+      azurerm_container_app.web[0].template[0].max_replicas == 1
+    )
+    error_message = "One-replica staging must bind the API cap without weakening the worker or web scale contract."
+  }
+}
+
+run "reject_noncanonical_region" {
+  command = plan
+  variables {
+    location = "East US 2"
+  }
+  expect_failures = [var.location]
+}
+
+run "reject_unsupported_api_cap" {
+  command = plan
+  variables {
+    api_max_replicas = 3
+  }
+  expect_failures = [var.api_max_replicas]
+}
+
+run "reject_fractional_api_cap" {
+  command = plan
+  variables {
+    api_max_replicas = 1.5
+  }
+  expect_failures = [var.api_max_replicas]
 }

@@ -346,6 +346,8 @@ def test_workload_verification_proves_exact_topology_and_health() -> None:
         ).hexdigest()
     )
     assert evidence["status"] == "verified"
+    assert evidence["location"] == "centralus"
+    assert evidence["api_max_replicas"] == 2
     assert evidence["images"] == {
         "api": API_DIGEST,
         "worker": API_DIGEST,
@@ -1010,3 +1012,57 @@ def test_subprocess_runner_rejects_ambient_or_unreviewed_commands(monkeypatch) -
         runner.run([workload._AZ_BINARY, "rest"])
     with pytest.raises(workload.WorkloadVerificationError, match="unreviewed"):
         runner.run(["az", "rest"])
+
+
+@pytest.mark.parametrize("actual", ["eastus2", "East US 2"])
+def test_selected_eastus2_matches_environment_and_all_apps(actual: str) -> None:
+    environment = _environment() | {
+        "COSMAS_WORKLOAD_LOCATION": "eastus2",
+        "COSMAS_WORKLOAD_API_MAX_REPLICAS": "2",
+    }
+    runner = FakeRunner()
+    runner.managed_environment["location"] = actual
+    for app in runner.apps.values():
+        app["location"] = actual
+    evidence = workload.verify_workload(
+        workload.Config.from_environment(environment),
+        runner,
+        now=datetime(2026, 9, 4, 12, 0, tzinfo=UTC),
+    )
+    assert evidence["location"] == "eastus2"
+
+
+@pytest.mark.parametrize("resource", ["environment", "api", "worker", "web"])
+@pytest.mark.parametrize("expected,actual", [("eastus2", "centralus"), ("centralus", "eastus2")])
+def test_each_resource_must_match_selected_region(
+    resource: str, expected: str, actual: str
+) -> None:
+    environment = _environment() | {
+        "COSMAS_WORKLOAD_LOCATION": expected,
+        "COSMAS_WORKLOAD_API_MAX_REPLICAS": "2",
+    }
+    runner = FakeRunner()
+    runner.managed_environment["location"] = expected
+    for app in runner.apps.values():
+        app["location"] = expected
+    target = runner.managed_environment if resource == "environment" else runner.apps[resource]
+    target["location"] = actual
+    with pytest.raises(workload.WorkloadVerificationError):
+        workload.verify_workload(
+            workload.Config.from_environment(environment),
+            runner,
+            now=datetime(2026, 9, 4, 12, 0, tzinfo=UTC),
+        )
+    assert runner.curl_calls == []
+
+
+@pytest.mark.parametrize(
+    "location", ["", "East US 2", "EASTUS2", "eastus2 ", None, True, "../eastus2"]
+)
+def test_invalid_selected_location_is_refused(location: object) -> None:
+    environment = _environment() | {
+        "COSMAS_WORKLOAD_LOCATION": location,
+        "COSMAS_WORKLOAD_API_MAX_REPLICAS": "2",
+    }
+    with pytest.raises(workload.WorkloadVerificationError, match="configuration"):
+        workload.Config.from_environment(environment)
