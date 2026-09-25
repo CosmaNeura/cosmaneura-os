@@ -216,6 +216,7 @@ def validate_private_files(value: dict, root: Path) -> bytes:
                 [
                     "openssl",
                     "verify",
+                    "-x509_strict",
                     "-CAfile",
                     str(root / "tls/private-ca.pem"),
                     "-purpose",

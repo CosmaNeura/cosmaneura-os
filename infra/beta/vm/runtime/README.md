@@ -34,8 +34,12 @@ required manifest is version 1 and contains exactly:
   `postgres.crt`, `redis.crt`. Extract public roots from the exact API image and
   bind their provenance in image review. The renderer combines those public
   roots with the dedicated private CA for the mounted system store; verifies
-  current server certificate chain, hostname and key pairing; and never weakens
+  current server certificate chain with strict X.509 validation matching Python
+  3.13, hostname and key pairing; and never weakens
   PostgreSQL `verify-full`/`sslrootcert=system` or Redis certificate checking.
+  The CA must include its subject key identifier and certificate-signing key
+  usage; server certificates must include authority key identifiers. Keep these
+  extensions when renewing certificates with existing keys.
 
 The prepare, API and worker entrypoints set the fixed
 `SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt` in their clean process

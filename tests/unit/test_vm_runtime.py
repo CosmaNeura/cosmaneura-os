@@ -16,7 +16,7 @@ import pytest
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import ec
-from cryptography.x509.oid import NameOID
+from cryptography.x509.oid import ExtendedKeyUsageOID, NameOID
 
 RUNTIME = Path(__file__).resolve().parents[2] / "infra/beta/vm/runtime"
 sys.path.insert(0, str(RUNTIME))
@@ -33,7 +33,7 @@ ADMIN = "SyntheticOnlyAdmin_9876543210_aBcDeF"
 REDIS_PASSWORD = "SyntheticOnlyBroker_0123456789_ZyXwVu"
 
 
-def certificate(common, issuer=None, issuer_key=None, *, expired=False):
+def certificate(common, issuer=None, issuer_key=None, *, expired=False, authority_key_id=True):
     key = ec.generate_private_key(ec.SECP256R1())
     name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, common)])
     now = datetime.now(UTC)
@@ -46,11 +46,31 @@ def certificate(common, issuer=None, issuer_key=None, *, expired=False):
         .not_valid_before(now - timedelta(days=3))
         .not_valid_after(now + timedelta(days=-1 if expired else 7))
         .add_extension(x509.BasicConstraints(ca=issuer is None, path_length=None), critical=True)
+        .add_extension(x509.SubjectKeyIdentifier.from_public_key(key.public_key()), critical=False)
+        .add_extension(
+            x509.KeyUsage(
+                digital_signature=issuer is not None,
+                content_commitment=False,
+                key_encipherment=False,
+                data_encipherment=False,
+                key_agreement=False,
+                key_cert_sign=issuer is None,
+                crl_sign=issuer is None,
+                encipher_only=None,
+                decipher_only=None,
+            ),
+            critical=True,
+        )
     )
+    if authority_key_id:
+        builder = builder.add_extension(
+            x509.AuthorityKeyIdentifier.from_issuer_public_key((issuer_key or key).public_key()),
+            critical=False,
+        )
     if issuer:
         builder = builder.add_extension(
             x509.SubjectAlternativeName([x509.DNSName(common)]), critical=False
-        )
+        ).add_extension(x509.ExtendedKeyUsage([ExtendedKeyUsageOID.SERVER_AUTH]), critical=False)
     return key, builder.sign(issuer_key or key, hashes.SHA256())
 
 
@@ -370,6 +390,48 @@ def test_certificate_hostname_and_trust_verified_even_when_hashes_match(installe
         config["tls_sha256"][name] = hashlib.sha256((root / "tls" / name).read_bytes()).hexdigest()
     with pytest.raises(vm.Refused, match="chain_or_hostname"):
         vm.render(config, root, output, Path("/var/lib/cosmabot"))
+
+
+@pytest.mark.parametrize("malformed_service", ["postgres", "redis"])
+def test_strict_certificate_check_rejects_missing_authority_key_id(installed, malformed_service):
+    config, root, output = installed
+    ca_key, ca = certificate("Synthetic strict verification root")
+    (root / "tls/private-ca.pem").write_bytes(ca.public_bytes(serialization.Encoding.PEM))
+    for service in ("postgres", "redis"):
+        key, cert = certificate(service, ca, ca_key, authority_key_id=service != malformed_service)
+        key_path = root / service / "server.key"
+        key_path.chmod(0o600)
+        private(
+            key_path,
+            key.private_bytes(
+                serialization.Encoding.PEM,
+                serialization.PrivateFormat.PKCS8,
+                serialization.NoEncryption(),
+            ).decode(),
+        )
+        (root / "tls" / f"{service}.crt").write_bytes(cert.public_bytes(serialization.Encoding.PEM))
+    for name in ("private-ca.pem", "postgres.crt", "redis.crt"):
+        config["tls_sha256"][name] = hashlib.sha256((root / "tls" / name).read_bytes()).hexdigest()
+    # The previous chain/purpose/hostname check accepted this malformed leaf.
+    permissive = subprocess.run(
+        [
+            "openssl",
+            "verify",
+            "-CAfile",
+            str(root / "tls/private-ca.pem"),
+            "-purpose",
+            "sslserver",
+            "-verify_hostname",
+            malformed_service,
+            str(root / "tls" / f"{malformed_service}.crt"),
+        ],
+        capture_output=True,
+        check=False,
+    )
+    assert permissive.returncode == 0
+    with pytest.raises(vm.Refused, match="service_certificate_chain_or_hostname"):
+        vm.render(config, root, output, Path("/var/lib/cosmabot"))
+    assert not output.exists()
 
 
 def test_existing_release_is_never_overwritten(installed):
