@@ -45,6 +45,14 @@ def require(condition):
 
 def run(argv, allowed=(0,)):
     result = subprocess.run(argv, capture_output=True, text=True, check=False)
+    if result.returncode not in allowed:
+        operation = {
+            "/usr/sbin/useradd": "create-account",
+            "/usr/sbin/usermod": "lock-account",
+            "/usr/sbin/sshd": "verify-sshd",
+            "systemctl": "manage-units",
+        }.get(argv[0], "host-command")
+        print(f"Operator operation failed: {operation}; exit={result.returncode}", file=sys.stderr)
     require(result.returncode in allowed)
     return result
 
@@ -296,7 +304,7 @@ def verify_sshd(state):
 def account_matches(state):
     account = pwd.getpwnam(state["username"])
     require(account.pw_uid == state["uid"] and account.pw_uid >= 1000)
-    require(account.pw_gecos == "cosmabot-window:" + state["window"])
+    require(account.pw_gecos == "cosmabot-window-" + state["window"])
     require(account.pw_dir == str(window_path(state["window"])))
     require(set(os.getgrouplist(account.pw_name, account.pw_gid)) == {account.pw_gid})
     return account
@@ -413,7 +421,7 @@ def install(raw, expected_sha):
                 "--home-dir",
                 str(folder),
                 "--comment",
-                "cosmabot-window:" + state["window"],
+                "cosmabot-window-" + state["window"],
                 state["username"],
             ]
         )

@@ -210,7 +210,7 @@ def test_install_requires_live_timer_before_key_activation(local, monkeypatch, t
         pw_name="cmop" + WINDOW,
         pw_uid=1501,
         pw_gid=1501,
-        pw_gecos="cosmabot-window:" + WINDOW,
+        pw_gecos="cosmabot-window-" + WINDOW,
         pw_dir=str(op.window_path(WINDOW)),
     )
     created = False
@@ -225,6 +225,10 @@ def test_install_requires_live_timer_before_key_activation(local, monkeypatch, t
         nonlocal created
         calls.append(argv)
         if argv[0].endswith("useradd"):
+            comment = argv[argv.index("--comment") + 1]
+            # Linux shadow's VALID() rejects these passwd field delimiters.
+            assert not any(character in comment for character in ":\n")
+            assert comment == account.pw_gecos
             created = True
         if argv[:3] == ["systemctl", "enable", "--now"]:
             assert op.load_state(WINDOW)["status"] == "installing"
@@ -251,6 +255,20 @@ def test_install_requires_live_timer_before_key_activation(local, monkeypatch, t
         assert op.authorized_key(account.pw_name)
         timer = (op.UNIT_DIR / ("cosmabot-operator-" + WINDOW + ".timer")).read_text()
         assert "OnBootSec=700s" in timer and "OnCalendar=" in timer
+
+
+def test_failed_host_command_reports_only_fixed_operation_and_exit_code(monkeypatch, capsys):
+    sensitive = "synthetic-sensitive-value-must-not-appear"
+    monkeypatch.setattr(
+        op.subprocess,
+        "run",
+        lambda *_, **__: SimpleNamespace(returncode=3, stdout=sensitive, stderr=sensitive),
+    )
+    with pytest.raises(op.Refused):
+        op.run(["/usr/sbin/useradd", "--comment", sensitive, sensitive])
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "Operator operation failed: create-account; exit=3\n"
 
 
 def test_session_cleanup_kills_only_window_uid_and_its_exact_privileged_monitor(local, monkeypatch):

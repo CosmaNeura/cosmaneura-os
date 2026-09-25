@@ -4,6 +4,9 @@
 `cmop<12-hex-window-id>`. It changes no Azure resources, NSGs, host keys,
 `cosmabotops`, sudoers, Docker groups, identities or runtime bridges. The private
 key stays on the Mac; root installation commands remain on Azure Run Command.
+The account's GECOS identity marker is `cosmabot-window-<window-id>`; its delimiter
+is valid for Linux passwd fields. Failed host commands report only a fixed
+operation label and exit code, with no argument or command-output values.
 
 Only `receive NAME BYTES SHA256` is accepted as a remote command, reading bytes
 from stdin into a fixed spool. Local TCP forwarding allows exactly the supplied
