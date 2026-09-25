@@ -25,10 +25,35 @@ boundary, current organization selection, fresh token policy and app-scoped
 Keychain custody. Configuring the build does not register a callback, create a
 membership, contact Clerk or authorize clinical data.
 
-Build the corresponding complete web bundle with data mode authorized_beta and
-the same API origin. All30 feature flags and normal native transport constraints
-apply. Existing synthetic builds retain their previous defaults and cannot consume
-an operational identity file or silently inherit its data/storage profile.
+Build each native renderer from the retained public `clients` directory emitted
+by `scripts/prepare-workspace-identity.mjs` or
+`scripts/prepare-operational-startup.py`. Use Node 24 and the existing locked web
+and capture-client dependencies. From the repository root:
+
+```sh
+node scripts/build-native-renderer.mjs \
+  --inputs /absolute/path/to/retained-startup/clients \
+  --client desktop --output /absolute/path/to/new-desktop-renderer
+node scripts/build-native-renderer.mjs \
+  --inputs /absolute/path/to/retained-startup/clients \
+  --client apple --output /absolute/path/to/new-apple-renderer
+```
+
+Each command consumes that client's `*-identity.json` and `*-build-env.json`,
+requires their complete current profile, production-format public identity and
+API origin to agree, and verifies both emitted manifests. All profile flags and
+normal native transport constraints apply. Ambient `VITE_*` settings are refused;
+dotenv files are not loaded. Output must be fresh and separate from the repository
+and retained inputs, with an existing parent directory. Failed output retains an
+`.incomplete` marker; inspect it before choosing a new output.
+
+Pass `<output>/dist` as `--web-dist` to the existing native composers below.
+`native-renderer-build.json` records the selected public input hashes and verified
+profile. This command compiles web assets only; it does not generate hosted Nginx
+policy, compile native code, package, sign or launch an app. The hosted web build
+continues to use `build:beta`. Existing synthetic compositions retain their
+previous defaults and cannot consume an operational identity file or silently
+inherit its data/storage profile.
 
 For desktop, first compose and compile the current native auth helper with
 prepare-native-auth-proof.py. Package that fresh product with
@@ -68,3 +93,9 @@ The operational Mac package can additionally enter the Scribe-based ASAR and
 Electron-fuse packaging step described in desktop-release-packaging.md. This
 keeps the native executable outside the archive while protecting its verification
 manifest inside it. Signing and distribution follow that step separately.
+
+Open packaging gap: `package-desktop-auth-helper.py` verifies the qualification
+source, but does not yet bind the supplied executable/resources to that source.
+A compiler-owned receipt must establish that binding before stale compiler
+products can be reliably refused. The renderer receipt above provides no native
+helper qualification; W90/W92 helper products are not evidence for current source.

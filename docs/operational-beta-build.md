@@ -12,6 +12,9 @@ key, then run the ordinary `build:beta` command. Vite also validates the profile
 when called directly for a hosted build. Individual conflicting, unknown or stale
 feature gates fail the build. The profile emits `cosmas-beta-features.json` beside
 the hosted transport manifest. Dockerfile.web uses this same profile.
+For desktop and Apple renderer bundles, use `scripts/build-native-renderer.mjs`
+with the retained public client inputs as described in operational-native-build.md;
+the hosted `build:beta` command generates a web-only Nginx policy.
 
 Capture mode is explicit: `browser_microphone` for web/desktop, `ios_native` for
 Apple, or `synthetic` for synthetic-only development. Choosing a source stages
