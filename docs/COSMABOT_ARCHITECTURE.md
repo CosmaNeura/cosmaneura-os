@@ -29,3 +29,32 @@ encounter. Athena access remains read-only.
 This source integration preserves the prior Scribe connector snapshot. It adds
 no new Scribe implementation, device work, service activation or release. Ongoing
 Scribe work remains separate. Staging deployment is managed by the owner.
+
+## Accepted owner decision — September 25, 2026
+
+The following is the agreed product direction, not a claim that the complete
+experience is implemented or deployed. Scribe implementation remains paused in
+this task while the separate Scribe work proceeds.
+
+Selecting the Scribe avatar opens the complete Scribe workspace inside CosmaBot.
+The embedded workspace and standalone Scribe share versioned recording and
+review components, with native adapters for their device capabilities. They
+retain the selected encounter context. Opening the workspace does not begin a
+recording: consent and the action to start recording remain explicit.
+
+The experience preserves durable recording, upload, processing, review and save
+states so users can see progress and recover saved work. SOAP notes remain
+editable for human review. Saving to the Cosmaneura platform is an explicit
+action through its authenticated APIs and current permissions; CosmaBot does
+not automatically sign a note.
+
+The iPhone presents a focused Scribe workflow. The Mac supports Scribe and the
+CosmaBot workspace side by side. Saved encounter work may reopen on another
+authorized device, but an active recording cannot transfer between the phone
+and Mac. Saved context may be shared with other bots within the user's existing
+workspace and access permissions.
+
+CosmaBot retains its separate app and hosting. The main Cosmaneura platform
+remains authoritative for clinical records, reached through authenticated APIs.
+This decision adds no direct platform database access, independent clinical
+record authority or automatic clinical signing.
