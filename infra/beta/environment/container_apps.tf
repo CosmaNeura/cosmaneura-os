@@ -15,6 +15,7 @@ resource "azurerm_container_app" "api" {
   resource_group_name          = data.azurerm_resource_group.beta.name
   container_app_environment_id = azurerm_container_app_environment.beta.id
   revision_mode                = "Single"
+  max_inactive_revisions       = 3
   tags                         = local.tags
 
   identity {
@@ -255,6 +256,7 @@ resource "azurerm_container_app" "worker" {
   resource_group_name          = data.azurerm_resource_group.beta.name
   container_app_environment_id = azurerm_container_app_environment.beta.id
   revision_mode                = "Single"
+  max_inactive_revisions       = 3
   tags                         = local.tags
 
   identity {

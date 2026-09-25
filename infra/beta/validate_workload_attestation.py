@@ -18,6 +18,7 @@ from typing import Any
 from uuid import UUID
 
 _CONTRACT = "cosmas-os-d3-workload-verification-v1"
+_BOUND_CONTRACT = "cosmas-os-d3-workload-verification-v2"
 _MAX_AGE = timedelta(hours=1)
 _MAX_FUTURE_SKEW = timedelta(minutes=5)
 _UTC = timezone.utc  # noqa: UP017 -- protected runner supports Python 3.10.
@@ -64,6 +65,7 @@ _TRUE_ASSERTIONS = {
 }
 _FALSE_ASSERTIONS = {"person_or_patient_identifiers_returned", "secrets_returned"}
 _PROFILE_KEYS = {"location", "api_max_replicas"}
+_BINDING_KEYS = {"plan_sha256", "review_sha256", "runtime_contract_sha256"}
 
 
 class WorkloadAttestationError(RuntimeError):
@@ -82,8 +84,16 @@ class ExpectedBinding:
     web_digest: str
     location: str = "centralus"
     api_max_replicas: int = 2
+    plan_sha256: str | None = None
+    review_sha256: str | None = None
+    runtime_contract_sha256: str | None = None
 
     def validated(self) -> ExpectedBinding:
+        bindings = (self.plan_sha256, self.review_sha256, self.runtime_contract_sha256)
+        if any(value is not None for value in bindings) and not all(
+            isinstance(value, str) and _SHA256.fullmatch(value) for value in bindings
+        ):
+            raise WorkloadAttestationError("invalid expected plan binding")
         if not all(
             isinstance(value, str)
             for value in (
@@ -128,6 +138,9 @@ class ExpectedBinding:
             web_digest=self.web_digest,
             location=self.location,
             api_max_replicas=self.api_max_replicas,
+            plan_sha256=self.plan_sha256,
+            review_sha256=self.review_sha256,
+            runtime_contract_sha256=self.runtime_contract_sha256,
         )
 
 
@@ -160,11 +173,16 @@ def validate_attestation(
     if observed_at.tzinfo is None:
         raise WorkloadAttestationError("invalid workload attestation observation time")
     observed_at = observed_at.astimezone(_UTC)
-    if not isinstance(evidence, dict) or set(evidence) not in (
-        _TOP_LEVEL_KEYS,
-        _TOP_LEVEL_KEYS | _PROFILE_KEYS,
-    ):
+    bound = expected.plan_sha256 is not None
+    shapes = (
+        (_TOP_LEVEL_KEYS | _PROFILE_KEYS | _BINDING_KEYS,)
+        if bound
+        else (_TOP_LEVEL_KEYS, _TOP_LEVEL_KEYS | _PROFILE_KEYS)
+    )
+    if not isinstance(evidence, dict) or set(evidence) not in shapes:
         raise WorkloadAttestationError("invalid workload attestation shape")
+    if bound and any(evidence[key] != getattr(expected, key) for key in _BINDING_KEYS):
+        raise WorkloadAttestationError("stale workload attestation plan binding")
     # Old v1 attestations proved only Central US with a two-replica API cap.
     # They cannot qualify another region or cap. Current producers bind both.
     if (
@@ -175,8 +193,8 @@ def validate_attestation(
         raise WorkloadAttestationError("stale workload attestation profile binding")
     if (
         type(evidence["schema_version"]) is not int
-        or evidence["schema_version"] != 1
-        or evidence["contract"] != _CONTRACT
+        or evidence["schema_version"] != (2 if bound else 1)
+        or evidence["contract"] != (_BOUND_CONTRACT if bound else _CONTRACT)
         or evidence["status"] != "verified"
         or evidence["source_sha"] != expected.source_sha
         or evidence["release_id"] != expected.release_id

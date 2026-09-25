@@ -20,6 +20,7 @@ usage() {
     "  $0 probe-network --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
     "  $0 build-push --bootstrap-outputs PATH --source-sha SHA --release-id ID --web-build-config PATH --artifact-out PATH" \
     "  $0 database-prepare --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
+    "  $0 workload-verify --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
     "  $0 runtime-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --acceptance-phase runtime|workflow-baseline|workflow-verify|purge-setup|purge-verify [--acceptance-state PATH] --artifact-out PATH" \
     "  $0 domain-verification --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH" \
     "  $0 alert-delivery --bootstrap-outputs PATH --source-sha SHA --release-id ID --alert-phase send|confirm|inspect-intent [--alert-retry-approval PATH | --alert-test-state PATH --delivery-confirmation-reference PATH] --artifact-out PATH" \
@@ -31,7 +32,7 @@ usage() {
     "  $0 stage-generation --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --stage-transition-mode abandoned_retry|planned_workloads_progression --approval PATH --var-file PATH --artifact-out PATH" \
     "  $0 offboarding-acceptance --bootstrap-outputs PATH --source-sha SHA --release-id ID --offboarding-phase baseline|verify [--offboarding-request PATH | --offboarding-state PATH --offboarding-confirmation PATH] --artifact-out PATH" \
     "  $0 bootstrap-identity --bootstrap-outputs PATH --source-sha SHA --release-id ID --bootstrap-manifest PATH --artifact-out PATH" \
-    "  $0 retrieve --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage STAGE --artifact-kind review|result|network|build|database|runtime|domain|alert|pitr|recovery|offboarding|identity [--acceptance-phase PHASE | --alert-phase send|confirm | --pitr-phase PHASE | --recovery-phase rollback|forward | --offboarding-phase baseline|verify] --artifact-out PATH" \
+    "  $0 retrieve --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage STAGE --artifact-kind review|result|network|build|database|workload|runtime|domain|alert|pitr|recovery|offboarding|identity [--acceptance-phase PHASE | --alert-phase send|confirm | --pitr-phase PHASE | --recovery-phase rollback|forward | --offboarding-phase baseline|verify] --artifact-out PATH" \
     "  $0 cleanup-commands --bootstrap-outputs PATH --source-sha SHA" \
     "  $0 stage-vars --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --var-file PATH" \
     "  $0 plan --bootstrap-outputs PATH --source-sha SHA --release-id ID --stage foundation|database|workloads --artifact-out PATH" \
@@ -39,6 +40,22 @@ usage() {
     "" \
     "Source is fixed to ssh://git@ssh.github.com:443/CosmaNeura/cosmaneura-os.git." \
     "Secrets use a temporary Azure managed Run Command protected parameter."
+}
+
+transport_validate_workload_arguments() {
+  if [[ "$operation" != "workload-verify" && ! ( "$operation" == "retrieve" && "$artifact_kind" == "workload" ) ]]; then
+    return
+  fi
+  [[ -z "$stage" || "$stage" == "workloads" ]] || guard_die "workload verification/retrieval requires stage=workloads"
+  stage=workloads
+  [[ "$operation" == "retrieve" || -z "$artifact_kind" ]] || guard_die "workload-verify does not accept --artifact-kind"
+  local name
+  for name in deploy_key known_hosts var_file web_build_config bootstrap_manifest approval_file \
+    acceptance_phase acceptance_state alert_phase alert_test_state alert_retry_approval delivery_confirmation_reference \
+    pitr_phase restore_time_utc quiet_window_end_utc pitr_preparer_reference prior_source_sha prior_release_id \
+    recovery_phase stage_transition_mode offboarding_phase offboarding_request offboarding_state offboarding_confirmation; do
+    [[ -z "${!name}" ]] || guard_die "workload verification/retrieval accepts only its source/release/output context"
+  done
 }
 
 [[ $# -gt 0 ]] || { usage >&2; exit 1; }
@@ -113,13 +130,15 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" || "$operation" == "cleanup-commands" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" ]] || guard_die "operation is invalid"
+transport_validate_workload_arguments
+
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" || "$operation" == "cleanup-commands" || "$operation" == "stage-vars" || "$operation" == "plan" || "$operation" == "apply" ]] || guard_die "operation is invalid"
 if [[ "$operation" == pitr-* ]]; then
   [[ "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" ]] || guard_die "PITR operation is invalid"
 fi
 [[ -n "$bootstrap_outputs" ]] || guard_die "--bootstrap-outputs is required"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || guard_die "--source-sha must be a full lowercase Git commit"
-for command_name in az jq stat base64 bzip2 gzip git; do
+for command_name in az jq stat base64 bzip2 gzip git python3; do
   command -v "$command_name" >/dev/null 2>&1 || guard_die "$command_name is required"
 done
 
@@ -485,6 +504,14 @@ case "$operation" in
     guard_outside_repository "$artifact_out" "$repository_root" "sanitized database-preparation attestation"
     guard_new_private_path "$artifact_out" "sanitized database-preparation attestation"
     ;;
+  workload-verify)
+    [[ "$stage" == "workloads" ]] || guard_die "workload verification requires stage=workloads"
+    [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "workload-verify requires a 3-32 character lowercase --release-id"
+    [[ -n "$artifact_out" ]] || guard_die "workload-verify requires --artifact-out"
+    artifact_out="$(guard_absolute_path "$artifact_out")"
+    guard_outside_repository "$artifact_out" "$repository_root" "sanitized workload verification"
+    guard_new_private_path "$artifact_out" "sanitized workload verification"
+    ;;
   runtime-acceptance)
     stage="acceptance"
     [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "runtime-acceptance requires a 3-32 character lowercase --release-id"
@@ -766,7 +793,7 @@ case "$operation" in
     ;;
   retrieve)
     [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || guard_die "retrieve requires a 3-32 character lowercase --release-id"
-    [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" || "$artifact_kind" == "network" || "$artifact_kind" == "build" || "$artifact_kind" == "database" || "$artifact_kind" == "runtime" || "$artifact_kind" == "domain" || "$artifact_kind" == "alert" || "$artifact_kind" == "pitr" || "$artifact_kind" == "recovery" || "$artifact_kind" == "offboarding" || "$artifact_kind" == "identity" ]] || guard_die "retrieve requires a valid --artifact-kind"
+    [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" || "$artifact_kind" == "network" || "$artifact_kind" == "build" || "$artifact_kind" == "database" || "$artifact_kind" == "workload" || "$artifact_kind" == "runtime" || "$artifact_kind" == "domain" || "$artifact_kind" == "alert" || "$artifact_kind" == "pitr" || "$artifact_kind" == "recovery" || "$artifact_kind" == "offboarding" || "$artifact_kind" == "identity" ]] || guard_die "retrieve requires a valid --artifact-kind"
     if [[ "$artifact_kind" == "review" || "$artifact_kind" == "result" ]]; then
       [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || guard_die "review/result retrieval requires its exact environment --stage"
     else
@@ -774,6 +801,7 @@ case "$operation" in
         network) stage="network" ;;
         build) stage="images" ;;
         database) stage="database" ;;
+        workload) [[ "$stage" == "workloads" ]] || guard_die "workload retrieval requires stage=workloads" ;;
         runtime)
           stage="acceptance"
           [[ "$acceptance_phase" == "runtime" || "$acceptance_phase" == "workflow-baseline" || "$acceptance_phase" == "workflow-verify" || "$acceptance_phase" == "purge-setup" || "$acceptance_phase" == "purge-verify" ]] || guard_die "runtime retrieval requires an enumerated --acceptance-phase"
@@ -1090,7 +1118,7 @@ case "$operation" in
         '{offboarding_phase: $offboarding_phase, prior_attestation: $prior_attestation[0], owner_confirmation: $owner_confirmation[0]}' >"$payload_file"
     fi
     ;;
-  plan|probe-network|database-prepare|domain-verification) printf '{}' >"$payload_file" ;;
+  plan|probe-network|database-prepare|workload-verify|domain-verification) printf '{}' >"$payload_file" ;;
   apply) install -m 0600 "$approval_file" "$payload_file" ;;
 esac
 base64 <"$payload_file" | tr -d '\n' >"$payload_b64_file"
@@ -1161,7 +1189,7 @@ done
 [[ "$execution_state" == "Succeeded" && "$provisioning_state" == "Succeeded" ]] || guard_die "protected runner command did not succeed within 90 minutes"
 
 command_output=""
-if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   command_output="$(jq -r '.instanceView.output // .properties.instanceView.output // ""' "$view_file")"
 fi
 rm -f -- "$view_file" || guard_die "cannot remove local protected Run Command result material"
@@ -1175,7 +1203,7 @@ if ! transport_complete_managed_command_cleanup; then
   exit "$managed_run_command_cleanup_failure_status"
 fi
 
-if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
+if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == pitr-* || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]]; then
   artifact_base64="$(awk -F= '/^COSMAS_SANITIZED_ARTIFACT_B64=/{sub(/^COSMAS_SANITIZED_ARTIFACT_B64=/, ""); print; exit}' <<<"$command_output")"
   [[ "$artifact_base64" =~ ^[A-Za-z0-9+/=]+$ ]] || guard_die "protected runner did not return a complete sanitized artifact"
   printf '%s' "$artifact_base64" | base64 --decode | gzip -d >"$artifact_out" || {
@@ -1183,12 +1211,22 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
     guard_die "sanitized artifact could not be decoded"
   }
   chmod 600 "$artifact_out"
-  jq -e 'type == "object" and .schema_version == 1' "$artifact_out" >/dev/null || {
-    rm -f -- "$artifact_out"
-    guard_die "returned artifact is not a schema-version-1 sanitized object"
-  }
+  workload_evidence=false
+  if [[ "$operation" == "workload-verify" || ( "$operation" == "retrieve" && "$artifact_kind" == "workload" ) ]]; then
+    workload_evidence=true
+  else
+    jq -e 'type == "object" and .schema_version == 1' "$artifact_out" >/dev/null || {
+      rm -f -- "$artifact_out"
+      guard_die "returned artifact is not a schema-version-1 sanitized object"
+    }
+  fi
   if guard_operation_returns_hashed_evidence "$operation" "$artifact_kind"; then
-    if [[ "$operation" == "inspect-stage" || "$operation" == "stage-generation" ]]; then
+    if [[ "$workload_evidence" == true ]]; then
+      evidence_hash_valid=false
+      if guard_validate_workload_evidence "$artifact_out" "$source_sha" "$release_id" "$GUARD_BOX_ID"; then
+        evidence_hash_valid=true
+      fi
+    elif [[ "$operation" == "inspect-stage" || "$operation" == "stage-generation" ]]; then
       evidence_hash_valid=false
       if guard_validate_python_sanitized_evidence_hash "$artifact_out"; then
         evidence_hash_valid=true
@@ -1207,7 +1245,9 @@ if [[ "$operation" == "plan" || "$operation" == "apply" || "$operation" == "prob
     if [[ "$operation" == "probe-network" || ( "$operation" == "retrieve" && "$artifact_kind" == "network" ) ]]; then
       guard_validate_network_public_configuration "$artifact_out" "$source_sha" "$release_id" "$GUARD_BETA_ID"
     fi
-    if [[ "$operation" == "probe-network" ]]; then
+    if [[ "$workload_evidence" == true ]]; then
+      printf 'Exact reviewed-plan/current-state workload verification is recorded in evidence sha256:%s.\n' "$expected_evidence_hash"
+    elif [[ "$operation" == "probe-network" ]]; then
       printf 'Use runner_live_network_evidence_reference=runner-network:sha256:%s for this exact release/state; the sanitized artifact contains the foundation-derived public origins.\n' "$expected_evidence_hash"
     elif [[ "$operation" == "build-push" ]]; then
       printf 'Accepted immutable API/web digests are recorded in build evidence sha256:%s.\n' "$expected_evidence_hash"

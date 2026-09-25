@@ -345,7 +345,7 @@ source_sha="${COSMAS_SOURCE_SHA:-}"
 uuid_pattern='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 [[ "$subscription_id" =~ $uuid_pattern ]] || die "subscription ID is invalid"
 [[ "$deploy_client_id" =~ $uuid_pattern ]] || die "deploy identity client ID is invalid"
-[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
 [[ "$stage" == "source" || "$stage" == "network" || "$stage" == "images" || "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" || "$stage" == "acceptance" || "$stage" == "domain" || "$stage" == "alert" || "$stage" == "pitr" || "$stage" == "recovery" || "$stage" == "offboarding" || "$stage" == "identity" ]] || die "stage is invalid"
 [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || die "release ID must be 3-32 lowercase letters, digits, or hyphens"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || die "source SHA must be a full lowercase Git commit"
@@ -531,7 +531,11 @@ fresh_managed_identity_login() {
 emit_sanitized_artifact() {
   local artifact="$1"
   local encoded
-  jq -e 'type == "object" and .schema_version == 1' "$artifact" >/dev/null || die "wrapper did not produce a valid sanitized artifact"
+  if [[ "$operation" == "workload-verify" || ( "$operation" == "retrieve" && "${artifact_kind:-}" == "workload" ) ]]; then
+    guard_validate_workload_evidence "$artifact" "$source_sha" "$release_id" "$GUARD_BOX_ID" || die "wrapper did not produce a bound workload artifact"
+  else
+    jq -e 'type == "object" and .schema_version == 1' "$artifact" >/dev/null || die "wrapper did not produce a valid sanitized artifact"
+  fi
   encoded="$(gzip -9 -c "$artifact" | base64 -w 0)"
   (( ${#encoded} <= 3000 )) || die "sanitized artifact exceeds the bounded Run Command return channel"
   printf 'COSMAS_SANITIZED_ARTIFACT_B64=%s\n' "$encoded"
@@ -1133,6 +1137,148 @@ prepare_live_acceptance_context() {
   ' "$probe_outputs" >/dev/null || die "live workload outputs differ from the exact synthetic immutable-image acceptance boundary"
 }
 
+workload_private_file() {
+  local path="$1"
+  [[ -f "$path" && ! -L "$path" && "$(stat -c '%a' "$path")" == "600" && "$(stat -c '%u' "$path")" == "0" ]] || die "workload verification input or evidence is unavailable or unsafe"
+}
+
+workload_private_directory() {
+  local path="$1"
+  [[ -d "$path" && ! -L "$path" && "$(stat -c '%a' "$path")" == "700" && "$(stat -c '%u' "$path")" == "0" ]] || die "workload verification directory is unavailable or unsafe"
+}
+
+validate_workload_request() {
+  [[ "$stage" == "workloads" ]] || die "workload verification requires stage=workloads"
+  if [[ "$operation" == "workload-verify" ]]; then
+    jq -e 'type == "object" and keys == []' "$payload_file" >/dev/null || die "workload verification accepts no payload fields"
+  elif [[ "$operation" == "retrieve" ]]; then
+    jq -e '. == {artifact_kind: "workload"}' "$payload_file" >/dev/null || die "workload retrieval payload is invalid"
+  else
+    die "workload verification operation is invalid"
+  fi
+}
+
+prepare_workload_verification_context() {
+  validate_workload_request
+  prepare_live_acceptance_context
+  local workload_stage="$release_root/stages/workloads"
+  [[ -d "$release_root/stages" && ! -L "$release_root/stages" && "$(stat -c '%u' "$release_root/stages")" == "0" ]] || die "workload stage parent is unsafe"
+  [[ "$(stat -c '%a' "$release_root/stages")" == "700" || "$(stat -c '%a' "$release_root/stages")" == "755" ]] || die "workload stage parent permissions are unsafe"
+  workload_private_directory "$workload_stage"
+  local input
+  for input in plan.tfplan review.json environment.tfvars.json result.json; do
+    workload_private_file "$workload_stage/$input"
+  done
+  WORKLOAD_EVIDENCE_DIR="$release_root/workload-verification"
+  if [[ ! -e "$WORKLOAD_EVIDENCE_DIR" && ! -L "$WORKLOAD_EVIDENCE_DIR" ]]; then
+    [[ "$operation" == "workload-verify" ]] || die "workload verification evidence is unavailable"
+    install -d -o root -g root -m 0700 "$WORKLOAD_EVIDENCE_DIR"
+  fi
+  workload_private_directory "$WORKLOAD_EVIDENCE_DIR"
+  operation_temp_dir="$(mktemp -d "$WORKLOAD_EVIDENCE_DIR/.operation.XXXXXX")"
+  chmod 0700 "$operation_temp_dir"
+  WORKLOAD_INITIAL_STATE_SHA256="$GUARD_STATE_SHA256"
+  # All helper expectations come from this hashed state and the saved plan,
+  # never the independently read outputs or ambient COSMAS_WORKLOAD_* values.
+  local plan_json="$operation_temp_dir/plan.json"
+  "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" show -json "$workload_stage/plan.tfplan" >"$plan_json"
+  chmod 0600 "$plan_json"
+  guard_validate_planned_boundary "$plan_json"
+  guard_validate_safe_plan_actions "$plan_json" true
+  jq '[.resource_changes[]? | {address, type, mode, actions: .change.actions}]' "$plan_json" >"$operation_temp_dir/actions.json"
+  guard_write_critical_planned_values "$plan_json" "$operation_temp_dir/critical.json"
+  guard_write_security_posture "$plan_json" "$operation_temp_dir/security.json"
+  jq -e --argjson create "$GUARD_CREATE_COUNT" --argjson update "$GUARD_UPDATE_COUNT" --argjson no_op "$GUARD_NOOP_COUNT" \
+    --slurpfile actions "$operation_temp_dir/actions.json" --slurpfile critical "$operation_temp_dir/critical.json" \
+    --slurpfile security "$operation_temp_dir/security.json" '
+      .phase == "subsequent" and
+      .managed_action_counts == {create: $create, update: $update, no_op: $no_op, delete: 0, replace: 0} and
+      .managed_actions == $actions[0] and .critical_planned_values == $critical[0] and .security_posture == $security[0]
+    ' "$workload_stage/review.json" >/dev/null || die "workload review does not match the complete saved plan projections"
+  WORKLOAD_BINDING_ARGS=(
+    --plan "$workload_stage/plan.tfplan" --plan-json "$plan_json" --review "$workload_stage/review.json"
+    --var-file "$workload_stage/environment.tfvars.json" --apply-result "$workload_stage/result.json"
+    --state "$probe_state" --bootstrap-outputs "$bootstrap_outputs" --build-evidence "$build_root/build-evidence.json"
+    --provider-lock "$GUARD_ENVIRONMENT_DIR/.terraform.lock.hcl" --source-sha "$source_sha" --release-id "$release_id"
+  )
+}
+
+run_workload_binding() {
+  local mode="$1"
+  local artifact="$2"
+  local option
+  case "$mode" in
+    verify) option=--output ;;
+    validate) option=--artifact ;;
+    *) die "workload binding mode is invalid" ;;
+  esac
+  python3 "$repository_root/infra/beta/workload_plan_binding.py" "$mode" \
+    "${WORKLOAD_BINDING_ARGS[@]}" "$option" "$artifact" || die "workload verification failed its saved-plan/current-state binding"
+}
+
+verify_workload_state_unchanged() {
+  local final_state="$operation_temp_dir/final-state.json"
+  guard_pull_state "$final_state"
+  guard_validate_environment_state "$final_state"
+  [[ "$GUARD_STATE_SHA256" == "$WORKLOAD_INITIAL_STATE_SHA256" ]] || die "state changed during workload verification; no evidence was published"
+}
+
+resolve_workload_generation() {
+  local pointer="$WORKLOAD_EVIDENCE_DIR/current"
+  local generation
+  workload_private_directory "$WORKLOAD_EVIDENCE_DIR"
+  workload_private_file "$pointer"
+  [[ "$(wc -l <"$pointer" | tr -d ' ')" == "1" ]] || die "workload evidence pointer is invalid"
+  generation="$(cat "$pointer")"
+  [[ "$generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "workload evidence pointer is invalid"
+  WORKLOAD_ARTIFACT="$WORKLOAD_EVIDENCE_DIR/$generation"
+  workload_private_file "$WORKLOAD_ARTIFACT"
+  guard_validate_workload_evidence "$WORKLOAD_ARTIFACT" "$source_sha" "$release_id" "$GUARD_BOX_ID" || die "stored workload evidence is invalid"
+  [[ "$generation" == "$GUARD_EVIDENCE_PAYLOAD_SHA256.json" ]] || die "workload evidence pointer differs from its payload hash"
+}
+
+publish_workload_generation() {
+  local candidate="$1"
+  local pointer="$WORKLOAD_EVIDENCE_DIR/current"
+  workload_private_file "$candidate"
+  guard_validate_workload_evidence "$candidate" "$source_sha" "$release_id" "$GUARD_BOX_ID" || die "workload evidence is invalid"
+  local generation="$GUARD_EVIDENCE_PAYLOAD_SHA256.json"
+  WORKLOAD_ARTIFACT="$WORKLOAD_EVIDENCE_DIR/$generation"
+  if [[ -e "$pointer" || -L "$pointer" ]]; then
+    workload_private_file "$pointer"
+  fi
+  if [[ -e "$WORKLOAD_ARTIFACT" || -L "$WORKLOAD_ARTIFACT" ]]; then
+    workload_private_file "$WORKLOAD_ARTIFACT"
+    cmp -s "$candidate" "$WORKLOAD_ARTIFACT" || die "immutable workload evidence generation conflicts"
+  else
+    # Both paths share the private filesystem. link() creates the immutable
+    # generation exclusively; it cannot silently replace existing evidence.
+    ln -- "$candidate" "$WORKLOAD_ARTIFACT" || die "workload evidence could not be persisted exclusively"
+    fsync_path "$WORKLOAD_ARTIFACT"
+    fsync_path "$WORKLOAD_EVIDENCE_DIR"
+  fi
+  printf '%s\n' "$generation" >"$operation_temp_dir/current"
+  chmod 0600 "$operation_temp_dir/current"
+  fsync_path "$operation_temp_dir/current"
+  mv -T -- "$operation_temp_dir/current" "$pointer"
+  fsync_path "$WORKLOAD_EVIDENCE_DIR"
+}
+
+execute_workload_verification() {
+  prepare_workload_verification_context
+  if [[ "$operation" == "workload-verify" ]]; then
+    local candidate="$operation_temp_dir/candidate.json"
+    run_workload_binding verify "$candidate"
+    run_workload_binding validate "$candidate"
+    verify_workload_state_unchanged
+    publish_workload_generation "$candidate"
+  else
+    resolve_workload_generation
+    run_workload_binding validate "$WORKLOAD_ARTIFACT"
+    verify_workload_state_unchanged
+  fi
+}
+
 recovery_no_drift_review() {
   local phase="$1"
   local recovery_root="$2"
@@ -1234,6 +1380,10 @@ validate_stage_tfvars_payload() {
 }
 
 case "$operation" in
+  workload-verify)
+    execute_workload_verification
+    emit_sanitized_artifact "$WORKLOAD_ARTIFACT"
+    ;;
   stage-source)
     [[ "$stage" == "source" ]] || die "stage-source requires stage=source"
     for command_name in git ssh ssh-keygen jq base64; do
@@ -4213,7 +4363,7 @@ PY
     jq -e '
       type == "object" and
       (.artifact_kind == "review" or .artifact_kind == "result" or .artifact_kind == "network" or
-       .artifact_kind == "build" or .artifact_kind == "database" or .artifact_kind == "runtime" or
+       .artifact_kind == "build" or .artifact_kind == "database" or .artifact_kind == "workload" or .artifact_kind == "runtime" or
        .artifact_kind == "domain" or .artifact_kind == "alert" or .artifact_kind == "pitr" or .artifact_kind == "recovery" or
        .artifact_kind == "offboarding" or .artifact_kind == "identity") and
       if .artifact_kind == "runtime" then
@@ -4238,6 +4388,10 @@ PY
     ' "$payload_file" >/dev/null || die "artifact retrieval payload is invalid"
     artifact_kind="$(jq -er '.artifact_kind' "$payload_file")"
     case "$artifact_kind" in
+      workload)
+        execute_workload_verification
+        artifact_file="$WORKLOAD_ARTIFACT"
+        ;;
       review)
         [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || die "review retrieval requires the exact environment stage"
         artifact_file="$stage_root/review.json"

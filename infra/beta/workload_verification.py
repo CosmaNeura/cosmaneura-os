@@ -23,6 +23,7 @@ from uuid import UUID
 
 ARM_API_VERSION = "2024-03-01"
 EVIDENCE_CONTRACT = "cosmas-os-d3-workload-verification-v1"
+BOUND_EVIDENCE_CONTRACT = "cosmas-os-d3-workload-verification-v2"
 UTC = timezone.utc  # noqa: UP017 -- protected runner supports Python 3.10.
 
 _AZ_BINARY = "/usr/bin/az"
@@ -120,6 +121,10 @@ class Config:
     # Legacy callers selected this exact profile before these inputs existed.
     location: str = "centralus"
     api_max_replicas: int = 2
+    plan_sha256: str | None = None
+    review_sha256: str | None = None
+    runtime_contract_sha256: str | None = None
+    runtime_contract: dict[str, Any] | None = None
 
     @classmethod
     def from_environment(cls, environment: Mapping[str, str]) -> Config:
@@ -302,6 +307,14 @@ def _canonical_json(value: Any) -> str:
 
 def _sha256_json(value: Any) -> str:
     return hashlib.sha256(_canonical_json(value).encode()).hexdigest()
+
+
+def runtime_contract_sha256(value: dict[str, Any]) -> str:
+    """Hash the private runtime projection as canonical UTF-8, including Unicode."""
+    encoded = json.dumps(
+        value, sort_keys=True, separators=(",", ":"), ensure_ascii=False, allow_nan=False
+    )
+    return hashlib.sha256(encoded.encode()).hexdigest()
 
 
 def _resource_id(config: Config, kind: str) -> str:
@@ -659,6 +672,94 @@ def _expected_runtime_env(config: Config) -> dict[str, tuple[str, str]]:
     }
 
 
+def _validate_bound_runtime_contract(config: Config) -> None:
+    """Retain baseline authority while matching a complete reviewed extension map."""
+    contract = config.runtime_contract
+    if (
+        any(
+            not isinstance(value, str) or not _SHA256.fullmatch(value)
+            for value in (config.plan_sha256, config.review_sha256, config.runtime_contract_sha256)
+        )
+        or not isinstance(contract, dict)
+        or set(contract) != {"env", "secrets", "max_inactive_revisions"}
+        or any(
+            not isinstance(contract[key], dict) or set(contract[key]) != {"api", "worker", "web"}
+            for key in contract
+        )
+        or runtime_contract_sha256(contract) != config.runtime_contract_sha256
+    ):
+        raise WorkloadVerificationError("reviewed runtime contract invalid")
+    for kind in ("api", "worker", "web"):
+        env, secrets = contract["env"][kind], contract["secrets"][kind]
+        if (
+            not isinstance(env, dict)
+            or len(env) > 160
+            or not isinstance(secrets, dict)
+            or len(secrets) > 104
+            or not _is_exact_int(contract["max_inactive_revisions"][kind], 3)
+            or any(
+                not isinstance(name, str)
+                or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,127}", name)
+                or not isinstance(value, (list, tuple))
+                or len(value) != 2
+                or value[0] not in {"value", "secretRef"}
+                or not isinstance(value[1], str)
+                or not value[1]
+                or len(value[1]) > 16384
+                for name, value in env.items()
+            )
+        ):
+            raise WorkloadVerificationError("reviewed runtime contract invalid")
+        if kind == "web":
+            if env or secrets:
+                raise WorkloadVerificationError("reviewed web configuration must be empty")
+            continue
+        base = _expected_runtime_env(config)
+        origins = [config.web_origin]
+        for flag, origin in (
+            ("WORKSPACE_APPLE_HOSTED_TRANSPORT_ENABLED", "capacitor://localhost"),
+            ("WORKSPACE_DESKTOP_HOSTED_TRANSPORT_ENABLED", "app://cosmas"),
+        ):
+            if tuple(env.get(flag, ())) == ("value", "true"):
+                if tuple(env.get("WORKSPACE_HOSTED_ENABLED", ())) != ("value", "true"):
+                    raise WorkloadVerificationError(
+                        "native origins require reviewed hosted workspace"
+                    )
+                origins.append(origin)
+        base["CORS_ALLOWED_ORIGINS"] = base["CLERK_AUTHORIZED_PARTIES"] = (
+            "value",
+            ",".join(origins),
+        )
+        if any(tuple(env.get(name, ())) != value for name, value in base.items()):
+            raise WorkloadVerificationError("reviewed runtime baseline changed")
+        base_secrets = {
+            name: f"{config.key_vault_uri}secrets/{name}"
+            for name in ("database-url", "redis-url", "human-deploy-evidence-reference")
+        }
+        if any(secrets.get(name) != value for name, value in base_secrets.items()):
+            raise WorkloadVerificationError("reviewed runtime base secrets changed")
+        for name, value in secrets.items():
+            if name not in base_secrets and (
+                not isinstance(name, str)
+                or not re.fullmatch(r"ws-[0-9a-f]{32}", name)
+                or not isinstance(value, str)
+                or not re.fullmatch(
+                    re.escape(config.key_vault_uri) + r"secrets/[A-Za-z0-9-]{1,127}/[0-9a-f]{32}",
+                    value,
+                )
+            ):
+                raise WorkloadVerificationError(
+                    "reviewed runtime secret escaped the dedicated vault"
+                )
+        if {value[1] for value in env.values() if value[0] == "secretRef"} != set(secrets):
+            raise WorkloadVerificationError("reviewed runtime secrets are not exactly referenced")
+    if (
+        contract["env"]["api"] != contract["env"]["worker"]
+        or contract["secrets"]["api"] != contract["secrets"]["worker"]
+    ):
+        raise WorkloadVerificationError("reviewed API and worker runtime contracts differ")
+
+
 def _validate_env(config: Config, kind: str, container: dict[str, Any]) -> None:
     env = container.get("env")
     if env is None:
@@ -666,6 +767,10 @@ def _validate_env(config: Config, kind: str, container: dict[str, Any]) -> None:
     if not isinstance(env, list):
         raise WorkloadVerificationError(f"{kind} runtime environment invalid")
     expected = {} if kind == "web" else _expected_runtime_env(config)
+    if config.runtime_contract is not None:
+        expected = {
+            name: tuple(value) for name, value in config.runtime_contract["env"][kind].items()
+        }
     actual: dict[str, tuple[str, str]] = {}
     for item in env:
         if not isinstance(item, dict) or not isinstance(item.get("name"), str):
@@ -674,9 +779,13 @@ def _validate_env(config: Config, kind: str, container: dict[str, Any]) -> None:
         if name in actual:
             raise WorkloadVerificationError(f"{kind} runtime environment invalid")
         fields = [field for field in ("value", "secretRef") if item.get(field) is not None]
-        if len(fields) != 1 or set(item) != {"name", fields[0]}:
+        if (
+            len(fields) != 1
+            or set(item) != {"name", fields[0]}
+            or not isinstance(item[fields[0]], str)
+        ):
             raise WorkloadVerificationError(f"{kind} runtime environment invalid")
-        actual[name] = (fields[0], str(item[fields[0]]))
+        actual[name] = (fields[0], item[fields[0]])
     if actual != expected:
         raise WorkloadVerificationError(f"{kind} runtime environment invalid")
 
@@ -696,6 +805,8 @@ def _validate_secrets(config: Config, kind: str, configuration: dict[str, Any]) 
             "human-deploy-evidence-reference": f"{config.key_vault_uri}secrets/human-deploy-evidence-reference",
         }
     )
+    if config.runtime_contract is not None:
+        expected = config.runtime_contract["secrets"][kind]
     actual: dict[str, str] = {}
     for item in secrets:
         if not isinstance(item, dict) or set(item) != {"name", "identity", "keyVaultUrl"}:
@@ -994,6 +1105,10 @@ def verify_workload(
         or config.api_max_replicas not in {1, 2}
     ):
         raise WorkloadVerificationError("workload verification configuration invalid")
+    bindings = (config.plan_sha256, config.review_sha256, config.runtime_contract_sha256)
+    bound = any(value is not None for value in (*bindings, config.runtime_contract))
+    if bound:
+        _validate_bound_runtime_contract(config)
     _validate_managed_environment(
         config,
         _get_json(runner, config.managed_environment_id),
@@ -1011,8 +1126,8 @@ def verify_workload(
     if now.tzinfo is None:
         raise WorkloadVerificationError("workload verification timestamp invalid")
     payload = {
-        "schema_version": 1,
-        "contract": EVIDENCE_CONTRACT,
+        "schema_version": 2 if bound else 1,
+        "contract": BOUND_EVIDENCE_CONTRACT if bound else EVIDENCE_CONTRACT,
         "status": "verified",
         "completed_at": now.astimezone(UTC).isoformat(timespec="seconds").replace("+00:00", "Z"),
         "source_sha": config.source_sha,
@@ -1042,6 +1157,12 @@ def verify_workload(
         "person_or_patient_identifiers_returned": False,
         "secrets_returned": False,
     }
+    if bound:
+        payload.update(
+            plan_sha256=config.plan_sha256,
+            review_sha256=config.review_sha256,
+            runtime_contract_sha256=config.runtime_contract_sha256,
+        )
     return {**payload, "evidence_payload_sha256": _sha256_json(payload)}
 
 

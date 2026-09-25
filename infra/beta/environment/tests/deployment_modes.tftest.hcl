@@ -681,9 +681,9 @@ run "workloads_create_digest_pinned_https_web_host" {
   assert {
     condition = (
       length(azurerm_container_app.worker) == 1 &&
-      azurerm_container_app.api[0].max_inactive_revisions == null &&
-      azurerm_container_app.worker[0].max_inactive_revisions == null &&
-      azurerm_container_app.web[0].max_inactive_revisions == null &&
+      azurerm_container_app.api[0].max_inactive_revisions == 3 &&
+      azurerm_container_app.worker[0].max_inactive_revisions == 3 &&
+      azurerm_container_app.web[0].max_inactive_revisions == 3 &&
       azurerm_container_app.worker[0].template[0].container[0].startup_probe[0].transport == "HTTP" &&
       azurerm_container_app.worker[0].template[0].container[0].startup_probe[0].port == 8001 &&
       azurerm_container_app.worker[0].template[0].container[0].startup_probe[0].path == "/ready" &&

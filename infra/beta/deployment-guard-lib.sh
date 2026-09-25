@@ -930,12 +930,12 @@ guard_operation_returns_hashed_evidence() {
   local artifact_kind="${2:-}"
 
   case "$operation" in
-    probe-network|build-push|database-prepare|runtime-acceptance|domain-verification|alert-delivery|pitr-*|release-rollback|release-forward|inspect-stage|stage-generation|offboarding-acceptance|bootstrap-identity)
+    probe-network|build-push|database-prepare|workload-verify|runtime-acceptance|domain-verification|alert-delivery|pitr-*|release-rollback|release-forward|inspect-stage|stage-generation|offboarding-acceptance|bootstrap-identity)
       return 0
       ;;
     retrieve)
       case "$artifact_kind" in
-        network|build|database|runtime|domain|alert|pitr|recovery|offboarding|identity)
+        network|build|database|workload|runtime|domain|alert|pitr|recovery|offboarding|identity)
           return 0
           ;;
       esac
@@ -968,6 +968,96 @@ guard_validate_python_sanitized_evidence_hash() {
   actual_hash="$(jq -cSj 'del(.evidence_payload_sha256)' "$artifact_file" | guard_sha256_stream)" || return 1
   [[ "$actual_hash" == "$expected_hash" ]] || return 1
   GUARD_EVIDENCE_PAYLOAD_SHA256="$expected_hash"
+}
+
+# This is a transport check, not a substitute for the runner's complete saved
+# plan/current-state validation. Use the producer's actual Python encoding;
+# jq's Unicode escaping and newline conventions are not interchangeable.
+guard_validate_workload_evidence() {
+  local artifact_file="$1"
+  local expected_source_sha="$2"
+  local expected_release_id="$3"
+  local expected_box_id="$4"
+  local validated_hash
+  validated_hash="$(python3 - "$artifact_file" "$expected_source_sha" "$expected_release_id" "$expected_box_id" <<'PY'
+import hashlib
+import json
+import re
+import sys
+
+def unique(pairs):
+    result = {}
+    for key, value in pairs:
+        if key in result:
+            raise ValueError("duplicate key")
+        result[key] = value
+    return result
+
+try:
+    path, source, release, box = sys.argv[1:]
+    with open(path, encoding="utf-8") as stream:
+        raw = stream.read(16385)
+    if len(raw.encode()) > 16384:
+        raise ValueError("oversize receipt")
+    artifact = json.loads(raw, object_pairs_hook=unique)
+    if not isinstance(artifact, dict):
+        raise ValueError("object required")
+    digest = artifact.pop("evidence_payload_sha256")
+    assertions = {
+        "exact_revisions_and_images_verified", "single_revision_traffic_verified",
+        "api_ready_verified", "web_health_verified", "worker_probe_configuration_verified",
+        "exact_runtime_configuration_verified", "managed_environment_verified",
+        "worker_private_and_ready", "synthetic_box_id_returned",
+    }
+    keys = assertions | {
+        "schema_version", "contract", "status", "completed_at", "source_sha", "release_id",
+        "box_id", "location", "api_max_replicas", "state", "images", "revision_id_sha256",
+        "person_or_patient_identifiers_returned", "secrets_returned", "plan_sha256",
+        "review_sha256", "runtime_contract_sha256",
+    }
+    if set(artifact) != keys or any(artifact[key] is not True for key in assertions):
+        raise ValueError("unexpected receipt shape")
+    if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
+        raise ValueError("hash required")
+    encoded = json.dumps(artifact, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
+    if hashlib.sha256(encoded).hexdigest() != digest:
+        raise ValueError("hash mismatch")
+    if (type(artifact.get("schema_version")) is not int or artifact["schema_version"] != 2
+            or artifact.get("contract") != "cosmas-os-d3-workload-verification-v2"
+            or artifact.get("status") != "verified"
+            or artifact.get("source_sha") != source or artifact.get("release_id") != release
+            or artifact.get("box_id") != box
+            or artifact.get("secrets_returned") is not False
+            or artifact.get("person_or_patient_identifiers_returned") is not False):
+        raise ValueError("binding mismatch")
+    for key in ("plan_sha256", "review_sha256", "runtime_contract_sha256"):
+        if not isinstance(artifact.get(key), str) or not re.fullmatch(r"[0-9a-f]{64}", artifact[key]):
+            raise ValueError("plan binding required")
+    state = artifact["state"]
+    if (not isinstance(state, dict) or set(state) != {"exists", "lineage", "serial", "sha256"}
+            or state["exists"] is not True or type(state["serial"]) is not int or state["serial"] < 0
+            or not isinstance(state["lineage"], str)
+            or not re.fullmatch(r"[0-9a-fA-F-]{36}", state["lineage"])
+            or not isinstance(state["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", state["sha256"])):
+        raise ValueError("state shape invalid")
+    for key, pattern in (("images", r"sha256:[0-9a-f]{64}"), ("revision_id_sha256", r"[0-9a-f]{64}")):
+        values = artifact[key]
+        if (not isinstance(values, dict) or set(values) != {"api", "worker", "web"}
+                or any(not isinstance(value, str) or not re.fullmatch(pattern, value) for value in values.values())):
+            raise ValueError("workload shape invalid")
+    if (artifact["images"]["worker"] != artifact["images"]["api"]
+            or artifact["images"]["web"] == artifact["images"]["api"]
+            or type(artifact["api_max_replicas"]) is not int or artifact["api_max_replicas"] not in {1, 2}
+            or not isinstance(artifact["location"], str) or not re.fullmatch(r"[a-z][a-z0-9]{2,31}", artifact["location"])
+            or not isinstance(artifact["completed_at"], str)
+            or not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z", artifact["completed_at"])):
+        raise ValueError("workload profile invalid")
+    print(digest)
+except (OSError, ValueError, KeyError, TypeError):
+    sys.exit(1)
+PY
+)" || return 1
+  GUARD_EVIDENCE_PAYLOAD_SHA256="$validated_hash"
 }
 
 guard_validate_network_public_configuration() {

@@ -198,9 +198,19 @@ Container App exists.
    `planned_workloads_progression`. This archives the first successful stage
    generation instead of overwriting it. Create and review the second plan
    from the newly staged variables. Any other tfvars change fails closed.
-6. Apply only that reviewed plan, then verify the managed certificate, HTTPS,
-   `/healthz`, Clerk login/redirects, exact-origin CORS, and authenticated API
-   access. Record evidence without storing session tokens or user data.
+6. Apply only that reviewed plan and refresh `probe-network` for its resulting
+   state. Run `transport-to-protected-runner.sh workload-verify` with the same
+   bootstrap outputs, source SHA and release ID and a new `--artifact-out` path.
+   This read-only command derives the expected configuration from the resident
+   reviewed plan and checks the live API, worker and web revisions, exact
+   workspace/native settings, secret references, replica limits, routing and
+   HTTPS readiness. Retain its plan-bound v2 receipt. If readiness is still
+   settling, resolve the reported failure and re-run verification without
+   applying the infrastructure again.
+7. Verify Clerk login/redirects, exact-origin CORS behavior and authenticated
+   API access using invented data. The infrastructure receipt does not prove
+   account or clinical workflow acceptance. Record evidence without storing
+   session tokens or user data.
 
 The AzureRM 4.81 managed-certificate contract intentionally omits certificate
 IDs and binding type. Both fields are lifecycle-ignored because Azure fills

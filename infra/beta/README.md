@@ -157,21 +157,35 @@ do not substitute a different major version based on an older support summary.
 
 The saved plan guard binds both `location` and `api_max_replicas` to its resolved
 variables, outputs and planned resources. Its sanitized
-`critical_planned_values` projection carries both values. A reviewed protected
-caller of `workload_verification.py` must supply those exact saved-plan values
-as `COSMAS_WORKLOAD_LOCATION` and `COSMAS_WORKLOAD_API_MAX_REPLICAS`, alongside
-the existing source, release, state, Box and image bindings. Never derive the
-expected values from the live resources being checked. Both variables must be
-supplied together; only a legacy invocation with neither supplied retains the
-Central US/two-replica expectation.
+`critical_planned_values` projection carries both values. After the workload and
+any selected custom-domain binding are applied, refresh the protected network
+receipt for that state and run the read-only workload verification operation:
 
-Current workload receipts contain both values. Pass the same expected location
-and API cap as the final argument pair to `validate_workload_attestation.py`;
-a mismatch fails even if the receipt hash is recomputed. Legacy receipts without
-either field are valid only for an expected Central US/two-replica deployment.
-These are resident primitives: this repository does not yet provide an automatic
-protected-runner caller for them. Their availability alone does not establish
-that a deployed workload was verified.
+```sh
+infra/beta/transport-to-protected-runner.sh workload-verify \
+  --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH
+```
+
+The runner derives all expected settings from the resident saved workload plan,
+reviewed variable file and apply result. It checks their hashes against the
+current state, source, bootstrap boundary and build evidence. The operator does
+not assemble `COSMAS_WORKLOAD_*` values. Expected workspace settings, native
+origins and version-pinned secret references come from the reviewed plan, never
+from the live app being checked. The verifier compares both app and active
+revision configuration, images, traffic, replica limits and readiness while
+preserving the fixed synthetic-data, identity and private-secret boundaries.
+
+A successful operation stores an immutable v2 receipt bound to the exact plan,
+review, runtime configuration and state. Retrieve it through the same transport
+with `retrieve --artifact-kind workload`; retrieval revalidates the resident
+bindings and receipt age. Changed state or an expired receipt requires a fresh
+verification. A readiness failure does not change an already completed apply
+result; re-run this read-only operation after resolving the cause.
+
+The older standalone primitives remain compatible with legacy v1 receipts, but
+those receipts cannot satisfy this plan-bound operation. A passing infrastructure
+receipt proves only its enumerated checks. Real account onboarding, approved
+connector workflows and desktop/iPhone acceptance remain separate requirements.
 
 ## Broker decision
 
