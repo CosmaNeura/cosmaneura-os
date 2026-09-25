@@ -546,16 +546,19 @@ uses the explicit `foundation_reconcile` phase. Both bind the backend and
 pre/post-plan state lineage, serial, and hash.
 
 The production web custom domain is selected before the foundation plan because
-Clerk production cannot use the shared `azurecontainerapps.io` hostname. The
-pending exact owner decision recommends `beta.cosmaneura.com`; once accepted,
-set it in the foundation and retain it in every later tfvars object with
-`web_custom_domain_dns_ready = false`. The app-specific verification value does
-not exist before the web Container App, so custom-domain activation remains a
-two-plan workload sequence. In the first workload plan, also set
-`web_origin = "https://beta.cosmaneura.com"`. That creates the web app but no
-domain binding; do not admit testers yet. Re-run `probe-network` for the
-resulting state, then retrieve the
-exact public DNS material through the protected runner:
+Clerk production cannot use the shared `azurecontainerapps.io` hostname. On
+2026-09-25 the owner confirmed `staging.cosmas.ai` for testing, reserving
+`bot.cosmas.ai` for the user-facing CosmaBot app. This replaces the earlier
+staging hostname recommendations; approval of each exact deployment plan and
+the identity/DNS gates remains required. Set
+`web_custom_domain = "staging.cosmas.ai"` in the foundation and retain it in
+every later tfvars object with `web_custom_domain_dns_ready = false`. The
+app-specific verification value does not exist before the web Container App,
+so custom-domain activation remains a two-plan workload sequence. In the first
+workload plan, also set `web_origin = "https://staging.cosmas.ai"`. That creates
+the web app but no domain binding; do not admit testers yet. Re-run
+`probe-network` for the resulting state, then retrieve the exact public DNS
+material through the protected runner:
 
 ```text
 bash ./transport-to-protected-runner.sh domain-verification \
@@ -570,7 +573,8 @@ CNAME target, `asuid` TXT name/value, and its exact source/release/state
 binding. The TXT value is public DNS publication material, not an application
 credential; the raw Terraform output and all unrelated state remain on the
 runner. A human then creates and externally verifies those exact records in
-the Cloudflare-hosted zone and adds the exact origin/redirects to Clerk. Before
+the selected hostname's authoritative DNS zone, confirming its current
+delegation and provider, and adds the exact origin/redirects to Clerk. Before
 the second plan, create replacement workload tfvars that change only
 `web_custom_domain_dns_ready` from `false` to `true` and replace
 `runner_live_network_evidence_reference` with the fresh post-workload probe.
