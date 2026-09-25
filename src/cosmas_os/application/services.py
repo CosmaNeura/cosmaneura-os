@@ -27,7 +27,6 @@ from cosmas_os.domain.enums import (
     TicketState,
 )
 from cosmas_os.domain.hashing import payload_hash
-from cosmas_os.domain.work_lanes import PRIVATE_CONNECTOR_LANES
 from cosmas_os.domain.rules import (
     AuthorizationError,
     DomainError,
@@ -37,6 +36,7 @@ from cosmas_os.domain.rules import (
     resolve_policy,
     transition_ticket,
 )
+from cosmas_os.domain.work_lanes import PRIVATE_CONNECTOR_LANES
 from cosmas_os.models import (
     ActionRevision,
     AppointmentObservation,

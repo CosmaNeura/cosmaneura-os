@@ -93,7 +93,9 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
     const key=configurationKey,revision=team.revision;setRehearsing(true);setError("");setResult(null);setReviewed(false);callbacks.current.onReviewChange(null);
     try{
       const value=await teamSetupApi.rehearse(identity,{expected_revision:revision,configuration:structuredClone(draft),scenario_id:loaded.catalog.version>=2?"team_policy_setup.v1":"preset_setup.v1"},controller.signal);
-      if(controller.signal.aborted||live.current.configurationKey!==key||live.current.revision!==revision||live.current.locked)return;
+      if(controller.signal.aborted||live.current.configurationKey!==key||live.current.revision!==revision)return;
+      // A temporary lock discards this result; allow a fresh check after unlocking.
+      if(live.current.locked){automaticAttempt.current=null;return;}
       callbacks.current.setDraft(value.configuration);setResult({key:JSON.stringify(value.configuration),revision,value});
     }catch(cause){
       if(controller.signal.aborted)return;

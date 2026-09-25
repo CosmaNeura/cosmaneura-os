@@ -86,6 +86,26 @@ it('discards a pending automatic result after an edit and checks the new exact d
   expect(input('I reviewed these team changes').checked).toBe(false);expect(review).toBeNull();expect(saved).toBeNull();
 });
 
+it('rechecks after a temporary lock discards an automatic result and still requires review and save',async()=>{
+  let release!:(value:Awaited<ReturnType<typeof rehearsalFixture>>)=>void;
+  vi.mocked(teamSetupApi.rehearse).mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+  await mount();await addGroup();await click('Review changes');
+  const draft=structuredClone(latest),request=structuredClone(vi.mocked(teamSetupApi.rehearse).mock.calls[0][1]);
+  await act(async()=>root.render(<Harness locked/>));
+  await act(async()=>release(await rehearsalFixture(draft,request.expected_revision)));
+  expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(1);expect(latest).toEqual(draft);
+  expect([...element.querySelectorAll('input[type=checkbox]')].filter(visible)).toHaveLength(0);
+  expect(button('Save team changes').disabled).toBe(true);expect(review).toBeNull();expect(saved).toBeNull();
+  await act(async()=>root.render(<Harness/>));
+  await wait(()=>expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(2));
+  expect(vi.mocked(teamSetupApi.rehearse).mock.calls[1][1]).toEqual(request);
+  expect(input('I reviewed these team changes').checked).toBe(false);
+  expect(button('Save team changes').disabled).toBe(true);expect(review).toBeNull();expect(saved).toBeNull();
+  await act(async()=>input('I reviewed these team changes').click());
+  await click('Save team changes');expect(saved?.draft).toEqual(latest);expect(saved?.review).toEqual(review);
+  expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(2);
+});
+
 it('waits for the current source inventory before automatically checking a policy change',async()=>{
   const {policySetupFixture,policyRehearsalFixture,resourcesFixture,usageFixture}=await import('./team-policy-test-fixture');
   let release!:(value:typeof resourcesFixture)=>void;

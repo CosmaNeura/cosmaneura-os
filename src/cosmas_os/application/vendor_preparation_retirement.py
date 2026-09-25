@@ -56,8 +56,9 @@ def retire(s, box, actor, wid, request):
         return (work.command_response(s, saved) if request.command_kind == "propose"
                 else artifacts._response(s, w, saved))
     if request.command_kind == "artifact_content":
-        row = artifacts._artifact(s, w, request.request.artifact_id, writing=True)
         q = request.request
+        assert isinstance(q, public.VendorArtifactContent)
+        row = artifacts._artifact(s, w, q.artifact_id, writing=True)
         if (row.intent_sha256, row.sha256, row.byte_length, row.media_type) != (
                 q.intent_sha256, q.sha256, q.byte_length, q.media_type):
             work.error("vendor_idempotency_conflict")

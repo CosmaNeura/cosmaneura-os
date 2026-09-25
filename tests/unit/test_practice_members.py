@@ -8,10 +8,10 @@ from uuid import uuid4
 
 import httpx
 import pytest
-import test_practice_access as existing
 from fastapi import FastAPI
 from sqlalchemy import func, select
-from test_practice_access import decision, invoke, request, verifier
+from tests.unit import test_practice_access as existing
+from tests.unit.test_practice_access import decision, invoke, request, verifier
 
 from cosmas_os.api.auth import AccessDenied, authenticate_request
 from cosmas_os.api.practice_access_routes import register

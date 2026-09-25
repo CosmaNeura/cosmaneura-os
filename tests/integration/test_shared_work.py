@@ -7,14 +7,24 @@ import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from tests.integration.test_follow_up import complete, decide, prepare, propose
+from tests.integration.test_workspace_auth import signed_workspace
 
 from cosmas_os.api import app as api
 from cosmas_os.application import services as svc
 from cosmas_os.application import shared_work as work
 from cosmas_os.application import workspace as ws
-from cosmas_os.models import AuditEvent, ExternalIdentity, FollowUpReceipt, PatientLink, Principal, WorkHandoff
-from tests.integration.test_follow_up import complete, decide, prepare, propose
-from tests.integration.test_workspace_auth import signed_workspace
+from cosmas_os.models import (
+    AuditEvent,
+    ExternalIdentity,
+    FollowUpReceipt,
+    PatientLink,
+    Principal,
+    WorkHandoff,
+)
+
+# Retain fixture discovery and its importable module name.
+__all__ = ["signed_workspace"]
 
 
 @pytest.fixture(autouse=True)
@@ -152,16 +162,23 @@ def test_stale_or_unauthorized_handoff_cannot_change_work(session, scenario, cha
     case, item, staff, _ = scenario
     altered = dict(item)
     args = {"recipient": staff, "key": "stable-offer"}
-    if change == "revision": altered["revision_id"] = str(uuid4())
-    if change == "hash": altered["payload_hash"] = "0" * 64
-    if change == "version": altered["version"] += 1
+    if change == "revision":
+        altered["revision_id"] = str(uuid4())
+    if change == "hash":
+        altered["payload_hash"] = "0" * 64
+    if change == "version":
+        altered["version"] += 1
     if change == "key":
         act(session, case, item, case[1], "offer", **args)
         altered["version"] += 1
-    if change == "agent": session.get(Principal, staff).principal_type = "agent"
-    if change == "staff": session.get(Principal, staff).tombstoned_at = datetime.now(UTC)
-    if change == "other_box": args["recipient"] = svc.provision_box(svc.Container(session), "Other invented Box")["owner_id"]
-    if change == "patient": session.get(PatientLink, case[3]).revoked_at = datetime.now(UTC)
+    if change == "agent":
+        session.get(Principal, staff).principal_type = "agent"
+    if change == "staff":
+        session.get(Principal, staff).tombstoned_at = datetime.now(UTC)
+    if change == "other_box":
+        args["recipient"] = svc.provision_box(svc.Container(session), "Other invented Box")["owner_id"]
+    if change == "patient":
+        session.get(PatientLink, case[3]).revoked_at = datetime.now(UTC)
     session.commit()
     before = session.scalar(select(func.count()).select_from(WorkHandoff).where(WorkHandoff.ticket_id == item["ticket_id"]))
     with pytest.raises(ws.WorkspaceError) as error:

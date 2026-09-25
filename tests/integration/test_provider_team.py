@@ -23,7 +23,7 @@ from cosmas_os.models import (
     ProviderBot,
     WorkspaceReply,
 )
-from cosmas_os.ports.bot_capabilities import BotReply, ConnectorUnavailable
+from cosmas_os.ports.bot_capabilities import BotReply
 
 
 @pytest.fixture
@@ -73,7 +73,6 @@ def ask(s, case, **values):
             "model_contract": True,
             "expected": 1,
             "team_revision": config["revision"],
-            "key": "invented-question",
             "role": "visit_prep",
             "content": "Review my preparation",
             **values,
@@ -303,6 +302,7 @@ def test_revoked_owner_and_patient_cannot_access_team_or_chat(session, case):
 
 def test_gpt_error_is_retained_once_and_exact_retry_does_not_call_again(session, case, monkeypatch):
     from pydantic import SecretStr
+
     from cosmas_os.application import model_work
     from cosmas_os.ports.bot_capabilities import ModelCallFailure
     monkeypatch.setattr(conversation.runtime_settings, "workspace_enabled", True)

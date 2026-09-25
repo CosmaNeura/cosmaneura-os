@@ -437,6 +437,7 @@ def verify_beta_bootstrap_state(
             appointments_match = appointments_match and (
                 appointment.box_id == box_id
                 and appointment.source == "csv"
+                and appointment.start_at is not None
                 and appointment.start_at.astimezone(UTC) == start_at
                 and appointment.patient_label == patient_label
                 and appointment.coverage_status == CoverageStatus.MISSING.value

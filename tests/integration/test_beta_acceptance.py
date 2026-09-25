@@ -574,7 +574,7 @@ def test_audit_replay_rejects_self_consistent_version_rewrite(
 
 @pytest.mark.parametrize(
     "mutation",
-    ["appointment", "patient_link", "non_owner_approver"],
+    ["appointment", "missing_appointment_start", "patient_link", "non_owner_approver"],
 )
 def test_audit_replay_rejects_self_consistent_fixture_identity_rewrite(
     session,
@@ -615,6 +615,8 @@ def test_audit_replay_rejects_self_consistent_fixture_identity_rewrite(
             select(AuditEvent).where(AuditEvent.action_revision_id == revision.id)
         ).all():
             event.payload_hash = revision.payload_hash
+    elif mutation == "missing_appointment_start":
+        appointment.start_at = None
     elif mutation == "patient_link":
         patient_link.source_pair_key = "csv:taylor-example"
         patient_link.label = appointment.patient_label = "Taylor Example"

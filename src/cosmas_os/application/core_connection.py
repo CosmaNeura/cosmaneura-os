@@ -8,8 +8,8 @@ from sqlalchemy import select
 
 from cosmas_os.application import workspace as ws
 from cosmas_os.models import AuditEvent, CoreCaptureAccount, ExternalIdentity
-from cosmas_os.ports.athena_visit_links import AthenaVisitLinkCommand
 from cosmas_os.ports.athena_schedule import AthenaCommand, AthenaScheduleRequest
+from cosmas_os.ports.athena_visit_links import AthenaVisitLinkCommand
 from cosmas_os.ports.core_appointment_setup import AppointmentSetupCommand, AppointmentSetupRequest
 from cosmas_os.ports.core_encounters import (
     AppointmentRef,

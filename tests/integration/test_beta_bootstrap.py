@@ -18,6 +18,7 @@ from cosmas_os.application.beta_bootstrap import (
 from cosmas_os.config import Settings
 from cosmas_os.models import (
     ActionRevision,
+    AppointmentObservation,
     Artifact,
     AuditEvent,
     BoxContext,
@@ -140,6 +141,24 @@ def test_reviewed_beta_can_seed_exact_synthetic_queue_idempotently(session) -> N
     assert readback["capability_config_count"] == 0
     assert readback["audit_event_count"] == 3
     assert BOX_ID not in second
+
+
+@pytest.mark.parametrize("external_id", ["appt-1001", "appt-1002"])
+def test_bootstrap_readback_rejects_missing_appointment_start(session, external_id: str) -> None:
+    _empty_database(session)
+    runtime = _runtime()
+    manifest = _manifest()
+    bootstrap_beta_identity(session, runtime, manifest)
+    seed_beta_synthetic_queue(session, runtime)
+    appointment = session.scalar(
+        select(AppointmentObservation).where(AppointmentObservation.external_id == external_id)
+    )
+    assert appointment is not None
+    appointment.start_at = None
+    session.commit()
+
+    with pytest.raises(BetaBootstrapError, match="readback differs"):
+        verify_beta_bootstrap_state(session, runtime, manifest)
 
 
 def test_beta_seed_refuses_authorized_data_mode(session) -> None:

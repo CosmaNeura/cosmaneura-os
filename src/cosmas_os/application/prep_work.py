@@ -12,7 +12,15 @@ from cosmas_os.application import note_review as notes
 from cosmas_os.application import workspace as ws
 from cosmas_os.config import settings
 from cosmas_os.domain.hashing import payload_hash
-from cosmas_os.models import ActionRevision, AuditEvent, Decision, FollowUpReceipt, FollowUpSource, Operation, Ticket
+from cosmas_os.models import (
+    ActionRevision,
+    AuditEvent,
+    Decision,
+    FollowUpReceipt,
+    FollowUpSource,
+    Operation,
+    Ticket,
+)
 from cosmas_os.ports.encounter_prep import CorePrepReceipt
 
 LANE = "visit_preparation"
@@ -230,13 +238,16 @@ def propose(s, box, actor, wid, command, checked):
         "due_date": command["due_date"], "expected_outcome": command["expected_outcome"]}
     t = Ticket(box_id=box, lane=LANE, state="pending_approval", created_by_principal_id=actor,
         appointment_id=w.appointment_id, patient_link_id=w.patient_link_id)
-    s.add(t); s.flush()
+    s.add(t)
+    s.flush()
     r = ActionRevision(ticket_id=t.id, box_id=box, revision_number=1, action_type=ACTION,
         target_ref=payload["target_ref"], content=payload["body"], payload=payload,
         payload_hash=payload_hash(payload), automation_class="hitl_required",
         policy_version="internal-preparation-v1", charter_version="human-selected-v1",
         config_version="local-only-v1", created_by_principal_id=actor)
-    s.add(r); s.flush(); t.current_revision_id = r.id
+    s.add(r)
+    s.flush()
+    t.current_revision_id = r.id
     s.add(FollowUpSource(ticket_id=t.id, box_id=box, workspace_id=wid, owner_id=actor,
         source_kind="core_prep", prep_snapshot_sha256=checked.snapshot_sha256,
         prep_receipt=checked.model_dump(mode="json"), action_revision_id=r.id,
@@ -286,7 +297,9 @@ def decide(s, box, actor, wid, tid, command, checked=None):
     if t.version != command["expected_version"]:
         raise ws.WorkspaceError("shared_work_changed")
     if command["choice"] == "reject":
-        t.state = "rejected"; t.version += 1; w.revision += 1
+        t.state = "rejected"
+        t.version += 1
+        w.revision += 1
         s.add(Decision(box_id=box, ticket_id=tid, action_revision_id=r.id, actor_principal_id=actor, kind="reject"))
         _event(s, w, t, r, "decision.rejected", "rejected")
     else:
@@ -297,15 +310,19 @@ def decide(s, box, actor, wid, tid, command, checked=None):
         _text(s, w, r.payload["expected_outcome"], 500, checked)
         op = Operation(box_id=box, ticket_id=tid, action_revision_id=r.id,
             idempotency_key=f"prep:{r.id}", adapter=ADAPTER, status="succeeded", attempt_count=1)
-        s.add(op); s.flush()
+        s.add(op)
+        s.flush()
         published = FollowUpReceipt(ticket_id=tid, box_id=box, operation_id=op.id, actor_id=actor,
             kind="internal_publication", content="Opened as internal preparation work. No patient message was sent.",
             request_hash=payload_hash(command), idempotency_key=op.idempotency_key)
-        s.add(published); s.flush()
+        s.add(published)
+        s.flush()
         op.started_at = op.completed_at = published.created_at
         op.result_receipt_hash = payload_hash({"receipt_id": published.id, "request_hash": published.request_hash})
         s.add(Decision(box_id=box, ticket_id=tid, action_revision_id=r.id, actor_principal_id=actor, kind="approve"))
-        t.state = "approved"; t.version += 1; w.revision += 1
+        t.state = "approved"
+        t.version += 1
+        w.revision += 1
         _event(s, w, t, r, "decision.approved", "approved", approved=True)
         _event(s, w, t, r, "prep_work.internal_publication", "internal_publication")
     s.commit()  # Exact approval and the internal DB publication are one atomic effect.
@@ -332,7 +349,8 @@ def record_ready(s, w, t, r, *, actor, expected, key, evidence):
     op = _operation(s, t, r)
     s.add(FollowUpReceipt(ticket_id=t.id, box_id=t.box_id, operation_id=op.id, actor_id=actor,
         kind="ready_for_review", content=evidence, request_hash=request_hash, idempotency_key=key))
-    t.version += 1; w.revision += 1
+    t.version += 1
+    w.revision += 1
     _event(s, w, t, r, "prep_work.ready_for_review", "ready_for_review", actor=actor)
 
 
@@ -381,8 +399,12 @@ def verify(s, box, actor, wid, tid, command, checked):
         kind="provider_verification", content="Provider reviewed the current saved intake summary.",
         request_hash=payload_hash(command), idempotency_key=command["idempotency_key"],
         source_snapshot_sha256=checked.snapshot_sha256, source_proof=checked.model_dump(mode="json"))
-    s.add(proof); s.flush()
-    t.state = "closed"; t.closed_at = proof.created_at; t.version += 1; w.revision += 1
+    s.add(proof)
+    s.flush()
+    t.state = "closed"
+    t.closed_at = proof.created_at
+    t.version += 1
+    w.revision += 1
     _event(s, w, t, r, "prep_work.provider_verification", "closed")
     s.commit()
     return _response(s, w, t, r)

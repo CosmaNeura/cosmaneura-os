@@ -44,6 +44,7 @@ packages = ["src/cosmas_os"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+addopts = "--import-mode=importlib"
 filterwarnings = ["ignore::DeprecationWarning"]
 
 [tool.ruff]

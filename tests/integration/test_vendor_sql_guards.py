@@ -7,16 +7,31 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import insert, select, text
 from sqlalchemy.exc import DBAPIError
-from tests.integration.test_vendor_work import (  # noqa: F401
-    acceptance, approved, bound, call, gates, immediate, proposal, vendor_case,
+from tests.integration.test_vendor_work import (
+    acceptance,
+    approved,
+    bound,
+    call,
+    gates,
+    immediate,
+    proposal,
+    vendor_case,
 )
 
 from cosmas_os.api import vendor_work_schemas as p
-from cosmas_os.application import vendor_execution as execution, vendor_work as flow
+from cosmas_os.application import vendor_execution as execution
+from cosmas_os.application import vendor_work as flow
 from cosmas_os.config import settings
 from cosmas_os.models import Ticket
 from cosmas_os.ports import vendor_connectors as private
-from cosmas_os.vendor_models import VendorCommandReceipt, VendorProviderObservation, VendorWorkRevision
+from cosmas_os.vendor_models import (
+    VendorCommandReceipt,
+    VendorProviderObservation,
+    VendorWorkRevision,
+)
+
+# Both fixtures must remain visible to pytest, including the autouse gates.
+__all__ = ["gates", "vendor_case"]
 
 
 def record_result(s, c, tid, disposition="verified_in_vendor"):
@@ -125,12 +140,17 @@ def test_sql_publication_requires_exact_safe_projection_and_explicit_share(sessi
     revision = session.get(VendorWorkRevision, d["summary"]["revision_id"])
     projection = flow._safe_publication(revision)
     request = p.VendorPublication(**bound(d, review_sha256=d["review_sha256"], share_to_practice=True)).public()
-    if change == "extra_private_field": projection["private_message"] = "Invented private content"
-    if change == "body": projection["body"] = "Unapproved invented text"
-    if change == "share": request["share_to_practice"] = False
+    if change == "extra_private_field":
+        projection["private_message"] = "Invented private content"
+    if change == "body":
+        projection["body"] = "Unapproved invented text"
+    if change == "share":
+        request["share_to_practice"] = False
     row = receipt(c, tid, request, "publish", projection)
-    if change == "projection_hash": row["publication_sha256"] = "0" * 64
-    if change == "receipt_hash": row["receipt_sha256"] = "0" * 64
+    if change == "projection_hash":
+        row["publication_sha256"] = "0" * 64
+    if change == "receipt_hash":
+        row["receipt_sha256"] = "0" * 64
     with pytest.raises(DBAPIError), session.begin_nested():
         insert_receipt(session, row)
 
@@ -183,8 +203,10 @@ def observation(s, invocation, kind="submission", value="accepted"):
 def test_sql_observation_requires_rehashed_exact_next_chain(session, vendor_case, monkeypatch, change):
     _, invocation = accepted_case(session, vendor_case, monkeypatch)
     row = observation(session, invocation)
-    if change == "public_hash": row["public_sha256"] = row["public_observation"]["sha256"] = "0" * 64
-    if change == "head_hash": row["head_sha256"] = "0" * 64
+    if change == "public_hash":
+        row["public_sha256"] = row["public_observation"]["sha256"] = "0" * 64
+    if change == "head_hash":
+        row["head_sha256"] = "0" * 64
     if change == "skipped_sequence":
         # Recompute every digest so the rejection proves the sequence rule itself.
         previous = session.scalar(select(VendorProviderObservation).where(VendorProviderObservation.operation_id == invocation.operation_id)
@@ -195,7 +217,8 @@ def test_sql_observation_requires_rehashed_exact_next_chain(session, vendor_case
         row["public_observation"]["sha256"] = row["public_sha256"]
         row["head_sha256"] = p.public_digest("cosmas-vendor-observation-head.v1", {"operation_id": invocation.operation_id,
             "sequence": row["sequence"], "previous_sha256": previous.head_sha256, "observation_sha256": row["public_sha256"]})
-    if change == "body_after_hash": row["public_observation"]["acceptance"] = "rejected"
+    if change == "body_after_hash":
+        row["public_observation"]["acceptance"] = "rejected"
     with pytest.raises(DBAPIError), session.begin_nested():
         session.execute(insert(VendorProviderObservation.__table__).values(**row))
         immediate(session)

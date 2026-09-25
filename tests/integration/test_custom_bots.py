@@ -2,20 +2,27 @@ from copy import deepcopy
 from uuid import uuid4
 
 import pytest
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
-from cosmas_os.application import conversation, handoffs, model_work, provider_team as team, workspace as ws
-from cosmas_os.models import Principal, WorkspaceReply
-from cosmas_os.adapters.gpt41 import _context
-from cosmas_os.ports.bot_capabilities import BotReply, DraftBrief
-from tests.integration.test_provider_team import case, ask
+from tests.integration.test_provider_team import ask, case
+from tests.integration.test_workspace_capture import admit, capture_case
 from tests.integration.test_workspace_handoffs import model, worker
-from tests.integration.test_workspace_capture import capture_case, admit
-from tests.integration.test_workspace_prep import setup as prep_setup, read as prep_read
-from tests.integration.test_workspace_scheduling import scheduling_case, read as scheduling_read
+from tests.integration.test_workspace_prep import read as prep_read
+from tests.integration.test_workspace_prep import setup as prep_setup
+from tests.integration.test_workspace_scheduling import read as scheduling_read
+from tests.integration.test_workspace_scheduling import scheduling_case
 from tests.unit.test_custom_bot_contract import custom
+
+from cosmas_os.adapters.gpt41 import _context
+from cosmas_os.application import conversation, handoffs, model_work
+from cosmas_os.application import provider_team as team
+from cosmas_os.application import workspace as ws
+from cosmas_os.models import Principal, WorkspaceReply
+from cosmas_os.ports.bot_capabilities import BotReply, DraftBrief
+
+# Pytest discovers these imported fixtures in this module.
+__all__ = ["case", "capture_case", "model", "scheduling_case"]
 
 
 def add(s, box, owner, config, *bots):
@@ -59,7 +66,8 @@ def test_two_custom_bots_have_persistent_private_identity_history_and_retirement
 def test_database_rejects_bare_custom_identity(session, case):
     box, owner, _, config = case
     principal = Principal(box_id=box, principal_type="agent", display_name="Custom bot", agent_key="provider_custom", is_owner=False)
-    session.add(principal); session.flush()
+    session.add(principal)
+    session.flush()
     with pytest.raises(IntegrityError, match="ck_provider_bot_custom_identity"), session.begin_nested():
         session.execute(text("INSERT INTO provider_bots (agent_id, box_id, owner_id, role) VALUES (:agent,:box,:owner,'custom')"),
             {"agent": principal.id, "box": box, "owner": owner})
@@ -81,8 +89,10 @@ def test_chief_assignments_to_custom_bot_obey_scope_and_revalidate_before_execut
     assert result["workspace"]["handoffs"][0]["recipient_role"] == "custom"
     if change:
         value = deepcopy(saved["configuration"])
-        if change == "include_notebook": value["bots"][-1][change] = False
-        else: value["bots"][-1]["skills"].remove(change)
+        if change == "include_notebook":
+            value["bots"][-1][change] = False
+        else:
+            value["bots"][-1]["skills"].remove(change)
         saved = team.save(session, box, owner, expected=2, key="restrict-custom", configuration=value)
         version = team.current(session, box, owner)
         assert bot["instance_id"] not in handoffs.available_roles(session, box, owner, version, value["bots"][3])
@@ -102,17 +112,21 @@ def test_custom_calendar_skill_and_revocation_during_io(scheduling_case, revoke)
     saved = add(f.session, f.box, f.actor, team.read(f.session, f.box, f.actor), custom(skills=["calendar_availability"]))
     bot = saved["configuration"]["bots"][-1]
     f.bot = {"address": bot["instance_id"], "team_revision": saved["revision"]}
+    # Release setup read locks before the callback writes through another session.
+    f.session.commit()
     if revoke:
         def after():
             with Session(f.engine) as s:
-                value = deepcopy(saved["configuration"]); value["bots"][-1]["skills"] = []
+                value = deepcopy(saved["configuration"])
+                value["bots"][-1]["skills"] = []
                 team.save(s, f.box, f.actor, expected=saved["revision"], key="revoke-skill", configuration=value)
         f.scheduling.after = after
     response = scheduling_read(f)
     assert response.status_code == (409 if revoke else 200), response.text
     if revoke:
         assert "slots" not in response.json()
-        f.bot["team_revision"] += 1; f.scheduling.calls.clear()
+        f.bot["team_revision"] += 1
+        f.scheduling.calls.clear()
         assert scheduling_read(f).status_code == 409 and not f.scheduling.calls
 
 
@@ -123,13 +137,17 @@ def test_custom_prep_skill_is_read_only_and_rechecked(capture_case, revoke):
     saved = add(f.session, f.box, f.actor, config, custom(skills=["encounter_prep"]))
     bot = {"address": saved["configuration"]["bots"][-1]["instance_id"], "team_revision": saved["revision"]}
     assert admit(f, bot=bot).status_code == 409 and not f.port.calls
+    # Release setup read locks before the callback writes through another session.
+    f.session.commit()
     if revoke:
         def after(phase):
             if phase == "prep":
                 with Session(f.engine) as s:
-                    value = deepcopy(saved["configuration"]); value["bots"][-1]["skills"] = []
+                    value = deepcopy(saved["configuration"])
+                    value["bots"][-1]["skills"] = []
                     team.save(s, f.box, f.actor, expected=saved["revision"], key="revoke-prep", configuration=value)
         f.port.after = after
     response = prep_read(f, bot)
     assert response.status_code == (409 if revoke else 200), response.text
-    if revoke: assert "Invented intake" not in response.text
+    if revoke:
+        assert "Invented intake" not in response.text

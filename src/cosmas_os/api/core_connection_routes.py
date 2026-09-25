@@ -17,8 +17,8 @@ from cosmas_os.application import core_connection
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.capture_deadline import run_in_threadpool
 from cosmas_os.application.core_record_deadline import RecordDeadline, session_deadline
-from cosmas_os.ports.athena_visit_links import AthenaVisitLinkCommand
 from cosmas_os.ports.athena_schedule import AthenaCommand
+from cosmas_os.ports.athena_visit_links import AthenaVisitLinkCommand
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
 from cosmas_os.ports.core_appointment_setup import AppointmentSetupCommand
 

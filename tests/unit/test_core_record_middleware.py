@@ -125,9 +125,11 @@ async def invoke(f, *, send=None, request_scope=None):
 @pytest.mark.parametrize('behavior,status',[('success',200),('denied',403),('unexpected',503),('blocked',504)])
 @pytest.mark.parametrize('stalled',['http.response.start','http.response.body'])
 def test_actual_record_final_output_is_bounded(actual_record, behavior, status, stalled):
-    f=actual_record; f.behavior=behavior
+    f=actual_record
+    f.behavior=behavior
     async def run():
-        release=asyncio.Event(); messages=[]
+        release=asyncio.Event()
+        messages=[]
         async def send(message):
             messages.append(message)
             if message['type']==stalled:
@@ -151,7 +153,8 @@ def test_actual_record_final_output_is_bounded(actual_record, behavior, status, 
             assert headers[b'x-content-type-options']==b'nosniff'
             assert headers[b'referrer-policy']==b'no-referrer'
         finally:
-            f.release.set(); release.set()
+            f.release.set()
+            release.set()
             await asyncio.gather(task,return_exceptions=True)
             await settled(lambda: f.events.count('session')==f.events.count('close'))
             await asyncio.sleep(0.01)
@@ -159,7 +162,8 @@ def test_actual_record_final_output_is_bounded(actual_record, behavior, status, 
 
 
 def test_actual_resistant_read_retains_capacity_and_its_session(actual_record):
-    f=actual_record; f.behavior='blocked'
+    f=actual_record
+    f.behavior='blocked'
     async def run():
         first=await invoke(f)
         assert first[0]['status']==504
@@ -182,9 +186,11 @@ def test_actual_resistant_read_retains_capacity_and_its_session(actual_record):
 def test_record_sender_and_saturation_delivery_have_finite_capacity(actual_record):
     f=actual_record
     async def run():
-        release=asyncio.Event(); streams=[]
+        release=asyncio.Event()
+        streams=[]
         async def one():
-            messages=[];streams.append(messages)
+            messages=[]
+            streams.append(messages)
             async def send(message):
                 messages.append(message)
                 try:
@@ -227,7 +233,8 @@ def test_record_boundary_inventory_is_exact(actual_record):
 
 
 def test_caller_cancel_keeps_live_reader_owned(actual_record):
-    f=actual_record; f.behavior='blocked'
+    f=actual_record
+    f.behavior='blocked'
     async def run():
         task=asyncio.create_task(invoke(f))
         await settled(lambda:'auth' in f.events)
@@ -266,7 +273,8 @@ def test_wrong_method_retains_405_without_reader_admission(actual_record, monkey
 def test_cancel_link_race_is_immediate_and_removes_callback():
     budget=boundary.CaptureBudget(1)
     events=[]
-    callback=lambda:events.append('cancel')
+    def callback():
+        return events.append('cancel')
     budget.cancel()
     with budget.on_cancel(callback):
         assert events==['cancel']
@@ -275,7 +283,8 @@ def test_cancel_link_race_is_immediate_and_removes_callback():
 
 
 def test_late_session_factory_retains_slot_and_never_authenticates(actual_record):
-    f=actual_record; f.behavior='pool'
+    f=actual_record
+    f.behavior='pool'
     async def run():
         first=await invoke(f)
         assert first[0]['status']==504

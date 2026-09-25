@@ -1,17 +1,17 @@
+import json
 from dataclasses import replace
 from types import SimpleNamespace
 from uuid import uuid4
-import json
 
 import httpx
 import pytest
 from pydantic import ValidationError
+from tests.unit.test_provider_team_contract import completion, context
 
 from cosmas_os.adapters.gpt41 import GPT41Connector
 from cosmas_os.api.team_schemas import BotSettings, ConversationRequest
 from cosmas_os.application.conversation import build_context
 from cosmas_os.ports.bot_capabilities import CUSTOM_SKILLS, supports_skill
-from tests.unit.test_provider_team_contract import context, completion
 
 
 def custom(**changes):

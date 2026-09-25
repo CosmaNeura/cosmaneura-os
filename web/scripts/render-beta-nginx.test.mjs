@@ -1,8 +1,10 @@
-import test from 'node:test';
+// @vitest-environment node
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {renderBetaNginx} from './render-beta-nginx.mjs';
 import {resolveBetaFeatureProfile} from '../../clients/shared/beta-feature-profile.mjs';
+// Keep these filesystem assertions runnable by both repository test runners.
+const {test}=await import(process.env.VITEST?'vitest':'node:test');
 const template=readFileSync(new URL('../nginx.conf',import.meta.url),'utf8');
 const env={VITE_WORKSPACE_FEATURE_PROFILE:'operational-beta-v1',VITE_WORKSPACE_HOSTED_CLIENT:'web',
   VITE_WORKSPACE_DATA_MODE:'synthetic',VITE_WORKSPACE_HOSTED_API_ORIGIN:'https://api.example.invalid',

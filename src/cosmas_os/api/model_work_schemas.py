@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Literal, TypeVar
+from typing import Annotated, Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
@@ -17,7 +17,6 @@ MODEL_REQUEST_BYTES = 65_536
 RETRY_REQUEST_BYTES = 2_048
 MODEL_RESPONSE_BYTES = 16_384
 ENTRY_MODEL_BYTES = 2_048
-RequestModel = TypeVar("RequestModel", ConversationRequest, HandoffRetry)
 Hash = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 Positive = Annotated[int, Field(strict=True, ge=1, le=9_007_199_254_740_991)]
 Tokens = Annotated[int, Field(strict=True, ge=0, lt=1_000_000)]
@@ -212,7 +211,9 @@ def _unique(pairs):
     return result
 
 
-async def read_model_request(request, schema: type[RequestModel]) -> RequestModel:
+async def read_model_request[RequestModel: (ConversationRequest, HandoffRetry)](
+    request, schema: type[RequestModel]
+) -> RequestModel:
     maximum = RETRY_REQUEST_BYTES if schema is HandoffRetry else MODEL_REQUEST_BYTES
     if schema not in {ConversationRequest, HandoffRetry}:
         raise ValueError("unsupported private model request")

@@ -3,6 +3,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NativeAuthenticatedWorkspace } from "./NativeAuthenticatedWorkspace";
 import { parseNativeAuthState, parseNativeToken, type NativeAuthState } from "./native-auth";
+import { accessPending } from "./practice-access-test-fixture";
+import { REQUIRED_WORKSPACE_CONTRACTS } from "./workspace-protocol";
 
 const first: NativeAuthState = { phase: "ready", revision: "00000000-0000-4000-8000-000000000001",
   identity: { userId: "user_first", sessionId: "sess_first", organizationId: "org_test" } };
@@ -63,12 +65,21 @@ describe("native workspace session", () => {
       VITE_WORKSPACE_HOSTED_CLIENT:"apple",VITE_WORKSPACE_DATA_MODE:"synthetic",VITE_WORKSPACE_NATIVE_AUTH_ENABLED:"true",
       VITE_WORKSPACE_HOSTED_API_ORIGIN:"https://api.example.invalid"})) vi.stubEnv(key,value);
     vi.stubGlobal("window",{location:{href:"capacitor://localhost/index.html"},setInterval:globalThis.setInterval,clearInterval:globalThis.clearInterval});
-    fetchMock.mockImplementation(async()=>new Response(JSON.stringify({contract_version:1,state:"pending",role:null,
-      request:{request_id:"873c4f63-2c89-4a51-a834-41574da371a9",display_name:"Ada Beta",review_sha256:"a".repeat(64),state:"pending",
-        created_at:"2026-09-24T09:00:00+00:00",expires_at:"2026-10-01T09:00:00+00:00"}}),{headers:{"Content-Type":"application/json","Cache-Control":"no-store"}}));
+    fetchMock.mockImplementation(async url=>{
+      const body=url==="https://api.example.invalid/practice-access/compatibility"
+        ? {contract_version:1,workspace_protocol:1,requests_require_protocol:true,contracts:{...REQUIRED_WORKSPACE_CONTRACTS}}
+        : url==="https://api.example.invalid/practice-access"?accessPending:null;
+      if(!body)throw new Error("Unexpected hosted workspace request");
+      return new Response(JSON.stringify(body),{headers:{"Content-Type":"application/json","Cache-Control":"no-store","X-Cosmas-Workspace-Protocol":"1"}});
+    });
     const native=harness();await render(native);expect(container.textContent).toContain("Waiting for your practice owner");
-    expect(container.textContent).not.toContain("Choose an encounter");expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0][0]).toBe("https://api.example.invalid/practice-access");
+    expect(container.textContent).not.toContain("Choose an encounter");
+    expect(fetchMock.mock.calls.map(([url])=>url)).toEqual(["https://api.example.invalid/practice-access/compatibility","https://api.example.invalid/practice-access"]);
+    expect(native.plugin.getToken).toHaveBeenCalledTimes(2);
+    for(const [,options] of fetchMock.mock.calls){
+      expect(new Headers(options?.headers).get("X-Cosmas-Workspace-Protocol")).toBe("1");
+      expect(new Headers(options?.headers).get("Authorization")).toBe(`Bearer ${token}`);
+    }
     await click("Sign out");expect(container.textContent).not.toContain("Ada Beta");expect(native.plugin.signOut).toHaveBeenCalledOnce();
   });
   it("keeps missing or disabled native adapters offline", async () => {

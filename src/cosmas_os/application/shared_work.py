@@ -11,7 +11,14 @@ from cosmas_os.application import follow_up as follow
 from cosmas_os.application import prep_work as prep
 from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import payload_hash
-from cosmas_os.models import EncounterWorkspace, FollowUpReceipt, FollowUpSource, Principal, Ticket, WorkHandoff
+from cosmas_os.models import (
+    EncounterWorkspace,
+    FollowUpReceipt,
+    FollowUpSource,
+    Principal,
+    Ticket,
+    WorkHandoff,
+)
 
 
 def history(s, ticket):

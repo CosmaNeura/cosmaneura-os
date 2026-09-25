@@ -29,7 +29,8 @@ from cosmas_os.config import Settings
 
 @pytest.fixture
 def connected(monkeypatch):
-    config = Settings(_env_file=None, **json.loads(Path(os.environ["W84_SETTINGS_JSON"]).read_text()))
+    fixture = Path(__file__).parents[1] / "fixtures/hosted-workspace-settings.json"
+    config = Settings(_env_file=None, **json.loads(fixture.read_text()))
     config.validate_runtime_configuration()
     private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
 

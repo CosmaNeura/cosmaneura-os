@@ -12,6 +12,7 @@ from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
 
+from cosmas_os.adapters.gpt41 import _context
 from cosmas_os.api import app as api_module
 from cosmas_os.application import conversation, handoffs, model_work
 from cosmas_os.application import provider_team as team
@@ -20,18 +21,17 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.models import (
     AppointmentObservation,
     Decision,
+    ModelWorkAdmission,
     Operation,
     PatientLink,
     Principal,
     Ticket,
     WorkspaceEntry,
     WorkspaceHandoff,
-    ModelWorkAdmission,
     WorkspaceHandoffAttempt,
     WorkspaceReply,
 )
-from cosmas_os.ports.bot_capabilities import BotReply, ConnectorUnavailable, DraftBrief, ModelCallFailure
-from cosmas_os.adapters.gpt41 import _context
+from cosmas_os.ports.bot_capabilities import BotReply, DraftBrief, ModelCallFailure
 
 
 def prepare(s, seed):
@@ -108,7 +108,6 @@ def assign(s, case, **kwargs):
             "model_contract": True,
             "expected": 1,
             "team_revision": config["revision"],
-            "key": "assign",
             "role": "chief",
             "content": "Ask Scribe to organize a private draft.",
             **kwargs,

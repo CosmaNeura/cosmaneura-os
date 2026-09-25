@@ -2,7 +2,6 @@
 
 import asyncio
 import json
-import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -29,20 +28,28 @@ from cosmas_os.practice_access_models import PracticeAccessRequest
 
 
 @pytest.fixture
-def case():
-    url = os.environ["W81_DATABASE_URL"]
-    assert "/w81_access" in url and "127.0.0.1:55581" in url
-    schema = "w81_" + uuid4().hex
-    root = create_engine(url)
+def case(engine):
+    # Use the test runner's database, with a private schema for committed and
+    # concurrent sessions. No workstation-specific settings file is required.
+    root = engine
+    schema = "practice_access_" + uuid4().hex
     with root.begin() as c:
         c.execute(text('CREATE SCHEMA "' + schema + '"'))
-    root.dispose()
-    engine = create_engine(url, connect_args={"options": "-c search_path=" + schema})
+    isolated = create_engine(root.url, connect_args={"options": "-c search_path=" + schema})
+    try:
+        yield _practice_access_case(isolated)
+    finally:
+        isolated.dispose()
+        with root.begin() as c:
+            c.execute(text('DROP SCHEMA "' + schema + '" CASCADE'))
+
+
+def _practice_access_case(engine):
     tables = [BoxContext.__table__, Principal.__table__, ExternalIdentity.__table__,
               AuditEvent.__table__, PracticeAccessRequest.__table__]
     Base.metadata.create_all(engine, tables=tables)
     factory = sessionmaker(engine, autoflush=False)
-    values = json.loads(Path(os.environ["W81_SETTINGS_JSON"]).read_text())
+    values = json.loads((Path(__file__).parents[1] / "fixtures/hosted-workspace-settings.json").read_text())
     values["beta_box_id"] = str(uuid4())
     config = Settings(_env_file=None, **values)
     config.validate_runtime_configuration()
@@ -59,9 +66,8 @@ def case():
         s.commit()
     def member(subject):
         return access.VerifiedMember(config.beta_box_id, config.clerk_issuer, config.clerk_organization_id, subject)
-    yield SimpleNamespace(factory=factory, engine=engine, config=config, owner_id=owner_id,
+    return SimpleNamespace(factory=factory, engine=engine, config=config, owner_id=owner_id,
                           owner=member("user_w81owner"), applicant=member("user_w81member"), member=member)
-    engine.dispose()
 
 
 def invoke(c, operation, member=None, command=None, fence=lambda: None):

@@ -29,13 +29,14 @@ credentials, or live Athena/Acuity/Clerk/messaging belong in this tree.
 ./scripts/dev-up.sh
 ```
 
-Requires: Docker (`docker-compose`), `uv`, Python 3.13. Starts Postgres + Redis,
+Requires: Docker (`docker-compose`), `uv`, Python 3.13, Node 24+ and Corepack. Starts Postgres + Redis,
 runs migrations, seeds a clinic, and serves the API on `:8000`.
 
 In another terminal:
 
 ```bash
-cd web && pnpm install && pnpm dev
+./scripts/install-client-deps.sh
+cd web && corepack pnpm dev
 ```
 
 Open http://localhost:5173 for the local synthetic owner work queue. It creates
@@ -64,7 +65,8 @@ Or piecemeal:
 uv run pytest
 uv run ruff check src tests
 uv run pyright src
-cd web && pnpm test && pnpm build
+./scripts/install-client-deps.sh
+cd web && corepack pnpm test && corepack pnpm build
 ```
 
 For the complete local D3 source check (application tests, mode tests and

@@ -729,7 +729,8 @@ def verify_beta_audit_replay(
             appointment.box_id != box_id,
             appointment.external_id != _SYNTHETIC_APPOINTMENT_REF,
             appointment.source != "csv",
-            appointment.start_at.astimezone(UTC) != _SYNTHETIC_APPOINTMENT_START,
+            appointment.start_at is None
+            or appointment.start_at.astimezone(UTC) != _SYNTHETIC_APPOINTMENT_START,
             appointment.patient_label != _SYNTHETIC_PATIENT_LABEL,
             appointment.coverage_status != "missing",
             appointment.patient_link_id != ticket.patient_link_id,

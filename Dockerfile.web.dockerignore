@@ -8,6 +8,8 @@
 !clients/capture/**
 !clients/shared/
 !clients/shared/**
+!clients/scribe-review/
+!clients/scribe-review/**
 !clients/desktop/
 !clients/desktop/google-navigation.mjs
 !clients/desktop/google-navigation.d.mts

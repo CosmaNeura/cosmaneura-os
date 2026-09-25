@@ -13,6 +13,7 @@ WORKDIR /build/web
 COPY web/ ./
 COPY clients/capture/ /build/clients/capture/
 COPY clients/shared/ /build/clients/shared/
+COPY clients/scribe-review/ /build/clients/scribe-review/
 COPY clients/desktop/google-navigation.mjs /build/clients/desktop/google-navigation.mjs
 COPY clients/desktop/google-navigation.d.mts /build/clients/desktop/google-navigation.d.mts
 COPY tests/fixtures/ /build/tests/fixtures/
