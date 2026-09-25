@@ -37,6 +37,13 @@ required manifest is version 1 and contains exactly:
   current server certificate chain, hostname and key pairing; and never weakens
   PostgreSQL `verify-full`/`sslrootcert=system` or Redis certificate checking.
 
+The prepare, API and worker entrypoints set the fixed
+`SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt` in their clean process
+environments. This directs bundled libpq/OpenSSL to the reviewed mounted CA
+bundle even when its compiled default points to a build-machine path. Public
+configuration and inherited environment values cannot override this path;
+PostgreSQL hostname verification and `sslrootcert=system` remain enabled.
+
 `secret_names` accepts current Settings `SecretStr` names, the required
 `HUMAN_DEPLOY_EVIDENCE_REF`, and supported `COSMAS_MANAGED_SECRET_*` references.
 It contains names only. `DATABASE_URL` and `REDIS_URL` cannot be supplied or

@@ -16,6 +16,7 @@ from urllib.parse import quote
 
 API_UID = 10001
 SECRET_LIMIT = 32768
+SYSTEM_CA_FILE = "/etc/ssl/certs/ca-certificates.crt"
 BASE = {
     "COSMAS_ENV": "early_adopter_beta",
     "DATA_MODE": "synthetic",
@@ -43,6 +44,7 @@ FORBIDDEN_PUBLIC = {
     "CLINIC_APPROVAL_REF",
     "BAA_EVIDENCE_REF",
     "PHI_AUTHORIZATION_REF",
+    "SSL_CERT_FILE",
 }
 
 
@@ -228,6 +230,7 @@ def main() -> int:
             "PATH": "/usr/local/bin:/usr/bin:/bin",
             "PYTHONPATH": "/app/src",
             "PYTHONDONTWRITEBYTECODE": "1",
+            "SSL_CERT_FILE": SYSTEM_CA_FILE,
             "COSMAS_ENV": "early_adopter_beta",
             "DATABASE_URL": "postgresql+psycopg://cosmas:"
             + quote(runtime_password, safe="")
@@ -255,6 +258,7 @@ def main() -> int:
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTHONUNBUFFERED": "1",
         **values,
+        "SSL_CERT_FILE": SYSTEM_CA_FILE,
     }
     command = (
         [

@@ -237,6 +237,7 @@ def test_only_proxy_adds_capability_required_by_official_caddy(installed):
         lambda c: c["runtime"]["environment"].update(DATA_MODE="authorized_beta"),
         lambda c: c["runtime"]["environment"].update(AUTH_MODE="synth_headers"),
         lambda c: c["runtime"]["environment"].update(DATABASE_URL="postgresql://leaked-secret"),
+        lambda c: c["runtime"]["environment"].update(SSL_CERT_FILE="/tmp/untrusted-ca.pem"),
         lambda c: c["runtime"]["environment"].update(WORKSPACE_UNKNOWN_ENABLED="true"),
         lambda c: c["runtime"]["environment"].pop("WORKSPACE_ROUTINES_ENABLED"),
     ],
@@ -303,6 +304,51 @@ def test_environment_ignores_operator_env_and_uses_verified_tls(installed, monke
     assert values["DATA_MODE"] == "synthetic"
     assert values["AZURE_CLIENT_ID"] == config["runtime"]["runtime_identity_client_id"]
     assert "POSTGRES_PASSWORD" not in values and ADMIN not in values.values()
+
+
+@pytest.mark.parametrize("role", ["prepare", "api", "worker"])
+def test_exec_environment_pins_mounted_ca_and_discards_ambient_trust(installed, monkeypatch, role):
+    config, root, _ = installed
+    monkeypatch.setattr(sys, "argv", ["entrypoint.py", role])
+    for name, value in {
+        "SSL_CERT_FILE": "/tmp/untrusted-ca.pem",
+        "SSL_CERT_DIR": "/tmp/untrusted-ca-directory",
+        "PGSSLROOTCERT": "/tmp/untrusted-postgres-ca.pem",
+        "PGSSLMODE": "disable",
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    def mounted_configuration(path):
+        assert path == Path("/opt/cosmabot/runtime/runtime.json")
+        return config["runtime"]
+
+    read_private = entrypoint.read_private
+
+    def mounted_secret(path, uid):
+        assert path.parent == Path("/run/cosmabot/secrets")
+        return read_private(root / role / path.name, uid)
+
+    captured = {}
+
+    def capture_exec(program, command, environment):
+        captured.update(program=program, command=command, environment=environment)
+
+    monkeypatch.setattr(entrypoint, "read_json", mounted_configuration)
+    monkeypatch.setattr(entrypoint, "read_private", mounted_secret)
+    monkeypatch.setattr(entrypoint.os, "execvpe", capture_exec)
+    assert entrypoint.main() == 1  # Only the real exec is replaced; no process starts.
+    environment = captured["environment"]
+    assert captured["program"] == {"prepare": "python", "api": "uvicorn", "worker": "celery"}[role]
+    assert environment["SSL_CERT_FILE"] == "/etc/ssl/certs/ca-certificates.crt"
+    assert not {"SSL_CERT_DIR", "PGSSLROOTCERT", "PGSSLMODE"} & environment.keys()
+    urls = ["DATABASE_URL", "DATABASE_ADMIN_URL"] if role == "prepare" else ["DATABASE_URL"]
+    for name in urls:
+        assert environment[name].endswith(
+            "@postgres:5432/cosmas_os?sslmode=verify-full&sslrootcert=system"
+        )
+    if role != "prepare":
+        assert "DATABASE_ADMIN_URL" not in environment
+        assert environment["REDIS_URL"].endswith("@redis:6379/0?ssl_cert_reqs=required")
 
 
 def test_certificate_hostname_and_trust_verified_even_when_hashes_match(installed):
