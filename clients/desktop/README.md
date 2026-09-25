@@ -104,8 +104,11 @@ The optional native-auth composition uses a separate `main-authenticated.mjs`
 entry and fixed loopback API on **8046**. The existing 8018 synthetic composition
 is unchanged. Supply `--native-auth-helper` to `prepare-desktop-synthetic.py`
 only after composing the pinned ClerkKit/native sources with
-`prepare-native-auth-proof.py --include-desktop`, compiling them, and packaging
-the helper with `package-desktop-auth-helper.py`. The generated helper's SDK
+`prepare-native-auth-proof.py --include-desktop`, compiling them with
+`build-desktop-auth-helper.py`, and packaging the helper with
+`package-desktop-auth-helper.py --compiler-receipt` pointing to that build's
+`compiler-receipt.json`. See `docs/operational-native-build.md` for the full commands.
+The generated helper's SDK
 configuration remains disabled. These scripts do not activate an account.
 
 The web build also requires `VITE_WORKSPACE_AUTHENTICATED_ENABLED=true` and

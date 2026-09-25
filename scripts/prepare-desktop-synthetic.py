@@ -127,6 +127,8 @@ def main():
                         json.dumps(args.capture_upload_origin)], check=True)
     if args.native_auth_helper:
         helper = args.native_auth_helper.resolve()
+        if (helper / ".incomplete").exists() or (helper / ".incomplete").is_symlink():
+            parser.error("Native auth helper packaging is incomplete; use a successfully packaged helper.")
         info = plistlib.loads((helper / "Contents/Info.plist").read_bytes())
         if operational and info.get("CosmasConfiguredCapture") != {"enabled": True, "apiOrigin": args.hosted_api_origin}:
             parser.error("The operational desktop helper must include matching native recording ownership.")

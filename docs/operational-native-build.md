@@ -55,9 +55,48 @@ continues to use `build:beta`. Existing synthetic compositions retain their
 previous defaults and cannot consume an operational identity file or silently
 inherit its data/storage profile.
 
-For desktop, first compose and compile the current native auth helper with
-prepare-native-auth-proof.py. Package that fresh product with
-package-desktop-auth-helper.py --native-identity-config (no verification variant).
+For desktop, first compose the current native auth helper with
+`prepare-native-auth-proof.py --include-desktop`. Compile and package it with
+Python 3.13, an explicit installed Swift toolchain and fresh output directories:
+
+```sh
+python3 scripts/build-desktop-auth-helper.py \
+  --qualification /absolute/path/to/native-auth-qualification \
+  --swift /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift \
+  --output /absolute/path/to/new-native-auth-build
+python3 scripts/package-desktop-auth-helper.py \
+  --qualification /absolute/path/to/native-auth-qualification \
+  --products /absolute/path/to/new-native-auth-build/products \
+  --compiler-receipt /absolute/path/to/new-native-auth-build/compiler-receipt.json \
+  --native-identity-config /absolute/path/to/retained-startup/clients/desktop-identity.json \
+  --output /absolute/path/to/CosmasAuth.app
+```
+
+The compiler wrapper checks the complete qualification inventory and copies it
+into its own output. It builds only `CosmasDesktopAuth` in debug configuration,
+using an owned child-process home and owned scratch, package, module and temporary
+caches. It disables automatic
+dependency resolution and runs Swift under macOS `sandbox-exec` with all network
+access denied. The selected Swift executable is explicit; ambient compiler and
+package settings are not inherited. This does not install dependencies.
+
+Only a successful invocation with unchanged source and verified executable and
+SDK resource hashes produces `compiler-receipt.json`. A failed build retains
+`.incomplete` and its log; choose a new output after inspecting the failure.
+Keep the entire successful build directory in place through packaging, including
+its copied source, scratch products and log. Packaging requires this receipt and
+checks its source and product binding before creating the app. The receipt stays
+outside the app and is not added to its runtime helper manifest.
+
+The receipt is a local compiler record that detects stale or mixed inputs. It is
+not a cryptographic attestation against someone who can rewrite the receipt and
+all retained files. A hand-written receipt or historical W90/W92 binary is not
+evidence that the wrapper compiled the current qualification. The renderer
+receipt above provides no native compiler evidence.
+
+Operational packaging uses `--native-identity-config` with no verification
+variant. Synthetic packaging instead requires its existing `--verification-variant`
+and keeps the SDK disabled; it still requires the compiler receipt.
 Pass the same identity file to prepare-desktop-synthetic.py with
 --installation-profile beta, the hosted API, required connection/capture origins
 and normal Scribe inputs. Package without a verification variant. The app is
@@ -93,9 +132,3 @@ The operational Mac package can additionally enter the Scribe-based ASAR and
 Electron-fuse packaging step described in desktop-release-packaging.md. This
 keeps the native executable outside the archive while protecting its verification
 manifest inside it. Signing and distribution follow that step separately.
-
-Open packaging gap: `package-desktop-auth-helper.py` verifies the qualification
-source, but does not yet bind the supplied executable/resources to that source.
-A compiler-owned receipt must establish that binding before stale compiler
-products can be reliably refused. The renderer receipt above provides no native
-helper qualification; W90/W92 helper products are not evidence for current source.
