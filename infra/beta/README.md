@@ -208,7 +208,10 @@ legacy Basic C0 meter was $0.022 per hour (about $16.06 per month), but all
 Basic, Standard, and Premium Azure Cache for Redis instances retire on
 2028-09-30. Refresh availability, quota, contract pricing, and the private
 endpoint estimate immediately before planning; the protected
-`broker_service_evidence_reference` records that human review.
+`broker_service_evidence_reference` records that human review. For the selected
+East US 2 destination, the [September 25 review](../../docs/beta/STAGING_COST_REVIEW_20260925.md)
+records the current published two-node B0 HA price of **$23.36 per 730-hour month**,
+without establishing subscription eligibility.
 
 A separate internal Redis Container App was rejected for D3. A single
 0.25-vCPU/0.5-GiB replica would be roughly $5.91/month if continuously idle or
@@ -1131,12 +1134,21 @@ Security boundaries are fixed; cost choices are variables. Review at least:
   and
 - the aggregate two-resource-group budget and alert recipients.
 
-The current planning envelope is approximately **$170–260/month at low
-traffic** across the state/runner and workload groups. Bootstrap creates a
-**$350/month subscription budget filtered to those exact two groups**, with
-actual and forecast notifications to the human-owned recipients supplied in
-the private bootstrap variables. It is an alert, not a spending cap. Refresh
-calculator evidence without assuming credits before approving a plan.
+The [September 25 East US 2 cost review](../../docs/beta/STAGING_COST_REVIEW_20260925.md)
+replaces the earlier $170–260 combined envelope. With the selected one-replica
+API, public retail scenarios total **about $278–329/month with private Premium
+ACR**, or **$224–275/month with the explicitly reviewed synthetic-public Basic
+exception**, before additional usage charges. Those totals include about $83
+of existing runner/state-network costs and the additional Azure-managed
+Container Apps network. They are scenarios, not a spending cap or account quote.
+
+Bootstrap creates a **$350/month subscription notification budget filtered to
+the named state and workload groups**. It does not automatically cover the
+Container Apps managed resource group. Logging, traffic, storage, jobs and
+external services add costs; include the actual managed group and current
+resolved inputs in the final cost review. Notifications do not stop spending.
+Do not assume credits, change the registry posture, or resize resources based
+on this estimate without the existing exact deployment review.
 
 ## Required human verification after apply
 
