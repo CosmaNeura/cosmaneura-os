@@ -401,7 +401,9 @@ def test_additional_bot_exact_retry_pause_and_old_client_preservation(session, c
     assert session.get(Principal, extra["agent_id"]).display_name == "Scribe"
     assert team.save(session, box, owner, expected=1, key="add-scribe", configuration=installed["configuration"]) == installed
     assert team.read(session, box, owner) == installed
-    assert len(installed["templates"]) == 3
+    assert {template["role"] for template in installed["templates"]} == {
+        "scribe", "visit_prep", "follow_up", "research",
+    }
     with pytest.raises(ws.WorkspaceError, match="team_member_missing"):
         team.save(session, box, owner, expected=2, key="old-client", configuration=original["configuration"])
     rebound = deepcopy(installed["configuration"])

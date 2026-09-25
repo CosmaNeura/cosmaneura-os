@@ -8,23 +8,31 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-configuration = json.loads(Path(sys.argv[2]).read_text())
-root = Path(configuration["root"])
-assert root.is_absolute() and str(root).startswith(
-    "/Users/jw/Desktop/Cosmas/cosmas-beta-local-recovery-"
-)
+from owned_process import database_socket, matches_endpoint, owned_root
+
+configuration_path = Path(sys.argv[2])
+root = owned_root(configuration_path.parent)
+if configuration_path != root / "configuration.json" or configuration_path.is_symlink():
+    raise PermissionError("Only the owned fixture configuration is authorized")
+configuration = json.loads(configuration_path.read_text())
+if owned_root(configuration["root"]) != root:
+    raise PermissionError("The configuration must name its exact owned fixture directory")
 assert configuration["receiver_origin"].startswith("http://127.0.0.1:")
 
 import socket
 
 _connect, _connect_ex, _dns = socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo
+database_address = database_socket()
+allowed = {database_address} | {
+    (host, port)
+    for host in ("127.0.0.1", "::1", "localhost")
+    for port in (configuration["os_port"], configuration["receiver_port"])
+}
 
 
 def checked(sock, address):
     if sock.family != socket.AF_UNIX and (
-        not isinstance(address, tuple)
-        or address[0] not in {"127.0.0.1", "::1", "localhost"}
-        or address[1] not in {55479, configuration["os_port"], configuration["receiver_port"]}
+        not isinstance(address, tuple) or address[:2] not in allowed
     ):
         raise PermissionError("Only owned PostgreSQL and local fixture ports authorized")
 
@@ -39,10 +47,10 @@ def connect_ex(sock, address):
     return _connect_ex(sock, address)
 
 
-def dns(host, *args, **kwargs):
-    if host not in {"127.0.0.1", "::1", "localhost", None}:
-        raise PermissionError("Only local DNS authorized")
-    return _dns(host, *args, **kwargs)
+def dns(host, port, *args, **kwargs):
+    if not any(matches_endpoint(host, port, endpoint) for endpoint in allowed):
+        raise PermissionError("Only owned PostgreSQL and local fixture DNS authorized")
+    return _dns(host, port, *args, **kwargs)
 
 
 socket.socket.connect = connect

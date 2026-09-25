@@ -5,11 +5,11 @@ import json
 import os
 import socket
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-root = Path(sys.argv[1]).resolve()
-assert str(root).startswith("/Users/jw/Desktop/Cosmas/cosmas-beta-local-recovery-")
+from owned_process import owned_root
+
+root = owned_root(sys.argv[1])
 config = json.loads((root / "configuration.json").read_text())
 _connect, _connect_ex, _dns = socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo
 

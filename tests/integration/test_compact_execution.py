@@ -44,6 +44,7 @@ def compact(monkeypatch):
         "cosmas_env": "synth_os",
         "data_mode": "synthetic",
         "auth_mode": "synth_headers",
+        "workspace_enabled": False,
         "blob_backend": "local",
         "database_url": url,
         "compact_web_root": None,

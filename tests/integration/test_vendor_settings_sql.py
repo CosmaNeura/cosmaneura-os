@@ -148,13 +148,11 @@ def test_changed_patient_denies_recipient_activation_but_allows_disable(session,
     assert command(session, c, first, "disable")["effect"]["state"] == "disabled"
 
 
-def test_identical_concurrent_command_has_one_receipt_and_binding(engine, setup_case, session):
+def test_identical_concurrent_command_has_one_receipt_and_binding(engine, setup_case, session, tmp_path):
     c = setup_case
     req = account_request(c)
     # The vendor fixture is transaction-isolated; retain an explicit independent
     # invented fixture for workers instead of committing another test's state.
-    from pathlib import Path
-
     from tests.integration.test_vendor_settings import setup_case as setup_fixture
     from tests.integration.test_vendor_work import vendor_case as vendor_fixture
 
@@ -165,12 +163,7 @@ def test_identical_concurrent_command_has_one_receipt_and_binding(engine, setup_
         seed = services.provision_box(
             services.Container(
                 s,
-                blob=LocalBlobAdapter(
-                    Path(
-                        "/Users/jw/Desktop/Cosmas/cosmas-beta-local-recovery-20260921/w36-vendor-settings/race-blobs"
-                    )
-                    / str(uuid4())
-                ),
+                blob=LocalBlobAdapter(tmp_path / "race-blobs" / str(uuid4())),
             ),
             "Invented setup race",
         )

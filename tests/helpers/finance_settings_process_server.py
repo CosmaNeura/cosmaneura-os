@@ -7,11 +7,15 @@ import time
 from pathlib import Path
 from types import SimpleNamespace
 
-configuration = json.loads(Path(sys.argv[2]).read_text())
-root = Path(configuration["root"])
-assert root.is_absolute() and str(root).startswith(
-    "/Users/jw/Desktop/Cosmas/cosmas-beta-local-recovery-"
-)
+from owned_process import owned_root
+
+configuration_path = Path(sys.argv[2])
+root = owned_root(configuration_path.parent)
+if configuration_path != root / "configuration.json" or configuration_path.is_symlink():
+    raise PermissionError("Only the owned fixture configuration is authorized")
+configuration = json.loads(configuration_path.read_text())
+if owned_root(configuration["root"]) != root:
+    raise PermissionError("The configuration must name its exact owned fixture directory")
 assert configuration["receiver_origin"].startswith("http://127.0.0.1:")
 
 

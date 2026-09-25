@@ -36,7 +36,10 @@ def test_two_custom_bots_have_persistent_private_identity_history_and_retirement
     a, b = custom(), custom(name="Checklist partner")
     saved = add(session, box, owner, config, a, b)
     ids = [m["agent_id"] for m in saved["members"][-2:]]
-    assert len(set(ids)) == 2 and len(saved["templates"]) == 3
+    assert len(set(ids)) == 2
+    assert {template["role"] for template in saved["templates"]} == {
+        "scribe", "visit_prep", "follow_up", "research",
+    }
     assert all(session.get(Principal, aid).display_name == "Custom bot" for aid in ids)
     seen = []
     def reply(ctx):

@@ -623,10 +623,14 @@ def test_routes_use_current_note_boundary_and_replay_without_current_services(se
             # Simulate a process stopping after durable admission, before provider I/O.
             assert inv and deadline
 
+    def claimed_runtime():
+        return ClaimedOnly()
+
     portal_work_routes.register(
         app,
         api.get_session,
         api._identity,
+        execution_dependency=claimed_runtime,
         current_core_note=current_note,
         core_connection=lambda: "invented-core-port",
     )
@@ -635,7 +639,6 @@ def test_routes_use_current_note_boundary_and_replay_without_current_services(se
     app.dependency_overrides[portal_work_routes.portal_setup_routes.installed_catalog] = lambda: c[
         "catalog"
     ]
-    app.dependency_overrides[portal_work_routes.no_execution] = lambda: ClaimedOnly()
     headers = {
         "X-Box-Id": c["box"],
         "X-Actor-Principal-Id": c["owner"],
@@ -664,7 +667,7 @@ def test_routes_use_current_note_boundary_and_replay_without_current_services(se
         assert admitted.status_code == 200, admitted.text
         assert len(calls) == 3
         unavailable = True
-        app.dependency_overrides[portal_work_routes.no_execution] = lambda: None
+        app.dependency_overrides[claimed_runtime] = lambda: None
         assert (
             client.post(path + "/" + tid + "/submit", headers=headers, json=send).json()
             == admitted.json()

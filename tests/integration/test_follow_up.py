@@ -290,13 +290,30 @@ def test_history_and_bound_action_are_immutable(session, case):
 
 
 def test_api_is_gated_redacts_validation_and_ignores_client_authority(session, case, monkeypatch):
-    api.app.dependency_overrides[api.get_session] = lambda: session
+    connection = session.connection()
+
+    def request_session():
+        # Reuse fixture data and its outer transaction, not a prior request's
+        # Session and retained capture ownership.
+        with Session(bind=connection, autoflush=False,
+                     join_transaction_mode="create_savepoint") as current:
+            yield current
+
+    class FixtureClient(TestClient):
+        def request(self, *args, **kwargs):
+            session.flush()
+            try:
+                return super().request(*args, **kwargs)
+            finally:
+                session.expire_all()
+
+    api.app.dependency_overrides[api.get_session] = request_session
     headers = {"X-Box-Id": case[0], "X-Actor-Principal-Id": case[1]}
     body = {"expected_revision": 3, "idempotency_key": "api-proposal", "note_id": case[2]["note"]["latest"]["id"],
         "body": "Invented selected text.", "due_date": "2026-09-25", "expected_outcome": "Invented result", "share": True}
     path = f'/workspaces/{case[2]["id"]}/follow-ups'
     try:
-        with TestClient(api.app) as client:
+        with FixtureClient(api.app) as client:
             bad = client.post(path, headers=headers, json={**body, "target_ref": "secret-input"})
             assert bad.status_code == 422 and "secret-input" not in bad.text
             assert bad.headers["cache-control"] == "no-store"

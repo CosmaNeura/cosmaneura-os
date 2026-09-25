@@ -20,6 +20,7 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from tests.helpers.owned_process import database_socket
 from tests.integration.test_inbox_work import ON, inbox_case
 from tests.integration.test_vendor_process import unused_port, wait_for
 from tests.integration.test_vendor_work import gates as gates
@@ -123,7 +124,7 @@ def test_actual_ingress_signed_commands_and_negative_proof_survive_process_loss(
 
     receiver = ThreadingHTTPServer(("127.0.0.1", 0), Receiver)
     api_port, receiver_port = unused_port(), receiver.server_port
-    allowed = {("127.0.0.1", api_port), ("127.0.0.1", receiver_port), ("127.0.0.1", 55479)}
+    allowed = {("127.0.0.1", api_port), ("127.0.0.1", receiver_port), database_socket()}
     old_connect, old_connect_ex, old_dns = (
         socket.socket.connect,
         socket.socket.connect_ex,

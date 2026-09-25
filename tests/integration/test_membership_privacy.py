@@ -149,9 +149,26 @@ def production_client(session):
     app = FastAPI(middleware=list(api.app.user_middleware))
     app.exception_handlers.update(api.app.exception_handlers)
     app.include_router(api.app.router)
-    app.dependency_overrides[api.get_session] = lambda: session
+    connection = session.connection()
+
+    def request_session():
+        # Each request owns its Session while sharing the fixture's outer
+        # transaction. Capture request ownership must never be reused or reset.
+        with Session(bind=connection, autoflush=False,
+                     join_transaction_mode="create_savepoint") as current:
+            yield current
+
+    class FixtureClient(TestClient):
+        def request(self, *args, **kwargs):
+            session.flush()
+            try:
+                return super().request(*args, **kwargs)
+            finally:
+                session.expire_all()
+
+    app.dependency_overrides[api.get_session] = request_session
     app.dependency_overrides[api._membership_policy] = lambda: POLICY
-    with TestClient(app) as client:
+    with FixtureClient(app) as client:
         yield client
 
 

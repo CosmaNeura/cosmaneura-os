@@ -5,18 +5,19 @@ import json
 import os
 import socket
 import sys
-from pathlib import Path
 from types import SimpleNamespace
 
-root = Path(sys.argv[1]).resolve()
-assert str(root).startswith("/Users/jw/Desktop/Cosmas/cosmas-beta-local-recovery-")
+from owned_process import database_socket, matches_endpoint, owned_root
+
+root = owned_root(sys.argv[1])
+database_address = database_socket()
 config = json.loads((root / "configuration.json").read_text())
 _connect, _connect_ex, _dns = socket.socket.connect, socket.socket.connect_ex, socket.getaddrinfo
 
 
 def checked(sock, address):
     if sock.family != socket.AF_UNIX and (
-        not isinstance(address, tuple) or address[:2] != ("127.0.0.1", 55479)
+        not isinstance(address, tuple) or address[:2] != database_address
     ):
         raise PermissionError("Only the owned Inbox proof database is authorized")
 
@@ -32,7 +33,7 @@ def connect_ex(sock, address):
 
 
 def dns(host, port, *args, **kwargs):
-    if (host, port) != ("127.0.0.1", 55479):
+    if not matches_endpoint(host, port, database_address):
         raise PermissionError("No Inbox fixture external DNS is authorized")
     return _dns(host, port, *args, **kwargs)
 

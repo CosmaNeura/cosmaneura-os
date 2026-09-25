@@ -101,6 +101,8 @@ def lanes(prep_case, monkeypatch):
                          "revision_id": detail["summary"]["revision_id"], "payload_hash": detail["summary"]["payload_hash"]}))
     provider_team.save(f.session, f.box, f.staff, expected=0, key="staff-routine-team",
                        configuration=provider_team.default_configuration())
+    # Release the setup read lock before HTTP opens its own write transaction.
+    f.session.commit()
     for headers in (f.headers, f.staff_headers):
         response = f.client.post("/provider-team/routines/chief", headers=headers, json={
             "expected_revision": 0, "team_revision": 1, "idempotency_key": "routine-lane-schedule",

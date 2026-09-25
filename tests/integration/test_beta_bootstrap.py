@@ -154,11 +154,14 @@ def test_bootstrap_readback_rejects_missing_appointment_start(session, external_
         select(AppointmentObservation).where(AppointmentObservation.external_id == external_id)
     )
     assert appointment is not None
+    # Persisted CSV rows require a start time. Exercise a nullable cached value
+    # without weakening that constraint or flushing the injected fault.
     appointment.start_at = None
-    session.commit()
-
-    with pytest.raises(BetaBootstrapError, match="readback differs"):
-        verify_beta_bootstrap_state(session, runtime, manifest)
+    try:
+        with session.no_autoflush, pytest.raises(BetaBootstrapError, match="readback differs"):
+            verify_beta_bootstrap_state(session, runtime, manifest)
+    finally:
+        session.expire(appointment, ["start_at"])
 
 
 def test_beta_seed_refuses_authorized_data_mode(session) -> None:

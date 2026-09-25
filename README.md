@@ -55,14 +55,20 @@ uv run python -m cosmas_os.cli demo-artifact-chase
 
 ## Tests
 
+Run backend checks locally against fresh, isolated PostgreSQL databases:
+
 ```bash
-./scripts/ci-local.sh
+uv run --no-sync python scripts/check-backend-local.py
 ```
 
-Or piecemeal:
+See [local checks](docs/local-checks.md) for PostgreSQL discovery, selected tests,
+network confinement and the recorded commit, results and cleanup evidence.
+The checker separates workspace, database administration and queue recovery
+profiles automatically. Reviews and validation evidence are local.
+
+Frontend and static checks:
 
 ```bash
-uv run pytest
 uv run ruff check src tests
 uv run pyright src
 ./scripts/install-client-deps.sh
@@ -79,7 +85,7 @@ validation for both isolated OpenTofu roots, and a non-root runtime image):
 This command does not authenticate to Azure or Clerk, deploy anything, or use
 PHI.
 
-## Synthetic CI / release artifact (D1)
+## Historical synthetic CI / release artifact (D1)
 
 ```bash
 ./scripts/ci-local.sh

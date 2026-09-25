@@ -74,10 +74,15 @@ def signed_case(session, signed_workspace):
     case = prepare(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed)
     now = datetime.now(UTC)
     original = operation(case.selection).intent
+    assert original.slot is not None
     intent = original.model_copy(
         update={
             "expires_at": now + timedelta(minutes=3),
             "google": original.google.model_copy(update={"checked_at": now}),
+            "slot": original.slot.model_copy(update={
+                "starts_at": now + timedelta(days=2),
+                "ends_at": now + timedelta(days=2, minutes=30),
+            }),
         }
     )
     case.item = propose(session, case, intent=intent, now=now)
