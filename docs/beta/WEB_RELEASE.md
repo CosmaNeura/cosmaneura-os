@@ -4,17 +4,22 @@ Status: **SOURCE IMPLEMENTED / NOT DEPLOYED**
 Data boundary: **SYNTHETIC LAB ONLY UNTIL A SEPARATE AUTHORIZED-BETA GATE**
 
 The D3 environment declares a dedicated static web Container App alongside the
-API and worker. It is a new Track B resource inside the isolated beta resource
-group and Terraform state. It does not reuse the D2 app, D2 image, Track A
-hosting, identity, state, or domain.
+standalone CosmaBot API and worker. It is a new Track B resource inside the
+isolated beta resource group and Terraform state. It does not reuse the D2 app,
+D2 image, Track A hosting, identity, state, or domain.
+
+The owner's requested web hostname as of 2026-09-25 is `bot.cosmas.ai`. The
+examples below use that selection; they do not establish a deployed hostname,
+DNS binding, or approval of a particular foundation or workload plan. Retain
+the exact owner-approved hostname through all release stages.
 
 ## Fixed hosting contract
 
 - Azure Container Apps provides the public HTTPS certificates and external
   origins. Plain HTTP is disabled for both web and API ingress.
 - The foundation creates the Container Apps environment while
-  `deploy_workloads=false`. For production Clerk, the recommended pending owner
-  decision selects `web_custom_domain = "beta.cosmaneura.com"` with
+  `deploy_workloads=false`. For production Clerk, record the requested hostname
+  in the exact owner decision as `web_custom_domain = "bot.cosmas.ai"` with
   `web_custom_domain_dns_ready = false`; once accepted, its `web_origin` and
   `api_origin` outputs reserve the final owned web origin and deterministic API
   hostname before either workload exists.
@@ -24,12 +29,12 @@ hosting, identity, state, or domain.
   the same Terraform origin; wildcard or caller-selected origins are not used.
 - `web_custom_domain` remains nullable for non-production validation, but D3
   production Clerk must use the dedicated hostname accepted by the exact owner
-  decision; the current recommendation is `beta.cosmaneura.com`. It cannot use
+  decision; the current request is `bot.cosmas.ai`. It cannot use
   the shared `azurecontainerapps.io` default. Terraform rejects
   uppercase/invalid hostnames and explicitly refuses the existing
   `app.cosmaneura.com`, `staging-app.cosmaneura.com`, `chat.cosmaneura.com`,
   and `staging-chat.cosmaneura.com` names. This stack does
-  not select a hostname or create/change Cloudflare DNS records.
+  not select a hostname or create/change public DNS records.
 - The frontend is served by a separate, non-root Nginx image on port 8080.
   `/healthz` is the only unauthenticated host probe and contains no app data.
 - The image contains only static assets. It receives no runtime secret and has
@@ -55,11 +60,37 @@ The protected builder consumes exactly the seven uppercase fields used by
 }
 ```
 
-Replace the placeholders with explicit public configuration. API and web origins
-must match the verified foundation outputs. Core and upload values must be exact,
-credential-free HTTPS origins without ports, paths, queries or fragments. Uploads
+Replace the placeholders with explicit public configuration. `<D3_API_ORIGIN>`
+must be the standalone CosmaBot API origin from the validated protected
+`probe-network` artifact's `public_configuration.api_origin`. The foundation
+derives it from the dedicated API Container App name and its Container Apps
+environment domain; it cannot be inferred from `bot.cosmas.ai` or replaced with
+the Core staging origin. `<D3_WEB_ORIGIN>` must match that artifact's
+`public_configuration.web_origin` and the selected approved web hostname.
+Core and upload values must be exact, credential-free HTTPS origins without
+ports, paths, queries or fragments. Uploads
 accept one to four distinct origins separated by commas without spaces. Web
 capture mode is `browser_microphone` or `synthetic`.
+
+The public observation recorded at 2026-09-25 14:25 UTC established
+`https://staging-app.cosmaneura.com` as the Core/platform web and Python API
+origin: its root, healthcheck, and explicitly linked public configuration
+returned successfully with normal TLS validation. It is the observed staging
+value for `<REVIEWED_CORE_WEB_ORIGIN>`, subject to the release's exact public
+configuration review. It does not identify a separate CosmaBot API, an upload
+origin, or the deployed Core commit. The local task receipt, retained outside
+this repository, is
+`w100-github-integration-r1/platform-staging-address-review-r1/live-inspection/RESULT.json`.
+
+The public schema observation recorded at 2026-09-25 14:30 UTC in the local task
+receipt (also retained outside this repository)
+`w100-github-integration-r1/platform-connector-contract-r1/RESULT.json` did not
+qualify protected CosmaBot-to-Core connectors. The inspected connection,
+appointment, Athena, and record-context routes are absent from that schema and
+intentionally excluded from OpenAPI in retained Core source. Their live
+availability and authorization remain unverified; schema omission establishes
+neither a missing route nor compatibility. Public reachability does not qualify
+authenticated, clinical, or Scribe workflows or authorize connector activation.
 
 `infra/beta/validate_web_build.py` runs in both the human-side transport and the
 protected builder using Python 3.10+. It rejects duplicate, extra, missing,
@@ -80,16 +111,17 @@ session token is unavailable.
 
 ## Human-owned release sequence
 
-1. After the pending exact owner decision accepts the hostname, apply only the
+1. After the exact owner decision accepts the selected hostname, apply only the
    reviewed foundation plan with `deploy_workloads=false`,
-   `web_custom_domain="beta.cosmaneura.com"`, and
+   `web_custom_domain="bot.cosmas.ai"`, and
    `web_custom_domain_dns_ready=false`.
 2. Run the protected `probe-network` operation and record the non-secret
    `public_configuration.web_origin`, `public_configuration.api_origin`, and
    `public_configuration.acr_login_server` values from its validated,
-   self-hashed artifact. Confirm the hostnames are inside the new D3 Container
-   Apps environment. Do not inspect or export raw Terraform state to obtain
-   them.
+   self-hashed artifact. Confirm the API hostname belongs to the new D3 Container
+   Apps environment and the web origin matches the selected custom hostname.
+   This supplies the concrete CosmaBot API target required for the build. Do not
+   inspect or export raw Terraform state to obtain these values.
 3. Create/configure the production Cosmas OS Clerk instance for the exact web
    origin, recreate the empty Cosmas Beta Lab Organization there, and retain
    Clerk secrets only in the human-controlled service. Do not invite testers.
@@ -133,13 +165,13 @@ A managed-certificate custom domain uses two reviewed workload plans because
 Azure exposes the app-specific domain-verification value only after the web
 Container App exists.
 
-1. The exact owner decision package selects `beta.cosmaneura.com` before the
-   foundation plan. Do not use or modify the existing `app.cosmaneura.com`,
-   `staging-app.cosmaneura.com`, `chat.cosmaneura.com`, or
+1. The exact owner decision package records the selected `bot.cosmas.ai`
+   hostname before the foundation plan. Do not use or modify the existing
+   `app.cosmaneura.com`, `staging-app.cosmaneura.com`, `chat.cosmaneura.com`, or
    `staging-chat.cosmaneura.com` records.
-2. Retain `web_custom_domain = "beta.cosmaneura.com"`, keep
+2. Retain `web_custom_domain = "bot.cosmas.ai"`, keep
    `web_custom_domain_dns_ready = false`, and set
-   `web_origin = "https://beta.cosmaneura.com"` in the initial workload plan.
+   `web_origin = "https://bot.cosmas.ai"` in the initial workload plan.
    This creates the app without claiming the custom-domain binding is ready. Do
    not admit testers during this stage.
 3. Re-run the protected `probe-network` operation for the post-apply state,
@@ -147,9 +179,11 @@ Container App exists.
    exact source SHA and release ID. Its mode-`0600`, self-hashed artifact
    exposes only the selected hostname, ACA CNAME target, `asuid` TXT name/value,
    and source/release/state binding; it does not return the raw Terraform
-   output or any credential. In the Cloudflare-hosted `cosmaneura.com` zone, a
-   human creates exactly those CNAME and TXT records. Terraform does not own or
-   mutate them.
+   output or any credential. A human confirms the selected hostname's actual
+   authoritative DNS zone and provider from its DNS delegation, then creates
+   exactly those CNAME and TXT records there. Do not assume the zone is
+   `cosmaneura.com` or that its provider is Cloudflare. Terraform does not own
+   or mutate these records.
 4. Verify both records externally, wait for propagation, and configure the
    production Cosmas OS Clerk application with the exact custom HTTPS origin
    and redirect URLs. Keep wildcard origins disabled.
