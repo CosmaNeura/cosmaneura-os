@@ -255,6 +255,10 @@ resource "terraform_data" "prerequisite_guard" {
       error_message = "deploy_workloads requires human approval of the exact D3 web_origin."
     }
     precondition {
+      condition     = !var.deploy_workloads || var.web_custom_domain != null
+      error_message = "deploy_workloads requires a dedicated web_custom_domain for production Clerk; DNS readiness remains separately gated."
+    }
+    precondition {
       condition     = !var.web_custom_domain_dns_ready || (var.web_custom_domain != null && var.deploy_workloads && var.web_image_digest != null)
       error_message = "web_custom_domain_dns_ready may be enabled only for a workload plan with a concrete web_custom_domain and web image."
     }
@@ -275,17 +279,7 @@ resource "terraform_data" "prerequisite_guard" {
       error_message = "deploy_workloads requires the structured attestation from a completed manual database-preparation execution."
     }
     precondition {
-      condition = !var.deploy_workloads || try(
-        var.database_preparation_attestation.image_digest == var.image_digest &&
-        var.database_preparation_attestation.schema_revision == "0002_external_identities" &&
-        lower(var.database_preparation_attestation.box_id) == lower(var.box_id) &&
-        lower(var.database_preparation_attestation.database_server_id) == lower(local.expected_database_server_id) &&
-        startswith(
-          lower(var.database_preparation_attestation.execution_id),
-          "${lower(local.expected_database_job_id)}/executions/",
-        ),
-        false,
-      )
+      condition     = !var.deploy_workloads || local.database_preparation_matches_release
       error_message = "The database-preparation attestation must bind the exact Box, database server, job execution, workload image digest, and expected Alembic head."
     }
     precondition {

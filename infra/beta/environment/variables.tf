@@ -50,7 +50,7 @@ variable "beta_id" {
 
 variable "location" {
   type        = string
-  description = "Single region for ACA and private data services. Central US is provisional until region/quota evidence is recorded."
+  description = "Owner-selected single region for ACA and private data services. Central US remains fail-closed until current quota and service-capacity evidence is recorded."
   default     = "centralus"
 }
 
@@ -430,14 +430,14 @@ variable "database_preparation_attestation" {
   validation {
     condition = var.database_preparation_attestation == null || try(
       can(regex("^[0-9a-f]{64}$", var.database_preparation_attestation.image_digest)) &&
-      var.database_preparation_attestation.schema_revision == "0002_external_identities" &&
+      var.database_preparation_attestation.schema_revision == local.database_release.schema_revision &&
       can(regex("^[0-9a-f]{64}$", var.database_preparation_attestation.evidence_sha256)) &&
       can(regex("^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/rg-cosmas-os-beta-[a-z0-9-]+/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-[a-z0-9-]+/executions/[A-Za-z0-9][A-Za-z0-9._-]{2,255}$", var.database_preparation_attestation.execution_id)) &&
       can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.database_preparation_attestation.box_id)) &&
       can(regex("^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/rg-cosmas-os-beta-[a-z0-9-]+/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-cosmas-beta-[a-z0-9-]+$", var.database_preparation_attestation.database_server_id)),
       false,
     )
-    error_message = "database_preparation_attestation must contain the exact Box, database server, job execution, 64-hex image/evidence digests, and expected D3 schema revision."
+    error_message = "database_preparation_attestation must contain the exact Box, database server, job execution, 64-hex image/evidence digests, and selected release schema revision."
   }
 }
 

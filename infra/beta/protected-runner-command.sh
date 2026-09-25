@@ -1661,6 +1661,7 @@ case "$operation" in
   database-prepare)
     [[ "$stage" == "database" ]] || die "database-prepare requires stage=database"
     validate_source
+    expected_schema_revision="$(python3 "$repository_root/infra/beta/validate_release_schema.py")" || die "selected release schema is inconsistent"
     verify_pinned_toolchain
     bind_release_to_source
     verify_release_network_evidence
@@ -1849,9 +1850,9 @@ PY
     done
     [[ "$evidence_found" == "true" ]] || die "exact sanitized database-preparation evidence was not available from the succeeded execution"
     chmod 0600 "$operation_temp_dir/job-evidence.json"
-    jq -e '
+    jq -e --arg schema_revision "$expected_schema_revision" '
       .contract == "cosmas-os-d3-database-preparation-v1" and .status == "ready" and
-      .schema_revision == "0002_external_identities" and
+      .schema_revision == $schema_revision and
       .schema_at_expected_head == true and .runtime_role_non_admin == true and
       .runtime_ddl_denied == true and .audit_update_denied == true and .audit_delete_denied == true and
       (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
@@ -1865,7 +1866,7 @@ PY
     jq -cS -n \
       --arg completed_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
       --arg source_sha "$source_sha" --arg release_id "$release_id" --arg box_id "$GUARD_BOX_ID" \
-      --arg image_digest "${expected_api_digest#sha256:}" --arg schema_revision "0002_external_identities" \
+      --arg image_digest "${expected_api_digest#sha256:}" --arg schema_revision "$expected_schema_revision" \
       --arg evidence_sha256 "$database_evidence_hash" --arg execution_id "$execution_id" \
       --arg database_server_id "$database_server_id" \
       --arg state_lineage "$GUARD_STATE_LINEAGE" --argjson state_serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" '
@@ -1904,6 +1905,7 @@ PY
   runtime-acceptance)
     [[ "$stage" == "acceptance" ]] || die "runtime-acceptance requires stage=acceptance"
     validate_source
+    expected_schema_revision="$(python3 "$repository_root/infra/beta/validate_release_schema.py")" || die "selected release schema is inconsistent"
     verify_pinned_toolchain
     bind_release_to_source
     verify_release_network_evidence
@@ -2255,7 +2257,7 @@ PY
     done
     [[ "$evidence_found" == "true" ]] || die "exact sanitized runtime-acceptance evidence was not available from the succeeded execution"
     chmod 0600 "$operation_temp_dir/job-evidence.json"
-    jq -e --arg phase "$acceptance_phase" '
+    jq -e --arg phase "$acceptance_phase" --arg schema_revision "$expected_schema_revision" '
       (.evidence_sha256 | strings | test("^[0-9a-f]{64}$")) and
       if $phase == "runtime" then
         .contract == "cosmas-os-d3-runtime-acceptance-v2" and .status == "ready" and
@@ -2269,7 +2271,7 @@ PY
         .blob_deleted_representations_absent_after_delete == true and
         .blob_recoverable_absence_verified == true and
         .redis_round_trip == true and .redis_cleanup_confirmed == true and
-        .database_schema_revision == "0002_external_identities" and
+        .database_schema_revision == $schema_revision and
         .database_schema_at_expected_head == true and .database_insert_read_rolled_back == true
       elif $phase == "workflow-baseline" then
         .contract == "cosmas-os-d3-workflow-acceptance-v1" and .stage == "baseline" and
