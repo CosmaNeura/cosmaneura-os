@@ -1,17 +1,22 @@
-# Optional East US 2 VM staging path
+# East US 2 VM staging path
 
-Prepared September 25, 2026 against published application/infra source
-`88ce82998ed14fd80608c9d282380b6d3fee8237`. This is a proposed alternative,
-not a selected architecture, deployment approval, allocated server, or beta
-acceptance. No cloud resource, account, secret or DNS settings were changed.
-This assessment uses public prices and authorized Azure quota/SKU metadata.
+The owner selected this staging route on September 25, 2026 and authorized
+implementation alongside current CosmaBot app/API work. The original sizing
+assessment used source `88ce82998ed14fd80608c9d282380b6d3fee8237`, public prices
+and authorized Azure quota/SKU metadata. The executable
+[foundation](../../infra/beta/vm/foundation/README.md) and
+[runtime preparation](../../infra/beta/vm/runtime/README.md) now describe the
+implementation. Source review, an applied foundation and operational acceptance
+are separate milestones; this document does not claim the staging app is live.
 
-**Recommendation: one dedicated `Standard_D2s_v5` Linux VM (2 vCPU, 8 GiB) in
+**Selected staging direction: one dedicated `Standard_D2s_v5` Linux VM (2 vCPU, 8 GiB) in
 East US 2, with PostgreSQL and Redis private on the host, while keeping the
 managed-service requests open.** It avoids the current Container Apps,
 PostgreSQL and Managed Redis eligibility blockers. It preserves CosmaBot as its
 own application, datastore and deployment, connecting to Cosmaneura by approved
-HTTPS APIs. The protected Central US runner/state remains separate and retained.
+HTTPS APIs. CosmaBot code and databases are deployed only to its own environment;
+the main Cosmaneura platform receives no CosmaBot application deployment.
+The protected Central US runner/state remains separate and retained.
 Scribe work remains paused here.
 
 ## Sizing and feasibility
@@ -43,9 +48,10 @@ latency, memory peak and disk I/O before deciding whether to resize.
 
 ## Proposed resource inventory and cost
 
-New workload-only resource group: proposed `rg-cosmas-os-vm-staging-eus2-lab01`.
-Names below are candidates; global availability and exact IDs belong in the
-reviewed plan. Existing protected state/bootstrap must never be recreated.
+New workload-only resource group: `rg-cosmas-os-vm-staging-eus2-lab01`.
+Global name availability and exact IDs belong in the reviewed plan. The
+foundation uses a fresh encrypted local state namespace; existing protected
+state/bootstrap must never be recreated or reused.
 
 | Resource | Proposed quantity / setting | Monthly fixed estimate |
 |---|---|---:|
@@ -67,9 +73,9 @@ backup repository), Log Analytics, and alert action group. VNet/NSG/NIC/identity
 have no separate meter included here; data, operations and logs are variable.
 No new NAT gateway, load balancer, Container Apps environment, managed PostgreSQL,
 managed Redis or Azure Backup protected-instance service is included. Explicit
-outbound uses the VM's static IP. If access from the retained runner needs VNet
-peering and extra DNS links, those must appear in the plan; peering transfer is
-additional. This is not permission to alter its bootstrap or current state.
+outbound uses the VM's static IP. The foundation does not peer to the retained
+runner or expand its identity. Release installation uses a separate operator
+path; its private-service access still needs operational verification.
 
 All estimates use 730 hours/month, USD on-demand retail, without discounts,
 credits, free grants or tax. An illustrative **10 GB application objects +
@@ -91,11 +97,12 @@ registry-posture change or alternative SKU is preapproved by this proposal.
 
 ## Required deployment shape
 
-- **Endpoints:** approved web name `staging.cosmas.ai`; proposed separate API
-  name `api.staging.cosmas.ai`. The API name is not known to exist or be selected.
-  Both would target the new static IP, with distinct TLS virtual hosts. An
-  authenticated API remains necessary even if the final review chooses one
-  origin. Reserve `bot.cosmas.ai` as previously directed.
+- **Endpoints:** approved web name `staging.cosmas.ai`; the runtime selects
+  `api.staging.cosmas.ai` for its separate authenticated API. Both target the
+  new static IP, with distinct TLS virtual hosts. Clerk uses the dedicated
+  `clerk.staging.cosmas.ai` instance domain. These configured names do not prove
+  DNS propagation, certificate issuance or a running app. Reserve `bot.cosmas.ai`
+  as previously directed.
 - **Network:** only HTTPS and narrowly handled ACME HTTP challenge/redirect
   ingress; no public PostgreSQL, Redis, health, Docker or management ports.
   SSH, if needed, restricted to the approved administrative source, never the
@@ -180,7 +187,7 @@ credentials in chat:
 
 - Exact subscription/tenant and new resource/state identities, accepted VM and
   registry posture, cost/budget scope, availability tradeoff and recovery targets.
-- DNS control/delegation for the approved web host and the proposed API host,
+- DNS control/delegation for the approved web host and the selected API host,
   administrative access source/method, and certificate renewal owner.
 - The actual production Clerk public key/frontend, issuer/JWKS, organization,
   audience, authorized web/native origins and callbacks matching the candidate.
