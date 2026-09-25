@@ -63,6 +63,7 @@ def main():
                         help="Optional separate local test storage root; otherwise Application Support/CosmasOS Synthetic")
     parser.add_argument("--hosted-api-origin", help="Pin a hosted synthetic beta API matching the web build manifest")
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; separate stable app/storage")
+    parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
     args = parser.parse_args()
     source, web, output = (value.resolve() for value in (args.scribe_source, args.web_dist, args.output))
     root = Path(__file__).resolve().parents[1]
@@ -71,7 +72,10 @@ def main():
     operational = identity is not None
     if operational and (not hosted or args.installation_profile != "beta" or args.installation_root is not None):
         parser.error("Operational desktop composition requires hosted API, the beta installation profile and default private storage.")
-    data_mode = "authorized_beta" if operational else "synthetic"
+    try:
+        data_mode = _identity.data_mode(identity, args.data_mode)
+    except ValueError as error:
+        parser.error(str(error))
     if hosted:
         manifest = json.loads((web / "cosmas-workspace-build.json").read_text())
         if (not args.native_auth_helper or not args.installation_profile

@@ -22,6 +22,7 @@ import {installDesktopCloseProtection, cleanupOnConfirmedQuit} from './close-pro
 import {createDesktopFailureHandler, destroyDesktopWorkspace, installDesktopLastWindowPolicy} from './startup-recovery.mjs';
 import {installDesktopWorkspaceLifecycle} from './workspace-lifecycle.mjs';
 import {preparePackagedDesktopCapture} from './native-capture-package.mjs';
+import {validateOperationalNativeIdentity} from './native-identity-config.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 let window, auth, captureHost, disposeIpc, disposeLifecycle, disposeNavigation, failureClosing = false;
@@ -98,7 +99,8 @@ async function bootstrap() {
   installMicrophonePermissions(window.webContents, auth, config.microphoneCaptureEnabled);
   disposeIpc = installAuthIpc(ipcMain, window.webContents, auth);
   if(config.nativeCaptureEnabled===true){
-    if(config.mode!=='hosted-beta-authenticated'||config.dataMode!=='authorized_beta')throw new Error('Desktop recording unavailable');
+    if(config.mode!=='hosted-beta-authenticated'||!['synthetic','authorized_beta'].includes(config.dataMode))throw new Error('Desktop recording unavailable');
+    validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
     const native=await preparePackagedDesktopCapture(root);
     const {installWorkspaceDesktopCapture}=await import('./workspace-native-capture.mjs');
     captureHost=installWorkspaceDesktopCapture({auth,ipc:ipcMain,renderer:window.webContents,directory:stateDirectory,

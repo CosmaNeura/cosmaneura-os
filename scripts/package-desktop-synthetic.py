@@ -41,7 +41,7 @@ def main():
     configuration = json.loads((app / "synthetic-build.json").read_text())
     authenticated = configuration.get("mode") in {"local-synthetic-authenticated", "hosted-beta-authenticated"}
     hosted = configuration.get("mode") == "hosted-beta-authenticated"
-    operational = hosted and configuration.get("dataMode") == "authorized_beta"
+    operational = hosted and (configuration.get("dataMode") == "authorized_beta" or "nativeIdentity" in configuration)
     identity = _identity.validate(configuration.get("nativeIdentity"), "desktop", configuration.get("apiOrigin")) if operational else None
     if operational and args.verification_variant or not operational and configuration.get("nativeIdentity") is not None:
         parser.error("Operational identity cannot be combined with a synthetic package.")

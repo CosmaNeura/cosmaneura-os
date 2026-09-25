@@ -11,7 +11,7 @@ const markerName = 'cosmas-installation.json';
 /** Development installation identity. Never migrate, reset, or choose a fallback profile. */
 export async function prepareDesktopState(config, appData, electronVersion) {
   const hosted = config.mode === 'hosted-beta-authenticated';
-  const operational = hosted && config.dataMode === 'authorized_beta';
+  const operational = hosted && (config.dataMode === 'authorized_beta' || Object.hasOwn(config, 'nativeIdentity'));
   if (hosted && (!['synthetic','authorized_beta'].includes(config.dataMode) || !exactHostedApiOrigin(config.apiOrigin) || !config.installation)) throw unavailable();
   let identityBinding;
   if (operational) {

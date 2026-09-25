@@ -4,6 +4,12 @@ export const OPERATIONAL_NATIVE_PROFILE = 'operational-beta-v1';
 const fields = ['version', 'profile', 'client', 'apiOrigin', 'publishableKey', 'frontendOrigin', 'organizationId', 'audience'];
 const unavailable = () => { throw new Error('Operational native identity configuration is incomplete or inconsistent'); };
 
+/** Authentication and data authorization are separate, explicit build inputs. */
+export function validateOperationalNativeDataMode(value) {
+  if (!['synthetic', 'authorized_beta'].includes(value)) unavailable();
+  return value;
+}
+
 /** Public build input only. Never selects an account or fetches a credential. */
 export function validateOperationalNativeIdentity(value, client, apiOrigin) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||

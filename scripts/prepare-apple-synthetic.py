@@ -238,12 +238,13 @@ def prepare(
     microsoft_connection_tenant_id: str = "", microsoft_connection_client_id: str = "", microsoft_connection_callback_uri: str = "",
     google_connection_client_id: str = "", google_connection_callback_uri: str = "",
     native_identity_config: Path | None = None,
+    data_mode: str | None = None,
 ) -> Path:
     identity = _identity.load(native_identity_config, "apple", workspace_api_origin)
     operational = identity is not None
     if operational and (not hosted_workspace or verification_variant is not None or simulator_custody):
         raise ValueError("Operational Apple composition requires hosted services and device custody, without a synthetic variant or Simulator identity.")
-    data_mode = "authorized_beta" if operational else "synthetic"
+    data_mode = _identity.data_mode(identity, data_mode)
     if hosted_workspace and not google_connection_client_id:
         raise ValueError("The complete beta profile requires configured Gmail navigation.")
     _navigation.validate_google(google_connection_client_id, google_connection_callback_uri)
@@ -534,6 +535,7 @@ def main() -> None:
     parser.add_argument("--hosted-workspace", action="store_true",
                         help="Use HTTPS service policy matching the hosted synthetic Apple web build")
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; stages a device-only project")
+    parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
     args = parser.parse_args()
     try:
         project = prepare(args.scribe_source, args.web_dist, args.output, args.verification_variant,
@@ -543,7 +545,7 @@ def main() -> None:
                           args.cosmaneura_web_origin, args.hosted_workspace,
                           args.scheduling_google_client_id, args.scheduling_google_callback_uri,
                           args.microsoft_connection_tenant_id, args.microsoft_connection_client_id, args.microsoft_connection_callback_uri,
-                          args.google_connection_client_id, args.google_connection_callback_uri, args.native_identity_config)
+                          args.google_connection_client_id, args.google_connection_callback_uri, args.native_identity_config, args.data_mode)
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     print(f"Prepared synthetic Apple project: {project}")

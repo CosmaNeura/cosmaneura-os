@@ -4,6 +4,14 @@ import subprocess
 from pathlib import Path
 
 
+def data_mode(identity, requested: str | None = None):
+    """Preserve legacy defaults; an authenticated identity does not grant PHI use."""
+    selected = requested if requested is not None else "authorized_beta" if identity is not None else "synthetic"
+    if not isinstance(selected, str) or selected not in {"synthetic", "authorized_beta"} or (selected == "authorized_beta" and identity is None):
+        raise ValueError("Select synthetic or authorized_beta with the matching native identity profile.")
+    return selected
+
+
 def load(path: Path | None, client: str, api_origin: str | None = None):
     if path is None:
         return None

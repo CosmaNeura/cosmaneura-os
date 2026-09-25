@@ -59,6 +59,17 @@ test('both native composers validate all profile features and matching origins a
     assert.throws(()=>validateNativeBetaProfile(manifest,{...options,...(client==='desktop'?{microphoneCapture:false}:{nativeRendererRecovery:false})}));
   }
 });
+
+test('synthetic Apple data can use operational device custody without admitting a Simulator identity',()=>{
+  const manifest=resolveBetaFeatureProfile(native('apple')).manifest;
+  const device={...expected('apple'),deviceCustody:true,simulatorCustody:false};
+  assert.equal(validateNativeBetaProfile(manifest,device),manifest);
+  assert.throws(()=>validateNativeBetaProfile(manifest,{...device,simulatorCustody:true}));
+  assert.throws(()=>validateNativeBetaProfile(manifest,{...device,deviceCustody:false}));
+  const authorized=resolveBetaFeatureProfile({...native('apple'),VITE_WORKSPACE_DATA_MODE:'authorized_beta'}).manifest;
+  assert.equal(validateNativeBetaProfile(authorized,device),authorized);
+  assert.throws(()=>validateNativeBetaProfile(authorized,expected('apple')));
+});
 test('ordinary Vite config emits the expanded profile in both direct flags and whole import.meta.env',async()=>{
   const require=createRequire(join(root,'web/package.json'));const {build}=await import(require.resolve('vite'));
   const saved=Object.fromEntries(Object.entries(process.env).filter(([key])=>key.startsWith('VITE_')));

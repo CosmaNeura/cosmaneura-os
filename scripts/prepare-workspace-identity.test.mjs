@@ -43,6 +43,22 @@ test('public identity mismatch and invalid companion/upload origins are rejected
     assert.throws(()=>workspaceIdentityInputs(identity,{...options,...changed}));
 });
 
+test('explicit synthetic staging retains the real-format identity and every account boundary',()=>{
+  const files=workspaceIdentityInputs(identity,{...options,dataMode:'synthetic'});
+  for(const client of ['web','desktop','apple']){
+    assert.equal(files[client+'-build-env.json'].VITE_WORKSPACE_DATA_MODE,'synthetic');
+    assert.equal(files[client+'-build-env.json'].VITE_CLERK_PUBLISHABLE_KEY,identity.publishableKey);
+    assert.equal(files[client+'-build-env.json'].VITE_WORKSPACE_AUTHENTICATED_ENABLED,'true');
+  }
+  assert.deepEqual(files['desktop-identity.json'],identity);
+  assert.equal(files['identity-bindings.json'].data_mode,'synthetic');
+  assert.equal(files['identity-bindings.json'].activation_authorized,false);
+  for(const dataMode of [null,'',false,'synth_os','production'])
+    assert.throws(()=>workspaceIdentityInputs(identity,{...options,dataMode}));
+  for(const changed of [{publishableKey:'pk_test_fixture'},{organizationId:''},{apiOrigin:'http://localhost:8000'}])
+    assert.throws(()=>workspaceIdentityInputs({...identity,...changed},{...options,dataMode:'synthetic'}));
+});
+
 test('identity digest is key-order independent and changes with review-relevant identity',()=>{
   assert.equal(identityDigest(identity),identityDigest(Object.fromEntries(Object.entries(identity).reverse())));
   assert.notEqual(identityDigest(identity),identityDigest({...identity,audience:'other-api'}));

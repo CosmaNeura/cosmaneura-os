@@ -7,7 +7,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 import {isDeepStrictEqual} from 'node:util';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {resolveHostedWorkspace} from '../clients/shared/hosted-workspace-config.mjs';
-import {validateOperationalNativeIdentity} from '../clients/desktop/native-identity-config.mjs';
+import {validateOperationalNativeIdentity, validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
 
 const source = fileURLToPath(new URL('../', import.meta.url));
 const digest = value => createHash('sha256').update(value).digest('hex');
@@ -78,7 +78,7 @@ export async function buildNativeRenderer({inputs, client, output}, {build} = {}
   const env = envInput.value;
   const profile = resolveBetaFeatureProfile({
     VITE_WORKSPACE_FEATURE_PROFILE: identity.profile,
-    VITE_WORKSPACE_HOSTED_CLIENT: client, VITE_WORKSPACE_DATA_MODE: 'authorized_beta',
+    VITE_WORKSPACE_HOSTED_CLIENT: client, VITE_WORKSPACE_DATA_MODE: validateOperationalNativeDataMode(env.VITE_WORKSPACE_DATA_MODE),
     VITE_WORKSPACE_HOSTED_API_ORIGIN: identity.apiOrigin,
     VITE_API_BASE: client === 'desktop' ? 'app://cosmas/api' : identity.apiOrigin,
     VITE_WORKSPACE_WEB_ORIGIN: '', VITE_CLERK_PUBLISHABLE_KEY: identity.publishableKey,

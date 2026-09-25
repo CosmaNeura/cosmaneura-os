@@ -25,6 +25,28 @@ boundary, current organization selection, fresh token policy and app-scoped
 Keychain custody. Configuring the build does not register a callback, create a
 membership, contact Clerk or authorize clinical data.
 
+For synthetic staging with real sign-in, pass `--data-mode synthetic` to
+`prepare-workspace-identity.mjs` and to each native composer
+(`prepare-desktop-synthetic.py` and `prepare-apple-synthetic.py`). The renderer
+builder consumes the explicit mode in the retained `*-build-env.json`; desktop
+packaging requires its manifest to match the composed app. A production-format
+Clerk identity keeps the operational app identity and device custody in either
+data mode. The key is not PHI authorization; the selected data mode remains a
+separate input.
+
+Omitting the option preserves the existing operational `authorized_beta`
+default; legacy compositions without an operational identity remain synthetic.
+Always select the mode explicitly for a new staging candidate. Existing desktop
+installation metadata binds the data mode as well as the account and API;
+changing those values refuses startup and preserves saved data. Do not relabel
+an existing installation or substitute the retained invented build inputs.
+
+Use the identity-only preparation command for these client inputs. The broader
+`prepare-operational-startup.py` still prepares Core/Scribe/Scheduling service
+overlays and is not a limited, non-Scribe staging shortcut. Actual public keys,
+organization and API/web/upload origins must be supplied before a connected
+build; public health checks do not establish companion API authorization.
+
 Build each native renderer from the retained public `clients` directory emitted
 by `scripts/prepare-workspace-identity.mjs` or
 `scripts/prepare-operational-startup.py`. Use Node 24 and the existing locked web

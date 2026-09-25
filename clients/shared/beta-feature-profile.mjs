@@ -100,6 +100,7 @@ export function validateNativeBetaProfile(manifest, expected) {
   if (expected.client === 'desktop' && expected.microphoneCapture !== (manifest.captureMode === 'browser_microphone') ||
       expected.client === 'apple' && manifest.captureMode === 'ios_native' &&
       (!expected.renewableNativeCapture || !expected.nativeRendererRecovery ||
-       (manifest.dataMode === 'authorized_beta' ? expected.deviceCustody !== true || expected.simulatorCustody === true : !expected.simulatorCustody))) fail('native capture support differs from the web build');
+       (manifest.dataMode === 'authorized_beta' || expected.deviceCustody === true ?
+         expected.deviceCustody !== true || expected.simulatorCustody === true : !expected.simulatorCustody))) fail('native capture support differs from the web build');
   return manifest;
 }

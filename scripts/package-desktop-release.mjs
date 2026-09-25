@@ -150,6 +150,16 @@ export async function verifyFuses(fuses, application) {
   return wire;
 }
 
+/** The operational identity selects custody; the retained mode selects data scope. */
+export function validateOperationalReleaseProfile(config, manifest, info) {
+  const identity=validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
+  const profile=validateBetaFeatureManifest(manifest);
+  if (config.mode!=='hosted-beta-authenticated' || !['synthetic','authorized_beta'].includes(config.dataMode) || profile.client!=='desktop' ||
+      profile.dataMode!==config.dataMode || profile.apiOrigin!==config.apiOrigin || config.appVersion!==info.CFBundleShortVersionString ||
+      config.buildNumber!==info.CFBundleVersion || config.installation?.bundleIdentifier!==info.CFBundleIdentifier) fail();
+  return identity;
+}
+
 export async function packageRelease({application,inputManifest,toolsDirectory,output}) {
   for (const path of [application,inputManifest,toolsDirectory,output]) if (!isAbsolute(path) || resolve(path)!==path) fail();
   if (!application.endsWith('.app') || !output.endsWith('.app') || inside(application,output) || inside(output,application) ||
@@ -164,11 +174,8 @@ export async function packageRelease({application,inputManifest,toolsDirectory,o
   const app=join(application,'Contents/Resources/app'), appFiles=await inventory(app);
   if (Object.values(appFiles).some(item=>item.link)) fail();
   const config=JSON.parse(await readFile(join(app,'synthetic-build.json'),'utf8'));
-  const identity=validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
-  const profile=validateBetaFeatureManifest(JSON.parse(await readFile(join(app,'public/cosmas-beta-features.json'),'utf8')));
-  if (config.mode!=='hosted-beta-authenticated' || config.dataMode!=='authorized_beta' || profile.client!=='desktop' ||
-      profile.dataMode!=='authorized_beta' || profile.apiOrigin!==config.apiOrigin || config.appVersion!==info.CFBundleShortVersionString ||
-      config.buildNumber!==info.CFBundleVersion || config.installation?.bundleIdentifier!==info.CFBundleIdentifier) fail();
+  const identity=validateOperationalReleaseProfile(config,
+    JSON.parse(await readFile(join(app,'public/cosmas-beta-features.json'),'utf8')),info);
   const pkg=JSON.parse(await readFile(join(app,'package.json'),'utf8'));
   if (pkg.main!=='main.mjs' || pkg.type!=='module' || pkg.version!==config.appVersion) fail();
   const helperInfo=await plist(join(app,'native-auth/CosmasDesktopAuth.app/Contents/Info.plist'));

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {mkdtemp, readFile, writeFile, realpath} from 'node:fs/promises';
+import {mkdtemp, readFile, writeFile, realpath, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {validateOperationalNativeIdentity, operationalNativeAuthSettings, operationalNativeBundle} from './native-identity-config.mjs';
@@ -46,4 +46,25 @@ test('stable operational installation preserves data and refuses changed account
   ]) await assert.rejects(prepareDesktopState(changed,base,'43.4.1'));
   assert.equal(await readFile(join(dir,'cosmas-installation.json'),'utf8'),marker);
   assert.equal(await readFile(join(dir,'retained-encrypted-draft'),'utf8'),'invented ciphertext');
+});
+
+test('synthetic data with operational identity preserves custody and rejects mode/account changes',async t=>{
+  const base=await realpath(await mkdtemp(join(tmpdir(),'cosmas-operational-synthetic-')));
+  t.after(()=>rm(base,{recursive:true,force:true}));
+  const synthetic={...config,dataMode:'synthetic'};
+  const directory=await prepareDesktopState(synthetic,base,'43.4.1');
+  const marker=await readFile(join(directory,'cosmas-installation.json'),'utf8');
+  assert.equal(JSON.parse(marker).dataMode,'synthetic');
+  assert.match(JSON.parse(marker).identityBinding,/^[0-9a-f]{64}$/);
+  await writeFile(join(directory,'retained-draft'),'invented private draft');
+  assert.equal(await prepareDesktopState(synthetic,base,'43.4.1'),directory);
+  for(const changed of [
+    {...synthetic,dataMode:'authorized_beta'}, {...synthetic,dataMode:undefined},
+    {...synthetic,nativeIdentity:undefined}, {...synthetic,nativeIdentity:null},
+    {...synthetic,nativeIdentity:{...identity,organizationId:'org_other'}},
+    {...synthetic,nativeIdentity:{...identity,apiOrigin:'https://other.example.invalid'}},
+    {...synthetic,nativeIdentity:{...identity,publishableKey:'pk_test_invented'}},
+  ]) await assert.rejects(prepareDesktopState(changed,base,'43.4.1'));
+  assert.equal(await readFile(join(directory,'cosmas-installation.json'),'utf8'),marker);
+  assert.equal(await readFile(join(directory,'retained-draft'),'utf8'),'invented private draft');
 });

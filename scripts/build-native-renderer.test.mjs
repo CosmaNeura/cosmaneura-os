@@ -17,12 +17,12 @@ const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
 const options = {webOrigin: 'https://workspace.example.invalid', coreWebOrigin: 'https://core.example.invalid',
   captureUploadOrigins: ['https://uploads.example.invalid']};
 
-async function fixture(t, client = 'desktop') {
+async function fixture(t, client = 'desktop', dataMode = 'authorized_beta') {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'cosmas-native-renderer-')));
   t.after(() => rm(root, {recursive: true, force: true}));
   const inputs = join(root, 'clients'), output = join(root, 'renderer');
   await mkdir(inputs);
-  const files = structuredClone(workspaceIdentityInputs(identity, options));
+  const files = structuredClone(workspaceIdentityInputs(identity, {...options, dataMode}));
   for (const [name, value] of Object.entries(files)) await writeFile(join(inputs, name), JSON.stringify(value));
   return {root, inputs, output, client, files};
 }
@@ -45,9 +45,9 @@ test('CLI requires explicit inputs, native client and output without duplicate a
   }
 });
 
-for (const client of ['desktop', 'apple']) {
-  test(`${client} consumes retained public inputs and verifies both emitted manifests`, async t => {
-    const f = await fixture(t, client), env = f.files[client + '-build-env.json'];
+for (const client of ['desktop', 'apple']) for (const dataMode of ['authorized_beta', 'synthetic']) {
+  test(`${client} consumes retained ${dataMode} inputs and verifies both emitted manifests`, async t => {
+    const f = await fixture(t, client, dataMode), env = f.files[client + '-build-env.json'];
     const beforeNodeEnv = process.env.NODE_ENV;
     let calls = 0;
     const result = await buildNativeRenderer(f, {build: async config => {
@@ -64,6 +64,7 @@ for (const client of ['desktop', 'apple']) {
     assert.equal(calls, 1);
     assert.equal(result.dist, join(f.output, 'dist'));
     assert.equal(result.client, client);
+    assert.equal(result.profile.dataMode, dataMode);
     assert.deepEqual(result.profile, resolveBetaFeatureProfile(env).manifest);
     for (const name of [client + '-identity.json', client + '-build-env.json']) {
       assert.equal(result.inputsSha256[name], createHash('sha256').update(await readFile(join(f.inputs, name))).digest('hex'));
@@ -84,7 +85,8 @@ test('inconsistent identity, stale or incomplete profile, and unsolicited enviro
     files => { files['desktop-build-env.json'].VITE_WORKSPACE_HOSTED_API_ORIGIN = 'https://different.example.invalid'; },
     files => { files['desktop-build-env.json'].VITE_CLERK_PUBLISHABLE_KEY = 'pk_live_other'; },
     files => { files['desktop-build-env.json'].VITE_WORKSPACE_HOSTED_CLIENT = 'apple'; },
-    files => { files['desktop-build-env.json'].VITE_WORKSPACE_DATA_MODE = 'synthetic'; },
+    files => { files['desktop-build-env.json'].VITE_WORKSPACE_DATA_MODE = 'unknown'; },
+    files => { delete files['desktop-build-env.json'].VITE_WORKSPACE_DATA_MODE; },
     files => { files['desktop-build-env.json'].VITE_WORKSPACE_PREP_ENABLED = 'false'; },
     files => { delete files['desktop-build-env.json'].VITE_WORKSPACE_PREP_ENABLED; },
     files => { files['desktop-build-env.json'].VITE_UNREVIEWED_VALUE = 'not retained'; },
