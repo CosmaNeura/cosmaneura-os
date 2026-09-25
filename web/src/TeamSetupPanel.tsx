@@ -14,12 +14,10 @@ const capabilityLabels:Record<CapabilityId,string>={saved_notebook:"Saved notebo
   model_answer:"AI answers",private_draft_handoff:"Private bot assignments",practice_work_brief:"Scheduled work briefs",encounter_prep:"Saved intake preparation",
   consented_capture:"Consented recording",clinical_note:"Clinical note",transcript_correction:"Transcript correction",calendar_availability:"Calendar availability",
   staff_handoff:"Human staff handoff",inbox_operations:"Inbox operations",membership_billing:"Membership and billing"};
-const caseLabels={private_sources:"Private sources",work_brief:"Work brief",scheduling:"Scheduling",preparation:"Visit preparation",
-  inbox:"Inbox",membership_billing:"Membership and billing",human_control:"Human control",model_work_policy:"Team attempt policy",resource_policy:"Source policy"};
 const resourceLabels:Record<ResourcePurpose,string>={core_preparation:"Saved intake preparation",scheduling_context:"Scheduling context"};
 export function SetupReadiness({configuration,setup,label}:{configuration:TeamConfiguration;setup:SetupProjection;label:string}) {
   return <section aria-label={label} className="team-setup-readiness"><h3>{label}</h3>
-    <p>Runtime availability and reviewed account mappings are local prerequisites. Each request still checks its encounter, source and human authority. Device and service acceptance remains separate.</p>
+    <p>Availability depends on the current connections and the access you allow. Each action checks its required sources and permissions again.</p>
     {configuration.bots.map(bot=><details key={botAddress(bot)}><summary>{bot.name || "Unnamed coworker"} · {bot.retired?"Retired":bot.enabled?"Configured":"Paused"}</summary>
       <ul>{setup.capabilities.filter(c=>c.bot===botAddress(bot)).map(c=><li key={c.capability}>
         <div><strong>{capabilityLabels[c.capability]}</strong><span className="team-pill">{readinessLabels[c.state]}</span></div>
@@ -47,13 +45,15 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
   const configurationKey=JSON.stringify(draft),live=useRef({configurationKey,revision:team.revision,locked});live.current={configurationKey,revision:team.revision,locked};
   const callbacks=useRef({onCurrentTeam,onReviewChange,onAccessLost,setDraft});callbacks.current={onCurrentTeam,onReviewChange,onAccessLost,setDraft};
   const rehearsalController=useRef<AbortController|null>(null);
+  const automaticAttempt=useRef<string|null>(null);
+  const prerequisitesReady=useRef(false);
   const active=result?.key===configurationKey&&result.revision===team.revision?result:null;
   useEffect(()=>{if(result&&!active){setResult(null);setReviewed(false);}},[configurationKey,team.revision,result,active]);
   useEffect(()=>{callbacks.current.onReviewChange(active&&reviewed?{review:active.value.setup_review,configurationKey,revision:team.revision}:null);
     return()=>callbacks.current.onReviewChange(null);
   },[active,reviewed,configurationKey,team.revision]);
   useEffect(()=>{
-    const controller=new AbortController();setReading(true);setError("");setLoaded(null);setResult(null);setReviewed(false);setResources(null);setUsage(null);
+    const controller=new AbortController();automaticAttempt.current=null;prerequisitesReady.current=false;setReading(true);setError("");setLoaded(null);setResult(null);setReviewed(false);setResources(null);setUsage(null);
     rehearsalController.current?.abort();setRehearsing(false);
     void teamSetupApi.read(identity,controller.signal).then(async value=>{
       if(controller.signal.aborted||value.team.revision<live.current.revision)return;
@@ -71,7 +71,7 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
       if(cause instanceof WorkspaceApiError&&cause.status===404){setUnavailable(true);return;}
       if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status)){callbacks.current.onAccessLost(cause);return;}
       setError("Team setup prerequisites could not be checked. Your editable draft is retained.");
-    }).finally(()=>{if(!controller.signal.aborted)setReading(false);});
+    }).finally(()=>{if(!controller.signal.aborted){prerequisitesReady.current=true;setReading(false);}});
     return()=>{controller.abort();rehearsalController.current?.abort();};
   },[identity,team.revision,refresh,refreshToken]);
   function update(next:TeamConfiguration){setResult(null);setReviewed(false);setError("");callbacks.current.onReviewChange(null);callbacks.current.setDraft(next);}
@@ -98,9 +98,16 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
     }catch(cause){
       if(controller.signal.aborted)return;
       if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))callbacks.current.onAccessLost(cause);
-      else setError(cause instanceof WorkspaceApiError?cause.message:"The invented rehearsal could not be checked. Your draft is retained.");
+      else setError(cause instanceof WorkspaceApiError?cause.message:"Team settings could not be checked. Your draft is retained.");
     }finally{if(rehearsalController.current===controller){rehearsalController.current=null;setRehearsing(false);}}
   }
+  useEffect(()=>{
+    if(view!=="review"||!prerequisitesReady.current||!loaded||loaded.team.revision!==team.revision||reading||locked||rehearsing||active||!validTeamConfiguration(draft))return;
+    const attempt=JSON.stringify([team.revision,configurationKey,refresh,refreshToken]);
+    if(automaticAttempt.current===attempt)return;
+    automaticAttempt.current=attempt;
+    void rehearse();
+  },[view,loaded,reading,locked,rehearsing,active,configurationKey,team.revision,refresh,refreshToken]);
   if(unavailable)return null;
   const chosen=loaded?.catalog.presets.find(p=>p.preset_id===preview);
   const installed=!!chosen&&draft.presets?.some(p=>p.preset_id===chosen.preset_id);
@@ -160,18 +167,18 @@ export function TeamSetupPanel({identity,team,draft,setDraft,locked,onCurrentTea
               {!current&&<small>No current reviewed mapping is available.</small>}{stale&&<small>This saved selection remains unavailable. It is never replaced with inherited access automatically.</small>}</label>;
           })}<button disabled={locked||rehearsing||!!bot.retired} onClick={()=>resourceMode(botAddress(bot),true)}>Use inherited source checks for {bot.name}</button></>}
         </details>)}</> }
-        <p>Adding, removing or relaxing either policy requires a fresh invented rehearsal, review and explicit save.</p>
+        <p>Policy changes are checked before saving. Your review applies only to the current settings.</p>
       </section>}
-      {(all||view==='review')&&<div className="team-rehearsal"><h3>{all?"Check the draft with invented examples":"Check these changes"}</h3>
-        <p>This rehearsal checks configuration and local prerequisites. It sends no messages, records no audio, books no appointments and creates no work. It does not confirm service or device acceptance.</p>
-        <button disabled={locked||reading||rehearsing||!validTeamConfiguration(draft)} onClick={()=>void rehearse()}>{rehearsing?"Checking invented examples…":"Run invented rehearsal"}</button>
-        {!validTeamConfiguration(draft)&&<p>Finish each coworker's name and required job before rehearsing.</p>}
-        {active&&<><p role="status">Configuration checks passed for this draft. Review all {active.value.cases.length} invented cases and the current prerequisites below.</p>
-          {all?<ol>{active.value.cases.map((item,index)=><li key={`${item.case_id}:${item.bot??index}`}><strong>{caseLabels[item.case_id]}</strong> · {item.result.replaceAll("_"," ")}<p>{item.explanation}</p></li>)}</ol>:<><ul>{active.value.cases.filter(item=>item.result!=='demonstrated').map((item,index)=><li key={`${item.case_id}:${item.bot??index}`}><strong>{caseLabels[item.case_id]}</strong> · {item.result.replaceAll("_"," ")}<p>{item.explanation}</p></li>)}</ul><details><summary>All {active.value.cases.length} checked examples</summary><ol>{active.value.cases.map((item,index)=><li key={`${item.case_id}:${item.bot??index}`}><strong>{caseLabels[item.case_id]}</strong> · {item.result.replaceAll("_"," ")}<p>{item.explanation}</p></li>)}</ol></details></>}
-          {all?<SetupReadiness configuration={active.value.configuration} setup={active.value.setup} label="Rehearsed draft prerequisites"/>:<details><summary>Current capability details</summary><SetupReadiness configuration={active.value.configuration} setup={active.value.setup} label="Rehearsed draft prerequisites"/></details>}
+      {(all||view==='review')&&<div className="team-rehearsal"><h3>Review team access</h3>
+        <p>{all?"Check your settings, then review the available capabilities before saving.":"We check these settings automatically. Review the available capabilities before saving."} Each action still checks its current account and encounter access.</p>
+        {rehearsing&&<p role="status">Checking team settings…</p>}
+        {(all||!!error||!!active)&&<button disabled={locked||reading||rehearsing||!validTeamConfiguration(draft)} onClick={()=>void rehearse()}>{active?"Check settings again":"Check team settings"}</button>}
+        {!validTeamConfiguration(draft)&&<p>Finish each coworker's name and required job before checking settings.</p>}
+        {active&&<><p role="status">Settings checked. Review the capability summary and confirm these changes.</p>
+          <SetupReadiness configuration={active.value.configuration} setup={active.value.setup} label="Capabilities with these settings"/>
           <label className="team-check"><input type="checkbox" checked={reviewed} disabled={locked} onChange={e=>setReviewed(e.target.checked)}/>
-            I reviewed this draft, the invented examples and the unavailable capabilities.</label>
-          <p>Save team settings below to apply this configuration. Changes to the draft require another review; an interrupted submitted save retains its exact request.</p></>}
+            I reviewed these team changes and the available capabilities.</label>
+          <p>Save to apply this configuration. Further edits require a fresh check and review.</p></>}
       </div>}
       {(view==='readiness'||!active&&all)&&<SetupReadiness configuration={loaded.team.configuration} setup={loaded.setup} label="Saved team prerequisites"/>}
     </>}

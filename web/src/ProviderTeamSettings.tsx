@@ -138,7 +138,7 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
         onChange={e => setDraft({ ...draft, practice_context: e.target.value })} /></label>
       <p className="team-fine">{team.llm.enabled && !bot.blocked_capabilities?.includes("model_answer") ? "Used as preferences for permitted GPT-4.1 requests. These cannot grant permission to act." : "Saved for connected skills. Local source lookup does not interpret practice instructions."}</p></>}
     </div></div>
-    {full&&reviewRequired && <p className="team-fine" role="status">Run the invented rehearsal and review this draft before saving preset, capability, attempt-limit or source-policy changes.</p>}
+    {full&&reviewRequired && <p className="team-fine" role="status">Check these settings and review the available capabilities before saving team, permission or limit changes.</p>}
     {full&&<footer className="team-settings-footer"><span>{team.revision ? `Saved configuration · revision ${team.revision}` : "Ready to personalize"}</span>
       <button className="team-primary" disabled={locked || reviewRequired || draft.bots.some(b => !b.name.trim() || b.role === "custom" && !b.job_focus?.trim())} onClick={onSave}>{team.revision ? "Save team settings" : "Set up Provider Team"}</button></footer>}
   </section>;

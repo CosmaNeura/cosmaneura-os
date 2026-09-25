@@ -22,7 +22,7 @@ function Harness({initial=teamFixture().configuration}:{initial?:TeamConfigurati
 const button=(label:string)=>[...element.querySelectorAll('button')].find(b=>b.textContent?.trim()===label)!;
 async function click(label:string){const b=button(label);expect(b,label).toBeTruthy();expect(b.disabled,label).toBe(false);await act(async()=>b.click());}
 async function choose(label:string){const b=[...element.querySelectorAll('.team-preset-options button')].find(b=>b.querySelector('strong')?.textContent===label) as HTMLButtonElement;expect(b).toBeTruthy();await act(async()=>b.click());}
-async function run(){await click("Run invented rehearsal");await vi.waitFor(async()=>{await act(async()=>{});expect(element.querySelector(".team-rehearsal input[type=checkbox]")).toBeTruthy();});}
+async function run(){await click("Check team settings");await vi.waitFor(async()=>{await act(async()=>{});expect(element.querySelector(".team-rehearsal input[type=checkbox]")).toBeTruthy();});}
 async function checkReview(){const box=element.querySelector<HTMLInputElement>('.team-rehearsal input[type=checkbox]')!;expect(box).toBeTruthy();await act(async()=>box.click());}
 async function rename(name:string){const input=element.querySelector<HTMLInputElement>('.team-settings-form input')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,name);input.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function mount(initial?:TeamConfiguration){root=createRoot(element);await act(async()=>root.render(<Harness initial={initial}/>));}
@@ -35,8 +35,8 @@ it('previews reusable groups, retains UUIDs, and requires a human review after i
   await mount();await choose('Front desk');expect(latest.bots).toHaveLength(4);await click('Add Front desk to draft');const addresses=latest.bots.map(b=>b.instance_id??b.role);
   await choose('Front desk');expect(button('Add Front desk to draft').disabled).toBe(true);expect(latest.bots.map(b=>b.instance_id??b.role)).toEqual(addresses);
   expect(button('Save team settings').disabled).toBe(true);await run();expect(button('Save team settings').disabled).toBe(true);
-  expect(element.textContent).toContain('all 7 invented cases');expect(element.textContent).toContain('Inbox operations remains unavailable');
-  expect(element.textContent).toContain('It does not confirm service or device acceptance');await checkReview();await click('Save team settings');
+  expect(element.textContent).toContain('Capabilities with these settings');expect(element.textContent).not.toContain('invented cases');expect(element.textContent).toContain('Inbox operations remains unavailable');
+  expect(element.textContent).toContain('Each action checks its required sources and permissions again');await checkReview();await click('Save team settings');
   expect(saved?.setup_review).toEqual((await rehearsalFixture(latest)).setup_review);expect(saved?.configuration.bots.map(b=>b.instance_id??b.role)).toEqual(addresses);
   expect(vi.mocked(teamSetupApi.rehearse)).toHaveBeenCalledOnce();
 });
@@ -48,8 +48,8 @@ it('invalidates review after edits, prerequisite refresh and component restart w
 });
 it('does not overwrite an edit made while an invented rehearsal is returning',async()=>{
   let resolve!:(value:Awaited<ReturnType<typeof rehearsalFixture>>)=>void;vi.mocked(teamSetupApi.rehearse).mockImplementation(()=>new Promise(r=>{resolve=r;}));
-  await mount();await choose('Front desk');await click('Add Front desk to draft');const sent=structuredClone(latest);await click('Run invented rehearsal');await rename('Edited during rehearsal');
-  await act(async()=>resolve(await rehearsalFixture(sent)));expect(latest.bots[0].name).toBe('Edited during rehearsal');expect(approval).toBeNull();expect(element.textContent).not.toContain('Configuration checks passed');
+  await mount();await choose('Front desk');await click('Add Front desk to draft');const sent=structuredClone(latest);await click('Check team settings');await rename('Edited during rehearsal');
+  await act(async()=>resolve(await rehearsalFixture(sent)));expect(latest.bots[0].name).toBe('Edited during rehearsal');expect(approval).toBeNull();expect(element.textContent).not.toContain('Settings checked');
 });
 it('hides setup on an older backend while retaining the ordinary settings form and its unsent fields',async()=>{
   vi.mocked(teamSetupApi.read).mockRejectedValue(new WorkspaceApiError(404));const draft=teamFixture().configuration;draft.bots[0].name='';
@@ -73,7 +73,7 @@ it('requires review for zero attempt limits and explicit source restrictions, re
  await click('Restrict Scribe sources');expect(latest.bots[0].resources?.allowed).toEqual([]);
  const select=[...element.querySelectorAll('label')].find(l=>l.textContent?.includes('Saved intake preparation for Scribe'))!.querySelector('select')!;
  await act(async()=>{select.value=resourcesFixture.resources[0].resource_ref;select.dispatchEvent(new Event('change',{bubbles:true}));});expect(latest.bots[0].resources?.allowed).toEqual([{purpose:'core_preparation',resource_ref:'d'.repeat(64)}]);
- await run();expect(element.textContent).toContain('all 12 invented cases');await checkReview();expect(approval?.review.catalog_version).toBe(4);
+ await run();expect(element.textContent).toContain('Capabilities with these settings');expect(element.textContent).not.toContain('invented cases');await checkReview();expect(approval?.review.catalog_version).toBe(4);
  await click('Remove team attempt limit from draft');expect(latest).not.toHaveProperty('model_work');expect(approval).toBeNull();expect(button('Save team settings').disabled).toBe(true);
  await click('Use inherited source checks for Scribe');expect(latest.bots[0]).not.toHaveProperty('resources');expect(element.textContent).toContain('They do not grant connector access');
 });
@@ -89,7 +89,7 @@ it('rejects an unsaved stale source binding before rehearsal and retains it for 
  const {policySetupFixture,resourcesFixture,usageFixture}=await import('./team-policy-test-fixture');const config=teamFixture().configuration;
  config.bots[0].resources={version:1,allowed:[{purpose:'core_preparation',resource_ref:'f'.repeat(64)}]};
  Object.assign(teamSetupApi,{resources:vi.fn().mockResolvedValue(resourcesFixture),usage:vi.fn().mockResolvedValue(usageFixture)});vi.mocked(teamSetupApi.read).mockResolvedValue(await policySetupFixture());
- await mount(config);await click('Run invented rehearsal');expect(teamSetupApi.rehearse).not.toHaveBeenCalled();expect(element.textContent).toContain('Refresh source choices');
+ await mount(config);await click('Check team settings');expect(teamSetupApi.rehearse).not.toHaveBeenCalled();expect(element.textContent).toContain('Refresh source choices');
  vi.mocked(teamSetupApi.resources).mockRejectedValue(new WorkspaceApiError(503));await click('Refresh setup prerequisites');expect(latest.bots[0].resources?.allowed[0].resource_ref).toBe('f'.repeat(64));expect(element.textContent).toContain('Retained source restrictions remain in place');
 });
 

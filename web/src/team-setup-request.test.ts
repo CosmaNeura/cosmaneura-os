@@ -88,7 +88,7 @@ it('normalizes Python whitespace, defaults and sorted restrictions without addin
 });
 it.each(['unknown-version','unknown-slot','foreign-bot','unknown-deny','duplicate-deny','missing-provider','unknown-field'])('rejects closed malformed preset configuration: %s',kind=>{
   let n=1;const config=applyPreset(teamFixture().configuration,catalogFixture(),'front_desk',()=>teamUuid(n++)) as any;
-  if(kind==='unknown-version')config.presets[1].version=2;if(kind==='unknown-slot')config.presets[1].slots.other='chief';
+  if(kind==='unknown-version')config.presets[1].version=999;if(kind==='unknown-slot')config.presets[1].slots.other='chief';
   if(kind==='foreign-bot')config.presets[1].slots.inbox=teamUuid(300);if(kind==='unknown-deny')config.bots[0].blocked_capabilities=['send_email'];
   if(kind==='duplicate-deny')config.bots[0].blocked_capabilities=['model_answer','model_answer'];if(kind==='missing-provider')config.presets.shift();
   if(kind==='unknown-field')config.bot_team_authority='external';expect(validTeamConfiguration(config,true)).toBe(false);
