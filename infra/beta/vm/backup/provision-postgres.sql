@@ -7,13 +7,27 @@ SELECT (pg_control_system()).system_identifier::text = :'expected_system_identif
        AND current_setting('server_version_num')::int BETWEEN 160000 AND 169999 AS target_ok \gset
 \if :target_ok
 \else
-  \quit 3
+  DO $$ BEGIN RAISE EXCEPTION 'Backup provisioning refused: wrong source cluster or administrator'; END $$;
+\endif
+-- Reserve WAL only after the reviewed runtime's bounded retention is active.
+-- PostgreSQL defaults to -1 (unlimited); provisioning against that profile can
+-- exhaust the VM disk before the first receiver starts.
+SELECT current_setting('wal_level') = 'replica'
+       AND current_setting('archive_mode') = 'off'
+       AND current_setting('max_wal_senders')::int >= 3
+       AND current_setting('max_replication_slots')::int >= 2
+       AND CASE WHEN current_setting('max_slot_wal_keep_size') = '-1' THEN false
+                ELSE pg_size_bytes(current_setting('max_slot_wal_keep_size')) = 4294967296
+           END AS retention_ok \gset
+\if :retention_ok
+\else
+  DO $$ BEGIN RAISE EXCEPTION 'Backup provisioning refused: bounded replication runtime required'; END $$;
 \endif
 SELECT EXISTS(SELECT FROM pg_roles WHERE rolname = 'cosmabot_backup')
        OR EXISTS(SELECT FROM pg_replication_slots WHERE slot_name = 'cosmabot_backup') AS already_exists \gset
 \if :already_exists
   -- Never alter an existing role or recreate/drop a slot and silently claim continuity.
-  \quit 3
+  DO $$ BEGIN RAISE EXCEPTION 'Backup provisioning refused: role or slot already exists'; END $$;
 \endif
 BEGIN;
 CREATE ROLE cosmabot_backup LOGIN REPLICATION NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS;

@@ -54,6 +54,14 @@ directory is inaccessible in that view; systemd supplies the named credentials
 through `LoadCredential`. Application releases and runtime configuration are
 not exposed. Do not broaden host directory permissions to make the service run.
 
+Before running `provision-postgres.sql`, activate the reviewed PostgreSQL backup
+runtime profile. Provisioning refuses the default unlimited slot retention or
+any limit other than 4 GiB before creating a role or reserving WAL. It also
+requires replica WAL, archive mode off, and sufficient replication capacity.
+Refusals raise SQL errors, so `ON_ERROR_STOP` returns a nonzero process exit.
+Start the receiver promptly after installing its protected password; the cap
+limits disk use but an idle slot can still lose continuity when WAL exceeds it.
+
 ## PostgreSQL 16 restore settings
 
 `restore.py` reads the fetched cluster's `pg_controldata` before rendering a
