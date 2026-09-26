@@ -1,6 +1,13 @@
 # Operational native build inputs
 
 The existing Scribe-based composers now support an explicit operational identity.
+Optional account connections do not block native capture packaging. Omit both
+Gmail client/callback arguments until that connector is configured; native Google
+navigation then remains unavailable and the account panel explains the missing
+connection. Partial or malformed settings are rejected. The full feature profile,
+capture configuration, service authorization and account-consent requirements
+remain unchanged. A successful build does not qualify an unconfigured connector
+or complete operational Beta acceptance.
 Use --native-identity-config with a public JSON document containing exactly:
 
 ```json

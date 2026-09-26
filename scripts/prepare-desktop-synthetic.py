@@ -97,8 +97,6 @@ def main():
     staging = feature_manifest is not None and feature_manifest["profile"] == _beta.NATIVE_STAGING_PROFILE
     if staging and (not operational or data_mode != "synthetic"):
         parser.error("First-owner staging requires the operational native identity and synthetic data.")
-    if hosted and "VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED" in feature_manifest["enabledFlags"] and not args.google_connection_client_id:
-        parser.error("The complete beta profile requires configured Gmail navigation.")
     if staging and any((args.google_connection_client_id, args.google_connection_callback_uri,
                         args.microsoft_connection_tenant_id, args.microsoft_connection_client_id,
                         args.microsoft_connection_callback_uri, args.scheduling_google_client_id,

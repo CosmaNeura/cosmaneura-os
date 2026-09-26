@@ -70,13 +70,17 @@ class NativeDataMode(unittest.TestCase):
         path.write_text(json.dumps(values["identity"]))
         return web, path
 
-    def test_only_explicit_first_owner_profile_admits_missing_google_configuration(self):
+    def test_optional_gmail_configuration_does_not_block_either_native_profile(self):
         for client in ("desktop", "apple"):
             for staging in (True, False):
                 with self.subTest(client=client, staging=staging):
                     profile = "first-owner-staging-v1" if staging else "operational-beta-v1"
                     web, identity = self.inputs(client, "synthetic", profile)
-                    expected = PreflightComplete if staging else (ValueError, SystemExit)
+                    manifest = json.loads((web / "cosmas-beta-features.json").read_text())
+                    self.assertEqual(manifest["profile"], profile)
+                    self.assertEqual(manifest["captureMode"], "disabled" if staging else
+                                     "ios_native" if client == "apple" else "browser_microphone")
+                    self.assertEqual("VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED" in manifest["enabledFlags"], not staging)
                     if client == "desktop":
                         argv = ["prepare-desktop-synthetic.py", "--scribe-source", str(self.root / "unread-source"),
                             "--web-dist", str(web), "--output", str(self.root / "never-created"),
@@ -87,11 +91,11 @@ class NativeDataMode(unittest.TestCase):
                             argv += ["--cosmaneura-web-origin", "https://core.example.invalid",
                                 "--capture-upload-origin", "https://uploads.example.invalid", "--microphone-capture"]
                         with patch.object(sys, "argv", argv), patch.object(desktop._navigation, "validate_scheduling", side_effect=PreflightComplete):
-                            with self.assertRaises(expected):
+                            with self.assertRaises(PreflightComplete):
                                 desktop.main()
                     else:
                         with patch.object(apple, "workspace_policy_html", side_effect=PreflightComplete):
-                            with self.assertRaises(expected):
+                            with self.assertRaises(PreflightComplete):
                                 apple.prepare(self.root / "unread-source", web, self.root / "never-created",
                                     native_auth_clerk_archive=self.root / "unread-archive", renewable_native_capture=True,
                                     native_renderer_recovery=True, hosted_workspace=True, workspace_api_origin=self.identity["apiOrigin"],
@@ -99,6 +103,16 @@ class NativeDataMode(unittest.TestCase):
                                     cosmaneura_web_origin="" if staging else "https://core.example.invalid",
                                     native_identity_config=identity, data_mode="synthetic")
                     self.assertFalse((self.root / "never-created").exists())
+
+    def test_gmail_configuration_remains_closed_when_missing_or_partial(self):
+        for target in (desktop, apple):
+            with self.subTest(composer=target.__name__):
+                target._navigation.validate_google("", "")
+                for client, callback in (("invented.apps.googleusercontent.com", ""),
+                                         ("", "https://api.example.invalid/connections/google/callback"),
+                                         ("invented.apps.googleusercontent.com", "https://api.example.invalid/connections/scheduling/google/callback")):
+                    with self.assertRaises(ValueError):
+                        target._navigation.validate_google(client, callback)
 
     def invoke(self, client, web, identity, selected):
         target = desktop if client == "desktop" else apple
