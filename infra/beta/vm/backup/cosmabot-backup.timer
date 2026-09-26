@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily CosmaBot full physical backup, no deletion
+
+[Timer]
+OnCalendar=*-*-* 03:00:00 UTC
+RandomizedDelaySec=300
+Persistent=true
+Unit=cosmabot-backup-job@backup.service
+
+[Install]
+WantedBy=timers.target

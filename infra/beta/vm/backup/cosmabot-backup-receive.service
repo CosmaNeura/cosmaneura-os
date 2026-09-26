@@ -1,0 +1,52 @@
+[Unit]
+Description=CosmaBot dedicated PostgreSQL WAL receiver
+After=network-online.target cosmabot-staging.service
+Wants=network-online.target
+Requires=cosmabot-staging.service
+StartLimitIntervalSec=300
+StartLimitBurst=5
+
+[Service]
+Type=simple
+User=cosmabot-backup
+Group=cosmabot-backup
+Environment=COSMABOT_BACKUP_ACTION=receive
+LoadCredential=azure.pem:/etc/cosmabot/backup/secrets/writer.pem
+LoadCredential=pgpass:/etc/cosmabot/backup/secrets/pgpass
+ExecStart=/usr/bin/python3 -I /opt/cosmabot/backup/backup.py receive
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=30
+KillMode=control-group
+StateDirectory=cosmabot-backup
+StateDirectoryMode=0700
+LogsDirectory=cosmabot-backup
+LogsDirectoryMode=0700
+StandardOutput=append:/var/log/cosmabot-backup/receive.log
+StandardError=append:/var/log/cosmabot-backup/receive.log
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+IPAddressDeny=127.0.0.0/8 ::1 169.254.0.0/16 fe80::/10
+# The host stub resolver is loopback. Use only the root-owned Azure DNS file in this unit.
+BindReadOnlyPaths=/etc/cosmabot/backup/resolv.conf:/etc/resolv.conf
+InaccessiblePaths=/var/lib/cosmabot /etc/cosmabot/runtime /run/docker.sock /var/run/docker.sock -/var/lib/waagent
+MemoryMax=768M
+CPUQuota=25%
+TasksMax=64
+
+[Install]
+WantedBy=multi-user.target

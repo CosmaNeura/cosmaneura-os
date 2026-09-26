@@ -1,0 +1,11 @@
+[Unit]
+Description=Close a PostgreSQL WAL segment each minute
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=1
+Unit=cosmabot-backup-job@switch.service
+
+[Install]
+WantedBy=timers.target
