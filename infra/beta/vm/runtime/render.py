@@ -38,6 +38,7 @@ NETWORKS = {
     "egress": ("172.30.241.0/24", "br-cm-egress", False),
     "frontend": ("172.30.242.0/24", "br-cm-front", True),
 }
+POSTGRES_BACKUP = {"mode": "wal-g-host-v1", "host_address": "172.30.240.1/32"}
 
 
 def checked_path(path: Path) -> Path:
@@ -54,8 +55,10 @@ def checked_path(path: Path) -> Path:
 def validate_manifest(value: dict) -> dict:
     if (
         not isinstance(value, dict)
+        or type(value.get("version")) is not int
+        or value["version"] not in {1, 2}
         or set(value)
-        != {
+        != ({
             "version",
             "release_id",
             "source_commit",
@@ -65,11 +68,11 @@ def validate_manifest(value: dict) -> dict:
             "runtime",
             "tls_sha256",
             "image_review_reference",
-        }
-        or type(value["version"]) is not int
-        or value["version"] != 1
+        } | ({"postgres_backup"} if value["version"] == 2 else set()))
     ):
         raise Refused("manifest_shape")
+    if value["version"] == 2 and value["postgres_backup"] != POSTGRES_BACKUP:
+        raise Refused("exact_host_backup_profile_required")
     if not re.fullmatch(r"[a-z][a-z0-9-]{2,47}", value["release_id"]):
         raise Refused("release_id")
     if not re.fullmatch(r"[0-9a-f]{40}", value["source_commit"]):
@@ -450,6 +453,26 @@ hostssl cosmas_os cosmas 172.30.240.12/32 scram-sha-256
 host all all 0.0.0.0/0 reject
 host all all ::/0 reject
 """
+
+
+def postgres_files(value: dict) -> tuple[str, str]:
+    if value["version"] == 1:
+        return POSTGRES, PG_HBA
+    settings = POSTGRES + """wal_level = replica
+archive_mode = off
+max_wal_senders = 10
+max_replication_slots = 10
+max_slot_wal_keep_size = '4096MB'
+"""
+    # Only the dedicated host account may use these TLS/SCRAM connections.
+    # Preserve the existing app/admin rules and both terminal rejects.
+    reject = "host all all 0.0.0.0/0 reject\n"
+    hba = PG_HBA.replace(reject, """hostssl postgres cosmabot_backup 172.30.240.1/32 scram-sha-256
+hostssl replication cosmabot_backup 172.30.240.1/32 scram-sha-256
+""" + reject)
+    return settings, hba
+
+
 REDIS = """bind 0.0.0.0
 protected-mode yes
 port 0
@@ -502,14 +525,15 @@ def render(value: dict, protected: Path, output: Path, data: Path) -> None:
         raise Refused("new_release_directory_required")
     trust = validate_private_files(value, protected)
     document = compose(value, output, protected, data)
+    postgres, hba = postgres_files(value)
     files = {name: (HERE / name).read_bytes() for name in SCRIPT_NAMES}
     files.update(
         {
             "compose.json": (json.dumps(document, indent=2) + "\n").encode(),
             "runtime.json": (json.dumps(value["runtime"], indent=2) + "\n").encode(),
             "system-ca.pem": trust,
-            "postgresql.conf": POSTGRES.encode(),
-            "pg_hba.conf": PG_HBA.encode(),
+            "postgresql.conf": postgres.encode(),
+            "pg_hba.conf": hba.encode(),
             "redis.conf": REDIS.encode(),
             "Caddyfile": caddy(value).encode(),
         }

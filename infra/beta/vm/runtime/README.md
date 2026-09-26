@@ -7,7 +7,7 @@ change DNS, run migrations or activate Scribe. The source and local checks are
 preparation; no VM runtime, restart, identity isolation or restore is qualified.
 
 Use the matching application's Python dependencies to run `render.py`. Its
-required manifest is version 1 and contains exactly:
+version 1 manifest contains exactly:
 
 - `release_id`, a new lowercase identifier; `source_commit`, its reviewed source
   SHA; `image_review_reference`, the reviewed image/build/config evidence.
@@ -40,6 +40,27 @@ required manifest is version 1 and contains exactly:
   The CA must include its subject key identifier and certificate-signing key
   usage; server certificates must include authority key identifiers. Keep these
   extensions when renewing certificates with existing keys.
+
+For the dedicated host WAL-G backup, use manifest version 2 with those same
+fields plus exactly:
+
+```json
+"postgres_backup": {"mode": "wal-g-host-v1", "host_address": "172.30.240.1/32"}
+```
+
+Version 1 preserves the existing PostgreSQL configuration byte for byte.
+Version 2 selects replica WAL, archive mode off, ten senders/slots and a 4 GiB
+slot-retention cap. It adds only two TLS/SCRAM rules for `cosmabot_backup` from
+the host bridge address, to the `postgres` database and physical replication.
+Existing app/admin rules, default rejects and unpublished database ports remain.
+Verify the actual host route/source address before deploying this profile;
+other hosts or subnets require a reviewed change. No backup credential enters
+the app/container environment, and rendering does not create the role or slot.
+Provision the separate backup identity, protected host credentials, hostname
+resolution and receiver through the backup deployment path, then prove a full
+backup and isolated restore. HBA and the retention cap are reloadable; compare
+all current settings before deciding whether a database restart is required.
+Do not rewrite an existing immutable release or its pending deployment request.
 
 The prepare, API and worker entrypoints set the fixed
 `SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt` in their clean process

@@ -248,6 +248,72 @@ def test_only_proxy_adds_capability_required_by_official_caddy(installed):
     assert "https_port 8443" in vm.caddy(config)
 
 
+@pytest.mark.parametrize("version", [1, 2])
+def test_backup_profile_preserves_app_access_and_binds_rendered_files(installed, version):
+    config, root, output = installed
+    config["version"] = version
+    if version == 2:
+        config["postgres_backup"] = {
+            "mode": "wal-g-host-v1", "host_address": "172.30.240.1/32"
+        }
+    vm.render(config, root, output, Path("/var/lib/cosmabot"))
+    postgres = (output / "postgresql.conf").read_bytes()
+    hba = (output / "pg_hba.conf").read_bytes()
+    receipt = json.loads((output / "RENDER.json").read_text())
+    for name, raw in (("postgresql.conf", postgres), ("pg_hba.conf", hba)):
+        assert receipt["files"][name] == hashlib.sha256(raw).hexdigest()
+    if version == 1:
+        # Exact configuration of existing releases before backup support.
+        assert hashlib.sha256(postgres).hexdigest() == (
+            "1fb92a6eecb607dbc63553b448b2e3af1bb200b53c65a872d6244d5bb9bb3dca"
+        )
+        assert hashlib.sha256(hba).hexdigest() == (
+            "a7d00896c8e3a97fd3479928721728c167ce722ab6f88d5907896b0c64f97193"
+        )
+    else:
+        lines = hba.decode().splitlines()
+        backup_rules = [line for line in lines if "cosmabot_backup" in line]
+        assert {tuple(line.split()) for line in backup_rules} == {
+            ("hostssl", database, "cosmabot_backup", "172.30.240.1/32", "scram-sha-256")
+            for database in ("postgres", "replication")
+        }
+        assert "\n".join(line for line in lines if line not in backup_rules) + "\n" == vm.PG_HBA
+        assert lines[-2:] == ["host all all 0.0.0.0/0 reject", "host all all ::/0 reject"]
+        assert "max_slot_wal_keep_size = '4096MB'" in postgres.decode()
+    document = json.loads((output / "compose.json").read_text())
+    assert "ports" not in document["services"]["postgres"]
+    assert "postgres_backup" not in json.loads((output / "runtime.json").read_text())
+    assert receipt["manifest_sha256"] == hashlib.sha256(
+        json.dumps(config, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+@pytest.mark.parametrize("profile", [
+    None, True, {}, "wal-g-host-v1",
+    {"mode": "wal-g-host-v1", "host_address": "172.30.240.0/24"},
+    {"mode": "wal-g-host-v1", "host_address": "172.30.240.10/32"},
+    {"mode": "wal-g-host-v1", "host_address": "172.30.240.1/32", "password": "invented"},
+    {"mode": "other", "host_address": "172.30.240.1/32"},
+])
+def test_backup_profile_rejects_implicit_or_expanded_access(installed, profile):
+    config, root, output = installed
+    config.update(version=2, postgres_backup=profile)
+    with pytest.raises(vm.Refused, match="exact_host_backup_profile"):
+        vm.render(config, root, output, Path("/var/lib/cosmabot"))
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("version, include_profile", [(1, True), (2, False), (True, False)])
+def test_backup_profile_requires_explicit_manifest_version(installed, version, include_profile):
+    config, root, output = installed
+    config["version"] = version
+    if include_profile:
+        config["postgres_backup"] = dict(vm.POSTGRES_BACKUP)
+    with pytest.raises(vm.Refused, match="manifest_shape"):
+        vm.render(config, root, output, Path("/var/lib/cosmabot"))
+    assert not output.exists()
+
+
 @pytest.mark.parametrize(
     "change",
     [
