@@ -5,9 +5,15 @@ import {basename,join,resolve} from 'node:path';
 export const CAPTURE_HELPERS = ['ScribeDesktopAudioHelper','ScribeProviderPresentationHelper'];
 const failure = () => new Error('Desktop recording installation is unavailable');
 export async function verifyDesktopCapturePackage(directory, manifest) {
-  const expected = CAPTURE_HELPERS.flatMap(name => [`${name}.app/Contents/MacOS/${name}`,`${name}.app/Contents/Info.plist`]).sort();
+  const required = CAPTURE_HELPERS.flatMap(name => [`${name}.app/Contents/MacOS/${name}`,`${name}.app/Contents/Info.plist`]);
+  const allowed = new Set([...required,...CAPTURE_HELPERS.map(name => `${name}.app/Contents/_CodeSignature/CodeResources`)]);
   if (!manifest || Object.keys(manifest).sort().join(',') !== 'files,version' || manifest.version !== 1 ||
-      !manifest.files || Object.keys(manifest.files).sort().join(',') !== expected.join(',')) throw failure();
+      !manifest.files || typeof manifest.files !== 'object' || Array.isArray(manifest.files) ||
+      !required.every(name => Object.hasOwn(manifest.files,name)) ||
+      Object.keys(manifest.files).some(name => !allowed.has(name))) throw failure();
+  // Apple adds a sealed-resource file when signing each helper bundle. Its exact
+  // bytes belong in the ASAR-protected manifest just like the executable.
+  const expected = Object.keys(manifest.files).sort();
   const observed=[];
   let visited=0;
   async function inspect(folder) {

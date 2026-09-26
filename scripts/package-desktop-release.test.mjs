@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {createHash} from 'node:crypto';
-import {mkdtemp,mkdir,readFile,realpath,writeFile} from 'node:fs/promises';
+import {mkdtemp,mkdir,readFile,realpath,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile} from './package-desktop-release.mjs';
@@ -28,10 +28,12 @@ test('first-owner release preserves operational identity and refuses native capt
     assert.throws(()=>validateOperationalReleaseProfile({...config,...change},profile,info));
 });
 
-test('desktop recording helpers remain executable outside ASAR with exact matching manifests',async()=>{
+for(const signed of [false,true]) test(`desktop recording helpers preserve ${signed?'signed':'unsigned'} manifests outside ASAR`,async t=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-capture-asar-'))),source=join(root,'input');
+  t.after(()=>rm(root,{recursive:true,force:true}));
   const files={};
-  for(const name of CAPTURE_HELPERS)for(const [path,value] of [[`Contents/MacOS/${name}`,'invented binary'],['Contents/Info.plist','invented config']]){
+  for(const name of CAPTURE_HELPERS)for(const [path,value] of [[`Contents/MacOS/${name}`,'invented binary'],['Contents/Info.plist','invented config'],
+    ...(signed?[['Contents/_CodeSignature/CodeResources','invented sealed resources']]:[])]){
     const relative=`${name}.app/${path}`;
     await mkdir(join(source,'native-capture',relative,'..'),{recursive:true});
     await writeFile(join(source,'native-capture',relative),value,{mode:0o755});
@@ -51,8 +53,19 @@ test('desktop recording helpers remain executable outside ASAR with exact matchi
   const expected=await inventory(source),archive=join(root,'app.asar');
   await tools.asar.createPackageWithOptions(source,archive,{smartUnpack:false,
     unpackDir:'{native-auth/CosmasDesktopAuth.app,native-capture/ScribeDesktopAudioHelper.app,native-capture/ScribeProviderPresentationHelper.app}'});
-  const checked=await verifyArchive(tools.asar,archive,expected);assert.equal(checked.unpackedFiles,6);assert.equal(checked.packedFiles,3);
-  await verifyDesktopCapturePackage(join(archive+'.unpacked','native-capture'),manifest);
+  const checked=await verifyArchive(tools.asar,archive,expected);assert.equal(checked.unpackedFiles,signed?8:6);assert.equal(checked.packedFiles,3);
+  const native=join(archive+'.unpacked','native-capture');
+  await verifyDesktopCapturePackage(native,manifest);
+  if(signed){
+    const relative=`${CAPTURE_HELPERS[0]}.app/Contents/_CodeSignature/CodeResources`,path=join(native,relative);
+    await writeFile(path,'changed sealed resources');
+    await assert.rejects(verifyArchive(tools.asar,archive,expected));
+    await assert.rejects(verifyDesktopCapturePackage(native,manifest));
+    await writeFile(path,'invented sealed resources');
+    await assert.rejects(verifyDesktopCapturePackage(native,{version:1,files:{...files,[`${CAPTURE_HELPERS[0]}.app/Contents/_CodeSignature/unexpected`]:files[relative]}}));
+    const missing={...files};delete missing[`${CAPTURE_HELPERS[0]}.app/Contents/MacOS/${CAPTURE_HELPERS[0]}`];
+    await assert.rejects(verifyDesktopCapturePackage(native,{version:1,files:missing}));
+  }
 });
 
 test('real ASAR preserves executable custody and catches changed packed and unpacked bytes',async()=>{
