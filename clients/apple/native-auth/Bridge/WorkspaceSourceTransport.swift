@@ -17,7 +17,7 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
         self.origin = origin
     }
 
-    func send(_ operation: ProviderNativeRequest, token: String) async throws -> ProviderNativeReply {
+    func makeRequest(_ operation: ProviderNativeRequest, token: String) throws -> URLRequest {
         try Task.checkCancellation()
         guard operation.action == .sourceStart,
               let value = try JSONSerialization.jsonObject(with: operation.body) as? [String: Any],
@@ -32,13 +32,6 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
               token.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 33 && $0.value < 127 }) else {
             throw ProviderNativeError.invalidRequest
         }
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.httpCookieStorage = nil; configuration.httpShouldSetCookies = false
-        configuration.urlCredentialStorage = nil; configuration.urlCache = nil
-        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        configuration.timeoutIntervalForRequest = 40; configuration.timeoutIntervalForResource = 45
-        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
-        defer { session.invalidateAndCancel() }
         var request = URLRequest(url: origin.appendingPathComponent("workspaces/" + workspace + "/capture/operations"))
         request.httpMethod = "POST"
         request.httpBody = try JSONSerialization.data(withJSONObject: ["session_id": sessionID,
@@ -50,8 +43,22 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
         #endif
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("1", forHTTPHeaderField: "X-Cosmas-Workspace-Protocol")
+        request.setValue("2", forHTTPHeaderField: "X-Cosmas-Draft-Recovery")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
+        return request
+    }
+
+    func send(_ operation: ProviderNativeRequest, token: String) async throws -> ProviderNativeReply {
+        let request = try makeRequest(operation, token: token)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.httpCookieStorage = nil; configuration.httpShouldSetCookies = false
+        configuration.urlCredentialStorage = nil; configuration.urlCache = nil
+        configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
+        configuration.timeoutIntervalForRequest = 40; configuration.timeoutIntervalForResource = 45
+        let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
         do {
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse, http.url == request.url,
