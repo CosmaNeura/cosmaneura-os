@@ -131,13 +131,14 @@ export async function verifyArchive(asar, archive, expected) {
     packedFiles:Object.values(entries).filter(e=>!e.unpacked).length,unpackedFiles:Object.keys(unpacked).length};
 }
 
-/** Exact Scribe fuse policy; explicitly disable its automatic ad-hoc re-sign step. */
+/** Retain Scribe's capability restrictions and use the supplied Electron snapshot. */
 export function fuseConfiguration(fuses) {
   const o=fuses.FuseV1Options;
   return {version:fuses.FuseVersion.V1,resetAdHocDarwinSignature:false,strictlyRequireAllFuses:true,
     [o.RunAsNode]:false,[o.EnableCookieEncryption]:true,[o.EnableNodeOptionsEnvironmentVariable]:false,
     [o.EnableNodeCliInspectArguments]:false,[o.EnableEmbeddedAsarIntegrityValidation]:true,
-    [o.OnlyLoadAppFromAsar]:true,[o.LoadBrowserProcessSpecificV8Snapshot]:true,
+    // Stock Electron 43.4.1 ships the shared V8 snapshot, not a browser-only variant.
+    [o.OnlyLoadAppFromAsar]:true,[o.LoadBrowserProcessSpecificV8Snapshot]:false,
     [o.GrantFileProtocolExtraPrivileges]:false,[o.WasmTrapHandlers]:true};
 }
 
