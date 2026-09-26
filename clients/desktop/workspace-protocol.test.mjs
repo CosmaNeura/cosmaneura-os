@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {createServer,request as httpRequest} from 'node:http';
+import {once} from 'node:events';
 import {connectorApiRoute} from './connector-api-routes.mjs';
+import {fetchLocalAuthenticatedWorkspace} from './local-auth-http.mjs';
 import {proxyAuthenticatedWorkspaceRequest as proxy,permittedAuthenticatedApiPath} from './workspace-auth-proxy.mjs';
 const id='00000000-0000-4000-8000-000000000084',path='/practice-access/compatibility';
 const ready={phase:'ready',revision:id,identity:{userId:'invented',sessionId:'invented',organizationId:'invented'}};
@@ -23,4 +26,36 @@ test('rejects unsupported declarations before credentials or transport and withh
   for(const value of ['2','1, 1',''])assert.equal((await proxy(request(value),{getState:()=>assert.fail()},()=>assert.fail())).status,426);
   for(const value of [null,'2','1, 1'])assert.equal((await proxy(request(),auth,async()=>response(value))).status,426);
   assert.equal((await proxy(request(),auth,async()=>response('1',4097))).status,503);
+});
+
+test('actual HTTP metadata survives the desktop transport and proxy without admitting a missing or changed protocol',async()=>{
+  let protocol='1';
+  const server=createServer((incoming,outgoing)=>{
+    assert.equal(incoming.headers['x-cosmas-workspace-protocol'],'1');
+    assert.equal(incoming.headers.authorization,'Bearer invented.local.token');
+    outgoing.writeHead(200,{'Content-Type':'application/json','Cache-Control':'no-store',
+      'Set-Cookie':'invented=discarded',...(protocol===null?{}:{'X-Cosmas-Workspace-Protocol':protocol})});
+    outgoing.end('{"ok":true}');
+  });
+  server.listen(0,'127.0.0.1');await once(server,'listening');
+  const port=server.address().port;
+  const transport=(url,options)=>fetchLocalAuthenticatedWorkspace(url,options,(address,callback)=>{
+    assert.equal(address.host,'127.0.0.1');assert.equal(address.port,8046);
+    return httpRequest({...address,port},callback);
+  });
+  try{
+    // Exercise both the strict compatibility response and ordinary workspace reads.
+    for(const target of [path,'/workspaces']){
+      const result=await proxy(request('1',target),auth,transport);
+      assert.equal(result.status,200);
+      assert.equal(result.headers.get('X-Cosmas-Workspace-Protocol'),'1');
+      assert.equal(result.headers.get('Set-Cookie'),null);
+      assert.deepEqual(await result.json(),{ok:true});
+    }
+    for(protocol of [null,'2',['1','1']]){
+      const result=await proxy(request(),auth,transport);
+      assert.equal(result.status,426);
+      assert.equal(result.headers.get('X-Cosmas-Workspace-Protocol'),null);
+    }
+  }finally{server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
 });
