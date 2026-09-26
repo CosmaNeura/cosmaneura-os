@@ -38,9 +38,9 @@ def connected(monkeypatch):
         def get_signing_keys(self, **_):
             return [SimpleNamespace(key_id="w84", key=private.public_key())]
 
-    verifier = ClerkTokenVerifier(config, jwks_client=Keys(), start_background_refresh=False)
     monkeypatch.setattr(api, "settings", config)
-    monkeypatch.setattr(api, "_clerk_verifier", lambda: verifier)
+    monkeypatch.setattr(api, "_clerk_verifier", lambda native_origin=None: ClerkTokenVerifier(
+        config, jwks_client=Keys(), start_background_refresh=False, native_origin=native_origin))
     opened = []
 
     class NoDatabase:
@@ -80,11 +80,13 @@ def connected(monkeypatch):
         dispatched.append(await request.body())
         return {"observed": True}
 
-    def headers(**changes):
+    def headers(*, omit=(), **changes):
         now = int(time.time())
         claims = {"iss": config.clerk_issuer, "sub": "user_w84invited", "org_id": config.clerk_organization_id,
                   "aud": config.clerk_audience, "azp": config.authorized_parties[0],
                   "sid": "sess_w84invented", "iat": now, "nbf": now, "exp": now + 120, **changes}
+        for claim in omit:
+            claims.pop(claim, None)
         return {"Authorization": "Bearer " + jwt.encode(claims, private, algorithm="RS256", headers={"kid": "w84"}),
                 "Origin": config.authorized_parties[0], "X-Cosmas-Practice-Access-Contract": "1",
                 "X-Cosmas-Draft-Recovery": "2", "X-Cosmas-Workspace-Protocol": "1"}
@@ -106,6 +108,27 @@ def test_actual_signed_handshake_for_invited_account_without_database_io(connect
     assert c.opened == [True]  # The context was opened; no method is available for database I/O.
     if destination := os.environ.get("W84_HANDSHAKE_RESULT"):
         Path(destination).write_text(json.dumps(result.json(), indent=2) + "\n")
+
+
+@pytest.mark.parametrize("origin", ["app://cosmas", "capacitor://localhost"])
+def test_actual_native_handshake_accepts_session_without_azp_only_for_enabled_origin(connected, origin):
+    c = connected
+    native_headers = {**c.headers(omit=("azp",)), "Origin": origin}
+    assert c.client.get("/practice-access/compatibility", headers=native_headers).status_code == 401
+    c.config.workspace_desktop_hosted_transport_enabled = origin == "app://cosmas"
+    c.config.workspace_apple_hosted_transport_enabled = origin == "capacitor://localhost"
+    c.config.cors_allowed_origins += "," + origin
+    c.config.clerk_authorized_parties += "," + origin
+    result = c.client.get("/practice-access/compatibility", headers=native_headers)
+    assert result.status_code == 200
+    assert result.json()["workspace_protocol"] == 1
+    for invalid in [{**native_headers, "Origin": c.config.authorized_parties[0]},
+        {**native_headers, "Origin": "null"},
+        {key: value for key, value in native_headers.items() if key != "Origin"},
+        {**c.headers(azp=c.config.authorized_parties[0]), "Origin": origin}]:
+        assert c.client.get("/practice-access/compatibility", headers=invalid).status_code == 401
+    duplicate = [*native_headers.items(), ("Origin", origin)]
+    assert c.client.get("/practice-access/compatibility", headers=duplicate).status_code == 401
 
 
 def test_handshake_retains_authentication_and_closed_request_contract(connected):

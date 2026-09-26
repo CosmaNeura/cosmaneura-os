@@ -160,6 +160,7 @@ def router(
                     def authenticate():
                         available()
                         value = identity_dependency(
+                            request=request,
                             session=session,
                             authorization=authorization,
                             x_box_id=None,

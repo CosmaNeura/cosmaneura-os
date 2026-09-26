@@ -32,6 +32,7 @@ from cosmas_os.api.auth import (
     ClerkTokenVerifier,
     RequestIdentity,
     authenticate_request,
+    native_clerk_origin,
 )
 from cosmas_os.api.capture_schemas import (
     CaptureAdmissionRequest,
@@ -227,12 +228,18 @@ class IdentitySummaryResponse(BaseModel):
     is_owner: bool
 
 
-@lru_cache(maxsize=1)
-def _clerk_verifier() -> ClerkTokenVerifier:
-    return ClerkTokenVerifier(settings)
+@lru_cache(maxsize=3)
+def _clerk_verifier(native_origin: str | None = None) -> ClerkTokenVerifier:
+    return ClerkTokenVerifier(settings, native_origin=native_origin)
+
+
+def _request_clerk_verifier(origins: list[str]) -> ClerkTokenVerifier:
+    native_origin = native_clerk_origin(settings, origins)
+    return _clerk_verifier(native_origin) if native_origin else _clerk_verifier()
 
 
 def _identity(
+    request: Request,
     session: Session = Depends(get_session),
     authorization: str | None = Header(default=None),
     x_box_id: str | None = Header(default=None),
@@ -240,7 +247,7 @@ def _identity(
 ) -> RequestIdentity:
     try:
         check_capture_deadline()
-        verifier = _clerk_verifier() if settings.auth_mode == "clerk_jwt" else None
+        verifier = _request_clerk_verifier(request.headers.getlist("origin")) if settings.auth_mode == "clerk_jwt" else None
         check_capture_deadline()
         result = authenticate_request(
             session,
@@ -376,7 +383,7 @@ async def _prepare_workspace_appointment(request, workspace_id, session, identit
     body = await read_capture_request(request, CurrentAppointmentRequest if current else AppointmentPrepare)
     def reauthenticate():
         _appointment_gate()
-        if _identity(session=session, authorization=request.headers.get("authorization"),
+        if _identity(request=request, session=session, authorization=request.headers.get("authorization"),
                      x_box_id=None, x_actor_principal_id=None) != identity:
             raise ws.WorkspaceError("scheduling_access_unavailable", 403)
     context = dict(box=identity.box_id, owner=identity.principal_id, workspace_id=str(workspace_id),
@@ -426,7 +433,7 @@ async def decide_workspace_appointment(request: Request, workspace_id: UUID, tic
     def decide():
         # A slow request body must not extend the lifetime of its signed session.
         _appointment_gate()
-        if _identity(session=session, authorization=request.headers.get("authorization"),
+        if _identity(request=request, session=session, authorization=request.headers.get("authorization"),
                      x_box_id=None, x_actor_principal_id=None) != identity:
             raise ws.WorkspaceError("scheduling_access_unavailable", 403)
         return appointment_work.decide(session, identity.box_id, identity.principal_id,
@@ -449,7 +456,7 @@ async def execute_workspace_appointment(request: Request, workspace_id: UUID, ti
     def reauthenticate():
         _appointment_gate()
         session.expire_all()
-        if _identity(session=session, authorization=request.headers.get("authorization"),
+        if _identity(request=request, session=session, authorization=request.headers.get("authorization"),
                      x_box_id=None, x_actor_principal_id=None) != identity:
             raise ws.WorkspaceError("scheduling_access_unavailable", 403)
     return await run_in_threadpool(appointment_execution.run, session,
@@ -473,7 +480,7 @@ async def read_workspace_scheduling(request: Request, workspace_id: UUID,
     authorization = request.headers["authorization"]
 
     def reauthenticate():
-        if _identity(session=session, authorization=authorization, x_box_id=None,
+        if _identity(request=request, session=session, authorization=authorization, x_box_id=None,
                      x_actor_principal_id=None) != identity:
             raise ws.WorkspaceError("scheduling_access_unavailable", 403)
 
@@ -529,7 +536,7 @@ async def _execute_workspace_capture(request: Request, workspace_id: UUID, sessi
             _prep_gate()
             if finalize_prep is not None:
                 _prep_work_gate()
-        current = _identity(session=session, authorization=raw_authorization, x_box_id=None,
+        current = _identity(request=request, session=session, authorization=raw_authorization, x_box_id=None,
                             x_actor_principal_id=None)
         if current != identity:
             raise ws.WorkspaceError("capture_access_unavailable", 403)
@@ -588,7 +595,7 @@ def _refresh_prep_work_identity(request, session, identity):
     _prep_work_gate()
     session.expire_all()
     if (identity.auth_mode != "clerk_jwt" or identity.external_identity_id is None
-        or _identity(session=session, authorization=request.headers.get("authorization"),
+        or _identity(request=request, session=session, authorization=request.headers.get("authorization"),
             x_box_id=None, x_actor_principal_id=None) != identity):
         raise ws.WorkspaceError("capture_access_unavailable", 403)
 
@@ -800,7 +807,7 @@ def read_team_usage(request: Request, session: Session = Depends(get_session),
 def _refresh_team_identity(request, session, identity):
     _workspace_gate(Response(), request)
     session.expire_all()
-    if _identity(session=session, authorization=request.headers.get("authorization"),
+    if _identity(request=request, session=session, authorization=request.headers.get("authorization"),
         x_box_id=request.headers.get("x-box-id"), x_actor_principal_id=request.headers.get("x-actor-principal-id")) != identity:
         raise ws.WorkspaceError("workspace_access_denied", 403)
 
@@ -892,7 +899,7 @@ async def save_routine(request: Request, bot: BotAddress, session: Session = Dep
     body = await read_capture_request(request, RoutineSave)
     def save_current():
         _routine_gate()
-        if _identity(session=session, authorization=request.headers.get("authorization"),
+        if _identity(request=request, session=session, authorization=request.headers.get("authorization"),
                      x_box_id=None, x_actor_principal_id=None) != identity:
             raise ws.WorkspaceError("routine_access_unavailable", 403)
         return routines.save(session, identity.box_id, identity.principal_id, bot,
@@ -1555,7 +1562,7 @@ def _vendor_event_routes(request: Request):
 
 
 def _vendor_reauthenticate(request, session, identity):
-    current = _identity(session=session, authorization=request.headers.get("authorization"),
+    current = _identity(request=request, session=session, authorization=request.headers.get("authorization"),
         x_box_id=request.headers.get("x-box-id"), x_actor_principal_id=request.headers.get("x-actor-principal-id"))
     if current != identity:
         raise ws.WorkspaceError("vendor_work_unavailable", 403)
@@ -1633,7 +1640,7 @@ def _finance_event_routes(request: Request):
 
 
 def _finance_reauthenticate(request, session, identity):
-    current = _identity(session=session, authorization=request.headers.get("authorization"),
+    current = _identity(request=request, session=session, authorization=request.headers.get("authorization"),
         x_box_id=request.headers.get("x-box-id"), x_actor_principal_id=request.headers.get("x-actor-principal-id"))
     if current != identity:
         raise ws.WorkspaceError("finance_work_unavailable", 403)
@@ -1670,7 +1677,7 @@ def _membership_policy():
 
 
 def _membership_reauthenticate(request, session, identity):
-    current = _identity(session=session, authorization=request.headers.get("authorization"),
+    current = _identity(request=request, session=session, authorization=request.headers.get("authorization"),
         x_box_id=request.headers.get("x-box-id"), x_actor_principal_id=request.headers.get("x-actor-principal-id"))
     if current != identity:
         raise ws.WorkspaceError("membership_work_unavailable", 403)
@@ -1720,7 +1727,7 @@ def _routine_sources():
 
 
 def _inbox_reauthenticate(request, session, identity):
-    current = _identity(session=session, authorization=request.headers.get("authorization"),
+    current = _identity(request=request, session=session, authorization=request.headers.get("authorization"),
         x_box_id=request.headers.get("x-box-id"), x_actor_principal_id=request.headers.get("x-actor-principal-id"))
     if current != identity:
         raise ws.WorkspaceError("inbox_unavailable", 403)
@@ -1784,7 +1791,7 @@ if settings.compact_web_root:
 # Register last so origin policy also wraps connector-boundary error responses.
 from cosmas_os.api.practice_access_routes import register as register_practice_access  # noqa: E402
 
-register_practice_access(app, runtime=lambda: settings, verifier=lambda: _clerk_verifier(),
+register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_verifier,
                         session_factory=lambda: new_capture_session(SessionLocal))
 
 allowed_headers = ["X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]

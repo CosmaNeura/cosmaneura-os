@@ -41,6 +41,7 @@ def register(
                 reauthenticate(request, s, identity)
             else:
                 current = identity_dependency(
+                    request=request,
                     session=s,
                     authorization=request.headers.get("authorization"),
                     x_box_id=request.headers.get("x-box-id"),

@@ -10,7 +10,7 @@ private func policy() throws -> NativeTokenPolicy {
     try NativeTokenPolicy(issuer: "https://invented.clerk.accounts.dev", audience: "cosmas-workspace-local")
 }
 
-private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:]) throws -> String {
+private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:], omit: [String] = []) throws -> String {
     let now = Int(Date().timeIntervalSince1970)
     var claims: [String: Any] = [
         "sub": user.userID, "sid": user.sessionID, "org_id": user.organizationID,
@@ -18,6 +18,7 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:]) throw
         "azp": "capacitor://localhost", "exp": now + 60, "iat": now, "nbf": now,
     ]
     claims.merge(changes) { _, value in value }
+    for name in omit { claims.removeValue(forKey: name) }
     func encode(_ value: [String: Any]) throws -> String {
         try JSONSerialization.data(withJSONObject: value, options: .sortedKeys).base64EncodedString()
             .replacingOccurrences(of: "+", with: "-").replacingOccurrences(of: "/", with: "_")
@@ -82,6 +83,26 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:]) throw
 }
 
 @Suite @MainActor struct NativeWorkspaceAuthTests {
+    @Test func nativeSessionsWithoutOriginRetainIdentityAndRejectWrongPresentOrigin() throws {
+        let user = try identity()
+        let token = try jwt(user, omit: ["azp"])
+        #expect(throws: NativeAuthError.tokenUnavailable) { try policy().validate(token, identity: user) }
+        for origin in ["capacitor://localhost", "app://cosmas"] {
+            let native = try NativeTokenPolicy(issuer: "https://invented.clerk.accounts.dev",
+                audience: "cosmas-workspace-local", authorizedParty: origin, nativeSessionWithoutOrigin: true)
+            try native.validate(token, identity: user)
+            try native.validate(jwt(user, changes: ["azp": origin]), identity: user)
+            for changes: [String: Any] in [["azp": NSNull()], ["azp": "https://other.invalid"],
+                ["azp": origin == "app://cosmas" ? "capacitor://localhost" : "app://cosmas"],
+                ["iss": "https://other.invalid"], ["aud": "other-api"], ["org_id": "org_other"],
+                ["sub": "user_other"], ["sid": "sess_other"], ["exp": 1]] {
+                #expect(throws: NativeAuthError.tokenUnavailable) {
+                    try native.validate(jwt(user, changes: changes, omit: changes["azp"] == nil ? ["azp"] : []), identity: user)
+                }
+            }
+        }
+    }
+
     @Test func desktopAndAppleTokensCannotCrossNativeOrigins() throws {
         let user = try identity()
         let desktop = try NativeTokenPolicy(issuer: "https://invented.clerk.accounts.dev",

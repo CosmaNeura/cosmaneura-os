@@ -6,9 +6,12 @@ public struct NativeTokenPolicy: Sendable {
     public let issuer: String
     public let audience: String
     public let authorizedParty: String
+    /// Selected by the native host, never by a renderer or a JWT claim.
+    public let nativeSessionWithoutOrigin: Bool
 
     public init(issuer: String, audience: String,
-                authorizedParty: String = NativeClerkConfiguration.nativeOrigin) throws {
+                authorizedParty: String = NativeClerkConfiguration.nativeOrigin,
+                nativeSessionWithoutOrigin: Bool = false) throws {
         guard let origin = URLComponents(string: issuer), origin.scheme == "https",
               let host = origin.host, issuer == "https://" + host,
               origin.user == nil, origin.password == nil, origin.port == nil,
@@ -21,6 +24,7 @@ public struct NativeTokenPolicy: Sendable {
         self.issuer = issuer
         self.audience = audience
         self.authorizedParty = authorizedParty
+        self.nativeSessionWithoutOrigin = nativeSessionWithoutOrigin
     }
 
     public func validate(_ token: String, identity: NativeAuthIdentity, now: Date = Date()) throws {
@@ -30,7 +34,9 @@ public struct NativeTokenPolicy: Sendable {
               bytes(pieces[2]) != nil,
               header["alg"] as? String == "RS256", let kid = header["kid"] as? String,
               !kid.isEmpty, kid.utf8.count <= 255,
-              claims["iss"] as? String == issuer, claims["azp"] as? String == authorizedParty,
+              claims["iss"] as? String == issuer,
+              (claims["azp"] as? String == authorizedParty ||
+               (nativeSessionWithoutOrigin && claims["azp"] == nil)),
               claims["sub"] as? String == identity.userID,
               claims["sid"] as? String == identity.sessionID else { throw NativeAuthError.tokenUnavailable }
         let audiences = (claims["aud"] as? String).map { [$0] } ?? claims["aud"] as? [String] ?? []

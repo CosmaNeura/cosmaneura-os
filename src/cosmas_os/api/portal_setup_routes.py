@@ -24,6 +24,7 @@ def register(app, get_session, identity_dependency, *, catalog_dependency=instal
         def fence():
             session.expire_all()
             current = identity_dependency(
+                request=request,
                 session=session,
                 authorization=request.headers.get("authorization"),
                 x_box_id=request.headers.get("x-box-id"),

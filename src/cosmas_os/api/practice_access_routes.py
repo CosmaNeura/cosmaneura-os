@@ -97,7 +97,7 @@ def register(app, *, runtime, verifier, session_factory):
                 config = runtime()
                 if not config.workspace_hosted_enabled or not config.workspace_available:
                     raise access.PracticeAccessError("practice_access_not_found", 404)
-                token_verifier = verifier()
+                token_verifier = verifier(request.headers.getlist("origin"))
                 member = verified(config, request.headers["authorization"], token_verifier)
 
                 def fence():

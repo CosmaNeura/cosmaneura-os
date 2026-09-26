@@ -82,7 +82,8 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
                       let bundle = Bundle.main.bundleIdentifier else { throw NativeAuthError.unavailable }
                 let configuration = try NativeClerkConfiguration(publishableKey: key, frontendOrigin: origin,
                     organizationID: organization, bundleIdentifier: bundle, profile: profile)
-                let policy = try NativeTokenPolicy(issuer: origin, audience: audience)
+                let policy = try NativeTokenPolicy(issuer: origin, audience: audience,
+                    nativeSessionWithoutOrigin: profile == .operationalBeta)
                 auth = NativeWorkspaceAuth(enabled: true, organizationID: organization, tokenPolicy: policy,
                     driver: { try ClerkKitWorkspaceDriver(configuration: configuration) },
                     accessBlock: { try KeychainAccessBlock(bundleIdentifier: bundle, profile: profile) })

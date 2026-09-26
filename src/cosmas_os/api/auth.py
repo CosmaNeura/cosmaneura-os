@@ -39,6 +39,23 @@ class TokenVerifier(Protocol):
     def verify(self, token: str) -> dict[str, Any]: ...
 
 
+def native_clerk_origin(runtime: Settings, origins: list[str]) -> str | None:
+    """Select a native transport; the Origin header does not establish identity."""
+    if (len(origins) != 1 or runtime.cosmas_env != "early_adopter_beta"
+            or runtime.auth_mode != "clerk_jwt" or not runtime.workspace_enabled
+            or not runtime.workspace_authenticated_enabled or not runtime.workspace_hosted_enabled):
+        return None
+    origin = origins[0]
+    enabled = {
+        "capacitor://localhost": runtime.workspace_apple_hosted_transport_enabled,
+        "app://cosmas": runtime.workspace_desktop_hosted_transport_enabled,
+    }
+    if (enabled.get(origin) and origin in runtime.allowed_origins
+            and origin in runtime.authorized_parties):
+        return origin
+    return None
+
+
 class _JwksState:
     """Process-shared JWKS state for one configured endpoint."""
 
@@ -68,6 +85,7 @@ class ClerkTokenVerifier:
         *,
         jwks_client: Any | None = None,
         start_background_refresh: bool = True,
+        native_origin: str | None = None,
     ) -> None:
         if (
             not runtime_settings.clerk_jwks_url
@@ -75,7 +93,10 @@ class ClerkTokenVerifier:
             or not runtime_settings.clerk_audience
         ):
             raise RuntimeError("Clerk verifier configuration is incomplete")
+        if native_origin is not None and native_clerk_origin(runtime_settings, [native_origin]) != native_origin:
+            raise RuntimeError("Native Clerk transport is not configured")
         self._settings = runtime_settings
+        self._native_origin = native_origin
         initialize_state = True
         if jwks_client is None and start_background_refresh:
             # functools.lru_cache may invoke the wrapped factory more than once
@@ -204,6 +225,9 @@ class ClerkTokenVerifier:
     def verify(self, token: str) -> dict[str, Any]:
         if not token or len(token) > 8192:
             raise AuthenticationFailed("invalid bearer token")
+        native_origin = self._native_origin
+        if native_origin is not None and native_clerk_origin(self._settings, [native_origin]) != native_origin:
+            raise AuthenticationFailed("native Clerk transport is unavailable")
         try:
             header = jwt.get_unverified_header(token)
             kid = header.get("kid")
@@ -216,7 +240,7 @@ class ClerkTokenVerifier:
                 raise AuthenticationFailed("invalid bearer token")
             signing_key = self._get_signing_key(kid)
             options: Any = {
-                "require": ["exp", "iat", "nbf", "iss", "sub", "sid", "azp"],
+                "require": ["exp", "iat", "nbf", "iss", "sub", "sid"] + ([] if native_origin else ["azp"]),
                 "verify_aud": True,
             }
             claims = jwt.decode(
@@ -237,9 +261,15 @@ class ClerkTokenVerifier:
         authorized_party = claims.get("azp")
         if not isinstance(subject, str) or not subject or len(subject) > 255:
             raise AuthenticationFailed("invalid bearer token")
-        if not isinstance(authorized_party, str) or authorized_party not in {
-            *self._settings.authorized_parties
-        }:
+        # Clerk native clients authenticate with Authorization and cannot send
+        # Origin alongside it. Their signed session JWT can therefore omit azp.
+        # Only the selected native transport admits absence; null/wrong/present
+        # claims remain invalid, and issuer/audience/session/org are still checked.
+        if native_origin is not None:
+            party_allowed = "azp" not in claims or authorized_party == native_origin
+        else:
+            party_allowed = isinstance(authorized_party, str) and authorized_party in self._settings.authorized_parties
+        if not party_allowed:
             raise AuthenticationFailed("invalid bearer token")
 
         organization_id = _organization_id(claims)

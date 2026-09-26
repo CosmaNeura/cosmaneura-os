@@ -135,7 +135,7 @@ def router(*, settings, session_factory, identity_dependency, workspace_gate,
                             raise ws.WorkspaceError("core_connection_unavailable", 404)
                         if (current.core_capture_origin, current.core_connection_tenant_ref) != scope:
                             raise ws.WorkspaceError("core_connection_changed", 409)
-                        value = identity_dependency(session=session, authorization=authorization,
+                        value = identity_dependency(request=request, session=session, authorization=authorization,
                             x_box_id=None, x_actor_principal_id=None)
                         if value.auth_mode != "clerk_jwt" or value.external_identity_id is None:
                             raise ws.WorkspaceError("core_connection_access_denied", 403)

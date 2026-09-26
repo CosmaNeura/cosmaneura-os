@@ -181,7 +181,7 @@ def router(*, settings, session_factory, identity_dependency, workspace_gate, po
                     def authenticate():
                         budget.check()
                         workspace_gate(response=Response(), request=request)
-                        value = identity_dependency(session=session, authorization=request.headers["authorization"],
+                        value = identity_dependency(request=request, session=session, authorization=request.headers["authorization"],
                                                     x_box_id=None, x_actor_principal_id=None)
                         if value.auth_mode != "clerk_jwt" or value.external_identity_id is None:
                             raise ws.WorkspaceError("research_access_denied", 403)

@@ -10,7 +10,12 @@ import pytest
 from cryptography.hazmat.primitives.asymmetric import rsa
 
 import cosmas_os.api.auth as auth_module
-from cosmas_os.api.auth import AccessDenied, AuthenticationFailed, ClerkTokenVerifier
+from cosmas_os.api.auth import (
+    AccessDenied,
+    AuthenticationFailed,
+    ClerkTokenVerifier,
+    native_clerk_origin,
+)
 from cosmas_os.config import Settings
 
 
@@ -85,6 +90,48 @@ def test_clerk_verifier_accepts_signed_session_for_exact_org_and_origin() -> Non
     private_key, verifier = _verifier()
     claims = verifier.verify(_token(private_key))
     assert claims["sub"] == "user_test_owner"
+
+
+@pytest.mark.parametrize("origin", ["app://cosmas", "capacitor://localhost"])
+def test_native_session_without_azp_requires_enabled_exact_transport_and_signed_identity(origin):
+    private, _ = _verifier()
+    settings = _settings(workspace_enabled=True, workspace_authenticated_enabled=True,
+        workspace_hosted_enabled=True, workspace_apple_hosted_transport_enabled=True,
+        workspace_desktop_hosted_transport_enabled=True,
+        cors_allowed_origins="https://beta.example.invalid,app://cosmas,capacitor://localhost",
+        clerk_authorized_parties="https://beta.example.invalid,app://cosmas,capacitor://localhost")
+    keys = SimpleNamespace(get_signing_keys=lambda **_: [SimpleNamespace(key_id="test-key", key=private.public_key())])
+    strict = ClerkTokenVerifier(settings, jwks_client=keys, start_background_refresh=False)
+    native = ClerkTokenVerifier(settings, jwks_client=keys, start_background_refresh=False, native_origin=origin)
+    token = _token(private, omit=("azp",))
+    assert native.verify(token)["sid"] == "sess_test_owner"
+    assert native.verify(_token(private, azp=origin))["azp"] == origin
+    with pytest.raises(AuthenticationFailed):
+        strict.verify(token)
+    for changes in [{"azp": None}, {"azp": "https://beta.example.invalid"},
+        {"azp": "capacitor://localhost" if origin == "app://cosmas" else "app://cosmas"},
+        {"iss": "https://other.invalid"}, {"aud": "other-api"}, {"o": {"id": "org_other"}},
+        {"exp": datetime.now(UTC) - timedelta(minutes=1)}]:
+        with pytest.raises((AuthenticationFailed, AccessDenied)):
+            native.verify(_token(private, omit=() if "azp" in changes else ("azp",), **changes))
+    for claim in ["iss", "aud", "sub", "sid", "iat", "nbf", "exp"]:
+        with pytest.raises(AuthenticationFailed):
+            native.verify(_token(private, omit=("azp", claim)))
+    assert native_clerk_origin(settings, [origin]) == origin
+    for origins in [[], [origin, origin], [origin + ", " + origin], ["https://beta.example.invalid"], ["null"]]:
+        assert native_clerk_origin(settings, origins) is None
+    gate = "workspace_desktop_hosted_transport_enabled" if origin == "app://cosmas" else "workspace_apple_hosted_transport_enabled"
+    for field, value in [(gate, False), ("workspace_hosted_enabled", False),
+        ("cors_allowed_origins", "https://beta.example.invalid"),
+        ("clerk_authorized_parties", "https://beta.example.invalid")]:
+        previous = getattr(settings, field)
+        setattr(settings, field, value)
+        assert native_clerk_origin(settings, [origin]) is None
+        with pytest.raises(AuthenticationFailed):
+            native.verify(token)
+        with pytest.raises(RuntimeError, match="Native Clerk transport"):
+            ClerkTokenVerifier(settings, jwks_client=keys, start_background_refresh=False, native_origin=origin)
+        setattr(settings, field, previous)
 
 
 def test_clerk_verifier_rejects_wrong_org_and_origin() -> None:

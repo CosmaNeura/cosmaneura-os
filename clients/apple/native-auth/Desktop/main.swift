@@ -75,7 +75,8 @@ import Foundation
                 let configuration = try NativeClerkConfiguration(publishableKey: key, frontendOrigin: origin,
                     organizationID: organization, bundleIdentifier: bundle, workspaceOrigin: .desktopApp, profile: profile)
                 let policy = try NativeTokenPolicy(issuer: origin, audience: audience,
-                    authorizedParty: NativeWorkspaceOrigin.desktopApp.rawValue)
+                    authorizedParty: NativeWorkspaceOrigin.desktopApp.rawValue,
+                    nativeSessionWithoutOrigin: profile == .operationalBeta)
                 auth = NativeWorkspaceAuth(enabled: true, organizationID: organization, tokenPolicy: policy,
                     driver: { try ClerkKitWorkspaceDriver(configuration: configuration) },
                     accessBlock: { try KeychainAccessBlock(bundleIdentifier: bundle, profile: profile) })

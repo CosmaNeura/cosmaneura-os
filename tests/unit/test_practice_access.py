@@ -237,7 +237,7 @@ def test_real_signed_http_request_owner_decision_and_recovery(case):
     c = case
     checked, token = verifier(c)
     app = FastAPI()
-    register(app, runtime=lambda: c.config, verifier=lambda: checked, session_factory=c.factory)
+    register(app, runtime=lambda: c.config, verifier=lambda _origins: checked, session_factory=c.factory)
     def headers(member):
         return {"Authorization": "Bearer " + token(member), "X-Cosmas-Practice-Access-Contract": "1"}
     async def exercise():

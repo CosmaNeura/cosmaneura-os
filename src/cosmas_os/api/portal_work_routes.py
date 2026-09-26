@@ -48,6 +48,7 @@ def register(
         def fence():
             s.expire_all()
             current = identity_dependency(
+                request=request,
                 session=s,
                 authorization=request.headers.get("authorization"),
                 x_box_id=request.headers.get("x-box-id"),
@@ -277,6 +278,7 @@ def register(
                                     return False
                                 with session_factory() as current_session:
                                     current_identity = identity_dependency(
+                                        request=request,
                                         session=current_session,
                                         authorization=request.headers.get("authorization"),
                                         x_box_id=request.headers.get("x-box-id"),

@@ -214,7 +214,7 @@ def test_real_signed_http_member_routes_and_closed_commands(case):
     row = enrolled(c)
     checked, token = verifier(c)
     app = FastAPI()
-    register(app, runtime=lambda: c.config, verifier=lambda: checked, session_factory=c.factory)
+    register(app, runtime=lambda: c.config, verifier=lambda _origins: checked, session_factory=c.factory)
 
     async def scenario():
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
