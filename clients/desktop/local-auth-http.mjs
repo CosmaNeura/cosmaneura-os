@@ -29,7 +29,7 @@ export function fetchAuthenticatedWorkspaceAtOrigin(origin, url, options, reques
       }
       try {
         const headers = new Headers();
-        for (const name of ['content-type', 'cache-control', ...(strictResponse ? ['content-length','content-encoding'] : [])]) {
+        for (const name of ['content-type', 'cache-control', 'x-cosmas-workspace-protocol', ...(strictResponse ? ['content-length','content-encoding'] : [])]) {
           const value = response.headers[name];
           if (strictResponse && value !== undefined && typeof value !== 'string') throw new Error('Invalid private response metadata');
           if (typeof value === 'string') headers.set(name, value);
