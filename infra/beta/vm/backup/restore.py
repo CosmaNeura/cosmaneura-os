@@ -211,7 +211,12 @@ def main() -> int:
     config = backup.validate_config(json.loads(backup.read_file(backup.ROOT / 'restore.json')))
     backup.require(config['mode'] == 'restore', 'reader configuration required')
     runner = backup.Runner(config)
-    runner.preflight()
+    # ExecStartPost only inspects the local peer-authenticated PostgreSQL socket.
+    # Its systemd credential namespace need not expose the cloud reader secret.
+    if args.action == 'verify':
+        runner.preflight_host()
+    else:
+        runner.preflight()
     if args.action == 'wal':
         return wal_fetch(runner, args.archive, args.destination)
     backup.require(args.archive is None and args.destination is None, 'unexpected arguments')

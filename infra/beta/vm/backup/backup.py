@@ -286,7 +286,8 @@ class Runner:
         return json.loads(self.call([PSQL, '-X', '--no-password', '-A', '-t',
                                      '-v', 'ON_ERROR_STOP=1', '-c', query], timeout=30))
 
-    def preflight(self) -> None:
+    def preflight_host(self) -> None:
+        """Validate the local execution boundary without reading cloud credentials."""
         mode = self.config['mode']
         require(platform.system() == 'Linux' and platform.machine() == 'x86_64', 'native host required')
         user = 'cosmabot-backup' if mode == 'backup' else 'cosmabot-restore'
@@ -297,6 +298,10 @@ class Runner:
         require(self.directory.resolve() == self.directory
                 and self.directory.stat().st_uid == os.geteuid()
                 and stat.S_IMODE(self.directory.stat().st_mode) == 0o700, 'state directory custody')
+
+    def preflight(self) -> None:
+        self.preflight_host()
+        mode = self.config['mode']
         credentials = Path(os.environ.get('CREDENTIALS_DIRECTORY', '/missing'))
         action = os.environ.get('COSMABOT_BACKUP_ACTION', '')
         unit = ('cosmabot-restore.service' if mode == 'restore' else
