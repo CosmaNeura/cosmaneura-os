@@ -1,0 +1,136 @@
+{
+  "owner": {
+    "contract_version": 1,
+    "box_id": "d81c1441-8277-47e9-90e6-101feb4c5f34",
+    "owner_id": "b43d4968-1342-4089-ac0d-be702d96890d",
+    "recovery_scope": "78c294b4b54451cbe68af0f60c9e7da221beed32de0e77b293882d686aaca430",
+    "view": "attention",
+    "as_of": "2026-09-22T15:36:37.446891Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 1,
+      "recent_total": 0,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:37.446891Z",
+      "window_start": "2026-09-21T15:36:37.446891Z",
+      "admitted_units": 1,
+      "occupied_units": 1,
+      "remaining_units": null,
+      "pending_units": 1,
+      "unknown_units": 0,
+      "verified_input_tokens": null,
+      "verified_output_tokens": null,
+      "usage_complete": false,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "4b125aca-3ccf-4bd0-935a-d1dd9d51e355",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "fddae4e4-af42-46cd-bc1a-e00371ba02e0",
+          "appointment_id": "d13ed6d8-7c01-45da-a446-3c186f7fa0e4",
+          "label": "Invented encounter",
+          "starts_at": "2026-09-22T11:36:37.197738-04:00",
+          "entry_id": "a87a072c-16e6-4240-a6c1-c0e42b45190b"
+        },
+        "admission": {
+          "id": "91e7e2d2-106b-4e8e-a3b0-f01aef7376bd",
+          "state": "reserved",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:36:37.294481-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    ]
+  },
+  "staff": {
+    "contract_version": 1,
+    "box_id": "d81c1441-8277-47e9-90e6-101feb4c5f34",
+    "owner_id": "419b7b54-24cd-4a65-abc7-c6ccb0c38e26",
+    "recovery_scope": "0d9d3d946432aff4146477fd4be2771050703759f8a6edcf7710501b64fa565e",
+    "view": "attention",
+    "as_of": "2026-09-22T15:36:37.417281Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 1,
+      "recent_total": 0,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:37.417281Z",
+      "window_start": "2026-09-21T15:36:37.417281Z",
+      "admitted_units": 1,
+      "occupied_units": 1,
+      "remaining_units": null,
+      "pending_units": 1,
+      "unknown_units": 0,
+      "verified_input_tokens": null,
+      "verified_output_tokens": null,
+      "usage_complete": false,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "c9f1c79e-40e7-43c6-99b2-1838147823f2",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "60c72ed7-5adb-40c0-95ec-3fcb7b4eb47c",
+          "appointment_id": "d13ed6d8-7c01-45da-a446-3c186f7fa0e4",
+          "label": "Invented encounter",
+          "starts_at": "2026-09-22T11:36:37.197738-04:00",
+          "entry_id": "d00120f3-b4cc-414a-9e35-9346a0fee17d"
+        },
+        "admission": {
+          "id": "0d01c3db-272f-4803-af46-6a7ef9e98e7c",
+          "state": "reserved",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:36:37.402543-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    ]
+  }
+}

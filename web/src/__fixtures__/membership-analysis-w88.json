@@ -1,0 +1,1703 @@
+{
+  "setup": {
+    "team": {
+      "revision": 1,
+      "template_version": "provider-team-v7",
+      "configuration": {
+        "bots": [
+          {
+            "name": "Scribe",
+            "role": "scribe",
+            "enabled": true,
+            "response_style": "brief",
+            "include_evidence": true,
+            "include_notebook": true
+          },
+          {
+            "name": "Visit Prep",
+            "role": "visit_prep",
+            "enabled": true,
+            "response_style": "brief",
+            "include_evidence": true,
+            "include_notebook": true
+          },
+          {
+            "name": "Follow-up",
+            "role": "follow_up",
+            "enabled": true,
+            "response_style": "brief",
+            "include_evidence": true,
+            "include_notebook": true
+          },
+          {
+            "name": "Chief",
+            "role": "chief",
+            "enabled": true,
+            "response_style": "brief",
+            "include_evidence": true,
+            "include_notebook": true
+          },
+          {
+            "name": "Membership / Billing",
+            "role": "custom",
+            "skills": [
+              "membership_review"
+            ],
+            "enabled": true,
+            "job_focus": "PRIVATE JOB",
+            "instance_id": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+            "response_style": "brief",
+            "include_evidence": true,
+            "include_notebook": true,
+            "working_preferences": "PRIVATE PREFERENCES"
+          }
+        ],
+        "model_work": {
+          "version": 1,
+          "max_attempts_per_24h": 2
+        },
+        "practice_context": "Direct Primary Care"
+      },
+      "members": [
+        {
+          "role": "scribe",
+          "agent_id": "525c306d-3301-47f6-999f-6b53e8bc6774",
+          "name": "Scribe",
+          "initials": "Sc",
+          "description": "Your notes, clearly kept.",
+          "prompt": "Review my saved draft",
+          "capabilities": [
+            {
+              "key": "workspace.notebook.read",
+              "label": "Saved notebook review",
+              "state": "local",
+              "connector": "workspace",
+              "contract": "workspace.read.v1"
+            },
+            {
+              "key": "scribe.capture",
+              "label": "Consented recording",
+              "state": "awaiting_connection",
+              "connector": "Scribe",
+              "contract": null
+            },
+            {
+              "key": "scribe.transcript.read",
+              "label": "Visit transcript",
+              "state": "awaiting_connection",
+              "connector": "Scribe",
+              "contract": null
+            },
+            {
+              "key": "core.note.draft",
+              "label": "SOAP draft generation",
+              "state": "awaiting_connection",
+              "connector": "Core",
+              "contract": null
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ]
+        },
+        {
+          "role": "visit_prep",
+          "agent_id": "a16641cb-2c87-4e63-987e-7b0043384ad2",
+          "name": "Visit Prep",
+          "initials": "Vp",
+          "description": "Context before the conversation.",
+          "prompt": "Review the saved preparation",
+          "capabilities": [
+            {
+              "key": "workspace.sources.review",
+              "label": "Saved source review",
+              "state": "local",
+              "connector": "workspace",
+              "contract": "workspace.read.v1"
+            },
+            {
+              "key": "core.session_prep.read",
+              "label": "Saved intake and prior visit drafts",
+              "state": "awaiting_connection",
+              "connector": "Core",
+              "contract": "core.encounter-context.v1"
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ]
+        },
+        {
+          "role": "follow_up",
+          "agent_id": "4142e35b-1d3f-4df4-a42b-44abaed8fcfd",
+          "name": "Follow-up",
+          "initials": "Fu",
+          "description": "Keep the next step in sight.",
+          "prompt": "Show my linked follow-up work",
+          "capabilities": [
+            {
+              "key": "workspace.work.read",
+              "label": "Linked work status",
+              "state": "local",
+              "connector": "F-8",
+              "contract": "workspace.work.read.v1"
+            },
+            {
+              "key": "followup.propose",
+              "label": "Proposals in the Work tab",
+              "state": "local",
+              "connector": "F-8",
+              "contract": "workspace.follow_up.v1"
+            },
+            {
+              "key": "followup.local_receipts.read",
+              "label": "Local delivery & human results",
+              "state": "local",
+              "connector": "F-8",
+              "contract": "workspace.follow_up.v1"
+            },
+            {
+              "key": "scheduling.coordinate",
+              "label": "Scheduling coordination",
+              "state": "awaiting_connection",
+              "connector": "Scheduling",
+              "contract": null
+            },
+            {
+              "key": "followup.deliver",
+              "label": "Delivery & outcome receipts",
+              "state": "awaiting_connection",
+              "connector": "Secure messaging",
+              "contract": null
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ]
+        },
+        {
+          "role": "chief",
+          "agent_id": "4511c8bf-a9ff-4c9c-a217-d087eb5e831b",
+          "name": "Chief",
+          "initials": "Ch",
+          "description": "A clear view of what is open.",
+          "prompt": "Review this encounter's status",
+          "capabilities": [
+            {
+              "key": "workspace.status.read",
+              "label": "Encounter status review",
+              "state": "local",
+              "connector": "workspace",
+              "contract": "workspace.read.v1"
+            },
+            {
+              "key": "team.routines",
+              "label": "Routines & quiet hours",
+              "state": "awaiting_connection",
+              "connector": "Durable scheduler",
+              "contract": null
+            },
+            {
+              "key": "team.handoff",
+              "label": "Accepted staff handoffs",
+              "state": "awaiting_connection",
+              "connector": "F-8",
+              "contract": null
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            },
+            {
+              "key": "workspace.draft.handoff",
+              "label": "Private bot draft handoffs",
+              "state": "enabled",
+              "connector": "Provider Team",
+              "contract": "workspace.draft.handoff.v1"
+            }
+          ]
+        },
+        {
+          "role": "custom",
+          "agent_id": "b229a982-c5c0-4322-bd47-52823faffd1e",
+          "name": "Membership / Billing",
+          "initials": "Cb",
+          "description": "PRIVATE JOB",
+          "prompt": "Help me with my bot's job",
+          "capabilities": [
+            {
+              "key": "membership_review",
+              "label": "Membership and payment review",
+              "state": "enabled",
+              "connector": "Private practice work",
+              "contract": "membership.analysis.v1"
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ],
+          "instance_id": "dc7ac5fe-a987-49b4-8da0-ce983859289b"
+        }
+      ],
+      "templates": [
+        {
+          "role": "scribe",
+          "agent_id": null,
+          "name": "Scribe",
+          "initials": "Sc",
+          "description": "Your notes, clearly kept.",
+          "prompt": "Review my saved draft",
+          "capabilities": [
+            {
+              "key": "workspace.notebook.read",
+              "label": "Saved notebook review",
+              "state": "local",
+              "connector": "workspace",
+              "contract": "workspace.read.v1"
+            },
+            {
+              "key": "scribe.capture",
+              "label": "Consented recording",
+              "state": "awaiting_connection",
+              "connector": "Scribe",
+              "contract": null
+            },
+            {
+              "key": "scribe.transcript.read",
+              "label": "Visit transcript",
+              "state": "awaiting_connection",
+              "connector": "Scribe",
+              "contract": null
+            },
+            {
+              "key": "core.note.draft",
+              "label": "SOAP draft generation",
+              "state": "awaiting_connection",
+              "connector": "Core",
+              "contract": null
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ]
+        },
+        {
+          "role": "visit_prep",
+          "agent_id": null,
+          "name": "Visit Prep",
+          "initials": "Vp",
+          "description": "Context before the conversation.",
+          "prompt": "Review the saved preparation",
+          "capabilities": [
+            {
+              "key": "workspace.sources.review",
+              "label": "Saved source review",
+              "state": "local",
+              "connector": "workspace",
+              "contract": "workspace.read.v1"
+            },
+            {
+              "key": "core.session_prep.read",
+              "label": "Saved intake and prior visit drafts",
+              "state": "awaiting_connection",
+              "connector": "Core",
+              "contract": "core.encounter-context.v1"
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ]
+        },
+        {
+          "role": "follow_up",
+          "agent_id": null,
+          "name": "Follow-up",
+          "initials": "Fu",
+          "description": "Keep the next step in sight.",
+          "prompt": "Show my linked follow-up work",
+          "capabilities": [
+            {
+              "key": "workspace.work.read",
+              "label": "Linked work status",
+              "state": "local",
+              "connector": "F-8",
+              "contract": "workspace.work.read.v1"
+            },
+            {
+              "key": "followup.propose",
+              "label": "Proposals in the Work tab",
+              "state": "local",
+              "connector": "F-8",
+              "contract": "workspace.follow_up.v1"
+            },
+            {
+              "key": "followup.local_receipts.read",
+              "label": "Local delivery & human results",
+              "state": "local",
+              "connector": "F-8",
+              "contract": "workspace.follow_up.v1"
+            },
+            {
+              "key": "scheduling.coordinate",
+              "label": "Scheduling coordination",
+              "state": "awaiting_connection",
+              "connector": "Scheduling",
+              "contract": null
+            },
+            {
+              "key": "followup.deliver",
+              "label": "Delivery & outcome receipts",
+              "state": "awaiting_connection",
+              "connector": "Secure messaging",
+              "contract": null
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ]
+        },
+        {
+          "role": "research",
+          "agent_id": null,
+          "name": "Research",
+          "initials": "Re",
+          "description": "Evidence with sources you can check.",
+          "prompt": "Compare the evidence in my saved sources",
+          "capabilities": [
+            {
+              "key": "research.public.read",
+              "label": "Public medical sources",
+              "state": "awaiting_connection",
+              "connector": "Public healthcare data",
+              "contract": "research.lookup.v1"
+            },
+            {
+              "key": "workspace.sources.review",
+              "label": "Saved evidence review",
+              "state": "local",
+              "connector": "Workspace",
+              "contract": "workspace.read.v1"
+            },
+            {
+              "key": "assistant.answer",
+              "label": "GPT-4.1 conversation",
+              "state": "enabled",
+              "connector": "CosmasCode \u00b7 GPT-4.1",
+              "contract": "openai.chat.completions.v1"
+            }
+          ]
+        }
+      ],
+      "custom_skills": [
+        {
+          "key": "saved_context",
+          "label": "Saved context review",
+          "state": "local",
+          "connector": "Workspace",
+          "contract": "workspace.read.v1"
+        },
+        {
+          "key": "work_status",
+          "label": "Work status and receipts",
+          "state": "local",
+          "connector": "F-8",
+          "contract": "workspace.work.read.v1"
+        },
+        {
+          "key": "encounter_prep",
+          "label": "Saved intake and prior visit drafts",
+          "state": "awaiting_connection",
+          "connector": "Core",
+          "contract": "core.encounter-context.v1"
+        },
+        {
+          "key": "calendar_availability",
+          "label": "Calendar availability",
+          "state": "awaiting_connection",
+          "connector": "Scheduling",
+          "contract": "scheduling.availability.v1"
+        },
+        {
+          "key": "inbox_review",
+          "label": "Reviewed Inbox drafts",
+          "state": "awaiting_connection",
+          "connector": "Private Inbox",
+          "contract": "inbox.analysis.v1"
+        },
+        {
+          "key": "membership_review",
+          "label": "Membership and payment review",
+          "state": "enabled",
+          "connector": "Private practice work",
+          "contract": "membership.analysis.v1"
+        }
+      ],
+      "llm": {
+        "enabled": true,
+        "model": "gpt-4.1"
+      },
+      "scheduling": {
+        "enabled": false
+      },
+      "capture": {
+        "enabled": false,
+        "prep_enabled": false,
+        "prep_work_enabled": false,
+        "notes_enabled": false,
+        "corrections_enabled": false
+      }
+    },
+    "catalog": {
+      "contract": "private-team-presets.v1",
+      "version": 4,
+      "presets": [
+        {
+          "preset_id": "provider",
+          "version": 1,
+          "label": "Provider",
+          "purpose": "Keep the existing private clinical and work coworkers together.",
+          "slots": [
+            {
+              "slot": "scribe",
+              "role": "scribe",
+              "address": "scribe",
+              "name": "Scribe",
+              "job_focus": "",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": true,
+              "include_evidence": true,
+              "skills": [],
+              "blocked_capabilities": []
+            },
+            {
+              "slot": "visit_prep",
+              "role": "visit_prep",
+              "address": "visit_prep",
+              "name": "Visit Prep",
+              "job_focus": "",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": true,
+              "include_evidence": true,
+              "skills": [],
+              "blocked_capabilities": []
+            },
+            {
+              "slot": "follow_up",
+              "role": "follow_up",
+              "address": "follow_up",
+              "name": "Follow-up",
+              "job_focus": "",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": true,
+              "include_evidence": true,
+              "skills": [],
+              "blocked_capabilities": []
+            },
+            {
+              "slot": "chief",
+              "role": "chief",
+              "address": "chief",
+              "name": "Chief",
+              "job_focus": "",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": true,
+              "include_evidence": true,
+              "skills": [],
+              "blocked_capabilities": []
+            }
+          ],
+          "unavailable_capabilities": []
+        },
+        {
+          "preset_id": "front_desk",
+          "version": 2,
+          "label": "Front Desk",
+          "purpose": "Draft reviewed administrative Inbox replies and review scheduling and preparation.",
+          "slots": [
+            {
+              "slot": "inbox",
+              "role": "custom",
+              "address": null,
+              "name": "Inbox",
+              "job_focus": "Draft administrative replies from a selected reviewed message and human triage for human review.",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": false,
+              "include_evidence": false,
+              "skills": [
+                "inbox_review"
+              ],
+              "blocked_capabilities": []
+            },
+            {
+              "slot": "scheduling",
+              "role": "custom",
+              "address": null,
+              "name": "Scheduling",
+              "job_focus": "Review scheduling availability and accountable work.",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": false,
+              "include_evidence": true,
+              "skills": [
+                "work_status",
+                "calendar_availability"
+              ],
+              "blocked_capabilities": []
+            },
+            {
+              "slot": "intake",
+              "role": "custom",
+              "address": null,
+              "name": "Intake",
+              "job_focus": "Prepare current saved intake information for provider review.",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": false,
+              "include_evidence": true,
+              "skills": [
+                "work_status",
+                "encounter_prep"
+              ],
+              "blocked_capabilities": []
+            }
+          ],
+          "unavailable_capabilities": []
+        },
+        {
+          "preset_id": "practice_manager",
+          "version": 2,
+          "label": "Practice Manager",
+          "purpose": "Review membership and payment evidence and coordinate accountable practice work.",
+          "slots": [
+            {
+              "slot": "operations",
+              "role": "custom",
+              "address": null,
+              "name": "Operations",
+              "job_focus": "Review accountable practice work and private work briefs.",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": false,
+              "include_evidence": false,
+              "skills": [
+                "work_status"
+              ],
+              "blocked_capabilities": []
+            },
+            {
+              "slot": "membership_billing",
+              "role": "custom",
+              "address": null,
+              "name": "Membership / Billing",
+              "job_focus": "Review selected membership or payment evidence and prepare human next steps.",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": false,
+              "include_evidence": false,
+              "skills": [
+                "membership_review"
+              ],
+              "blocked_capabilities": []
+            },
+            {
+              "slot": "chief",
+              "role": "chief",
+              "address": "chief",
+              "name": "Chief",
+              "job_focus": "",
+              "working_preferences": "",
+              "enabled": true,
+              "response_style": "brief",
+              "include_notebook": true,
+              "include_evidence": true,
+              "skills": [],
+              "blocked_capabilities": []
+            }
+          ],
+          "unavailable_capabilities": []
+        }
+      ]
+    },
+    "setup": {
+      "contract_version": 4,
+      "catalog_version": 4,
+      "team_revision": 1,
+      "configuration_sha256": "061ff2f8240ce91efee24421626eed12817b44acef30398650239a044ae9a4b2",
+      "prerequisites_sha256": "875a4bad4e9dc641b67f6d77b6236327c96adaabf69cef18287380fd3ce8efd4",
+      "capabilities": [
+        {
+          "bot": "scribe",
+          "capability": "saved_notebook",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "scribe",
+          "capability": "saved_evidence",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "scribe",
+          "capability": "work_status",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "scribe",
+          "capability": "model_answer",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "scribe",
+          "capability": "private_draft_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "scribe",
+          "capability": "practice_work_brief",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "routines",
+              "enabled": false
+            },
+            {
+              "kind": "routine",
+              "revision": 0,
+              "status": "not_configured"
+            }
+          ]
+        },
+        {
+          "bot": "scribe",
+          "capability": "encounter_prep",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "prep",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "core",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "encounter",
+              "required": true
+            },
+            {
+              "kind": "resource",
+              "purpose": "core_preparation",
+              "mode": "inherit",
+              "selection": "inherited",
+              "inventory_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        {
+          "bot": "scribe",
+          "capability": "consented_capture",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "capture",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "core",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "recording_consent",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "scribe",
+          "capability": "clinical_note",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "notes",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "core",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "provider_review",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "scribe",
+          "capability": "transcript_correction",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "corrections",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "core",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "encounter",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "scribe",
+          "capability": "staff_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "scope",
+              "key": "work_item",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "saved_notebook",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "saved_evidence",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "work_status",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "model_answer",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "private_draft_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "practice_work_brief",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "routines",
+              "enabled": false
+            },
+            {
+              "kind": "routine",
+              "revision": 0,
+              "status": "not_configured"
+            }
+          ]
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "encounter_prep",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "prep",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "core",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "encounter",
+              "required": true
+            },
+            {
+              "kind": "resource",
+              "purpose": "core_preparation",
+              "mode": "inherit",
+              "selection": "inherited",
+              "inventory_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        {
+          "bot": "visit_prep",
+          "capability": "staff_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "scope",
+              "key": "work_item",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "follow_up",
+          "capability": "saved_notebook",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "follow_up",
+          "capability": "saved_evidence",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "follow_up",
+          "capability": "work_status",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "follow_up",
+          "capability": "model_answer",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "follow_up",
+          "capability": "private_draft_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "follow_up",
+          "capability": "practice_work_brief",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "routines",
+              "enabled": false
+            },
+            {
+              "kind": "routine",
+              "revision": 0,
+              "status": "not_configured"
+            }
+          ]
+        },
+        {
+          "bot": "follow_up",
+          "capability": "calendar_availability",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "scheduling",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "scheduling",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "encounter",
+              "required": true
+            },
+            {
+              "kind": "resource",
+              "purpose": "scheduling_context",
+              "mode": "inherit",
+              "selection": "inherited",
+              "inventory_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        {
+          "bot": "follow_up",
+          "capability": "staff_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "scope",
+              "key": "work_item",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "chief",
+          "capability": "saved_notebook",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "chief",
+          "capability": "saved_evidence",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "chief",
+          "capability": "work_status",
+          "selected": true,
+          "restricted": false,
+          "state": "ready_local",
+          "explanation": "This local capability is available within its existing human and work scope.",
+          "sources": []
+        },
+        {
+          "bot": "chief",
+          "capability": "model_answer",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "chief",
+          "capability": "private_draft_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "chief",
+          "capability": "practice_work_brief",
+          "selected": true,
+          "restricted": false,
+          "state": "connection_required",
+          "explanation": "The configured runtime or this signed account\u2019s reviewed connection is unavailable.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "routines",
+              "enabled": false
+            },
+            {
+              "kind": "routine",
+              "revision": 0,
+              "status": "not_configured"
+            }
+          ]
+        },
+        {
+          "bot": "chief",
+          "capability": "staff_handoff",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "scope",
+              "key": "work_item",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "saved_notebook",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": []
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "saved_evidence",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": []
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "work_status",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": []
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "model_answer",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "private_draft_handoff",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "model",
+              "enabled": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "practice_work_brief",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "routines",
+              "enabled": false
+            },
+            {
+              "kind": "routine",
+              "revision": 0,
+              "status": "not_configured"
+            }
+          ]
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "encounter_prep",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "prep",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "core",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "encounter",
+              "required": true
+            },
+            {
+              "kind": "resource",
+              "purpose": "core_preparation",
+              "mode": "inherit",
+              "selection": "inherited",
+              "inventory_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "calendar_availability",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "scheduling",
+              "enabled": false
+            },
+            {
+              "kind": "account",
+              "key": "scheduling",
+              "state": "unverified"
+            },
+            {
+              "kind": "scope",
+              "key": "encounter",
+              "required": true
+            },
+            {
+              "kind": "resource",
+              "purpose": "scheduling_context",
+              "mode": "inherit",
+              "selection": "inherited",
+              "inventory_sha256": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945"
+            }
+          ]
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "staff_handoff",
+          "selected": false,
+          "restricted": false,
+          "state": "disabled_by_owner",
+          "explanation": "This skill or source is not selected, or an owner restriction excludes it.",
+          "sources": [
+            {
+              "kind": "scope",
+              "key": "work_item",
+              "required": true
+            }
+          ]
+        },
+        {
+          "bot": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+          "capability": "membership_billing",
+          "selected": true,
+          "restricted": false,
+          "state": "available_for_scoped_request",
+          "explanation": "Local prerequisites permit a scoped request. Service and device acceptance are not established.",
+          "sources": [
+            {
+              "kind": "runtime",
+              "key": "membership",
+              "enabled": true
+            },
+            {
+              "kind": "scope",
+              "key": "reviewed_membership",
+              "required": true
+            },
+            {
+              "kind": "model_work",
+              "limit": 2,
+              "occupied_units": 0,
+              "state": "available",
+              "as_of": "2026-09-24T11:50:17.534257+00:00"
+            }
+          ]
+        }
+      ]
+    }
+  },
+  "workspace": {
+    "id": "690c50f4-2e2a-45aa-87d3-5a07d1e8eff2",
+    "appointment_id": "060dcbee-6627-45c0-875b-e042b81594cc",
+    "label": "Invented W36 visit",
+    "revision": 4,
+    "entries": [
+      {
+        "id": "20d37c9f-ed15-4d4b-b391-87548e9201f9",
+        "revision": 1,
+        "kind": "synthetic_source",
+        "content": "Invented visit preparation: discuss access to the practice and agree on next steps. No chart, medications, diagnoses or clinical history were retrieved. This fixed example is evidence for the workspace rehearsal only.",
+        "source_label": "Invented preparation \u00b7 v1",
+        "origin": "synthetic_fixture",
+        "ticket": null,
+        "created_at": "2026-09-24T07:50:16.857439-04:00",
+        "reply": null
+      },
+      {
+        "id": "5063a947-7ddd-4514-8d33-767fcf56fa65",
+        "revision": 4,
+        "kind": "conversation",
+        "content": "Review selected work and concrete human next steps.",
+        "source_label": null,
+        "origin": "authenticated_human",
+        "ticket": null,
+        "created_at": "2026-09-24T07:50:16.857439-04:00",
+        "reply": {
+          "agent_name": "Membership / Billing",
+          "agent_id": "b229a982-c5c0-4322-bd47-52823faffd1e",
+          "role": "custom",
+          "backend": "azure_gpt41",
+          "content": "Invented HTTP work review",
+          "team_revision_id": "e3abd4aa-c6e1-4000-b1f9-3bf852ef6398",
+          "context_revision": 3,
+          "citations": []
+        },
+        "model_request": {
+          "contract_version": 1,
+          "request_sha256": "d6788ec7d992343cd559cb55a019cb1a21b41cd262d650270b1ee2361fc864c5",
+          "request": {
+            "membership_analysis": {
+              "version": 1,
+              "consented": true,
+              "kind": "membership",
+              "ticket_id": "7946bd70-258b-4bf1-b253-7df5b738c0fa",
+              "ticket_version": 3,
+              "revision_id": "f19069f0-5191-4e95-b196-cea2c3907063",
+              "payload_hash": "2a2fd4924644c57e521a35c1bd75547247a42516fd4ed8e4e126f63f81bdb330",
+              "snapshot_sha256": "5917871ece759aba30340ff656930653b41b36829ab62e4809450c90b1eab04c"
+            },
+            "kind": "conversation",
+            "expected_revision": 3,
+            "team_revision": 1,
+            "idempotency_key": "membership-review-fcdaa042-ab35-427c-9696-9adcf3e35c9b",
+            "role": "dc7ac5fe-a987-49b4-8da0-ce983859289b"
+          },
+          "bot": {
+            "address": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+            "agent_id": "b229a982-c5c0-4322-bd47-52823faffd1e",
+            "role": "custom",
+            "name": "Membership / Billing",
+            "team_revision": 1
+          },
+          "admission": {
+            "id": "6f25eb81-ba9b-4c66-a8df-9939971af04a",
+            "state": "completed",
+            "unit": 1,
+            "admitted_at": "2026-09-24T07:50:17.562677-04:00",
+            "dispatch": "started",
+            "usage": "verified",
+            "input_tokens": 20,
+            "output_tokens": 8
+          },
+          "reason": null
+        }
+      }
+    ],
+    "handoffs": [],
+    "note": {
+      "latest": {
+        "id": "cb520876-1bc0-4d02-96fd-9d43a38263aa",
+        "version": 1,
+        "workspace_revision": 2,
+        "content": "Invented reviewed clinical source; never publish this text.",
+        "content_hash": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_reply_id": null,
+        "core_source": null,
+        "source_revision": 1,
+        "source_fingerprint": "4c761d64c42a8840fce642b4f20e3e401554ec3bc07328db7fe3e759d6bcd9ee",
+        "sources_changed": false,
+        "created_at": "2026-09-24T07:50:16.857439-04:00",
+        "review": {
+          "id": "f06fa101-6638-4f79-a5c5-281a33b773df",
+          "reviewer_id": "5e575b96-812d-4b96-bfb9-d11d7365ca7f",
+          "created_at": "2026-09-24T07:50:16.857439-04:00"
+        }
+      },
+      "history": [
+        {
+          "id": "cb520876-1bc0-4d02-96fd-9d43a38263aa",
+          "version": 1,
+          "workspace_revision": 2,
+          "content": "Invented reviewed clinical source; never publish this text.",
+          "content_hash": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+          "source_reply_id": null,
+          "core_source": null,
+          "source_revision": 1,
+          "source_fingerprint": "4c761d64c42a8840fce642b4f20e3e401554ec3bc07328db7fe3e759d6bcd9ee",
+          "sources_changed": false,
+          "created_at": "2026-09-24T07:50:16.857439-04:00",
+          "review": {
+            "id": "f06fa101-6638-4f79-a5c5-281a33b773df",
+            "reviewer_id": "5e575b96-812d-4b96-bfb9-d11d7365ca7f",
+            "created_at": "2026-09-24T07:50:16.857439-04:00"
+          }
+        }
+      ]
+    },
+    "follow_ups": [],
+    "work_candidates": [
+      {
+        "id": "7946bd70-258b-4bf1-b253-7df5b738c0fa",
+        "state": "approved",
+        "lane": "encounter_membership_work"
+      }
+    ],
+    "model_contract_version": 1,
+    "model_observed_at": "2026-09-24T11:50:17.615033+00:00"
+  },
+  "request": {
+    "expected_revision": 3,
+    "team_revision": 1,
+    "idempotency_key": "membership-review-fcdaa042-ab35-427c-9696-9adcf3e35c9b",
+    "role": "dc7ac5fe-a987-49b4-8da0-ce983859289b",
+    "content": "Review selected work and concrete human next steps.",
+    "membership_analysis": {
+      "version": 1,
+      "consented": true,
+      "kind": "membership",
+      "ticket_id": "7946bd70-258b-4bf1-b253-7df5b738c0fa",
+      "ticket_version": 3,
+      "revision_id": "f19069f0-5191-4e95-b196-cea2c3907063",
+      "payload_hash": "2a2fd4924644c57e521a35c1bd75547247a42516fd4ed8e4e126f63f81bdb330",
+      "snapshot_sha256": "5917871ece759aba30340ff656930653b41b36829ab62e4809450c90b1eab04c"
+    }
+  },
+  "detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "3e5edc09-f8a0-47f4-8a4f-38ae20e62d86",
+      "owner_id": "5e575b96-812d-4b96-bfb9-d11d7365ca7f",
+      "workspace_id": "690c50f4-2e2a-45aa-87d3-5a07d1e8eff2"
+    },
+    "summary": {
+      "ticket_id": "7946bd70-258b-4bf1-b253-7df5b738c0fa",
+      "version": 3,
+      "revision_id": "f19069f0-5191-4e95-b196-cea2c3907063",
+      "payload_hash": "2a2fd4924644c57e521a35c1bd75547247a42516fd4ed8e4e126f63f81bdb330",
+      "purpose": "enrollment_assistance",
+      "due_date": "2026-09-30",
+      "state": "approved",
+      "evidence_classification": "local_unreconciled",
+      "evidence_current": "none",
+      "result": "local_preparation_ready",
+      "verification": "pending",
+      "external_service_verified": false,
+      "membership_authority": "not_established",
+      "source_current": true,
+      "can_verify": true
+    },
+    "review": {
+      "ticket_id": "7946bd70-258b-4bf1-b253-7df5b738c0fa",
+      "revision_id": "f19069f0-5191-4e95-b196-cea2c3907063",
+      "patient_link_id": "d5cafaa5-41a7-4515-894e-90ca7f071b9b",
+      "proposal": {
+        "expected_workspace_revision": 3,
+        "idempotency_key": "membership-propose-82cdb7c4-9608-4a94-9aca-d234407b80f5",
+        "source": {
+          "kind": "reviewed_note",
+          "note_id": "cb520876-1bc0-4d02-96fd-9d43a38263aa",
+          "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+          "source_fingerprint": "4c761d64c42a8840fce642b4f20e3e401554ec3bc07328db7fe3e759d6bcd9ee"
+        },
+        "patient_link_id": "d5cafaa5-41a7-4515-894e-90ca7f071b9b",
+        "purpose": "enrollment_assistance",
+        "due_date": "2026-09-30",
+        "expected_outcome": "Review invented enrollment information",
+        "instructions": "Prepare a local review; no patient enrollment or charge."
+      },
+      "authority": "local_human_review_only",
+      "automatic_membership_changes": false,
+      "automatic_messages_or_money_movement": false
+    },
+    "review_sha256": "1d83bc97451b46fe2562ba491e0f4360f512c9b99883f5babd21dee40582cf45",
+    "latest_result": {
+      "receipt_id": "299008e1-39ea-403e-a918-37901d72d11d",
+      "receipt_sha256": "53b78f9b8d0f3e77991c3c910f825df1693b3da959e51ed714d25b93dc3c1ba7",
+      "request": {
+        "ticket_id": "7946bd70-258b-4bf1-b253-7df5b738c0fa",
+        "expected_version": 2,
+        "revision_id": "f19069f0-5191-4e95-b196-cea2c3907063",
+        "payload_hash": "2a2fd4924644c57e521a35c1bd75547247a42516fd4ed8e4e126f63f81bdb330",
+        "idempotency_key": "membership-command-ed423335-59a0-470d-9836-ee58af5fcdfd",
+        "disposition": "local_preparation_ready",
+        "evidence": "Invented local information was reviewed; membership is unreconciled."
+      }
+    }
+  },
+  "snapshot": {
+    "kind": "membership",
+    "data": {
+      "status": {
+        "purpose": "enrollment_assistance",
+        "due_date": "2026-09-30",
+        "state": "approved",
+        "evidence_classification": "local_unreconciled",
+        "evidence_current": "none",
+        "result": "local_preparation_ready",
+        "verification": "pending",
+        "external_service_verified": false,
+        "membership_authority": "not_established",
+        "source_current": true
+      },
+      "expected_outcome": "Review invented enrollment information",
+      "instructions": "Prepare a local review; no patient enrollment or charge.",
+      "human_evidence": "Invented local information was reviewed; membership is unreconciled.",
+      "ledger_observation": null
+    },
+    "review_sha256": "1d83bc97451b46fe2562ba491e0f4360f512c9b99883f5babd21dee40582cf45",
+    "result_receipt": {
+      "id": "299008e1-39ea-403e-a918-37901d72d11d",
+      "sha256": "53b78f9b8d0f3e77991c3c910f825df1693b3da959e51ed714d25b93dc3c1ba7"
+    },
+    "finance_evidence": null
+  }
+}

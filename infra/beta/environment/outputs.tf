@@ -3,7 +3,13 @@ output "resource_group_name" {
 }
 
 output "location" {
-  value = data.azurerm_resource_group.beta.location
+  description = "Reviewed workload placement; existing bootstrap/state resource locations are unchanged."
+  value       = var.location
+}
+
+output "api_max_replicas" {
+  description = "Reviewed API replica cap used as an exact workload verification input."
+  value       = var.api_max_replicas
 }
 
 output "environment" {

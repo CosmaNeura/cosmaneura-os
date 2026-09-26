@@ -1,0 +1,13 @@
+.routine-time { display: grid; gap: .4rem; min-width: 0; }
+.routine-time > label { display: grid; gap: .4rem; margin: 0; }
+.routine-time > label > input {
+  box-sizing: border-box; width: 100%; min-width: 0; min-height: 44px;
+  padding: .65rem; border: 1px solid var(--border, #a9bdc6); border-radius: .4rem;
+  font: inherit; font-variant-numeric: tabular-nums;
+}
+.routine-time__controls { display: flex; flex-wrap: wrap; align-items: center; gap: .4rem .7rem; min-width: 0; }
+.routine-time .routine-time__controls > button {
+  width: auto; flex: 0 0 auto; min-height: 44px; max-width: 100%;
+  padding: .5rem .75rem; white-space: normal;
+}
+.routine-time__controls > p { margin: 0; font-size: .9rem; overflow-wrap: anywhere; }

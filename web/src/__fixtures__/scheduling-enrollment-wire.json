@@ -1,0 +1,149 @@
+{
+  "not_connected": {
+    "command": {
+      "action": "enrollment_status"
+    },
+    "response": {
+      "state": "not_connected",
+      "label": null,
+      "attempt_ref": null,
+      "catalog": null,
+      "expires_at": null
+    }
+  },
+  "choose": {
+    "command": {
+      "action": "enrollment_status"
+    },
+    "response": {
+      "label": null,
+      "attempt_ref": "4da5e297-cb5b-4ea8-9580-9732ae0cddc7",
+      "catalog": {
+        "contract_version": "1",
+        "practice": {
+          "id": "fa602f18-96ef-4477-b018-f4dae45333d3",
+          "label": "W55 invented practice"
+        },
+        "actor_id": "b62b18c9-5552-4fb8-91a9-5cb7e9d4992e",
+        "role": "staff",
+        "practitioner": {
+          "id": "f879945e-3918-4654-9bd3-f0af6ec62a27",
+          "label": "Invited clinician",
+          "timezone": "America/New_York"
+        },
+        "locations": [
+          {
+            "id": "c5d0c30b-7433-4998-a71f-a318ae84afb2",
+            "label": "Main office",
+            "timezone": "America/New_York"
+          }
+        ],
+        "appointment_types": [
+          {
+            "id": "a4be1849-1cab-4008-a2a5-792a5b20ca69",
+            "label": "Office visit",
+            "duration_minutes": 30
+          }
+        ],
+        "observed_at": "2026-09-24T02:26:09.020578Z",
+        "catalog_sha256": "74c1c569c19aded268110725af520096906c055e467e5537316de38185f7a620"
+      },
+      "expires_at": "2026-09-24T02:36:08.965664+00:00",
+      "state": "choose_schedule"
+    }
+  },
+  "review": {
+    "command": {
+      "action": "enrollment_review",
+      "attempt_ref": "4da5e297-cb5b-4ea8-9580-9732ae0cddc7",
+      "catalog_sha256": "74c1c569c19aded268110725af520096906c055e467e5537316de38185f7a620",
+      "location_id": "c5d0c30b-7433-4998-a71f-a318ae84afb2",
+      "appointment_type_id": "a4be1849-1cab-4008-a2a5-792a5b20ca69",
+      "command_key": "e3387e09-b071-41eb-8b66-180a286f0e33"
+    },
+    "response": {
+      "state": "ready",
+      "attempt_ref": "4da5e297-cb5b-4ea8-9580-9732ae0cddc7",
+      "catalog": {
+        "contract_version": "1",
+        "practice": {
+          "id": "fa602f18-96ef-4477-b018-f4dae45333d3",
+          "label": "W55 invented practice"
+        },
+        "actor_id": "b62b18c9-5552-4fb8-91a9-5cb7e9d4992e",
+        "role": "staff",
+        "practitioner": {
+          "id": "f879945e-3918-4654-9bd3-f0af6ec62a27",
+          "label": "Invited clinician",
+          "timezone": "America/New_York"
+        },
+        "locations": [
+          {
+            "id": "c5d0c30b-7433-4998-a71f-a318ae84afb2",
+            "label": "Main office",
+            "timezone": "America/New_York"
+          }
+        ],
+        "appointment_types": [
+          {
+            "id": "a4be1849-1cab-4008-a2a5-792a5b20ca69",
+            "label": "Office visit",
+            "duration_minutes": 30
+          }
+        ],
+        "observed_at": "2026-09-24T02:26:09.054473Z",
+        "catalog_sha256": "74c1c569c19aded268110725af520096906c055e467e5537316de38185f7a620"
+      },
+      "location_id": "c5d0c30b-7433-4998-a71f-a318ae84afb2",
+      "appointment_type_id": "a4be1849-1cab-4008-a2a5-792a5b20ca69",
+      "plan_sha256": "97ac796f8539f42f8d77a0fb3465709d3a90e089b549043a966d4a2d734dcaff",
+      "command_key": "e3387e09-b071-41eb-8b66-180a286f0e33",
+      "command_sha256": "0bbd79b033506f27e68f993baaaa0a25b67923fb5835672e4d752534ba549986",
+      "expires_at": "2026-09-24T02:36:08.965664+00:00"
+    }
+  },
+  "confirm": {
+    "command": {
+      "action": "enrollment_confirm",
+      "attempt_ref": "4da5e297-cb5b-4ea8-9580-9732ae0cddc7",
+      "catalog_sha256": "74c1c569c19aded268110725af520096906c055e467e5537316de38185f7a620",
+      "location_id": "c5d0c30b-7433-4998-a71f-a318ae84afb2",
+      "appointment_type_id": "a4be1849-1cab-4008-a2a5-792a5b20ca69",
+      "command_key": "e3387e09-b071-41eb-8b66-180a286f0e33",
+      "plan_sha256": "97ac796f8539f42f8d77a0fb3465709d3a90e089b549043a966d4a2d734dcaff",
+      "confirmed": true
+    },
+    "response": {
+      "state": "connected",
+      "attempt_ref": "4da5e297-cb5b-4ea8-9580-9732ae0cddc7",
+      "command_key": "e3387e09-b071-41eb-8b66-180a286f0e33",
+      "command_sha256": "0bbd79b033506f27e68f993baaaa0a25b67923fb5835672e4d752534ba549986",
+      "applied": true,
+      "label": "W55 invented practice \u00b7 Invited clinician"
+    }
+  },
+  "receipt": {
+    "command": {
+      "action": "enrollment_result",
+      "attempt_ref": "4da5e297-cb5b-4ea8-9580-9732ae0cddc7",
+      "command_key": "e3387e09-b071-41eb-8b66-180a286f0e33",
+      "command_sha256": "0bbd79b033506f27e68f993baaaa0a25b67923fb5835672e4d752534ba549986"
+    },
+    "response": {
+      "state": "connected",
+      "attempt_ref": "4da5e297-cb5b-4ea8-9580-9732ae0cddc7",
+      "command_key": "e3387e09-b071-41eb-8b66-180a286f0e33",
+      "command_sha256": "0bbd79b033506f27e68f993baaaa0a25b67923fb5835672e4d752534ba549986",
+      "applied": true,
+      "label": "W55 invented practice \u00b7 Invited clinician"
+    }
+  },
+  "cancel": {
+    "command": {
+      "action": "enrollment_cancel"
+    },
+    "response": {
+      "state": "cancelled"
+    }
+  }
+}

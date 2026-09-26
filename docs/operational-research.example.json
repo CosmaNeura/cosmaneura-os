@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "enabled": false,
+  "sources": ["pubmed", "clinical_trials", "dailymed", "rxnorm", "openfda", "cms_coverage", "cms_open_data", "medicare_care_compare", "npi_registry"],
+  "openfda_api_key": {
+    "secret_name": "invented-research-openfda",
+    "version": "99999999999999999999999999999999"
+  },
+  "dataset_mappings": {
+    "cms_open_data": {
+      "dataset_id": "22222222-2222-4222-8222-222222222222",
+      "query_field": "name",
+      "id_field": "id",
+      "title_field": "name",
+      "text_fields": ["summary"],
+      "expected_columns": ["id", "name", "summary"],
+      "version": "invented-v1",
+      "released_at": "2026-09-24"
+    },
+    "medicare_care_compare": {
+      "dataset_id": "abcd-ef12",
+      "query_field": "name",
+      "id_field": "id",
+      "title_field": "name",
+      "text_fields": ["summary"],
+      "expected_columns": ["id", "name", "summary"],
+      "version": "invented-v1",
+      "released_at": "2026-09-24",
+      "distribution_index": 0,
+      "metadata_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "response_schema_sha256": "2222222222222222222222222222222222222222222222222222222222222222"
+    }
+  }
+}

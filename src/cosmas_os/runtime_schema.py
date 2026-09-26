@@ -2,4 +2,4 @@ from __future__ import annotations
 
 # Both API and worker readiness must reject a database that has not reached the
 # exact application revision shipped in the image.
-EXPECTED_SCHEMA_REVISION = "0002_external_identities"
+EXPECTED_SCHEMA_REVISION = "c83a2f19b650"

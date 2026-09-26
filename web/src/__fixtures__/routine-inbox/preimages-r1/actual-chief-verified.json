@@ -1,0 +1,130 @@
+{
+  "owner": {
+    "id": "4129296e-2841-46a6-b17d-7ba187405b09",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [],
+      "matching_items": 0,
+      "counts": {
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "complete",
+      "reason": null,
+      "items": [
+        {
+          "ticket_id": "2102eb2f-db37-48cb-9f4a-653638fba9f8",
+          "revision_id": "0adb2e02-c5ce-4d78-9523-1c663a899b4b",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 6,
+          "state": "closed",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "2de8b042-fc40-49b9-89f7-d13f3c143bdd",
+            "name": "Invented recipient",
+            "available": true
+          },
+          "originator_id": "299f9a77-7359-489b-bc5d-aace731c353c",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": true,
+          "publication_receipt_id": "07db26dd-8218-4e41-b5aa-16de6eb36ef2",
+          "result_receipt_id": "9ff7adda-097e-4190-afae-e8b2a2275c67",
+          "verification_receipt_id": "c0688e2a-e65d-4559-8ca2-8dd733f5b8af",
+          "changed_since_report": false
+        }
+      ],
+      "matching_items": 1,
+      "counts": {
+        "pending_approval": 0,
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "awaiting_review": 0,
+        "verified_complete": 1,
+        "source_unavailable": 0
+      },
+      "withheld_sources": false
+    },
+    "model_used": false
+  },
+  "staff": {
+    "id": "2adc30f8-7f7d-4a4f-9db0-de21d787de3c",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [],
+      "matching_items": 0,
+      "counts": {
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "complete",
+      "reason": null,
+      "items": [
+        {
+          "ticket_id": "2102eb2f-db37-48cb-9f4a-653638fba9f8",
+          "revision_id": "0adb2e02-c5ce-4d78-9523-1c663a899b4b",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 6,
+          "state": "closed",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "2de8b042-fc40-49b9-89f7-d13f3c143bdd",
+            "name": "Invented recipient",
+            "available": true
+          },
+          "originator_id": "299f9a77-7359-489b-bc5d-aace731c353c",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": true,
+          "publication_receipt_id": "07db26dd-8218-4e41-b5aa-16de6eb36ef2",
+          "result_receipt_id": "9ff7adda-097e-4190-afae-e8b2a2275c67",
+          "verification_receipt_id": "c0688e2a-e65d-4559-8ca2-8dd733f5b8af",
+          "changed_since_report": false
+        }
+      ],
+      "matching_items": 1,
+      "counts": {
+        "pending_approval": 0,
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "awaiting_review": 0,
+        "verified_complete": 1,
+        "source_unavailable": 0
+      },
+      "withheld_sources": false
+    },
+    "model_used": false
+  }
+}

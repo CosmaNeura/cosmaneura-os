@@ -1,4 +1,6 @@
-const API_BASE =
+export const COMPACT_LOCAL = import.meta.env.VITE_COMPACT_LOCAL === "true" &&
+  import.meta.env.VITE_COSMAS_ENV === "synth_os";
+const API_BASE = COMPACT_LOCAL ? "" :
   import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://localhost:8000";
 
 export type QueueItem = {
@@ -8,6 +10,7 @@ export type QueueItem = {
   proposed_message: string | null;
   revision_id: string | null;
   patient_link_id: string | null;
+  execution_status?: string | null;
 };
 
 export type Seed = {

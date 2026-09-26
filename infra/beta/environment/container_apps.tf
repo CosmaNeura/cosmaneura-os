@@ -1,7 +1,7 @@
 resource "azurerm_container_app_environment" "beta" {
   name                           = local.cae_name
   resource_group_name            = data.azurerm_resource_group.beta.name
-  location                       = data.azurerm_resource_group.beta.location
+  location                       = var.location
   infrastructure_subnet_id       = azurerm_subnet.container_apps.id
   log_analytics_workspace_id     = azurerm_log_analytics_workspace.beta.id
   internal_load_balancer_enabled = false
@@ -15,6 +15,7 @@ resource "azurerm_container_app" "api" {
   resource_group_name          = data.azurerm_resource_group.beta.name
   container_app_environment_id = azurerm_container_app_environment.beta.id
   revision_mode                = "Single"
+  max_inactive_revisions       = 3
   tags                         = local.tags
 
   identity {
@@ -59,6 +60,15 @@ resource "azurerm_container_app" "api" {
     key_vault_secret_id = azurerm_key_vault_secret.human_deploy_evidence_reference[0].versionless_id
   }
 
+  dynamic "secret" {
+    for_each = module.workspace_runtime.secret_definitions
+    content {
+      name                = secret.key
+      identity            = azurerm_user_assigned_identity.runtime.id
+      key_vault_secret_id = secret.value
+    }
+  }
+
   template {
     min_replicas = var.api_min_replicas
     max_replicas = var.api_max_replicas
@@ -89,6 +99,22 @@ resource "azurerm_container_app" "api" {
         success_count_threshold = 1
       }
 
+      dynamic "env" {
+        for_each = module.workspace_runtime.secret_env
+        content {
+          name        = env.key
+          secret_name = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.workspace_runtime_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
       env {
         name  = "COSMAS_ENV"
         value = "early_adopter_beta"
@@ -106,7 +132,7 @@ resource "azurerm_container_app" "api" {
 
       env {
         name  = "CORS_ALLOWED_ORIGINS"
-        value = local.web_origin
+        value = join(",", local.workspace_client_origins)
       }
 
       env {
@@ -146,7 +172,7 @@ resource "azurerm_container_app" "api" {
 
       env {
         name  = "CLERK_AUTHORIZED_PARTIES"
-        value = local.web_origin
+        value = join(",", local.workspace_client_origins)
       }
 
       env {
@@ -212,6 +238,7 @@ resource "azurerm_container_app" "api" {
   }
 
   depends_on = [
+    terraform_data.workspace_profile_guard,
     azurerm_private_endpoint.acr,
     azurerm_private_endpoint.blob,
     azurerm_private_endpoint.key_vault,
@@ -229,6 +256,7 @@ resource "azurerm_container_app" "worker" {
   resource_group_name          = data.azurerm_resource_group.beta.name
   container_app_environment_id = azurerm_container_app_environment.beta.id
   revision_mode                = "Single"
+  max_inactive_revisions       = 3
   tags                         = local.tags
 
   identity {
@@ -273,6 +301,15 @@ resource "azurerm_container_app" "worker" {
     key_vault_secret_id = azurerm_key_vault_secret.human_deploy_evidence_reference[0].versionless_id
   }
 
+  dynamic "secret" {
+    for_each = module.workspace_runtime.secret_definitions
+    content {
+      name                = secret.key
+      identity            = azurerm_user_assigned_identity.runtime.id
+      key_vault_secret_id = secret.value
+    }
+  }
+
   template {
     min_replicas = var.worker_min_replicas
     max_replicas = var.worker_max_replicas
@@ -310,6 +347,22 @@ resource "azurerm_container_app" "worker" {
         success_count_threshold = 1
       }
 
+      dynamic "env" {
+        for_each = module.workspace_runtime.secret_env
+        content {
+          name        = env.key
+          secret_name = env.value
+        }
+      }
+
+      dynamic "env" {
+        for_each = local.workspace_runtime_env
+        content {
+          name  = env.key
+          value = env.value
+        }
+      }
+
       env {
         name  = "COSMAS_ENV"
         value = "early_adopter_beta"
@@ -327,7 +380,7 @@ resource "azurerm_container_app" "worker" {
 
       env {
         name  = "CORS_ALLOWED_ORIGINS"
-        value = local.web_origin
+        value = join(",", local.workspace_client_origins)
       }
 
       env {
@@ -367,7 +420,7 @@ resource "azurerm_container_app" "worker" {
 
       env {
         name  = "CLERK_AUTHORIZED_PARTIES"
-        value = local.web_origin
+        value = join(",", local.workspace_client_origins)
       }
 
       env {
@@ -421,6 +474,7 @@ resource "azurerm_container_app" "worker" {
   }
 
   depends_on = [
+    terraform_data.workspace_profile_guard,
     azurerm_private_endpoint.acr,
     azurerm_private_endpoint.blob,
     azurerm_private_endpoint.key_vault,

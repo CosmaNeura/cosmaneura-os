@@ -113,6 +113,8 @@ jq -n \
     {
       planned_values: {outputs: {
         box_id: {value: $box_id},
+        location: {value: "centralus"},
+        api_max_replicas: {value: 2},
         environment: {value: "early_adopter_beta"},
         deployment_mode: {value: "synthetic_lab"},
         data_classification: {value: "synthetic-only"},
@@ -130,6 +132,36 @@ chmod 600 "$plan_file"
 guard_validate_planned_boundary "$plan_file"
 guard_validate_safe_plan_actions "$plan_file"
 [[ "$GUARD_CREATE_COUNT" == "0" && "$GUARD_UPDATE_COUNT" == "1" && "$GUARD_NOOP_COUNT" == "1" ]]
+
+region_plan="$test_dir/region-plan.json"
+jq '
+  .variables = {location: {value: "eastus2"}, api_max_replicas: {value: 1}} |
+  .planned_values.outputs.location.value = "eastus2" |
+  .planned_values.outputs.api_max_replicas.value = 1 |
+  .resource_changes += [
+    {mode: "data", type: "azurerm_resource_group", change: {after: {location: "centralus"}}},
+    {mode: "managed", type: "azurerm_container_app_environment", change: {after: {location: "eastus2"}}},
+    {mode: "managed", type: "azurerm_container_app", name: "api", change: {after: {template: [{max_replicas: 1}]}}}
+  ]
+' "$plan_file" >"$region_plan"
+guard_validate_planned_boundary "$region_plan"
+for mutation in \
+  '.planned_values.outputs.location.value = "centralus"' \
+  '.resource_changes[3].change.after.location = "centralus"' \
+  '.variables.location.value = "East US 2"' \
+  '.variables.location.value = null' \
+  '.planned_values.outputs.api_max_replicas.value = 2' \
+  '.resource_changes[4].change.after.template[0].max_replicas = 2' \
+  '.variables.api_max_replicas.value = true' \
+  '.variables.api_max_replicas.value = "1"' \
+  'del(.planned_values.outputs.location)' \
+  'del(.planned_values.outputs.api_max_replicas)'; do
+  jq "$mutation" "$region_plan" >"$test_dir/wrong-profile.json"
+  if (guard_validate_planned_boundary "$test_dir/wrong-profile.json" >/dev/null 2>&1); then
+    printf '%s\n' "expected exact reviewed workload profile rejection: $mutation" >&2
+    exit 1
+  fi
+done
 
 security_plan="$test_dir/security-plan.json"
 jq '.resource_changes += [
@@ -228,6 +260,8 @@ jq '.planned_values.outputs += {
 critical_values="$test_dir/critical-values.json"
 guard_write_critical_planned_values "$critical_plan" "$critical_values"
 jq -e '
+  .location == "centralus" and
+  .api_max_replicas == 2 and
   .api_origin == "https://ca-api-cosmas-beta-lab01.example.azurecontainerapps.io" and
   .web_origin == "https://beta.example.test" and
   .web_default_fqdn == "ca-cosmas-web.example.azurecontainerapps.io" and

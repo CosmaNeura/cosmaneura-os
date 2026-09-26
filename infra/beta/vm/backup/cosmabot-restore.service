@@ -1,0 +1,48 @@
+[Unit]
+Description=Isolated CosmaBot PostgreSQL restore paused at a fixed LSN
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=cosmabot-restore
+Group=cosmabot-restore
+LoadCredential=azure.pem:/etc/cosmabot/backup/secrets/reader.pem
+LoadCredential=server.key:/etc/cosmabot/backup/secrets/restore-server.key
+ExecStart=/usr/bin/python3 -I /opt/cosmabot/backup/restore.py run
+ExecStartPost=/usr/bin/python3 -I /opt/cosmabot/backup/restore.py verify
+Restart=no
+TimeoutStartSec=7800
+TimeoutStopSec=90
+KillSignal=SIGINT
+KillMode=control-group
+StateDirectory=cosmabot-restore
+StateDirectoryMode=0700
+LogsDirectory=cosmabot-restore
+LogsDirectoryMode=0700
+StandardOutput=append:/var/log/cosmabot-restore/postgres.log
+StandardError=append:/var/log/cosmabot-restore/postgres.log
+UMask=0077
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+ProtectProc=invisible
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+LockPersonality=yes
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Permit only loopback restore clients; deny the live DB bridge and all IMDS/link-local access.
+IPAddressDeny=172.30.240.0/24 172.30.241.0/24 172.30.242.0/24 169.254.0.0/16 fe80::/10
+TemporaryFileSystem=/opt/cosmabot:ro,mode=0755 /etc/cosmabot:ro,mode=0755
+BindReadOnlyPaths=/opt/cosmabot/backup /etc/cosmabot/backup /etc/cosmabot/backup/resolv.conf:/etc/resolv.conf
+InaccessiblePaths=/var/lib/cosmabot -/etc/cosmabot/runtime /etc/cosmabot/backup/secrets /run/docker.sock /var/run/docker.sock -/var/lib/waagent
+MemoryMax=1G
+CPUQuota=50%
+TasksMax=96

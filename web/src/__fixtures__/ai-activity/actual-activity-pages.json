@@ -1,0 +1,175 @@
+{
+  "empty": {
+    "contract_version": 1,
+    "box_id": "acea104b-ed9b-4e8e-8bdd-0696c13378bc",
+    "owner_id": "3102ca69-75ec-4155-be65-b5a08ef4fcbf",
+    "recovery_scope": "2d4a727ec7ae7ee0cc3034b817507bffe8b5c1dc750a30890dda996f5f1cf5e3",
+    "view": "attention",
+    "as_of": "2026-09-22T15:36:28.894804Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 0,
+      "recent_total": 0,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:28.894804Z",
+      "window_start": "2026-09-21T15:36:28.894804Z",
+      "admitted_units": 0,
+      "occupied_units": 0,
+      "remaining_units": null,
+      "pending_units": 0,
+      "unknown_units": 0,
+      "verified_input_tokens": 0,
+      "verified_output_tokens": 0,
+      "usage_complete": true,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": []
+  },
+  "pending": {
+    "contract_version": 1,
+    "box_id": "acea104b-ed9b-4e8e-8bdd-0696c13378bc",
+    "owner_id": "3102ca69-75ec-4155-be65-b5a08ef4fcbf",
+    "recovery_scope": "2d4a727ec7ae7ee0cc3034b817507bffe8b5c1dc750a30890dda996f5f1cf5e3",
+    "view": "attention",
+    "as_of": "2026-09-22T15:36:28.978698Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 1,
+      "recent_total": 0,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:28.978698Z",
+      "window_start": "2026-09-21T15:36:28.978698Z",
+      "admitted_units": 1,
+      "occupied_units": 1,
+      "remaining_units": null,
+      "pending_units": 1,
+      "unknown_units": 0,
+      "verified_input_tokens": null,
+      "verified_output_tokens": null,
+      "usage_complete": false,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "7c3db24f-82fe-42a1-9c37-35281c5110c9",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "38195b99-3bf6-4833-b8f7-837a6f9f644e",
+          "appointment_id": "cec5c1b2-7fc3-4934-a64b-e49b9315b55b",
+          "label": "Invented encounter",
+          "starts_at": "2026-09-22T11:36:28.787014-04:00",
+          "entry_id": "294bbc4a-7bf3-4e51-a154-f22c8b2296a8"
+        },
+        "admission": {
+          "id": "271ae59f-5eb9-4fcd-bdb8-69d1620461b4",
+          "state": "reserved",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:36:28.954493-04:00",
+          "dispatch": "not_started",
+          "usage": "unknown",
+          "input_tokens": null,
+          "output_tokens": null
+        }
+      }
+    ]
+  },
+  "recent": {
+    "contract_version": 1,
+    "box_id": "acea104b-ed9b-4e8e-8bdd-0696c13378bc",
+    "owner_id": "3102ca69-75ec-4155-be65-b5a08ef4fcbf",
+    "recovery_scope": "2d4a727ec7ae7ee0cc3034b817507bffe8b5c1dc750a30890dda996f5f1cf5e3",
+    "view": "recent",
+    "as_of": "2026-09-22T15:36:29.144045Z",
+    "page": {
+      "limit": 20,
+      "cursor": null,
+      "next_cursor": null,
+      "has_more": false
+    },
+    "coverage": {
+      "rows": "durable_admissions_only",
+      "paging": "live_current_access",
+      "attention_total": 0,
+      "recent_total": 1,
+      "withheld_total": 0,
+      "legacy_rows_included": false
+    },
+    "usage": {
+      "contract_version": 1,
+      "policy": null,
+      "team_revision": 1,
+      "as_of": "2026-09-22T15:36:29.144045Z",
+      "window_start": "2026-09-21T15:36:29.144045Z",
+      "admitted_units": 1,
+      "occupied_units": 1,
+      "remaining_units": null,
+      "pending_units": 0,
+      "unknown_units": 0,
+      "verified_input_tokens": 0,
+      "verified_output_tokens": 0,
+      "usage_complete": true,
+      "coverage": "new_admissions_and_retained_legacy_records"
+    },
+    "rows": [
+      {
+        "kind": "conversation",
+        "bot": {
+          "address": "visit_prep",
+          "agent_id": "7c3db24f-82fe-42a1-9c37-35281c5110c9",
+          "role": "visit_prep",
+          "name": "Visit Prep",
+          "team_revision": 1
+        },
+        "encounter": {
+          "workspace_id": "38195b99-3bf6-4833-b8f7-837a6f9f644e",
+          "appointment_id": "cec5c1b2-7fc3-4934-a64b-e49b9315b55b",
+          "label": "Invented encounter",
+          "starts_at": "2026-09-22T11:36:28.787014-04:00",
+          "entry_id": "294bbc4a-7bf3-4e51-a154-f22c8b2296a8"
+        },
+        "admission": {
+          "id": "271ae59f-5eb9-4fcd-bdb8-69d1620461b4",
+          "state": "completed",
+          "unit": 1,
+          "admitted_at": "2026-09-22T11:36:28.954493-04:00",
+          "dispatch": "started",
+          "usage": "verified",
+          "input_tokens": 0,
+          "output_tokens": 0
+        }
+      }
+    ]
+  }
+}

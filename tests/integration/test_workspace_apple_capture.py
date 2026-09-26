@@ -1,0 +1,12 @@
+"""Repeat admission and correction authority checks from the native local profile."""
+import pytest
+from tests.integration import test_workspace_capture as capture
+from tests.integration import test_workspace_capture_corrections as corrections
+
+capture_case = capture.capture_case
+pytestmark = pytest.mark.parametrize("capture_case", ["apple"], indirect=True)
+
+test_apple_retains_admission_without_starting_recording = capture.test_signed_workspace_prepares_and_reopens_same_session_without_recording
+test_apple_rechecks_admission_authority = capture.test_independent_revocation_stops_next_phase_or_disclosure
+test_apple_reads_and_corrects_working_transcript = corrections.test_working_operations_use_current_signed_workspace
+test_apple_rechecks_correction_authority = corrections.test_revocation_blocks_correction_phase_or_disclosure

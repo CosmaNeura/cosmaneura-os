@@ -1,7 +1,7 @@
 resource "azurerm_user_assigned_identity" "runtime" {
   name                = local.runtime_identity_name
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   tags                = local.tags
 }
 
@@ -10,7 +10,7 @@ resource "azurerm_user_assigned_identity" "runtime" {
 resource "azurerm_user_assigned_identity" "web" {
   name                = local.web_identity_name
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   tags                = local.tags
 }
 
@@ -22,6 +22,6 @@ resource "azurerm_user_assigned_identity" "database_preparation" {
 
   name                = local.database_identity_name
   resource_group_name = data.azurerm_resource_group.beta.name
-  location            = data.azurerm_resource_group.beta.location
+  location            = var.location
   tags                = local.tags
 }

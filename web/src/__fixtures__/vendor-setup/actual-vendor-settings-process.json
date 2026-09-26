@@ -1,0 +1,657 @@
+{
+  "account_request": {
+    "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+    "expected_version": 0,
+    "idempotency_key": "account-9173607a-bd42-4d7e-9c70-98fcace57548",
+    "installation_id": "042a978a-5fda-40e2-8766-b48e118e1028",
+    "installation_sha256": "892c6d1c7ada6aba8a6134f85e70694798977b1035c508e75268e5ad32ea6f5b",
+    "label": "Invented reviewed spruce",
+    "permissions": {
+      "read_status": true,
+      "prepare_and_submit": true,
+      "actions": [
+        "spruce_secure_message",
+        "spruce_media_upload",
+        "spruce_fax"
+      ]
+    }
+  },
+  "proposal_receipt": {
+    "contract_version": 1,
+    "outcome": "recorded",
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "command_kind": "propose_account",
+    "idempotency_key": "account-9173607a-bd42-4d7e-9c70-98fcace57548",
+    "request_sha256": "fa61bc75b40ac3a609326bfbe3f6f71341dd6557ace375f42170f112ccc56013",
+    "receipt_id": "ff22b9fc-8bdc-484f-8571-296dfa814c21",
+    "recorded_at": "2026-09-22T11:01:16.137102Z",
+    "effect": {
+      "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+      "kind": "account",
+      "version": 1,
+      "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+      "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380",
+      "state": "pending_review"
+    },
+    "receipt_sha256": "de3a1e98b3477f2bf8d2750353baa8934a4f9bb97c2f17c92cd70d45b74cdd89"
+  },
+  "activation_request": {
+    "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+    "expected_version": 1,
+    "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+    "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380",
+    "idempotency_key": "lost-activation-94d45813-47d3-44c9-a460-57d50f3f30af",
+    "reviewed_account": true,
+    "reviewed_environment": true,
+    "reviewed_sender": true,
+    "reviewed_capabilities": true,
+    "confirm_local_activation": true
+  },
+  "activation_receipt": {
+    "contract_version": 1,
+    "outcome": "recorded",
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "command_kind": "activate",
+    "idempotency_key": "lost-activation-94d45813-47d3-44c9-a460-57d50f3f30af",
+    "request_sha256": "c88e3338c621764b496192913899de2c9ddcc2aecb8a7113175fcb6a823fc2f2",
+    "receipt_id": "c30eea3a-c578-4795-b619-2c732e69e440",
+    "recorded_at": "2026-09-22T11:01:16.153615Z",
+    "effect": {
+      "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+      "kind": "account",
+      "version": 2,
+      "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+      "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380",
+      "state": "active"
+    },
+    "receipt_sha256": "d5739198c8cbfb818c9c6ce2355d049ecc71ef29492d36d472e352ad85bcdadb"
+  },
+  "recipient_request": {
+    "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+    "expected_version": 0,
+    "idempotency_key": "recipient-63f61d9a-710d-4d76-aacf-8f8aae254ad7",
+    "account": {
+      "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+      "expected_version": 2,
+      "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+      "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380"
+    },
+    "patient_link_id": "d28ef8eb-ce99-46fc-8157-54c14b39917c",
+    "destination": {
+      "channel": "secure",
+      "contact_id": "invented_contact"
+    },
+    "label": "Invented reviewed recipient",
+    "permission_reference": "Invented manual permission record",
+    "expires_at": "2026-09-24T11:01:16.699854Z"
+  },
+  "recipient_proposal_receipt": {
+    "contract_version": 1,
+    "outcome": "recorded",
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "command_kind": "propose_recipient",
+    "idempotency_key": "recipient-63f61d9a-710d-4d76-aacf-8f8aae254ad7",
+    "request_sha256": "dc1bb137cb05da0cbaad3bcd3c290b6cce836033856b823a7495bddebbd6b503",
+    "receipt_id": "fc1c7514-d37b-4391-b3c9-4523fe15f936",
+    "recorded_at": "2026-09-22T11:01:16.713374Z",
+    "effect": {
+      "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+      "kind": "recipient",
+      "version": 1,
+      "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+      "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+      "state": "pending_review"
+    },
+    "receipt_sha256": "758a7e96d4d5d0a5dd725a6eae7be61ac120298fb224387093d148f9d1c3c1ba"
+  },
+  "recipient_activation_request": {
+    "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+    "expected_version": 1,
+    "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+    "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+    "idempotency_key": "recipient-activation-3893d103-c0a7-4024-9f3f-01495f1f4fb4",
+    "reviewed_account": true,
+    "reviewed_environment": true,
+    "reviewed_sender": true,
+    "reviewed_capabilities": true,
+    "reviewed_patient": true,
+    "reviewed_recipient": true,
+    "reviewed_permission": true,
+    "confirm_local_activation": true
+  },
+  "recipient_activation_receipt": {
+    "contract_version": 1,
+    "outcome": "recorded",
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "command_kind": "activate",
+    "idempotency_key": "recipient-activation-3893d103-c0a7-4024-9f3f-01495f1f4fb4",
+    "request_sha256": "50c44d0a567264fb60fec3df04f6fedcb4abb4156da3fc82c434ad2019750d4d",
+    "receipt_id": "00c0b1b9-75e9-4dc5-b332-b8f2076f49fa",
+    "recorded_at": "2026-09-22T11:01:16.728690Z",
+    "effect": {
+      "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+      "kind": "recipient",
+      "version": 2,
+      "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+      "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+      "state": "active"
+    },
+    "receipt_sha256": "28f9967089124a4fd7269d9400ccbbd6830f2a32053e8c03d928b54e83579007"
+  },
+  "account_detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "summary": {
+      "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+      "kind": "account",
+      "version": 2,
+      "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+      "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380",
+      "state": "active",
+      "target": {
+        "kind": "account",
+        "installation_id": "042a978a-5fda-40e2-8766-b48e118e1028"
+      },
+      "label": "Invented reviewed spruce",
+      "usable_locally": true,
+      "availability": "available"
+    },
+    "review": {
+      "kind": "account",
+      "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+      "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+      "revision": 1,
+      "installed": {
+        "installation_id": "042a978a-5fda-40e2-8766-b48e118e1028",
+        "installation_sha256": "892c6d1c7ada6aba8a6134f85e70694798977b1035c508e75268e5ad32ea6f5b",
+        "label": "Invented spruce account",
+        "vendor": "spruce",
+        "environment": "production",
+        "account_reference": "invented_practice",
+        "sender_label": "Invented sender",
+        "capabilities": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ]
+      },
+      "label": "Invented reviewed spruce",
+      "permissions": {
+        "read_status": true,
+        "prepare_and_submit": true,
+        "actions": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ]
+      },
+      "connection_version_id": "79e4dfec-199b-4b37-ade1-4552350943b5"
+    },
+    "last_receipt": {
+      "contract_version": 1,
+      "outcome": "recorded",
+      "scope": {
+        "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+        "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+      },
+      "command_kind": "activate",
+      "idempotency_key": "lost-activation-94d45813-47d3-44c9-a460-57d50f3f30af",
+      "request_sha256": "c88e3338c621764b496192913899de2c9ddcc2aecb8a7113175fcb6a823fc2f2",
+      "receipt_id": "c30eea3a-c578-4795-b619-2c732e69e440",
+      "recorded_at": "2026-09-22T11:01:16.153615Z",
+      "effect": {
+        "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+        "kind": "account",
+        "version": 2,
+        "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+        "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380",
+        "state": "active"
+      },
+      "receipt_sha256": "d5739198c8cbfb818c9c6ce2355d049ecc71ef29492d36d472e352ad85bcdadb"
+    }
+  },
+  "recipient_detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "summary": {
+      "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+      "kind": "recipient",
+      "version": 2,
+      "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+      "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+      "state": "active",
+      "target": {
+        "kind": "recipient",
+        "account_setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+        "patient_link_id": "d28ef8eb-ce99-46fc-8157-54c14b39917c"
+      },
+      "label": "Invented reviewed recipient",
+      "usable_locally": true,
+      "availability": "available"
+    },
+    "review": {
+      "kind": "recipient",
+      "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+      "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+      "revision": 1,
+      "installed": {
+        "installation_id": "042a978a-5fda-40e2-8766-b48e118e1028",
+        "installation_sha256": "892c6d1c7ada6aba8a6134f85e70694798977b1035c508e75268e5ad32ea6f5b",
+        "label": "Invented spruce account",
+        "vendor": "spruce",
+        "environment": "production",
+        "account_reference": "invented_practice",
+        "sender_label": "Invented sender",
+        "capabilities": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ]
+      },
+      "label": "Invented reviewed recipient",
+      "account": {
+        "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+        "expected_version": 2,
+        "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+        "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380"
+      },
+      "account_label": "Invented reviewed spruce",
+      "connection_version_id": "79e4dfec-199b-4b37-ade1-4552350943b5",
+      "correspondence_version_id": "8f05ebd8-ad52-4418-ab83-b5e9f1ea03e5",
+      "patient": {
+        "patient_link_id": "d28ef8eb-ce99-46fc-8157-54c14b39917c",
+        "label": "Invented W36 patient"
+      },
+      "destination": {
+        "channel": "secure",
+        "contact_id": "invented_contact"
+      },
+      "permission_reference": "Invented manual permission record",
+      "expires_at": "2026-09-24T11:01:16.699854Z"
+    },
+    "last_receipt": {
+      "contract_version": 1,
+      "outcome": "recorded",
+      "scope": {
+        "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+        "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+      },
+      "command_kind": "activate",
+      "idempotency_key": "recipient-activation-3893d103-c0a7-4024-9f3f-01495f1f4fb4",
+      "request_sha256": "50c44d0a567264fb60fec3df04f6fedcb4abb4156da3fc82c434ad2019750d4d",
+      "receipt_id": "00c0b1b9-75e9-4dc5-b332-b8f2076f49fa",
+      "recorded_at": "2026-09-22T11:01:16.728690Z",
+      "effect": {
+        "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+        "kind": "recipient",
+        "version": 2,
+        "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+        "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+        "state": "active"
+      },
+      "receipt_sha256": "28f9967089124a4fd7269d9400ccbbd6830f2a32053e8c03d928b54e83579007"
+    }
+  },
+  "history": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+    "items": [
+      {
+        "request": {
+          "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+          "expected_version": 0,
+          "idempotency_key": "recipient-63f61d9a-710d-4d76-aacf-8f8aae254ad7",
+          "account": {
+            "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+            "expected_version": 2,
+            "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+            "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380"
+          },
+          "patient_link_id": "d28ef8eb-ce99-46fc-8157-54c14b39917c",
+          "destination": {
+            "channel": "secure",
+            "contact_id": "invented_contact"
+          },
+          "label": "Invented reviewed recipient",
+          "permission_reference": "Invented manual permission record",
+          "expires_at": "2026-09-24T11:01:16.699854Z"
+        },
+        "receipt": {
+          "contract_version": 1,
+          "outcome": "recorded",
+          "scope": {
+            "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+            "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+          },
+          "command_kind": "propose_recipient",
+          "idempotency_key": "recipient-63f61d9a-710d-4d76-aacf-8f8aae254ad7",
+          "request_sha256": "dc1bb137cb05da0cbaad3bcd3c290b6cce836033856b823a7495bddebbd6b503",
+          "receipt_id": "fc1c7514-d37b-4391-b3c9-4523fe15f936",
+          "recorded_at": "2026-09-22T11:01:16.713374Z",
+          "effect": {
+            "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+            "kind": "recipient",
+            "version": 1,
+            "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+            "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+            "state": "pending_review"
+          },
+          "receipt_sha256": "758a7e96d4d5d0a5dd725a6eae7be61ac120298fb224387093d148f9d1c3c1ba"
+        }
+      },
+      {
+        "request": {
+          "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+          "expected_version": 1,
+          "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+          "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+          "idempotency_key": "recipient-activation-3893d103-c0a7-4024-9f3f-01495f1f4fb4",
+          "reviewed_account": true,
+          "reviewed_environment": true,
+          "reviewed_sender": true,
+          "reviewed_capabilities": true,
+          "reviewed_patient": true,
+          "reviewed_recipient": true,
+          "reviewed_permission": true,
+          "confirm_local_activation": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "outcome": "recorded",
+          "scope": {
+            "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+            "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+          },
+          "command_kind": "activate",
+          "idempotency_key": "recipient-activation-3893d103-c0a7-4024-9f3f-01495f1f4fb4",
+          "request_sha256": "50c44d0a567264fb60fec3df04f6fedcb4abb4156da3fc82c434ad2019750d4d",
+          "receipt_id": "00c0b1b9-75e9-4dc5-b332-b8f2076f49fa",
+          "recorded_at": "2026-09-22T11:01:16.728690Z",
+          "effect": {
+            "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+            "kind": "recipient",
+            "version": 2,
+            "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+            "review_sha256": "7ef2af1a4d51eff6cc216bb8ef1b623846dba2c96bbac2623691c0b0416eb08b",
+            "state": "active"
+          },
+          "receipt_sha256": "28f9967089124a4fd7269d9400ccbbd6830f2a32053e8c03d928b54e83579007"
+        }
+      }
+    ],
+    "reviews": [
+      {
+        "kind": "recipient",
+        "setup_id": "cfed119b-205a-44f0-8cf4-4e5811f49561",
+        "revision_id": "cf614762-3b68-477b-a17a-4198f1d9fd0e",
+        "revision": 1,
+        "installed": {
+          "installation_id": "042a978a-5fda-40e2-8766-b48e118e1028",
+          "installation_sha256": "892c6d1c7ada6aba8a6134f85e70694798977b1035c508e75268e5ad32ea6f5b",
+          "label": "Invented spruce account",
+          "vendor": "spruce",
+          "environment": "production",
+          "account_reference": "invented_practice",
+          "sender_label": "Invented sender",
+          "capabilities": [
+            "spruce_secure_message",
+            "spruce_media_upload",
+            "spruce_fax"
+          ]
+        },
+        "label": "Invented reviewed recipient",
+        "account": {
+          "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+          "expected_version": 2,
+          "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+          "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380"
+        },
+        "account_label": "Invented reviewed spruce",
+        "connection_version_id": "79e4dfec-199b-4b37-ade1-4552350943b5",
+        "correspondence_version_id": "8f05ebd8-ad52-4418-ab83-b5e9f1ea03e5",
+        "patient": {
+          "patient_link_id": "d28ef8eb-ce99-46fc-8157-54c14b39917c",
+          "label": "Invented W36 patient"
+        },
+        "destination": {
+          "channel": "secure",
+          "contact_id": "invented_contact"
+        },
+        "permission_reference": "Invented manual permission record",
+        "expires_at": "2026-09-24T11:01:16.699854Z"
+      }
+    ]
+  },
+  "delivery_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "f16c7688-0c6b-4fd6-9b55-3dda6e7d5063"
+    },
+    "command_kind": "submit",
+    "idempotency_key": "command-259a340e-9cd5-405c-9056-d342dc6c4a5b",
+    "request_sha256": "bd7addeb9e56c17c61e824b1fc5852ffcb4bd6fa4fac938a8de84e642d54d459",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "29d5c3c1-26c8-451e-9e85-d65e92a7ede7",
+      "operation_id": "673c3e4a-a47a-46c0-b45f-5a522d4f1340",
+      "revision_id": "be5e064c-951c-497a-884f-a07b8acac30d",
+      "payload_hash": "b83ba65e60c5dd0cb26a1514e360f903d96971f1ba8e5eeeb6c5be827272b193",
+      "receipt_id": "78419f05-7471-4561-af54-b2440499135c",
+      "effect_version": 3,
+      "recorded_at": "2026-09-22T11:01:16.833189Z",
+      "receipt_sha256": "c9b4b85d1836274d81d45db297e889d063feed9ce8acdf6a9a2bffa0b0d5a178"
+    },
+    "summary": {
+      "effect": "submit_claimed",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T11:01:16.836690Z"
+  },
+  "missing_installation_delivery": {
+    "contract_version": 1,
+    "workspace_id": "f16c7688-0c6b-4fd6-9b55-3dda6e7d5063",
+    "view_version": 5,
+    "observed_at": "2026-09-22T11:01:16.957923Z",
+    "summary": {
+      "ticket_id": "bffa4302-d2c4-4909-93d9-66d6d2492906",
+      "version": 5,
+      "revision_id": "0b749381-96b9-4fe8-9a86-b6673b84f9ce",
+      "operation_id": "ed115cc5-2e6d-4e46-87ea-feecbc0ce1a9",
+      "payload_hash": "983932b3092d23fbbf646d5ebac0e22e95e87aa7a913107c6aed8a3a85971108",
+      "action": "spruce_secure_message",
+      "state": "approved",
+      "published": false,
+      "submit_claimed": true,
+      "dispatch": "proved_not_dispatched",
+      "acceptance": "not_observed",
+      "transport": "not_observed",
+      "conflicting_evidence": false,
+      "result": "none",
+      "verification": "pending",
+      "due_date": "2026-10-01",
+      "outcome_excerpt": "Invented reviewed message receipt",
+      "responsible_id": "23d2636d-1b49-45ab-bef1-4799525a617c",
+      "observation_head": {
+        "sequence": 2,
+        "sha256": "3b7dc80312efdda675332a6e3107da825d66983cb84be15ed95b7d0d22a6c5d0"
+      },
+      "evidence_sha256": "0a24e44da8636b7bc8c346f66afb21597b4eecc6c3c0936dc70b85e525f62366"
+    },
+    "review": {
+      "ticket_id": "bffa4302-d2c4-4909-93d9-66d6d2492906",
+      "revision_id": "0b749381-96b9-4fe8-9a86-b6673b84f9ce",
+      "operation_id": "ed115cc5-2e6d-4e46-87ea-feecbc0ce1a9",
+      "action": "spruce_secure_message",
+      "connection": {
+        "id": "79e4dfec-199b-4b37-ade1-4552350943b5",
+        "revision": 1,
+        "vendor": "spruce",
+        "environment": "production",
+        "label": "Invented reviewed spruce",
+        "actions": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ],
+        "availability": "enabled",
+        "public_sha256": "f0b2df6d28de0ed0b07cfd0047ef622e87874cc34d49c03078f7330024105496"
+      },
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "06176c31-3602-4c77-a5c4-7c22207e06ae",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "3fd52f428660f411f81d03c77920acbb1d6e33a539aefdd7167955e79d53ac06"
+      },
+      "correspondence": {
+        "id": "8f05ebd8-ad52-4418-ab83-b5e9f1ea03e5",
+        "revision": 1,
+        "connection_id": "79e4dfec-199b-4b37-ade1-4552350943b5",
+        "channel": "secure",
+        "recipient_label": "Invented reviewed recipient",
+        "destination_display": "Secure contact invented_contact",
+        "permission": "reviewed",
+        "expires_at": "2026-09-24T11:01:16.699854Z",
+        "public_sha256": "30c63f6319f484e5600ef26dee371858fb2cc14bed984b9d547a529b7bb64b5a"
+      },
+      "message": "Invented managed message",
+      "due_date": "2026-10-01",
+      "expected_outcome": "Invented reviewed message receipt",
+      "share_to_practice": false,
+      "expires_at": "2026-09-23T11:01:16.884553Z"
+    },
+    "review_sha256": "80d0b3ec175f2ec38e090d1aa1fb3e7eb07654cd42d04e2000bfdc332259cb34",
+    "latest_result": null,
+    "availability": {
+      "approve": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "reject": {
+        "allowed": false,
+        "reason": "not_approved"
+      },
+      "withdraw": {
+        "allowed": false,
+        "reason": "submit_already_claimed"
+      },
+      "publish": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "submit": {
+        "allowed": false,
+        "reason": "submit_already_claimed"
+      },
+      "reconcile": {
+        "allowed": false,
+        "reason": "reference_unavailable"
+      },
+      "result": {
+        "allowed": true,
+        "reason": "available"
+      },
+      "verify": {
+        "allowed": false,
+        "reason": "result_required"
+      }
+    }
+  },
+  "missing_installation_account": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+      "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+    },
+    "summary": {
+      "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+      "kind": "account",
+      "version": 2,
+      "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+      "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380",
+      "state": "active",
+      "target": {
+        "kind": "account",
+        "installation_id": "042a978a-5fda-40e2-8766-b48e118e1028"
+      },
+      "label": "Invented reviewed spruce",
+      "usable_locally": false,
+      "availability": "vendor_installation_changed"
+    },
+    "review": {
+      "kind": "account",
+      "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+      "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+      "revision": 1,
+      "installed": {
+        "installation_id": "042a978a-5fda-40e2-8766-b48e118e1028",
+        "installation_sha256": "892c6d1c7ada6aba8a6134f85e70694798977b1035c508e75268e5ad32ea6f5b",
+        "label": "Invented spruce account",
+        "vendor": "spruce",
+        "environment": "production",
+        "account_reference": "invented_practice",
+        "sender_label": "Invented sender",
+        "capabilities": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ]
+      },
+      "label": "Invented reviewed spruce",
+      "permissions": {
+        "read_status": true,
+        "prepare_and_submit": true,
+        "actions": [
+          "spruce_secure_message",
+          "spruce_media_upload",
+          "spruce_fax"
+        ]
+      },
+      "connection_version_id": "79e4dfec-199b-4b37-ade1-4552350943b5"
+    },
+    "last_receipt": {
+      "contract_version": 1,
+      "outcome": "recorded",
+      "scope": {
+        "box_id": "c233da8b-0342-4452-9958-06c485525b01",
+        "owner_id": "23d2636d-1b49-45ab-bef1-4799525a617c"
+      },
+      "command_kind": "activate",
+      "idempotency_key": "lost-activation-94d45813-47d3-44c9-a460-57d50f3f30af",
+      "request_sha256": "c88e3338c621764b496192913899de2c9ddcc2aecb8a7113175fcb6a823fc2f2",
+      "receipt_id": "c30eea3a-c578-4795-b619-2c732e69e440",
+      "recorded_at": "2026-09-22T11:01:16.153615Z",
+      "effect": {
+        "setup_id": "94451f8b-0393-408e-9946-f1e9a74280c2",
+        "kind": "account",
+        "version": 2,
+        "revision_id": "4a7054ad-9d92-4143-8b27-da98f10d2a08",
+        "review_sha256": "2f67d5d6e61075cfc70a9d41f003e46a0b9c7706429fb821164a8784a1ac1380",
+        "state": "active"
+      },
+      "receipt_sha256": "d5739198c8cbfb818c9c6ce2355d049ecc71ef29492d36d472e352ad85bcdadb"
+    }
+  }
+}

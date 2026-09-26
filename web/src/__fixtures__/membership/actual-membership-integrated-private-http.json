@@ -1,0 +1,92 @@
+{
+  "request": {
+    "expected_workspace_revision": 3,
+    "idempotency_key": "membership-propose-304ceba7-2e0a-4fbc-8f9c-c338830e92a7",
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "bc39ab5c-508c-44d9-907b-d35a0cf1ea81",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "c3b3efef1a51c4ee04e4dd8f862fb7a4a44adef5b8bfec066d0b0093b34f5e37"
+    },
+    "patient_link_id": "536aceaa-2aae-4747-a98b-dd0bd76d1ebe",
+    "purpose": "enrollment_assistance",
+    "due_date": "2026-09-30",
+    "expected_outcome": "Review invented enrollment information",
+    "instructions": "Invented private membership instructions sentinel"
+  },
+  "receipt": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "8fdb5368-906f-4f85-96ba-1603b7f457ba",
+      "owner_id": "49d35c91-22b2-4f9e-a429-9025e51edba1",
+      "workspace_id": "cac0f526-0c0b-48b0-a4b8-3e807a142edb"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-304ceba7-2e0a-4fbc-8f9c-c338830e92a7",
+    "request_sha256": "b8405e2f61620050f40789aecaf1ef6b5b58526d8f6a46b7e8bfa008184e7b92",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "78375f36-c22f-4068-b3ce-288a6fea28c3",
+      "revision_id": "4fbfe670-5be1-4d35-af5a-21c670b3d152",
+      "payload_hash": "a02c83b382bf5b173be0952d1ba31376b01acb7e7fd5655543f744e7199eab42",
+      "version": 1,
+      "receipt_id": "39aa98ce-9ba1-432b-a6a5-c8153dfa406d",
+      "recorded_at": "2026-09-22T02:27:32.068551Z",
+      "effect": "proposed",
+      "state": "pending_approval",
+      "evidence_classification": "local_unreconciled",
+      "external_service_verified": false
+    },
+    "receipt_sha256": "a45044cf4e5df3a498d288cdac58d56d414983c33a90846a498448669dedc46f"
+  },
+  "detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "8fdb5368-906f-4f85-96ba-1603b7f457ba",
+      "owner_id": "49d35c91-22b2-4f9e-a429-9025e51edba1",
+      "workspace_id": "cac0f526-0c0b-48b0-a4b8-3e807a142edb"
+    },
+    "summary": {
+      "ticket_id": "78375f36-c22f-4068-b3ce-288a6fea28c3",
+      "version": 1,
+      "revision_id": "4fbfe670-5be1-4d35-af5a-21c670b3d152",
+      "payload_hash": "a02c83b382bf5b173be0952d1ba31376b01acb7e7fd5655543f744e7199eab42",
+      "purpose": "enrollment_assistance",
+      "due_date": "2026-09-30",
+      "state": "pending_approval",
+      "evidence_classification": "local_unreconciled",
+      "evidence_current": "none",
+      "result": "none",
+      "verification": "pending",
+      "external_service_verified": false,
+      "membership_authority": "not_established",
+      "source_current": true,
+      "can_verify": false
+    },
+    "review": {
+      "ticket_id": "78375f36-c22f-4068-b3ce-288a6fea28c3",
+      "revision_id": "4fbfe670-5be1-4d35-af5a-21c670b3d152",
+      "patient_link_id": "536aceaa-2aae-4747-a98b-dd0bd76d1ebe",
+      "proposal": {
+        "expected_workspace_revision": 3,
+        "idempotency_key": "membership-propose-304ceba7-2e0a-4fbc-8f9c-c338830e92a7",
+        "source": {
+          "kind": "reviewed_note",
+          "note_id": "bc39ab5c-508c-44d9-907b-d35a0cf1ea81",
+          "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+          "source_fingerprint": "c3b3efef1a51c4ee04e4dd8f862fb7a4a44adef5b8bfec066d0b0093b34f5e37"
+        },
+        "patient_link_id": "536aceaa-2aae-4747-a98b-dd0bd76d1ebe",
+        "purpose": "enrollment_assistance",
+        "due_date": "2026-09-30",
+        "expected_outcome": "Review invented enrollment information",
+        "instructions": "Invented private membership instructions sentinel"
+      },
+      "authority": "local_human_review_only",
+      "automatic_membership_changes": false,
+      "automatic_messages_or_money_movement": false
+    },
+    "review_sha256": "b61401dc305d843bd8c84dc71cd1cdb8377d7a7636ce7ad8168262e358deaf70",
+    "latest_result": null
+  }
+}

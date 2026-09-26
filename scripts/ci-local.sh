@@ -40,12 +40,11 @@ echo "== demo =="
 uv run python -m cosmas_os.cli demo-artifact-chase
 
 echo "== web =="
+./scripts/install-client-deps.sh
 (
   cd web
-  corepack enable
-  pnpm install --frozen-lockfile
-  pnpm test
-  pnpm build
+  corepack pnpm test
+  corepack pnpm build
 )
 
 echo "== local synth CI gates passed =="

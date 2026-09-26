@@ -1,0 +1,20 @@
+{
+  "source": "w96-service-source-integration-r1/scribe-source/apps/capture/src",
+  "files": {
+    "flow/controller.ts": "5e7b766daf03861a5abe846fbf53b3c0b4bf16ef5da5f9c40cb789610944225f",
+    "flow/encrypted-store.ts": "685ddf0d5c1528f0131d282426816f14e25029b9601e17ab813e0df24c0cc002",
+    "flow/types.ts": "d2b6aafb61cfb3d7c676e9f459d311b0595e3a306f29cf0c8b5bb125ea4902b5",
+    "flow/session-key.ts": "39166a608c2e83c9d01bba3e21a406b284a2c774a5f8567b18585ed67b15b49d",
+    "capture/source.ts": "bd959ba20f59fc9583da5dc66799910b9fce936760a853cf38da1f84916b840b",
+    "capture/stop-confirmation.ts": "f02d607c08a48ec0775e51ac1f6d765949147c3b51d2904b7f4690201bf8caa2",
+    "native/capacitor-ios-native-pcm-bridge.ts": "0f7eb995371cf513bd26358ceb678cfe62a287b01db05b890c748ee85a9f17fa",
+    "native/ios-native-pcm-bridge.ts": "7111e8e4c69205f3ceb6131cb690bf3ccaa7d5165ea8e91038fa18c6e8f9f4f2",
+    "native/ios-native-microphone-source.ts": "3589948f74a8218cf722fedbdc10cfd91da7f4607a054b28aa743ad7502e53eb",
+    "native/native-pcm-source.ts": "4c4f2a153a3bcde89f36634285730a5868306f4f62605ff6808eb7c79be642b8",
+    "native/native-pcm-bridge.ts": "fe743223814188ec7f8337c95222d64be6853bbc820a7f75436e7f591e344b72",
+    "native/capacitor-pcm/index.ts": "d657ed96ce605cf68cd9b1d39590770ac8b19e609b03bb9324f36f5bb9538c17",
+    "native/capacitor-pcm/definitions.ts": "2526d608d3704f2e60099e7a00b54b25651361fe3bc2d44eba9e1c2ef9047c71",
+    "native/capacitor-pcm/codec.ts": "947e2960599f720c068fe3751675dca059b055af41c6db8aa89e49b4108d03a4"
+  },
+  "adaptation": "Imports use the shared capture transport, queue and error types. No second transport or session key is invented."
+}

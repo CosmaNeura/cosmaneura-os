@@ -13,5 +13,5 @@ done
 uv sync --extra dev
 uv run alembic upgrade head
 uv run python -m cosmas_os.cli seed-synth
-echo "Starting API on :8000 (Ctrl+C to stop). Web: cd web && pnpm install && pnpm dev"
+echo "Starting API on :8000 (Ctrl+C to stop). Web: ./scripts/install-client-deps.sh && cd web && corepack pnpm dev"
 exec uv run uvicorn cosmas_os.api.app:app --reload --port 8000

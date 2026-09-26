@@ -66,21 +66,27 @@ services:
         condition: service_healthy
 
   web:
-    image: node:22.11.0-bookworm
-    working_dir: /web
-    command: sh -c "corepack enable && pnpm install && pnpm dev --host 0.0.0.0 --port 5173"
+    image: node:24.19.0-alpine@sha256:d32cdf619f63fe0471182d08996dd516c6275bb5fd31ae06e55a570bd9e1ad43
+    working_dir: /workspace
+    command: sh -c "./scripts/install-client-deps.sh && cd web && corepack pnpm dev --host 0.0.0.0 --port 5173"
     environment:
       VITE_API_BASE: http://localhost:8000
       VITE_COSMAS_ENV: synth_os
     ports:
       - "5173:5173"
     volumes:
-      - ./web:/web
+      - ./web:/workspace/web
+      - ./clients:/workspace/clients:ro
+      - ./scripts/install-client-deps.sh:/workspace/scripts/install-client-deps.sh:ro
+      - cosmas_web_modules:/workspace/web/node_modules
+      - cosmas_capture_modules:/workspace/clients/capture/node_modules
     depends_on:
       - api
 
 volumes:
   cosmas_pg:
   cosmas_blobs:
+  cosmas_web_modules:
+  cosmas_capture_modules:
 
 # Note: this host uses the `docker-compose` binary (not `docker compose`).

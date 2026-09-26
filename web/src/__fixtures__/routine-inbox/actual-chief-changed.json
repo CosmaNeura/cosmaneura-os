@@ -1,0 +1,67 @@
+{
+  "owner": {
+    "id": "4480900e-52d8-4090-a8dc-120344073ff0",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [],
+      "matching_items": 0,
+      "counts": {
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "partial",
+      "reason": "work_changed",
+      "items": [
+        {
+          "ticket_id": "bba29516-1467-4882-b1ea-22f87621c619",
+          "revision_id": "8ea8b440-c5bf-4acd-a712-dc33840b6876",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 5,
+          "state": "work_changed",
+          "body": null,
+          "due_date": null,
+          "responsible": {
+            "id": "7fc8deb7-732f-438b-9050-9706fe6944d7",
+            "name": "Invented recipient",
+            "available": true
+          },
+          "originator_id": "da9d61f7-a473-4967-acbc-4126143a9125",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": null,
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": true
+        }
+      ],
+      "matching_items": 1,
+      "counts": {
+        "pending_approval": 0,
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "awaiting_review": 0,
+        "verified_complete": 0,
+        "source_unavailable": 0,
+        "work_changed": 1
+      },
+      "withheld_sources": true
+    },
+    "model_used": false
+  }
+}

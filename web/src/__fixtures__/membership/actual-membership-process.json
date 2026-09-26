@@ -1,0 +1,311 @@
+{
+  "proposal_request": {
+    "expected_workspace_revision": 3,
+    "idempotency_key": "membership-propose-0181f248-5cf8-479b-be9b-349df7afc7d5",
+    "source": {
+      "kind": "reviewed_note",
+      "note_id": "7ddc4fbe-1aa6-479d-be0a-388858f8ffba",
+      "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+      "source_fingerprint": "2ea56034e6549c1d16155d7b9ce9afc48909d776293b7708b3982cf8335521d6"
+    },
+    "patient_link_id": "e4f17af1-1cc7-40f6-9cc0-56e0fd3adbd6",
+    "purpose": "enrollment_assistance",
+    "due_date": "2026-09-30",
+    "expected_outcome": "Review invented enrollment information",
+    "instructions": "Prepare a local review; no patient enrollment or charge."
+  },
+  "proposal_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+      "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+      "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "membership-propose-0181f248-5cf8-479b-be9b-349df7afc7d5",
+    "request_sha256": "dbec9c6d57043f2110b15f5171e2067ce7071656a5daf573ae45e515777c87b8",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+      "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+      "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+      "version": 1,
+      "receipt_id": "a9aa162d-67a1-4e72-8694-e191930f3999",
+      "recorded_at": "2026-09-22T01:54:02.545212Z",
+      "effect": "proposed",
+      "state": "pending_approval",
+      "evidence_classification": "local_unreconciled",
+      "external_service_verified": false
+    },
+    "receipt_sha256": "25abe1479b383b4376c79f2c873f23e037ffc47c61bb37f30b691ae7b2ee3bb1"
+  },
+  "verify_request": {
+    "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+    "expected_version": 3,
+    "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+    "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+    "idempotency_key": "membership-command-2858e2ce-8934-4a09-a55f-cc60f5622ee4",
+    "result_receipt_id": "68e506de-4a4d-4d51-a26f-7c76238c3aae",
+    "result_receipt_sha256": "efc0dae29e33bac3c9867c00afac42552522dacfb7c3d3a014242d068bdfea13",
+    "evidence_classification": "local_unreconciled",
+    "reviewed_patient": true,
+    "reviewed_result": true,
+    "reviewed_evidence_limits": true,
+    "confirm_review_completion": true
+  },
+  "verify_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+      "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+      "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+    },
+    "command_kind": "verify",
+    "idempotency_key": "membership-command-2858e2ce-8934-4a09-a55f-cc60f5622ee4",
+    "request_sha256": "ff0af38da28aabe2c6f0dcbe7c5d8326bddd655c6959291ce9d6c0839a52a504",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+      "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+      "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+      "version": 4,
+      "receipt_id": "fd8390e3-9785-422c-a56a-b3bfbbb769fe",
+      "recorded_at": "2026-09-22T01:54:03.220408Z",
+      "effect": "review_verified",
+      "state": "closed",
+      "evidence_classification": "local_unreconciled",
+      "external_service_verified": false
+    },
+    "receipt_sha256": "d2785ade31b229644a2d1e00262bdcd9706ca9ef920aa5f43c3fa8a21bddac3f"
+  },
+  "detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+      "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+      "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+    },
+    "summary": {
+      "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+      "version": 4,
+      "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+      "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+      "purpose": "enrollment_assistance",
+      "due_date": "2026-09-30",
+      "state": "closed",
+      "evidence_classification": "local_unreconciled",
+      "evidence_current": "none",
+      "result": "local_preparation_ready",
+      "verification": "review_verified",
+      "external_service_verified": false,
+      "membership_authority": "not_established",
+      "source_current": true,
+      "can_verify": false
+    },
+    "review": {
+      "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+      "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+      "patient_link_id": "e4f17af1-1cc7-40f6-9cc0-56e0fd3adbd6",
+      "proposal": {
+        "expected_workspace_revision": 3,
+        "idempotency_key": "membership-propose-0181f248-5cf8-479b-be9b-349df7afc7d5",
+        "source": {
+          "kind": "reviewed_note",
+          "note_id": "7ddc4fbe-1aa6-479d-be0a-388858f8ffba",
+          "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+          "source_fingerprint": "2ea56034e6549c1d16155d7b9ce9afc48909d776293b7708b3982cf8335521d6"
+        },
+        "patient_link_id": "e4f17af1-1cc7-40f6-9cc0-56e0fd3adbd6",
+        "purpose": "enrollment_assistance",
+        "due_date": "2026-09-30",
+        "expected_outcome": "Review invented enrollment information",
+        "instructions": "Prepare a local review; no patient enrollment or charge."
+      },
+      "authority": "local_human_review_only",
+      "automatic_membership_changes": false,
+      "automatic_messages_or_money_movement": false
+    },
+    "review_sha256": "0cebf1ce27324535483a68dcf7d8fcc8923f78398709c6887ac247f62a08909d",
+    "latest_result": {
+      "receipt_id": "68e506de-4a4d-4d51-a26f-7c76238c3aae",
+      "receipt_sha256": "efc0dae29e33bac3c9867c00afac42552522dacfb7c3d3a014242d068bdfea13",
+      "request": {
+        "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+        "expected_version": 2,
+        "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+        "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+        "idempotency_key": "membership-command-18669941-bff3-4709-897c-be141f1dfa70",
+        "disposition": "local_preparation_ready",
+        "evidence": "Invented local information checked; no enrollment or payment established."
+      }
+    }
+  },
+  "history": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+      "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+      "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+    },
+    "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+    "items": [
+      {
+        "request": {
+          "expected_workspace_revision": 3,
+          "idempotency_key": "membership-propose-0181f248-5cf8-479b-be9b-349df7afc7d5",
+          "source": {
+            "kind": "reviewed_note",
+            "note_id": "7ddc4fbe-1aa6-479d-be0a-388858f8ffba",
+            "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+            "source_fingerprint": "2ea56034e6549c1d16155d7b9ce9afc48909d776293b7708b3982cf8335521d6"
+          },
+          "patient_link_id": "e4f17af1-1cc7-40f6-9cc0-56e0fd3adbd6",
+          "purpose": "enrollment_assistance",
+          "due_date": "2026-09-30",
+          "expected_outcome": "Review invented enrollment information",
+          "instructions": "Prepare a local review; no patient enrollment or charge."
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+            "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+            "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+          },
+          "command_kind": "propose",
+          "idempotency_key": "membership-propose-0181f248-5cf8-479b-be9b-349df7afc7d5",
+          "request_sha256": "dbec9c6d57043f2110b15f5171e2067ce7071656a5daf573ae45e515777c87b8",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+            "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+            "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+            "version": 1,
+            "receipt_id": "a9aa162d-67a1-4e72-8694-e191930f3999",
+            "recorded_at": "2026-09-22T01:54:02.545212Z",
+            "effect": "proposed",
+            "state": "pending_approval",
+            "evidence_classification": "local_unreconciled",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "25abe1479b383b4376c79f2c873f23e037ffc47c61bb37f30b691ae7b2ee3bb1"
+        }
+      },
+      {
+        "request": {
+          "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+          "expected_version": 1,
+          "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+          "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+          "idempotency_key": "membership-command-bcb55636-63e0-48d9-a8a9-c3ba5c97d6ad",
+          "review_sha256": "0cebf1ce27324535483a68dcf7d8fcc8923f78398709c6887ac247f62a08909d",
+          "choice": "approve",
+          "reviewed_patient": true,
+          "reviewed_local_only_authority": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+            "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+            "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+          },
+          "command_kind": "decide",
+          "idempotency_key": "membership-command-bcb55636-63e0-48d9-a8a9-c3ba5c97d6ad",
+          "request_sha256": "ebffff30c83fabf6fdbe0487a44f7d74ef07e11c5d6b4f81a297d50476beadf6",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+            "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+            "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+            "version": 2,
+            "receipt_id": "9fd9a38e-00b6-4b1b-9203-03e1ccce8a1b",
+            "recorded_at": "2026-09-22T01:54:03.171164Z",
+            "effect": "approved",
+            "state": "approved",
+            "evidence_classification": "local_unreconciled",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "9158dc4d11c81edd72e89dcda636a7871f331841adf50333faf57302d36c613b"
+        }
+      },
+      {
+        "request": {
+          "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+          "expected_version": 2,
+          "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+          "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+          "idempotency_key": "membership-command-18669941-bff3-4709-897c-be141f1dfa70",
+          "disposition": "local_preparation_ready",
+          "evidence": "Invented local information checked; no enrollment or payment established."
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+            "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+            "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+          },
+          "command_kind": "result",
+          "idempotency_key": "membership-command-18669941-bff3-4709-897c-be141f1dfa70",
+          "request_sha256": "6544bf63fa3e111abd77b581cd2a1cd35327385899bc3ea3e5679949a6a41d47",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+            "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+            "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+            "version": 3,
+            "receipt_id": "68e506de-4a4d-4d51-a26f-7c76238c3aae",
+            "recorded_at": "2026-09-22T01:54:03.199996Z",
+            "effect": "result_recorded",
+            "state": "approved",
+            "evidence_classification": "local_unreconciled",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "efc0dae29e33bac3c9867c00afac42552522dacfb7c3d3a014242d068bdfea13"
+        }
+      },
+      {
+        "request": {
+          "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+          "expected_version": 3,
+          "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+          "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+          "idempotency_key": "membership-command-2858e2ce-8934-4a09-a55f-cc60f5622ee4",
+          "result_receipt_id": "68e506de-4a4d-4d51-a26f-7c76238c3aae",
+          "result_receipt_sha256": "efc0dae29e33bac3c9867c00afac42552522dacfb7c3d3a014242d068bdfea13",
+          "evidence_classification": "local_unreconciled",
+          "reviewed_patient": true,
+          "reviewed_result": true,
+          "reviewed_evidence_limits": true,
+          "confirm_review_completion": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "b16d75f3-425a-4d59-bc35-291fc48d75d1",
+            "owner_id": "5fcff77b-71e7-434d-b221-462d7908a11c",
+            "workspace_id": "637f160a-0886-46c9-93a4-2cf1bd04f133"
+          },
+          "command_kind": "verify",
+          "idempotency_key": "membership-command-2858e2ce-8934-4a09-a55f-cc60f5622ee4",
+          "request_sha256": "ff0af38da28aabe2c6f0dcbe7c5d8326bddd655c6959291ce9d6c0839a52a504",
+          "outcome": "recorded",
+          "effect": {
+            "ticket_id": "724d964f-f7d9-4086-941f-27561e5eb728",
+            "revision_id": "f52475eb-f4d7-4254-84ac-19d829b573b9",
+            "payload_hash": "c84229cc809dadb0412480d8ca6a4be9d5cdf2c4b9c7f890273e6d9c388fc044",
+            "version": 4,
+            "receipt_id": "fd8390e3-9785-422c-a56a-b3bfbbb769fe",
+            "recorded_at": "2026-09-22T01:54:03.220408Z",
+            "effect": "review_verified",
+            "state": "closed",
+            "evidence_classification": "local_unreconciled",
+            "external_service_verified": false
+          },
+          "receipt_sha256": "d2785ade31b229644a2d1e00262bdcd9706ca9ef920aa5f43c3fa8a21bddac3f"
+        }
+      }
+    ]
+  }
+}

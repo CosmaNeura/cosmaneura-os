@@ -1,7 +1,7 @@
 resource "azurerm_postgresql_flexible_server" "beta" {
   name                   = local.postgres_name
   resource_group_name    = data.azurerm_resource_group.beta.name
-  location               = data.azurerm_resource_group.beta.location
+  location               = var.location
   version                = "16"
   zone                   = var.postgres_zone
   administrator_login    = var.postgres_admin_login

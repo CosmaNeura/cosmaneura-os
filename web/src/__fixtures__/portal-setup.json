@@ -1,0 +1,384 @@
+{
+  "proposal": {
+    "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+    "expected_version": 0,
+    "idempotency_key": "portal-proposal-3a31fbcf-1561-4fe9-a9cd-fa735327dd60",
+    "installation_id": "b2fe07dc-54e3-4558-8afc-6af36d9e415d",
+    "profile_sha256": "5402be0815ae82c1240212ab0e83ecea5818d576ee32bc7d48310301a410196e",
+    "configuration_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+    "capabilities": [
+      "referral.read"
+    ],
+    "mappings": {
+      "patient_link_id": "9cff2074-05bf-4c6a-a3e1-183cc6a5520a",
+      "practice_reference": "synthetic_practice",
+      "patient_reference": "invented_patient",
+      "recipient_reference": "invented_recipient",
+      "practice_label": "Invented practice",
+      "recipient_label": "Invented recipient"
+    }
+  },
+  "proposal_receipt": {
+    "scope": {
+      "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+      "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+    },
+    "effect": {
+      "state": "pending_review",
+      "version": 1,
+      "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+      "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+    },
+    "outcome": "recorded",
+    "receipt_id": "c577a28a-f639-4db3-8913-ffb6a59a1c0c",
+    "recorded_at": "2026-09-22T00:28:47.446374Z",
+    "command_kind": "propose",
+    "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+    "receipt_sha256": "be7828c6c6c039de82f568f0767286107b3697625c8fedac7064a85391adfc4d",
+    "request_sha256": "bab707765ff2d8244d9dcc515d72df48a1bf9504b4958b146d263c937de0ee9d",
+    "idempotency_key": "portal-proposal-3a31fbcf-1561-4fe9-a9cd-fa735327dd60",
+    "contract_version": 1
+  },
+  "detail_pending": {
+    "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+    "version": 1,
+    "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+    "revision": 1,
+    "state": "pending_review",
+    "usable_locally": false,
+    "availability": "available",
+    "review": {
+      "mode": "synthetic",
+      "mappings": {
+        "patient_label": "Invented portal patient",
+        "practice_label": "Invented practice",
+        "patient_link_id": "9cff2074-05bf-4c6a-a3e1-183cc6a5520a",
+        "recipient_label": "Invented recipient",
+        "patient_reference": "invented_patient",
+        "practice_reference": "synthetic_practice",
+        "recipient_reference": "invented_recipient"
+      },
+      "portal_id": "synthetic_only",
+      "mapping_ids": {
+        "patient_mapping_id": "d37c431d-0932-4fc3-9c98-2027b9916958",
+        "practice_mapping_id": "39202af0-df75-4b19-b368-650e8671d820",
+        "recipient_mapping_id": "adad78a2-add0-421a-8f66-3757e1335846"
+      },
+      "capabilities": [
+        "referral.read"
+      ],
+      "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+      "profile_label": "Invented portal",
+      "profile_sha256": "5402be0815ae82c1240212ab0e83ecea5818d576ee32bc7d48310301a410196e",
+      "installation_id": "b2fe07dc-54e3-4558-8afc-6af36d9e415d",
+      "mappings_sha256": "b6cc1c12b31b9ecb52eebf82eb6c7187e253399bf693ab181e3d91039e77cc2d",
+      "configuration_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2",
+    "last_receipt": {
+      "scope": {
+        "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+        "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+      },
+      "effect": {
+        "state": "pending_review",
+        "version": 1,
+        "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+        "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+      },
+      "outcome": "recorded",
+      "receipt_id": "c577a28a-f639-4db3-8913-ffb6a59a1c0c",
+      "recorded_at": "2026-09-22T00:28:47.446374Z",
+      "command_kind": "propose",
+      "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+      "receipt_sha256": "be7828c6c6c039de82f568f0767286107b3697625c8fedac7064a85391adfc4d",
+      "request_sha256": "bab707765ff2d8244d9dcc515d72df48a1bf9504b4958b146d263c937de0ee9d",
+      "idempotency_key": "portal-proposal-3a31fbcf-1561-4fe9-a9cd-fa735327dd60",
+      "contract_version": 1
+    }
+  },
+  "catalog_pending": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+      "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+    },
+    "profiles": [
+      {
+        "installation_id": "b2fe07dc-54e3-4558-8afc-6af36d9e415d",
+        "portal_id": "synthetic_only",
+        "label": "Invented portal",
+        "profile_sha256": "5402be0815ae82c1240212ab0e83ecea5818d576ee32bc7d48310301a410196e",
+        "configuration_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "capabilities": [
+          {
+            "capability": "document.upload",
+            "evidence": "documented"
+          },
+          {
+            "capability": "referral.submit",
+            "evidence": "documented"
+          },
+          {
+            "capability": "referral.read",
+            "evidence": "documented"
+          }
+        ],
+        "mode": "synthetic",
+        "mapping_requirements": [
+          "patient",
+          "practice",
+          "recipient"
+        ]
+      }
+    ],
+    "patients": [
+      {
+        "id": "9cff2074-05bf-4c6a-a3e1-183cc6a5520a",
+        "label": "Invented portal patient"
+      }
+    ],
+    "connections": [
+      {
+        "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+        "version": 1,
+        "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+        "revision": 1,
+        "state": "pending_review",
+        "usable_locally": false,
+        "availability": "available",
+        "review": {
+          "mode": "synthetic",
+          "mappings": {
+            "patient_label": "Invented portal patient",
+            "practice_label": "Invented practice",
+            "patient_link_id": "9cff2074-05bf-4c6a-a3e1-183cc6a5520a",
+            "recipient_label": "Invented recipient",
+            "patient_reference": "invented_patient",
+            "practice_reference": "synthetic_practice",
+            "recipient_reference": "invented_recipient"
+          },
+          "portal_id": "synthetic_only",
+          "mapping_ids": {
+            "patient_mapping_id": "d37c431d-0932-4fc3-9c98-2027b9916958",
+            "practice_mapping_id": "39202af0-df75-4b19-b368-650e8671d820",
+            "recipient_mapping_id": "adad78a2-add0-421a-8f66-3757e1335846"
+          },
+          "capabilities": [
+            "referral.read"
+          ],
+          "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+          "profile_label": "Invented portal",
+          "profile_sha256": "5402be0815ae82c1240212ab0e83ecea5818d576ee32bc7d48310301a410196e",
+          "installation_id": "b2fe07dc-54e3-4558-8afc-6af36d9e415d",
+          "mappings_sha256": "b6cc1c12b31b9ecb52eebf82eb6c7187e253399bf693ab181e3d91039e77cc2d",
+          "configuration_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2",
+        "last_receipt": {
+          "scope": {
+            "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+            "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+          },
+          "effect": {
+            "state": "pending_review",
+            "version": 1,
+            "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+            "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+          },
+          "outcome": "recorded",
+          "receipt_id": "c577a28a-f639-4db3-8913-ffb6a59a1c0c",
+          "recorded_at": "2026-09-22T00:28:47.446374Z",
+          "command_kind": "propose",
+          "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+          "receipt_sha256": "be7828c6c6c039de82f568f0767286107b3697625c8fedac7064a85391adfc4d",
+          "request_sha256": "bab707765ff2d8244d9dcc515d72df48a1bf9504b4958b146d263c937de0ee9d",
+          "idempotency_key": "portal-proposal-3a31fbcf-1561-4fe9-a9cd-fa735327dd60",
+          "contract_version": 1
+        }
+      }
+    ],
+    "live_portals_configured": false
+  },
+  "activation": {
+    "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+    "expected_version": 1,
+    "idempotency_key": "portal-command-2607cce5-58be-4f4c-8fbf-070506e43b93",
+    "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+    "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2",
+    "reviewed_profile": true,
+    "reviewed_practice": true,
+    "reviewed_patient": true,
+    "reviewed_recipient": true,
+    "confirm_local_activation": true
+  },
+  "activation_receipt": {
+    "scope": {
+      "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+      "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+    },
+    "effect": {
+      "state": "active",
+      "version": 2,
+      "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+      "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+    },
+    "outcome": "recorded",
+    "receipt_id": "d2ce897a-d6f8-47bf-8a6e-616dfb8b1d28",
+    "recorded_at": "2026-09-22T00:28:47.473496Z",
+    "command_kind": "activate",
+    "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+    "receipt_sha256": "4f940c842a15c833a9980223e66f931cdcaf9a307d474053c9be66459963bfdf",
+    "request_sha256": "ba15b03ed0649d4be096ee5ed5d5444475edcb5c9b600f6f57b639b960716e58",
+    "idempotency_key": "portal-command-2607cce5-58be-4f4c-8fbf-070506e43b93",
+    "contract_version": 1
+  },
+  "detail_active": {
+    "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+    "version": 2,
+    "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+    "revision": 1,
+    "state": "active",
+    "usable_locally": true,
+    "availability": "available",
+    "review": {
+      "mode": "synthetic",
+      "mappings": {
+        "patient_label": "Invented portal patient",
+        "practice_label": "Invented practice",
+        "patient_link_id": "9cff2074-05bf-4c6a-a3e1-183cc6a5520a",
+        "recipient_label": "Invented recipient",
+        "patient_reference": "invented_patient",
+        "practice_reference": "synthetic_practice",
+        "recipient_reference": "invented_recipient"
+      },
+      "portal_id": "synthetic_only",
+      "mapping_ids": {
+        "patient_mapping_id": "d37c431d-0932-4fc3-9c98-2027b9916958",
+        "practice_mapping_id": "39202af0-df75-4b19-b368-650e8671d820",
+        "recipient_mapping_id": "adad78a2-add0-421a-8f66-3757e1335846"
+      },
+      "capabilities": [
+        "referral.read"
+      ],
+      "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+      "profile_label": "Invented portal",
+      "profile_sha256": "5402be0815ae82c1240212ab0e83ecea5818d576ee32bc7d48310301a410196e",
+      "installation_id": "b2fe07dc-54e3-4558-8afc-6af36d9e415d",
+      "mappings_sha256": "b6cc1c12b31b9ecb52eebf82eb6c7187e253399bf693ab181e3d91039e77cc2d",
+      "configuration_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+    },
+    "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2",
+    "last_receipt": {
+      "scope": {
+        "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+        "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+      },
+      "effect": {
+        "state": "active",
+        "version": 2,
+        "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+        "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+      },
+      "outcome": "recorded",
+      "receipt_id": "d2ce897a-d6f8-47bf-8a6e-616dfb8b1d28",
+      "recorded_at": "2026-09-22T00:28:47.473496Z",
+      "command_kind": "activate",
+      "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+      "receipt_sha256": "4f940c842a15c833a9980223e66f931cdcaf9a307d474053c9be66459963bfdf",
+      "request_sha256": "ba15b03ed0649d4be096ee5ed5d5444475edcb5c9b600f6f57b639b960716e58",
+      "idempotency_key": "portal-command-2607cce5-58be-4f4c-8fbf-070506e43b93",
+      "contract_version": 1
+    }
+  },
+  "history": {
+    "contract_version": 1,
+    "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+    "receipts": [
+      {
+        "scope": {
+          "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+          "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+        },
+        "effect": {
+          "state": "pending_review",
+          "version": 1,
+          "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+          "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+        },
+        "outcome": "recorded",
+        "receipt_id": "c577a28a-f639-4db3-8913-ffb6a59a1c0c",
+        "recorded_at": "2026-09-22T00:28:47.446374Z",
+        "command_kind": "propose",
+        "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+        "receipt_sha256": "be7828c6c6c039de82f568f0767286107b3697625c8fedac7064a85391adfc4d",
+        "request_sha256": "bab707765ff2d8244d9dcc515d72df48a1bf9504b4958b146d263c937de0ee9d",
+        "idempotency_key": "portal-proposal-3a31fbcf-1561-4fe9-a9cd-fa735327dd60",
+        "contract_version": 1
+      },
+      {
+        "scope": {
+          "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+          "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+        },
+        "effect": {
+          "state": "active",
+          "version": 2,
+          "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+          "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+        },
+        "outcome": "recorded",
+        "receipt_id": "d2ce897a-d6f8-47bf-8a6e-616dfb8b1d28",
+        "recorded_at": "2026-09-22T00:28:47.473496Z",
+        "command_kind": "activate",
+        "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+        "receipt_sha256": "4f940c842a15c833a9980223e66f931cdcaf9a307d474053c9be66459963bfdf",
+        "request_sha256": "ba15b03ed0649d4be096ee5ed5d5444475edcb5c9b600f6f57b639b960716e58",
+        "idempotency_key": "portal-command-2607cce5-58be-4f4c-8fbf-070506e43b93",
+        "contract_version": 1
+      },
+      {
+        "scope": {
+          "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+          "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+        },
+        "effect": {
+          "state": "disabled",
+          "version": 3,
+          "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+          "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+        },
+        "outcome": "recorded",
+        "receipt_id": "19cc3fa8-a6b5-4e5d-b5ba-97534295e001",
+        "recorded_at": "2026-09-22T00:28:48.065698Z",
+        "command_kind": "disable",
+        "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+        "receipt_sha256": "b3d3f4da2d2559ea997185e1d3eaea08f1e786eb6796a0d2dec7a09795b0f0ee",
+        "request_sha256": "f5502c0ab44f9941f205867452f910ff4c38b3fb52a75823bc103295868eba6d",
+        "idempotency_key": "portal-command-5534d58c-ad46-4517-8908-04330306a624",
+        "contract_version": 1
+      },
+      {
+        "scope": {
+          "box_id": "5e06d4c9-bb87-4592-b90a-bf6fd6a70262",
+          "owner_id": "66d6499e-078c-4963-bf88-5c1cedc168bc"
+        },
+        "effect": {
+          "state": "revoked",
+          "version": 4,
+          "revision_id": "d8e64578-cede-4317-ac70-df92a8db3d0d",
+          "review_sha256": "d74fbd5058f1a790ca819e0a44d11b7eab7f5fe766c0a632dd4b23c20be431c2"
+        },
+        "outcome": "recorded",
+        "receipt_id": "56253e25-a41d-4207-ba42-870ca919bbac",
+        "recorded_at": "2026-09-22T00:28:48.083855Z",
+        "command_kind": "revoke",
+        "connection_id": "0b875c0e-735b-4f38-8937-854c1cfde221",
+        "receipt_sha256": "e4d2d7ac586292422fa4361be74e8ef6022ce18725738a3c51183724a2653eef",
+        "request_sha256": "aa34a5fae5e87af94b2acec3e9dddd97e4574e4eeb6dec77c5b31d99c12d322a",
+        "idempotency_key": "portal-command-5ed4727e-8583-4ced-8047-86d14d11483f",
+        "contract_version": 1
+      }
+    ]
+  }
+}

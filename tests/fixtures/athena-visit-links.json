@@ -1,0 +1,702 @@
+{
+  "lookup": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "35dc6249-cc96-4328-a880-1761917ce871",
+      "action": "lookup",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      },
+      "appointment_ref": null,
+      "core_source_sha256": null,
+      "link_ref": null,
+      "plan_sha256": null,
+      "command_key": null,
+      "command_sha256": null,
+      "confirmed": null
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "35dc6249-cc96-4328-a880-1761917ce871",
+      "action": "athena_visit_lookup",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      }
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_lookup",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "lookup",
+        "request_nonce": "35dc6249-cc96-4328-a880-1761917ce871",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "not_linked",
+        "source": {
+          "appointment_ref": "8001",
+          "patient_ref": "9001",
+          "source_local_start": "2026-09-24T09:00:00",
+          "department_timezone": "America/New_York",
+          "duration_minutes": 30,
+          "source_status": "f",
+          "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+        },
+        "encounter": null,
+        "link_ref": null,
+        "plan_sha256": null,
+        "command_key": null,
+        "command_sha256": null,
+        "operation": null,
+        "applied": false
+      }
+    }
+  },
+  "preview": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "2d247dc3-ab99-4253-a974-3c047af3e6bf",
+      "action": "preview",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      },
+      "appointment_ref": "appointment_00000000000000000000000001",
+      "core_source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a",
+      "link_ref": null,
+      "plan_sha256": null,
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+      "command_sha256": null,
+      "confirmed": null
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "2d247dc3-ab99-4253-a974-3c047af3e6bf",
+      "action": "athena_visit_preview",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      },
+      "appointment_ref": "appointment_00000000000000000000000001",
+      "core_source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a",
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_preview",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "preview",
+        "request_nonce": "2d247dc3-ab99-4253-a974-3c047af3e6bf",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "ready",
+        "source": {
+          "appointment_ref": "8001",
+          "patient_ref": "9001",
+          "source_local_start": "2026-09-24T09:00:00",
+          "department_timezone": "America/New_York",
+          "duration_minutes": 30,
+          "source_status": "f",
+          "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+        },
+        "encounter": {
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+          "patient": {
+            "patient_ref": "patient_00000000000000000000000001",
+            "display_name": "Invented patient"
+          },
+          "appointment": {
+            "appointment_ref": "appointment_00000000000000000000000001",
+            "patient_ref": "patient_00000000000000000000000001",
+            "appointment_date": "2026-09-24T09:00:00",
+            "timezone_known": false
+          },
+          "source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a"
+        },
+        "link_ref": null,
+        "plan_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+        "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377",
+        "operation": "link",
+        "applied": false
+      }
+    }
+  },
+  "link": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "2d247dc3-ab99-4253-a974-3c047af3e6bf",
+      "action": "link",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      },
+      "appointment_ref": "appointment_00000000000000000000000001",
+      "core_source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a",
+      "link_ref": null,
+      "plan_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+      "command_sha256": null,
+      "confirmed": true
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "2d247dc3-ab99-4253-a974-3c047af3e6bf",
+      "action": "athena_visit_link",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      },
+      "appointment_ref": "appointment_00000000000000000000000001",
+      "core_source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a",
+      "plan_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+      "confirmed": true
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_link",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "link",
+        "request_nonce": "2d247dc3-ab99-4253-a974-3c047af3e6bf",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "linked",
+        "source": {
+          "appointment_ref": "8001",
+          "patient_ref": "9001",
+          "source_local_start": "2026-09-24T09:00:00",
+          "department_timezone": "America/New_York",
+          "duration_minutes": 30,
+          "source_status": "f",
+          "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+        },
+        "encounter": {
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+          "patient": {
+            "patient_ref": "patient_00000000000000000000000001",
+            "display_name": "Invented patient"
+          },
+          "appointment": {
+            "appointment_ref": "appointment_00000000000000000000000001",
+            "patient_ref": "patient_00000000000000000000000001",
+            "appointment_date": "2026-09-24T09:00:00",
+            "timezone_known": false
+          },
+          "source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a"
+        },
+        "link_ref": "athena_visit_link_00000000000000000000000001",
+        "plan_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+        "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+        "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377",
+        "operation": "link",
+        "applied": true
+      }
+    }
+  },
+  "status": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "611d7cfb-fa89-4800-b096-c835f5053782",
+      "action": "status",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": null,
+      "appointment_ref": null,
+      "core_source_sha256": null,
+      "link_ref": null,
+      "plan_sha256": null,
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+      "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377",
+      "confirmed": null
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "611d7cfb-fa89-4800-b096-c835f5053782",
+      "action": "athena_visit_status",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+      "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_status",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "status",
+        "request_nonce": "611d7cfb-fa89-4800-b096-c835f5053782",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "linked",
+        "source": null,
+        "encounter": {
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+          "patient": {
+            "patient_ref": "patient_00000000000000000000000001",
+            "display_name": "Invented patient"
+          },
+          "appointment": {
+            "appointment_ref": "appointment_00000000000000000000000001",
+            "patient_ref": "patient_00000000000000000000000001",
+            "appointment_date": "2026-09-24T09:00:00",
+            "timezone_known": false
+          },
+          "source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a"
+        },
+        "link_ref": "athena_visit_link_00000000000000000000000001",
+        "plan_sha256": null,
+        "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+        "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377",
+        "operation": "link",
+        "applied": true
+      }
+    }
+  },
+  "not_found": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "611d7cfb-fa89-4800-b096-c835f5053782",
+      "action": "status",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": null,
+      "appointment_ref": null,
+      "core_source_sha256": null,
+      "link_ref": null,
+      "plan_sha256": null,
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+      "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377",
+      "confirmed": null
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "611d7cfb-fa89-4800-b096-c835f5053782",
+      "action": "athena_visit_status",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+      "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_status",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "status",
+        "request_nonce": "611d7cfb-fa89-4800-b096-c835f5053782",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "not_found",
+        "source": null,
+        "encounter": null,
+        "link_ref": null,
+        "plan_sha256": null,
+        "command_key": "b86fffc4-b403-4f82-9873-fd2f643e2f62",
+        "command_sha256": "30a50600100cc677016f6ac1c54f931eaead66f3749af383d6622f741f737377",
+        "operation": null,
+        "applied": false
+      }
+    }
+  },
+  "linked_lookup": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "35dc6249-cc96-4328-a880-1761917ce871",
+      "action": "lookup",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      },
+      "appointment_ref": null,
+      "core_source_sha256": null,
+      "link_ref": null,
+      "plan_sha256": null,
+      "command_key": null,
+      "command_sha256": null,
+      "confirmed": null
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "35dc6249-cc96-4328-a880-1761917ce871",
+      "action": "athena_visit_lookup",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": {
+        "start_date": "2026-09-24",
+        "end_date": "2026-09-24",
+        "offset": 25,
+        "appointment_ref": "8001",
+        "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+      }
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_lookup",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "lookup",
+        "request_nonce": "35dc6249-cc96-4328-a880-1761917ce871",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "linked",
+        "source": {
+          "appointment_ref": "8001",
+          "patient_ref": "9001",
+          "source_local_start": "2026-09-24T09:00:00",
+          "department_timezone": "America/New_York",
+          "duration_minutes": 30,
+          "source_status": "f",
+          "source_sha256": "c6599d132f6ad60a234c889b0dc5f1134f402edbac6ff005ffe42599bf55aaf3"
+        },
+        "encounter": {
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+          "patient": {
+            "patient_ref": "patient_00000000000000000000000001",
+            "display_name": "Invented patient"
+          },
+          "appointment": {
+            "appointment_ref": "appointment_00000000000000000000000001",
+            "patient_ref": "patient_00000000000000000000000001",
+            "appointment_date": "2026-09-24T09:00:00",
+            "timezone_known": false
+          },
+          "source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a"
+        },
+        "link_ref": "athena_visit_link_00000000000000000000000001",
+        "plan_sha256": null,
+        "command_key": null,
+        "command_sha256": null,
+        "operation": null,
+        "applied": false
+      }
+    }
+  },
+  "unlink_preview": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "1d74bc23-59ca-4d77-8e84-8f6b7846dd50",
+      "action": "unlink_preview",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": null,
+      "appointment_ref": null,
+      "core_source_sha256": null,
+      "link_ref": "athena_visit_link_00000000000000000000000001",
+      "plan_sha256": null,
+      "command_key": "d7231bd6-3726-4f12-8883-3951c5caae69",
+      "command_sha256": null,
+      "confirmed": null
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "1d74bc23-59ca-4d77-8e84-8f6b7846dd50",
+      "action": "athena_visit_unlink_preview",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "link_ref": "athena_visit_link_00000000000000000000000001",
+      "command_key": "d7231bd6-3726-4f12-8883-3951c5caae69"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_unlink_preview",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "unlink_preview",
+        "request_nonce": "1d74bc23-59ca-4d77-8e84-8f6b7846dd50",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "ready",
+        "source": null,
+        "encounter": {
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+          "patient": {
+            "patient_ref": "patient_00000000000000000000000001",
+            "display_name": "Invented patient"
+          },
+          "appointment": {
+            "appointment_ref": "appointment_00000000000000000000000001",
+            "patient_ref": "patient_00000000000000000000000001",
+            "appointment_date": "2026-09-24T09:00:00",
+            "timezone_known": false
+          },
+          "source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a"
+        },
+        "link_ref": "athena_visit_link_00000000000000000000000001",
+        "plan_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "command_key": "d7231bd6-3726-4f12-8883-3951c5caae69",
+        "command_sha256": "543e8d51b1ddaf0fb9c30d29cd612a6100a170424134ca280c59308e90520abd",
+        "operation": "unlink",
+        "applied": false
+      }
+    }
+  },
+  "unlink": {
+    "request": {
+      "expected_tenant_ref": "authority_tenant_00000000000000000000000001",
+      "expected_actor_ref": "authority_actor_00000000000000000000000001",
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "1d74bc23-59ca-4d77-8e84-8f6b7846dd50",
+      "action": "unlink",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "source": null,
+      "appointment_ref": null,
+      "core_source_sha256": null,
+      "link_ref": "athena_visit_link_00000000000000000000000001",
+      "plan_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "command_key": "d7231bd6-3726-4f12-8883-3951c5caae69",
+      "command_sha256": null,
+      "confirmed": true
+    },
+    "command": {
+      "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+      "request_nonce": "1d74bc23-59ca-4d77-8e84-8f6b7846dd50",
+      "action": "athena_visit_unlink",
+      "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "link_ref": "athena_visit_link_00000000000000000000000001",
+      "plan_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+      "command_key": "d7231bd6-3726-4f12-8883-3951c5caae69",
+      "confirmed": true
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "athena_visit_unlink",
+      "connection_status": "connected",
+      "athena_visit_link": {
+        "contract_version": "1",
+        "action": "unlink",
+        "request_nonce": "1d74bc23-59ca-4d77-8e84-8f6b7846dd50",
+        "checked_at": "2026-09-24T01:57:32.078549Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented practice",
+          "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+        },
+        "account": {
+          "account_ref": "79b9d536-e38d-4b8b-bb14-c0f619b4afa6",
+          "account_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "department_label": "Invented office",
+          "department_timezone": "America/New_York",
+          "environment": "preview",
+          "state": "practice_enabled",
+          "access": "appointments_read_only"
+        },
+        "state": "removed",
+        "source": null,
+        "encounter": null,
+        "link_ref": "athena_visit_link_00000000000000000000000001",
+        "plan_sha256": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd",
+        "command_key": "d7231bd6-3726-4f12-8883-3951c5caae69",
+        "command_sha256": "543e8d51b1ddaf0fb9c30d29cd612a6100a170424134ca280c59308e90520abd",
+        "operation": "unlink",
+        "applied": true
+      }
+    }
+  },
+  "encounters": {
+    "contract_version": 1,
+    "action": "encounters",
+    "connection_status": "connected",
+    "discovery": {
+      "contract_version": "1",
+      "action": "encounters",
+      "request_nonce": "c59248b3-9dc5-474b-b9b3-8df460f39089",
+      "checked_at": "2026-09-24T01:57:32.078549+00:00",
+      "connection": {
+        "actor_ref": "authority_actor_00000000000000000000000001",
+        "tenant_ref": "authority_tenant_00000000000000000000000001",
+        "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+        "practice_ref": "practice_00000000000000000000000001",
+        "practice_label": "Invented practice",
+        "review_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b"
+      },
+      "encounters": [
+        {
+          "connection_sha256": "a84d3cc39382aa2e813a7e820f7605f665d657a94f664676436b529d087e1d6b",
+          "patient": {
+            "patient_ref": "patient_00000000000000000000000001",
+            "display_name": "Invented patient"
+          },
+          "appointment": {
+            "appointment_ref": "appointment_00000000000000000000000001",
+            "patient_ref": "patient_00000000000000000000000001",
+            "appointment_date": "2026-09-24T09:00:00",
+            "timezone_known": false
+          },
+          "source_sha256": "f24584dd3949c4cb19beeacd27e182bba1947c90ce57da8f424d51d38f9d861a"
+        }
+      ],
+      "next_cursor": null
+    }
+  }
+}

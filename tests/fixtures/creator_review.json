@@ -1,0 +1,143 @@
+{
+  "waiting": {
+    "schema_version": "1.0",
+    "session_id": "00000000-0000-4000-8000-000000000003",
+    "status": "review_required",
+    "source": {
+      "schema_version": "1.0",
+      "source_transcript_version": 1,
+      "language_mode": "en-US+es-US",
+      "transcription_adapter_id": "azure_ai_speech",
+      "transcription_model_profile_id": "azure_fast_transcription_en_es_v1",
+      "normalization_profile_id": "azure_phrase_en_es_evidence_v1",
+      "duration_ms": 1000,
+      "segments": [
+        {
+          "source_segment_id": "7a64345a-65f9-4084-8401-376f8fa08752",
+          "source_segment_version": 1,
+          "source_locale": "es-US",
+          "speaker_id": "c7ec8f3a-02c6-40b5-8938-8bbf8314d5a8",
+          "speaker_role": "patient",
+          "start_ms": 0,
+          "end_ms": 1000,
+          "content": "No tengo fiebre.",
+          "locale_confidence": 0.9
+        }
+      ]
+    },
+    "working": {
+      "schema_version": "1.0",
+      "working_transcript_id": "b774d242-392d-4cfa-9410-6a8326068445",
+      "working_transcript_version": 1,
+      "source_transcript_version": 1,
+      "segments": [
+        {
+          "source_segment_id": "7a64345a-65f9-4084-8401-376f8fa08752",
+          "source_segment_version": 1,
+          "source_locale": "es-US",
+          "speaker_id": "c7ec8f3a-02c6-40b5-8938-8bbf8314d5a8",
+          "speaker_role": "patient",
+          "start_ms": 0,
+          "end_ms": 1000,
+          "resolution": "unresolved",
+          "content": null,
+          "translation_id": null,
+          "translation_version": null,
+          "translation_review_id": null
+        }
+      ],
+      "blockers": [
+        {
+          "source_segment_id": "7a64345a-65f9-4084-8401-376f8fa08752",
+          "code": "translation_review_required"
+        }
+      ],
+      "note_ready": false
+    },
+    "review_queue": {
+      "schema_version": "1.0",
+      "session_id": "00000000-0000-4000-8000-000000000003",
+      "source_transcript_version": 1,
+      "working_transcript_id": "b774d242-392d-4cfa-9410-6a8326068445",
+      "working_transcript_version": 1,
+      "status": "review_required",
+      "items": [
+        {
+          "source_segment_id": "7a64345a-65f9-4084-8401-376f8fa08752",
+          "source_segment_version": 1,
+          "translation_id": "ec721e20-71dd-4e8d-899c-c7a6a5399b08",
+          "translation_version": 1,
+          "source_locale": "es-US",
+          "target_locale": "en-US",
+          "speaker_role": "patient",
+          "start_ms": 0,
+          "end_ms": 1000,
+          "source_content": "No tengo fiebre.",
+          "translated_content": "I do not have a fever."
+        }
+      ]
+    },
+    "translation_progress": []
+  },
+  "ready": {
+    "schema_version": "1.0",
+    "session_id": "00000000-0000-4000-8000-000000000003",
+    "status": "transcript_ready",
+    "source": {
+      "schema_version": "1.0",
+      "source_transcript_version": 1,
+      "language_mode": "en-US+es-US",
+      "transcription_adapter_id": "azure_ai_speech",
+      "transcription_model_profile_id": "azure_fast_transcription_en_es_v1",
+      "normalization_profile_id": "azure_phrase_en_es_evidence_v1",
+      "duration_ms": 1000,
+      "segments": [
+        {
+          "source_segment_id": "7a64345a-65f9-4084-8401-376f8fa08752",
+          "source_segment_version": 1,
+          "source_locale": "es-US",
+          "speaker_id": "c7ec8f3a-02c6-40b5-8938-8bbf8314d5a8",
+          "speaker_role": "patient",
+          "start_ms": 0,
+          "end_ms": 1000,
+          "content": "No tengo fiebre.",
+          "locale_confidence": 0.9
+        }
+      ]
+    },
+    "working": {
+      "schema_version": "1.0",
+      "working_transcript_id": "b774d242-392d-4cfa-9410-6a8326068445",
+      "working_transcript_version": 2,
+      "source_transcript_version": 1,
+      "segments": [
+        {
+          "source_segment_id": "7a64345a-65f9-4084-8401-376f8fa08752",
+          "source_segment_version": 1,
+          "source_locale": "es-US",
+          "speaker_id": "c7ec8f3a-02c6-40b5-8938-8bbf8314d5a8",
+          "speaker_role": "patient",
+          "start_ms": 0,
+          "end_ms": 1000,
+          "resolution": "spanish_translation",
+          "content": "I do not have a fever.",
+          "translation_id": "ec721e20-71dd-4e8d-899c-c7a6a5399b08",
+          "translation_version": 1,
+          "translation_review_id": "18f8909e-07dc-4e68-a9ac-fa6fa795ce3b"
+        }
+      ],
+      "blockers": [],
+      "note_ready": true
+    },
+    "review_queue": {
+      "schema_version": "1.0",
+      "session_id": "00000000-0000-4000-8000-000000000003",
+      "source_transcript_version": 1,
+      "working_transcript_id": "b774d242-392d-4cfa-9410-6a8326068445",
+      "working_transcript_version": 2,
+      "status": "complete",
+      "items": []
+    },
+    "translation_progress": []
+  }
+}

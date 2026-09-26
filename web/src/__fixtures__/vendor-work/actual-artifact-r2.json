@@ -1,0 +1,119 @@
+{
+  "artifact_intent_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "3098f3a0-7f4a-4f94-bb66-69b6d6a228f6"
+    },
+    "command_kind": "artifact_intent",
+    "idempotency_key": "intent-829a2ce0-ec0c-4c94-a861-da7c17fb8891",
+    "request_sha256": "d07d023b40910c37b58ad5a8a7f5a9988501a3065fd8f8cf0c6562d0a69442bd",
+    "outcome": "recorded",
+    "effect": {
+      "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+      "receipt_id": "9dfc522f-0235-448c-a20e-7d43163b29c8",
+      "effect_version": 1,
+      "recorded_at": "2026-09-22T00:02:42.588286Z",
+      "receipt_sha256": "b9e7d01323c398c6f5efe2408194eb6f48a8736a7ced74f800804269be3d0fc8"
+    },
+    "artifact": {
+      "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+      "version": 1,
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "a981f660-91b8-4c68-8a95-66513c6c55a7",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "dd91e6d80a941c29d86e741193c725bc850f0640b2e7dcccaf5788eea2a478c4"
+      },
+      "document": {
+        "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+        "sha256": "3df2edda1caee918ed7929197c9888fdc32b022a8c911dceb81444a3d9552dfb",
+        "byte_length": 40,
+        "media_type": "application/pdf"
+      },
+      "intent_sha256": "d07d023b40910c37b58ad5a8a7f5a9988501a3065fd8f8cf0c6562d0a69442bd",
+      "state": "empty",
+      "generation": 0,
+      "lease_until": null
+    },
+    "observed_at": "2026-09-22T00:02:42.589081Z"
+  },
+  "artifact_content_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "3098f3a0-7f4a-4f94-bb66-69b6d6a228f6"
+    },
+    "command_kind": "artifact_content",
+    "idempotency_key": "same-local-content",
+    "request_sha256": "5fe9b3cc52e24b3cbdfb3252b51b1957081baa326ef3da83c63691cad6806a0a",
+    "outcome": "recorded",
+    "effect": {
+      "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+      "receipt_id": "bcc89842-5a32-4303-a662-7486a114ebde",
+      "effect_version": 2,
+      "recorded_at": "2026-09-22T00:02:42.594960Z",
+      "receipt_sha256": "5cabd92a6a0d33f802f840d96945bf445eb16462ca960b3fab2092e3db84f35a"
+    },
+    "artifact": {
+      "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+      "version": 3,
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "a981f660-91b8-4c68-8a95-66513c6c55a7",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "dd91e6d80a941c29d86e741193c725bc850f0640b2e7dcccaf5788eea2a478c4"
+      },
+      "document": {
+        "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+        "sha256": "3df2edda1caee918ed7929197c9888fdc32b022a8c911dceb81444a3d9552dfb",
+        "byte_length": 40,
+        "media_type": "application/pdf"
+      },
+      "intent_sha256": "d07d023b40910c37b58ad5a8a7f5a9988501a3065fd8f8cf0c6562d0a69442bd",
+      "state": "ready",
+      "generation": 1,
+      "lease_until": "2026-09-22T00:04:12.594225Z"
+    },
+    "observed_at": "2026-09-22T00:02:42.611149Z"
+  },
+  "artifact_replay_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "workspace",
+      "id": "3098f3a0-7f4a-4f94-bb66-69b6d6a228f6"
+    },
+    "command_kind": "artifact_content",
+    "idempotency_key": "same-local-content",
+    "request_sha256": "5fe9b3cc52e24b3cbdfb3252b51b1957081baa326ef3da83c63691cad6806a0a",
+    "outcome": "recorded",
+    "effect": {
+      "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+      "receipt_id": "bcc89842-5a32-4303-a662-7486a114ebde",
+      "effect_version": 2,
+      "recorded_at": "2026-09-22T00:02:42.594960Z",
+      "receipt_sha256": "5cabd92a6a0d33f802f840d96945bf445eb16462ca960b3fab2092e3db84f35a"
+    },
+    "artifact": {
+      "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+      "version": 3,
+      "source": {
+        "kind": "reviewed_note",
+        "note_id": "a981f660-91b8-4c68-8a95-66513c6c55a7",
+        "content_sha256": "39ab4bedecd382e5230c322fb5e135b42e1f64edd428070e3cefb9563a7efe34",
+        "source_fingerprint": "dd91e6d80a941c29d86e741193c725bc850f0640b2e7dcccaf5788eea2a478c4"
+      },
+      "document": {
+        "artifact_id": "4b4e51fc-8b48-4e2f-936a-855dcb47aa8e",
+        "sha256": "3df2edda1caee918ed7929197c9888fdc32b022a8c911dceb81444a3d9552dfb",
+        "byte_length": 40,
+        "media_type": "application/pdf"
+      },
+      "intent_sha256": "d07d023b40910c37b58ad5a8a7f5a9988501a3065fd8f8cf0c6562d0a69442bd",
+      "state": "ready",
+      "generation": 1,
+      "lease_until": "2026-09-22T00:04:12.594225Z"
+    },
+    "observed_at": "2026-09-22T00:02:42.622208Z"
+  }
+}

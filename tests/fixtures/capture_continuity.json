@@ -1,0 +1,18 @@
+{
+  "schema_version": "1.1",
+  "continuity": "interrupted_or_unconfirmed",
+  "missing_audio": "unknown",
+  "starts": [],
+  "recovery": {
+    "history_sha256": "51bec64411e988462f3c4ac590bc5d3d62b7467212b3b92c7baa9580aeeea12e",
+    "interruptions": [
+      {
+        "receipt_id": "00000000-0000-0000-0000-00000000000f",
+        "gap_id": "00000000-0000-0000-0000-00000000000c",
+        "next_sequence_number": 1,
+        "reason_code": "capture_backgrounded",
+        "decision": "finish_capture"
+      }
+    ]
+  }
+}

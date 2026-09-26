@@ -1,0 +1,5 @@
+.workspace-compatibility { max-width: 52rem; margin: 1rem auto; padding: 1.25rem; border: 1px solid #cfad72; border-radius: .75rem; background: #fff8eb; color: #372b1a; overflow-wrap: anywhere; }
+.workspace-compatibility h1 { font-size: 1.2rem; margin: .5rem 0; }
+.workspace-compatibility p { line-height: 1.5; }
+.workspace-compatibility button { min-height: 44px; padding: .5rem 1rem; }
+@media (max-width: 600px) { .workspace-compatibility { margin: .5rem; padding: 1rem; } }

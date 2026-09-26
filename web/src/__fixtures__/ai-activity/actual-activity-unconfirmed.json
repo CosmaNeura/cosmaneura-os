@@ -1,0 +1,67 @@
+{
+  "contract_version": 1,
+  "box_id": "8eb13eee-5f1a-444a-b107-b81c21ebf78d",
+  "owner_id": "21dfd36b-f38e-4c6d-b2cf-3253f415305c",
+  "recovery_scope": "68119becf91534151b69da9462aa0bc88ccf2c5f42e51c8ec892b01d168d2828",
+  "view": "attention",
+  "as_of": "2026-09-22T15:36:29.418644Z",
+  "page": {
+    "limit": 20,
+    "cursor": null,
+    "next_cursor": null,
+    "has_more": false
+  },
+  "coverage": {
+    "rows": "durable_admissions_only",
+    "paging": "live_current_access",
+    "attention_total": 1,
+    "recent_total": 0,
+    "withheld_total": 0,
+    "legacy_rows_included": false
+  },
+  "usage": {
+    "contract_version": 1,
+    "policy": null,
+    "team_revision": 1,
+    "as_of": "2026-09-22T15:36:29.418644Z",
+    "window_start": "2026-09-21T15:36:29.418644Z",
+    "admitted_units": 0,
+    "occupied_units": 0,
+    "remaining_units": null,
+    "pending_units": 0,
+    "unknown_units": 0,
+    "verified_input_tokens": 0,
+    "verified_output_tokens": 0,
+    "usage_complete": true,
+    "coverage": "new_admissions_and_retained_legacy_records"
+  },
+  "rows": [
+    {
+      "kind": "conversation",
+      "bot": {
+        "address": "visit_prep",
+        "agent_id": "0440d6b5-175f-4f26-bb38-77f3b0a2cf59",
+        "role": "visit_prep",
+        "name": "Visit Prep",
+        "team_revision": 1
+      },
+      "encounter": {
+        "workspace_id": "d730d990-bb63-4d93-99cd-40ae62517647",
+        "appointment_id": "0371734d-ab64-43c8-9676-5953845f4ba9",
+        "label": "Invented encounter",
+        "starts_at": "2026-09-22T11:36:29.311391-04:00",
+        "entry_id": "e20e8538-f825-4384-bd53-9e82a6870bd6"
+      },
+      "admission": {
+        "id": "afa66e94-431e-4ae8-addb-54d23bae43d9",
+        "state": "unknown",
+        "unit": 1,
+        "admitted_at": "2026-09-19T11:36:29.359099-04:00",
+        "dispatch": "unconfirmed",
+        "usage": "verified",
+        "input_tokens": 25,
+        "output_tokens": 8
+      }
+    }
+  ]
+}

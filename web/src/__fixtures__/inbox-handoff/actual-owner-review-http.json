@@ -1,0 +1,73 @@
+{
+  "request": {
+    "idempotency_key": "propose-bce6a56b-769e-4338-979b-e5253c36de0c",
+    "item_id": "780db541-45e0-41b6-b848-2b6aafcb2a19",
+    "source_id": "5f4339b2-0e71-45ba-bdea-eb7970055d71",
+    "source_sha256": "15ef8af6647d1635fba13060b9cd047d4c853650d6b438511ed95cbd76721be9",
+    "review_receipt_id": "8150bd14-0cd0-417b-baeb-8bb07d55bd2f",
+    "review_receipt_sha256": "3b4593c286a7d87f02d765fc8b52bd3b45c6cc5d702c087aee5c17124f16eecd",
+    "expected_workspace_revision": 3,
+    "instructions": "Please review the appointment question.",
+    "selected_context": "The patient asked about next week's appointment.",
+    "due_date": "2026-10-02",
+    "expected_outcome": "Record the local administrative review outcome.",
+    "reviewed_minimum_context": true
+  },
+  "receipt": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "c4f8cbd9-7fdf-4980-8728-8dcc6dc8581e",
+      "owner_id": "67415aa8-6aba-4c89-b0ca-4b8ed40575c0",
+      "actor_id": "67415aa8-6aba-4c89-b0ca-4b8ed40575c0",
+      "kind": "workspace",
+      "id": "0469694f-3935-4f11-aabc-f5dae6df8fb6"
+    },
+    "command_kind": "propose",
+    "idempotency_key": "propose-bce6a56b-769e-4338-979b-e5253c36de0c",
+    "request_sha256": "4b43448cb754811c48b50ff970d15e2b183e470e3cd56bd45329ae0aea6c22ce",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "51df607e-3886-4045-b846-e26a6aef9a4b",
+      "version": 1,
+      "revision_id": "a254a07f-b6e3-49be-95c2-7e149e9387bf",
+      "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+      "effect_id": "a254a07f-b6e3-49be-95c2-7e149e9387bf",
+      "state": "pending_approval"
+    },
+    "rejection": null,
+    "receipt_id": "eb127d7d-20e7-40d7-ad6a-68c773248678",
+    "recorded_at": "2026-09-22T13:51:22.183382Z",
+    "receipt_sha256": "482cd5f53aa8eceb79767c661b0064c49763e7ba85c4c1faa7f9b59ff92e66d9"
+  },
+  "detail": {
+    "contract_version": 1,
+    "work_kind": "incoming_message",
+    "ticket_id": "51df607e-3886-4045-b846-e26a6aef9a4b",
+    "version": 1,
+    "revision_id": "a254a07f-b6e3-49be-95c2-7e149e9387bf",
+    "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+    "state": "pending_approval",
+    "publication_active": false,
+    "requires_owner_attention": false,
+    "originator_id": "67415aa8-6aba-4c89-b0ca-4b8ed40575c0",
+    "originator_available": true,
+    "responsible_id": "67415aa8-6aba-4c89-b0ca-4b8ed40575c0",
+    "publication_receipt_id": null,
+    "verified_current": false,
+    "external_action_performed": false,
+    "instructions": "Please review the appointment question.",
+    "selected_context": "The patient asked about next week's appointment.",
+    "due_date": "2026-10-02",
+    "expected_outcome": "Record the local administrative review outcome.",
+    "result": null,
+    "handoffs": [],
+    "private_source": {
+      "item_id": "780db541-45e0-41b6-b848-2b6aafcb2a19",
+      "source_id": "5f4339b2-0e71-45ba-bdea-eb7970055d71",
+      "source_sha256": "15ef8af6647d1635fba13060b9cd047d4c853650d6b438511ed95cbd76721be9",
+      "review_receipt_id": "8150bd14-0cd0-417b-baeb-8bb07d55bd2f",
+      "review_receipt_sha256": "3b4593c286a7d87f02d765fc8b52bd3b45c6cc5d702c087aee5c17124f16eecd",
+      "unavailability": null
+    }
+  }
+}

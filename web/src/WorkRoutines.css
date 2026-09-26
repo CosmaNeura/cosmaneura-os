@@ -1,0 +1,25 @@
+.work-routines [hidden] { display: none !important; }
+.work-routines .routine-overview,
+.work-routines .routine-editor,
+.work-routines .routine-form,
+.work-routines .routine-options,
+.work-routines .routine-history { min-width: 0; }
+.work-routines .routine-editor-nav { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem 1rem; margin-top: 1rem; }
+.work-routines .routine-editor-nav p { flex: 1 1 16rem; margin: 0; }
+.team-workspace .work-routines button,
+.work-routines button,
+.work-routines summary { min-height: 44px; box-sizing: border-box; font: inherit; }
+.work-routines button { max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.work-routines summary { cursor: pointer; padding: .75rem .25rem; font-weight: 600; }
+.work-routines .routine-form > .team-check,
+.work-routines .routine-form > .routine-options { grid-column: 1 / -1; }
+.work-routines .routine-options { border-top: 1px solid var(--border, #cbd5db); }
+.work-routines .routine-options > label:not(.team-check) { max-width: 24rem; }
+.work-routines .routine-form input:not([type="checkbox"]),
+.work-routines select { box-sizing: border-box; width: 100%; min-height: 44px; padding: .6rem; font: inherit; border: 1px solid #a9bdc6; border-radius: .4rem; }
+.work-routines .routine-history { margin-top: 1rem; }
+@media (max-width: 600px) {
+  .work-routines .routine-form { grid-template-columns: minmax(0, 1fr); padding: .75rem; }
+  .work-routines .routine-days { padding: .75rem; gap: .7rem; }
+  .work-routines .routine-editor-nav { align-items: stretch; }
+}

@@ -1,0 +1,166 @@
+{
+  "api_port": 55623,
+  "preinvoke_effects": 0,
+  "publication_operations": 1,
+  "handoffs": 2,
+  "preinvoke_exit": 88,
+  "lost_response_exit": 87,
+  "vectors": [
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "cbc527a6-72a2-4f26-a523-5607e9174129",
+        "owner_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "actor_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "kind": "workspace",
+        "id": "081624a6-f926-49b6-aca6-5f8932bd3d62"
+      },
+      "command_kind": "propose",
+      "idempotency_key": "propose-9679972c-07f2-4575-8788-5a7e2f189882",
+      "request_sha256": "e866f8643cba2f436fed1652df989ba6f3f5a3bcd92b5dc5df4c5d6f9a23057e",
+      "outcome": "recorded",
+      "effect": {
+        "ticket_id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679",
+        "version": 1,
+        "revision_id": "7f6d1022-cbc1-4e1b-b1c4-e9535dbe34b8",
+        "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+        "effect_id": "7f6d1022-cbc1-4e1b-b1c4-e9535dbe34b8",
+        "state": "pending_approval"
+      },
+      "rejection": null,
+      "receipt_id": "6207bb19-2197-430f-9cff-6a95ee78bc6e",
+      "recorded_at": "2026-09-22T13:13:00.551567Z",
+      "receipt_sha256": "79e1d803cebbe88e49c60d75edfe48809a7fbac4e590dd85803381dcf1c257ed"
+    },
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "cbc527a6-72a2-4f26-a523-5607e9174129",
+        "owner_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "actor_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "kind": "ticket",
+        "id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679"
+      },
+      "command_kind": "decide",
+      "idempotency_key": "publish-process-once",
+      "request_sha256": "aab01d1b38026db129fd66573323f1bb9b0f4f4127c8de6a881e998b28cba3d2",
+      "outcome": "recorded",
+      "effect": {
+        "ticket_id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679",
+        "version": 2,
+        "revision_id": "7f6d1022-cbc1-4e1b-b1c4-e9535dbe34b8",
+        "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+        "effect_id": "e69ad603-ad16-4491-abc7-adc7574017c4",
+        "state": "approved"
+      },
+      "rejection": null,
+      "receipt_id": "d2a236db-da2c-4aba-8765-ba71c32eb024",
+      "recorded_at": "2026-09-22T13:13:00.618234Z",
+      "receipt_sha256": "3d8d4d586ad475bd61b4d044af1489b1914bc67149ca7fc6cee5e06dc1879b33"
+    },
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "cbc527a6-72a2-4f26-a523-5607e9174129",
+        "owner_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "actor_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "kind": "ticket",
+        "id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679"
+      },
+      "command_kind": "handoff",
+      "idempotency_key": "handoff-1ddd304f-1723-4df8-93a5-333b63a93f39",
+      "request_sha256": "3e627e5e3e3ce6039fb142ed95ed3925c528ee64b6775c458109cb0e74e6a4c4",
+      "outcome": "recorded",
+      "effect": {
+        "ticket_id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679",
+        "version": 3,
+        "revision_id": "7f6d1022-cbc1-4e1b-b1c4-e9535dbe34b8",
+        "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+        "effect_id": "8a64cd21-ba72-4ce6-82ce-5665b27811dd",
+        "state": "approved"
+      },
+      "rejection": null,
+      "receipt_id": "1576492c-47e0-4d59-b52e-28a4bfb7f3e0",
+      "recorded_at": "2026-09-22T13:13:01.545934Z",
+      "receipt_sha256": "2b7c380acceb640ef341bb2e2d63b07202b87c5badbe6df321be11a9987a2a01"
+    },
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "cbc527a6-72a2-4f26-a523-5607e9174129",
+        "owner_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "actor_id": "f2868928-56e4-4d2e-8352-faa7e2335af7",
+        "kind": "ticket",
+        "id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679"
+      },
+      "command_kind": "handoff",
+      "idempotency_key": "handoff-0af33c03-03d3-4f94-83ef-b4452e199f88",
+      "request_sha256": "4efce22d1695a7eae93f4e9d095960e0141c1345cc3bde6bb080d6566b148c2d",
+      "outcome": "recorded",
+      "effect": {
+        "ticket_id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679",
+        "version": 4,
+        "revision_id": "7f6d1022-cbc1-4e1b-b1c4-e9535dbe34b8",
+        "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+        "effect_id": "7088ae5e-7de5-44a4-88c7-96ff1c3ee0eb",
+        "state": "approved"
+      },
+      "rejection": null,
+      "receipt_id": "076f532a-69c8-4544-b2f8-3065743d7279",
+      "recorded_at": "2026-09-22T13:13:01.592283Z",
+      "receipt_sha256": "2dd24f804f0e8fd7374227c8743b1cb9949835bb8f496e2c6d6c5fe7edc387eb"
+    },
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "cbc527a6-72a2-4f26-a523-5607e9174129",
+        "owner_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "actor_id": "f2868928-56e4-4d2e-8352-faa7e2335af7",
+        "kind": "ticket",
+        "id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679"
+      },
+      "command_kind": "result",
+      "idempotency_key": "result-023a8306-54c9-479f-8d44-860596b60913",
+      "request_sha256": "d467adc30eb2f4351fb86aa598a78f708397b084851197fe077bed7ff75cebea",
+      "outcome": "recorded",
+      "effect": {
+        "ticket_id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679",
+        "version": 5,
+        "revision_id": "7f6d1022-cbc1-4e1b-b1c4-e9535dbe34b8",
+        "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+        "effect_id": "3ff1f424-4534-4a1c-964b-6b05e492fdab",
+        "state": "approved"
+      },
+      "rejection": null,
+      "receipt_id": "435a2f92-2c04-4614-ba18-d7f99d6ba4f6",
+      "recorded_at": "2026-09-22T13:13:01.632873Z",
+      "receipt_sha256": "b9593e8c4a7a4ad37d0d151ad10a0346a78f26dbeb4b3c845b565a45c7ded40e"
+    },
+    {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "cbc527a6-72a2-4f26-a523-5607e9174129",
+        "owner_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "actor_id": "02c8dc5e-7930-4f6a-9e90-86c65e36dd56",
+        "kind": "ticket",
+        "id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679"
+      },
+      "command_kind": "verify",
+      "idempotency_key": "verify-748e0c26-103d-4b56-81ee-ed94ba963062",
+      "request_sha256": "dba43945ae17a1d5ffd76ad535f4c05f883d20d37442e0febebd642a49cb8e65",
+      "outcome": "recorded",
+      "effect": {
+        "ticket_id": "1e0ba362-cf8e-4a9a-ae81-5936dc108679",
+        "version": 6,
+        "revision_id": "7f6d1022-cbc1-4e1b-b1c4-e9535dbe34b8",
+        "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+        "effect_id": "01d7e9b0-58d3-45b8-9576-d801cb3c9f84",
+        "state": "closed"
+      },
+      "rejection": null,
+      "receipt_id": "8993dfc6-5b19-4650-a60f-46e49f17c7e9",
+      "recorded_at": "2026-09-22T13:13:01.687706Z",
+      "receipt_sha256": "68b90f4ba441ec0c7fd8a5f15b41a5d2f13ad2fdad50927614bc0865cccd8975"
+    }
+  ]
+}

@@ -109,6 +109,52 @@ def seed_beta_synthetic_cmd(
         session.close()
 
 
+@app.command("verify-beta-bootstrap-state")
+def verify_beta_bootstrap_state_cmd(
+    manifest_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    confirm_synthetic_only: bool = typer.Option(False, "--confirm-synthetic-only"),
+) -> None:
+    """Emit a stable, identifier-free readback of the reviewed beta bootstrap."""
+
+    from cosmas_os.application.beta_bootstrap import (
+        BOOTSTRAP_READBACK_CONTRACT,
+        BetaBootstrapManifest,
+        verify_beta_bootstrap_state,
+    )
+
+    failure = json.dumps(
+        {"contract": BOOTSTRAP_READBACK_CONTRACT, "status": "failed"},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    session: Session | None = None
+    try:
+        repository_root = Path(__file__).resolve().parents[2]
+        resolved_manifest = manifest_path.resolve(strict=True)
+        info = resolved_manifest.stat()
+        if (
+            not confirm_synthetic_only
+            or not _acceptance_environment_is_synthetic_beta()
+            or manifest_path.is_symlink()
+            or resolved_manifest == repository_root
+            or repository_root in resolved_manifest.parents
+            or stat.S_IMODE(info.st_mode) & 0o077
+        ):
+            raise ValueError("invalid bootstrap readback input")
+        manifest = BetaBootstrapManifest.model_validate_json(
+            resolved_manifest.read_text(encoding="utf-8")
+        )
+        session = _session()
+        evidence = verify_beta_bootstrap_state(session, settings, manifest)
+    except Exception:  # noqa: BLE001 - never reflect identity, row, or manifest details
+        typer.echo(failure, err=True)
+        raise typer.Exit(1) from None
+    finally:
+        if session is not None:
+            session.close()
+    typer.echo(evidence.sanitized_json())
+
+
 @app.command("prepare-beta-database")
 def prepare_beta_database_cmd(
     confirm_forward_only: bool = typer.Option(False, "--confirm-forward-only"),
@@ -205,6 +251,32 @@ def fingerprint_beta_database_cmd(
 
 
 _ACCEPTANCE_STATE_MAX_BYTES = 16_384
+
+
+@app.command("fingerprint-workspace-database")
+def fingerprint_workspace_database_cmd(
+    confirm_synthetic_only: bool = typer.Option(False, "--confirm-synthetic-only"),
+    confirm_read_only: bool = typer.Option(False, "--confirm-read-only"),
+) -> None:
+    """Measure the full synthetic workspace snapshot without exposing row values."""
+    from cosmas_os.application.workspace_fingerprint import (
+        fingerprint_workspace_database,
+        workspace_fingerprint_failure_json,
+    )
+
+    if not confirm_synthetic_only or not confirm_read_only:
+        typer.echo(workspace_fingerprint_failure_json(), err=True)
+        raise typer.Exit(1)
+    try:
+        evidence = fingerprint_workspace_database(
+            os.environ.get("DATABASE_URL", ""),
+            cosmas_env=os.environ.get("COSMAS_ENV", ""),
+            data_mode=os.environ.get("DATA_MODE", ""),
+        )
+    except Exception:  # noqa: BLE001 - never expose credentials or database values
+        typer.echo(workspace_fingerprint_failure_json(), err=True)
+        raise typer.Exit(1) from None
+    typer.echo(evidence.sanitized_json())
 
 
 def _read_acceptance_state(path: Path | None) -> str:
@@ -357,6 +429,39 @@ def prepare_beta_purge_acceptance_cmd(
     typer.echo(state.sanitized_json())
 
 
+@app.command("verify-beta-audit-replay")
+def verify_beta_audit_replay_cmd(
+    confirm_synthetic_only: bool = typer.Option(False, "--confirm-synthetic-only"),
+    confirm_no_content_export: bool = typer.Option(False, "--confirm-no-content-export"),
+) -> None:
+    """Replay the live Box-scoped audit timeline and emit counts only."""
+
+    from cosmas_os.application.beta_acceptance import (
+        AUDIT_REPLAY_CONTRACT,
+        acceptance_failure_json,
+        verify_beta_audit_replay,
+    )
+
+    session: Session | None = None
+    if (
+        not confirm_synthetic_only
+        or not confirm_no_content_export
+        or not _acceptance_environment_is_synthetic_beta()
+    ):
+        typer.echo(acceptance_failure_json(AUDIT_REPLAY_CONTRACT), err=True)
+        raise typer.Exit(1)
+    try:
+        session = _session()
+        evidence = verify_beta_audit_replay(session, settings)
+    except Exception:  # noqa: BLE001 - never reflect database rows or identifiers
+        typer.echo(acceptance_failure_json(AUDIT_REPLAY_CONTRACT), err=True)
+        raise typer.Exit(1) from None
+    finally:
+        if session is not None:
+            session.close()
+    typer.echo(evidence.sanitized_json())
+
+
 @app.command("verify-beta-purge-acceptance")
 def verify_beta_purge_acceptance_cmd(
     state_path: Path | None = typer.Argument(None, dir_okay=False),
@@ -428,9 +533,7 @@ def baseline_beta_offboarding_acceptance_cmd(
         typer.echo(offboarding_failure_json(), err=True)
         raise typer.Exit(1)
     try:
-        hmac_key = decode_offboarding_hmac_key(
-            os.environ.get("COSMAS_ACCEPTANCE_HMAC_KEY")
-        )
+        hmac_key = decode_offboarding_hmac_key(os.environ.get("COSMAS_ACCEPTANCE_HMAC_KEY"))
         request_json = _read_acceptance_state(request_path)
         session = _session()
         state = baseline_beta_offboarding_acceptance(
@@ -471,9 +574,7 @@ def verify_beta_offboarding_acceptance_cmd(
         typer.echo(offboarding_failure_json(), err=True)
         raise typer.Exit(1)
     try:
-        hmac_key = decode_offboarding_hmac_key(
-            os.environ.get("COSMAS_ACCEPTANCE_HMAC_KEY")
-        )
+        hmac_key = decode_offboarding_hmac_key(os.environ.get("COSMAS_ACCEPTANCE_HMAC_KEY"))
         verification_json = _read_acceptance_state(state_path)
         session = _session()
         evidence = verify_beta_offboarding_acceptance(

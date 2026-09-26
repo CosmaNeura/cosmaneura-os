@@ -2,6 +2,8 @@
 .env
 .env.*
 !.env.example
+!.env.hosted.example
+!web/.env.hosted.example
 .venv/
 __pycache__/
 *.py[cod]

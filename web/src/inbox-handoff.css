@@ -1,0 +1,20 @@
+.inbox-handoff { width:100%; max-width:42rem; min-width:0; margin-inline:auto; display:grid; gap:1rem; }
+.inbox-handoff header { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
+.inbox-handoff h2,.inbox-handoff h3,.inbox-handoff p { margin:0; overflow-wrap:anywhere; }
+.inbox-handoff fieldset,.inbox-handoff article,.inbox-handoff aside,.inbox-handoff nav { min-width:0; display:grid; gap:1rem; }
+.inbox-handoff fieldset { border:0; padding:0; }
+.inbox-handoff legend { margin-bottom:.75rem; font-weight:600; }
+.inbox-handoff label { display:grid; gap:.4rem; min-width:0; }
+.inbox-handoff input,.inbox-handoff textarea,.inbox-handoff select,.inbox-handoff button { box-sizing:border-box; width:100%; min-width:0; min-height:44px; font:inherit; }
+.inbox-handoff textarea { min-height:7rem; resize:vertical; }
+.inbox-handoff button { white-space:normal; overflow-wrap:anywhere; text-align:start; padding:.65rem .85rem; }
+.inbox-handoff header button { width:auto; flex-shrink:0; }
+.inbox-handoff pre { white-space:pre-wrap; overflow-wrap:anywhere; word-break:break-word; margin:0; font:inherit; line-height:1.5; }
+.inbox-handoff details { min-width:0; padding:.75rem; border:1px solid var(--border,#d1d5db); border-radius:.5rem; }
+.inbox-handoff details > :not(summary) { margin-top:.75rem; }
+.inbox-handoff summary { cursor:pointer; min-height:32px; overflow-wrap:anywhere; }
+.inbox-handoff .inbox-handoff-check { display:flex; align-items:flex-start; gap:.65rem; }
+.inbox-handoff-check input { width:1.2rem; height:1.2rem; min-height:0; margin-top:.15rem; flex:0 0 auto; }
+.inbox-handoff [role=alert] { padding:.75rem; border-left:3px solid #b45309; }
+.inbox-handoff code { overflow-wrap:anywhere; word-break:break-all; }
+@media(max-width:480px) { .inbox-handoff { gap:.85rem; } .inbox-handoff h2 { font-size:1.25rem; } }

@@ -8,6 +8,7 @@ from typer.testing import CliRunner
 
 from cosmas_os.application import beta_acceptance
 from cosmas_os.application.beta_acceptance import (
+    AUDIT_REPLAY_CONTRACT,
     PURGE_ACCEPTANCE_CONTRACT,
     WORKFLOW_ACCEPTANCE_CONTRACT,
 )
@@ -162,10 +163,36 @@ def test_purge_prepare_cli_passes_exact_identity_binding(monkeypatch) -> None:
     assert seen == [(_UAMI, _UAMI)]
 
 
+def test_audit_replay_cli_emits_only_sanitized_evidence(monkeypatch) -> None:
+    serialized = '{"contract":"cosmas-os-d3-audit-replay-acceptance-v1","status":"verified"}'
+    session = StubSession()
+    monkeypatch.setattr("cosmas_os.cli._session", lambda: session)
+    monkeypatch.setattr(
+        beta_acceptance,
+        "verify_beta_audit_replay",
+        lambda _session, _settings: StubResult(serialized),
+    )
+
+    result = CliRunner().invoke(
+        app,
+        [
+            "verify-beta-audit-replay",
+            "--confirm-synthetic-only",
+            "--confirm-no-content-export",
+        ],
+        env=_environment(),
+    )
+
+    assert result.exit_code == 0
+    assert result.output.strip() == serialized
+    assert session.closed is True
+
+
 @pytest.mark.parametrize(
     ("command", "contract"),
     [
         ("baseline-beta-workflow-acceptance", WORKFLOW_ACCEPTANCE_CONTRACT),
+        ("verify-beta-audit-replay", AUDIT_REPLAY_CONTRACT),
         ("prepare-beta-purge-acceptance", PURGE_ACCEPTANCE_CONTRACT),
     ],
 )

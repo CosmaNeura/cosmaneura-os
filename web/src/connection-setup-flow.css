@@ -1,0 +1,22 @@
+.connection-focused { max-width: 38rem; margin-inline: auto; min-width: 0; }
+.connection-focused header p { margin-block: .35rem; }
+.connection-focused .connection-step-heading { margin-block: .75rem; }
+.connection-focused .connection-step-heading h3 { margin-block: .8rem .4rem; }
+.connection-focused nav, .connection-focused .connection-choice-actions { display: grid; gap: .6rem; }
+.connection-focused nav button { text-align: start; padding: .85rem; }
+.connection-focused input,.connection-focused select,.connection-focused textarea { min-width: 0; max-width: 100%; box-sizing: border-box; }
+.connection-focused button { min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.connection-focused fieldset { min-width: 0; margin-block: .8rem; }
+.connection-focused label { display: block; margin-block: .75rem; }
+.connection-focused label input:not([type=checkbox]),.connection-focused label select { display: block; width: 100%; margin-block-start: .3rem; }
+.connection-focused [hidden] { display: none !important; }
+.connection-focused details { margin-block: .8rem; }
+.connection-focused code,.connection-focused dd { overflow-wrap: anywhere; }
+.connection-focused .connection-step-actions { display: flex; gap: .6rem; flex-wrap: wrap; margin-block-start: 1rem; }
+.connection-focused .connection-primary { width: 100%; }
+.connection-focused .connection-draft-notice { padding: .8rem; border: 1px solid currentColor; border-radius: .6rem; margin-block: .8rem; }
+@media(max-width: 420px) { .connection-focused dl { display: block; } .connection-focused dd { margin: .2rem 0 .75rem; } }
+.connection-focused:is(.finance-setup,.portal-setup) { gap: .5rem; }
+.connection-focused .portal-mapping-grid { grid-template-columns: 1fr; }
+.connection-focused .connection-primary { background: #235e4c; border-color: #235e4c; color: #fff; margin-inline: 0; }
+.connection-focused:is(.vendor-setup,.finance-setup,.portal-setup) button { min-height: 44px; }

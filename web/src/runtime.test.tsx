@@ -3,14 +3,26 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const clerkHarness = vi.hoisted(() => ({
+  nativeMounts: 0,
+  desktopMounts: 0,
   auth: {
     isLoaded: false,
     isSignedIn: false as boolean | undefined,
     orgId: null as string | null | undefined,
     getToken: vi.fn(),
+  } as {
+    isLoaded: boolean; isSignedIn: boolean | undefined; orgId: string | null | undefined;
+    userId?: string; sessionId?: string; getToken: ReturnType<typeof vi.fn>;
   },
   providerKeys: [] as string[],
   providerError: null as Error | null,
+}));
+
+vi.mock("./NativeAuthenticatedWorkspace", () => ({
+  NativeAuthenticatedWorkspace: () => { clerkHarness.nativeMounts++; return "Native workspace entry"; },
+}));
+vi.mock("./DesktopAuthenticatedWorkspace", () => ({
+  DesktopAuthenticatedWorkspace: () => { clerkHarness.desktopMounts++; return "Desktop workspace entry"; },
 }));
 
 vi.mock("@clerk/react", () => ({
@@ -81,6 +93,8 @@ describe("beta runtime", () => {
       getToken: vi.fn(),
     };
     clerkHarness.providerKeys = [];
+    clerkHarness.nativeMounts = 0;
+    clerkHarness.desktopMounts = 0;
     clerkHarness.providerError = null;
     container = document.createElement("div");
     document.body.append(container);
@@ -91,6 +105,7 @@ describe("beta runtime", () => {
     await act(async () => root.unmount());
     container.remove();
     vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -275,7 +290,156 @@ describe("beta runtime", () => {
     await act(async () => root.render(betaApp()));
 
     expect(fetchMock).not.toHaveBeenCalled();
-    expect(container.textContent).toContain("Beta login is unavailable");
+    expect(container.textContent).toContain("Your workspace could not continue");
+    expect(container.textContent).toContain("unconfirmed requests before retrying");
+    expect(container.textContent).not.toContain("No work has been loaded");
     expect(container.textContent).not.toContain("sensitive provider failure");
+  });
+
+  function workspaceApp() {
+    return createElement(RuntimeApp, {
+      runtimeMode: "synth_os", authenticatedWorkspace: true, workspaceEnabled: true,
+      clerkPublishableKey: "pk_test_offline_example", apiBase: "http://127.0.0.1:8018",
+    });
+  }
+
+  it("does not mistake the Apple transport flag for a qualified native login provider", async () => {
+    vi.stubEnv("VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED", "true");
+    vi.stubGlobal("window", {location: {href: "capacitor://localhost/index.html"}});
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+    await act(async () => root.render(workspaceApp()));
+    expect(container.textContent).toContain("Workspace login is not configured");
+    expect(clerkHarness.providerKeys).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("selects native authentication only in its explicit signed Apple profile", async () => {
+    vi.stubEnv("VITE_WORKSPACE_NATIVE_AUTH_ENABLED", "true");
+    vi.stubEnv("VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED", "true");
+    vi.stubGlobal("window", { location: { href: "capacitor://localhost/index.html" } });
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+    await act(async () => root.render(workspaceApp()));
+    expect(container.textContent).toContain("Native workspace entry");
+    expect(clerkHarness.nativeMounts).toBe(1);
+    expect(clerkHarness.providerKeys).toHaveLength(0); expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("selects the desktop native entry without initializing browser Clerk", async () => {
+    vi.stubEnv("VITE_WORKSPACE_DESKTOP_AUTH_ENABLED", "true");
+    vi.stubEnv("VITE_DESKTOP_SYNTHETIC_ENABLED", "true");
+    vi.stubGlobal("window", { location: { href: "app://cosmas/index.html" } });
+    await act(async () => root.render(createElement(RuntimeApp, {
+      runtimeMode: "synth_os", authenticatedWorkspace: true, workspaceEnabled: true, apiBase: "app://cosmas/api",
+    })));
+    expect(container.textContent).toContain("Desktop workspace entry");
+    expect(clerkHarness.providerKeys).toHaveLength(0); expect(clerkHarness.nativeMounts).toBe(0);
+  });
+
+  it.each([
+    { page: "http://localhost:5173/" }, { page: "app://other/index.html" },
+    { page: "app://cosmas/index.html?redirect=true" }, { apiBase: "http://127.0.0.1:8046" },
+    { desktop: "false" }, { apple: "true" }, { authenticatedWorkspace: false }, { workspaceEnabled: false },
+  ])("rejects mixed or incomplete desktop native profiles: %j", async override => {
+    vi.stubEnv("VITE_WORKSPACE_DESKTOP_AUTH_ENABLED", "true");
+    vi.stubEnv("VITE_DESKTOP_SYNTHETIC_ENABLED", override.desktop ?? "true");
+    vi.stubEnv("VITE_WORKSPACE_NATIVE_AUTH_ENABLED", override.apple ?? "false");
+    vi.stubGlobal("window", { location: { href: override.page ?? "app://cosmas/index.html" } });
+    await act(async () => root.render(createElement(RuntimeApp, {
+      runtimeMode: "synth_os", authenticatedWorkspace: override.authenticatedWorkspace ?? true,
+      workspaceEnabled: override.workspaceEnabled ?? true, apiBase: override.apiBase ?? "app://cosmas/api",
+    })));
+    expect(container.textContent).toContain("Workspace login is not configured");
+    expect(clerkHarness.desktopMounts).toBe(0); expect(clerkHarness.nativeMounts).toBe(0);
+    expect(clerkHarness.providerKeys).toHaveLength(0);
+  });
+
+  it.each([
+    { page: "http://localhost:5173/" }, { page: "capacitor://other/index.html" },
+    { page: "capacitor://localhost:80/index.html" }, { page: "capacitor://user@localhost/index.html" },
+    { transport: "false" }, { desktop: "true" }, { authenticatedWorkspace: false },
+    { workspaceEnabled: false }, { runtimeMode: "early_adopter_beta" as const },
+    { apiBase: "https://unqualified.invalid" },
+  ])("fails closed for mismatched native configuration: %j", async override => {
+    vi.stubEnv("VITE_WORKSPACE_NATIVE_AUTH_ENABLED", "true");
+    vi.stubEnv("VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED", override.transport ?? "true");
+    vi.stubEnv("VITE_DESKTOP_SYNTHETIC_ENABLED", override.desktop ?? "false");
+    vi.stubGlobal("window", { location: { href: override.page ?? "capacitor://localhost/index.html" } });
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+    await act(async () => root.render(createElement(RuntimeApp, {
+      runtimeMode: override.runtimeMode ?? "synth_os", authenticatedWorkspace: override.authenticatedWorkspace ?? true,
+      workspaceEnabled: override.workspaceEnabled ?? true, apiBase: override.apiBase ?? "http://127.0.0.1:8018",
+    })));
+    expect(container.textContent).toContain("Workspace login is not configured");
+    expect(clerkHarness.nativeMounts).toBe(0); expect(clerkHarness.providerKeys).toHaveLength(0);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["https://unqualified.invalid", "app://cosmas/api", "http://user@localhost:8018"])(
+    "rejects unqualified authenticated workspace origins before initializing Clerk", async apiBase => {
+      const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+      await act(async () => root.render(createElement(RuntimeApp, {
+        runtimeMode: "synth_os", authenticatedWorkspace: true, workspaceEnabled: true,
+        clerkPublishableKey: "pk_test_offline_example", apiBase,
+      })));
+      expect(clerkHarness.providerKeys).toHaveLength(0);
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(container.textContent).toContain("Workspace login is not configured");
+    },
+  );
+
+  it("opens the encounter chooser after sign-in and clears private labels on sign-out", async () => {
+    vi.stubEnv("VITE_API_BASE", "http://127.0.0.1:8018");
+    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse([
+      { appointment_id: "invented-appointment", workspace_id: null, label: "Private invented label" },
+    ]));
+    vi.stubGlobal("fetch", fetchMock);
+    clerkHarness.auth = { isLoaded: true, isSignedIn: true, orgId: "org_invented",
+      userId: "user_invented", sessionId: "session_invented", getToken: vi.fn().mockResolvedValue("fresh-token") };
+    await act(async () => root.render(workspaceApp()));
+    expect(fetchMock).not.toHaveBeenCalled();
+    const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Choose an encounter"));
+    await act(async () => choose!.click());
+    expect(container.textContent).toContain("Private invented label");
+    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8018/workspaces");
+    expect(requestHeaders(fetchMock, 0).get("Authorization")).toBe("Bearer fresh-token");
+    clerkHarness.auth = { ...clerkHarness.auth, getToken: vi.fn().mockResolvedValue("refreshed-token") };
+    await act(async () => root.render(workspaceApp()));
+    expect(container.textContent).toContain("Private invented label");
+    const refresh = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Refresh encounters"));
+    await act(async () => refresh!.click());
+    expect(requestHeaders(fetchMock, 1).get("Authorization")).toBe("Bearer refreshed-token");
+    clerkHarness.auth = { ...clerkHarness.auth, isSignedIn: false };
+    await act(async () => root.render(workspaceApp()));
+    expect(container.textContent).not.toContain("Private invented label");
+    expect(container.textContent).toContain("Clerk sign in");
+  });
+
+  it("does not fall back to demo seeding when authenticated mode is missing its workspace flag", async () => {
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+    await act(async () => root.render(createElement(RuntimeApp, {
+      runtimeMode: "synth_os", authenticatedWorkspace: true, workspaceEnabled: false,
+      clerkPublishableKey: "pk_test_offline_example", apiBase: "http://127.0.0.1:8018",
+    })));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(clerkHarness.providerKeys).toHaveLength(0);
+    expect(container.textContent).toContain("Workspace login is not configured");
+  });
+
+  it.each(["orgId", "userId", "sessionId"] as const)("discards a pending token when %s changes", async field => {
+    let resolveToken!: (value: string) => void;
+    const getToken = vi.fn().mockImplementation(() => new Promise<string>(resolve => { resolveToken = resolve; }));
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+    clerkHarness.auth = { isLoaded: true, isSignedIn: true, orgId: "org_invented",
+      userId: "user_invented", sessionId: "session_invented", getToken };
+    await act(async () => root.render(workspaceApp()));
+    const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Choose an encounter"));
+    await act(async () => choose!.click());
+    expect(getToken).toHaveBeenCalledTimes(1);
+    clerkHarness.auth = { ...clerkHarness.auth, [field]: `${field === "orgId" ? "org" : field}_changed` };
+    await act(async () => root.render(workspaceApp()));
+    await act(async () => resolveToken("obsolete-token"));
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Choose an encounter");
+    expect(container.textContent).not.toContain("Workspace access is unavailable");
   });
 });

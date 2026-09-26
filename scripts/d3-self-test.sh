@@ -47,9 +47,12 @@ docker buildx build --load \
   --platform linux/amd64 \
   --tag cosmas-os-web:d3-local-check \
   --file Dockerfile.web \
-  --build-arg VITE_COSMAS_ENV=early_adopter_beta \
   --build-arg VITE_CLERK_PUBLISHABLE_KEY=pk_live_synthetic_public_test_value \
-  --build-arg VITE_API_BASE=https://api.example.invalid \
+  --build-arg VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.example.invalid \
+  --build-arg VITE_WORKSPACE_WEB_ORIGIN=https://workspace.example.invalid \
+  --build-arg VITE_COSMANEURA_WEB_ORIGIN=https://platform.example.invalid \
+  --build-arg VITE_CAPTURE_UPLOAD_ORIGINS=https://uploads.example.invalid \
+  --build-arg VITE_WORKSPACE_CAPTURE_MODE=synthetic \
   .
 WEB_UID="$(docker run --rm --entrypoint id cosmas-os-web:d3-local-check -u)"
 if [[ "$WEB_UID" == "0" ]]; then

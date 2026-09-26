@@ -65,7 +65,7 @@ requirements without inventing values:
 - a reviewed D3 capability manifest with every external connector dark;
 - a human-owned `alert_contact_email` before workloads, followed by a delivered
   Azure Action Group test containing no application data; and
-- a reviewed Central US availability and cost record for the selected Azure
+- a reviewed selected-region availability and cost record for the selected Azure
   Managed Redis `Balanced_B0` broker and its private endpoint.
 
 For `synthetic_lab`, a named clinic, clinic approval, BAA evidence, and PHI
@@ -111,14 +111,81 @@ after account-scope Blob RBAC propagates. Environment planning and apply then
 run on that VM. Do not expose the state account or substitute an interactive
 identity as a workaround.
 
-## Provisional region
+## Selected staging region and capacity
 
-`centralus` is a provisional default because the sponsorship subscription
-rejected PostgreSQL Flexible Server in `eastus`/`eastus2` during D2. D3 uses a
-single region so Container Apps and private PostgreSQL can share one VNet.
-The human must confirm residency, Container Apps, PostgreSQL, Redis, private
-endpoint, zone, and SKU availability before any plan. A different verified
-region may be supplied.
+The owner selected **East US 2 (`eastus2`)** on September 25, 2026 for
+`staging.cosmas.ai`. Set these values explicitly in the reviewed environment
+inputs; the retained `centralus`/two-replica defaults are for compatibility with
+earlier deployments and do not select the new staging profile:
+
+```hcl
+location         = "eastus2"
+api_max_replicas = 1
+```
+
+Environment resources use the selected `location`, independently of resource
+group metadata. Keep the existing Central US bootstrap/state/runner boundary;
+do not recreate it or change its location to move workloads. Workload Container
+Apps, PostgreSQL, Redis and private endpoints share the East US 2 workload VNet.
+The two explicit peerings connect that VNet to the retained runner/state VNet.
+Private DNS, routing, global-peering cost and exact endpoint access still need
+current review and the protected live network probe before deployment proceeds.
+
+With current container sizes, one API replica uses 0.5 vCPU, the worker 0.5 and
+the web host at most 0.25: 1.25 total. Conservative overlapping old/new revisions
+use 2.5; one 0.25-vCPU manual job brings the envelope to 2.75. **Three total cores**
+are therefore the proposed low-traffic staging quota. This requires the reviewed
+API cap of one and at most one active manual job. It is a quota ceiling, not
+three continuously allocated or billed cores. The default two-replica API has a
+3.75-core envelope under the same assumptions and needs four total cores.
+
+The protected runner checks the exact beta job inventory and execution status
+before either manual job starts and before a workload apply. Active, unknown,
+incompletely enumerated or unexpected jobs block that operation. It preserves
+surviving jobs for explicit recovery; a released local process lock is not
+treated as proof that a remote execution ended. Keep starts within this
+serialized deployment path.
+
+The September 25 subscription readback still showed East US 2 `SandboxCores`
+usage 0 / limit 1, an explicit PostgreSQL `OfferRestricted` response, and no
+`Balanced_B0` entry for East US 2 in the stable Redis SKU catalog. The Redis
+catalog conflicts with earlier portal evidence; EastUS2EUAP is a different
+region. These observations do not establish provisioning eligibility. Obtain
+current quota, exact PostgreSQL/Redis SKU, private endpoint, zone and cost
+confirmation before a real plan. The selected PostgreSQL source version is 16;
+do not substitute a different major version based on an older support summary.
+
+The saved plan guard binds both `location` and `api_max_replicas` to its resolved
+variables, outputs and planned resources. Its sanitized
+`critical_planned_values` projection carries both values. After the workload and
+any selected custom-domain binding are applied, refresh the protected network
+receipt for that state and run the read-only workload verification operation:
+
+```sh
+infra/beta/transport-to-protected-runner.sh workload-verify \
+  --bootstrap-outputs PATH --source-sha SHA --release-id ID --artifact-out PATH
+```
+
+The runner derives all expected settings from the resident saved workload plan,
+reviewed variable file and apply result. It checks their hashes against the
+current state, source, bootstrap boundary and build evidence. The operator does
+not assemble `COSMAS_WORKLOAD_*` values. Expected workspace settings, native
+origins and version-pinned secret references come from the reviewed plan, never
+from the live app being checked. The verifier compares both app and active
+revision configuration, images, traffic, replica limits and readiness while
+preserving the fixed synthetic-data, identity and private-secret boundaries.
+
+A successful operation stores an immutable v2 receipt bound to the exact plan,
+review, runtime configuration and state. Retrieve it through the same transport
+with `retrieve --artifact-kind workload`; retrieval revalidates the resident
+bindings and receipt age. Changed state or an expired receipt requires a fresh
+verification. A readiness failure does not change an already completed apply
+result; re-run this read-only operation after resolving the cause.
+
+The older standalone primitives remain compatible with legacy v1 receipts, but
+those receipts cannot satisfy this plan-bound operation. A passing infrastructure
+receipt proves only its enumerated checks. Real account onboarding, approved
+connector workflows and desktop/iPhone acceptance remain separate requirements.
 
 ## Broker decision
 
@@ -141,17 +208,35 @@ legacy Basic C0 meter was $0.022 per hour (about $16.06 per month), but all
 Basic, Standard, and Premium Azure Cache for Redis instances retire on
 2028-09-30. Refresh availability, quota, contract pricing, and the private
 endpoint estimate immediately before planning; the protected
-`broker_service_evidence_reference` records that human review.
+`broker_service_evidence_reference` records that human review. For the selected
+East US 2 destination, the [September 25 review](../../docs/beta/STAGING_COST_REVIEW_20260925.md)
+records the current published two-node B0 HA price of **$23.36 per 730-hour month**,
+without establishing subscription eligibility.
 
 A separate internal Redis Container App was rejected for D3. A single
 0.25-vCPU/0.5-GiB replica would be roughly $5.91/month if continuously idle or
 $19.71/month if continuously active before subscription-wide free grants, but
 it would have no managed failover, durable volume, or TLS setup. Multiple
 ordinary replicas would split broker state rather than provide Redis HA. The
-application currently writes the authoritative operation row before enqueue,
-but it has no scanner that re-enqueues a `PENDING` operation after complete
-broker loss. That cheaper shape therefore does not meet the D3 worker
-reliability requirement.
+legacy notification workflow writes the authoritative operation row before
+enqueue, but it has no scanner that re-enqueues a `PENDING` notification after
+complete broker loss. That cheaper shape therefore does not meet the retained
+D3 notification-worker reliability requirement.
+
+Current CosmaBot workspace work uses a different execution path. Chat and
+connector operations use durable PostgreSQL claims; the ordinary API lifespan
+starts PostgreSQL-polling workers for teammate handoffs and scheduled briefs.
+The legacy Celery worker does not process those handoffs. An interrupted model
+dispatch remains uncertain and requires explicit retry; restarting must not
+silently repeat an external call. See [API startup](../../src/cosmas_os/api/app.py),
+[model-work recovery](../../src/cosmas_os/application/model_work.py), and
+[routine processing](../../src/cosmas_os/application/routines.py).
+
+A future hosting alternative must preserve both the enabled workspace workers
+and the retained legacy queue. Generic replay of every `PENDING` operation is
+not a substitute for the current workflow-specific recovery rules. This
+distinction does not change the selected managed broker or authorize a
+deployment with lower availability.
 
 Evidence links:
 
@@ -501,9 +586,25 @@ The self-hashed network artifact includes a strictly whitelisted
 and ACR login server. Use those values for Clerk and the public web build;
 never export or inspect raw Terraform state to discover them.
 
-`public-web-build.json` contains only `vite_cosmas_env`,
-`vite_clerk_publishable_key`, and the exact foundation `vite_api_base`. A
-different state serial requires a new append-only network probe generation;
+`public-web-build.json` uses the existing `web-build-arguments.json` schema:
+exactly `VITE_CLERK_PUBLISHABLE_KEY`, `VITE_WORKSPACE_HOSTED_API_ORIGIN`,
+`VITE_WORKSPACE_WEB_ORIGIN`, `VITE_WORKSPACE_DATA_MODE`,
+`VITE_COSMANEURA_WEB_ORIGIN`, `VITE_CAPTURE_UPLOAD_ORIGINS`, and
+`VITE_WORKSPACE_CAPTURE_MODE`. Validate it locally with
+`python3 infra/beta/validate_web_build.py validate /absolute/path/to/public-web-build.json`
+from the repository root. The shared Python 3.10+ validator rejects duplicate,
+extra, missing and malformed fields. The protected builder binds API and web
+origins to the exact foundation outputs and hashes all seven values in its image
+label and accepted evidence. The Dockerfile fixes the operational feature profile
+and web client; arbitrary feature gates and image overrides are not inputs.
+
+This protected D3 path requires `pk_live_`, data mode `synthetic`, exact public
+HTTPS origins, and web capture mode `synthetic` or `browser_microphone`.
+`authorized_beta` remains a separate deployment gate; an operational identity
+preparer's authorized-beta output is not accepted here. See
+[`docs/beta/WEB_RELEASE.md`](../../docs/beta/WEB_RELEASE.md) for the complete input
+example and unchanged human-owned release sequence. A different state serial
+requires a new append-only network probe generation;
 the already accepted source/digest build evidence remains reusable after its
 ACR tags and digests are revalidated.
 
@@ -530,16 +631,19 @@ uses the explicit `foundation_reconcile` phase. Both bind the backend and
 pre/post-plan state lineage, serial, and hash.
 
 The production web custom domain is selected before the foundation plan because
-Clerk production cannot use the shared `azurecontainerapps.io` hostname. The
-pending exact owner decision recommends `beta.cosmaneura.com`; once accepted,
-set it in the foundation and retain it in every later tfvars object with
-`web_custom_domain_dns_ready = false`. The app-specific verification value does
-not exist before the web Container App, so custom-domain activation remains a
-two-plan workload sequence. In the first workload plan, also set
-`web_origin = "https://beta.cosmaneura.com"`. That creates the web app but no
-domain binding; do not admit testers yet. Re-run `probe-network` for the
-resulting state, then retrieve the
-exact public DNS material through the protected runner:
+Clerk production cannot use the shared `azurecontainerapps.io` hostname. On
+2026-09-25 the owner confirmed `staging.cosmas.ai` for testing, reserving
+`bot.cosmas.ai` for the user-facing CosmaBot app. This replaces the earlier
+staging hostname recommendations; approval of each exact deployment plan and
+the identity/DNS gates remains required. Set
+`web_custom_domain = "staging.cosmas.ai"` in the foundation and retain it in
+every later tfvars object with `web_custom_domain_dns_ready = false`. The
+app-specific verification value does not exist before the web Container App,
+so custom-domain activation remains a two-plan workload sequence. In the first
+workload plan, also set `web_origin = "https://staging.cosmas.ai"`. That creates
+the web app but no domain binding; do not admit testers yet. Re-run
+`probe-network` for the resulting state, then retrieve the exact public DNS
+material through the protected runner:
 
 ```text
 bash ./transport-to-protected-runner.sh domain-verification \
@@ -554,7 +658,8 @@ CNAME target, `asuid` TXT name/value, and its exact source/release/state
 binding. The TXT value is public DNS publication material, not an application
 credential; the raw Terraform output and all unrelated state remain on the
 runner. A human then creates and externally verifies those exact records in
-the Cloudflare-hosted zone and adds the exact origin/redirects to Clerk. Before
+the selected hostname's authoritative DNS zone, confirming its current
+delegation and provider, and adds the exact origin/redirects to Clerk. Before
 the second plan, create replacement workload tfvars that change only
 `web_custom_domain_dns_ready` from `false` to `true` and replace
 `runner_live_network_evidence_reference` with the fresh post-workload probe.
@@ -1044,12 +1149,21 @@ Security boundaries are fixed; cost choices are variables. Review at least:
   and
 - the aggregate two-resource-group budget and alert recipients.
 
-The current planning envelope is approximately **$170–260/month at low
-traffic** across the state/runner and workload groups. Bootstrap creates a
-**$350/month subscription budget filtered to those exact two groups**, with
-actual and forecast notifications to the human-owned recipients supplied in
-the private bootstrap variables. It is an alert, not a spending cap. Refresh
-calculator evidence without assuming credits before approving a plan.
+The [September 25 East US 2 cost review](../../docs/beta/STAGING_COST_REVIEW_20260925.md)
+replaces the earlier $170–260 combined envelope. With the selected one-replica
+API, public retail scenarios total **about $278–329/month with private Premium
+ACR**, or **$224–275/month with the explicitly reviewed synthetic-public Basic
+exception**, before additional usage charges. Those totals include about $83
+of existing runner/state-network costs and the additional Azure-managed
+Container Apps network. They are scenarios, not a spending cap or account quote.
+
+Bootstrap creates a **$350/month subscription notification budget filtered to
+the named state and workload groups**. It does not automatically cover the
+Container Apps managed resource group. Logging, traffic, storage, jobs and
+external services add costs; include the actual managed group and current
+resolved inputs in the final cost review. Notifications do not stop spending.
+Do not assume credits, change the registry posture, or resize resources based
+on this estimate without the existing exact deployment review.
 
 ## Required human verification after apply
 

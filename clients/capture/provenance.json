@@ -1,0 +1,266 @@
+{
+  "source_ref": "ea7f99d0278a05706531ffb1288cb1df7acf507b",
+  "files": {
+    "plugins/ios-pcm/codec.ts": {
+      "source_path": "apps/capture/native-plugins/ios-pcm-capacitor/src/codec.ts",
+      "sha256": "947e2960599f720c068fe3751675dca059b055af41c6db8aa89e49b4108d03a4"
+    },
+    "plugins/ios-pcm/definitions.ts": {
+      "source_path": "apps/capture/native-plugins/ios-pcm-capacitor/src/definitions.ts",
+      "sha256": "2526d608d3704f2e60099e7a00b54b25651361fe3bc2d44eba9e1c2ef9047c71"
+    },
+    "plugins/ios-pcm/index.ts": {
+      "source_path": "apps/capture/native-plugins/ios-pcm-capacitor/src/index.ts",
+      "sha256": "d657ed96ce605cf68cd9b1d39590770ac8b19e609b03bb9324f36f5bb9538c17"
+    },
+    "plugins/secure-queue/definitions.ts": {
+      "source_path": "apps/capture/native-plugins/secure-queue/src/definitions.ts",
+      "sha256": "c014b193b48854612a205614c904fc58e91ec62f5bf080754bc5f8b6a636a0de"
+    },
+    "plugins/secure-queue/index.ts": {
+      "source_path": "apps/capture/native-plugins/secure-queue/src/index.ts",
+      "sha256": "30af6d47e49c808347a5f903a842befba84dc944e2b810cf431dbdf85883247b"
+    },
+    "src/audio/browser-microphone-source.ts": {
+      "source_path": "apps/capture/src/audio/browser-microphone-source.ts",
+      "sha256": "0fd28fd84e2c8c4855ee8869c001e097a8465ed12f7d38b612b823cae534a8b9"
+    },
+    "src/audio/downmix.ts": {
+      "source_path": "apps/capture/src/audio/downmix.ts",
+      "sha256": "f0f9b01da4249d1a2a7b167c1bc90fa128bcb95d2b7129bf462a95ce1a27316f"
+    },
+    "src/audio/errors.ts": {
+      "source_path": "apps/capture/src/audio/errors.ts",
+      "sha256": "dc85155df6fd6561f044ba4d12870390b5e68aaf9e844b47a440645b0fff0973"
+    },
+    "src/audio/index.ts": {
+      "source_path": "apps/capture/src/audio/index.ts",
+      "sha256": "a71202f9caeb5a481429e16b18a1ef1f770eb50827cd3607301e8f9697e01053"
+    },
+    "src/audio/pcm-capture-worklet.ts": {
+      "source_path": "apps/capture/src/audio/pcm-capture-worklet.ts",
+      "sha256": "bd3598dd18594735c7acbec6775f94a38045a5f29be010176c0494360e1daea9"
+    },
+    "src/audio/pcm-chunker.ts": {
+      "source_path": "apps/capture/src/audio/pcm-chunker.ts",
+      "sha256": "29b933cb08d4c6b1c33f348591bb66b35dc241cd48044ef28a982a071b194f7c"
+    },
+    "src/audio/resampler.ts": {
+      "source_path": "apps/capture/src/audio/resampler.ts",
+      "sha256": "f9c38d550cc981f6ee054c6e76588f42031331119457e98ee05e6a91ca04e253"
+    },
+    "src/audio/worklet-packet.ts": {
+      "source_path": "apps/capture/src/audio/worklet-packet.ts",
+      "sha256": "b8c242a285d1ac6df515d430d4c7dbca2de79a78e84c60cfc8ef5a6ab1498bb9"
+    },
+    "src/audio/worklet-protocol.ts": {
+      "source_path": "apps/capture/src/audio/worklet-protocol.ts",
+      "sha256": "3609f293a41eab20771f40be17b7314ae2eb43318dc7322987eb07e8c8b14fa7"
+    },
+    "src/bff/contracts.ts": {
+      "source_path": "apps/capture/src/bff/contracts.ts",
+      "sha256": "d4e7a1f3da678ef1d24941743a5465a7c1ac7dc76b210dfa06d59c6ac344a36a"
+    },
+    "src/bff/http-client.ts": {
+      "source_path": "apps/capture/src/bff/http-client.ts",
+      "sha256": "7373423541d5c94d0c339b62ed3b2950f7cf0b9f2c13d994886fb69a1843fb33"
+    },
+    "src/bff/index.ts": {
+      "source_path": "apps/capture/src/bff/index.ts",
+      "sha256": "f7eae0bf1565afdbd9245b620ea9d08b431d36c7f4dfbf1f5d82947218b3213b"
+    },
+    "src/bff/queue-transport.test.ts": {
+      "source_path": "apps/capture/src/bff/queue-transport.test.ts",
+      "sha256": "f6734108b20d523d9489b0469cb349ac30c21d100ae0cad2d7462384e4978791"
+    },
+    "src/bff/queue-transport.ts": {
+      "source_path": "apps/capture/src/bff/queue-transport.ts",
+      "sha256": "cf8ab1a690b09178cbabaf424b6283ac375aeeb779e2f86907ee37265b7b8639"
+    },
+    "src/bff/upload-target.ts": {
+      "source_path": "apps/capture/src/bff/upload-target.ts",
+      "sha256": "c13ed8646cc8f938d32bdba58353dd508992b4f7ab3d5f578d5623273de29445"
+    },
+    "src/capture-source-factory.ts": {
+      "source_path": "apps/capture/src/capture-source-factory.ts",
+      "sha256": "570eb4c3b84381cf8b0b0a71c65cabcfb04a6d191ceb5a7e7b5c237c301281e0"
+    },
+    "src/capture/index.ts": {
+      "source_path": "apps/capture/src/capture/index.ts",
+      "sha256": "5173565cb2d755d11b327638f13d037c412e0f222f8f794ce1245217c056edc2"
+    },
+    "src/capture/source.ts": {
+      "source_path": "apps/capture/src/capture/source.ts",
+      "sha256": "ab3bb9d549af27d148359842f80016d819b19b629e2d980e06f425d94c38e6ff"
+    },
+    "src/capture/synthetic-source.ts": {
+      "source_path": "apps/capture/src/capture/synthetic-source.ts",
+      "sha256": "4fd64af5e223b0b0caf369fa7e4276464b5cb24bd9062725c8fe89be44701568"
+    },
+    "src/capture/wav.ts": {
+      "source_path": "apps/capture/src/capture/wav.ts",
+      "sha256": "68a2741342a0c405bf5c3dd319a85c669d23cd3ace27ae39fe3a4bf30e613c6a"
+    },
+    "src/flow/capture-lock.ts": {
+      "source_path": "apps/capture/src/flow/capture-lock.ts",
+      "sha256": "2e8fe7636bdbc0b5b3adafb4c6df309337c9f5bc5cf9a9d6ccc6e6b941701840"
+    },
+    "src/flow/controller.integration.test.ts": {
+      "source_path": "apps/capture/src/flow/controller.integration.test.ts",
+      "sha256": "bc8a1464c3e5a241ba0c220d58863105af9202c1c653a59081833eb86fb088ef"
+    },
+    "src/flow/controller.ts": {
+      "source_path": "apps/capture/src/flow/controller.ts",
+      "sha256": "c1f4970d824d45264995a28999ad3af23a4f2af93f9e8b8cdf894b151ccf638b"
+    },
+    "src/flow/encrypted-store.test.ts": {
+      "source_path": "apps/capture/src/flow/encrypted-store.test.ts",
+      "sha256": "4d8af9e90c312464f8b2e490ec6d4b1fab340e4a73fb878ecb15cf80de35a22f"
+    },
+    "src/flow/encrypted-store.ts": {
+      "source_path": "apps/capture/src/flow/encrypted-store.ts",
+      "sha256": "bab4856cde2c09218cb0397e24eba9a2c7f88b91e272420fa3af6b1dd4a57279"
+    },
+    "src/flow/index.ts": {
+      "source_path": "apps/capture/src/flow/index.ts",
+      "sha256": "58317fc614054a86bd4969374699f25137ad5d9393835a3214d8a164ebb6309f"
+    },
+    "src/flow/recovery-state.test.ts": {
+      "source_path": "apps/capture/src/flow/recovery-state.test.ts",
+      "sha256": "7feda3aa0484c339cdfc27f9282cca905695317328dc0635248936e301a33750"
+    },
+    "src/flow/recovery-state.ts": {
+      "source_path": "apps/capture/src/flow/recovery-state.ts",
+      "sha256": "8efaf546f72dc04e1d83521627e8dbda4da0a9f2f9cb0b6cbb5d8e24b323eb69"
+    },
+    "src/flow/session-key.ts": {
+      "source_path": "apps/capture/src/flow/session-key.ts",
+      "sha256": "7e100ef7d264b429cd2b9722a3960bda89fcd438c99b951798edc9e8eebd41b9"
+    },
+    "src/flow/types.ts": {
+      "source_path": "apps/capture/src/flow/types.ts",
+      "sha256": "a05724fca0288155f814a3ec036659eb97ec931c8482a4b9559ab7ba05ecd458"
+    },
+    "src/generated/capture-api.ts": {
+      "source_path": "apps/capture/src/generated/capture-api.ts",
+      "sha256": "6ea9e2e0d8ade5fcc6a2d2494091cfb2d27ba8fcb5aa7113f9a2a2905310a90f"
+    },
+    "src/mock-bff/server.ts": {
+      "source_path": "apps/capture/src/mock-bff/server.ts",
+      "sha256": "df64f0403d7c653adea3a44bc0f4f3e3bed70a42ffddb402ddb971f892afe05f"
+    },
+    "src/mock-bff/state.ts": {
+      "source_path": "apps/capture/src/mock-bff/state.ts",
+      "sha256": "a9976251a4d8096b0b12b36fc0546a1f85aaf599c4ca516b0749b518ce8297b9"
+    },
+    "src/native/capacitor-ios-native-pcm-bridge.ts": {
+      "source_path": "apps/capture/src/native/capacitor-ios-native-pcm-bridge.ts",
+      "sha256": "18b4ffb5ac439ddd1ee1a80dbbee210863c281ad25860eece69a6e44d1df63d5"
+    },
+    "src/native/fake-ios-native-pcm-bridge.ts": {
+      "source_path": "apps/capture/src/native/fake-ios-native-pcm-bridge.ts",
+      "sha256": "04f4f674ca1eef98d2bd1c9d65cf338990723f24a745c1c240a122622805c836"
+    },
+    "src/native/index.ts": {
+      "source_path": "apps/capture/src/native/index.ts",
+      "sha256": "199ebbc2e14e1943c9a17b90ae83f4ecbe9368e49379c422d676b5571c273610"
+    },
+    "src/native/ios-native-microphone-source.ts": {
+      "source_path": "apps/capture/src/native/ios-native-microphone-source.ts",
+      "sha256": "ef1a308c69721a714a8608856fbc22ef3c51bdd3559f615f020570e3b816c935"
+    },
+    "src/native/ios-native-pcm-bridge.ts": {
+      "source_path": "apps/capture/src/native/ios-native-pcm-bridge.ts",
+      "sha256": "7111e8e4c69205f3ceb6131cb690bf3ccaa7d5165ea8e91038fa18c6e8f9f4f2"
+    },
+    "src/queue/capture-queue.test.ts": {
+      "source_path": "apps/capture/src/queue/capture-queue.test.ts",
+      "sha256": "ca63e2bd189fa68547beac8ba6f294772a1a340de3955a54d9530456eccf6fe8"
+    },
+    "src/queue/capture-queue.ts": {
+      "source_path": "apps/capture/src/queue/capture-queue.ts",
+      "sha256": "462edcc5b9db2bc6ad3e88178ca082d3e373ed6ba5fb2e594148d50754d2f14b",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
+    },
+    "src/queue/errors.ts": {
+      "source_path": "apps/capture/src/queue/errors.ts",
+      "sha256": "c4c37e1a2f5555db2be13cec778831d535dd44075bc47b22c961d416bd588aa4"
+    },
+    "src/queue/index.ts": {
+      "source_path": "apps/capture/src/queue/index.ts",
+      "sha256": "4f281146c12f28fc8d9405ee494db046dcec03edd0bc6ef7242b42ba6bd49ab0"
+    },
+    "src/queue/records.ts": {
+      "source_path": "apps/capture/src/queue/records.ts",
+      "sha256": "2f5bec6a48a673355fed9f1c8fedb41c253e74e76b54aef95e1d562cf953cac0",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
+    },
+    "src/queue/types.ts": {
+      "source_path": "apps/capture/src/queue/types.ts",
+      "sha256": "d99e759afad0a2f0f2f47fc38b43aabb6491af9a2cad6643c0f1d9b84447f3ca",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
+    },
+    "src/storage/encrypted-indexeddb.test.ts": {
+      "source_path": "apps/capture/src/storage/encrypted-indexeddb.test.ts",
+      "sha256": "dc9b1dd43f1d20d39eefe72b8b42db7add9130a11d53ce27012e2d98f5592d81"
+    },
+    "src/storage/encrypted-indexeddb.ts": {
+      "source_path": "apps/capture/src/storage/encrypted-indexeddb.ts",
+      "sha256": "f228291ad64de85cfdd5cacfd45f5e9dcd88a47c71911f4de93d24aa27874a7e",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
+    },
+    "src/storage/index.ts": {
+      "source_path": "apps/capture/src/storage/index.ts",
+      "sha256": "be238554c4a17aa81d3f9255cd4baef058b1ab33bdec862327349cb64adf8f1d"
+    },
+    "src/storage/native-plugin.ts": {
+      "source_path": "apps/capture/src/storage/native-plugin.ts",
+      "sha256": "aff3fabd7974cdedd72f6c0b44abd6e765edf2fa30d6f53d5e8b8d4649b88685"
+    },
+    "src/storage/record-codec.ts": {
+      "source_path": "apps/capture/src/storage/record-codec.ts",
+      "sha256": "b65ff91b383eb2a6a04c37858a690c85de34447e4029ed5eb37929ef853594a8"
+    },
+    "test-fixtures/preview-constants.ts": {
+      "source_path": "packages/capture-preview-domain/src/constants.ts",
+      "sha256": "967315063e7e1d425100812c7bdffb2e415cb8ca4b7173bae1d142b41309a0d0"
+    },
+    "protocol/generated.ts": {
+      "source_path": "packages/capture-protocol/src/generated.ts",
+      "sha256": "9c7a844d5ac6558890886af926b2264f375cc84c05ad3259ed86cfde00011c38",
+      "source_ref": "6a55bf7ec407172834b58a740801a8eb58ff0b5e"
+    }
+  },
+  "bounded_device_queue_reuse": {
+    "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1",
+    "source_change": "PR131 authenticated metadata enumeration; sequential device payload scanning",
+    "adapted_files": [
+      "src/storage/native-plugin.ts",
+      "src/flow/controller.ts",
+      "src/configured/flow/controller.ts",
+      "src/flow/empty-preparation-transfer.ts",
+      "../desktop/recorder/durable-record-store.ts",
+      "../desktop/recorder/durable-queue-store.ts",
+      "../../web/src/capture-storage.ts",
+      "../../web/src/configured-capture-runtime.ts",
+      "../../web/src/capture-runtime.ts"
+    ],
+    "preserved": "CosmaBot workspace/session scoping, encrypted record format, CAS, upload concurrency, receipt binding and recovery authorization"
+  },
+  "long_visit_response_compatibility": {
+    "core_ref": "bec60877ee0cb142c27af7a07e59939b275f400d",
+    "scribe_ref": "a947b5499cac449d4132c666a0229140b6674f34",
+    "scope": "Consumer limits: 500000 aggregate characters, unchanged100000 per-segment characters,24MiB source/working and32MiB review. Exact workspace operation transport limits include wrapper overhead; currentCore4MiB correction request bound carried end-to-end.",
+    "adapted_files": [
+      "src/bff/transcript-limits.ts",
+      "src/bff/working-contracts.ts",
+      "src/bff/source-contracts.ts",
+      "../scribe-review/creator-review-api.ts",
+      "../desktop/workspace-auth-proxy.mjs",
+      "../../web/src/capture-api.ts",
+      "../../web/src/capture-working-api.ts",
+      "../../web/src/creator-review-api.ts"
+    ],
+    "preserved": "Complete text, current source/session/hash binding, translation and clinician review, and smaller non-operation endpoint limits."
+  }
+}

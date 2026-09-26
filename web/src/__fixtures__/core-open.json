@@ -1,0 +1,157 @@
+{
+  "connection": {
+    "command": {
+      "action": "connection",
+      "request_nonce": "3e9628ef-2ec4-4356-b241-2dade94a97ab"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "connection",
+      "connection_status": "ready_to_connect",
+      "discovery": {
+        "contract_version": "1",
+        "action": "connection",
+        "request_nonce": "3e9628ef-2ec4-4356-b241-2dade94a97ab",
+        "checked_at": "2026-09-23T20:50:14.483696Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented W42 practice",
+          "review_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe"
+        },
+        "encounters": [],
+        "next_cursor": null
+      }
+    }
+  },
+  "connect": {
+    "command": {
+      "action": "connect",
+      "request_nonce": "49e29fda-d4c0-4587-82e2-17009eb5538b",
+      "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "connect",
+      "connection_status": "connected",
+      "discovery": {
+        "contract_version": "1",
+        "action": "connection",
+        "request_nonce": "49e29fda-d4c0-4587-82e2-17009eb5538b",
+        "checked_at": "2026-09-23T20:50:14.508539Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented W42 practice",
+          "review_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe"
+        },
+        "encounters": [],
+        "next_cursor": null
+      }
+    }
+  },
+  "encounters": {
+    "command": {
+      "action": "encounters",
+      "request_nonce": "b73b2537-0e6b-490e-ae4d-edf08f8d02fc",
+      "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe",
+      "window": {
+        "start_date": "2026-09-23",
+        "end_date": "2026-09-24"
+      }
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "encounters",
+      "connection_status": "connected",
+      "discovery": {
+        "contract_version": "1",
+        "action": "encounters",
+        "request_nonce": "b73b2537-0e6b-490e-ae4d-edf08f8d02fc",
+        "checked_at": "2026-09-23T20:50:14.520291Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented W42 practice",
+          "review_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe"
+        },
+        "encounters": [
+          {
+            "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe",
+            "patient": {
+              "patient_ref": "patient_00000000000000000000000001",
+              "display_name": "Invented W42 person"
+            },
+            "appointment": {
+              "appointment_ref": "appointment_00000000000000000000000001",
+              "patient_ref": "patient_00000000000000000000000001",
+              "appointment_date": "2026-09-23T09:00:00",
+              "timezone_known": false
+            },
+            "source_sha256": "daad2c330aa8fac6d4f1cfc344b6a9142b76f52e052ee50a99dbb6260c18a380"
+          }
+        ],
+        "next_cursor": null
+      }
+    }
+  },
+  "open": {
+    "command": {
+      "action": "open",
+      "request_nonce": "d128e93f-6f56-41e5-bb44-017859bc2ab2",
+      "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe",
+      "appointment_ref": "appointment_00000000000000000000000001",
+      "source_sha256": "daad2c330aa8fac6d4f1cfc344b6a9142b76f52e052ee50a99dbb6260c18a380"
+    },
+    "response": {
+      "contract_version": 1,
+      "action": "open",
+      "connection_status": "connected",
+      "discovery": {
+        "contract_version": "1",
+        "action": "encounter",
+        "request_nonce": "d128e93f-6f56-41e5-bb44-017859bc2ab2",
+        "checked_at": "2026-09-23T20:50:14.550125Z",
+        "connection": {
+          "actor_ref": "authority_actor_00000000000000000000000001",
+          "tenant_ref": "authority_tenant_00000000000000000000000001",
+          "provider_link_ref": "scribe_provider_link_00000000000000000000000001",
+          "practice_ref": "practice_00000000000000000000000001",
+          "practice_label": "Invented W42 practice",
+          "review_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+          "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe"
+        },
+        "encounters": [
+          {
+            "connection_sha256": "483e1c6a8578edd0e6d1432a4fde84eb76dda1eb541c12b8bed4df2843868cfe",
+            "patient": {
+              "patient_ref": "patient_00000000000000000000000001",
+              "display_name": "Invented W42 person"
+            },
+            "appointment": {
+              "appointment_ref": "appointment_00000000000000000000000001",
+              "patient_ref": "patient_00000000000000000000000001",
+              "appointment_date": "2026-09-23T09:00:00",
+              "timezone_known": false
+            },
+            "source_sha256": "daad2c330aa8fac6d4f1cfc344b6a9142b76f52e052ee50a99dbb6260c18a380"
+          }
+        ],
+        "next_cursor": null
+      },
+      "workspace": {
+        "workspace_id": "bde801c1-431c-4dd6-98d2-cbb17646d9b3",
+        "appointment_id": "37938e5b-4403-4294-a2be-12eb2b3cd907"
+      }
+    }
+  }
+}

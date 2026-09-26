@@ -50,8 +50,13 @@ variable "beta_id" {
 
 variable "location" {
   type        = string
-  description = "Single region for ACA and private data services. Central US is provisional until region/quota evidence is recorded."
+  description = "Reviewed workload region for ACA and private data services, independent of existing resource-group and bootstrap/state locations. Current quota and service-capacity evidence remains required."
   default     = "centralus"
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9]{2,31}$", var.location))
+    error_message = "location must be the canonical lowercase Azure region name selected in the reviewed plan."
+  }
 }
 
 variable "deployment_mode" {
@@ -430,14 +435,14 @@ variable "database_preparation_attestation" {
   validation {
     condition = var.database_preparation_attestation == null || try(
       can(regex("^[0-9a-f]{64}$", var.database_preparation_attestation.image_digest)) &&
-      var.database_preparation_attestation.schema_revision == "0002_external_identities" &&
+      var.database_preparation_attestation.schema_revision == local.database_release.schema_revision &&
       can(regex("^[0-9a-f]{64}$", var.database_preparation_attestation.evidence_sha256)) &&
       can(regex("^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/rg-cosmas-os-beta-[a-z0-9-]+/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-[a-z0-9-]+/executions/[A-Za-z0-9][A-Za-z0-9._-]{2,255}$", var.database_preparation_attestation.execution_id)) &&
       can(regex("^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[1-5][0-9a-fA-F]{3}-[89abAB][0-9a-fA-F]{3}-[0-9a-fA-F]{12}$", var.database_preparation_attestation.box_id)) &&
       can(regex("^/subscriptions/[0-9a-fA-F-]{36}/resourceGroups/rg-cosmas-os-beta-[a-z0-9-]+/providers/Microsoft.DBforPostgreSQL/flexibleServers/pg-cosmas-beta-[a-z0-9-]+$", var.database_preparation_attestation.database_server_id)),
       false,
     )
-    error_message = "database_preparation_attestation must contain the exact Box, database server, job execution, 64-hex image/evidence digests, and expected D3 schema revision."
+    error_message = "database_preparation_attestation must contain the exact Box, database server, job execution, 64-hex image/evidence digests, and selected release schema revision."
   }
 }
 
@@ -559,8 +564,13 @@ variable "api_min_replicas" {
 
 variable "api_max_replicas" {
   type        = number
-  description = "API maximum replicas."
+  description = "Reviewed API maximum replicas: one for bounded staging capacity or two for the default beta profile."
   default     = 2
+
+  validation {
+    condition     = contains([1, 2], var.api_max_replicas)
+    error_message = "api_max_replicas must be exactly 1 or 2 to match the workload verification contract."
+  }
 }
 
 variable "web_cpu" {

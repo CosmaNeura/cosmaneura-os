@@ -345,7 +345,7 @@ source_sha="${COSMAS_SOURCE_SHA:-}"
 uuid_pattern='^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
 [[ "$subscription_id" =~ $uuid_pattern ]] || die "subscription ID is invalid"
 [[ "$deploy_client_id" =~ $uuid_pattern ]] || die "deploy identity client ID is invalid"
-[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
+[[ "$operation" == "stage-source" || "$operation" == "probe-network" || "$operation" == "build-push" || "$operation" == "stage-vars" || "$operation" == "inspect-stage" || "$operation" == "stage-generation" || "$operation" == "plan" || "$operation" == "apply" || "$operation" == "database-prepare" || "$operation" == "workload-verify" || "$operation" == "runtime-acceptance" || "$operation" == "domain-verification" || "$operation" == "alert-delivery" || "$operation" == "pitr-freeze" || "$operation" == "pitr-manifest" || "$operation" == "pitr-start" || "$operation" == "pitr-complete" || "$operation" == "pitr-cleanup" || "$operation" == "pitr-resume" || "$operation" == "release-rollback" || "$operation" == "release-forward" || "$operation" == "offboarding-acceptance" || "$operation" == "bootstrap-identity" || "$operation" == "retrieve" ]] || die "operation is invalid"
 [[ "$stage" == "source" || "$stage" == "network" || "$stage" == "images" || "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" || "$stage" == "acceptance" || "$stage" == "domain" || "$stage" == "alert" || "$stage" == "pitr" || "$stage" == "recovery" || "$stage" == "offboarding" || "$stage" == "identity" ]] || die "stage is invalid"
 [[ "$release_id" =~ ^[a-z0-9][a-z0-9-]{2,31}$ ]] || die "release ID must be 3-32 lowercase letters, digits, or hyphens"
 [[ "$source_sha" =~ ^[0-9a-f]{40}$ ]] || die "source SHA must be a full lowercase Git commit"
@@ -531,7 +531,11 @@ fresh_managed_identity_login() {
 emit_sanitized_artifact() {
   local artifact="$1"
   local encoded
-  jq -e 'type == "object" and .schema_version == 1' "$artifact" >/dev/null || die "wrapper did not produce a valid sanitized artifact"
+  if [[ "$operation" == "workload-verify" || ( "$operation" == "retrieve" && "${artifact_kind:-}" == "workload" ) ]]; then
+    guard_validate_workload_evidence "$artifact" "$source_sha" "$release_id" "$GUARD_BOX_ID" || die "wrapper did not produce a bound workload artifact"
+  else
+    jq -e 'type == "object" and .schema_version == 1' "$artifact" >/dev/null || die "wrapper did not produce a valid sanitized artifact"
+  fi
   encoded="$(gzip -9 -c "$artifact" | base64 -w 0)"
   (( ${#encoded} <= 3000 )) || die "sanitized artifact exceeds the bounded Run Command return channel"
   printf 'COSMAS_SANITIZED_ARTIFACT_B64=%s\n' "$encoded"
@@ -913,6 +917,63 @@ prepare_pitr_context() {
   install -d -o root -g root -m 0700 "$PITR_ROOT" "$PITR_ROOT/evidence"
 }
 
+verify_manual_jobs_idle() {
+  local outputs_file="$1"
+  local target_dir="$2"
+  local jobs_scope="/subscriptions/$GUARD_SUBSCRIPTION_ID/resourceGroups/$GUARD_WORKLOAD_RESOURCE_GROUP/providers/Microsoft.App/jobs"
+  local database_name="caj-dbprep-cosmas-beta-$GUARD_BETA_ID"
+  local acceptance_name="caj-runtime-accept-$GUARD_BETA_ID"
+  local prefix job_name expected_id enabled
+  mkdir -m 0700 "$target_dir" || die "cannot create private manual-job preflight directory"
+  # A failed resource GET is never evidence that an optional job is absent.
+  # Require a complete inventory, including no unreviewed third job in this RG.
+  az rest --method get --url "https://management.azure.com${jobs_scope}?api-version=2023-11-02-preview" --only-show-errors --output json >"$target_dir/jobs.json" || die "cannot establish an idle manual-job boundary"
+  jq -e --arg database_id "${jobs_scope,,}/${database_name}" --arg acceptance_id "${jobs_scope,,}/${acceptance_name}" '
+    type == "object" and (.value | type) == "array" and
+    (.nextLink == null or .nextLink == "") and (has("error") | not) and
+    all(.value[];
+      (.id | type) == "string" and
+      ((.id | ascii_downcase) == $database_id or (.id | ascii_downcase) == $acceptance_id)) and
+    ([.value[].id | ascii_downcase] | length == (unique | length))
+  ' "$target_dir/jobs.json" >/dev/null || die "manual-job inventory is incomplete or outside the exact beta boundary"
+  for prefix in database_preparation runtime_acceptance; do
+    if [[ "$prefix" == "database_preparation" ]]; then
+      job_name="$database_name"
+    else
+      job_name="$acceptance_name"
+    fi
+    expected_id="$jobs_scope/$job_name"
+    jq -e --arg prefix "$prefix" --arg expected_name "$job_name" --arg expected_id "${expected_id,,}" --slurpfile jobs "$target_dir/jobs.json" '
+      .[$prefix + "_job_enabled"].value as $enabled |
+      .[$prefix + "_job_name"].value as $name |
+      .[$prefix + "_job_resource_id"].value as $id |
+      [$jobs[0].value[] | select((.id | ascii_downcase) == $expected_id)] as $matches |
+      ($enabled | type) == "boolean" and
+      (if $enabled then
+        $name == $expected_name and ($id | type) == "string" and
+        ($id | ascii_downcase) == $expected_id and ($matches | length) == 1 and
+        $matches[0].name == $name and $matches[0].properties.configuration.triggerType == "Manual"
+      else
+        $name == null and $id == null and ($matches | length) == 0
+      end)
+    ' "$outputs_file" >/dev/null || die "manual-job stage outputs and live inventory disagree"
+    enabled="$(jq -r --arg prefix "$prefix" '.[$prefix + "_job_enabled"].value' "$outputs_file")"
+    [[ "$enabled" == "true" ]] || continue
+    az rest --method get --url "https://management.azure.com${expected_id}/executions?api-version=2023-11-02-preview" --only-show-errors --output json >"$target_dir/$prefix-executions.json" || die "cannot establish an idle manual-job boundary"
+    # Running/Processing/Starting/Waiting/Queued/Pending are the existing PITR
+    # active states. Only explicit terminal states are safe; unknown is blocked.
+    jq -e --arg job_id "${expected_id,,}" '
+      type == "object" and (.value | type) == "array" and
+      (.nextLink == null or .nextLink == "") and (has("error") | not) and
+      all(.value[];
+        (.name | type) == "string" and (.name | test("^[a-z0-9][a-z0-9-]{2,255}$")) and
+        (.id | type) == "string" and (.id | ascii_downcase) == ($job_id + "/executions/" + .name) and
+        (.properties.status == "Succeeded" or .properties.status == "Failed" or .properties.status == "Stopped")) and
+      ([.value[].id | ascii_downcase] | length == (unique | length))
+    ' "$target_dir/$prefix-executions.json" >/dev/null || die "a manual job is active or its complete terminal state is unverified"
+  done
+}
+
 pitr_get_live_topology() {
   local target_dir="$1"
   local resource
@@ -1076,6 +1137,148 @@ prepare_live_acceptance_context() {
   ' "$probe_outputs" >/dev/null || die "live workload outputs differ from the exact synthetic immutable-image acceptance boundary"
 }
 
+workload_private_file() {
+  local path="$1"
+  [[ -f "$path" && ! -L "$path" && "$(stat -c '%a' "$path")" == "600" && "$(stat -c '%u' "$path")" == "0" ]] || die "workload verification input or evidence is unavailable or unsafe"
+}
+
+workload_private_directory() {
+  local path="$1"
+  [[ -d "$path" && ! -L "$path" && "$(stat -c '%a' "$path")" == "700" && "$(stat -c '%u' "$path")" == "0" ]] || die "workload verification directory is unavailable or unsafe"
+}
+
+validate_workload_request() {
+  [[ "$stage" == "workloads" ]] || die "workload verification requires stage=workloads"
+  if [[ "$operation" == "workload-verify" ]]; then
+    jq -e 'type == "object" and keys == []' "$payload_file" >/dev/null || die "workload verification accepts no payload fields"
+  elif [[ "$operation" == "retrieve" ]]; then
+    jq -e '. == {artifact_kind: "workload"}' "$payload_file" >/dev/null || die "workload retrieval payload is invalid"
+  else
+    die "workload verification operation is invalid"
+  fi
+}
+
+prepare_workload_verification_context() {
+  validate_workload_request
+  prepare_live_acceptance_context
+  local workload_stage="$release_root/stages/workloads"
+  [[ -d "$release_root/stages" && ! -L "$release_root/stages" && "$(stat -c '%u' "$release_root/stages")" == "0" ]] || die "workload stage parent is unsafe"
+  [[ "$(stat -c '%a' "$release_root/stages")" == "700" || "$(stat -c '%a' "$release_root/stages")" == "755" ]] || die "workload stage parent permissions are unsafe"
+  workload_private_directory "$workload_stage"
+  local input
+  for input in plan.tfplan review.json environment.tfvars.json result.json; do
+    workload_private_file "$workload_stage/$input"
+  done
+  WORKLOAD_EVIDENCE_DIR="$release_root/workload-verification"
+  if [[ ! -e "$WORKLOAD_EVIDENCE_DIR" && ! -L "$WORKLOAD_EVIDENCE_DIR" ]]; then
+    [[ "$operation" == "workload-verify" ]] || die "workload verification evidence is unavailable"
+    install -d -o root -g root -m 0700 "$WORKLOAD_EVIDENCE_DIR"
+  fi
+  workload_private_directory "$WORKLOAD_EVIDENCE_DIR"
+  operation_temp_dir="$(mktemp -d "$WORKLOAD_EVIDENCE_DIR/.operation.XXXXXX")"
+  chmod 0700 "$operation_temp_dir"
+  WORKLOAD_INITIAL_STATE_SHA256="$GUARD_STATE_SHA256"
+  # All helper expectations come from this hashed state and the saved plan,
+  # never the independently read outputs or ambient COSMAS_WORKLOAD_* values.
+  local plan_json="$operation_temp_dir/plan.json"
+  "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" show -json "$workload_stage/plan.tfplan" >"$plan_json"
+  chmod 0600 "$plan_json"
+  guard_validate_planned_boundary "$plan_json"
+  guard_validate_safe_plan_actions "$plan_json" true
+  jq '[.resource_changes[]? | {address, type, mode, actions: .change.actions}]' "$plan_json" >"$operation_temp_dir/actions.json"
+  guard_write_critical_planned_values "$plan_json" "$operation_temp_dir/critical.json"
+  guard_write_security_posture "$plan_json" "$operation_temp_dir/security.json"
+  jq -e --argjson create "$GUARD_CREATE_COUNT" --argjson update "$GUARD_UPDATE_COUNT" --argjson no_op "$GUARD_NOOP_COUNT" \
+    --slurpfile actions "$operation_temp_dir/actions.json" --slurpfile critical "$operation_temp_dir/critical.json" \
+    --slurpfile security "$operation_temp_dir/security.json" '
+      .phase == "subsequent" and
+      .managed_action_counts == {create: $create, update: $update, no_op: $no_op, delete: 0, replace: 0} and
+      .managed_actions == $actions[0] and .critical_planned_values == $critical[0] and .security_posture == $security[0]
+    ' "$workload_stage/review.json" >/dev/null || die "workload review does not match the complete saved plan projections"
+  WORKLOAD_BINDING_ARGS=(
+    --plan "$workload_stage/plan.tfplan" --plan-json "$plan_json" --review "$workload_stage/review.json"
+    --var-file "$workload_stage/environment.tfvars.json" --apply-result "$workload_stage/result.json"
+    --state "$probe_state" --bootstrap-outputs "$bootstrap_outputs" --build-evidence "$build_root/build-evidence.json"
+    --provider-lock "$GUARD_ENVIRONMENT_DIR/.terraform.lock.hcl" --source-sha "$source_sha" --release-id "$release_id"
+  )
+}
+
+run_workload_binding() {
+  local mode="$1"
+  local artifact="$2"
+  local option
+  case "$mode" in
+    verify) option=--output ;;
+    validate) option=--artifact ;;
+    *) die "workload binding mode is invalid" ;;
+  esac
+  python3 "$repository_root/infra/beta/workload_plan_binding.py" "$mode" \
+    "${WORKLOAD_BINDING_ARGS[@]}" "$option" "$artifact" || die "workload verification failed its saved-plan/current-state binding"
+}
+
+verify_workload_state_unchanged() {
+  local final_state="$operation_temp_dir/final-state.json"
+  guard_pull_state "$final_state"
+  guard_validate_environment_state "$final_state"
+  [[ "$GUARD_STATE_SHA256" == "$WORKLOAD_INITIAL_STATE_SHA256" ]] || die "state changed during workload verification; no evidence was published"
+}
+
+resolve_workload_generation() {
+  local pointer="$WORKLOAD_EVIDENCE_DIR/current"
+  local generation
+  workload_private_directory "$WORKLOAD_EVIDENCE_DIR"
+  workload_private_file "$pointer"
+  [[ "$(wc -l <"$pointer" | tr -d ' ')" == "1" ]] || die "workload evidence pointer is invalid"
+  generation="$(cat "$pointer")"
+  [[ "$generation" =~ ^[0-9a-f]{64}\.json$ ]] || die "workload evidence pointer is invalid"
+  WORKLOAD_ARTIFACT="$WORKLOAD_EVIDENCE_DIR/$generation"
+  workload_private_file "$WORKLOAD_ARTIFACT"
+  guard_validate_workload_evidence "$WORKLOAD_ARTIFACT" "$source_sha" "$release_id" "$GUARD_BOX_ID" || die "stored workload evidence is invalid"
+  [[ "$generation" == "$GUARD_EVIDENCE_PAYLOAD_SHA256.json" ]] || die "workload evidence pointer differs from its payload hash"
+}
+
+publish_workload_generation() {
+  local candidate="$1"
+  local pointer="$WORKLOAD_EVIDENCE_DIR/current"
+  workload_private_file "$candidate"
+  guard_validate_workload_evidence "$candidate" "$source_sha" "$release_id" "$GUARD_BOX_ID" || die "workload evidence is invalid"
+  local generation="$GUARD_EVIDENCE_PAYLOAD_SHA256.json"
+  WORKLOAD_ARTIFACT="$WORKLOAD_EVIDENCE_DIR/$generation"
+  if [[ -e "$pointer" || -L "$pointer" ]]; then
+    workload_private_file "$pointer"
+  fi
+  if [[ -e "$WORKLOAD_ARTIFACT" || -L "$WORKLOAD_ARTIFACT" ]]; then
+    workload_private_file "$WORKLOAD_ARTIFACT"
+    cmp -s "$candidate" "$WORKLOAD_ARTIFACT" || die "immutable workload evidence generation conflicts"
+  else
+    # Both paths share the private filesystem. link() creates the immutable
+    # generation exclusively; it cannot silently replace existing evidence.
+    ln -- "$candidate" "$WORKLOAD_ARTIFACT" || die "workload evidence could not be persisted exclusively"
+    fsync_path "$WORKLOAD_ARTIFACT"
+    fsync_path "$WORKLOAD_EVIDENCE_DIR"
+  fi
+  printf '%s\n' "$generation" >"$operation_temp_dir/current"
+  chmod 0600 "$operation_temp_dir/current"
+  fsync_path "$operation_temp_dir/current"
+  mv -T -- "$operation_temp_dir/current" "$pointer"
+  fsync_path "$WORKLOAD_EVIDENCE_DIR"
+}
+
+execute_workload_verification() {
+  prepare_workload_verification_context
+  if [[ "$operation" == "workload-verify" ]]; then
+    local candidate="$operation_temp_dir/candidate.json"
+    run_workload_binding verify "$candidate"
+    run_workload_binding validate "$candidate"
+    verify_workload_state_unchanged
+    publish_workload_generation "$candidate"
+  else
+    resolve_workload_generation
+    run_workload_binding validate "$WORKLOAD_ARTIFACT"
+    verify_workload_state_unchanged
+  fi
+}
+
 recovery_no_drift_review() {
   local phase="$1"
   local recovery_root="$2"
@@ -1177,6 +1380,10 @@ validate_stage_tfvars_payload() {
 }
 
 case "$operation" in
+  workload-verify)
+    execute_workload_verification
+    emit_sanitized_artifact "$WORKLOAD_ARTIFACT"
+    ;;
   stage-source)
     [[ "$stage" == "source" ]] || die "stage-source requires stage=source"
     for command_name in git ssh ssh-keygen jq base64; do
@@ -1468,13 +1675,8 @@ case "$operation" in
     verify_release_network_evidence
     network_evidence_file="$VERIFIED_NETWORK_EVIDENCE"
     install -d -o root -g root -m 0700 "$runner_root/builds" "$build_root"
-    jq -e '
-      type == "object" and
-      .vite_cosmas_env == "early_adopter_beta" and
-      (.vite_clerk_publishable_key | strings | test("^pk_live_[^[:space:]]+$")) and
-      (.vite_api_base | strings | test("^https://[^/?#]+$")) and
-      (keys | sort) == (["vite_api_base", "vite_clerk_publishable_key", "vite_cosmas_env"] | sort)
-    ' "$payload_file" >/dev/null || die "build payload must contain only the exact public D3 web build arguments"
+    web_build_validator="$repository_root/infra/beta/validate_web_build.py"
+    python3 "$web_build_validator" validate "$payload_file" || die "build payload must contain only the exact public D3 web build arguments"
     fresh_managed_identity_login
     # shellcheck source=deployment-guard-lib.sh
     source "$repository_root/infra/beta/deployment-guard-lib.sh"
@@ -1496,7 +1698,12 @@ case "$operation" in
     "$GUARD_TERRAFORM_BIN" -chdir="$GUARD_ENVIRONMENT_DIR" output -json >"$probe_outputs"
     chmod 0600 "$probe_outputs"
     api_origin="$(jq -er '.api_origin.value | strings' "$probe_outputs")"
-    jq -e --arg api_origin "$api_origin" '.vite_api_base == $api_origin' "$payload_file" >/dev/null || die "web build API origin differs from the exact foundation output"
+    web_origin="$(jq -er '.web_origin.value | strings' "$probe_outputs")"
+    web_build_argument_lines="$(python3 "$web_build_validator" docker-args "$payload_file" --api-origin "$api_origin" --web-origin "$web_origin")" || die "web build configuration differs from the exact foundation outputs"
+    web_build_args=()
+    while IFS= read -r argument; do
+      web_build_args+=(--build-arg "$argument")
+    done <<<"$web_build_argument_lines"
     acr_host="$(jq -er '.acr_login_server.value | strings' "$probe_outputs")"
     acr_id="$(jq -er '.acr_resource_id.value | strings' "$probe_outputs")"
     acr_name="${acr_host%%.*}"
@@ -1510,7 +1717,7 @@ case "$operation" in
     api_repository="cosmas-os"
     web_repository="cosmas-os-web"
     immutable_tag="git-$source_sha"
-    public_config_hash="$(jq -cS '{vite_cosmas_env, vite_clerk_publishable_key, vite_api_base}' "$payload_file" | sha256sum | awk '{print $1}')"
+    public_config_hash="$(python3 "$web_build_validator" sha256 "$payload_file" --api-origin "$api_origin" --web-origin "$web_origin")" || die "web build configuration cannot be hashed"
     if [[ -e "$build_root/build-evidence.json" || -L "$build_root/build-evidence.json" ]]; then
       verify_release_build_evidence
       jq -e --arg expected "$public_config_hash" '.public_web_build_config_sha256 == $expected' "$build_root/build-evidence.json" >/dev/null || die "accepted source build used different public web build inputs"
@@ -1573,9 +1780,7 @@ case "$operation" in
         --label "com.cosmaneura.cosmas-os.public-config-sha256=$public_config_hash" \
         --file "$repository_root/Dockerfile.web" \
         --tag "$web_image" \
-        --build-arg VITE_COSMAS_ENV=early_adopter_beta \
-        --build-arg "VITE_CLERK_PUBLISHABLE_KEY=$(jq -er '.vite_clerk_publishable_key' "$payload_file")" \
-        --build-arg "VITE_API_BASE=$api_origin" \
+        "${web_build_args[@]}" \
         "$repository_root" >>"$build_log" 2>&1; then
         die "web image build failed; diagnostics remain root-only on the runner"
       fi
@@ -1663,6 +1868,7 @@ case "$operation" in
   database-prepare)
     [[ "$stage" == "database" ]] || die "database-prepare requires stage=database"
     validate_source
+    expected_schema_revision="$(python3 "$repository_root/infra/beta/validate_release_schema.py")" || die "selected release schema is inconsistent"
     verify_pinned_toolchain
     bind_release_to_source
     verify_release_network_evidence
@@ -1766,6 +1972,7 @@ for name, value in values.items():
 if parsed["database-admin-url"] == parsed["database-runtime-url"]:
     raise SystemExit(1)
 PY
+    verify_manual_jobs_idle "$probe_outputs" "$operation_temp_dir/manual-job-preflight"
     az rest --method post --url "https://management.azure.com${job_id}/start?api-version=2023-11-02-preview" --body '{}' --only-show-errors --output json >"$operation_temp_dir/start.json" || die "database-preparation execution did not start"
     chmod 0600 "$operation_temp_dir/start.json"
     execution_name="$(jq -er '.name | strings | select(test("^[a-z0-9][a-z0-9-]{2,255}$"))' "$operation_temp_dir/start.json")" || die "database-preparation start response lacks an exact execution name"
@@ -1851,9 +2058,9 @@ PY
     done
     [[ "$evidence_found" == "true" ]] || die "exact sanitized database-preparation evidence was not available from the succeeded execution"
     chmod 0600 "$operation_temp_dir/job-evidence.json"
-    jq -e '
+    jq -e --arg schema_revision "$expected_schema_revision" '
       .contract == "cosmas-os-d3-database-preparation-v1" and .status == "ready" and
-      .schema_revision == "0002_external_identities" and
+      .schema_revision == $schema_revision and
       .schema_at_expected_head == true and .runtime_role_non_admin == true and
       .runtime_ddl_denied == true and .audit_update_denied == true and .audit_delete_denied == true and
       (.evidence_sha256 | strings | test("^[0-9a-f]{64}$"))
@@ -1867,7 +2074,7 @@ PY
     jq -cS -n \
       --arg completed_at "$(date -u '+%Y-%m-%dT%H:%M:%SZ')" \
       --arg source_sha "$source_sha" --arg release_id "$release_id" --arg box_id "$GUARD_BOX_ID" \
-      --arg image_digest "${expected_api_digest#sha256:}" --arg schema_revision "0002_external_identities" \
+      --arg image_digest "${expected_api_digest#sha256:}" --arg schema_revision "$expected_schema_revision" \
       --arg evidence_sha256 "$database_evidence_hash" --arg execution_id "$execution_id" \
       --arg database_server_id "$database_server_id" \
       --arg state_lineage "$GUARD_STATE_LINEAGE" --argjson state_serial "$GUARD_STATE_SERIAL" --arg state_sha256 "$GUARD_STATE_SHA256" '
@@ -1906,6 +2113,7 @@ PY
   runtime-acceptance)
     [[ "$stage" == "acceptance" ]] || die "runtime-acceptance requires stage=acceptance"
     validate_source
+    expected_schema_revision="$(python3 "$repository_root/infra/beta/validate_release_schema.py")" || die "selected release schema is inconsistent"
     verify_pinned_toolchain
     bind_release_to_source
     verify_release_network_evidence
@@ -2105,6 +2313,7 @@ PY
         ]}}
       ' >"$operation_temp_dir/start-request.json" || die "cannot construct the enumerated runtime-acceptance execution override"
     chmod 0600 "$operation_temp_dir/start-request.json"
+    verify_manual_jobs_idle "$probe_outputs" "$operation_temp_dir/manual-job-preflight"
     az rest --method post --url "https://management.azure.com${job_id}/start?api-version=2023-11-02-preview" --body @"$operation_temp_dir/start-request.json" --only-show-errors --output json >"$operation_temp_dir/start.json" || die "runtime-acceptance execution did not start"
     chmod 0600 "$operation_temp_dir/start.json"
     execution_name="$(jq -er '.name | strings | select(test("^[a-z0-9][a-z0-9-]{2,255}$"))' "$operation_temp_dir/start.json")" || die "runtime-acceptance start response lacks an exact execution name"
@@ -2257,7 +2466,7 @@ PY
     done
     [[ "$evidence_found" == "true" ]] || die "exact sanitized runtime-acceptance evidence was not available from the succeeded execution"
     chmod 0600 "$operation_temp_dir/job-evidence.json"
-    jq -e --arg phase "$acceptance_phase" '
+    jq -e --arg phase "$acceptance_phase" --arg schema_revision "$expected_schema_revision" '
       (.evidence_sha256 | strings | test("^[0-9a-f]{64}$")) and
       if $phase == "runtime" then
         .contract == "cosmas-os-d3-runtime-acceptance-v2" and .status == "ready" and
@@ -2271,7 +2480,7 @@ PY
         .blob_deleted_representations_absent_after_delete == true and
         .blob_recoverable_absence_verified == true and
         .redis_round_trip == true and .redis_cleanup_confirmed == true and
-        .database_schema_revision == "0002_external_identities" and
+        .database_schema_revision == $schema_revision and
         .database_schema_at_expected_head == true and .database_insert_read_rolled_back == true
       elif $phase == "workflow-baseline" then
         .contract == "cosmas-os-d3-workflow-acceptance-v1" and .stage == "baseline" and
@@ -4154,7 +4363,7 @@ PY
     jq -e '
       type == "object" and
       (.artifact_kind == "review" or .artifact_kind == "result" or .artifact_kind == "network" or
-       .artifact_kind == "build" or .artifact_kind == "database" or .artifact_kind == "runtime" or
+       .artifact_kind == "build" or .artifact_kind == "database" or .artifact_kind == "workload" or .artifact_kind == "runtime" or
        .artifact_kind == "domain" or .artifact_kind == "alert" or .artifact_kind == "pitr" or .artifact_kind == "recovery" or
        .artifact_kind == "offboarding" or .artifact_kind == "identity") and
       if .artifact_kind == "runtime" then
@@ -4179,6 +4388,10 @@ PY
     ' "$payload_file" >/dev/null || die "artifact retrieval payload is invalid"
     artifact_kind="$(jq -er '.artifact_kind' "$payload_file")"
     case "$artifact_kind" in
+      workload)
+        execute_workload_verification
+        artifact_file="$WORKLOAD_ARTIFACT"
+        ;;
       review)
         [[ "$stage" == "foundation" || "$stage" == "database" || "$stage" == "workloads" ]] || die "review retrieval requires the exact environment stage"
         artifact_file="$stage_root/review.json"
@@ -4374,6 +4587,29 @@ PY
     review_phase="$(jq -er '.phase | strings' "$stage_root/review.json")"
     [[ "$review_phase" != "foundation_reconcile" || "$stage" == "foundation" ]] || die "partial-foundation reconciliation cannot be applied as a later stage"
     [[ "$stage" == "foundation" || "$review_phase" == "subsequent" ]] || die "database/workload applies require a normal complete-state review"
+    if [[ "$stage" == "workloads" ]]; then
+      # The process lock cannot stop a prior remote execution surviving a
+      # controller timeout. Check the live jobs before overlapping revisions.
+      # shellcheck source=deployment-guard-lib.sh
+      source "$repository_root/infra/beta/deployment-guard-lib.sh"
+      GUARD_ENVIRONMENT_DIR="$repository_root/infra/beta/environment"
+      guard_find_terraform
+      guard_source_metadata "$repository_root"
+      guard_load_bootstrap_outputs "$bootstrap_outputs"
+      guard_verify_azure_context_and_boundary
+      export TF_DATA_DIR="$stage_root/manual-job-preflight-terraform-data"
+      guard_backend_init >/dev/null
+      probe_state="$(mktemp /run/cosmas-manual-job-preflight-state.XXXXXX)"
+      guard_pull_state "$probe_state"
+      guard_validate_environment_state "$probe_state"
+      jq -e --arg hash "$GUARD_STATE_SHA256" --slurpfile state "$probe_state" '
+        .prior_state == {lineage: $state[0].lineage, serial: $state[0].serial, sha256: $hash}
+      ' "$stage_root/review.json" >/dev/null || die "manual-job preflight state differs from the reviewed workload plan"
+      probe_outputs="$(mktemp /run/cosmas-manual-job-preflight-outputs.XXXXXX)"
+      jq '.outputs' "$probe_state" >"$probe_outputs"
+      operation_temp_dir="$(mktemp -d /run/cosmas-manual-job-preflight.XXXXXX)"
+      verify_manual_jobs_idle "$probe_outputs" "$operation_temp_dir/jobs"
+    fi
     if [[ "$stage" == "foundation" && "$review_phase" == "first" ]]; then
       if ! bash "$repository_root/infra/beta/apply-first-environment-plan.sh" \
         --bootstrap-outputs "$bootstrap_outputs" \

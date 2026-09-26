@@ -1,0 +1,5 @@
+import type {MemberChange,MemberChangeResult,MembersPage,PracticeMember} from './practice-members-contract';
+export const practiceMember:PracticeMember={member_id:'873c4f63-2c89-4a51-a834-41574da371a9',display_name:'Ada Beta',role:'member',state:'active',action:'deactivate',reviewed_at:'2026-09-24T10:00:00+00:00',expires_at:'2026-09-24T10:10:00+00:00',review_sha256:'a'.repeat(64)};
+export const memberPage:MembersPage={contract_version:1,members:[practiceMember],next_after_id:null};
+export const memberCommand:MemberChange={idempotency_key:'873c4f63-2c89-4a51-a834-41574da371aa',member_id:practiceMember.member_id,action:'deactivate',reviewed_at:practiceMember.reviewed_at,review_sha256:practiceMember.review_sha256,confirm:true};
+export const memberReceipt=(command:MemberChange,replayed=false):MemberChangeResult=>({contract_version:1,replayed,receipt:{receipt_id:command.idempotency_key,member_id:command.member_id,action:command.action,recorded_state:command.action==='deactivate'?'inactive':'active',review_sha256:command.review_sha256,recorded_at:'2026-09-24T10:01:00+00:00'}});

@@ -1,0 +1,10 @@
+.bot-avatar { position: relative; }
+.bot-avatar-still { display: inline-flex; align-items: center; justify-content: center; width: 100%; height: 100%; }
+.bot-avatar .bot-avatar-motion { position: absolute; inset: 0; opacity: 0; pointer-events: none; }
+.bot-avatar-playing .bot-avatar-still { visibility: hidden; }
+.bot-avatar-playing .bot-avatar-motion { opacity: 1; }
+/* Keep the still immediately visible even before the preference-change handler runs. */
+@media (prefers-reduced-motion: reduce) {
+  .bot-avatar-playing .bot-avatar-still { visibility: visible; }
+  .bot-avatar .bot-avatar-motion { display: none; }
+}

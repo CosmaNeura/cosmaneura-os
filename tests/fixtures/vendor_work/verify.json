@@ -1,0 +1,18 @@
+{
+  "expected_version": 2147483647,
+  "operation_id": "11111111-1111-4111-8111-111111111111",
+  "revision_id": "11111111-1111-4111-8111-111111111111",
+  "payload_hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "idempotency_key": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "result_receipt_id": "11111111-1111-4111-8111-111111111111",
+  "result_receipt_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "observation_head": {
+    "sequence": 2147483647,
+    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  "evidence_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+  "reviewed_result": true,
+  "reviewed_observations": true,
+  "outcome_confirmed": true,
+  "reviewed_conflicting_evidence": true
+}

@@ -1,0 +1,77 @@
+{
+  "kind": "actual-existing-Pydantic-schema-and-domain-hash-fixtures-not-HTTP-acceptance",
+  "cases": [
+    {
+      "case": "ascii_space",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-key",
+        "role": "scribe",
+        "content": " \tInvented\r\n"
+      },
+      "normalized_content": "Invented",
+      "request_sha256": "d5ae6c99b9b742645617f2aa045c422ba1b4eecbad745cc499f465d02083a257"
+    },
+    {
+      "case": "information_separator",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-key",
+        "role": "scribe",
+        "content": "\u001cInvented\u001f"
+      },
+      "normalized_content": "\u001cInvented\u001f",
+      "request_sha256": "303acdb13ef43780502213a012e3f4cab066185321d33f97c3ce42d37375b065"
+    },
+    {
+      "case": "nel_nbsp",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-key",
+        "role": "scribe",
+        "content": "\u0085Invented\u00a0"
+      },
+      "normalized_content": "Invented",
+      "request_sha256": "d5ae6c99b9b742645617f2aa045c422ba1b4eecbad745cc499f465d02083a257"
+    },
+    {
+      "case": "bom",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-key",
+        "role": "scribe",
+        "content": "\ufeffInvented\ufeff"
+      },
+      "normalized_content": "\ufeffInvented\ufeff",
+      "request_sha256": "9ea7733686173dea6e71b9d1a32456cba1c8b0fdeed727c4716c2cc5bb22e32e"
+    },
+    {
+      "case": "astral_control",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-key",
+        "role": "scribe",
+        "content": " \ud83d\ude00\u0000\n "
+      },
+      "normalized_content": "\ud83d\ude00\u0000",
+      "request_sha256": "552a648fe84056237e4a3cdceb9ced2f27a464c022622f9325d60083027586c1"
+    },
+    {
+      "case": "unicode_spaces",
+      "request": {
+        "expected_revision": 1,
+        "team_revision": 1,
+        "idempotency_key": "invented-key",
+        "role": "scribe",
+        "content": "\u2000Invented\u202f"
+      },
+      "normalized_content": "Invented",
+      "request_sha256": "d5ae6c99b9b742645617f2aa045c422ba1b4eecbad745cc499f465d02083a257"
+    }
+  ]
+}

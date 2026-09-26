@@ -1,0 +1,370 @@
+{
+  "shared_offer_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "practice_work",
+      "id": "c42888bb-3cba-43df-bfec-ea196269e3bc"
+    },
+    "command_kind": "handoff",
+    "idempotency_key": "http-offer-262f0da1-6f6d-4684-8d00-b5b0b33216ec",
+    "request_sha256": "6effe87880a40f86b242a46996ed46a98f3bbc0558dbdccd7fa1e5654fb060a0",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "c42888bb-3cba-43df-bfec-ea196269e3bc",
+      "operation_id": "11ff5039-2809-4b3e-ab1b-eaff86258256",
+      "revision_id": "33c1345e-a551-4204-b369-47ae3577cb14",
+      "payload_hash": "10b4bc7c3d997b2ccc6c7fa5970affe8618c95a3b2bcda6718359a2857eadece",
+      "receipt_id": "0ed6e713-4575-4070-8565-fa9dea9e47f7",
+      "effect_version": 3,
+      "recorded_at": "2026-09-22T00:02:42.715642Z",
+      "receipt_sha256": "b65e0b1d16edf3998fae28097e85ee4593a02025a4504bfee780cf033f3092c1"
+    },
+    "summary": {
+      "effect": "handoff_recorded",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:02:42.718348Z"
+  },
+  "shared_offered_detail": {
+    "work_kind": "vendor_delivery",
+    "ticket_id": "c42888bb-3cba-43df-bfec-ea196269e3bc",
+    "version": 3,
+    "revision_id": "33c1345e-a551-4204-b369-47ae3577cb14",
+    "payload_hash": "10b4bc7c3d997b2ccc6c7fa5970affe8618c95a3b2bcda6718359a2857eadece",
+    "state": "approved",
+    "ready_for_review": false,
+    "historical": false,
+    "publication_receipt_id": "105d2f88-3d57-4ea3-b29f-aebc74f5cad6",
+    "body": "Invented patient receives the reviewed follow-up.",
+    "due_date": "2026-10-01",
+    "expected_outcome": "Invented patient receives the reviewed follow-up.",
+    "viewer_id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+    "originator": {
+      "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+      "name": "Alex Owner",
+      "available": true
+    },
+    "responsible": {
+      "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+      "name": "Alex Owner",
+      "available": true
+    },
+    "vendor_work": {
+      "action": "spruce_secure_message",
+      "operation_id": "11ff5039-2809-4b3e-ab1b-eaff86258256",
+      "submit_claimed": false,
+      "acceptance": "not_observed",
+      "transport": "not_observed",
+      "conflicting_evidence": false,
+      "result": "none",
+      "verification": "pending",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "40bf723e485dca1a38b10b0505d65458d9791d870e46f9d8934f65f72f4f6e3e"
+      },
+      "evidence_sha256": "939aac3a3ad7e32884aafa2682c3d9df1ac9eb09dca665eb25d113664af4105b"
+    },
+    "pending_offer": {
+      "id": "8b5ab3d4-025e-4f47-9fc9-2cebd721cd35",
+      "from": {
+        "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+        "name": "Alex Owner",
+        "available": true
+      },
+      "to": {
+        "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+        "name": "Invented W36 staff",
+        "available": true
+      }
+    },
+    "handoffs": [
+      {
+        "id": "8b5ab3d4-025e-4f47-9fc9-2cebd721cd35",
+        "kind": "offer",
+        "actor": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "from": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "to": {
+          "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+          "name": "Invented W36 staff",
+          "available": true
+        },
+        "offer_id": null,
+        "created_at": "2026-09-22T00:02:42.639968Z"
+      }
+    ],
+    "latest_result": null
+  },
+  "shared_accept_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "practice_work",
+      "id": "c42888bb-3cba-43df-bfec-ea196269e3bc"
+    },
+    "command_kind": "handoff",
+    "idempotency_key": "http-accept-608966b9-aad7-4145-8b1c-a1176f0c4894",
+    "request_sha256": "221619024e4e6ca3957d89e5862177edd4c04bf5193e36386187571fe3796b04",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "c42888bb-3cba-43df-bfec-ea196269e3bc",
+      "operation_id": "11ff5039-2809-4b3e-ab1b-eaff86258256",
+      "revision_id": "33c1345e-a551-4204-b369-47ae3577cb14",
+      "payload_hash": "10b4bc7c3d997b2ccc6c7fa5970affe8618c95a3b2bcda6718359a2857eadece",
+      "receipt_id": "9bba6a61-826f-43b8-9f25-02fe653a331d",
+      "effect_version": 4,
+      "recorded_at": "2026-09-22T00:02:42.734520Z",
+      "receipt_sha256": "008a6dd425f00b078d72e8d34e28755870f861ee8e93a0b6ad9556e11bbc6035"
+    },
+    "summary": {
+      "effect": "handoff_recorded",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:02:42.736395Z"
+  },
+  "shared_accepted_detail": {
+    "work_kind": "vendor_delivery",
+    "ticket_id": "c42888bb-3cba-43df-bfec-ea196269e3bc",
+    "version": 4,
+    "revision_id": "33c1345e-a551-4204-b369-47ae3577cb14",
+    "payload_hash": "10b4bc7c3d997b2ccc6c7fa5970affe8618c95a3b2bcda6718359a2857eadece",
+    "state": "approved",
+    "ready_for_review": false,
+    "historical": false,
+    "publication_receipt_id": "105d2f88-3d57-4ea3-b29f-aebc74f5cad6",
+    "body": "Invented patient receives the reviewed follow-up.",
+    "due_date": "2026-10-01",
+    "expected_outcome": "Invented patient receives the reviewed follow-up.",
+    "viewer_id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+    "originator": {
+      "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+      "name": "Alex Owner",
+      "available": true
+    },
+    "responsible": {
+      "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+      "name": "Invented W36 staff",
+      "available": true
+    },
+    "vendor_work": {
+      "action": "spruce_secure_message",
+      "operation_id": "11ff5039-2809-4b3e-ab1b-eaff86258256",
+      "submit_claimed": false,
+      "acceptance": "not_observed",
+      "transport": "not_observed",
+      "conflicting_evidence": false,
+      "result": "none",
+      "verification": "pending",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "40bf723e485dca1a38b10b0505d65458d9791d870e46f9d8934f65f72f4f6e3e"
+      },
+      "evidence_sha256": "939aac3a3ad7e32884aafa2682c3d9df1ac9eb09dca665eb25d113664af4105b"
+    },
+    "pending_offer": null,
+    "handoffs": [
+      {
+        "id": "8b5ab3d4-025e-4f47-9fc9-2cebd721cd35",
+        "kind": "offer",
+        "actor": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "from": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "to": {
+          "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+          "name": "Invented W36 staff",
+          "available": true
+        },
+        "offer_id": null,
+        "created_at": "2026-09-22T00:02:42.639968Z"
+      },
+      {
+        "id": "62c02c02-4c12-414c-a2d9-90ee28382c42",
+        "kind": "accept",
+        "actor": {
+          "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+          "name": "Invented W36 staff",
+          "available": true
+        },
+        "from": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "to": {
+          "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+          "name": "Invented W36 staff",
+          "available": true
+        },
+        "offer_id": "8b5ab3d4-025e-4f47-9fc9-2cebd721cd35",
+        "created_at": "2026-09-22T00:02:42.639968Z"
+      }
+    ],
+    "latest_result": null
+  },
+  "shared_result_receipt": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "practice_work",
+      "id": "c42888bb-3cba-43df-bfec-ea196269e3bc"
+    },
+    "command_kind": "result",
+    "idempotency_key": "http-result-f0799a3e-f91b-48c3-9d3c-ea4b6f6b2680",
+    "request_sha256": "b0a410644daa338dd8e4764098f5a6e13cc3f03babc51c107cc841e0bc352e3f",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "c42888bb-3cba-43df-bfec-ea196269e3bc",
+      "operation_id": "11ff5039-2809-4b3e-ab1b-eaff86258256",
+      "revision_id": "33c1345e-a551-4204-b369-47ae3577cb14",
+      "payload_hash": "10b4bc7c3d997b2ccc6c7fa5970affe8618c95a3b2bcda6718359a2857eadece",
+      "receipt_id": "705268d3-8137-4342-ada3-071b7f35783f",
+      "effect_version": 5,
+      "recorded_at": "2026-09-22T00:02:42.750740Z",
+      "receipt_sha256": "24522238bd8d70c1c3534d4be0ae72e1bf3546e68f9325280e4522e25fe2162e"
+    },
+    "summary": {
+      "effect": "result_recorded",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:02:42.752404Z"
+  },
+  "shared_result_detail": {
+    "work_kind": "vendor_delivery",
+    "ticket_id": "c42888bb-3cba-43df-bfec-ea196269e3bc",
+    "version": 5,
+    "revision_id": "33c1345e-a551-4204-b369-47ae3577cb14",
+    "payload_hash": "10b4bc7c3d997b2ccc6c7fa5970affe8618c95a3b2bcda6718359a2857eadece",
+    "state": "approved",
+    "ready_for_review": true,
+    "historical": false,
+    "publication_receipt_id": "105d2f88-3d57-4ea3-b29f-aebc74f5cad6",
+    "body": "Invented patient receives the reviewed follow-up.",
+    "due_date": "2026-10-01",
+    "expected_outcome": "Invented patient receives the reviewed follow-up.",
+    "viewer_id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+    "originator": {
+      "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+      "name": "Alex Owner",
+      "available": true
+    },
+    "responsible": {
+      "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+      "name": "Invented W36 staff",
+      "available": true
+    },
+    "vendor_work": {
+      "action": "spruce_secure_message",
+      "operation_id": "11ff5039-2809-4b3e-ab1b-eaff86258256",
+      "submit_claimed": false,
+      "acceptance": "not_observed",
+      "transport": "not_observed",
+      "conflicting_evidence": false,
+      "result": "recorded_exception",
+      "verification": "exception_unresolved",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "40bf723e485dca1a38b10b0505d65458d9791d870e46f9d8934f65f72f4f6e3e"
+      },
+      "evidence_sha256": "bbe32144acfe92ec5c2ac380f1d3cf14ba8dc0ef5cb1c412baf5976d2f24cbc8"
+    },
+    "pending_offer": null,
+    "handoffs": [
+      {
+        "id": "8b5ab3d4-025e-4f47-9fc9-2cebd721cd35",
+        "kind": "offer",
+        "actor": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "from": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "to": {
+          "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+          "name": "Invented W36 staff",
+          "available": true
+        },
+        "offer_id": null,
+        "created_at": "2026-09-22T00:02:42.639968Z"
+      },
+      {
+        "id": "62c02c02-4c12-414c-a2d9-90ee28382c42",
+        "kind": "accept",
+        "actor": {
+          "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+          "name": "Invented W36 staff",
+          "available": true
+        },
+        "from": {
+          "id": "e82527fe-29ac-492a-a03e-bb0849634c5f",
+          "name": "Alex Owner",
+          "available": true
+        },
+        "to": {
+          "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+          "name": "Invented W36 staff",
+          "available": true
+        },
+        "offer_id": "8b5ab3d4-025e-4f47-9fc9-2cebd721cd35",
+        "created_at": "2026-09-22T00:02:42.639968Z"
+      }
+    ],
+    "latest_result": {
+      "receipt_id": "705268d3-8137-4342-ada3-071b7f35783f",
+      "receipt_sha256": "24522238bd8d70c1c3534d4be0ae72e1bf3546e68f9325280e4522e25fe2162e",
+      "actor": {
+        "id": "5e12f67d-31e4-4245-a7e2-b4d420b06edd",
+        "name": "Invented W36 staff",
+        "available": true
+      },
+      "disposition": "reported_exception",
+      "evidence": "Invented staff could not establish completion.",
+      "recorded_at": "2026-09-22T00:02:42.750740Z",
+      "observation_head": {
+        "sequence": 0,
+        "sha256": "40bf723e485dca1a38b10b0505d65458d9791d870e46f9d8934f65f72f4f6e3e"
+      }
+    }
+  },
+  "shared_result_resolved": {
+    "contract_version": 1,
+    "scope": {
+      "kind": "practice_work",
+      "id": "c42888bb-3cba-43df-bfec-ea196269e3bc"
+    },
+    "command_kind": "result",
+    "idempotency_key": "http-result-f0799a3e-f91b-48c3-9d3c-ea4b6f6b2680",
+    "request_sha256": "b0a410644daa338dd8e4764098f5a6e13cc3f03babc51c107cc841e0bc352e3f",
+    "outcome": "recorded",
+    "effect": {
+      "ticket_id": "c42888bb-3cba-43df-bfec-ea196269e3bc",
+      "operation_id": "11ff5039-2809-4b3e-ab1b-eaff86258256",
+      "revision_id": "33c1345e-a551-4204-b369-47ae3577cb14",
+      "payload_hash": "10b4bc7c3d997b2ccc6c7fa5970affe8618c95a3b2bcda6718359a2857eadece",
+      "receipt_id": "705268d3-8137-4342-ada3-071b7f35783f",
+      "effect_version": 5,
+      "recorded_at": "2026-09-22T00:02:42.750740Z",
+      "receipt_sha256": "24522238bd8d70c1c3534d4be0ae72e1bf3546e68f9325280e4522e25fe2162e"
+    },
+    "summary": {
+      "effect": "result_recorded",
+      "publication_recorded": false
+    },
+    "observed_at": "2026-09-22T00:02:42.765947Z"
+  }
+}

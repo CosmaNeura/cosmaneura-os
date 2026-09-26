@@ -1,0 +1,1511 @@
+--- a/apps/capture/native-plugins/ios-pcm-capacitor/Package.swift
++++ b/apps/capture/native-plugins/ios-pcm-capacitor/Package.swift
+@@ -5,7 +5,7 @@
+ let package = Package(
+   name: "CosmaneuraIOSPCMCapacitor",
+   platforms: [
+-    .iOS(.v15),
++    .iOS(.v17),
+     .macOS(.v13),
+   ],
+   products: [
+@@ -29,13 +29,15 @@
+     .target(
+       name: "CosmaneuraIOSPCMCapacitorTransport",
+       dependencies: [
+-        .product(name: "CosmaneuraIOSPCMBridgeCore", package: "ios-pcm-capture")
++        .product(name: "CosmaneuraIOSPCMBridgeCore", package: "ios-pcm-capture"),
++        .product(name: "CosmaneuraIOSPCMCore", package: "ios-pcm-capture")
+       ]
+     ),
+     .target(
+       name: "CosmaneuraIOSPCMCapacitor",
+       dependencies: [
+         "CosmaneuraIOSPCMCapacitorTransport",
++        .product(name: "CosmaneuraIOSPCMCore", package: "ios-pcm-capture"),
+         .product(
+           name: "Capacitor",
+           package: "capacitor-swift-pm",
+--- a/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
++++ b/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift
+@@ -2,6 +2,8 @@
+   @preconcurrency import Capacitor
+   import CosmaneuraIOSPCMBridgeCore
+   import CosmaneuraIOSPCMCapacitorTransport
++  import CosmaneuraIOSPCMCore
++  import CoreFoundation
+   import Foundation
+ 
+   @objc(IOSPCMCapacitorPlugin)
+@@ -12,6 +14,9 @@
+     public let jsName = "IOSPCM"
+     public let pluginMethods: [CAPPluginMethod] = [
+       CAPPluginMethod(name: "getAppState", returnType: CAPPluginReturnPromise),
++      CAPPluginMethod(name: "confirmCaptureIdle", returnType: CAPPluginReturnPromise),
++      CAPPluginMethod(name: "getCaptureCapabilities", returnType: CAPPluginReturnPromise),
++      CAPPluginMethod(name: "extend", returnType: CAPPluginReturnPromise),
+       CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
+       CAPPluginMethod(name: "ready", returnType: CAPPluginReturnPromise),
+       CAPPluginMethod(name: "heartbeat", returnType: CAPPluginReturnPromise),
+@@ -33,6 +38,22 @@
+       }
+     }
+ 
++    @objc public func confirmCaptureIdle(_ call: CAPPluginCall) {
++      guard let transport else {
++        reject(call, error: IOSPCMCapacitorErrorCode.captureFailed)
++        return
++      }
++      call.resolve(["version": 1, "idle": transport.confirmCaptureIdle()])
++    }
++
++    @objc public func getCaptureCapabilities(_ call: CAPPluginCall) {
++      guard let transport else {
++        reject(call, error: IOSPCMCapacitorErrorCode.captureFailed)
++        return
++      }
++      call.resolve(["version": 1, "renewableAuthority": transport.supportsRenewableCapture])
++    }
++
+     @objc public func start(_ call: CAPPluginCall) {
+       guard let transport,
+         let encoding = call.getString("encoding"),
+@@ -45,17 +66,59 @@
+         return
+       }
+       do {
++        let authority: PCMSourceAuthority?
++        if call.options.keys.contains("authority") {
++          guard let value = call.getObject("authority"),
++            Set(value.keys) == Set(["runId", "generation", "expiresAtMs", "hardMaximumChunks"]),
++            let runID = value["runId"] as? String,
++            let generation = Self.exactInteger(value["generation"]),
++            let expires = Self.exactInteger(value["expiresAtMs"]),
++            let hard = Self.exactInteger(value["hardMaximumChunks"])
++          else { throw IOSPCMCapacitorErrorCode.invalidArguments }
++          authority = try PCMSourceAuthority(runID: runID, generation: generation,
++            expiresAtMilliseconds: Int64(expires), hardMaximumChunks: hard)
++        } else { authority = nil }
+         let configuration = try IOSPCMCapacitorConfiguration(
+           encoding: encoding,
+           channels: channels,
+           sampleRateHz: sampleRateHz,
+           targetFramesPerChunk: targetFramesPerChunk,
+-          maximumChunks: maximumChunks
++          maximumChunks: maximumChunks,
++          authority: authority
+         )
+         call.resolve(["sessionToken": try transport.start(configuration: configuration)])
+       } catch {
+         reject(call, error: error)
+       }
++    }
++
++    @objc public func extend(_ call: CAPPluginCall) {
++      guard let token = call.getString("sessionToken"),
++        let value = call.getObject("extension"),
++        Set(value.keys) == Set(["runId", "generation", "expiresAtMs", "maximumChunks"]),
++        let runID = value["runId"] as? String,
++        let generation = Self.exactInteger(value["generation"]),
++        let expires = Self.exactInteger(value["expiresAtMs"]),
++        let maximum = Self.exactInteger(value["maximumChunks"])
++      else {
++        reject(call, error: IOSPCMCapacitorErrorCode.invalidArguments)
++        return
++      }
++      let extensionValue = PCMSourceExtension(runID: runID, generation: generation,
++        expiresAtMilliseconds: Int64(expires), maximumChunks: maximum)
++      perform(call) { transport in
++        try await transport.extend(sessionToken: token, value: extensionValue)
++        return ["sessionToken": token, "runId": runID, "generation": generation,
++          "expiresAtMs": expires, "maximumChunks": maximum]
++      }
++    }
++
++    private static func exactInteger(_ value: Any?) -> Int? {
++      guard let number = value as? NSNumber,
++        CFGetTypeID(number) != CFBooleanGetTypeID(), number.doubleValue.isFinite,
++        abs(number.doubleValue) <= 9_007_199_254_740_991,
++        number.doubleValue.rounded(.towardZero) == number.doubleValue else { return nil }
++      return number.intValue
+     }
+ 
+     @objc public func ready(_ call: CAPPluginCall) {
+@@ -179,6 +242,8 @@
+ 
+     private static func eventObject(_ event: IOSPCMCapacitorEvent) -> JSObject {
+       switch event {
++      case .windowClosed(let sessionToken, let reason):
++        return ["kind": "window_closed", "sessionToken": sessionToken, "reason": reason]
+       case .packet(let packet):
+         return ["kind": "packet", "packet": packetObject(packet)]
+       case .interruption(let sessionToken, let code):
+--- a/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitorTransport/IOSPCMCapacitorTransport.swift
++++ b/apps/capture/native-plugins/ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitorTransport/IOSPCMCapacitorTransport.swift
+@@ -1,4 +1,5 @@
+ import CosmaneuraIOSPCMBridgeCore
++import CosmaneuraIOSPCMCore
+ import Foundation
+ 
+ public enum IOSPCMCapacitorErrorCode: String, Error, Equatable, Sendable {
+@@ -31,23 +32,27 @@
+   public let sampleRateHz: Int
+   public let targetFramesPerChunk: Int
+   public let maximumChunks: Int
++  public let authority: PCMSourceAuthority?
+ 
+   public init(
+     encoding: String,
+     channels: Int,
+     sampleRateHz: Int,
+     targetFramesPerChunk: Int,
+-    maximumChunks: Int
++    maximumChunks: Int,
++    authority: PCMSourceAuthority? = nil
+   ) throws {
+     guard encoding == "pcm_s16le", channels == 1, sampleRateHz == 16_000,
+       targetFramesPerChunk > 0, targetFramesPerChunk <= 960_000,
+-      maximumChunks > 0, maximumChunks <= 8_640
++      maximumChunks > 0, maximumChunks <= 8_640,
++      authority == nil || maximumChunks <= authority!.hardMaximumChunks
+     else { throw IOSPCMCapacitorErrorCode.invalidArguments }
+     self.encoding = encoding
+     self.channels = channels
+     self.sampleRateHz = sampleRateHz
+     self.targetFramesPerChunk = targetFramesPerChunk
+     self.maximumChunks = maximumChunks
++    self.authority = authority
+   }
+ }
+ 
+@@ -65,6 +70,7 @@
+   case packet(IOSPCMCapacitorPacket)
+   case interruption(sessionToken: String, code: String)
+   case terminal(sessionToken: String, code: String)
++  case windowClosed(sessionToken: String, reason: String)
+ }
+ 
+ public protocol IOSPCMCapacitorEventEmitting: AnyObject, Sendable {
+@@ -72,10 +78,13 @@
+ }
+ 
+ public protocol IOSPCMBridgeServing: Sendable {
++  func confirmCaptureIdle() -> Bool
++  var supportsRenewableCapture: Bool { get }
+   func appState() async -> IOSPCMBridgeAppState
+   func begin(configuration: IOSPCMBridgeConfiguration) throws -> IOSPCMBridgeSessionToken
+   func ready(_ token: IOSPCMBridgeSessionToken) async throws
+   func heartbeat(_ token: IOSPCMBridgeSessionToken) async throws
++  func extend(_ token: IOSPCMBridgeSessionToken, value: PCMSourceExtension) async throws
+   func stopForCapacitor(
+     _ token: IOSPCMBridgeSessionToken,
+     mode: IOSPCMBridgeStopMode
+@@ -90,7 +99,16 @@
+   ) -> IOSPCMBridgeReplayResult
+ }
+ 
++extension IOSPCMBridgeServing {
++  public func confirmCaptureIdle() -> Bool { false }
++  public var supportsRenewableCapture: Bool { false }
++  public func extend(_ token: IOSPCMBridgeSessionToken, value: PCMSourceExtension) async throws {
++    throw IOSPCMBridgeFailure(.captureFailed)
++  }
++}
++
+ extension IOSPCMBridgeCore: IOSPCMBridgeServing {
++  public var supportsRenewableCapture: Bool { true }
+   public func stopForCapacitor(
+     _ token: IOSPCMBridgeSessionToken,
+     mode: IOSPCMBridgeStopMode
+@@ -126,6 +144,11 @@
+   public func publish(_ event: IOSPCMBridgeEvent) throws {
+     guard let emitter else { throw IOSPCMCapacitorErrorCode.captureFailed }
+     switch event {
++    case .windowClosed(let token, let reason):
++      guard IOSPCMCapacitorTransport.validSessionToken(token.rawValue) else {
++        throw IOSPCMCapacitorErrorCode.captureFailed
++      }
++      try emitter.emit(.windowClosed(sessionToken: token.rawValue, reason: reason.rawValue))
+     case .packetAvailable(let packet):
+       try emitter.emit(.packet(try Self.encode(packet, clearOwner: false)))
+     case .interruption(let token, let code):
+@@ -178,6 +201,9 @@
+   }
+ 
+   public func start(configuration: IOSPCMCapacitorConfiguration) throws -> String {
++    guard configuration.authority == nil || bridge.supportsRenewableCapture else {
++      throw IOSPCMCapacitorErrorCode.startFailed
++    }
+     do {
+       return try bridge.begin(
+         configuration: IOSPCMBridgeConfiguration(
+@@ -185,7 +211,8 @@
+           channels: configuration.channels,
+           sampleRateHz: configuration.sampleRateHz,
+           targetFramesPerChunk: configuration.targetFramesPerChunk,
+-          maximumChunks: configuration.maximumChunks
++          maximumChunks: configuration.maximumChunks,
++          authority: configuration.authority
+         )
+       ).rawValue
+     } catch let failure as IOSPCMBridgeStartFailure {
+@@ -215,6 +242,16 @@
+     } catch {
+       throw IOSPCMCapacitorErrorCode.captureFailed
+     }
++  }
++
++  public var supportsRenewableCapture: Bool { bridge.supportsRenewableCapture }
++  public func confirmCaptureIdle() -> Bool { bridge.confirmCaptureIdle() }
++
++  public func extend(sessionToken: String, value: PCMSourceExtension) async throws {
++    let token = try Self.token(sessionToken)
++    guard bridge.supportsRenewableCapture else { throw IOSPCMCapacitorErrorCode.captureFailed }
++    do { try await bridge.extend(token, value: value) }
++    catch { throw IOSPCMCapacitorErrorCode.captureFailed }
+   }
+ 
+   public func stop(
+--- a/apps/capture/native-plugins/ios-pcm-capacitor/Tests/CosmaneuraIOSPCMCapacitorTransportTests/IOSPCMCapacitorTransportTests.swift
++++ b/apps/capture/native-plugins/ios-pcm-capacitor/Tests/CosmaneuraIOSPCMCapacitorTransportTests/IOSPCMCapacitorTransportTests.swift
+@@ -1,10 +1,59 @@
+ import CosmaneuraIOSPCMBridgeCore
++import CosmaneuraIOSPCMCore
+ import Foundation
+ import XCTest
+ 
+ @testable import CosmaneuraIOSPCMCapacitorTransport
+ 
+ final class IOSPCMCapacitorTransportTests: XCTestCase {
++  func testLegacyBridgeDoesNotInventProcessIdleProof() {
++    let bridge = FakeBridge()
++    let transport = IOSPCMCapacitorTransport(bridge: bridge)
++    XCTAssertFalse(transport.confirmCaptureIdle())
++    XCTAssertNil(bridge.configuration)
++  }
++
++  func testUnsupportedBridgeDeniesAuthorityBeforeBegin() throws {
++    let bridge = FakeBridge()
++    let transport = IOSPCMCapacitorTransport(bridge: bridge)
++    let config = try IOSPCMCapacitorConfiguration(encoding: "pcm_s16le", channels: 1,
++      sampleRateHz: 16_000, targetFramesPerChunk: 1_600, maximumChunks: 10,
++      authority: PCMSourceAuthority(runID: UUID().uuidString.lowercased(), generation: 1,
++        expiresAtMilliseconds: 1_000_000, hardMaximumChunks: 20))
++    XCTAssertFalse(transport.supportsRenewableCapture)
++    XCTAssertThrowsError(try transport.start(configuration: config))
++    XCTAssertNil(bridge.configuration)
++    bridge.supportsRenewableCapture = true
++    _ = try transport.start(configuration: config)
++    XCTAssertEqual(bridge.configuration?.authority, config.authority)
++  }
++
++  func testExtensionPassesExactTokenAndBoundsAndSanitizesFailure() async throws {
++    let bridge = FakeBridge()
++    bridge.supportsRenewableCapture = true
++    let transport = IOSPCMCapacitorTransport(bridge: bridge)
++    let value = PCMSourceExtension(runID: UUID().uuidString.lowercased(), generation: 2,
++      expiresAtMilliseconds: 2_000_000, maximumChunks: 20)
++    try await transport.extend(sessionToken: "1.fragment", value: value)
++    XCTAssertEqual(bridge.extensionToken?.rawValue, "1.fragment")
++    XCTAssertEqual(bridge.extensionValue, value)
++    bridge.supportsRenewableCapture = false
++    do {
++      try await transport.extend(sessionToken: "1.fragment", value: value)
++      XCTFail("unsupported extension")
++    } catch { XCTAssertEqual(error as? IOSPCMCapacitorErrorCode, .captureFailed) }
++  }
++
++  func testWindowClosureHasExactTokenAndReasonWithoutAudio() throws {
++    let emitter = RecordingEmitter()
++    let publisher = IOSPCMCapacitorEventPublisher(emitter: emitter)
++    let token = IOSPCMBridgeSessionToken(rawValue: "2.fragment")
++    try publisher.publish(.windowClosed(token, .authorityExpired))
++    try publisher.publish(.windowClosed(token, .frameLimit))
++    XCTAssertEqual(emitter.events, [
++      .windowClosed(sessionToken: "2.fragment", reason: "authority_expired"),
++      .windowClosed(sessionToken: "2.fragment", reason: "frame_limit")])
++  }
+   func testConfigurationRequiresExactBoundedPCMContract() throws {
+     XCTAssertNoThrow(try configuration())
+     XCTAssertThrowsError(try configuration(encoding: "pcm_f32le"))
+@@ -193,6 +242,13 @@
+ }
+ 
+ private final class FakeBridge: IOSPCMBridgeServing, @unchecked Sendable {
++  var supportsRenewableCapture = false
++  var extensionToken: IOSPCMBridgeSessionToken?
++  var extensionValue: PCMSourceExtension?
++  func extend(_ token: IOSPCMBridgeSessionToken, value: PCMSourceExtension) async throws {
++    extensionToken = token
++    extensionValue = value
++  }
+   var configuration: IOSPCMBridgeConfiguration?
+   var readyError: Error?
+   var stopError: Error?
+--- a/apps/capture/native-plugins/ios-pcm-capture/Package.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Package.swift
+@@ -5,7 +5,7 @@
+ let package = Package(
+   name: "CosmaneuraIOSPCMCore",
+   platforms: [
+-    .iOS(.v15),
++    .iOS(.v17),
+     .macOS(.v13),
+   ],
+   products: [
+--- a/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift
+@@ -55,19 +55,22 @@
+   public let sampleRateHz: Int
+   public let targetFramesPerChunk: Int
+   public let maximumChunks: Int
++  public let authority: PCMSourceAuthority?
+ 
+   public init(
+     encoding: String,
+     channels: Int,
+     sampleRateHz: Int,
+     targetFramesPerChunk: Int,
+-    maximumChunks: Int
++    maximumChunks: Int,
++    authority: PCMSourceAuthority? = nil
+   ) {
+     self.encoding = encoding
+     self.channels = channels
+     self.sampleRateHz = sampleRateHz
+     self.targetFramesPerChunk = targetFramesPerChunk
+     self.maximumChunks = maximumChunks
++    self.authority = authority
+   }
+ }
+ 
+@@ -128,6 +131,7 @@
+   case packetAvailable(IOSPCMBridgePacket)
+   case interruption(IOSPCMBridgeSessionToken, IOSPCMBridgeInterruptionCode)
+   case terminal(IOSPCMBridgeSessionToken, IOSPCMBridgeTerminalErrorCode)
++  case windowClosed(IOSPCMBridgeSessionToken, PCMWindowCloseReason)
+ }
+ 
+ public protocol IOSPCMBridgeEventPublishing: Sendable {
+@@ -157,6 +161,7 @@
+ /// Capacitor wrapper. This target is not linked into the application.
+ public final class IOSPCMBridgeCore: @unchecked Sendable {
+   private final class SessionRecord: @unchecked Sendable {
++    let ownershipID: UUID
+     let token: IOSPCMBridgeSessionToken
+     let generation: UInt64
+     let core: IOSPCMCore
+@@ -172,12 +177,14 @@
+     private var stopAttempt: UInt64 = 0
+ 
+     init(
++      ownershipID: UUID,
+       token: IOSPCMBridgeSessionToken,
+       generation: UInt64,
+       core: IOSPCMCore,
+       handle: IOSPCMSessionHandle,
+       configuration: PCMConfiguration
+     ) {
++      self.ownershipID = ownershipID
+       self.token = token
+       self.generation = generation
+       self.core = core
+@@ -301,6 +308,8 @@
+   private let foreground: any AppleApplicationForegroundProviding
+   private let events: any IOSPCMBridgeEventPublishing
+   private let clock: any PCMClock
++  private let sourceClock: any PCMSourceClock
++  private var usedRunIDs: Set<String> = []
+   private let tokenSource: @Sendable () -> String
+   private var nextGeneration: UInt64 = 0
+   private var session: SessionRecord?
+@@ -314,6 +323,7 @@
+     foreground: any AppleApplicationForegroundProviding,
+     events: any IOSPCMBridgeEventPublishing,
+     clock: any PCMClock = ContinuousPCMClock(),
++    sourceClock: any PCMSourceClock = ContinuousPCMSourceClock(),
+     tokenSource: @escaping @Sendable () -> String = {
+       UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+     }
+@@ -323,6 +333,7 @@
+     self.foreground = foreground
+     self.events = events
+     self.clock = clock
++    self.sourceClock = sourceClock
+     self.tokenSource = tokenSource
+   }
+ 
+@@ -346,6 +357,12 @@
+ 
+   public func appState() async -> IOSPCMBridgeAppState {
+     await foreground.isForegroundActive() ? .foreground : .background
++  }
++
++  /// Includes every bridge instance in this native process, including pending
++  /// permission/startup and failed Stop. A new WebView cannot hide an old owner.
++  public func confirmCaptureIdle() -> Bool {
++    CaptureProcessOwnership.shared.isIdle
+   }
+ 
+   /// Claims the single bridge slot and returns its opaque token before native
+@@ -365,7 +382,8 @@
+         maximumInputFramesPerBuffer: min(
+           4_096,
+           configuration.targetFramesPerChunk
+-        )
++        ),
++        authority: configuration.authority
+       )
+     } catch {
+       throw IOSPCMBridgeStartFailure(.startFailed)
+@@ -380,6 +398,9 @@
+     guard session == nil, nextGeneration < UInt64.max else {
+       throw IOSPCMBridgeStartFailure(.startFailed)
+     }
++    if let runID = configuration.authority?.runID, usedRunIDs.contains(runID) {
++      throw IOSPCMBridgeStartFailure(.startFailed)
++    }
+     let fragment = tokenSource()
+     guard Self.validTokenFragment(fragment) else {
+       throw IOSPCMBridgeStartFailure(.startFailed)
+@@ -392,11 +413,15 @@
+       permission: permission,
+       audio: audio,
+       sink: sink,
+-      clock: clock
++      clock: clock,
++      sourceClock: sourceClock
+     )
++    let ownershipID = CaptureProcessOwnership.shared.claim()
+     do {
+       let handle = try core.start(configuration: coreConfiguration)
++      if let runID = configuration.authority?.runID { usedRunIDs.insert(runID) }
+       session = SessionRecord(
++        ownershipID: ownershipID,
+         token: token,
+         generation: generation,
+         core: core,
+@@ -406,6 +431,7 @@
+       lastAcknowledged = nil
+       return token
+     } catch {
++      CaptureProcessOwnership.shared.release(ownershipID)
+       throw IOSPCMBridgeStartFailure(.startFailed)
+     }
+   }
+@@ -430,6 +456,19 @@
+     await record.handle.heartbeat()
+   }
+ 
++  public func extend(_ token: IOSPCMBridgeSessionToken, value: PCMSourceExtension) async throws {
++    let record = try currentRecord(token)
++    guard !record.stopWasRequested else { throw IOSPCMBridgeFailure(.captureFailed) }
++    do {
++      try await record.handle.extend(value)
++      guard lock.withLock({ session === record }), !record.stopWasRequested else {
++        throw IOSPCMBridgeFailure(.captureFailed)
++      }
++    } catch {
++      throw IOSPCMBridgeFailure(.captureFailed)
++    }
++  }
++
+   public func stop(
+     _ token: IOSPCMBridgeSessionToken,
+     mode: IOSPCMBridgeStopMode
+@@ -449,7 +488,8 @@
+     if completion.first {
+       if completion.mode == .drain, let source = result.finalPacket {
+         defer { source.bytes.zeroize() }
+-        guard source.sequenceNumber < UInt64(record.configuration.maximumChunks),
++        guard source.sequenceNumber < UInt64(record.configuration.authority?.hardMaximumChunks
++            ?? record.configuration.maximumChunks),
+           source.bytes.count > 0,
+           source.bytes.count < record.configuration.targetFramesPerChunk * 2,
+           source.bytes.count.isMultiple(of: 2)
+@@ -565,7 +605,8 @@
+       return session?.configuration
+     }
+     guard let configuration,
+-      source.sequenceNumber < UInt64(configuration.maximumChunks),
++      source.sequenceNumber < UInt64(configuration.authority?.hardMaximumChunks
++        ?? configuration.maximumChunks),
+       source.bytes.count == configuration.targetFramesPerChunk * 2
+     else { throw BridgeTransportFailure.operationFailed }
+     let bytes = source.bytes.withUnsafeBytes { IOSPCMBridgeOwnedBytes(copying: $0) }
+@@ -666,6 +707,20 @@
+     Task { [weak self] in await self?.closeAfterTermination(record) }
+   }
+ 
++  fileprivate func windowClosed(_ reason: PCMWindowCloseReason,
++    token: IOSPCMBridgeSessionToken, generation: UInt64)
++  {
++    guard let record = lock.withLock({ () -> SessionRecord? in
++      guard session?.token == token, session?.generation == generation else { return nil }
++      return session
++    }), !record.stopWasRequested else { return }
++    do {
++      try events.publish(.windowClosed(token, reason))
++    } catch {
++      terminate(.captureFailed, token: token, generation: generation)
++    }
++  }
++
+   private func closeAfterTermination(_ record: SessionRecord) async {
+     do {
+       let result = try await record.performStop(.discard)
+@@ -678,8 +733,10 @@
+   }
+ 
+   private func retire(_ record: SessionRecord) {
++    var retired = false
+     let acknowledgement = lock.withLock { () -> BridgeAcknowledgement? in
+       guard session === record else { return nil }
++      retired = true
+       session = nil
+       lastClosedToken = record.token
+       let acknowledgement = pending?.acknowledgement
+@@ -688,6 +745,7 @@
+       return acknowledgement
+     }
+     acknowledgement?.cancel()
++    if retired { CaptureProcessOwnership.shared.release(record.ownershipID) }
+   }
+ 
+   private static func validTokenFragment(_ value: String) -> Bool {
+@@ -733,6 +791,10 @@
+ 
+   func terminated(_ code: PCMTerminationCode) {
+     owner?.terminate(code, token: token, generation: generation)
++  }
++
++  func windowClosed(_ reason: PCMWindowCloseReason) {
++    owner?.windowClosed(reason, token: token, generation: generation)
+   }
+ }
+ 
+@@ -875,3 +937,21 @@
+ private enum BridgeTransportFailure: Error {
+   case operationFailed
+ }
++
++/// Strong ownership records intentionally outlive abandoned JS/plugin handles.
++/// Only verified native retirement releases them; process exit starts a new set.
++private final class CaptureProcessOwnership: @unchecked Sendable {
++  static let shared = CaptureProcessOwnership()
++  private let lock = NSLock()
++  private var owners: Set<UUID> = []
++
++  var isIdle: Bool { lock.withLock { owners.isEmpty } }
++  func claim() -> UUID {
++    lock.withLock {
++      let id = UUID()
++      owners.insert(id)
++      return id
++    }
++  }
++  func release(_ id: UUID) { _ = lock.withLock { owners.remove(id) } }
++}
+--- a/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/AreaWeightedResampler.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/AreaWeightedResampler.swift
+@@ -5,8 +5,8 @@
+ struct AreaWeightedPCM16Resampler {
+   private let sourceRate: Int64
+   private let targetRate: Int64
+-  private let maximumInputFrames: Int64
+-  private let maximumOutputFrames: Int64
++  private var maximumInputFrames: Int64
++  private var maximumOutputFrames: Int64
+   private var inputFrames: Int64 = 0
+   private var outputFrames: Int64 = 0
+   private var outputTicksRemaining: Int64
+@@ -28,6 +28,13 @@
+       Int64(maximumOutputFrames) * Int64(sourceRate)
+       / Int64(targetRate) + Int64(sourceRate)
+     self.outputTicksRemaining = Int64(sourceRate)
++  }
++
++  mutating func extendMaximumOutputFrames(_ maximum: Int) throws {
++    guard !closed, maximum >= maximumOutputFrames, maximum <= Int.max / Int(sourceRate)
++    else { throw PCMFailure(.invalidConfiguration) }
++    maximumOutputFrames = Int64(maximum)
++    maximumInputFrames = Int64(maximum) * sourceRate / targetRate + sourceRate
+   }
+ 
+   mutating func push(_ input: [Float]) throws -> [Int16] {
+--- a/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift
+@@ -12,6 +12,8 @@
+   private let audio: any PCMAudioDriving
+   private let sink: any PCMEmissionSink
+   private let clock: any PCMClock
++  private let sourceClock: any PCMSourceClock
++  private var usedRunIDs: Set<String> = []
+   private var nextSessionID: UInt64 = 0
+   private var active: Active?
+ 
+@@ -19,22 +21,31 @@
+     permission: any MicrophonePermissionAuthorizing,
+     audio: any PCMAudioDriving,
+     sink: any PCMEmissionSink,
+-    clock: any PCMClock = ContinuousPCMClock()
++    clock: any PCMClock = ContinuousPCMClock(),
++    sourceClock: any PCMSourceClock = ContinuousPCMSourceClock()
+   ) {
+     self.permission = permission
+     self.audio = audio
+     self.sink = sink
+     self.clock = clock
++    self.sourceClock = sourceClock
+   }
+ 
+   /// Claims ownership synchronously and returns a handle before permission or
+   /// audio readiness can wait.
+   public func start(configuration: PCMConfiguration) throws -> IOSPCMSessionHandle {
++    let window = try configuration.authority.map {
++      try PCMSourceWindow(authority: $0, maximumChunks: configuration.maximumChunks,
++        now: sourceClock.now())
++    }
+     let sessionID: UInt64 = try lock.withLock {
+       if let active {
+         throw PCMFailure(active.closeFailed ? .stopFailed : .alreadyActive)
+       }
+       guard nextSessionID < UInt64.max else { throw PCMFailure(.invalidConfiguration) }
++      if let runID = window?.authority.runID {
++        guard usedRunIDs.insert(runID).inserted else { throw PCMFailure(.invalidConfiguration) }
++      }
+       nextSessionID += 1
+       active = Active(sessionID: nextSessionID, closeFailed: false, state: nil)
+       return nextSessionID
+@@ -46,6 +57,8 @@
+       audio: audio,
+       sink: sink,
+       clock: clock,
++      sourceClock: sourceClock,
++      window: window,
+       markCloseFailed: { [weak self] in self?.markCloseFailed(sessionID) },
+       releaseOwnership: { [weak self] in self?.release(sessionID) }
+     )
+@@ -86,6 +99,10 @@
+ 
+   public func heartbeat() async {
+     await state.heartbeat()
++  }
++
++  public func extend(_ extensionValue: PCMSourceExtension) async throws {
++    try await state.extend(extensionValue)
+   }
+ 
+   public func stop(_ mode: PCMStopMode) async throws -> PCMStopResult {
+@@ -172,6 +189,12 @@
+   private let audio: any PCMAudioDriving
+   private let sink: any PCMEmissionSink
+   private let clock: any PCMClock
++  private let sourceClock: any PCMSourceClock
++  private var window: PCMSourceWindow?
++  private var sourceInputFrames: Int64 = 0
++  private var authorityTask: Task<Void, Never>?
++  private var explicitStopRequested = false
++  private var windowFinalPacket: PCMEncodedPacket?
+   private let cancellation = StartupCancellation()
+   private let frameAdmission = FrameAdmissionGate()
+   private let markCloseFailed: @Sendable () -> Void
+@@ -202,6 +225,8 @@
+     audio: any PCMAudioDriving,
+     sink: any PCMEmissionSink,
+     clock: any PCMClock,
++    sourceClock: any PCMSourceClock,
++    window: PCMSourceWindow?,
+     markCloseFailed: @escaping @Sendable () -> Void,
+     releaseOwnership: @escaping @Sendable () -> Void
+   ) {
+@@ -211,6 +236,8 @@
+     self.audio = audio
+     self.sink = sink
+     self.clock = clock
++    self.sourceClock = sourceClock
++    self.window = window
+     self.markCloseFailed = markCloseFailed
+     self.releaseOwnership = releaseOwnership
+     accumulator = PCMAccumulator(frameCapacity: configuration.targetFramesPerChunk)
+@@ -218,7 +245,11 @@
+ 
+   func startup() async throws {
+     guard phase == .owned else { throw PCMFailure(.startupCancelled) }
++    if let window, window.remainingNanoseconds(sourceClock.now()) == 0 {
++      try await closeAfterStartupFailure(.startupCancelled)
++    }
+     phase = .requestingPermission
++    armAuthorityDeadline()
+     let permissionResult = await racePermission()
+     guard phase == .requestingPermission, case .value(let permissionValue) = permissionResult
+     else {
+@@ -233,6 +264,10 @@
+       try await closeAfterStartupFailure(.permissionRestricted)
+     case .unavailable:
+       try await closeAfterStartupFailure(.microphoneUnavailable)
++    }
++
++    if let window, window.remainingNanoseconds(sourceClock.now()) == 0 {
++      try await closeAfterStartupFailure(.startupCancelled)
+     }
+ 
+     phase = .starting
+@@ -277,6 +312,9 @@
+     guard phase == .starting, !cancellation.isCancelled else {
+       throw PCMFailure(.startupCancelled)
+     }
++    if let window, window.remainingNanoseconds(sourceClock.now()) == 0 {
++      try await closeAfterStartupFailure(.startupCancelled)
++    }
+     phase = .active
+     armWatchdog()
+   }
+@@ -286,12 +324,35 @@
+     armWatchdog()
+   }
+ 
+-  func stop(_ mode: PCMStopMode) async throws -> PCMStopResult {
+-    if phase == .closed { return PCMStopResult(finalPacket: nil) }
++  private var maximumChunks: Int { window?.maximumChunks ?? configuration.maximumChunks }
++
++  func extend(_ value: PCMSourceExtension) throws {
++    guard phase == .active, var next = window else {
++      throw PCMFailure(.invalidConfiguration)
++    }
++    if next.remainingNanoseconds(sourceClock.now()) == 0 {
++      beginWindowClose(.authorityExpired)
++      throw PCMFailure(.invalidConfiguration)
++    }
++    do {
++      try next.extend(value, now: sourceClock.now())
++      try resampler?.extendMaximumOutputFrames(
++        configuration.targetFramesPerChunk * next.maximumChunks)
++      window = next
++      armAuthorityDeadline()
++    } catch {
++      beginTerminal(.captureFailed)
++      throw PCMFailure(.invalidConfiguration)
++    }
++  }
++
++  func stop(_ mode: PCMStopMode, automatic: Bool = false) async throws -> PCMStopResult {
++    if !automatic { explicitStopRequested = true }
++    if phase == .closed { return completedWindowStop(mode, automatic: automatic) }
+     applyStopRequest(mode)
+     while closingInProgress {
+       await withCheckedContinuation { closeWaiters.append($0) }
+-      if phase == .closed { return PCMStopResult(finalPacket: nil) }
++      if phase == .closed { return completedWindowStop(mode, automatic: automatic) }
+     }
+     closingInProgress = true
+     defer { finishCloseOperation() }
+@@ -336,7 +397,19 @@
+     releaseOwnership()
+     let final = requestedStopMode == .drain ? retainedFinalPacket : nil
+     retainedFinalPacket = nil
++    if automatic {
++      windowFinalPacket = final
++      return PCMStopResult(finalPacket: nil)
++    }
+     return PCMStopResult(finalPacket: final)
++  }
++
++  private func completedWindowStop(_ mode: PCMStopMode, automatic: Bool) -> PCMStopResult {
++    guard !automatic else { return PCMStopResult(finalPacket: nil) }
++    let final = windowFinalPacket
++    windowFinalPacket = nil
++    if mode == .discard { final?.bytes.zeroize() }
++    return PCMStopResult(finalPacket: mode == .drain ? final : nil)
+   }
+ 
+   private func closeAfterStartupFailure(_ code: PCMErrorCode) async throws -> Never {
+@@ -353,7 +426,13 @@
+       frames.zeroize()
+       return
+     }
++    if let window, window.remainingNanoseconds(sourceClock.now()) == 0 {
++      frames.zeroize()
++      beginWindowClose(.authorityExpired)
++      return
++    }
+     do {
++      var windowEnd: PCMWindowCloseReason?
+       var output = try frames.consume { channels -> [Int16] in
+         guard frames.sampleRateHz >= PCMConfiguration.sampleRateHz,
+           frames.sampleRateHz <= 384_000,
+@@ -363,10 +442,25 @@
+         defer {
+           for index in mono.indices { mono[index] = 0 }
+         }
++        if let window {
++          let maximumInput = Int64(configuration.targetFramesPerChunk * maximumChunks)
++            * Int64(frames.sampleRateHz) / Int64(PCMConfiguration.sampleRateHz)
++          let remainingInput = max(0, maximumInput - sourceInputFrames)
++          let timeFrames = Int64(Double(window.remainingNanoseconds(sourceClock.now()))
++            * Double(frames.sampleRateHz) / 1_000_000_000)
++          let admitted = min(Int64(mono.count), remainingInput, timeFrames)
++          if admitted < mono.count {
++            for index in Int(admitted)..<mono.count { mono[index] = 0 }
++            mono.removeLast(mono.count - Int(admitted))
++          }
++          sourceInputFrames += admitted
++          if sourceInputFrames >= maximumInput { windowEnd = .frameLimit }
++          else if admitted == timeFrames { windowEnd = .authorityExpired }
++        }
+         if resampler == nil {
+           let maximumOutput =
+             configuration.targetFramesPerChunk
+-            * configuration.maximumChunks
++            * maximumChunks
+           resampler = try AreaWeightedPCM16Resampler(
+             sourceRate: frames.sampleRateHz,
+             targetRate: PCMConfiguration.sampleRateHz,
+@@ -377,6 +471,7 @@
+         return try resampler!.push(mono)
+       }
+       try append(&output)
++      if let windowEnd { beginWindowClose(windowEnd) }
+     } catch let failure as PCMFailure {
+       beginTerminal(Self.termination(for: failure.code))
+     } catch {
+@@ -444,7 +539,7 @@
+ 
+   private func startDelivery() throws {
+     guard inFlight == nil, accumulator.isFull else { return }
+-    guard nextSequence < UInt64(configuration.maximumChunks) else {
++    guard nextSequence < UInt64(maximumChunks) else {
+       throw PCMFailure(.outputLimitExceeded)
+     }
+     let packet = PCMEncodedPacket(
+@@ -520,7 +615,7 @@
+     guard retainedFinalPacket == nil,
+       let bytes = accumulator.takePartial()
+     else { return }
+-    guard nextSequence < UInt64(configuration.maximumChunks) else {
++    guard nextSequence < UInt64(maximumChunks) else {
+       bytes.zeroize()
+       throw PCMFailure(.outputLimitExceeded)
+     }
+@@ -548,11 +643,28 @@
+     Task { [weak self] in _ = try? await self?.stop(.discard) }
+   }
+ 
++  private func beginWindowClose(_ reason: PCMWindowCloseReason) {
++    guard phase == .active || phase == .starting || phase == .requestingPermission else { return }
++    applyStopRequest(.drain)
++    Task { [weak self] in await self?.finishWindowClose(reason) }
++  }
++
++  private func finishWindowClose(_ reason: PCMWindowCloseReason) async {
++    do {
++      _ = try await stop(.drain, automatic: true)
++      if !explicitStopRequested, !terminationSent { sink.windowClosed(reason) }
++    } catch {
++      beginTerminal(.captureFailed)
++    }
++  }
++
+   private func applyStopRequest(_ mode: PCMStopMode) {
+     if requestedStopMode == nil || mode == .discard { requestedStopMode = mode }
+     phase = .closing
+     cancellation.cancel()
+     cancelWatchdog()
++    authorityTask?.cancel()
++    authorityTask = nil
+     frameAdmission.close()
+     if requestedStopMode == .discard { discardBufferedAudio() }
+   }
+@@ -621,6 +733,28 @@
+     }
+   }
+ 
++  private func armAuthorityDeadline() {
++    authorityTask?.cancel()
++    guard let window else { return }
++    let generation = window.authority.generation
++    let remaining = window.remainingNanoseconds(sourceClock.now())
++    authorityTask = Task { [weak self, sourceClock] in
++      do { try await sourceClock.sleep(nanoseconds: remaining) } catch { return }
++      guard !Task.isCancelled else { return }
++      await self?.authorityExpired(generation)
++    }
++  }
++
++  private func authorityExpired(_ generation: Int) {
++    guard let window, window.authority.generation == generation,
++      phase == .active || phase == .starting || phase == .requestingPermission else { return }
++    if window.remainingNanoseconds(sourceClock.now()) == 0 {
++      beginWindowClose(.authorityExpired)
++    } else {
++      armAuthorityDeadline()
++    }
++  }
++
+   private func watchdogExpired(_ generation: UInt64) {
+     guard phase == .active, generation == watchdogGeneration else { return }
+     beginTerminal(.heartbeatExpired)
+--- /dev/null
++++ b/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMSourceAuthority.swift
+@@ -0,0 +1,135 @@
++import Foundation
++
++public struct PCMSourceAuthority: Equatable, Sendable {
++  public let runID: String
++  public let generation: Int
++  public let expiresAtMilliseconds: Int64
++  public let hardMaximumChunks: Int
++
++  public init(runID: String, generation: Int, expiresAtMilliseconds: Int64,
++    hardMaximumChunks: Int) throws
++  {
++    guard UUID(uuidString: runID)?.uuidString.lowercased() == runID,
++      generation > 0, generation <= 9_007_199_254_740_991,
++      expiresAtMilliseconds > 0, expiresAtMilliseconds <= 9_007_199_254_740_991,
++      (1...360).contains(hardMaximumChunks)
++    else { throw PCMFailure(.invalidConfiguration) }
++    self.runID = runID
++    self.generation = generation
++    self.expiresAtMilliseconds = expiresAtMilliseconds
++    self.hardMaximumChunks = hardMaximumChunks
++  }
++}
++
++public struct PCMSourceExtension: Equatable, Sendable {
++  public let runID: String
++  public let generation: Int
++  public let expiresAtMilliseconds: Int64
++  /// Cumulative chunks from the original Start, never an additional allowance.
++  public let maximumChunks: Int
++
++  public init(runID: String, generation: Int, expiresAtMilliseconds: Int64,
++    maximumChunks: Int)
++  {
++    self.runID = runID
++    self.generation = generation
++    self.expiresAtMilliseconds = expiresAtMilliseconds
++    self.maximumChunks = maximumChunks
++  }
++}
++
++public enum PCMWindowCloseReason: String, Sendable {
++  case authorityExpired = "authority_expired"
++  case frameLimit = "frame_limit"
++}
++
++public struct PCMSourceTime: Sendable {
++  public let epochMilliseconds: Int64
++  public let monotonicNanoseconds: UInt64
++
++  public init(epochMilliseconds: Int64, monotonicNanoseconds: UInt64) {
++    self.epochMilliseconds = epochMilliseconds
++    self.monotonicNanoseconds = monotonicNanoseconds
++  }
++}
++
++/// Separate from the WebView heartbeat clock. ContinuousClock includes system
++/// suspension; a wall-clock rollback cannot extend an admitted native window.
++public protocol PCMSourceClock: Sendable {
++  func now() -> PCMSourceTime
++  func sleep(nanoseconds: UInt64) async throws
++}
++
++public struct ContinuousPCMSourceClock: PCMSourceClock {
++  private let origin = ContinuousClock.now
++  public init() {}
++
++  public func now() -> PCMSourceTime {
++    let elapsed = origin.duration(to: ContinuousClock.now).components
++    return PCMSourceTime(
++      epochMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000),
++      monotonicNanoseconds: UInt64(elapsed.seconds) * 1_000_000_000
++        + UInt64(elapsed.attoseconds / 1_000_000_000))
++  }
++
++  public func sleep(nanoseconds: UInt64) async throws {
++    try await ContinuousClock().sleep(for: .nanoseconds(nanoseconds))
++  }
++}
++
++struct PCMSourceWindow: Sendable {
++  private(set) var authority: PCMSourceAuthority
++  private(set) var maximumChunks: Int
++  private var monotonicDeadline: UInt64
++
++  init(authority: PCMSourceAuthority, maximumChunks: Int, now: PCMSourceTime) throws {
++    guard maximumChunks > 0, maximumChunks <= authority.hardMaximumChunks else {
++      throw PCMFailure(.invalidConfiguration)
++    }
++    self.authority = authority
++    self.maximumChunks = maximumChunks
++    monotonicDeadline = try Self.deadline(authority.expiresAtMilliseconds, now: now)
++  }
++
++  func remainingNanoseconds(_ now: PCMSourceTime) -> UInt64 {
++    guard now.epochMilliseconds < authority.expiresAtMilliseconds,
++      now.monotonicNanoseconds < monotonicDeadline else { return 0 }
++    let wallMilliseconds = min(905_000, authority.expiresAtMilliseconds - now.epochMilliseconds)
++    return min(UInt64(wallMilliseconds) * 1_000_000,
++      monotonicDeadline - now.monotonicNanoseconds)
++  }
++
++  mutating func extend(_ value: PCMSourceExtension, now: PCMSourceTime) throws {
++    guard remainingNanoseconds(now) > 0, value.runID == authority.runID,
++      value.maximumChunks >= maximumChunks,
++      value.maximumChunks <= authority.hardMaximumChunks else {
++      throw PCMFailure(.invalidConfiguration)
++    }
++    if value.generation == authority.generation,
++      value.expiresAtMilliseconds == authority.expiresAtMilliseconds,
++      value.maximumChunks == maximumChunks { return }
++    guard value.generation == authority.generation + 1,
++      value.expiresAtMilliseconds > authority.expiresAtMilliseconds else {
++      throw PCMFailure(.invalidConfiguration)
++    }
++    let next = try PCMSourceAuthority(runID: value.runID, generation: value.generation,
++      expiresAtMilliseconds: value.expiresAtMilliseconds,
++      hardMaximumChunks: authority.hardMaximumChunks)
++    let deadline = try Self.deadline(value.expiresAtMilliseconds, now: now)
++    authority = next
++    maximumChunks = value.maximumChunks
++    monotonicDeadline = deadline
++  }
++
++  private static func deadline(_ expires: Int64, now: PCMSourceTime) throws -> UInt64 {
++    guard now.epochMilliseconds >= 0, expires > now.epochMilliseconds,
++      expires - now.epochMilliseconds <= 905_000 else {
++      throw PCMFailure(.invalidConfiguration)
++    }
++    let duration = UInt64(expires - now.epochMilliseconds) * 1_000_000
++    guard now.monotonicNanoseconds <= UInt64.max - duration else {
++      throw PCMFailure(.invalidConfiguration)
++    }
++    return now.monotonicNanoseconds + duration
++  }
++}
+--- a/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMTypes.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMTypes.swift
+@@ -68,12 +68,14 @@
+   public let maximumChunks: Int
+   public let maximumInputFramesPerBuffer: Int
+   public let heartbeatTimeoutNanoseconds: UInt64
++  public let authority: PCMSourceAuthority?
+ 
+   public init(
+     targetFramesPerChunk: Int,
+     maximumChunks: Int,
+     maximumInputFramesPerBuffer: Int = 4_096,
+-    heartbeatTimeoutNanoseconds: UInt64 = 15_000_000_000
++    heartbeatTimeoutNanoseconds: UInt64 = 15_000_000_000,
++    authority: PCMSourceAuthority? = nil
+   ) throws {
+     guard targetFramesPerChunk > 0,
+       targetFramesPerChunk <= Self.maximumTargetFramesPerChunk,
+@@ -84,7 +86,8 @@
+       maximumInputFramesPerBuffer <= targetFramesPerChunk,
+       heartbeatTimeoutNanoseconds > 0,
+       targetFramesPerChunk <= Int.max / 2,
+-      maximumChunks <= Int.max / targetFramesPerChunk
++      maximumChunks <= Int.max / targetFramesPerChunk,
++      authority == nil || maximumChunks <= authority!.hardMaximumChunks
+     else {
+       throw PCMFailure(.invalidConfiguration)
+     }
+@@ -92,6 +95,7 @@
+     self.maximumChunks = maximumChunks
+     self.maximumInputFramesPerBuffer = maximumInputFramesPerBuffer
+     self.heartbeatTimeoutNanoseconds = heartbeatTimeoutNanoseconds
++    self.authority = authority
+   }
+ }
+ 
+@@ -198,6 +202,13 @@
+   /// but must not retain or read `packet.bytes` after returning.
+   func emit(_ packet: PCMEncodedPacket) throws -> any PCMAcknowledging
+   func terminated(_ code: PCMTerminationCode)
++  /// Input is frozen and accepted full packets have settled. Explicit stop
++  /// drains the retained partial exactly once; this callback owns no PCM bytes.
++  func windowClosed(_ reason: PCMWindowCloseReason)
++}
++
++extension PCMEmissionSink {
++  public func windowClosed(_ reason: PCMWindowCloseReason) {}
+ }
+ 
+ public final class StartupCancellation: @unchecked Sendable {
+--- a/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/IOSPCMBridgeCoreTests.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMBridgeCoreTests/IOSPCMBridgeCoreTests.swift
+@@ -6,6 +6,36 @@
+ @testable import CosmaneuraIOSPCMCore
+ 
+ final class IOSPCMBridgeCoreTests: XCTestCase, @unchecked Sendable {
++  func testIdleProofIncludesOtherBridgePermissionWaitAndFailedClose() async throws {
++    let permission = WaitingPermission()
++    let first = BridgeHarness(permission: permission, audio: FakeBridgeAudioDriver(freezeFailures: 1))
++    let observer = BridgeHarness()
++    XCTAssertTrue(observer.bridge.confirmCaptureIdle())
++    let token = try first.bridge.begin(configuration: first.configuration)
++    XCTAssertFalse(observer.bridge.confirmCaptureIdle())
++    let readiness = Task { try await first.bridge.ready(token) }
++    try await waitUntil { permission.isWaiting }
++    XCTAssertFalse(observer.bridge.confirmCaptureIdle())
++    await assertBridgeFailure(.stopFailed) { _ = try await first.bridge.stop(token, mode: .discard) }
++    await assertStartFailure(.startFailed) { try await readiness.value }
++    XCTAssertFalse(observer.bridge.confirmCaptureIdle())
++    _ = try await first.bridge.stop(token, mode: .discard)
++    XCTAssertTrue(observer.bridge.confirmCaptureIdle())
++    XCTAssertEqual(observer.audio.startCalls, 0)
++  }
++
++  func testIdleProofStaysFalseUntilEveryNativeOwnerHasReleased() async throws {
++    let first = BridgeHarness(), second = BridgeHarness(), observer = BridgeHarness()
++    let one = try await first.readyToken(), two = try await second.readyToken()
++    XCTAssertFalse(observer.bridge.confirmCaptureIdle())
++    _ = try await first.bridge.stop(one, mode: .discard)
++    _ = try await first.bridge.stop(one, mode: .discard)
++    XCTAssertFalse(observer.bridge.confirmCaptureIdle())
++    _ = try await second.bridge.stop(two, mode: .discard)
++    XCTAssertTrue(observer.bridge.confirmCaptureIdle())
++    XCTAssertEqual(observer.audio.startCalls, 0)
++  }
++
+   func testPublicCodesExactlyMatchDormantTypeScriptBoundary() {
+     XCTAssertEqual(
+       [
+@@ -605,6 +635,7 @@
+   private var packetStorage: [IOSPCMBridgePacket] = []
+   private var packetSnapshotStorage: [[UInt8]] = []
+   private var terminalStorage: [IOSPCMBridgeTerminalErrorCode] = []
++  private var windowStorage: [PCMWindowCloseReason] = []
+   private var failPacket: Bool
+   private let blockPacketNumber: Int?
+   private let packetBlock = DispatchSemaphore(value: 0)
+@@ -619,12 +650,15 @@
+   var packets: [IOSPCMBridgePacket] { lock.withLock { packetStorage } }
+   var packetSnapshots: [[UInt8]] { lock.withLock { packetSnapshotStorage } }
+   var terminalCodes: [IOSPCMBridgeTerminalErrorCode] { lock.withLock { terminalStorage } }
++  var windows: [PCMWindowCloseReason] { lock.withLock { windowStorage } }
+   var isPacketBlocked: Bool { lock.withLock { packetBlocked } }
+ 
+   func releaseBlockedPacket() { packetBlock.signal() }
+ 
+   func publish(_ event: IOSPCMBridgeEvent) throws {
+     switch event {
++    case .windowClosed(_, let reason):
++      lock.withLock { windowStorage.append(reason) }
+     case .packetAvailable(let packet):
+       let snapshot = packet.bytes.snapshot
+       let disposition = lock.withLock { () -> (fail: Bool, block: Bool) in
+@@ -721,6 +755,65 @@
+   }
+ }
+ 
++extension IOSPCMBridgeCoreTests {
++  func testRenewedProducerPacketsPassBridgePastOriginalWindow() async throws {
++    let h = BridgeHarness()
++    let expires = Int64(Date().timeIntervalSince1970 * 1_000) + 10_000
++    let runID = UUID().uuidString.lowercased()
++    let config = IOSPCMBridgeConfiguration(encoding: "pcm_s16le", channels: 1,
++      sampleRateHz: 16_000, targetFramesPerChunk: 4, maximumChunks: 2,
++      authority: try PCMSourceAuthority(runID: runID, generation: 1,
++        expiresAtMilliseconds: expires, hardMaximumChunks: 4))
++    let token = try h.bridge.begin(configuration: config)
++    try await h.bridge.ready(token)
++    await h.audio.emitLatest(OwnedAudioFrames(sampleRateHz: 16_000, channels: [[1, 1, 1, 1]]))
++    XCTAssertEqual(h.bridge.acknowledge(token, sequenceNumber: 0), .accepted)
++    let extensionValue = PCMSourceExtension(runID: runID, generation: 2,
++      expiresAtMilliseconds: expires + 10_000, maximumChunks: 4)
++    try await h.bridge.extend(token, value: extensionValue)
++    try await h.bridge.extend(token, value: extensionValue)
++    for sequence in 1..<4 {
++      await h.audio.emitLatest(OwnedAudioFrames(sampleRateHz: 16_000, channels: [[1, 1, 1, 1]]))
++      try await waitUntil { h.events.packetCount == sequence + 1 }
++      XCTAssertEqual(h.bridge.acknowledge(token, sequenceNumber: UInt64(sequence)), .accepted)
++    }
++    try await waitUntil { h.events.windows == [.frameLimit] }
++    XCTAssertEqual(h.events.packets.map(\.sequenceNumber), [0, 1, 2, 3])
++    XCTAssertTrue(h.events.terminalCodes.isEmpty)
++    XCTAssertEqual(h.audio.startCalls, 1)
++    let stopped = try await h.bridge.stop(token, mode: .drain)
++    XCTAssertNil(stopped.finalPacket)
++    XCTAssertThrowsError(try h.bridge.begin(configuration: config))
++    let replacement = try await h.readyToken()
++    do {
++      try await h.bridge.extend(token, value: extensionValue)
++      XCTFail("retired token extended a replacement")
++    } catch {}
++    XCTAssertEqual(h.audio.startCalls, 2)
++    _ = try await h.bridge.stop(replacement, mode: .discard)
++  }
++
++  func testNativeExpiryRetainsFinalPartialForOneExplicitBridgeDrain() async throws {
++    let h = BridgeHarness()
++    let config = IOSPCMBridgeConfiguration(encoding: "pcm_s16le", channels: 1,
++      sampleRateHz: 16_000, targetFramesPerChunk: 4, maximumChunks: 2,
++      authority: try PCMSourceAuthority(runID: UUID().uuidString.lowercased(), generation: 1,
++        expiresAtMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000) + 40,
++        hardMaximumChunks: 4))
++    let token = try h.bridge.begin(configuration: config)
++    try await h.bridge.ready(token)
++    await h.audio.emitLatest(OwnedAudioFrames(sampleRateHz: 16_000, channels: [[0.5]]))
++    try await waitUntil { h.events.windows == [.authorityExpired] }
++    let result = try await h.bridge.stop(token, mode: .drain)
++    XCTAssertEqual(result.finalPacket?.bytes.snapshot, [0, 64])
++    XCTAssertEqual(result.finalPacket?.sequenceNumber, 0)
++    result.finalPacket?.bytes.zeroize()
++    let repeated = try await h.bridge.stop(token, mode: .drain)
++    XCTAssertNil(repeated.finalPacket)
++    XCTAssertEqual(h.audio.releaseCalls, 1)
++  }
++}
++
+ extension IOSPCMBridgeOwnedBytes {
+   fileprivate var snapshot: [UInt8] { withUnsafeBytes { Array($0) } }
+ }
+--- a/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMCoreTests/IOSPCMCoreTests.swift
++++ b/apps/capture/native-plugins/ios-pcm-capture/Tests/CosmaneuraIOSPCMCoreTests/IOSPCMCoreTests.swift
+@@ -544,12 +544,18 @@
+   private var packetStorage: [OwnedPCMBytes] = []
+   private var acknowledgementStorage: [ManualAcknowledgement] = []
+   private var terminationStorage: [PCMTerminationCode] = []
++  private var windowStorage: [PCMWindowCloseReason] = []
+ 
+   var sequences: [UInt64] { lock.withLock { sequenceStorage } }
+   var snapshots: [[UInt8]] { lock.withLock { snapshotStorage } }
+   var retainedPackets: [OwnedPCMBytes] { lock.withLock { packetStorage } }
+   var acknowledgements: [ManualAcknowledgement] { lock.withLock { acknowledgementStorage } }
+   var terminations: [PCMTerminationCode] { lock.withLock { terminationStorage } }
++  var windows: [PCMWindowCloseReason] { lock.withLock { windowStorage } }
++
++  func windowClosed(_ reason: PCMWindowCloseReason) {
++    lock.withLock { windowStorage.append(reason) }
++  }
+ 
+   func emit(_ packet: PCMEncodedPacket) throws -> any PCMAcknowledging {
+     let acknowledgement = ManualAcknowledgement()
+@@ -679,3 +685,225 @@
+ extension Array where Element == UInt8 {
+   fileprivate var hex: String { map { String(format: "%02x", $0) }.joined() }
+ }
++
++private final class SourceTestClock: PCMSourceClock, @unchecked Sendable {
++  private let lock = NSLock()
++  let timer = ManualClock()
++  private var wall: Int64 = 1_000_000
++  private var monotonic: UInt64 = 0
++  func now() -> PCMSourceTime {
++    lock.withLock { PCMSourceTime(epochMilliseconds: wall, monotonicNanoseconds: monotonic) }
++  }
++  func advance(wall: Int64, milliseconds: UInt64) {
++    lock.withLock { self.wall += wall; monotonic += milliseconds * 1_000_000 }
++  }
++  func sleep(nanoseconds: UInt64) async throws { try await timer.sleep(nanoseconds: nanoseconds) }
++}
++
++private struct RenewableHarness {
++  let audio: FakeAudioDriver
++  let sink = FakeSink()
++  let clock = SourceTestClock()
++  let core: IOSPCMCore
++  let configuration: PCMConfiguration
++  let runID = "2e4968c5-856f-4b4a-a2a3-82fb25f441a8"
++
++  init(target: Int = 4, initial: Int = 2, hard: Int = 8,
++    permission: any MicrophonePermissionAuthorizing = GrantedPermission(),
++    audio: FakeAudioDriver = FakeAudioDriver()) throws
++  {
++    self.audio = audio
++    core = IOSPCMCore(permission: permission, audio: audio, sink: sink,
++      clock: ManualClock(), sourceClock: clock)
++    configuration = try PCMConfiguration(targetFramesPerChunk: target, maximumChunks: initial,
++      maximumInputFramesPerBuffer: target,
++      authority: PCMSourceAuthority(runID: runID, generation: 1,
++        expiresAtMilliseconds: 1_001_000, hardMaximumChunks: hard))
++  }
++
++  func renewal(_ generation: Int, chunks: Int) -> PCMSourceExtension {
++    PCMSourceExtension(runID: runID, generation: generation,
++      expiresAtMilliseconds: 1_000_000 + Int64(generation) * 1_000, maximumChunks: chunks)
++  }
++  func ready() async throws -> IOSPCMSessionHandle {
++    let session = try core.start(configuration: configuration)
++    try await session.ready()
++    return session
++  }
++}
++
++extension IOSPCMCoreTests {
++  func testRenewalPreserves44100HzPhasePCMAndSequenceAcrossThreeExtensions() async throws {
++    let h = try RenewableHarness(target: 16)
++    let session = try await h.ready()
++    let input = (0..<300).map { Float(sin(Double($0) * 0.1)) }
++    for offset in stride(from: 0, to: 300, by: 10) {
++      if offset == 30 { try await session.extend(h.renewal(2, chunks: 4)) }
++      if offset == 100 { try await session.extend(h.renewal(3, chunks: 6)) }
++      if offset == 180 {
++        try await session.extend(h.renewal(4, chunks: 8))
++        try await session.extend(h.renewal(4, chunks: 8))
++      }
++      let frames = OwnedAudioFrames(sampleRateHz: 44_100,
++        channels: [Array(input[offset..<(offset + 10)])])
++      await h.audio.emitLatest(frames)
++      XCTAssertTrue(frames.isZeroed)
++      for ack in h.sink.acknowledgements { ack.complete(.accepted) }
++    }
++    let result = try await session.stop(.drain)
++    var golden = try AreaWeightedPCM16Resampler(sourceRate: 44_100, targetRate: 16_000,
++      maximumOutputFrames: 128)
++    let expected = try golden.push(input) + golden.finish()
++    let actual = h.sink.snapshots.flatMap { $0 } + (result.finalPacket?.bytes.testingCopy() ?? [])
++    XCTAssertEqual(actual, encodePCM16LE(expected))
++    XCTAssertEqual(h.sink.sequences, [0, 1, 2, 3, 4, 5])
++    XCTAssertEqual(result.finalPacket?.sequenceNumber, 6)
++    XCTAssertEqual(h.audio.startCalls, 1)
++    XCTAssertEqual(h.audio.releaseCalls, 1)
++    XCTAssertTrue(h.sink.terminations.isEmpty)
++    result.finalPacket?.bytes.zeroize()
++  }
++
++  func testFrameWindowClipsFinalInputAndDrainsBeforeNotification() async throws {
++    let h = try RenewableHarness()
++    let session = try await h.ready()
++    for input: [Float] in [[1, 1, 1], [1, 1, 1, 1], [1, 1, 1, 1]] {
++      let frames = OwnedAudioFrames(sampleRateHz: 16_000, channels: [input])
++      await h.audio.emitLatest(frames)
++      XCTAssertTrue(frames.isZeroed)
++      for ack in h.sink.acknowledgements { ack.complete(.accepted) }
++    }
++    try await waitUntil { h.sink.windows == [.frameLimit] }
++    XCTAssertEqual(h.sink.snapshots.flatMap { $0 }.count, 16)
++    XCTAssertEqual(h.sink.sequences, [0, 1])
++    XCTAssertEqual(h.audio.freezeCalls, 1)
++    XCTAssertTrue(h.sink.terminations.isEmpty)
++    await assertFailure(.invalidConfiguration) { try await session.extend(h.renewal(2, chunks: 4)) }
++    let stopped = try await session.stop(.drain)
++    XCTAssertNil(stopped.finalPacket)
++  }
++
++  func testAuthorityExpirySurvivesWallRollbackAndHeartbeatAndRetainsPartial() async throws {
++    let h = try RenewableHarness(initial: 4)
++    let session = try await h.ready()
++    await h.audio.emitLatest(OwnedAudioFrames(sampleRateHz: 16_000, channels: [[1, 1, 1, 1]]))
++    await h.audio.emitLatest(OwnedAudioFrames(sampleRateHz: 16_000, channels: [[0.5]]))
++    try await waitUntil { h.clock.timer.waiterCount == 1 }
++    h.clock.advance(wall: -10_000, milliseconds: 1_000)
++    await session.heartbeat()
++    h.clock.timer.fire(index: 0)
++    try await waitUntil { h.audio.freezeCalls == 1 }
++    XCTAssertTrue(h.sink.windows.isEmpty)
++    let late = OwnedAudioFrames(sampleRateHz: 16_000, channels: [[1]])
++    await h.audio.emitLatest(late)
++    XCTAssertTrue(late.isZeroed)
++    h.sink.accept(0)
++    try await waitUntil { h.sink.windows == [.authorityExpired] }
++    let result = try await session.stop(.drain)
++    XCTAssertEqual(result.finalPacket?.sequenceNumber, 1)
++    XCTAssertEqual(result.finalPacket?.bytes.testingCopy(), [0, 64])
++    result.finalPacket?.bytes.zeroize()
++    let repeated = try await session.stop(.drain)
++    XCTAssertNil(repeated.finalPacket)
++    XCTAssertEqual(h.audio.releaseCalls, 1)
++  }
++
++  func testAuthorityExpiresDuringPermissionWithoutOpeningAudio() async throws {
++    let permission = LatePermission()
++    let h = try RenewableHarness(permission: permission)
++    let session = try h.core.start(configuration: h.configuration)
++    try await waitUntil { permission.isWaiting && h.clock.timer.waiterCount == 1 }
++    h.clock.advance(wall: 1_000, milliseconds: 1_000)
++    h.clock.timer.fire(index: 0)
++    await assertFailure(.startupCancelled) { try await session.ready() }
++    permission.resolve(.granted)
++    try await waitUntil { h.audio.releaseCalls == 1 }
++    XCTAssertEqual(h.audio.startCalls, 0)
++  }
++
++  func testExpiredStartAndReusedRunRejectBeforePermission() async throws {
++    let h = try RenewableHarness()
++    h.clock.advance(wall: 1_000, milliseconds: 1_000)
++    XCTAssertThrowsError(try h.core.start(configuration: h.configuration))
++    XCTAssertEqual(h.audio.startCalls, 0)
++    let next = try RenewableHarness()
++    let session = try await next.ready()
++    _ = try await session.stop(.discard)
++    XCTAssertThrowsError(try next.core.start(configuration: next.configuration))
++    XCTAssertEqual(next.audio.startCalls, 1)
++  }
++
++  func testOldTimerCannotExpireRenewedWindowAndRetryCannotMoveDeadline() async throws {
++    let h = try RenewableHarness()
++    let session = try await h.ready()
++    try await waitUntil { h.clock.timer.waiterCount == 1 }
++    try await session.extend(h.renewal(2, chunks: 4))
++    try await waitUntil { h.clock.timer.waiterCount == 2 }
++    h.clock.advance(wall: 1_000, milliseconds: 1_000)
++    h.clock.timer.fire(index: 0)
++    try await session.extend(h.renewal(2, chunks: 4))
++    try await waitUntil { h.clock.timer.waiterCount == 3 }
++    XCTAssertEqual(h.audio.freezeCalls, 0)
++    h.clock.advance(wall: 1_000, milliseconds: 1_000)
++    h.clock.timer.fire(index: 2)
++    try await waitUntil { h.sink.windows == [.authorityExpired] }
++    XCTAssertEqual(h.audio.releaseCalls, 1)
++    _ = try await session.stop(.discard)
++  }
++
++  func testForeignStaleChangedRetryAndOverBudgetExtensionsFailClosed() async throws {
++    for kind in 0..<5 {
++      let h = try RenewableHarness()
++      let session = try await h.ready()
++      let extensionValue = PCMSourceExtension(
++        runID: kind == 0 ? UUID().uuidString.lowercased() : h.runID,
++        generation: kind == 1 ? 3 : kind == 2 ? 1 : 2,
++        expiresAtMilliseconds: kind == 3 ? 1_001_000 : 1_002_000,
++        maximumChunks: kind == 4 ? 9 : 4)
++      await assertFailure(.invalidConfiguration) { try await session.extend(extensionValue) }
++      try await waitUntil { h.audio.releaseCalls == 1 }
++      XCTAssertEqual(h.sink.terminations, [.captureFailed])
++      XCTAssertEqual(h.audio.startCalls, 1)
++    }
++  }
++
++  func testStopPreventsRenewalWhileNativeFreezeIsStillPending() async throws {
++    let gate = ManualGate<Void>()
++    let h = try RenewableHarness(audio: FakeAudioDriver(freezeGate: gate))
++    let session = try await h.ready()
++    let stopped = Task { try await session.stop(.drain) }
++    try await waitUntil { h.audio.freezeCalls == 1 }
++    await assertFailure(.invalidConfiguration) { try await session.extend(h.renewal(2, chunks: 4)) }
++    gate.resolve(())
++    _ = try await stopped.value
++    XCTAssertTrue(h.sink.windows.isEmpty)
++    XCTAssertEqual(h.audio.releaseCalls, 1)
++  }
++
++  func testResamplerExtensionRejectsShrinkAndFinishedState() throws {
++    var resampler = try AreaWeightedPCM16Resampler(sourceRate: 44_100, targetRate: 16_000,
++      maximumOutputFrames: 4)
++    _ = try resampler.push([1, 0, -1])
++    XCTAssertThrowsError(try resampler.extendMaximumOutputFrames(3))
++    try resampler.extendMaximumOutputFrames(8)
++    _ = try resampler.finish()
++    XCTAssertThrowsError(try resampler.extendMaximumOutputFrames(12))
++  }
++
++  func testRealContinuousDeadlineClosesWithoutFramesOrHeartbeat() async throws {
++    let audio = FakeAudioDriver()
++    let sink = FakeSink()
++    let core = IOSPCMCore(permission: GrantedPermission(), audio: audio, sink: sink)
++    let configuration = try PCMConfiguration(targetFramesPerChunk: 4, maximumChunks: 2,
++      maximumInputFramesPerBuffer: 4,
++      authority: PCMSourceAuthority(runID: UUID().uuidString.lowercased(), generation: 1,
++        expiresAtMilliseconds: Int64(Date().timeIntervalSince1970 * 1_000) + 40,
++        hardMaximumChunks: 4))
++    let session = try core.start(configuration: configuration)
++    try await session.ready()
++    try await waitUntil { sink.windows == [.authorityExpired] }
++    XCTAssertEqual(audio.freezeCalls, 1)
++    XCTAssertEqual(audio.releaseCalls, 1)
++    _ = try await session.stop(.drain)
++  }
++}

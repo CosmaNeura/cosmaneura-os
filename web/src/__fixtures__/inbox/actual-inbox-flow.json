@@ -1,0 +1,352 @@
+{
+  "ingest": {
+    "id": "dfb29ebd-3f18-4518-b2ac-bffb566f3aed",
+    "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+    "outcome": "new",
+    "version": 1,
+    "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+    "safe_error": null,
+    "observed_at": "2026-09-22T12:22:08.161272Z",
+    "recorded_at": "2026-09-22T12:21:08.166977Z",
+    "grant_sha256": "8e4e4b82010d22da3212f9c65dd1d89296d5c158287e72e6f4763e7b1fe5a011",
+    "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+    "request_sha256": "5f469fdc6a6932119d6b792a0e95391f269b6b2deb82a2865357d791332f5228",
+    "item_response_sha256": "206817508ff65733122e6f9f5097de582dc45dc51875bffa78b48a83a7a56a7f",
+    "conversation_response_sha256": "1f7595e135bb03c392f5245c3123321a8a98a69d1876a7dacf2586d2e6930d6e",
+    "receipt_sha256": "1188b18153215656c60fd544ed525e9ce5c4c4d1d5737d81e7fdbe1c8e3f8c97"
+  },
+  "detail": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+      "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+    },
+    "summary": {
+      "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+      "version": 5,
+      "label": "Invented reviewed secure inbox item",
+      "patient_link_id": "17c465c3-7ed4-4359-b6bd-db4f83760b97",
+      "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+      "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+      "state": "closed_local_review",
+      "source_conflict": false,
+      "read_issue": null,
+      "binding_current": true,
+      "incomplete_content": false,
+      "workspace_id": "7914ab89-79b4-4bb0-b8e2-401d18b4b82c",
+      "workspace_current": true,
+      "classification": "administrative_review",
+      "human_review_required": true,
+      "vendor_latest_state_verified": false,
+      "external_action_performed": false,
+      "handoff_available": false
+    },
+    "source": {
+      "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+      "sequence": 1,
+      "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+      "created_at": "2026-09-22T11:21:08.161272Z",
+      "modified_at": "2026-09-22T12:21:08.161272Z",
+      "observed_at": "2026-09-22T12:22:08.161272Z",
+      "incomplete_content": false,
+      "vendor": "spruce",
+      "conversation_id": "invented_conversation",
+      "item_reference": "invented_incoming_item",
+      "contact_id": "invented_contact",
+      "patient_link_id": "17c465c3-7ed4-4359-b6bd-db4f83760b97",
+      "correspondence_version_id": "b666a00f-6f64-49f1-9dad-5bd0fdd2f92b",
+      "correspondence_public_sha256": "9895eedda1835ddda5827df05b6844eb7ffea51d7d80182b1b430e0e03b8bd76",
+      "text": "Invented incoming appointment question",
+      "attachments": false,
+      "attachment_types": [],
+      "pages": false,
+      "buttons": false,
+      "event": false,
+      "conversation_archived": false,
+      "conversation_read_only": false,
+      "item_response_sha256": "206817508ff65733122e6f9f5097de582dc45dc51875bffa78b48a83a7a56a7f",
+      "conversation_response_sha256": "1f7595e135bb03c392f5245c3123321a8a98a69d1876a7dacf2586d2e6930d6e",
+      "trust": "untrusted_external_text",
+      "projection_sha256": "e426faa74f27eb5260728897cab78976fe0045d2bc21bf04230c04d64e2ea243"
+    },
+    "latest_review": {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+        "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+      },
+      "command_kind": "review",
+      "idempotency_key": "human-affa2cfa-7d7c-4677-9295-bd29e0ea82fd",
+      "request_sha256": "f83a62310ae3809ca7a990db28aabf6b84dc68a387b842053fee21dca409b461",
+      "outcome": "recorded",
+      "effect": {
+        "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+        "version": 2,
+        "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+        "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+        "state": "reviewed"
+      },
+      "rejection": null,
+      "receipt_id": "f2c52f83-2bd3-4c2d-9dc8-3de8194703d5",
+      "recorded_at": "2026-09-22T12:21:08.188254Z",
+      "receipt_sha256": "e096505065c3393325b4f844d3ebdd5b1e6f2c87822e66961193b363aa58a126"
+    },
+    "latest_triage": {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+        "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+      },
+      "command_kind": "triage",
+      "idempotency_key": "human-92b918b3-f140-412e-ac56-88f68beb186f",
+      "request_sha256": "fbb17d357850a1559426d2fbe3620a6c9c464800d8bb6f8d22abb049130b4711",
+      "outcome": "recorded",
+      "effect": {
+        "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+        "version": 3,
+        "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+        "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+        "state": "triaged"
+      },
+      "rejection": null,
+      "receipt_id": "f0776439-6133-411c-a442-975316c481a8",
+      "recorded_at": "2026-09-22T12:21:08.203170Z",
+      "receipt_sha256": "4808f1c028e31853ec272d1dc7da8079a9b2f896f04913c19da6c1983c8f6842"
+    },
+    "latest_result": {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+        "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+      },
+      "command_kind": "result",
+      "idempotency_key": "human-33b2c14c-5ec8-4b96-a7b1-942fb30c704e",
+      "request_sha256": "b56111b93ca438bf24a4cd17489f6f7de4c4e2e84ad69192a92ce98aff3b8fda",
+      "outcome": "recorded",
+      "effect": {
+        "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+        "version": 4,
+        "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+        "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+        "state": "result_recorded"
+      },
+      "rejection": null,
+      "receipt_id": "496ebbd4-b8de-468e-a606-b53c83a67c2a",
+      "recorded_at": "2026-09-22T12:21:08.217711Z",
+      "receipt_sha256": "ebaa707a0fb5e9475d0551fba218b963bd45c0edc8b143c81f3a6ae1c04aed18"
+    },
+    "latest_verification": {
+      "contract_version": 1,
+      "scope": {
+        "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+        "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+      },
+      "command_kind": "verify",
+      "idempotency_key": "human-365edf47-ad0d-4573-a7a6-3efc247bb731",
+      "request_sha256": "796409b13278e76e25ea041ed30780293dfc59cb930f25b9a96c29a9e349252d",
+      "outcome": "recorded",
+      "effect": {
+        "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+        "version": 5,
+        "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+        "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+        "state": "closed_local_review"
+      },
+      "rejection": null,
+      "receipt_id": "b150e184-ba7c-4b9b-8597-b849c79e1ce7",
+      "recorded_at": "2026-09-22T12:21:08.232144Z",
+      "receipt_sha256": "19ead9f6ab79ae690b25963e45d49cac0aa033c76ac57e6e877e35cd03ee4281"
+    },
+    "availability": {
+      "review": true,
+      "triage": true,
+      "result": true,
+      "verify": false,
+      "history_capacity_remaining": 95
+    }
+  },
+  "history": {
+    "contract_version": 1,
+    "scope": {
+      "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+      "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+    },
+    "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+    "sources": [
+      {
+        "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+        "sequence": 1,
+        "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+        "created_at": "2026-09-22T11:21:08.161272Z",
+        "modified_at": "2026-09-22T12:21:08.161272Z",
+        "observed_at": "2026-09-22T12:22:08.161272Z",
+        "incomplete_content": false
+      }
+    ],
+    "reads": [
+      {
+        "id": "dfb29ebd-3f18-4518-b2ac-bffb566f3aed",
+        "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+        "version": 1,
+        "outcome": "new",
+        "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+        "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+        "safe_error": null,
+        "observed_at": "2026-09-22T12:22:08.161272Z",
+        "item_response_sha256": "206817508ff65733122e6f9f5097de582dc45dc51875bffa78b48a83a7a56a7f",
+        "conversation_response_sha256": "1f7595e135bb03c392f5245c3123321a8a98a69d1876a7dacf2586d2e6930d6e",
+        "request_sha256": "5f469fdc6a6932119d6b792a0e95391f269b6b2deb82a2865357d791332f5228",
+        "grant_sha256": "8e4e4b82010d22da3212f9c65dd1d89296d5c158287e72e6f4763e7b1fe5a011",
+        "recorded_at": "2026-09-22T12:21:08.166977Z",
+        "receipt_sha256": "1188b18153215656c60fd544ed525e9ce5c4c4d1d5737d81e7fdbe1c8e3f8c97"
+      }
+    ],
+    "commands": [
+      {
+        "request": {
+          "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+          "expected_version": 1,
+          "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+          "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+          "idempotency_key": "human-affa2cfa-7d7c-4677-9295-bd29e0ea82fd",
+          "workspace_id": "7914ab89-79b4-4bb0-b8e2-401d18b4b82c",
+          "expected_workspace_revision": 3,
+          "patient_link_id": "17c465c3-7ed4-4359-b6bd-db4f83760b97",
+          "reviewed_patient": true,
+          "reviewed_exact_thread": true,
+          "reviewed_untrusted_source": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+            "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+          },
+          "command_kind": "review",
+          "idempotency_key": "human-affa2cfa-7d7c-4677-9295-bd29e0ea82fd",
+          "request_sha256": "f83a62310ae3809ca7a990db28aabf6b84dc68a387b842053fee21dca409b461",
+          "outcome": "recorded",
+          "effect": {
+            "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+            "version": 2,
+            "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+            "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+            "state": "reviewed"
+          },
+          "rejection": null,
+          "receipt_id": "f2c52f83-2bd3-4c2d-9dc8-3de8194703d5",
+          "recorded_at": "2026-09-22T12:21:08.188254Z",
+          "receipt_sha256": "e096505065c3393325b4f844d3ebdd5b1e6f2c87822e66961193b363aa58a126"
+        }
+      },
+      {
+        "request": {
+          "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+          "expected_version": 2,
+          "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+          "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+          "idempotency_key": "human-92b918b3-f140-412e-ac56-88f68beb186f",
+          "classification": "administrative_review",
+          "due_date": "2026-10-01",
+          "instructions": "Invented internal review only; no reply or vendor change.",
+          "human_disposition_required": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+            "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+          },
+          "command_kind": "triage",
+          "idempotency_key": "human-92b918b3-f140-412e-ac56-88f68beb186f",
+          "request_sha256": "fbb17d357850a1559426d2fbe3620a6c9c464800d8bb6f8d22abb049130b4711",
+          "outcome": "recorded",
+          "effect": {
+            "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+            "version": 3,
+            "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+            "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+            "state": "triaged"
+          },
+          "rejection": null,
+          "receipt_id": "f0776439-6133-411c-a442-975316c481a8",
+          "recorded_at": "2026-09-22T12:21:08.203170Z",
+          "receipt_sha256": "4808f1c028e31853ec272d1dc7da8079a9b2f896f04913c19da6c1983c8f6842"
+        }
+      },
+      {
+        "request": {
+          "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+          "expected_version": 3,
+          "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+          "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+          "idempotency_key": "human-33b2c14c-5ec8-4b96-a7b1-942fb30c704e",
+          "triage_receipt_id": "f0776439-6133-411c-a442-975316c481a8",
+          "triage_receipt_sha256": "4808f1c028e31853ec272d1dc7da8079a9b2f896f04913c19da6c1983c8f6842",
+          "disposition": "local_review_complete",
+          "evidence": "Invented administrative classification was checked by the owner.",
+          "no_external_action_claimed": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+            "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+          },
+          "command_kind": "result",
+          "idempotency_key": "human-33b2c14c-5ec8-4b96-a7b1-942fb30c704e",
+          "request_sha256": "b56111b93ca438bf24a4cd17489f6f7de4c4e2e84ad69192a92ce98aff3b8fda",
+          "outcome": "recorded",
+          "effect": {
+            "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+            "version": 4,
+            "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+            "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+            "state": "result_recorded"
+          },
+          "rejection": null,
+          "receipt_id": "496ebbd4-b8de-468e-a606-b53c83a67c2a",
+          "recorded_at": "2026-09-22T12:21:08.217711Z",
+          "receipt_sha256": "ebaa707a0fb5e9475d0551fba218b963bd45c0edc8b143c81f3a6ae1c04aed18"
+        }
+      },
+      {
+        "request": {
+          "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+          "expected_version": 4,
+          "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+          "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+          "idempotency_key": "human-365edf47-ad0d-4573-a7a6-3efc247bb731",
+          "result_receipt_id": "496ebbd4-b8de-468e-a606-b53c83a67c2a",
+          "result_receipt_sha256": "ebaa707a0fb5e9475d0551fba218b963bd45c0edc8b143c81f3a6ae1c04aed18",
+          "reviewed_patient": true,
+          "reviewed_exact_source": true,
+          "reviewed_human_result": true,
+          "confirm_local_review_only": true
+        },
+        "receipt": {
+          "contract_version": 1,
+          "scope": {
+            "box_id": "1b1fe6cf-32f5-42f2-b1f1-0e8c3750b3b3",
+            "owner_id": "92afa4e5-1965-453c-a4fe-3109a3a33469"
+          },
+          "command_kind": "verify",
+          "idempotency_key": "human-365edf47-ad0d-4573-a7a6-3efc247bb731",
+          "request_sha256": "796409b13278e76e25ea041ed30780293dfc59cb930f25b9a96c29a9e349252d",
+          "outcome": "recorded",
+          "effect": {
+            "item_id": "fe434845-2b58-458b-8111-3ab0bbbc5f6c",
+            "version": 5,
+            "source_id": "d2a0b97b-3bb2-490c-9316-98ff134cbb34",
+            "source_sha256": "79507d979cbe96f3e25764896dabe9fe330a00c1b5aefd683d7af1ebec466556",
+            "state": "closed_local_review"
+          },
+          "rejection": null,
+          "receipt_id": "b150e184-ba7c-4b9b-8597-b849c79e1ce7",
+          "recorded_at": "2026-09-22T12:21:08.232144Z",
+          "receipt_sha256": "19ead9f6ab79ae690b25963e45d49cac0aa033c76ac57e6e877e35cd03ee4281"
+        }
+      }
+    ]
+  }
+}

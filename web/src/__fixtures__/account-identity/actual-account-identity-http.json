@@ -1,0 +1,47 @@
+{
+  "owner": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "contract_version": 1,
+      "box_id": "42d50d4b-aa5e-44dd-ba8d-1dbbef034546",
+      "actor_id": "7c4877c3-c7fc-46cc-a9d6-535d5e2be0aa",
+      "recovery_scope": "aae8bcaaf6deee374f0bc0ad9932b225ce14f15d9e25a1240457757639850142"
+    }
+  },
+  "staff": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "contract_version": 1,
+      "box_id": "42d50d4b-aa5e-44dd-ba8d-1dbbef034546",
+      "actor_id": "0258a887-08bc-45e3-b040-cf5711f0083a",
+      "recovery_scope": "e308796468d4759e6d7281dff5a740b82fb57870b2ce9521fcf69ce3a6ef1b9a"
+    }
+  },
+  "peer": {
+    "status": 200,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "contract_version": 1,
+      "box_id": "42d50d4b-aa5e-44dd-ba8d-1dbbef034546",
+      "actor_id": "db7b5406-9871-4907-865f-78e28e77c46b",
+      "recovery_scope": "4b30bcdb223b21f6650b1460941bad6a37bb4fbf2ff8c2b29fefa49e6f009f8f"
+    }
+  },
+  "disabled_identity": {
+    "status": 403,
+    "headers": {
+      "cache-control": "no-store"
+    },
+    "body": {
+      "detail": "identity_access_denied"
+    }
+  }
+}

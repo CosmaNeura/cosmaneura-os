@@ -19,12 +19,13 @@ import tempfile
 import time
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Literal, Protocol
 from urllib.parse import urlsplit
 from uuid import UUID
 
+UTC = timezone.utc  # noqa: UP017 -- protected runner supports Python 3.10.
 ARM_API_VERSION = "2024-03-01"
 STATE_CONTRACT = "cosmas-os-d3-release-recovery-state-v1"
 EVIDENCE_CONTRACT = "cosmas-os-d3-release-recovery-acceptance-v1"
@@ -115,9 +116,7 @@ class Config:
         api_ready_url = required("COSMAS_RECOVERY_API_READY_URL")
         web_health_url = required("COSMAS_RECOVERY_WEB_HEALTH_URL")
         approval_sha256 = required("COSMAS_RECOVERY_APPROVAL_SHA256")
-        rollback_state_sha256 = environment.get(
-            "COSMAS_RECOVERY_ROLLBACK_STATE_SHA256", ""
-        )
+        rollback_state_sha256 = environment.get("COSMAS_RECOVERY_ROLLBACK_STATE_SHA256", "")
         state_path = Path(required("COSMAS_RECOVERY_STATE_PATH"))
 
         current = Release(
@@ -139,19 +138,20 @@ class Config:
             or not _BETA_ID.fullmatch(beta_id)
             or not _REGISTRY.fullmatch(registry)
             or not _SHA256.fullmatch(approval_sha256)
-            or (
-                operation == "rollback"
-                and rollback_state_sha256 != ""
-            )
-            or (
-                operation == "forward"
-                and not _SHA256.fullmatch(rollback_state_sha256)
-            )
+            or (operation == "rollback" and rollback_state_sha256 != "")
+            or (operation == "forward" and not _SHA256.fullmatch(rollback_state_sha256))
             or not state_path.is_absolute()
             or current.source_sha == prior.source_sha
             or current.release_id == prior.release_id
-            or current.api_digest == prior.api_digest
-            or current.web_digest == prior.web_digest
+            or len(
+                {
+                    current.api_digest,
+                    current.web_digest,
+                    prior.api_digest,
+                    prior.web_digest,
+                }
+            )
+            != 4
         ):
             raise RecoveryError("release recovery configuration invalid")
         for release in (current, prior):
@@ -195,9 +195,7 @@ class Config:
             current=current,
             prior=prior,
             approval_sha256=approval_sha256,
-            rollback_state_sha256=(
-                rollback_state_sha256 if operation == "forward" else None
-            ),
+            rollback_state_sha256=(rollback_state_sha256 if operation == "forward" else None),
             state_path=state_path,
             poll_attempts=attempts,
             poll_interval_seconds=interval,
@@ -300,7 +298,11 @@ def _write_state(path: Path, value: dict[str, Any]) -> None:
         raise RecoveryError("release recovery state invalid")
     parent = path.parent.resolve(strict=True)
     info = parent.stat()
-    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or stat.S_IMODE(info.st_mode) & 0o077:
+    if (
+        not stat.S_ISDIR(info.st_mode)
+        or info.st_uid != os.geteuid()
+        or stat.S_IMODE(info.st_mode) & 0o077
+    ):
         raise RecoveryError("release recovery state invalid")
     descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=parent)
     temporary = Path(temporary_name)
@@ -416,9 +418,7 @@ def _validate_route(config: Config, kind: str, app: dict[str, Any]) -> None:
     health_host = (urlsplit(health_url).hostname or "").lower()
     custom_domains = ingress.get("customDomains") or []
     custom_names = {
-        str(item.get("name", "")).lower()
-        for item in custom_domains
-        if isinstance(item, dict)
+        str(item.get("name", "")).lower() for item in custom_domains if isinstance(item, dict)
     }
     if health_host != fqdn and health_host not in custom_names:
         raise RecoveryError("health route is not bound to the exact Container App")
@@ -470,7 +470,11 @@ def _validate_topology(
         values = revisions.get("value")
         if not isinstance(values, list):
             raise RecoveryError("Container App revision response invalid")
-        active = [item for item in values if isinstance(item, dict) and item.get("properties", {}).get("active") is True]
+        active = [
+            item
+            for item in values
+            if isinstance(item, dict) and item.get("properties", {}).get("active") is True
+        ]
         if len(active) != 1:
             raise RecoveryError("Container App active revision set invalid")
         revision = active[0]
@@ -485,8 +489,7 @@ def _validate_topology(
         minimum_replicas = 0 if kind == "web" else 1
         if (
             revision.get("name") != latest
-            or str(revision.get("id", "")).lower()
-            != f"{resource_id}/revisions/{latest}".lower()
+            or str(revision.get("id", "")).lower() != f"{resource_id}/revisions/{latest}".lower()
             or not isinstance(revision_containers, list)
             or len(revision_containers) != 1
             or revision_containers[0].get("name") != kind
@@ -512,7 +515,9 @@ def _validate_topology(
     }
 
 
-def _get_topology(config: Config, runner: CommandRunner) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
+def _get_topology(
+    config: Config, runner: CommandRunner
+) -> dict[str, tuple[dict[str, Any], dict[str, Any]]]:
     return {
         kind: (
             _az_get(runner, _resource_id(config, kind)),
@@ -535,8 +540,13 @@ def _current_image(app: dict[str, Any]) -> str:
     return value
 
 
-def _patch_image(config: Config, runner: CommandRunner, kind: str, app: dict[str, Any], image: str) -> None:
-    if not image.startswith(f"{config.registry}/") or re.search(r"@sha256:[0-9a-f]{64}$", image) is None:
+def _patch_image(
+    config: Config, runner: CommandRunner, kind: str, app: dict[str, Any], image: str
+) -> None:
+    if (
+        not image.startswith(f"{config.registry}/")
+        or re.search(r"@sha256:[0-9a-f]{64}$", image) is None
+    ):
         raise RecoveryError("mutable Container App image is forbidden")
     properties = app.get("properties")
     template = copy.deepcopy(properties.get("template")) if isinstance(properties, dict) else None
@@ -548,7 +558,9 @@ def _patch_image(config: Config, runner: CommandRunner, kind: str, app: dict[str
     template.pop("revisionSuffix", None)
     containers[0]["image"] = image
     parent = config.state_path.parent.resolve(strict=True)
-    descriptor, request_name = tempfile.mkstemp(prefix=f".recovery-{kind}.", suffix=".json", dir=parent)
+    descriptor, request_name = tempfile.mkstemp(
+        prefix=f".recovery-{kind}.", suffix=".json", dir=parent
+    )
     request = Path(request_name)
     try:
         os.fchmod(descriptor, 0o600)
@@ -616,9 +628,7 @@ def _wait_for_release(
     for attempt in range(config.poll_attempts):
         try:
             topology = _get_topology(config, runner)
-            result = _validate_topology(
-                config, topology, release, baseline_hashes=baseline_hashes
-            )
+            result = _validate_topology(config, topology, release, baseline_hashes=baseline_hashes)
             _probe_health(config, runner)
             return result
         except RecoveryError:
@@ -731,8 +741,7 @@ def run_recovery(
                 or not authorizations
                 or any(
                     not isinstance(item, dict)
-                    or item.get("rollback_state_sha256")
-                    != config.rollback_state_sha256
+                    or item.get("rollback_state_sha256") != config.rollback_state_sha256
                     for item in authorizations
                 )
             ):
@@ -766,9 +775,7 @@ def run_recovery(
         "prior": vars(config.prior),
         "approval_sha256": config.approval_sha256,
         "rollback_state_sha256": (
-            config.rollback_state_sha256
-            if config.operation == "forward"
-            else saved["state_sha256"]
+            config.rollback_state_sha256 if config.operation == "forward" else saved["state_sha256"]
         ),
         "baseline_revision_ids": saved["baseline"]["revision_ids"],
         "result_revision_ids": result["revision_ids"],

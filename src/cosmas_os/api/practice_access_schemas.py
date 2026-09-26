@@ -1,0 +1,66 @@
+"""Closed practice-access requests. No caller-supplied account or organization."""
+
+from datetime import UTC, datetime
+from typing import Literal
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field, field_validator
+
+
+class SubmitAccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    idempotency_key: UUID
+    display_name: str = Field(min_length=1, max_length=120, strict=True)
+
+    @field_validator("display_name")
+    @classmethod
+    def name(cls, value):
+        if value != value.strip() or any(ord(c) < 32 or ord(c) == 127 for c in value):
+            raise ValueError("invalid display name")
+        return value
+
+
+class ReviewAccess(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    request_id: UUID
+    review_sha256: str = Field(pattern=r"^[a-f0-9]{64}$", strict=True)
+    confirm: bool = Field(strict=True)
+
+    @field_validator("confirm")
+    @classmethod
+    def confirmed(cls, value):
+        if value is not True:
+            raise ValueError("confirmation required")
+        return value
+
+
+class DecideAccess(ReviewAccess):
+    decision: Literal["approve", "decline"]
+
+
+class MembersPage(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    after_id: UUID | None
+
+
+class MemberChange(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    idempotency_key: UUID
+    member_id: UUID
+    action: Literal["deactivate", "reactivate"]
+    review_sha256: str = Field(pattern=r"^[a-f0-9]{64}$", strict=True)
+    reviewed_at: str = Field(min_length=25, max_length=40, strict=True)
+    confirm: bool = Field(strict=True)
+
+    @field_validator("confirm")
+    @classmethod
+    def confirmed(cls, value):
+        return ReviewAccess.confirmed(value)
+
+    @field_validator("reviewed_at")
+    @classmethod
+    def canonical_time(cls, value):
+        parsed = datetime.fromisoformat(value)
+        if parsed.tzinfo is None or parsed.astimezone(UTC).isoformat() != value:
+            raise ValueError("canonical UTC review timestamp required")
+        return value

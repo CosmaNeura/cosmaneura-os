@@ -97,11 +97,17 @@ serializes overlapping starts.
 The success record has this public-safe shape:
 
 ```json
-{"audit_delete_denied":true,"audit_update_denied":true,"contract":"cosmas-os-d3-database-preparation-v1","evidence_sha256":"<sha256>","runtime_ddl_denied":true,"runtime_role_non_admin":true,"schema_at_expected_head":true,"schema_revision":"0002_external_identities","status":"ready"}
+{"audit_delete_denied":true,"audit_update_denied":true,"contract":"cosmas-os-d3-database-preparation-v1","evidence_sha256":"<sha256>","runtime_ddl_denied":true,"runtime_role_non_admin":true,"schema_at_expected_head":true,"schema_revision":"<selected_schema_revision>","status":"ready"}
 ```
 
+The emitted `schema_revision` must match `schema_revision` in the selected
+[`release-schema.json`](../../infra/beta/environment/release-schema.json) for
+the exact reviewed application source/image. Its source-graph validation is
+defined by `infra/beta/validate_release_schema.py`; do not substitute a historical
+revision or turn this example into an attestation.
+
 Record the immutable image digest, Azure job execution identity and completion
-time, the exact JSON above, and its hash in the protected deployment record.
+time, the actual returned JSON, and its hash in the protected deployment record.
 Do not copy the job definition, environment variables, Terraform plan/state,
 or raw platform diagnostics into the evidence record. The live execution—not a
 placeholder string—is the evidence for both the role and migration gates.

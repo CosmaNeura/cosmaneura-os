@@ -1,0 +1,250 @@
+{
+  "owner": {
+    "id": "edfb57b7-cdb4-4f5e-bd40-36df347b0b52",
+    "scheduled_at": "2026-09-23T04:00:00-04:00",
+    "completed_at": "2026-09-23T04:00:00-04:00",
+    "local_date": "2026-09-23",
+    "contract_version": 2,
+    "snapshot_version": 2,
+    "kind": "practice_work_brief",
+    "generic": {
+      "items": [
+        {
+          "body": "Invented shared delivery 1",
+          "state": "approved",
+          "version": 2,
+          "due_date": "2026-10-01",
+          "ticket_id": "3c3526a3-cb46-4b9f-90b9-4a7b4ac0b06b",
+          "work_kind": "vendor_delivery",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "revision_id": "2177305e-8413-48ad-9772-8fbed6289337",
+          "payload_hash": "9f5ac579ef90decbc1ab6cfe7142057df54b43b2209ad935ac8ac53caeac6dd7",
+          "pending_offer": false,
+          "human_completion": false,
+          "ready_for_review": false
+        },
+        {
+          "body": "Invented shared delivery 3",
+          "state": "approved",
+          "version": 2,
+          "due_date": "2026-10-01",
+          "ticket_id": "7b3b8d85-629d-4a24-817f-602b378eaa78",
+          "work_kind": "vendor_delivery",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "revision_id": "a304d086-fac3-4c51-a04e-d98eacc76b73",
+          "payload_hash": "96ee791bc8530cfa146950efbcfc7f48862944d87abee3f3ec09bcb7b6250fba",
+          "pending_offer": false,
+          "human_completion": false,
+          "ready_for_review": false
+        },
+        {
+          "body": "Invented shared delivery 2",
+          "state": "approved",
+          "version": 2,
+          "due_date": "2026-10-01",
+          "ticket_id": "7f1b087b-f814-4cc3-8226-958cc876602e",
+          "work_kind": "vendor_delivery",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "revision_id": "b3f9436a-7089-4425-855a-ec3c62d81d21",
+          "payload_hash": "76bf6ce6e9a0af8bf83a0cac9e250a393b2fbca02c7f7b3ef50468810625d713",
+          "pending_offer": false,
+          "human_completion": false,
+          "ready_for_review": false
+        },
+        {
+          "body": "Invented shared delivery 0",
+          "state": "approved",
+          "version": 2,
+          "due_date": "2026-10-01",
+          "ticket_id": "8636b29f-fae5-42f0-ab09-8f31477e4753",
+          "work_kind": "vendor_delivery",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "revision_id": "84518c23-ca9f-4827-a7f0-db9403fb06f4",
+          "payload_hash": "98bd2f4174cccec2167a7724b4b039a991aa535d07f1a8435a1c89d55b3b48b9",
+          "pending_offer": false,
+          "human_completion": false,
+          "ready_for_review": false
+        },
+        {
+          "body": "Invented shared delivery 4",
+          "state": "approved",
+          "version": 2,
+          "due_date": "2026-10-01",
+          "ticket_id": "88a8fc9f-5659-4f3b-a878-b310e970e5c7",
+          "work_kind": "vendor_delivery",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "revision_id": "2457757d-2ad6-40fc-a2b8-e20979f97323",
+          "payload_hash": "b356149177d77bc2ff4cb3136ab1c2f3b7dd2ca8b994dff8f9f6b49539cf2b22",
+          "pending_offer": false,
+          "human_completion": false,
+          "ready_for_review": false
+        }
+      ],
+      "matching_items": 7,
+      "counts": {
+        "open": 7,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "verified_complete": 0
+      },
+      "withheld_sources": false,
+      "truncated": false
+    },
+    "incoming": {
+      "coverage": "complete",
+      "reason": null,
+      "items": [
+        {
+          "ticket_id": "3bc92412-8fac-4fc4-979c-50f8d3d7093d",
+          "revision_id": "4b1c3b06-8ac8-4d6e-b212-f1efcee48d77",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 1,
+          "state": "pending_approval",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": null,
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        },
+        {
+          "ticket_id": "50cd71a7-2a42-4435-84a7-642c5ea9a56c",
+          "revision_id": "5ab8a4c8-e3c6-4fff-a9b8-71785f329b59",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 1,
+          "state": "pending_approval",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": null,
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        },
+        {
+          "ticket_id": "581e0595-41c3-43ec-9aca-4cac65da7018",
+          "revision_id": "182be41a-a92f-4d13-b274-505a2ac381e7",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 1,
+          "state": "pending_approval",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": null,
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        },
+        {
+          "ticket_id": "653e9215-a8d3-48a4-97f3-06f28d9f4be2",
+          "revision_id": "b89d8089-3733-4148-b200-fad2f3a2018a",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 1,
+          "state": "pending_approval",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": null,
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        },
+        {
+          "ticket_id": "ca0e472d-8c48-4761-81e3-3813dbbbca6c",
+          "revision_id": "15b29fbd-7438-4b5d-83c5-1c2027c0b3bc",
+          "payload_hash": "4043ac5909de85ba6d144a5f6217a7eadde142ddbc3f206b9847040a50542933",
+          "version": 1,
+          "state": "pending_approval",
+          "body": "Please review the appointment question.",
+          "due_date": "2026-10-02",
+          "responsible": {
+            "id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+            "name": "Alex Owner",
+            "available": true
+          },
+          "originator_id": "c983bbe5-3b1a-41bf-85ec-ac5067b795dc",
+          "requires_owner_attention": false,
+          "pending_offer": false,
+          "ready_for_review": false,
+          "verified_current": false,
+          "publication_receipt_id": null,
+          "result_receipt_id": null,
+          "verification_receipt_id": null,
+          "changed_since_report": false
+        }
+      ],
+      "matching_items": 7,
+      "counts": {
+        "pending_approval": 7,
+        "open": 0,
+        "overdue": 0,
+        "awaiting_acceptance": 0,
+        "responsible_unavailable": 0,
+        "awaiting_review": 0,
+        "verified_complete": 0,
+        "source_unavailable": 0,
+        "work_changed": 0
+      },
+      "withheld_sources": false
+    },
+    "model_used": false
+  }
+}

@@ -1,0 +1,38 @@
+import {act} from 'react';
+import {createRoot,type Root} from 'react-dom/client';
+import {afterEach,expect,it,vi} from 'vitest';
+vi.hoisted(()=>{
+  vi.stubEnv('VITE_CORE_CONNECTION_ENABLED','true');vi.stubEnv('VITE_CONNECTION_ONBOARDING_ENABLED','true');
+  vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');
+});
+import {EncounterWorkspace} from './EncounterWorkspace';
+import {workspaceApi,type Workspace} from './workspace-api';
+import {coreConnectionApi} from './core-connection-api';
+import {teamFixture} from './team-setup-test-fixture';
+import {memoryDraftStorage} from './draft-test-fixture';
+import fixture from './__fixtures__/core-open.json';
+vi.mock('./core-connection-api',()=>({coreConnectionApi:{read:vi.fn()}}));
+vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
+const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+let host:HTMLDivElement,root:Root;
+afterEach(async()=>{if(root)await act(async()=>root.unmount());host?.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('moves from guided account setup into its existing private notebook without creating a catalog duplicate',async()=>{
+  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);
+  const identity={mode:'clerk_jwt' as const,getToken:async()=>'invented-owner'},team=teamFixture();
+  const selection=fixture.open.response.workspace;
+  const workspace:Workspace={id:selection.workspace_id,appointment_id:selection.appointment_id,label:'Invented W42 person',revision:1,entries:[],work_candidates:[]};
+  vi.spyOn(workspaceApi,'team').mockResolvedValue(team);
+  const existing=vi.spyOn(workspaceApi,'openExisting').mockResolvedValue({identity,team,workspace});
+  const catalog=vi.spyOn(workspaceApi,'catalog');const create=vi.spyOn(workspaceApi,'open');
+  vi.mocked(coreConnectionApi.read).mockResolvedValueOnce(fixture.connect.response as never).mockResolvedValueOnce(fixture.encounters.response as never).mockResolvedValueOnce(fixture.open.response as never);
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+  const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>!b.closest('[hidden]')&&(b.textContent?.trim()===label||[...b.querySelectorAll('strong')].some(s=>s.textContent?.trim()===label)));
+  const wait=async(check:()=>void)=>{for(let i=0;i<100;i++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));try{check();done=true;}catch{}});if(done)return;}check();};
+  const click=async(label:string)=>{await wait(()=>{expect(button(label),label).toBeTruthy();expect(button(label)!.matches(':disabled'),label).toBe(false);});await act(async()=>button(label)!.click());};
+  await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
+  await click('Connect your practice and services');await click('Cosmaneura account & appointments');
+  await click('Check connection status');await click('View appointments');await click('Open notebook');
+  await wait(()=>expect(existing).toHaveBeenCalledWith(identity,selection));
+  await wait(()=>expect(host.querySelector('.settings-hub')?.hasAttribute('hidden')).toBe(true));
+  expect(host.textContent).toContain(workspace.label);expect(catalog).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
+});
