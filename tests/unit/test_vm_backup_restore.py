@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import json
 from copy import deepcopy
 from pathlib import Path
 
@@ -58,6 +59,40 @@ def configuration():
         "target_lsn": TARGET_START,
         "restore_certificate_sha256": "c" * 64,
     }
+
+
+@pytest.mark.parametrize("action", ["verify", "run", "wal"])
+def test_only_local_verifier_can_start_without_cloud_credential_access(
+    monkeypatch, configuration, action
+):
+    monkeypatch.setattr(restore.sys, "argv", ["restore.py", action])
+    monkeypatch.setattr(backup, "read_file", lambda path: json.dumps(configuration).encode())
+    checked = []
+    monkeypatch.setattr(backup.Runner, "preflight_host", lambda self: checked.append("host"))
+
+    def inaccessible_credentials(self):
+        raise PermissionError("synthetic credential namespace unavailable")
+
+    monkeypatch.setattr(backup.Runner, "preflight", inaccessible_credentials)
+    monkeypatch.setattr(restore, "verify_paused", lambda runner: {"status": "synthetic-paused"})
+    if action == "verify":
+        assert restore.main() == 0
+        assert checked == ["host"]
+    else:
+        with pytest.raises(PermissionError):
+            restore.main()
+
+
+def test_local_verifier_still_refuses_invalid_host_boundary(monkeypatch, configuration):
+    monkeypatch.setattr(restore.sys, "argv", ["restore.py", "verify"])
+    monkeypatch.setattr(backup, "read_file", lambda path: json.dumps(configuration).encode())
+
+    def refuse_host(self):
+        raise backup.Refused("dedicated host account")
+
+    monkeypatch.setattr(backup.Runner, "preflight_host", refuse_host)
+    with pytest.raises(backup.Refused, match="dedicated host account"):
+        restore.main()
 
 
 def test_recovery_configuration_preserves_all_source_control_floors(configuration):
