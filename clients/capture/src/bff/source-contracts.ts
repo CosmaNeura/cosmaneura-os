@@ -1,5 +1,6 @@
 /** Qualified transcript evidence. It grants neither capture nor clinical review. */
 import type { RequestOptions, Transcript } from "./contracts";
+import { MAX_TRANSCRIPT_TOTAL_CONTENT_CHARS } from "./transcript-limits";
 import { canonicalCaptureTimestamp as timestamp, canonicalRecoveryRequest,
   validateRecoveryHistory, type CaptureRecoveryHistory } from "./recovery-contracts";
 import { closed, invalid, role, uuid, validTranscriptText, validateWorking, workingHash,
@@ -76,7 +77,7 @@ function validateRaw(value: unknown, sessionId: string, now: Date): Transcript {
           Number.isFinite(segment.confidence) && segment.confidence >= 0 && segment.confidence <= 1)) invalid();
     previousStart = segment.start_ms; characters += [...segment.content].length;
   }
-  if (characters > 100000) invalid();
+  if (characters > MAX_TRANSCRIPT_TOTAL_CONTENT_CHARS) invalid();
   return value as unknown as Transcript;
 }
 export async function validateCaptureSource(value: unknown, sessionId: string, now = new Date()): Promise<CaptureSourceEnvelope> {

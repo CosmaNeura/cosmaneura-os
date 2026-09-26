@@ -9,17 +9,21 @@ import httpx
 from pydantic import AwareDatetime, Field, SecretStr
 
 from cosmas_os.adapters.capture_native_start import validate_native_start
-from cosmas_os.ports.capture_native_extension import validate_native_extension
 from cosmas_os.adapters.core_capture import HttpCoreCaptureBinding
 from cosmas_os.ports import capture_protocol as protocol
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
+from cosmas_os.ports.capture_native_extension import validate_native_extension
 from cosmas_os.ports.capture_recovery import (
     MAX_RECOVERY_STATE_BYTES,
     CaptureRecoveryReceipt,
     CaptureRecoveryState,
 )
 from cosmas_os.ports.capture_source import MAX_CAPTURE_SOURCE_BYTES, CaptureSourceEnvelope
-from cosmas_os.ports.capture_working import CaptureWorkingTranscript, canonical_hash
+from cosmas_os.ports.capture_working import (
+    MAX_WORKING_BYTES,
+    CaptureWorkingTranscript,
+    canonical_hash,
+)
 from cosmas_os.ports.core_capture import (
     ActorRef,
     BindingRef,
@@ -450,11 +454,11 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
                     if operation.kind == "creator_review"
                     else MAX_CAPTURE_SOURCE_BYTES + 4096
                     if operation.kind in {"capture_source", "correct_capture_source"}
-                    else 16_781_312
+                    else MAX_WORKING_BYTES + 4096
                     if operation.kind in {"working_transcript", "correct_transcript"}
                     else MAX_RECOVERY_STATE_BYTES + 4096
                     if operation.kind == "capture_recovery_state"
-                    else 4_198_400
+                    else MAX_CAPTURE_SOURCE_BYTES + 4096
                     if operation.kind == "transcript"
                     else 131072
                     if operation.kind == "reserve_chunks"

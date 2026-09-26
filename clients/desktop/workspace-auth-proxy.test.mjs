@@ -7,6 +7,22 @@ const ready = {phase: 'ready', revision: id, identity: {userId: 'user_one', sess
 const response = value => Response.json(value, {headers: {'Cache-Control': 'no-store'}});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('capture operation transport carries long corrections/reviews with finite bounds', async () => {
+  const path=`/workspaces/${id}/capture/operations`;
+  const body=JSON.stringify({content:'🩺'.repeat(500_000)});
+  const accepted=await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body}),fixture(),async (_url,options)=>{
+    assert.equal(new TextDecoder().decode(options.body),body);
+    return response({text:'x'.repeat(26*1024*1024)});
+  });
+  assert.equal(accepted.status,200);
+  assert.equal((await accepted.json()).text.length,26*1024*1024);
+  const tooLarge=await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body:' '.repeat(4*1024*1024+1)}),fixture(),()=>assert.fail('no oversized request dispatch'));
+  assert.equal(tooLarge.status,503);
+  const oversized=await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body:'{}'}),fixture(),async()=>
+    new Response(new Uint8Array(32*1024*1024+4097),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));
+  assert.equal(oversized.status,503);
+});
+
 test('preparation admits exact private read/review routes with bounded input and receipts', async () => {
   const base = `/workspaces/${id}/prep-work`;
   for (const [suffix, method] of [['', 'GET'], ['', 'POST'], ['/' + id, 'GET'], ['/' + id + '/decide', 'POST'], ['/' + id + '/verify', 'POST']]) {

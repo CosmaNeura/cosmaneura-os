@@ -1,4 +1,5 @@
 import { HttpCreatorReviewApi } from "../../clients/scribe-review/creator-review-api";
+import { MAX_CREATOR_REVIEW_BYTES } from "../../clients/capture/src/bff/transcript-limits";
 import { BffResponseError } from "../../clients/capture/src/bff/http-client";
 import { request } from "./capture-api";
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
@@ -13,7 +14,7 @@ export function creatorReviewApi(workspaceId: string, sessionId: string,
       const value = await request(workspaceId, "operations", identity, {
         session_id: sessionId, idempotency_key: operation.key ?? crypto.randomUUID(),
         operation: {kind, ...(operation.body ? {payload: operation.body} : {})},
-      }, signal, 8 * 1024 * 1024 + 4096);
+      }, signal, MAX_CREATOR_REVIEW_BYTES + 4096);
       if (!value || typeof value !== "object" || Array.isArray(value) ||
           Object.keys(value).sort().join(",") !== "operation,receipt,session_id,workspace_id") throw new Error("Invalid review response");
       const result = value as Record<string, unknown>;

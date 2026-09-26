@@ -1,5 +1,6 @@
 import {workspaceFetch} from './workspace-protocol';
 import { WorkspaceCaptureBff } from "../../clients/capture/src/bff/workspace-client";
+import { MAX_CAPTURE_SOURCE_BYTES } from "../../clients/capture/src/bff/transcript-limits";
 import { BffResponseError } from "../../clients/capture/src/bff/http-client";
 import type { AuthenticatedWorkspaceIdentity, CaptureBotSelection } from "./workspace-api";
 import { assertCurrentDesktopSession, workspaceAuthHeaders } from "./workspace-auth-headers";
@@ -141,8 +142,7 @@ export function workspaceCaptureBff(workspaceId: string, sessionId: string, iden
   return new WorkspaceCaptureBff(workspaceId, sessionId,
     (body, signal) => request(workspaceId, "operations", identity, body,
       signal && scopeSignal ? AbortSignal.any([signal, scopeSignal]) : signal ?? scopeSignal,
-      body.operation.kind === "transcript" ? 4_198_400 :
-        body.operation.kind === "capture_source" ? 25_169_920 :
+      ["transcript", "capture_source"].includes(body.operation.kind) ? MAX_CAPTURE_SOURCE_BYTES + 4096 :
         body.operation.kind === "capture_recovery_state" ? 2_004_096 : 131072));
 }
 

@@ -1,4 +1,6 @@
 import { MAX_CHUNKS } from "../capture/protocol/generated";
+import { MAX_CREATOR_REVIEW_BYTES, MAX_TRANSCRIPT_TOTAL_CONTENT_CHARS } from "../capture/src/bff/transcript-limits";
+import { characters, validTranscriptText } from "../capture/src/bff/working-contracts";
 import type { components } from "./capture-api";
 import { readBoundedJson } from "./beta-api";
 import { isUuid } from "./contracts";
@@ -109,7 +111,7 @@ export class HttpCreatorReviewApi implements CreatorReviewApi {
     }
     requireValue(response.headers.get("content-type")?.split(";", 1)[0] === "application/json");
     try {
-      return await readBoundedJson(response, 8 * 1024 * 1024);
+      return await readBoundedJson(response, MAX_CREATOR_REVIEW_BYTES);
     } catch {
       throw new CreatorReviewError("invalid_response");
     }
@@ -143,10 +145,13 @@ export function parseCreatorReview(value: unknown, sessionId: string): CreatorRe
   const segments = array(working.segments);
   requireValue(sources.length > 0 && sources.length === segments.length);
   const byId = new Map<string, Record<string, unknown>>();
+  let totalSourceCharacters = 0;
   for (const item of sources) {
     const segment = record(item);
     requireValue(isUuid(segment.source_segment_id) && !byId.has(segment.source_segment_id));
     requireValue(positive(segment.source_segment_version) && content(segment.content));
+    totalSourceCharacters += characters(segment.content as string);
+    requireValue(totalSourceCharacters <= MAX_TRANSCRIPT_TOTAL_CONTENT_CHARS);
     requireValue(["en-US", "es-US", "unknown"].includes(String(segment.source_locale)));
     requireValue(["clinician", "patient", "other", "unknown"].includes(String(segment.speaker_role)));
     requireValue(Number.isSafeInteger(segment.start_ms) && Number(segment.start_ms) >= 0);
@@ -223,5 +228,5 @@ function array(value: unknown): unknown[] {
 }
 function positive(value: unknown): boolean { return Number.isSafeInteger(value) && Number(value) > 0; }
 function content(value: unknown): boolean {
-  return typeof value === "string" && value.trim().length > 0 && value.length <= 100_000;
+  return validTranscriptText(value);
 }

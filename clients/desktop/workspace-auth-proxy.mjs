@@ -135,7 +135,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     const prepWorkPath = path.endsWith('/prep-work') || path.includes('/prep-work/');
     const routinePath = path.startsWith('/provider-team/routines/');
     const maximumInput = identityPath || activityPath ? 0 : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
-      path.includes('/capture/') ? 1048576 : 128000;
+      path.endsWith('/capture/operations') ? 4194304 : path.includes('/capture/') ? 1048576 : 128000;
     const body = await boundedBytes(request.body, maximumInput, signal);
     if (request.method === 'GET' && body.length) return unavailable(400);
     if (request.method === 'POST') JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(body));
@@ -161,7 +161,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     if(workspaceProtocol && response.status>=200 && response.status<300 && response.headers.get('X-Cosmas-Workspace-Protocol')!=='1'){cancelBody(response.body);return unavailable(426);}
     if (strictResponse && [401,403,404].includes(response.status)) authorityStatus = response.status;
     const responseType = connector?.binaryResponse && response.status === 200 ? 'application/pdf' : 'application/json';
-    const maximumOutput = identityPath ? 1024 : activityPath ? response.status === 200 ? 65536 : 1024 : connector ? connector.errorOutput && response.status !== 200 ? connector.errorOutput : connector.binaryResponse && response.status !== 200 ? 8192 : connector.output : modelReceipt || teamInfoPath ? 16384 : teamPath ? 8388608 : prepWorkPath ? 1048576 : appointmentPath || routinePath ? 32768 : path.endsWith('/scheduling/availability') ? 1048576 : path.includes('/capture/') ? 25169920 : 12000000;
+    const maximumOutput = identityPath ? 1024 : activityPath ? response.status === 200 ? 65536 : 1024 : connector ? connector.errorOutput && response.status !== 200 ? connector.errorOutput : connector.binaryResponse && response.status !== 200 ? 8192 : connector.output : modelReceipt || teamInfoPath ? 16384 : teamPath ? 8388608 : prepWorkPath ? 1048576 : appointmentPath || routinePath ? 32768 : path.endsWith('/scheduling/availability') ? 1048576 : path.endsWith('/capture/operations') ? 32 * 1024 * 1024 + 4096 : path.includes('/capture/') ? 25169920 : 12000000;
     const length = response.headers.get('Content-Length');
     if (response.headers.get('Content-Type')?.split(';', 1)[0].trim() !== responseType ||
         !response.headers.get('Cache-Control')?.split(',').some(value => value.trim().toLowerCase() === 'no-store') ||

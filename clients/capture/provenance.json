@@ -246,5 +246,21 @@
       "../../web/src/capture-runtime.ts"
     ],
     "preserved": "CosmaBot workspace/session scoping, encrypted record format, CAS, upload concurrency, receipt binding and recovery authorization"
+  },
+  "long_visit_response_compatibility": {
+    "core_ref": "bec60877ee0cb142c27af7a07e59939b275f400d",
+    "scribe_ref": "a947b5499cac449d4132c666a0229140b6674f34",
+    "scope": "Consumer limits: 500000 aggregate characters, unchanged100000 per-segment characters,24MiB source/working and32MiB review. Exact workspace operation transport limits include wrapper overhead; currentCore4MiB correction request bound carried end-to-end.",
+    "adapted_files": [
+      "src/bff/transcript-limits.ts",
+      "src/bff/working-contracts.ts",
+      "src/bff/source-contracts.ts",
+      "../scribe-review/creator-review-api.ts",
+      "../desktop/workspace-auth-proxy.mjs",
+      "../../web/src/capture-api.ts",
+      "../../web/src/capture-working-api.ts",
+      "../../web/src/creator-review-api.ts"
+    ],
+    "preserved": "Complete text, current source/session/hash binding, translation and clinician review, and smaller non-operation endpoint limits."
   }
 }

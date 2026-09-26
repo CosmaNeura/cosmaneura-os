@@ -1,4 +1,5 @@
 import { BffResponseError } from "./http-client";
+import { MAX_TRANSCRIPT_TOTAL_CONTENT_CHARS, MAX_TRANSCRIPT_SEGMENT_CONTENT_CHARS } from "./transcript-limits";
 
 export type SpeakerRole = "clinician" | "patient" | "other" | "unknown";
 export type WorkingSegment = { source_segment_id: string; source_segment_version: number;
@@ -30,7 +31,7 @@ export const closed = (v: unknown, keys: string): v is Record<string, unknown> =
 export const role = (v: unknown): v is SpeakerRole => ["clinician", "patient", "other", "unknown"].includes(v as string);
 export const characters = (v: string) => [...v].length;
 export const validTranscriptText = (v: unknown): v is string => typeof v === "string" && !!v.trim() &&
-  !v.includes("\0") && characters(v) <= 100000 && new TextDecoder().decode(new TextEncoder().encode(v)) === v;
+  !v.includes("\0") && characters(v) <= MAX_TRANSCRIPT_SEGMENT_CONTENT_CHARS && new TextDecoder().decode(new TextEncoder().encode(v)) === v;
 export function invalid(): never { throw new BffResponseError(503, "capture_receipt_invalid", null); }
 const originKeys = "source_segment_id,source_segment_version,source_locale,speaker_id,speaker_role,start_ms,end_ms";
 
@@ -84,9 +85,8 @@ export async function validateWorking(value: unknown, session: string, rawId: st
     if (projected.resolution !== (english ? "english_source" : "unresolved") || projected.content !== (english ? segment.content : null)) invalid();
     if (!english) expected.add(segment.source_segment_id + (segment.source_locale === "es-US" ? ":translation_missing" : ":source_locale_unknown"));
   }
-  if (count > 100000 || end !== s.duration_ms || w.note_ready !== (expected.size === 0) || w.blockers.length !== expected.size) invalid();
+  if (count > MAX_TRANSCRIPT_TOTAL_CONTENT_CHARS || end !== s.duration_ms || w.note_ready !== (expected.size === 0) || w.blockers.length !== expected.size) invalid();
   for (const b of w.blockers) if (!closed(b, "source_segment_id,code") || !expected.delete(b.source_segment_id + ":" + b.code)) invalid();
   if (await workingHash({raw_transcript_sha256:value.raw_transcript_sha256,working_source:s}) !== value.working_sha256) invalid();
   return value as WorkingReceipt;
 }
-

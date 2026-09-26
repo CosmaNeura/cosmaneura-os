@@ -28,6 +28,21 @@ it("reuses an exact correction body/key and verifies its returned successor", as
   expect(fetcher.mock.calls[0][1].body).toEqual(fetcher.mock.calls[1][1].body);
   expect(JSON.parse(fetcher.mock.calls[0][1].body).operation.payload).toEqual(golden.correction);
 });
+it("saves a multi-segment Unicode correction above the previous whole-visit limit", async () => {
+  const next = structuredClone(second);
+  const edits = next.working_source.segments.map(segment => ({source_segment_id:segment.source_segment_id,
+    speaker_role:segment.speaker_role,content:"🩺".repeat(100_000)}));
+  for (let i = 0; i < edits.length; i++) {
+    Object.assign(next.working_source.segments[i], {content:edits[i].content,source_segment_version:2});
+    Object.assign(next.working_transcript.segments[i], {content:edits[i].content,source_segment_version:2});
+  }
+  next.working_sha256 = await workingHash({raw_transcript_sha256:next.raw_transcript_sha256,
+    working_source:next.working_source});
+  const fetcher=vi.fn().mockResolvedValue(json(envelope(next,"correct_transcript")));
+  vi.stubGlobal("fetch",fetcher);
+  expect(await correctWorking(workspace,identity,base,edits,crypto.randomUUID())).toEqual(next);
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).operation.payload.corrections).toEqual(edits);
+});
 it.each(["hash","raw","session","projection","origin","blockers","actor","extra","scope"])("rejects malformed or misbound working data: %s", async fault => {
   const packet=structuredClone(envelope(second)); const value=packet.receipt as WorkingReceipt;
   if(fault==="hash") value.working_sha256="a".repeat(64);

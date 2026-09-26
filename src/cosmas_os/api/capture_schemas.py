@@ -76,7 +76,7 @@ async def read_capture_request[T: ProtectedModel](request: Request, schema: type
         ):
             raise ValueError
         body = bytearray()
-        max_bytes = maximum_bytes if maximum_bytes is not None else 270336 if schema is CaptureNoteRequest else 1_048_576 if schema in (CaptureOperationRequest, CoreNoteLink) else 2048
+        max_bytes = maximum_bytes if maximum_bytes is not None else 270336 if schema is CaptureNoteRequest else 4_194_304 if schema is CaptureOperationRequest else 1_048_576 if schema is CoreNoteLink else 2048
         async for chunk in request.stream():
             if len(body) + len(chunk) > max_bytes:
                 raise ValueError

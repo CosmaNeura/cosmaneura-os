@@ -18,6 +18,20 @@ async function rehash(source: CaptureSourceEnvelope) {
     working_sha256:working.working_sha256,recovery_sha256:source.recovery_sha256});
 }
 describe("Scribe qualified source fixture", () => {
+  it("opens a complete long Unicode visit and keeps the per-segment limit", async () => {
+    const source = structuredClone(fixture.base);
+    const text = "🩺".repeat(100_000);
+    for (const s of source.raw_transcript.segments) s.content = text;
+    for (const s of source.working_transcript.working_source.segments) s.content = text;
+    for (const s of source.working_transcript.working_transcript.segments) s.content = text;
+    await rehash(source);
+    expect((await validate(source)).raw_transcript.segments).toHaveLength(2);
+    source.raw_transcript.segments[0].content += "x";
+    source.working_transcript.working_source.segments[0].content += "x";
+    source.working_transcript.working_transcript.segments[0].content += "x";
+    await rehash(source);
+    await expect(validate(source)).rejects.toThrow();
+  });
   it.each([
     [0, "df87ec8a91e59d3f1f1578fced53b8f139d229cbd989056a7d950a70ed0ba626"],
     [1, "24d0d2b4c165a194c5c4c3f3e0416373b19d9e5167ea8b19b291d68e698dc505"],
