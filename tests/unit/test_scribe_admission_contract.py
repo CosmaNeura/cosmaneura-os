@@ -53,7 +53,11 @@ def receipt(binding, attestation, **changes):
     }
 
 
-def test_existing_wire_contract_and_fixed_scope_are_preserved(binding, attestation):
+@pytest.mark.parametrize("regions", [("US-NY",), ()])
+def test_existing_wire_contract_and_fixed_scope_are_preserved(binding, attestation, regions):
+    attestation = ConsentAttestation.model_validate(
+        {**attestation.model_dump(), "participant_regions": regions}
+    )
     calls = []
     consent = receipt(binding, attestation)
     session_id = str(uuid4())
@@ -69,6 +73,7 @@ def test_existing_wire_contract_and_fixed_scope_are_preserved(binding, attestati
         assert "box_id" not in body and "owner_id" not in body
         if request.url.path == "/v1/consents":
             assert body["all_parties_consented"] is True
+            assert body["participant_regions"] == list(regions)
             assert body["patient_id"] == binding.patient_id
             return httpx.Response(201, json=consent)
         assert request.url.path == "/v1/sessions"
@@ -138,10 +143,11 @@ def test_changed_or_revoked_consent_receipt_is_rejected(binding, attestation, ch
 
 
 @pytest.mark.parametrize("value", [False, 1, "true", None])
-def test_consent_must_be_explicit_true(attestation, value):
+@pytest.mark.parametrize("regions", [("US-NY",), ()])
+def test_consent_must_be_explicit_true(attestation, value, regions):
     with pytest.raises(ValidationError):
         ConsentAttestation.model_validate(
-            {**attestation.model_dump(), "all_parties_consented": value}
+            {**attestation.model_dump(), "participant_regions": regions, "all_parties_consented": value}
         )
 
 

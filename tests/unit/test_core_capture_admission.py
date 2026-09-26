@@ -4,7 +4,7 @@ from uuid import uuid4
 
 import httpx
 import pytest
-from pydantic import SecretStr
+from pydantic import SecretStr, ValidationError
 
 from cosmas_os.adapters.core_capture_admission import HttpCoreCaptureAdmission
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
@@ -111,7 +111,7 @@ def open_port(selected, calls, mutate=lambda *_: None):
     )
 
 
-def run_admission(port, selected):
+def run_admission(port, selected, regions=("US-NY",)):
     token = port.exchange_context(selected, SecretStr("synthetic_PRIVATE_jwt"))
     credential = port.resolve_context(selected, token)
     binding = port.resolve_binding(selected, credential)
@@ -121,7 +121,7 @@ def run_admission(port, selected):
         CoreConsentAttestation(
             modality="in_person",
             method="verbal_attestation",
-            participant_regions=("US-NY",),
+            participant_regions=regions,
             all_parties_consented=True,
             granted_at=NOW,
         ),
@@ -129,16 +129,28 @@ def run_admission(port, selected):
     )
 
 
-def test_context_exchange_binding_and_admission_keep_credentials_in_transport_only():
+@pytest.mark.parametrize("regions", [("US-NY",), ()])
+def test_context_exchange_binding_and_admission_keep_credentials_in_transport_only(regions):
     selected, calls = selection(), []
     port = open_port(selected, calls)
     try:
-        result = run_admission(port, selected)
+        result = run_admission(port, selected, regions)
         assert result.workspace_id == selected.workspace_id and len(calls) == 4
+        assert json.loads(calls[-1].content)["attestation"]["participant_regions"] == list(regions)
         assert "PRIVATE" not in str(result) and "PRIVATE" not in result.model_dump_json()
         assert calls[0].headers["Authorization"] != calls[-1].headers["Authorization"]
     finally:
         port.close()
+
+
+@pytest.mark.parametrize("value", [False, 1, "true", None])
+def test_uncollected_location_still_requires_explicit_consent(value):
+    with pytest.raises(ValidationError):
+        CoreConsentAttestation.model_validate({
+            "modality": "in_person", "method": "verbal_attestation",
+            "participant_regions": [], "all_parties_consented": value,
+            "granted_at": NOW,
+        })
 
 
 @pytest.mark.parametrize(

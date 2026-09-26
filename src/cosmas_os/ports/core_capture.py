@@ -84,7 +84,8 @@ class CoreMountToken(ProtectedModel):
 
 class CoreConsentAttestation(ProtectedModel):
     modality: Literal["in_person", "virtual", "phone"]
-    participant_regions: tuple[Annotated[str, Field(pattern=r"^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$")], ...] = Field(min_length=1, max_length=16)
+    participant_regions: tuple[Annotated[str, Field(pattern=r"^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$")], ...] = Field(max_length=16)
+    # Match Core: empty location metadata does not waive explicit recording consent.
     method: Literal["verbal_attestation"]
     all_parties_consented: Literal[True]
     granted_at: AwareDatetime
