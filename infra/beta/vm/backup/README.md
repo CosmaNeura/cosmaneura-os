@@ -6,6 +6,47 @@ A committed change after the base backup survived; a later change after the
 target was excluded. Missing and corrupt WAL were refused. Runtime backup
 configuration remains Azure-only; it cannot select the fixture's file storage.
 
+## Public host installation
+
+`install-host.py` installs the reviewed public software and service definitions
+on `vm-cosmabot-staging-eus2-lab01`, Ubuntu 22.04 amd64. Native PostgreSQL 16
+`psql`, `postgres`, and `pg_controldata` must already be installed from the
+reviewed package source. An existing backup installation, account, group,
+state directory or loaded unit requires operator review before proceeding.
+These checks run before any persistent write or account creation.
+
+Prepare a root-owned directory beneath a root-owned, non-writable parent
+(for example `/opt/cosmabot/backup-inputs/release`). It must contain exactly
+the six `.service`/`.timer` files in this directory, `backup.py`, `restore.py`,
+`walg.json`, `resolv.conf`, `logrotate.conf`, the pinned 3.0.9 binary named
+`wal-g`, and `bundle.json`. The manifest has exactly `version: 1`, the reviewed
+40-character `source_commit`, and `files`, mapping each of those 12 payload
+filenames to its SHA256. Record the manifest's SHA256 in the release evidence.
+Credentials and database/configuration inputs do not belong in this bundle.
+
+Run the exact reviewed installer with the bound public values:
+
+```sh
+python3 -I install-host.py \
+  --bundle "$COSMABOT_BACKUP_BUNDLE" \
+  --bundle-sha256 "$COSMABOT_BACKUP_BUNDLE_SHA256" \
+  --source-commit "$COSMABOT_BACKUP_SOURCE_COMMIT"
+```
+
+Installation creates distinct system accounts with no login shell, home or
+supplementary groups, installs root-owned public files, parses the units, reloads
+systemd and verifies that every job/timer is inactive and disabled or static.
+The receipt `/etc/cosmabot/backup-install.json` records the exact source and
+installed file hashes. A partial installation is preserved for diagnosis;
+rerunning cannot overwrite it or report success.
+
+This receipt qualifies software installation only. The separate writer/reader
+certificates, PostgreSQL replication role/slot/password, private DNS, TLS,
+validated `backup.json`/`restore.json`, receiver/timer activation and actual
+Azure backup/restore still require their reviewed deployment steps. The
+installer does not place credentials or start backup, restore or application
+services. The restore target always remains separate from application startup.
+
 ## PostgreSQL 16 restore settings
 
 `restore.py` reads the fetched cluster's `pg_controldata` before rendering a
