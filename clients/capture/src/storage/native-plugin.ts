@@ -5,9 +5,10 @@ import {
 } from "@cosmaneura-scribe/capture-protocol";
 
 import { QueueInvariantError } from "../queue/errors";
-import { assertSafeCaptureRecord } from "../queue/records";
+import { assertSafeCaptureRecord, captureChunkMetadata } from "../queue/records";
 import type {
   CaptureChunkRecord,
+  CaptureChunkMetadata,
   CaptureQueueStorage,
   ReservedChunkRecord,
 } from "../queue/types";
@@ -58,15 +59,25 @@ export class NativePluginQueueStorage implements CaptureQueueStorage {
   }
 
   async list(): Promise<readonly CaptureChunkRecord[]> {
+    const records: CaptureChunkRecord[] = [];
+    for await (const record of this.#scan()) records.push(record);
+    return records;
+  }
+
+  async listMetadata(): Promise<readonly CaptureChunkMetadata[]> {
+    const records: CaptureChunkMetadata[] = [];
+    for await (const record of this.#scan()) records.push(captureChunkMetadata(record));
+    return records;
+  }
+
+  async *#scan(): AsyncGenerator<CaptureChunkRecord> {
     const result = await this.#plugin.list();
-    return Promise.all(
-      result.keys.map(async (objectId) => {
-        const value = await this.#plugin.get({ key: objectId });
-        const record = fromNativeRecord(objectId, value.key, value.data, value.revision);
-        this.#assertSession(record);
-        return record;
-      }),
-    );
+    for (const objectId of result.keys) {
+      const value = await this.#plugin.get({ key: objectId });
+      const record = fromNativeRecord(objectId, value.key, value.data, value.revision);
+      this.#assertSession(record);
+      yield record;
+    }
   }
 
   async compareAndSwap(

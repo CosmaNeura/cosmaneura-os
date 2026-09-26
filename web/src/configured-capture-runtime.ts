@@ -79,7 +79,7 @@ export async function openConfiguredWorkspaceRuntime(options:{workspaceId:string
           if(!reviewOnly)await current.deactivate();
           abort.abort();
           if(await flow.getActiveCaptureState()===null&&await flow.getPreparationState()===null&&
-            (await queue.storage.list()).every(record=>record.state==="purged")){
+            (await queue.storage.listMetadata()).every(record=>record.state==="purged")){
             await releaseEmptyPreparationTransfer(`cosmas-capture-flow:${workspaceId}`,
               `cosmas-configured-flow:v1:${workspaceId}`,sessionId);
             await profiles.releaseQueueStorageKind(sessionId,queue.kind);

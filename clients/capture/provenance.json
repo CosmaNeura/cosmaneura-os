@@ -179,7 +179,8 @@
     },
     "src/queue/capture-queue.ts": {
       "source_path": "apps/capture/src/queue/capture-queue.ts",
-      "sha256": "27b860f7cedf81977b9b0962393c72ee06e6127617a62f17b24324115d8a07f7"
+      "sha256": "462edcc5b9db2bc6ad3e88178ca082d3e373ed6ba5fb2e594148d50754d2f14b",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
     },
     "src/queue/errors.ts": {
       "source_path": "apps/capture/src/queue/errors.ts",
@@ -191,11 +192,13 @@
     },
     "src/queue/records.ts": {
       "source_path": "apps/capture/src/queue/records.ts",
-      "sha256": "d5436c7b82142be3c8b11240444d952840e8c14bdbd7a8126d747f60ba4b2878"
+      "sha256": "2f5bec6a48a673355fed9f1c8fedb41c253e74e76b54aef95e1d562cf953cac0",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
     },
     "src/queue/types.ts": {
       "source_path": "apps/capture/src/queue/types.ts",
-      "sha256": "433d1ebab57f3a5e66a7b4297c8884c69b20e7c909be2275b456d4a4e8f0a4ee"
+      "sha256": "d99e759afad0a2f0f2f47fc38b43aabb6491af9a2cad6643c0f1d9b84447f3ca",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
     },
     "src/storage/encrypted-indexeddb.test.ts": {
       "source_path": "apps/capture/src/storage/encrypted-indexeddb.test.ts",
@@ -203,7 +206,8 @@
     },
     "src/storage/encrypted-indexeddb.ts": {
       "source_path": "apps/capture/src/storage/encrypted-indexeddb.ts",
-      "sha256": "0c5e45e01d6e94ae6e68d1be97e85788b642bd9d8e25cd189df21fe8ca669f84"
+      "sha256": "f228291ad64de85cfdd5cacfd45f5e9dcd88a47c71911f4de93d24aa27874a7e",
+      "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1"
     },
     "src/storage/index.ts": {
       "source_path": "apps/capture/src/storage/index.ts",
@@ -226,5 +230,21 @@
       "sha256": "9c7a844d5ac6558890886af926b2264f375cc84c05ad3259ed86cfde00011c38",
       "source_ref": "6a55bf7ec407172834b58a740801a8eb58ff0b5e"
     }
+  },
+  "bounded_device_queue_reuse": {
+    "source_ref": "da6e85a4439711cb5abf50f8a65700495d966aa1",
+    "source_change": "PR131 authenticated metadata enumeration; sequential device payload scanning",
+    "adapted_files": [
+      "src/storage/native-plugin.ts",
+      "src/flow/controller.ts",
+      "src/configured/flow/controller.ts",
+      "src/flow/empty-preparation-transfer.ts",
+      "../desktop/recorder/durable-record-store.ts",
+      "../desktop/recorder/durable-queue-store.ts",
+      "../../web/src/capture-storage.ts",
+      "../../web/src/configured-capture-runtime.ts",
+      "../../web/src/capture-runtime.ts"
+    ],
+    "preserved": "CosmaBot workspace/session scoping, encrypted record format, CAS, upload concurrency, receipt binding and recovery authorization"
   }
 }

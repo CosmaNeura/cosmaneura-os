@@ -31,7 +31,7 @@ async function fixture(activePresent = true) {
     const keyState = { schemaVersion: 2 as const, sessionId, keyVersion: 'invented-key-v1', wrappedDek: 'a'.repeat(342), idempotencyKey: 'same-key-binding', state: 'bound' as const };
     await legacy.putSessionKeyCandidate(keyState, key);
     const state: CaptureRecoveryState = { session_status: 'created', lease_closed: false, current_lease: lease, history: { session_id: sessionId, recoveries: [] } };
-    const queue = { list: vi.fn().mockResolvedValue([]) } as unknown as CaptureQueueStorage;
+    const queue = { listMetadata: vi.fn().mockResolvedValue([]) } as unknown as CaptureQueueStorage;
     const bff = { getCaptureRecoveryState: vi.fn().mockImplementation(async () => state), recoverCapture: vi.fn() };
     const options = { source, destination, sessionId, kind: 'browser' as const, indexedDB, crypto, queue, bff,
         now: () => new Date('2026-09-24T12:01:00Z') };
@@ -76,7 +76,7 @@ describe('explicit empty preparation transfer', () => {
         if (problem === 'audio')
             await f.legacy.putActiveCaptureState({ ...f.active, recordedChunks: 1, recordedPlaintextBytes: 10 });
         if (problem === 'queue')
-            vi.mocked(f.options.queue.list).mockResolvedValue([{ state: 'encrypted', reservation: { sessionId } }] as never);
+            vi.mocked(f.options.queue.listMetadata).mockResolvedValue([{ state: 'encrypted', reservation: { sessionId } }] as never);
         if (problem === 'segment')
             await f.legacy.putCaptureRecoveryState(beginRecoverySegment(createCaptureRecoveryState(sessionId), {
                 segmentId: crypto.randomUUID(), recoveryGapId: crypto.randomUUID(), startedAt: f.active.startedAt,

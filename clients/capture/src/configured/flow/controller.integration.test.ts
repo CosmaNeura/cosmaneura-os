@@ -96,7 +96,9 @@ describe("CaptureFlowController", () => {
       queueStorage = await EncryptedIndexedDbQueueStorage.open({ databaseName: queueName, indexedDB, crypto: TEST_CRYPTO });
       const secondSource = new InspectableCaptureSource(channel);
       const second = createControllerWithSource({ bff, flowStore, queueStorage, origin, source: secondSource }); controllers.push(second);
-      expect(await second.restore()).toBe(true); expect(second.snapshot.state).toBe("paused");
+      const bulk = vi.spyOn(queueStorage, "list").mockRejectedValue(new Error("bulk audio enumeration forbidden"));
+      expect(await second.restore()).toBe(true);
+      expect(bulk).not.toHaveBeenCalled(); bulk.mockRestore(); expect(second.snapshot.state).toBe("paused");
       expect(secondSource.startCalls).toBe(0);
       const reserve = bff.reserveChunks.bind(bff), reserveSpy = vi.spyOn(bff, "reserveChunks").mockImplementationOnce(async (...args) => {
         await reserve(...args); throw new Error("invented lost reservation reply");
@@ -143,6 +145,7 @@ describe("CaptureFlowController", () => {
       await controller.startRecording(); await source.emit();
       const retained = await flowStore.getActiveCaptureState();
       const encrypted = (await queueStorage.list()).find(row => row.state === "encrypted")!;
+      vi.spyOn(queueStorage, "list").mockRejectedValue(new Error("bulk audio enumeration forbidden"));
       if (stage === "upload") vi.spyOn(bff, "authorizeUpload").mockRejectedValueOnce(new Error("synthetic offline authorization"));
       else if (stage === "denied") vi.spyOn(bff, "authorizeUpload").mockRejectedValueOnce(new BffResponseError(403, "forbidden", null));
       else completeSpy.mockImplementationOnce(async (...args) => {

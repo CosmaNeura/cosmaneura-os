@@ -1,12 +1,13 @@
-import { webcrypto } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { encodeChunkAdditionalDataBase64Url } from "@cosmaneura-scribe/capture-protocol";
+import { MAX_ENVELOPE_BYTES, base64UrlEncode, encodeEnvelope, encodeChunkAdditionalDataBase64Url } from "@cosmaneura-scribe/capture-protocol";
 import { bindCaptureQueueStorage, openCaptureQueueStorage, scopedNativePlugin } from "../../../../web/src/capture-storage";
 import { MemoryNativeQueuePlugin } from "../../test-fixtures/native-queue";
 import { EncryptedIndexedDbFlowStore } from "../flow/encrypted-store";
-import { createReservedRecord } from "../queue/records";
+import { attachEncryptedEnvelope, createReservedRecord } from "../queue/records";
 import { encodeCaptureRecord } from "./record-codec";
+import { NativePluginQueueStorage } from "./native-plugin";
 
 const workspace = "00000000-0000-4000-8000-000000000001";
 const session = "00000000-0000-4000-8000-000000000002";
@@ -15,7 +16,7 @@ const other = "00000000-0000-4000-8000-000000000004";
 const crypto = webcrypto as unknown as Crypto;
 const closers: (() => void)[] = [];
 beforeEach(() => { vi.stubGlobal("indexedDB", new IDBFactory()); vi.stubGlobal("crypto", crypto); });
-afterEach(() => { closers.splice(0).forEach(close => close()); vi.unstubAllGlobals(); });
+afterEach(() => { closers.splice(0).forEach(close => close()); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 function record(sid = session) {
   return createReservedRecord({protocolVersion:"1.0", objectId, sessionId:sid, channel:"microphone",
@@ -30,6 +31,44 @@ async function flow() {
 }
 
 describe("OS native queue binding", () => {
+  it("opens maximum-sized retained chunks with one native payload read at a time", async () => {
+    const plugin = new MemoryNativeQueuePlugin();
+    const storage = new NativePluginQueueStorage(scopedNativePlugin(plugin, workspace, session), session);
+    const header = { schema_version: "1.0" as const, content_encryption: "A256GCM" as const,
+      nonce: base64UrlEncode(new Uint8Array(12)), media_type: "audio/wav" as const };
+    const overhead = encodeEnvelope(header, new Uint8Array(16)).length - 16;
+    const envelope = encodeEnvelope(header, new Uint8Array(MAX_ENVELOPE_BYTES - overhead).fill(7));
+    const sha256 = createHash("sha256").update(envelope).digest("hex");
+    const objects: string[] = [];
+    for (let sequenceNumber = 0; sequenceNumber < 6; sequenceNumber += 1) {
+      const id = crypto.randomUUID(); objects.push(id);
+      const original = record();
+      const reserved = { ...original, reservation: { ...original.reservation, objectId: id, sequenceNumber,
+        additionalAuthenticatedData: encodeChunkAdditionalDataBase64Url({tenantId:workspace, sessionId:session,
+          objectId:id, channel:"microphone", sequenceNumber}) } };
+      await storage.create(reserved);
+      await storage.compareAndSwap(id, 1, attachEncryptedEnvelope(reserved, envelope, sha256));
+    }
+    let active = 0, peak = 0;
+    const get = plugin.get.bind(plugin);
+    vi.spyOn(plugin, "get").mockImplementation(async options => {
+      active += 1; peak = Math.max(peak, active);
+      try { await Promise.resolve(); return await get(options); } finally { active -= 1; }
+    });
+    const bulk = vi.spyOn(NativePluginQueueStorage.prototype, "list").mockRejectedValue(new Error("bulk audio enumeration forbidden"));
+    const reopened = await openCaptureQueueStorage(workspace, session, true, async () => ({plugin}));
+    const metadata = await reopened.storage.listMetadata();
+    expect(metadata).toHaveLength(6); expect(peak).toBe(1); expect(bulk).not.toHaveBeenCalled();
+    expect(metadata.every(item => !("envelope" in item) && "byteLength" in item && item.byteLength === MAX_ENVELOPE_BYTES)).toBe(true);
+    const retained = await reopened.storage.get(objects[0]!);
+    expect(retained?.state).toBe("encrypted");
+    if (!retained || !("envelope" in retained)) throw new Error("missing retained audio");
+    expect(retained.envelope).toEqual(envelope);
+    const lastKey = `cosmas-queue:v1:${workspace}:${session}:${objects.at(-1)}`;
+    plugin.records.set(lastKey, { ...plugin.records.get(lastKey)!, data: "corrupt" });
+    await expect(reopened.storage.listMetadata()).rejects.toMatchObject({code:"native_queue_integrity_failure"});
+  });
+
   it("does not assimilate Capacitor's synthetic then method while loading its proxy", async () => {
     let thenReads=0;
     const plugin=new Proxy(new MemoryNativeQueuePlugin(), {get(target,key,receiver) {
@@ -51,7 +90,7 @@ describe("OS native queue binding", () => {
     expect(await c.storage.create(record(other))).toBe(true);
     expect(plugin.records.size).toBe(3);
     plugin.reads.length = 0;
-    expect(await a.storage.list()).toEqual([record()]);
+    expect(await a.storage.listMetadata()).toEqual([record()]);
     expect(plugin.reads).toEqual([`cosmas-queue:v1:${workspace}:${session}:${objectId}`]);
     expect(await a.storage.get(other)).toBeNull();
   });
@@ -77,6 +116,7 @@ describe("OS native queue binding", () => {
     plugin.records.set(key, corrupt);
     await expect(storage.get(objectId)).rejects.toMatchObject({code:"native_queue_session_mismatch"});
     await expect(storage.list()).rejects.toMatchObject({code:"native_queue_session_mismatch"});
+    await expect(storage.listMetadata()).rejects.toMatchObject({code:"native_queue_session_mismatch"});
     await expect(storage.compareAndSwap(objectId,1,{...record(),revision:2})).rejects.toMatchObject({code:"native_queue_session_mismatch"});
     expect(plugin.records.get(key)).toEqual(corrupt);
   });

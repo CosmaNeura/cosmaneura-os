@@ -35,7 +35,7 @@ import type {
 import { QueueInvariantError } from "../queue/errors";
 import type { CaptureQueue } from "../queue/capture-queue";
 import type {
-  CaptureChunkRecord,
+  CaptureChunkMetadata,
   CaptureQueueTransport,
   ChunkReservation,
 } from "../queue/types";
@@ -275,7 +275,7 @@ export class CaptureFlowController {
       if (!storedRecovery?.gaps.length && this.#canCreateOrRecoverReservations()) {
         await this.#recoverReservationIntents();
       }
-      let records = (await this.#queue.list()).filter(
+      let records = (await this.#queue.listMetadata()).filter(
         (record) => record.reservation.sessionId === active.sessionId,
       );
       if (
@@ -283,7 +283,7 @@ export class CaptureFlowController {
         this.#canCreateOrRecoverReservations()
       ) {
         await this.#reserveInitialWindow();
-        records = (await this.#queue.list()).filter(
+        records = (await this.#queue.listMetadata()).filter(
           (record) => record.reservation.sessionId === active.sessionId,
         );
       }
@@ -989,7 +989,7 @@ export class CaptureFlowController {
   }
 
   async #purgeRegisteredChunks(): Promise<void> {
-    for (const record of await this.#queue.list()) {
+    for (const record of await this.#queue.listMetadata()) {
       if (
         record.reservation.sessionId === this.#requireSessionId() &&
         record.state === "registered"
@@ -1867,7 +1867,7 @@ function isRecoveryHold(error: unknown): error is QueueInvariantError {
 }
 
 function contiguousRecordedChunkCount(
-  records: readonly CaptureChunkRecord[],
+  records: readonly CaptureChunkMetadata[],
 ): number {
   const sequences = records
     .map((record) => record.reservation.sequenceNumber)

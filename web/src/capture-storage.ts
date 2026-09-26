@@ -19,7 +19,7 @@ export async function bindCaptureQueueStorage(flow: EncryptedIndexedDbFlowStore,
     if (hasLegacyFlow) throw new QueueInvariantError("queue_storage_profile_changed");
     const browser = await EncryptedIndexedDbQueueStorage.open({databaseName: `cosmas-capture-queue:${workspaceId}`});
     try {
-      if ((await browser.list()).some(record => record.reservation.sessionId === sessionId && record.state !== "purged")) {
+      if ((await browser.listMetadata()).some(record => record.reservation.sessionId === sessionId && record.state !== "purged")) {
         throw new QueueInvariantError("queue_storage_profile_changed");
       }
     } finally { browser.close(); }
@@ -42,7 +42,7 @@ export async function openCaptureQueueStorage(workspaceId: string, sessionId: st
   try {
     const {plugin} = await loadNative();
     const storage = new NativePluginQueueStorage(scopedNativePlugin(plugin, workspaceId, sessionId), sessionId);
-    await storage.list(); // Verify plugin availability and retained record integrity before capture.
+    await storage.listMetadata(); // Verify plugin availability and retained record integrity before capture.
     return {storage, kind: "native", close: () => undefined};
   } catch (error) {
     if (error instanceof QueueInvariantError) throw error;

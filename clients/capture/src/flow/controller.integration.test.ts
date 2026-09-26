@@ -316,6 +316,10 @@ describe("CaptureFlowController", () => {
       crypto: TEST_CRYPTO,
     });
     const bff = new HttpCaptureBff(createSameOriginFetch(origin));
+    const readCapabilities = bff.getCapabilities.bind(bff);
+    vi.spyOn(bff, "getCapabilities").mockImplementation(async (...args) => ({
+      ...await readCapabilities(...args), max_chunks: 1000, remaining_aggregate_plaintext_bytes: 67_108_864,
+    }));
     const queue = new CaptureQueue(queueStorage, { crypto: TEST_CRYPTO });
     const configureUploadConcurrency = vi.spyOn(queue, "configureUploadConcurrency");
     const source = new InspectableCaptureSource();

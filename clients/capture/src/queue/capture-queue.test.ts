@@ -28,6 +28,48 @@ const TENANT_ID = "20000000-0000-4000-8000-000000000002";
 const REGISTERED_AT = "2026-08-17T12:00:00.000Z";
 
 describe("CaptureQueue", () => {
+  it("reopens 1080 retained chunks and retries an unknown registration without bulk payload reads", async () => {
+    const options = { indexedDB: new IDBFactory(), databaseName: TEST_CRYPTO.randomUUID(), crypto: TEST_CRYPTO };
+    let storage = await EncryptedIndexedDbQueueStorage.open(options), now = 0;
+    const queueOptions = { crypto: TEST_CRYPTO, now: () => now, random: () => 0, baseRetryMs: 100 };
+    let queue = new CaptureQueue(storage, queueOptions);
+    try {
+      for (let sequence = 0; sequence < 1080; sequence += 1) {
+        const reservation = makeReservation(sequence);
+        await queue.reserve(reservation, "large-queue-reservation");
+        await queue.encrypt(reservation.objectId, makeEnvelope(sequence));
+      }
+      const retained = await queue.get(objectIdFor(1079));
+      storage.close();
+      storage = await EncryptedIndexedDbQueueStorage.open(options);
+      queue = new CaptureQueue(storage, queueOptions);
+      const bulk = vi.spyOn(storage, "list").mockRejectedValue(new Error("bulk audio enumeration forbidden"));
+      const reopened = await queue.listMetadata();
+      expect(reopened).toHaveLength(1080);
+      expect(reopened.every(record => !("envelope" in record))).toBe(true);
+      const attempts: RegisterChunkRequest[] = [];
+      const transport = successfulTransport(() => now, { receiptAlwaysReserved: true, register: async request => {
+        if (request.sequenceNumber === 1079) {
+          attempts.push({ ...request });
+          if (attempts.length === 1) throw new QueueTransportError("unknown_success", "registration_timeout");
+        }
+        return receiptFor(request);
+      } });
+      const first = await queue.drainOnce(transport);
+      expect(first.items.filter(item => item.outcome === "registered")).toHaveLength(1079);
+      expect(first.items.at(-1)).toMatchObject({ outcome: "deferred", code: "registration_timeout" });
+      const pending = await queue.get(objectIdFor(1079));
+      expect(pending).toMatchObject({ state: "uploaded", reservation: retained!.reservation });
+      if (!pending || !("envelope" in pending) || !retained || !("envelope" in retained)) throw new Error("missing retained audio");
+      expect(pending.envelope).toEqual(retained.envelope);
+      now = 1000;
+      expect((await queue.drainOnce(transport)).items).toEqual([{ objectId: objectIdFor(1079), outcome: "registered" }]);
+      expect(attempts).toHaveLength(2); expect(attempts[1]).toEqual(attempts[0]);
+      expect(transport.upload).toHaveBeenCalledTimes(1080);
+      expect(bulk).not.toHaveBeenCalled();
+    } finally { storage.close(); }
+  }, 30000);
+
   it("persists every ordered state and removes bytes only after a registration receipt", async () => {
     const harness = await createHarness();
     const states: string[] = [];
@@ -38,6 +80,7 @@ describe("CaptureQueue", () => {
       },
       get: (objectId: string) => harness.storage.get(objectId),
       list: () => harness.storage.list(),
+      listMetadata: () => harness.storage.listMetadata(),
       compareAndSwap: async (
         objectId: string,
         revision: number,

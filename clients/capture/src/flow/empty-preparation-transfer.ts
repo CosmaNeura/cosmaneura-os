@@ -147,7 +147,7 @@ export async function transferEmptyPreparation(options: {
                     Boolean(keyState) !== Boolean(sessionKey) || active && keyState?.state !== 'bound' ||
                     (await legacy.listReservationIntents()).some(intent => intent.sessionId !== sessionId) ||
                     (await legacy.getQueueStorageKind(sessionId)) !== kind ||
-                    (await options.queue.list()).some(row => row.reservation.sessionId === sessionId ? row.state !== 'reserved' : row.state !== 'purged') ||
+                    (await options.queue.listMetadata()).some(row => row.reservation.sessionId === sessionId ? row.state !== 'reserved' : row.state !== 'purged') ||
                     before.some(row => !['active', 'preparation', `session:${sessionId}`].includes(row.key) &&
                         !row.key.startsWith('intent:') && !/^recovery:[A-Za-z0-9_-]+$/u.test(row.key)))
                     throw conflict();

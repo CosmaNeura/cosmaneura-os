@@ -138,7 +138,7 @@ export const openCaptureRuntime: CaptureRuntimeFactory = async (workspaceId, ses
       abort.abort();
       await current.close();
       if (flow && queueStore && !await hasEmptyPreparationTransfer(sourceDatabase,sessionId,destinationDatabase) && await flow.getActiveCaptureState() === null && await flow.getPreparationState() === null &&
-          (await queueStore.storage.list()).every(record => record.state === "purged")) {
+          (await queueStore.storage.listMetadata()).every(record => record.state === "purged")) {
         await flow.releaseQueueStorageKind(sessionId, queueStore.kind);
       }
       flow?.close(); queueStore?.close(); await release(); closed = true;
