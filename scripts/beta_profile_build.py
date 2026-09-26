@@ -3,8 +3,9 @@ import json
 import subprocess
 from pathlib import Path
 
+NATIVE_STAGING_PROFILE = "first-owner-staging-v1"
 
-def validate_native(web: Path, **expected: object) -> None:
+def validate_native(web: Path, **expected: object) -> dict:
     root = Path(__file__).resolve().parents[1]
     manifest = json.loads((web / "cosmas-beta-features.json").read_text())
     subprocess.run([
@@ -13,3 +14,4 @@ def validate_native(web: Path, **expected: object) -> None:
         (root / "clients/shared/beta-feature-profile.mjs").as_uri(),
         json.dumps(manifest), json.dumps(expected),
     ], check=True, timeout=15)
+    return manifest

@@ -4,9 +4,29 @@ import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,realpath,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity} from './package-desktop-release.mjs';
+import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile} from './package-desktop-release.mjs';
+import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
 const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
+
+test('first-owner release preserves operational identity and refuses native capture or connector activation',()=>{
+  const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
+    frontendOrigin:'https://identity.example.invalid',publishableKey:'pk_live_'+Buffer.from('identity.example.invalid$').toString('base64'),
+    organizationId:'org_fixture',audience:'cosmas-beta-api'};
+  const profile=resolveBetaFeatureProfile({VITE_WORKSPACE_FEATURE_PROFILE:'first-owner-staging-v1',
+    VITE_WORKSPACE_HOSTED_CLIENT:'desktop',VITE_WORKSPACE_DATA_MODE:'synthetic',VITE_WORKSPACE_HOSTED_API_ORIGIN:identity.apiOrigin,
+    VITE_API_BASE:'app://cosmas/api',VITE_WORKSPACE_WEB_ORIGIN:'',VITE_COSMANEURA_WEB_ORIGIN:'',
+    VITE_CAPTURE_UPLOAD_ORIGINS:'',VITE_WORKSPACE_CAPTURE_MODE:'disabled'}).manifest;
+  const info={CFBundleIdentifier:'com.cosmasos.beta.desktop',CFBundleShortVersionString:'0.1.43',CFBundleVersion:'1003'};
+  const config={nativeIdentity:identity,mode:'hosted-beta-authenticated',dataMode:'synthetic',apiOrigin:identity.apiOrigin,
+    appVersion:info.CFBundleShortVersionString,buildNumber:info.CFBundleVersion,
+    installation:{bundleIdentifier:info.CFBundleIdentifier},nativeCaptureEnabled:false};
+  assert.deepEqual(validateOperationalReleaseProfile(config,profile,info),identity);
+  for(const change of [{nativeCaptureEnabled:true},{nativeCaptureEnabled:undefined},{microphoneCaptureEnabled:true},
+    {cosmaneuraWebOrigin:'https://core.example.invalid'},{googleConnectionClientId:'invented.apps.googleusercontent.com'},
+    {captureUploadOrigins:['https://uploads.example.invalid']}])
+    assert.throws(()=>validateOperationalReleaseProfile({...config,...change},profile,info));
+});
 
 test('desktop recording helpers remain executable outside ASAR with exact matching manifests',async()=>{
   const root=await realpath(await mkdtemp(join(tmpdir(),'cosmas-capture-asar-'))),source=join(root,'input');

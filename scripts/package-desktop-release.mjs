@@ -157,6 +157,10 @@ export function validateOperationalReleaseProfile(config, manifest, info) {
   if (config.mode!=='hosted-beta-authenticated' || !['synthetic','authorized_beta'].includes(config.dataMode) || profile.client!=='desktop' ||
       profile.dataMode!==config.dataMode || profile.apiOrigin!==config.apiOrigin || config.appVersion!==info.CFBundleShortVersionString ||
       config.buildNumber!==info.CFBundleVersion || config.installation?.bundleIdentifier!==info.CFBundleIdentifier) fail();
+  if (profile.captureMode==='disabled' && (config.nativeCaptureEnabled!==false || config.microphoneCaptureEnabled===true ||
+      config.captureUploadOrigins?.length || ['cosmaneuraWebOrigin','googleConnectionClientId','googleConnectionCallbackUri',
+        'microsoftConnectionTenantId','microsoftConnectionClientId','microsoftConnectionCallbackUri',
+        'schedulingGoogleClientId','schedulingGoogleCallbackUri'].some(key=>config[key]))) fail();
   return identity;
 }
 
@@ -186,6 +190,8 @@ export async function packageRelease({application,inputManifest,toolsDirectory,o
     equal(helperInfo.CosmasConfiguredCapture,{enabled:true,apiOrigin:config.apiOrigin});
     await verifyDesktopCapturePackage(join(app,'native-capture'),JSON.parse(await readFile(join(app,'native-capture/manifest.json'),'utf8')));
     if(!appFiles['workspace-native-capture.mjs']||!appFiles['native-capture-package.mjs'])fail();
+  } else if(config.nativeCaptureEnabled===false) {
+    equal(helperInfo.CosmasConfiguredCapture,{enabled:false});
   }
   const tools=await loadBuildTools(toolsDirectory);
   const templateArchive=await validateTemplateIntegrity(tools.asar,application,info);

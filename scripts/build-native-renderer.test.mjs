@@ -17,15 +17,25 @@ const identity = {version: 1, profile: 'operational-beta-v1', client: 'desktop',
 const options = {webOrigin: 'https://workspace.example.invalid', coreWebOrigin: 'https://core.example.invalid',
   captureUploadOrigins: ['https://uploads.example.invalid']};
 
-async function fixture(t, client = 'desktop', dataMode = 'authorized_beta') {
+async function fixture(t, client = 'desktop', dataMode = 'authorized_beta', nativeFeatureProfile = 'operational-beta-v1') {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'cosmas-native-renderer-')));
   t.after(() => rm(root, {recursive: true, force: true}));
   const inputs = join(root, 'clients'), output = join(root, 'renderer');
   await mkdir(inputs);
-  const files = structuredClone(workspaceIdentityInputs(identity, {...options, dataMode}));
+  const files = structuredClone(workspaceIdentityInputs(identity, {...options, dataMode, nativeFeatureProfile}));
   for (const [name, value] of Object.entries(files)) await writeFile(join(inputs, name), JSON.stringify(value));
   return {root, inputs, output, client, files};
 }
+
+for (const client of ['desktop','apple']) test(`${client} explicitly builds the first-owner synthetic profile with operational auth`,async t=>{
+  const f=await fixture(t,client,'synthetic','first-owner-staging-v1');
+  const env=f.files[client+'-build-env.json'];
+  const result=await buildNativeRenderer(f,{build:config=>emit(config,env)});
+  assert.equal(result.profile.profile,'first-owner-staging-v1');
+  assert.equal(result.profile.captureMode,'disabled');
+  assert.equal(result.profile.dataMode,'synthetic');
+  assert.deepEqual(result.profile.enabledFlags,['VITE_AI_ACTIVITY_ENABLED','VITE_WORKSPACE_ROUTINES_ENABLED']);
+});
 
 async function emit(config, env, change = {}) {
   await mkdir(config.build.outDir);

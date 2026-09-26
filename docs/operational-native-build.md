@@ -41,6 +41,37 @@ installation metadata binds the data mode as well as the account and API;
 changing those values refuses startup and preserves saved data. Do not relabel
 an existing installation or substitute the retained invented build inputs.
 
+For the first-owner native staging milestone, additionally pass
+`--native-feature-profile first-owner-staging-v1` to identity preparation and
+desktop auth-helper packaging. This native-only feature profile requires
+`--data-mode synthetic`, keeps the operational Clerk identity and app custody,
+and enables workspace/team access, AI activity and routines. It explicitly
+disables capture, Core navigation, Google/Microsoft connections, Scheduling and
+the other connected Beta workflows. The default `operational-beta-v1` profile
+still requires the complete feature set and its actual connection inputs.
+
+Use the generated native inputs with the same renderer builders. For the native
+composers, omit microphone, capture-upload, Core navigation and provider OAuth
+arguments for this profile; their presence is refused. Apple can retain the
+existing recovery/capture source overlays for compilation, while
+`CosmasConfiguredCapture.enabled` is false. Desktop composition omits the native
+capture package and requires the helper's capture setting to be false. No native
+capture implementation or authentication boundary changes for this milestone.
+
+A staging candidate remains unsigned and unlaunched. The API must separately
+admit `app://cosmas` and `capacitor://localhost` through its existing hosted
+transport flags, CORS and Clerk authorized-party settings before native use.
+Build completion does not establish that admission, owner enrollment, actual
+native sign-in or full operational Beta completion.
+
+Native auth uses the normal Clerk session token, whose custom `aud` claim must
+match the configured API audience. Clerk native requests omit `Origin`, so that
+token may omit `azp`. The API admits this only for one explicitly enabled native
+request origin present in both allowlists; signed issuer, audience, session and
+Organization checks remain mandatory. A present `azp` must match that native
+origin. Browser/default verification still requires `azp`. JWT templates are
+unsuitable here because they cannot include the session-bound `sid` claim.
+
 Use the identity-only preparation command for these client inputs. The broader
 `prepare-operational-startup.py` still prepares Core/Scribe/Scheduling service
 overlays and is not a limited, non-Scribe staging shortcut. Actual public keys,

@@ -42,6 +42,22 @@ test('public identity mismatch and invalid companion/upload origins are rejected
     {captureUploadOrigins:[]},{captureUploadOrigins:['https://uploads.example.invalid','https://uploads.example.invalid']}])
     assert.throws(()=>workspaceIdentityInputs(identity,{...options,...changed}));
 });
+test('first-owner native staging keeps the real auth identity and leaves full hosted web defaults intact',()=>{
+  const files=workspaceIdentityInputs(identity,{...options,dataMode:'synthetic',nativeFeatureProfile:'first-owner-staging-v1'});
+  assert.deepEqual(files['desktop-identity.json'],identity);
+  for(const client of ['desktop','apple']){
+    const env=files[client+'-build-env.json'];
+    assert.equal(env.VITE_WORKSPACE_FEATURE_PROFILE,'first-owner-staging-v1');
+    assert.equal(env.VITE_WORKSPACE_CAPTURE_MODE,'disabled');
+    assert.equal(env.VITE_COSMANEURA_WEB_ORIGIN,'');
+    assert.equal(env.VITE_CAPTURE_UPLOAD_ORIGINS,'');
+    assert.equal(env.VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED,'false');
+  }
+  assert.equal(files['web-build-env.json'].VITE_WORKSPACE_FEATURE_PROFILE,'operational-beta-v1');
+  assert.equal(files['web-build-env.json'].VITE_WORKSPACE_CAPTURE_ENABLED,'true');
+  assert.throws(()=>workspaceIdentityInputs(identity,{...options,nativeFeatureProfile:'first-owner-staging-v1'}));
+  assert.throws(()=>workspaceIdentityInputs(identity,{...options,dataMode:'synthetic',nativeFeatureProfile:'unknown'}));
+});
 
 test('explicit synthetic staging retains the real-format identity and every account boundary',()=>{
   const files=workspaceIdentityInputs(identity,{...options,dataMode:'synthetic'});

@@ -4,7 +4,7 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
-import {BETA_FEATURE_FLAGS,resolveBetaFeatureProfile,validateNativeBetaProfile} from './beta-feature-profile.mjs';
+import {BETA_FEATURE_FLAGS,NATIVE_STAGING_FEATURE_PROFILE,resolveBetaFeatureProfile,validateNativeBetaProfile} from './beta-feature-profile.mjs';
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const base={VITE_WORKSPACE_FEATURE_PROFILE:'operational-beta-v1',VITE_WORKSPACE_HOSTED_CLIENT:'web',
   VITE_WORKSPACE_DATA_MODE:'synthetic',VITE_WORKSPACE_HOSTED_API_ORIGIN:'https://api.example.invalid',
@@ -34,6 +34,25 @@ test('rejects prior partial recipes, misspelled flags and individual feature exc
     {VITE_WORKSPACE_CAPTURE_ENABLED:'false'},{VITE_CAPTURE_IOS_NATIVE_PCM_ENABLED:'true'},
     {VITE_DESKTOP_SYNTHETIC_ENABLED:'true'},{VITE_WORKSPACE_APPOINTMENTS_ENABLED:'TRUE'}]){
     assert.throws(()=>resolveBetaFeatureProfile({...base,...change}));
+  }
+});
+test('explicit native first-owner staging enables only available work and refuses connector or live-data promotion',()=>{
+  for(const client of ['desktop','apple']) {
+    const input={...native(client),VITE_WORKSPACE_FEATURE_PROFILE:NATIVE_STAGING_FEATURE_PROFILE,
+      VITE_COSMANEURA_WEB_ORIGIN:'',VITE_CAPTURE_UPLOAD_ORIGINS:'',VITE_WORKSPACE_CAPTURE_MODE:'disabled'};
+    const {env,manifest}=resolveBetaFeatureProfile(input);
+    assert.deepEqual(manifest.enabledFlags,['VITE_AI_ACTIVITY_ENABLED','VITE_WORKSPACE_ROUTINES_ENABLED']);
+    for(const key of BETA_FEATURE_FLAGS)assert.equal(env[key],manifest.enabledFlags.includes(key)?'true':'false');
+    assert.equal(env.VITE_WORKSPACE_AUTHENTICATED_ENABLED,'true');
+    assert.equal(env.VITE_CAPTURE_IOS_NATIVE_PCM_ENABLED,'false');
+    assert.equal(env.VITE_CAPTURE_E2E_MICROPHONE_ENABLED,'false');
+    assert.equal(validateNativeBetaProfile(manifest,{client,apiOrigin:input.VITE_WORKSPACE_HOSTED_API_ORIGIN,
+      coreWebOrigin:'',captureUploadOrigins:[],microphoneCapture:false,deviceCustody:true,simulatorCustody:false}),manifest);
+    for(const change of [{VITE_WORKSPACE_HOSTED_CLIENT:'web'},{VITE_WORKSPACE_DATA_MODE:'authorized_beta'},
+      {VITE_WORKSPACE_CAPTURE_ENABLED:'true'},{VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED:'true'},
+      {VITE_COSMANEURA_WEB_ORIGIN:'https://core.example.invalid'},
+      {VITE_CAPTURE_UPLOAD_ORIGINS:'https://uploads.example.invalid'},{VITE_WORKSPACE_CAPTURE_MODE:'synthetic'}])
+      assert.throws(()=>resolveBetaFeatureProfile({...input,...change}));
   }
 });
 test('requires usable exact origins and explicit source mode, without a synthetic fallback for real data',()=>{

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
@@ -116,6 +117,25 @@ def test_owned_build_and_normal_packaging_preserve_products(tmp_path, compiler, 
     assert info["CosmasNativeAuth"] == {"enabled": False}
     assert not (app / ".incomplete").exists()
     assert not list(app.rglob(binding.RECEIPT))
+
+
+@pytest.mark.parametrize("profile,capture", [("operational-beta-v1", True), ("first-owner-staging-v1", False)])
+def test_operational_helper_keeps_auth_and_explicitly_controls_capture(tmp_path, compiler, monkeypatch, profile, capture):
+    qualified, output, receipt = compile_fixture(tmp_path, compiler)
+    identity = tmp_path / "identity.json"
+    identity.write_text(json.dumps({"version": 1, "profile": "operational-beta-v1", "client": "desktop",
+        "apiOrigin": "https://api.example.invalid", "frontendOrigin": "https://identity.example.invalid",
+        "publishableKey": "pk_live_" + base64.b64encode(b"identity.example.invalid$").decode(),
+        "organizationId": "org_fixture", "audience": "cosmas-beta-api"}))
+    app = tmp_path / "Operational.app"
+    monkeypatch.setattr(sys, "argv", ["package-desktop-auth-helper.py", "--qualification", str(qualified),
+        "--products", str(output / "products"), "--compiler-receipt", str(receipt), "--output", str(app),
+        "--native-identity-config", str(identity), "--native-feature-profile", profile])
+    packager.main()
+    info = plistlib.loads((app / "Contents/Info.plist").read_bytes())
+    assert info["CosmasNativeAuth"]["enabled"] is True
+    assert info["CFBundleIdentifier"] == "com.cosmasos.beta.desktop.auth"
+    assert info["CosmasConfiguredCapture"] == ({"enabled": True, "apiOrigin": "https://api.example.invalid"} if capture else {"enabled": False})
 
 
 @pytest.mark.parametrize("damage", ["binary", "resources", "extra-resource", "mode", "original-product", "source-copy", "log"])

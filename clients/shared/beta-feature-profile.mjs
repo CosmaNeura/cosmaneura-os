@@ -2,6 +2,8 @@ import {exactHostedOrigin, resolveHostedWorkspace} from './hosted-workspace-conf
 
 /** One client feature set. Server/account grants and action approvals remain separate. */
 export const BETA_FEATURE_PROFILE = 'operational-beta-v1';
+export const NATIVE_STAGING_FEATURE_PROFILE = 'first-owner-staging-v1';
+const stagingFlags = ['VITE_AI_ACTIVITY_ENABLED', 'VITE_WORKSPACE_ROUTINES_ENABLED'];
 export const BETA_FEATURE_FLAGS = Object.freeze([
   'VITE_AI_ACTIVITY_ENABLED', 'VITE_ATHENA_CONNECTION_ENABLED', 'VITE_ATHENA_VISIT_LINK_ENABLED',
   'VITE_CONNECTION_ONBOARDING_ENABLED', 'VITE_CORE_APPOINTMENT_SETUP_ENABLED',
@@ -40,21 +42,33 @@ export function resolveBetaFeatureProfile(input) {
 }
 
 function resolveProfile(input, checkPublishableKey) {
-  if (input.VITE_WORKSPACE_FEATURE_PROFILE !== BETA_FEATURE_PROFILE) fail(`select VITE_WORKSPACE_FEATURE_PROFILE=${BETA_FEATURE_PROFILE}`);
+  const staging = input.VITE_WORKSPACE_FEATURE_PROFILE === NATIVE_STAGING_FEATURE_PROFILE;
+  if (!staging && input.VITE_WORKSPACE_FEATURE_PROFILE !== BETA_FEATURE_PROFILE) fail(`select VITE_WORKSPACE_FEATURE_PROFILE=${BETA_FEATURE_PROFILE}`);
   const env = {...input};
   // Catch stale recipes and misspelled gates instead of silently shipping partial UI.
   for (const key of Object.keys(env)) {
     if (key.startsWith('VITE_') && key.endsWith('_ENABLED') && !knownGates.has(key)) fail(`unknown feature gate ${key}`);
   }
   set(env, 'VITE_COSMAS_ENV', 'early_adopter_beta');
-  for (const key of [...foundations, ...BETA_FEATURE_FLAGS]) set(env, key, 'true');
+  for (const key of foundations) set(env, key, 'true');
+  for (const key of BETA_FEATURE_FLAGS) set(env, key, !staging || stagingFlags.includes(key) ? 'true' : 'false');
   for (const key of forbidden) set(env, key, 'false');
   const client = env.VITE_WORKSPACE_HOSTED_CLIENT;
   if (!['web', 'desktop', 'apple'].includes(client)) fail('select the web, desktop or apple client');
+  if (staging && (client === 'web' || env.VITE_WORKSPACE_DATA_MODE !== 'synthetic')) fail('first-owner staging requires a native client and synthetic data');
   set(env, 'VITE_WORKSPACE_NATIVE_AUTH_ENABLED', client === 'apple' ? 'true' : 'false');
   set(env, 'VITE_WORKSPACE_DESKTOP_AUTH_ENABLED', client === 'desktop' ? 'true' : 'false');
   const hosted = resolveHostedWorkspace(env);
   if (!hosted) fail('hosted identity, data mode or origin configuration is incomplete or inconsistent');
+  if (staging) {
+    set(env, 'VITE_COSMANEURA_WEB_ORIGIN', '');
+    set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', '');
+    set(env, 'VITE_WORKSPACE_CAPTURE_MODE', 'disabled');
+    for (const key of captureFlags) set(env, key, 'false');
+    return {env: Object.freeze(env), manifest: {version: 1, profile: NATIVE_STAGING_FEATURE_PROFILE, ...hosted,
+      enabledFlags: [...stagingFlags], captureMode: 'disabled', captureUploadOrigins: [],
+      coreWebOrigin: '', athenaAccess: 'read_only'}};
+  }
   if (checkPublishableKey && client === 'web' && !(hosted.dataMode === 'synthetic' ? /^pk_(test|live)_\S+$/ : /^pk_live_\S+$/).test(env.VITE_CLERK_PUBLISHABLE_KEY ?? '')) fail('a Clerk publishable key is required for the selected web data profile');
   if (!exactHostedOrigin(env.VITE_COSMANEURA_WEB_ORIGIN) ||
       !/[a-z]/.test(new URL(env.VITE_COSMANEURA_WEB_ORIGIN).hostname.split('.').at(-1)[0])) fail('an exact Core web origin is required');
@@ -97,6 +111,7 @@ export function validateNativeBetaProfile(manifest, expected) {
   if (manifest.client !== expected.client ||
       manifest.apiOrigin !== expected.apiOrigin || manifest.coreWebOrigin !== expected.coreWebOrigin ||
       JSON.stringify(manifest.captureUploadOrigins) !== JSON.stringify(expected.captureUploadOrigins)) fail('native and web feature/origin profiles differ');
+  if (manifest.profile === NATIVE_STAGING_FEATURE_PROFILE && expected.microphoneCapture === true) fail('native capture is disabled for first-owner staging');
   if (expected.client === 'desktop' && expected.microphoneCapture !== (manifest.captureMode === 'browser_microphone') ||
       expected.client === 'apple' && manifest.captureMode === 'ios_native' &&
       (!expected.renewableNativeCapture || !expected.nativeRendererRecovery ||

@@ -88,13 +88,23 @@ def main():
                         (root / "clients/desktop/hosted-auth-http.mjs").as_uri(), args.hosted_api_origin], check=True)
     elif (web / "cosmas-workspace-build.json").exists():
         parser.error("A hosted web build requires its explicit hosted API origin.")
+    feature_manifest = None
     if hosted:
-        _beta.validate_native(web, client="desktop", apiOrigin=args.hosted_api_origin,
+        feature_manifest = _beta.validate_native(web, client="desktop", apiOrigin=args.hosted_api_origin,
                               coreWebOrigin=args.cosmaneura_web_origin,
                               captureUploadOrigins=args.capture_upload_origin,
                               microphoneCapture=args.microphone_capture)
-    if hosted and not args.google_connection_client_id:
+    staging = feature_manifest is not None and feature_manifest["profile"] == _beta.NATIVE_STAGING_PROFILE
+    if staging and (not operational or data_mode != "synthetic"):
+        parser.error("First-owner staging requires the operational native identity and synthetic data.")
+    if hosted and "VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED" in feature_manifest["enabledFlags"] and not args.google_connection_client_id:
         parser.error("The complete beta profile requires configured Gmail navigation.")
+    if staging and any((args.google_connection_client_id, args.google_connection_callback_uri,
+                        args.microsoft_connection_tenant_id, args.microsoft_connection_client_id,
+                        args.microsoft_connection_callback_uri, args.scheduling_google_client_id,
+                        args.scheduling_google_callback_uri)):
+        parser.error("External account connections are disabled for first-owner staging.")
+    native_capture = operational and not staging
     _navigation.validate_google(args.google_connection_client_id, args.google_connection_callback_uri)
     if args.google_connection_client_id and not args.native_auth_helper:
         parser.error("Google connection requires authenticated desktop composition.")
@@ -134,7 +144,8 @@ def main():
         if (helper / ".incomplete").exists() or (helper / ".incomplete").is_symlink():
             parser.error("Native auth helper packaging is incomplete; use a successfully packaged helper.")
         info = plistlib.loads((helper / "Contents/Info.plist").read_bytes())
-        if operational and info.get("CosmasConfiguredCapture") != {"enabled": True, "apiOrigin": args.hosted_api_origin}:
+        expected_capture = {"enabled": True, "apiOrigin": args.hosted_api_origin} if native_capture else {"enabled": False}
+        if operational and info.get("CosmasConfiguredCapture") != expected_capture:
             parser.error("The operational desktop helper must include matching native recording ownership.")
         valid_identity = (info.get("CosmasNativeAuth") == identity["auth"] and
                           info.get("CosmasNativeIdentity") == identity["identity"] and
@@ -217,7 +228,7 @@ def main():
         shutil.copyfile(root / 'clients/desktop/microsoft-navigation.mjs', app / 'microsoft-navigation.mjs')
         _navigation.compose_preload(root, app / "auth-preload.cjs")
         shutil.copyfile(root / "clients/desktop/main-authenticated.mjs", app / "main.mjs")
-    if operational:
+    if native_capture:
         from native_capture_build import prepare as prepare_native_capture
         prepare_native_capture(root, output, app)
     (app / "package.json").write_text(json.dumps({
@@ -229,7 +240,7 @@ def main():
         "apiOrigin": args.hosted_api_origin if hosted else "http://127.0.0.1:8046" if args.native_auth_helper else "http://127.0.0.1:8018",
         **({"dataMode": data_mode} if hosted else {}),
         **({"nativeIdentity": identity["identity"]} if operational else {}),
-        **({"nativeCaptureEnabled": True} if operational else {}),
+        **({"nativeCaptureEnabled": native_capture} if operational else {}),
         "appVersion": args.app_version,
         "buildNumber": args.build_number,
         "cosmaneuraWebOrigin": args.cosmaneura_web_origin,

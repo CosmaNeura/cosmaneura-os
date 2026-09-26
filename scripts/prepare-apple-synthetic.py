@@ -245,8 +245,6 @@ def prepare(
     if operational and (not hosted_workspace or verification_variant is not None or simulator_custody):
         raise ValueError("Operational Apple composition requires hosted services and device custody, without a synthetic variant or Simulator identity.")
     data_mode = _identity.data_mode(identity, data_mode)
-    if hosted_workspace and not google_connection_client_id:
-        raise ValueError("The complete beta profile requires configured Gmail navigation.")
     _navigation.validate_google(google_connection_client_id, google_connection_callback_uri)
     if google_connection_client_id and (native_auth_clerk_archive is None or not native_renderer_recovery):
         raise ValueError("Google connection requires the authenticated native host.")
@@ -274,13 +272,24 @@ def prepare(
             raise ValueError("Hosted composition requires the matching Apple web build and native sign-in adapter.")
     elif (web / "cosmas-workspace-build.json").exists():
         raise ValueError("A hosted web build requires explicit hosted composition.")
+    feature_manifest = None
     if hosted_workspace:
-        _beta.validate_native(web, client="apple", apiOrigin=workspace_api_origin,
+        feature_manifest = _beta.validate_native(web, client="apple", apiOrigin=workspace_api_origin,
                               coreWebOrigin=cosmaneura_web_origin,
                               captureUploadOrigins=list(capture_upload_origins),
                               renewableNativeCapture=renewable_native_capture,
                               nativeRendererRecovery=native_renderer_recovery,
                               simulatorCustody=simulator_custody, deviceCustody=operational)
+    staging = feature_manifest is not None and feature_manifest["profile"] == _beta.NATIVE_STAGING_PROFILE
+    if staging and (not operational or data_mode != "synthetic"):
+        raise ValueError("First-owner staging requires the operational native identity and synthetic data.")
+    if hosted_workspace and "VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED" in feature_manifest["enabledFlags"] and not google_connection_client_id:
+        raise ValueError("The complete beta profile requires configured Gmail navigation.")
+    if staging and any((google_connection_client_id, google_connection_callback_uri,
+                        microsoft_connection_tenant_id, microsoft_connection_client_id,
+                        microsoft_connection_callback_uri, scheduling_google_client_id,
+                        scheduling_google_callback_uri)):
+        raise ValueError("External account connections are disabled for first-owner staging.")
     policy = ((hosted_workspace_policy if hosted_workspace else local_workspace_policy)(workspace_api_origin, capture_upload_origins)
               if workspace_api_origin is not None else None)
     if operational:
@@ -454,7 +463,7 @@ def prepare(
         info["CosmasNativeAuth"] = identity["auth"] if operational else {"enabled": False}
         if operational:
             info["CosmasNativeIdentity"] = identity["identity"]
-            info["CosmasConfiguredCapture"] = {"enabled": True, "apiOrigin": workspace_api_origin}
+            info["CosmasConfiguredCapture"] = {"enabled": False} if staging else {"enabled": True, "apiOrigin": workspace_api_origin}
             info["CosmasSourceAccessGroup"] = "$(AppIdentifierPrefix)" + bundle_id
             info["CFBundleURLTypes"] = [{"CFBundleURLName": bundle_id, "CFBundleURLSchemes": [bundle_id]}]
         info["CosmaneuraWebOrigin"] = cosmaneura_web_origin

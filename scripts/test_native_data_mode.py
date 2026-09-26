@@ -44,22 +44,23 @@ class NativeDataMode(unittest.TestCase):
             "organizationId": "org_invented_mode_test", "audience": "cosmas-beta-api",
         }
 
-    def inputs(self, client, data_mode):
+    def inputs(self, client, data_mode, native_profile="operational-beta-v1"):
         result = subprocess.run([
             "node", "--input-type=module", "-e",
             "const m=await import(process.argv[1]);"
             "const f=m.workspaceIdentityInputs(JSON.parse(process.argv[2]),{"
             "webOrigin:'https://workspace.example.invalid',coreWebOrigin:'https://core.example.invalid',"
-            "captureUploadOrigins:['https://uploads.example.invalid'],dataMode:process.argv[3]});"
+            "captureUploadOrigins:['https://uploads.example.invalid'],dataMode:process.argv[3],nativeFeatureProfile:process.argv[6]});"
             "const p=await import(process.argv[4]);"
             "process.stdout.write(JSON.stringify({identity:f[process.argv[5]+'-identity.json'],"
             "manifest:p.resolveBetaFeatureProfile(f[process.argv[5]+'-build-env.json']).manifest}));",
             (ROOT / "scripts/prepare-workspace-identity.mjs").as_uri(), json.dumps(self.identity), data_mode,
-            (ROOT / "clients/shared/beta-feature-profile.mjs").as_uri(), client,
+            (ROOT / "clients/shared/beta-feature-profile.mjs").as_uri(), client, native_profile,
         ], capture_output=True, text=True, check=True)
         values = json.loads(result.stdout)
         web = self.root / "web"
         web.mkdir(exist_ok=True)
+        (web / "index.html").write_text("<html><head></head><body></body></html>")
         manifest = values["manifest"]
         (web / "cosmas-beta-features.json").write_text(json.dumps(manifest))
         (web / "cosmas-workspace-build.json").write_text(json.dumps({
@@ -68,6 +69,36 @@ class NativeDataMode(unittest.TestCase):
         path = self.root / "identity.json"
         path.write_text(json.dumps(values["identity"]))
         return web, path
+
+    def test_only_explicit_first_owner_profile_admits_missing_google_configuration(self):
+        for client in ("desktop", "apple"):
+            for staging in (True, False):
+                with self.subTest(client=client, staging=staging):
+                    profile = "first-owner-staging-v1" if staging else "operational-beta-v1"
+                    web, identity = self.inputs(client, "synthetic", profile)
+                    expected = PreflightComplete if staging else (ValueError, SystemExit)
+                    if client == "desktop":
+                        argv = ["prepare-desktop-synthetic.py", "--scribe-source", str(self.root / "unread-source"),
+                            "--web-dist", str(web), "--output", str(self.root / "never-created"),
+                            "--native-auth-helper", str(self.root / "unread-helper"), "--installation-profile", "beta",
+                            "--hosted-api-origin", self.identity["apiOrigin"], "--native-identity-config", str(identity),
+                            "--data-mode", "synthetic"]
+                        if not staging:
+                            argv += ["--cosmaneura-web-origin", "https://core.example.invalid",
+                                "--capture-upload-origin", "https://uploads.example.invalid", "--microphone-capture"]
+                        with patch.object(sys, "argv", argv), patch.object(desktop._navigation, "validate_scheduling", side_effect=PreflightComplete):
+                            with self.assertRaises(expected):
+                                desktop.main()
+                    else:
+                        with patch.object(apple, "workspace_policy_html", side_effect=PreflightComplete):
+                            with self.assertRaises(expected):
+                                apple.prepare(self.root / "unread-source", web, self.root / "never-created",
+                                    native_auth_clerk_archive=self.root / "unread-archive", renewable_native_capture=True,
+                                    native_renderer_recovery=True, hosted_workspace=True, workspace_api_origin=self.identity["apiOrigin"],
+                                    capture_upload_origins=() if staging else ("https://uploads.example.invalid",),
+                                    cosmaneura_web_origin="" if staging else "https://core.example.invalid",
+                                    native_identity_config=identity, data_mode="synthetic")
+                    self.assertFalse((self.root / "never-created").exists())
 
     def invoke(self, client, web, identity, selected):
         target = desktop if client == "desktop" else apple

@@ -77,7 +77,7 @@ export async function buildNativeRenderer({inputs, client, output}, {build} = {}
   const identity = validateOperationalNativeIdentity(identityInput.value, client, identityInput.value.apiOrigin);
   const env = envInput.value;
   const profile = resolveBetaFeatureProfile({
-    VITE_WORKSPACE_FEATURE_PROFILE: identity.profile,
+    VITE_WORKSPACE_FEATURE_PROFILE: env.VITE_WORKSPACE_FEATURE_PROFILE,
     VITE_WORKSPACE_HOSTED_CLIENT: client, VITE_WORKSPACE_DATA_MODE: validateOperationalNativeDataMode(env.VITE_WORKSPACE_DATA_MODE),
     VITE_WORKSPACE_HOSTED_API_ORIGIN: identity.apiOrigin,
     VITE_API_BASE: client === 'desktop' ? 'app://cosmas/api' : identity.apiOrigin,
