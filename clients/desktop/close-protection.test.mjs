@@ -6,12 +6,15 @@ import {createDesktopAuthSession} from './auth-session.mjs';
 
 test('native stop completes before auth cleanup and a lost stop response can retry', async () => {
   const app=new EventEmitter();let attempts=0,cleaned=0,failures=0,prevented=0;
+  let cleanupFinished, failureReported;
+  const cleanupComplete=new Promise(resolve=>{cleanupFinished=resolve;});
+  const failureComplete=new Promise(resolve=>{failureReported=resolve;});
   const event={preventDefault(){prevented++;}};
   app.quit=()=>app.emit('will-quit',event);
-  cleanupOnConfirmedQuit(app,()=>cleaned++,{beforeCleanup:async()=>{if(++attempts===1)throw Error('Invented stop loss');},onFailure:()=>failures++});
-  app.quit();app.quit();await new Promise(resolve=>setImmediate(resolve));
+  cleanupOnConfirmedQuit(app,()=>{cleaned++;cleanupFinished();},{beforeCleanup:async()=>{if(++attempts===1)throw Error('Invented stop loss');},onFailure:()=>{failures++;failureReported();}});
+  app.quit();app.quit();await failureComplete;
   assert.equal(attempts,1);assert.equal(cleaned,0);assert.equal(failures,1);
-  app.quit();await new Promise(resolve=>setImmediate(resolve));
+  app.quit();await cleanupComplete;
   assert.equal(attempts,2);assert.equal(cleaned,1);assert.equal(prevented,3);
   app.quit();assert.equal(cleaned,1);
 });

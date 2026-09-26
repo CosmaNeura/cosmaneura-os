@@ -21,7 +21,9 @@ export function cleanupOnConfirmedQuit(app, cleanup, {beforeCleanup, onFailure} 
     if (cleaned) return;
     if(beforeCleanup&&!ready){
       event.preventDefault();
-      if(!pending){pending=true;Promise.resolve().then(beforeCleanup).then(()=>{ready=true;pending=false;app.quit();})
+      // Electron can ignore a quit retried from a microtask while the last
+      // window's close event is still unwinding. Resume on the next event turn.
+      if(!pending){pending=true;Promise.resolve().then(beforeCleanup).then(()=>{ready=true;pending=false;setImmediate(()=>app.quit());})
         .catch(()=>{pending=false;onFailure?.();});}
       return;
     }
