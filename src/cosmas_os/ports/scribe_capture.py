@@ -1,6 +1,6 @@
 """Scoped Scribe v1 admission contract; application authorization precedes this port.
 
-Matches the existing Scribe consent/session receiver at 1e48c124. This port is
+Tracks the Scribe consent/session wire, including uncollected location metadata. This port is
 not a browser API, a permission grant, or an assertion that capture is connected.
 """
 
@@ -46,7 +46,8 @@ class ConsentAttestation(ProtectedModel):
     modality: Modality
     participant_regions: tuple[
         Annotated[str, Field(pattern=r"^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$")], ...
-    ] = Field(min_length=1, max_length=20)
+    ] = Field(max_length=20)
+    # Empty means location was not collected; explicit all-party consent still applies.
     method: Literal["pre_visit_form", "verbal_attestation", "phone_ivr"]
     all_parties_consented: Literal[True]
     granted_at: datetime
