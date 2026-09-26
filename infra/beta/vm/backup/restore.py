@@ -210,6 +210,11 @@ def main() -> int:
     os.umask(0o077)
     config = backup.validate_config(json.loads(backup.read_file(backup.ROOT / 'restore.json')))
     backup.require(config['mode'] == 'restore', 'reader configuration required')
+    if args.action == 'wal':
+        # PostgreSQL adds these installation paths to archive-command children.
+        # WAL-G needs neither; discard them before the closed environment check.
+        for key in ('PGLOCALEDIR', 'PGSYSCONFDIR'):
+            os.environ.pop(key, None)
     runner = backup.Runner(config)
     # ExecStartPost only inspects the local peer-authenticated PostgreSQL socket.
     # Its systemd credential namespace need not expose the cloud reader secret.

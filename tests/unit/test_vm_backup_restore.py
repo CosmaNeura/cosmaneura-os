@@ -95,6 +95,50 @@ def test_local_verifier_still_refuses_invalid_host_boundary(monkeypatch, configu
         restore.main()
 
 
+@pytest.mark.parametrize("override", [None, "PGHOST", "PGDATA", "AZURE_CLIENT_SECRET", "WALG_FILE_PREFIX"])
+def test_wal_entrypoint_discards_only_postgresql_installation_paths(
+    monkeypatch, configuration, override
+):
+    ambient = {"PGLOCALEDIR": "/synthetic/locale", "PGSYSCONFDIR": "/synthetic/config"}
+    if override:
+        ambient[override] = "synthetic-override"
+    monkeypatch.setattr(backup.os, "environ", ambient)
+    monkeypatch.setattr(
+        restore.sys, "argv", ["restore.py", "wal", "000000010000000000000003", "pg_wal/RECOVERYXLOG"]
+    )
+    monkeypatch.setattr(backup, "read_file", lambda path: json.dumps(configuration).encode())
+    preflight_calls = []
+
+    def cloud_preflight(runner):
+        preflight_calls.append(True)
+        runner.env = backup.clean_environment(configuration, Path("/run/credentials/synthetic"))
+
+    def archive_fetch(runner, name, destination):
+        assert "PGLOCALEDIR" not in runner.env and "PGSYSCONFDIR" not in runner.env
+        return 74
+
+    monkeypatch.setattr(backup.Runner, "preflight", cloud_preflight)
+    monkeypatch.setattr(restore, "wal_fetch", archive_fetch)
+    if override:
+        with pytest.raises(backup.Refused, match="ambient credential/config override"):
+            restore.main()
+    else:
+        assert restore.main() == 74
+    assert preflight_calls == [True]
+
+
+def test_initial_restore_still_rejects_postgresql_path_overrides(monkeypatch, configuration):
+    monkeypatch.setattr(backup.os, "environ", {"PGSYSCONFDIR": "/synthetic/config"})
+    monkeypatch.setattr(restore.sys, "argv", ["restore.py", "run"])
+    monkeypatch.setattr(backup, "read_file", lambda path: json.dumps(configuration).encode())
+    monkeypatch.setattr(
+        backup.Runner, "preflight",
+        lambda runner: backup.clean_environment(configuration, Path("/run/credentials/synthetic")),
+    )
+    with pytest.raises(backup.Refused, match="ambient credential/config override"):
+        restore.main()
+
+
 def test_recovery_configuration_preserves_all_source_control_floors(configuration):
     settings = restore.recovery_settings(CONTROL, SYSTEM_IDENTIFIER)
     assert settings == {
