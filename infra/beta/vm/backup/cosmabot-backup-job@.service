@@ -35,8 +35,9 @@ RestrictNamespaces=yes
 LockPersonality=yes
 RestrictAddressFamilies=AF_INET AF_INET6
 IPAddressDeny=127.0.0.0/8 ::1 169.254.0.0/16 fe80::/10
-BindReadOnlyPaths=/etc/cosmabot/backup/resolv.conf:/etc/resolv.conf
-InaccessiblePaths=/var/lib/cosmabot /etc/cosmabot/runtime /run/docker.sock /var/run/docker.sock -/var/lib/waagent
+TemporaryFileSystem=/opt/cosmabot:ro,mode=0755 /etc/cosmabot:ro,mode=0755
+BindReadOnlyPaths=/opt/cosmabot/backup /etc/cosmabot/backup /etc/cosmabot/backup/resolv.conf:/etc/resolv.conf
+InaccessiblePaths=/var/lib/cosmabot -/etc/cosmabot/runtime /etc/cosmabot/backup/secrets /run/docker.sock /var/run/docker.sock -/var/lib/waagent
 MemoryMax=768M
 CPUQuota=25%
 TasksMax=64

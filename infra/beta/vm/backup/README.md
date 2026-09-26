@@ -47,6 +47,13 @@ Azure backup/restore still require their reviewed deployment steps. The
 installer does not place credentials or start backup, restore or application
 services. The restore target always remains separate from application startup.
 
+The host's `/opt/cosmabot` and `/etc/cosmabot` parents may remain root-only.
+Each backup/restore unit mounts private read-only parent views and binds only
+the public backup code and configuration beneath them. The credential-source
+directory is inaccessible in that view; systemd supplies the named credentials
+through `LoadCredential`. Application releases and runtime configuration are
+not exposed. Do not broaden host directory permissions to make the service run.
+
 ## PostgreSQL 16 restore settings
 
 `restore.py` reads the fetched cluster's `pg_controldata` before rendering a
