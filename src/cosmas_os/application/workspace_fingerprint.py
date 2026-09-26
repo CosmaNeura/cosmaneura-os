@@ -21,7 +21,7 @@ from cosmas_os.application.database_fingerprint import (
     _make_database_engine,
     _validate_database_url,
 )
-from cosmas_os.models import Base
+from cosmas_os.model_registry import metadata
 from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 WORKSPACE_FINGERPRINT_CONTRACT = "cosmas-os-workspace-database-fingerprint-v1"
@@ -301,11 +301,11 @@ def fingerprint_workspace_database(
                     "SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace "
                     "WHERE n.nspname='public' AND c.relkind IN ('r','p','v','m','f','S')"
                 )).scalars())
-                if actual != set(Base.metadata.tables) | {"alembic_version"}:
+                if actual != set(metadata.tables) | {"alembic_version"}:
                     raise DatabaseFingerprintError("database fingerprint failed")
                 quote = connection.dialect.identifier_preparer.quote_identifier
                 tables = {}
-                for name, table in sorted(Base.metadata.tables.items()):
+                for name, table in sorted(metadata.tables.items()):
                     order = ", ".join(quote(column.name) for column in table.primary_key)
                     if not order:
                         raise DatabaseFingerprintError("database fingerprint failed")

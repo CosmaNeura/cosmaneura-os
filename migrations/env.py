@@ -7,32 +7,14 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import engine_from_config, pool
 
-from cosmas_os import (  # noqa: F401
-    finance_models,
-    finance_setup_models,
-    google_connection_models,
-    inbox_handoff_models,
-    inbox_models,
-    membership_models,
-    microsoft_connection_models,
-    models,
-    portal_models,
-    portal_work_models,
-    practice_access_models,
-    research_models,
-    scheduling_enrollment_models,
-    scheduling_login_models,
-    vendor_models,
-    vendor_setup_models,
-)
 from cosmas_os.config import settings
-from cosmas_os.db import Base
+from cosmas_os.model_registry import metadata
 
 config = context.config
 if config.config_file_name is not None and config.attributes.get("configure_logger", True):
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+target_metadata = metadata
 # Alembic stores this value in a ConfigParser, where percent-encoded URL
 # credentials must escape "%" to avoid interpolation errors.
 if config.attributes.get("connection") is None:
