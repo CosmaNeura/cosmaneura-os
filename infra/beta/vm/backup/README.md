@@ -34,7 +34,10 @@ python3 -I install-host.py \
 ```
 
 Installation creates distinct system accounts with no login shell, home or
-supplementary groups, installs root-owned public files, parses the units, reloads
+supplementary groups and initializes their private state/log directories with
+the matching account ownership and mode 0700. This lets the preflight run before
+the first service, and lets Ubuntu 22.04 open append logs before service startup.
+It installs root-owned public files, parses the units, reloads
 systemd and verifies that every job/timer is inactive and disabled or static.
 The receipt `/etc/cosmabot/backup-install.json` records the exact source and
 installed file hashes. A partial installation is preserved for diagnosis;

@@ -23,6 +23,7 @@ LOGROTATE = Path('/etc/logrotate.d/cosmabot-backup')
 RECEIPT = Path('/etc/cosmabot/backup-install.json')
 ENV = {'PATH': '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG': 'C', 'LC_ALL': 'C'}
 ACCOUNTS = ('cosmabot-backup', 'cosmabot-restore')
+DIRECTORY_ROOTS = (Path('/var/lib'), Path('/var/log'))
 UNIT_NAMES = (
     'cosmabot-backup-receive.service', 'cosmabot-backup-job@.service',
     'cosmabot-restore.service', 'cosmabot-backup.timer',
@@ -122,7 +123,7 @@ def preflight() -> None:
     active = read_public(Path('/etc/cosmabot/active-release'), 256).decode()
     require(re.fullmatch(r'RELEASE_DIR=/opt/cosmabot/releases/stg-owner-20260925-r[1-9][0-9]*\n',
                          active) is not None, 'separate staging release required')
-    for parent in (CODE.parent, CONFIG.parent, UNITS, LOGROTATE.parent):
+    for parent in (CODE.parent, CONFIG.parent, UNITS, LOGROTATE.parent, *DIRECTORY_ROOTS):
         parent_custody(parent)
     for path in (CODE, CONFIG, LOGROTATE, RECEIPT, *(UNITS / name for name in UNIT_NAMES)):
         absent(path)
@@ -144,8 +145,8 @@ def preflight() -> None:
             pass
         else:
             raise Refused('existing backup group requires review')
-        absent(Path('/var/lib') / account)
-        absent(Path('/var/log') / account)
+        for parent in DIRECTORY_ROOTS:
+            absent(parent / account)
     for executable in ('psql', 'postgres', 'pg_controldata'):
         path = Path('/usr/lib/postgresql/16/bin') / executable
         require(path.is_file() and not path.is_symlink(), 'installed native PostgreSQL 16 tools required')
@@ -186,6 +187,29 @@ def service_names() -> tuple[str, ...]:
               for action in ('backup', 'switch', 'status')))
 
 
+def initialize_directories() -> dict[str, dict[str, int]]:
+    # Ubuntu 22.04 opens append output before creating LogsDirectory. State
+    # also needs to exist for the preflight that precedes the first service.
+    for parent in DIRECTORY_ROOTS:
+        parent_custody(parent)
+        for account in ACCOUNTS:
+            absent(parent / account)
+    directories = {}
+    for account in ACCOUNTS:
+        user = pwd.getpwnam(account)
+        for parent in DIRECTORY_ROOTS:
+            path = parent / account
+            path.mkdir(mode=0o700)
+            os.chown(path, user.pw_uid, user.pw_gid, follow_symlinks=False)
+            path.chmod(0o700)
+            metadata = path.lstat()
+            require(path.resolve() == path and stat.S_ISDIR(metadata.st_mode)
+                    and metadata.st_uid == user.pw_uid and metadata.st_gid == user.pw_gid
+                    and stat.S_IMODE(metadata.st_mode) == 0o700, 'private directory custody')
+            directories[str(path)] = {'uid': user.pw_uid, 'gid': user.pw_gid, 'mode': 0o700}
+    return directories
+
+
 def service_properties(name: str) -> dict[str, str]:
     result = command(['systemctl', 'show', name,
                       '--property=LoadState,ActiveState,UnitFileState']).decode()
@@ -218,6 +242,7 @@ def install(contents: dict[str, bytes], bundle_digest: str, source_commit: str) 
         command(['useradd', '--system', '--gid', account, '--home-dir', '/nonexistent',
                  '--no-create-home', '--shell', '/usr/sbin/nologin', account])
     verify_accounts()
+    directories = initialize_directories()
     for name in UNIT_NAMES:
         write_new(UNITS / name, contents[name], 0o644)
     write_new(LOGROTATE, contents['logrotate.conf'], 0o644)
@@ -234,7 +259,8 @@ def install(contents: dict[str, bytes], bundle_digest: str, source_commit: str) 
         'status': 'public_software_installed_services_stopped', 'source_commit': source_commit,
         'bundle_sha256': bundle_digest,
         'files': {name: hashlib.sha256(raw).hexdigest() for name, raw in contents.items()},
-        'accounts': list(ACCOUNTS), 'credentials_installed': False,
+        'accounts': list(ACCOUNTS), 'private_directories': directories,
+        'credentials_installed': False,
         'database_provisioned': False, 'backup_activated': False,
         'restore_qualified': False,
     }, sort_keys=True, indent=2) + '\n').encode(), 0o600)

@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
+import stat
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -114,6 +116,13 @@ def test_successful_file_install_keeps_service_and_credential_activation_separat
     installer.UNITS.mkdir()
     monkeypatch.setattr(installer, "preflight", lambda: None)
     monkeypatch.setattr(installer, "verify_accounts", lambda: None)
+    directory_roots = (tmp_path / "state", tmp_path / "logs")
+    for parent in directory_roots:
+        parent.mkdir()
+    monkeypatch.setattr(installer, "DIRECTORY_ROOTS", directory_roots)
+    monkeypatch.setattr(installer, "parent_custody", lambda path: None)
+    monkeypatch.setattr(installer.pwd, "getpwnam", lambda name: SimpleNamespace(
+        pw_uid=os.getuid(), pw_gid=os.getgid()))
     monkeypatch.setattr(installer, "read_public", lambda path, limit: path.read_bytes())
     commands = []
 
@@ -133,9 +142,37 @@ def test_successful_file_install_keeps_service_and_credential_activation_separat
     assert receipt["credentials_installed"] is receipt["database_provisioned"] is False
     assert receipt["backup_activated"] is receipt["restore_qualified"] is False
     assert list((installer.CONFIG / "secrets").iterdir()) == []
+    assert len(receipt["private_directories"]) == 4
+    for parent in directory_roots:
+        for account in installer.ACCOUNTS:
+            path = parent / account
+            metadata = path.stat()
+            assert metadata.st_uid == os.getuid() and metadata.st_gid == os.getgid()
+            assert stat.S_IMODE(metadata.st_mode) == 0o700
+            assert list(path.iterdir()) == []
     assert not any(args[0] == "systemctl" and args[1] in {"start", "enable", "restart"}
                    for args in commands)
     assert [args for args in commands if args[:2] == ["systemctl", "daemon-reload"]]
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_existing_private_directory_refused_before_any_directory_creation(tmp_path, monkeypatch, linked):
+    roots = (tmp_path / "state", tmp_path / "logs")
+    for parent in roots:
+        parent.mkdir()
+    existing = roots[1] / installer.ACCOUNTS[1]
+    if linked:
+        existing.symlink_to(tmp_path / "missing-owner-data")
+    else:
+        existing.mkdir()
+        (existing / "owner-data").write_bytes(b"preserve")
+    monkeypatch.setattr(installer, "DIRECTORY_ROOTS", roots)
+    monkeypatch.setattr(installer, "parent_custody", lambda path: None)
+    with pytest.raises(installer.Refused, match="existing installation"):
+        installer.initialize_directories()
+    assert list(roots[0].iterdir()) == []
+    assert list(roots[1].iterdir()) == [existing]
+    assert existing.is_symlink() if linked else (existing / "owner-data").read_bytes() == b"preserve"
 
 
 @pytest.mark.parametrize("affected", [True, False])
