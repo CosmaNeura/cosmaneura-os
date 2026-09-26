@@ -223,7 +223,7 @@ SELECT json_build_object(
  'max_wal_senders',current_setting('max_wal_senders')::int,
  'max_replication_slots',current_setting('max_replication_slots')::int,
  'slot_limit_bytes',pg_size_bytes(current_setting('max_slot_wal_keep_size')),
- 'recovery',pg_is_in_recovery(), 'server_addr',inet_server_addr()::text,
+ 'recovery',pg_is_in_recovery(), 'server_addr',host(inet_server_addr()),
  'server_port',inet_server_port(), 'user',current_user,
  'ssl',(SELECT ssl FROM pg_stat_ssl WHERE pid=pg_backend_pid()),
  'role',(SELECT json_build_object('replication',rolreplication,'superuser',rolsuper,
