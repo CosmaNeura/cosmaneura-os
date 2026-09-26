@@ -272,7 +272,7 @@ def test_duplicate_returned_identity_cannot_claim_two_complete_studies():
 
 
 def npi():
-    return {"result_count": 1, "results": [{"number": int(NPI),
+    return {"result_count": 1, "results": [{"number": NPI,
         "basic": {"first_name": "Invented", "last_name": "Provider"},
         "taxonomies": [{"desc": "Invented specialty"}]}]}
 
@@ -287,7 +287,7 @@ def test_npi_requires_integral_consistent_count_and_result_collection(changes):
         lookup("npi_registry", {**npi(), **changes}, NPI)
 
 
-@pytest.mark.parametrize("field,value", [("number", NPI), ("number", 1234567890.0),
+@pytest.mark.parametrize("field,value", [("number", {"value": NPI}), ("number", 1234567890.0),
     ("basic", []), ("basic", {"organization_name": 123}), ("taxonomies", {}),
     ("taxonomies", [{"desc": 123}])])
 def test_npi_requires_documented_field_types(field, value):

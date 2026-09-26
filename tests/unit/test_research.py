@@ -88,6 +88,45 @@ def test_query_hash_is_utf8_and_exact():
     assert research_digest(parsed) == hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
 
 
+@pytest.mark.parametrize("number", ["1234567890", 1234567890])
+def test_npi_registry_accepts_publisher_identifier_text_and_retains_exact_provenance(number):
+    settings = Settings(_env_file=None, research_sources="npi_registry")
+    payload = {"result_count": 1, "results": [{"number": number,
+        "basic": {"organization_name": "Invented Research Hospital", "status": "A"}}]}
+    raw = json.dumps(payload).encode()
+    transport = httpx.MockTransport(lambda _: httpx.Response(200, content=raw))
+    with adapter.PublicResearch(settings, transport=transport) as port:
+        rows = port.lookup("npi_registry", "1234567890", check=lambda: 30)
+    assert len(rows) == 1
+    row = rows[0]
+    assert row["id"] == "1234567890"
+    assert row["url"] == "https://npiregistry.cms.hhs.gov/provider-view/1234567890"
+    assert row["raw_response_sha256"] == hashlib.sha256(raw).hexdigest()
+    assert row["sha256"] == research_digest({key: value for key, value in row.items() if key != "sha256"})
+
+
+@pytest.mark.parametrize("number", ["1234567891", "01234567890", " 1234567890", 1234567890.0, True, None])
+def test_npi_registry_rejects_changed_or_coerced_publisher_identifiers(number):
+    settings = Settings(_env_file=None, research_sources="npi_registry")
+    payload = {"result_count": 1, "results": [{"number": number,
+        "basic": {"organization_name": "Invented Research Hospital"}}]}
+    with adapter.PublicResearch(settings, transport=httpx.MockTransport(
+        lambda _: httpx.Response(200, json=payload)
+    )) as port, pytest.raises(ResearchUnavailable, match="invalid_source_response"):
+        port.lookup("npi_registry", "1234567890", check=lambda: 30)
+
+
+def test_npi_registry_rejects_non_ascii_query_before_publisher_io():
+    settings = Settings(_env_file=None, research_sources="npi_registry")
+
+    def unexpected(_):
+        pytest.fail("Non-ASCII identifiers must not reach the publisher")
+
+    with adapter.PublicResearch(settings, transport=httpx.MockTransport(unexpected)) as port:
+        with pytest.raises(ResearchUnavailable, match="invalid_source_response"):
+            port.lookup("npi_registry", "１２３４５６７８９０", check=lambda: 30)
+
+
 @pytest.mark.parametrize("source,query", [
     ("pubmed", "Invented evidence"), ("clinical_trials", "Invented study"),
     ("dailymed", "Invented drug"), ("rxnorm", "Invented drug"), ("openfda", "Invented drug"),

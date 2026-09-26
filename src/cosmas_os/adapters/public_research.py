@@ -562,7 +562,7 @@ class PublicResearch:
         return self._dataset("medicare_care_compare", query, check)
 
     def _npi_registry(self, query, check):
-        if not re.fullmatch(r"\d{10}", query):
+        if not re.fullmatch(r"[0-9]{10}", query):
             raise ResearchUnavailable("invalid_source_response")
         value, digest = self._json("https://npiregistry.cms.hhs.gov", "/api/", {"version": "2.1", "number": query, "limit": 5}, check)
         total = count(value["result_count"])
@@ -571,7 +571,9 @@ class PublicResearch:
             raise ValueError()
         result = []
         for row in rows:
-            if type(row["number"]) is not int or str(row["number"]) != query:
+            # NPPES v2.1 returns this identifier as a decimal string. Retain
+            # compatibility with numeric responses without coercing other types.
+            if type(row["number"]) not in (str, int) or str(row["number"]) != query:
                 raise ValueError()
             basic = row["basic"]
             if type(basic) is not dict or any(not isinstance(basic[key], str) for key in
