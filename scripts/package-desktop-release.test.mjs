@@ -90,12 +90,13 @@ test('real ASAR preserves executable custody and catches changed packed and unpa
   await writeFile(join(archive+'.unpacked','native-auth',manifest.executable),'changed executable');
   await assert.rejects(verifyArchive(tools.asar,archive,expected));
 });
-test('fuse adaptation keeps all Scribe restrictions and never requests automatic signing',()=>{
+test('fuse adaptation keeps capability restrictions and selects the supplied V8 snapshot',()=>{
   const f=fuseConfiguration(tools.fuses),o=tools.fuses.FuseV1Options;
   assert.equal(f.resetAdHocDarwinSignature,false);assert.equal(f.strictlyRequireAllFuses,true);
   assert.equal(f[o.RunAsNode],false);assert.equal(f[o.EnableNodeOptionsEnvironmentVariable],false);
   assert.equal(f[o.EnableNodeCliInspectArguments],false);assert.equal(f[o.OnlyLoadAppFromAsar],true);
   assert.equal(f[o.EnableEmbeddedAsarIntegrityValidation],true);
+  assert.equal(f[o.LoadBrowserProcessSpecificV8Snapshot],false);
 });
 
 test('official default-app metadata must match its actual header before replacement',async()=>{
