@@ -223,7 +223,8 @@
     },
     "protocol/generated.ts": {
       "source_path": "packages/capture-protocol/src/generated.ts",
-      "sha256": "3def50dc15d79ea5bf780c8bdac6d98b008d0ba9444d5098dd20fdc6efb82bca"
+      "sha256": "9c7a844d5ac6558890886af926b2264f375cc84c05ad3259ed86cfde00011c38",
+      "source_ref": "6a55bf7ec407172834b58a740801a8eb58ff0b5e"
     }
   }
 }

@@ -71,3 +71,23 @@ it("rejects foreign selection/recovery before transport and preserves strict leg
   await bff.acknowledgeCaptureProfile(golden);
   await expect(bff.getCapabilities(session)).rejects.toThrow("capture_profile_invalid");
 });
+
+
+it("receives current Scribe capacity while keeping legacy and acknowledged profile budgets exact", async () => {
+  let receipt = { ...capabilities, max_chunks: 2048, remaining_aggregate_plaintext_bytes: 402653184 };
+  const transport = vi.fn<WorkspaceCaptureTransport>(async ({ operation }) => ({ workspace_id: workspace,
+    session_id: session, operation: operation.kind, receipt }));
+  const bff = new WorkspaceCaptureBff(workspace, session, transport);
+  expect(await bff.getCapabilities(session)).toEqual(receipt);
+  receipt = { ...receipt, max_chunks: 1000, remaining_aggregate_plaintext_bytes: 67108864 };
+  expect(await bff.getCapabilities(session)).toEqual(receipt);
+  for (const [max_chunks, remaining_aggregate_plaintext_bytes] of [
+    [1000, 67108865], [2048, 402653185], [2049, 402653184], [720, 268435456],
+  ]) {
+    receipt = { ...receipt, max_chunks, remaining_aggregate_plaintext_bytes };
+    await expect(bff.getCapabilities(session)).rejects.toThrow("capture_profile_invalid");
+  }
+  await bff.acknowledgeCaptureProfile(golden);
+  receipt = { ...capabilities, max_chunks: 2048, remaining_aggregate_plaintext_bytes: 402653184 };
+  await expect(bff.getCapabilities(session)).rejects.toThrow("capture_profile_invalid");
+});

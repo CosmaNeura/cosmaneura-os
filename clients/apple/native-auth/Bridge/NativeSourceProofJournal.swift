@@ -52,7 +52,7 @@ struct NativeSourceProofRecord: Codable, Equatable, Sendable, CustomStringConver
               userID.range(of: idPattern, options: .regularExpression) != nil,
               organizationID == nil || organizationID?.range(of: idPattern, options: .regularExpression) != nil,
               source == platform.source.rawValue, leaseGeneration > 0, leaseGeneration < 2_147_483_648,
-              (0..<1000).contains(firstSequenceNumber), captureAuthorizedUntil.utf8.count <= 64,
+              (0..<2048).contains(firstSequenceNumber), captureAuthorizedUntil.utf8.count <= 64,
               nativeRecoveryDate(captureAuthorizedUntil) != nil else {
             throw NativeSourceJournalError.unavailable
         }

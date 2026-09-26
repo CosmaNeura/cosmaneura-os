@@ -1,3 +1,4 @@
+import { MAX_CHUNKS, MAX_AGGREGATE_PLAINTEXT_BYTES } from "@cosmaneura-scribe/capture-protocol";
 /** Additive Scribe visit policy. A receipt never grants recording authority. */
 import type { CaptureCapabilities, MutationOptions, RequestOptions } from "./contracts";
 import { canonicalCaptureTimestamp } from "./recovery-contracts";
@@ -88,12 +89,16 @@ export function validateProfileCapabilities(value: unknown, profile: CaptureProf
     "remaining_aggregate_plaintext_bytes", "capture_lease_ttl_seconds", "reservation_window_seconds",
     "max_reservations_per_batch", "upload_concurrency"]);
   keys(value.media, ["media_type", "encoding", "channels", "sample_rate_hz"]);
+  const recognizedCapacity = profile ? value.max_chunks === profile.maximum_chunks
+    : value.max_chunks === 1000 || value.max_chunks === MAX_CHUNKS;
+  const byteLimit = profile?.maximum_aggregate_plaintext_bytes
+    ?? (value.max_chunks === 1000 ? 67108864 : MAX_AGGREGATE_PLAINTEXT_BYTES);
   requireValue(value.protocol_version === "1.0" && value.media.media_type === "audio/wav" &&
     value.media.encoding === "pcm_s16le" && value.media.channels === 1 && value.media.sample_rate_hz === 16000 &&
     value.target_chunk_duration_ms === 10000 && value.max_envelope_bytes === 327680 &&
-    value.max_chunks === (profile?.maximum_chunks ?? 1000) && value.capture_lease_ttl_seconds === 900 &&
+    recognizedCapacity && value.capture_lease_ttl_seconds === 900 &&
     value.reservation_window_seconds === 900 && value.max_reservations_per_batch === 90 && value.upload_concurrency === 2 &&
     Number.isSafeInteger(value.remaining_aggregate_plaintext_bytes) && (value.remaining_aggregate_plaintext_bytes as number) >= 0 &&
-    (value.remaining_aggregate_plaintext_bytes as number) <= (profile?.maximum_aggregate_plaintext_bytes ?? 67108864));
+    (value.remaining_aggregate_plaintext_bytes as number) <= byteLimit);
   return structuredClone(value) as unknown as CaptureCapabilities;
 }

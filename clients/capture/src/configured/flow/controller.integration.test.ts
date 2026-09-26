@@ -542,7 +542,10 @@ describe("CaptureFlowController", () => {
     }
   });
 
-  it("caps capture to the exact authority window and applies server upload concurrency", async () => {
+  it.each([
+    { chunks: 1000, bytes: 67_108_864, seconds: 2_040 },
+    { chunks: 2048, bytes: 402_653_184, seconds: 12_280 },
+  ])("caps $chunks-chunk capture to the exact authority window and applies server upload concurrency", async ({ chunks, bytes, seconds }) => {
     const clock = { value: new Date("2026-08-18T12:00:00.000Z") };
     const server = createMockBffServer({ now: () => new Date(clock.value) });
     const origin = await listenOnEphemeralLoopback(server);
@@ -558,6 +561,10 @@ describe("CaptureFlowController", () => {
       crypto: TEST_CRYPTO,
     });
     const bff = new HttpCaptureBff(createSameOriginFetch(origin));
+    const readCapabilities = bff.getCapabilities.bind(bff);
+    vi.spyOn(bff, "getCapabilities").mockImplementation(async (...args) => ({
+      ...await readCapabilities(...args), max_chunks: chunks, remaining_aggregate_plaintext_bytes: bytes,
+    }));
     const queue = new CaptureQueue(queueStorage, { crypto: TEST_CRYPTO });
     const configureUploadConcurrency = vi.spyOn(queue, "configureUploadConcurrency");
     const source = new InspectableCaptureSource();
@@ -581,10 +588,10 @@ describe("CaptureFlowController", () => {
       await controller.prepare(TEST_ENCOUNTER);
       await expect(flowStore.getActiveCaptureState()).resolves.toMatchObject({
         captureAuthorizedUntil: "2026-08-18T12:15:00.000Z",
-        aggregatePlaintextBudgetBytes: 67_108_864,
+        aggregatePlaintextBudgetBytes: bytes,
       });
       expect(configureUploadConcurrency).toHaveBeenCalledWith(2);
-      expect(controller.snapshot.remainingBudgetSeconds).toBe(2_040);
+      expect(controller.snapshot.remainingBudgetSeconds).toBe(seconds);
       expect(controller.snapshot.remainingAuthoritySeconds).toBe(900);
 
       await controller.startRecording();

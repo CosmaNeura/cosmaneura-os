@@ -23,15 +23,20 @@ from pydantic import (
     model_validator,
 )
 
-from cosmas_os.ports.capture_native_start import NativeSourceStart
+from cosmas_os.ports.capture_limits import (
+    LEGACY_CAPTURE_PLAINTEXT_BYTES,
+    MAX_CAPTURE_CHUNKS,
+    MAX_CAPTURE_PLAINTEXT_BYTES,
+)
 from cosmas_os.ports.capture_native_extension import NativeSourceExtension
+from cosmas_os.ports.capture_native_start import NativeSourceStart
 from cosmas_os.ports.capture_recovery import CaptureRecoveryRequest
 from cosmas_os.ports.capture_working import TranscriptCorrection
 from cosmas_os.ports.creator_review import CreatorTranslationDecision
 
 Channel = Literal["microphone", "system_audio", "mixed"]
 Generation = Annotated[int, Field(strict=True, ge=1)]
-Sequence = Annotated[int, Field(strict=True, ge=0, lt=1000)]
+Sequence = Annotated[int, Field(strict=True, ge=0, lt=MAX_CAPTURE_CHUNKS)]
 KeyVersion = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,128}$")]
 WrappedKey = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{512}$", repr=False)]
 AssociatedData = Annotated[str, Field(pattern=r"^[A-Za-z0-9_-]{1,1024}$", repr=False)]
@@ -69,7 +74,7 @@ class ReservePayload(ProtocolPayload):
 
     @model_validator(mode="after")
     def within_limit(self) -> ReservePayload:
-        if self.first_sequence_number + self.count > 1000:
+        if self.first_sequence_number + self.count > MAX_CAPTURE_CHUNKS:
             raise ValueError("Capture limit exceeded")
         return self
 
@@ -323,8 +328,18 @@ class BaseCapabilities(ProtocolPayload):
 
 
 class Capabilities(BaseCapabilities):
-    max_chunks: Literal[1000]
-    remaining_aggregate_plaintext_bytes: int = Field(strict=True, ge=0, le=67108864)
+    max_chunks: Literal[1000, 2048]
+    remaining_aggregate_plaintext_bytes: int = Field(
+        strict=True, ge=0, le=MAX_CAPTURE_PLAINTEXT_BYTES
+    )
+
+    @model_validator(mode="after")
+    def capability_budget(self) -> Capabilities:
+        if self.max_chunks == 1000 and (
+            self.remaining_aggregate_plaintext_bytes > LEGACY_CAPTURE_PLAINTEXT_BYTES
+        ):
+            raise ValueError("Invalid legacy capture budget")
+        return self
 
 
 class LongVisitCapabilities(BaseCapabilities):

@@ -1,4 +1,4 @@
-import { NONCE_BYTES } from "@cosmaneura-scribe/capture-protocol";
+import { MAX_CHUNKS, MAX_AGGREGATE_PLAINTEXT_BYTES, NONCE_BYTES } from "@cosmaneura-scribe/capture-protocol";
 
 import { QueueInvariantError } from "../../queue/errors";
 import {validateProfileReceipt, validateProfileSelection, canonicalProfileRequest} from "../../bff/profile-contracts";
@@ -564,6 +564,7 @@ export function assertActiveCaptureState(value: unknown): asserts value is Activ
       typeof value.captureAuthorizedUntil !== "string") ||
     !Number.isSafeInteger(value.aggregatePlaintextBudgetBytes) ||
     (value.aggregatePlaintextBudgetBytes as number) < 1 ||
+    (value.aggregatePlaintextBudgetBytes as number) > (value.captureProfile === undefined ? MAX_AGGREGATE_PLAINTEXT_BYTES : 268435456) ||
     !isActiveCapturePhase(value.phase) ||
     typeof value.completeIdempotencyKey !== "string" ||
     !Number.isSafeInteger(value.recordedChunks) ||
@@ -596,7 +597,7 @@ export function assertActiveCaptureState(value: unknown): asserts value is Activ
       || (next.firstSequenceNumber as number) > (value.recordedChunks as number)
       || !Number.isSafeInteger(next.reservationCount) || (next.reservationCount as number) < 1
       || (next.reservationCount as number) > 90
-      || (next.firstSequenceNumber as number) + (next.reservationCount as number) > 1000
+      || (next.firstSequenceNumber as number) + (next.reservationCount as number) > MAX_CHUNKS
       || typeof next.renewIdempotencyKey !== "string" || !isRecord(next.previousLease)) {
       throw new QueueInvariantError("invalid_active_capture_state");
     }

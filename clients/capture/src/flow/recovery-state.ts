@@ -257,8 +257,9 @@ export function assertCaptureRecoveryState(
   const segments = value.segments as unknown[];
   const gaps = value.gaps as unknown[];
   if (
-    segments.length > MAX_CHUNKS ||
-    gaps.length > MAX_CHUNKS ||
+    // Recovery history capacity is independent of the negotiated audio chunk limit.
+    segments.length > 1000 ||
+    gaps.length > 1000 ||
     value.nextSegmentOrdinal !== segments.length ||
     (gaps.length === 0) !== (value.noteReadiness === "eligible")
   ) {

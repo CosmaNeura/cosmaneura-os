@@ -1,3 +1,4 @@
+import { MAX_CHUNKS } from "../capture/protocol/generated";
 import type { components } from "./capture-api";
 import { readBoundedJson } from "./beta-api";
 import { isUuid } from "./contracts";
@@ -25,7 +26,7 @@ export function parseCaptureContinuity(value: unknown): CaptureContinuity {
     requireValue(Object.keys(start).sort().join(",") === "first_sequence_number,source_start_id"
       && isUuid(start.source_start_id) && !ids.has(start.source_start_id)
       && Number.isSafeInteger(start.first_sequence_number) && Number(start.first_sequence_number) >= position
-      && Number(start.first_sequence_number) < 1000 && (index !== 0 || start.first_sequence_number === 0));
+      && Number(start.first_sequence_number) < MAX_CHUNKS && (index !== 0 || start.first_sequence_number === 0));
     ids.add(start.source_start_id); position = Number(start.first_sequence_number);
   }
   if (recovered) {
@@ -41,7 +42,7 @@ export function parseCaptureContinuity(value: unknown): CaptureContinuity {
         && isUuid(gap.receipt_id) && !receipts.has(gap.receipt_id)
         && isUuid(gap.gap_id) && !gapIds.has(gap.gap_id)
         && Number.isSafeInteger(gap.next_sequence_number) && Number(gap.next_sequence_number) >= boundary
-        && Number(gap.next_sequence_number) <= 1000
+        && Number(gap.next_sequence_number) <= MAX_CHUNKS
         && typeof gap.reason_code === "string"
         && ["audio_context_suspended", "audio_device_disconnected", "audio_route_changed",
           "audio_session_interrupted", "capture_backgrounded", "capture_source_stalled",

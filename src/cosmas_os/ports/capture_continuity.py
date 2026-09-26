@@ -5,19 +5,20 @@ from uuid import UUID
 
 from pydantic import Field, model_serializer, model_validator
 
+from cosmas_os.ports.capture_limits import MAX_CAPTURE_CHUNKS
 from cosmas_os.ports.capture_recovery import GapReason
 from cosmas_os.ports.capture_working import ProtectedContract
 
 
 class NativeIntervalStart(ProtectedContract):
     source_start_id: UUID
-    first_sequence_number: int = Field(strict=True, ge=0, le=999)
+    first_sequence_number: int = Field(strict=True, ge=0, lt=MAX_CAPTURE_CHUNKS)
 
 
 class AcknowledgedCaptureInterruption(ProtectedContract):
     receipt_id: UUID
     gap_id: UUID
-    next_sequence_number: int = Field(strict=True, ge=0, le=1000)
+    next_sequence_number: int = Field(strict=True, ge=0, le=MAX_CAPTURE_CHUNKS)
     reason_code: GapReason
     decision: Literal["resume_capture", "finish_capture"]
 

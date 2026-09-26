@@ -1,4 +1,4 @@
-import { base64UrlEncode, NONCE_BYTES } from "@cosmaneura-scribe/capture-protocol";
+import { base64UrlEncode, MAX_AGGREGATE_PLAINTEXT_BYTES, NONCE_BYTES } from "@cosmaneura-scribe/capture-protocol";
 
 import { QueueInvariantError } from "../queue/errors";
 import type { CaptureLeaseReceipt, ChunkReservationBatchReceipt } from "../bff/contracts";
@@ -946,7 +946,7 @@ export function assertActiveCaptureState(value: unknown): asserts value is Activ
       typeof value.captureAuthorizedUntil !== "string") ||
     !Number.isSafeInteger(value.aggregatePlaintextBudgetBytes) ||
     (value.aggregatePlaintextBudgetBytes as number) < 1 ||
-    (value.aggregatePlaintextBudgetBytes as number) > (value.captureProfile === undefined ? 67108864 : 268435456) ||
+    (value.aggregatePlaintextBudgetBytes as number) > (value.captureProfile === undefined ? MAX_AGGREGATE_PLAINTEXT_BYTES : 268435456) ||
     !isActiveCapturePhase(value.phase) ||
     typeof value.completeIdempotencyKey !== "string" ||
     !Number.isSafeInteger(value.recordedChunks) ||
