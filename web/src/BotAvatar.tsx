@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 import type { BotRole } from "./workspace-api";
-import { ResearchAvatar } from "./ResearchAvatar";
 import "./bot-motion.css";
 
 const portraits: Record<BotRole, { file: string; initials: string }> = {
@@ -9,7 +8,7 @@ const portraits: Record<BotRole, { file: string; initials: string }> = {
   follow_up: { file: "follow-up", initials: "Fu" },
   chief: { file: "chief", initials: "Ch" },
   custom: { file: "", initials: "Cb" },
-  research: { file: "", initials: "Re" },
+  research: { file: "research", initials: "Re" },
 };
 
 // The media itself is 4,060ms long; the supplied demo's 4,380ms timer was inaccurate.
@@ -29,7 +28,8 @@ export function BotAvatar({ role, large = false, active = false, greeting = fals
   const [loadedMotion, setLoadedMotion] = useState<string | null>(null);
   const [failedMotion, setFailedMotion] = useState<string | null>(null);
   const greeted = useRef(new Set<BotRole>());
-  const requested = enabled && !!portrait.file && (active || greeting);
+  // Research has a matching still portrait; request clips only for the supplied motion set.
+  const requested = enabled && !!portrait.file && role !== "research" && (active || greeting);
 
   useEffect(() => {
     setCanMove(false);
@@ -68,7 +68,7 @@ export function BotAvatar({ role, large = false, active = false, greeting = fals
   }, [phase, playing, role, active]);
 
   return <span ref={element} className={`bot-avatar ${role}${large ? " large" : ""}${playing ? " bot-avatar-playing" : ""}`} aria-hidden="true" data-motion-phase={playing ? phase : "idle"}>
-    {role === "research" ? <ResearchAvatar /> : role === "custom" ? <svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2"><rect x="10" y="14" width="28" height="24" rx="8"/><path d="M24 8v6M17 31h14"/><circle cx="18" cy="23" r="1.5"/><circle cx="30" cy="23" r="1.5"/></svg> : <>
+    {role === "custom" ? <svg viewBox="0 0 48 48" width="48" height="48" fill="none" stroke="currentColor" strokeWidth="2"><rect x="10" y="14" width="28" height="24" rx="8"/><path d="M24 8v6M17 31h14"/><circle cx="18" cy="23" r="1.5"/><circle cx="30" cy="23" r="1.5"/></svg> : <>
       <span className="bot-avatar-still">{failedSource === src ? portrait.initials : <img src={src} alt="" width={384} height={384} draggable={false} onError={() => setFailedSource(src)} />}</span>
       {motionSource && !motionFailed && <img key={motionSource} className="bot-avatar-motion" src={motionSource} alt="" width={256} height={256} draggable={false}
         onLoad={() => setLoadedMotion(motionSource)} onError={() => setFailedMotion(portrait.file)} />}

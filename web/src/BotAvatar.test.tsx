@@ -69,6 +69,9 @@ describe("bot motion follows real activity and accessibility preferences", () =>
   it("does not request animation for idle or disabled bots, or replace custom bot identity", async () => {
     await show(); expect(motion()).toBeNull(); expect(intersections).toHaveLength(0);
     await show({active: true, enabled: false}); expect(motion()).toBeNull();
+    await show({role: "research", active: true, greeting: true});
+    expect(motion()).toBeNull();
+    expect(container.querySelector(".bot-avatar-still img")!.getAttribute("src")).toBe("/bots/research.png");
     await show({role: "custom", active: true, greeting: true});
     expect(motion()).toBeNull(); expect(container.querySelector("svg")).not.toBeNull();
   });
