@@ -1,0 +1,32 @@
+{
+  "repository": "CosmaNeura/cosmaneura-scribe",
+  "commit": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+  "files": [
+    {
+      "path": "apps/capture/src/provider/native-recorder.ts",
+      "git_blob": "b3990ce5c54a3c6f94184bb97c88b3db31055e11"
+    },
+    {
+      "path": "apps/capture/src/provider/native-recorder.fixture.ts",
+      "git_blob": "d38a59f1017fcbabc8aee6a9390597e65ddf8b2f"
+    },
+    {
+      "path": "apps/capture/src/provider/native-recorder.test.ts",
+      "git_blob": "8755e532ca5bc55c0d3a1a892e3c00e6c0181dd2"
+    },
+    {
+      "path": "apps/capture/src/native/ios-input-signal.ts",
+      "git_blob": "5c443d150cb136be452810cb3da213d8b8027897"
+    },
+    {
+      "path": "apps/capture/src/native/microphone-input.ts",
+      "git_blob": "2a0c6c86b14538261426169cbdd00cd9f8c3d4fa"
+    }
+  ],
+  "adaptations": [
+    "OS workspace and native-derived account recovery scope are validated before the ciphertext namespace is opened.",
+    "UI detach and abort retain the native host; explicit stop/seal closes the host before upload completion.",
+    "Current admitted 360-position profile retained; no extension to upstream 2048 positions.",
+    "Reuse existing OS ciphertext upload, registration and creator review; older queue/controller owners remain unchanged."
+  ]
+}

@@ -22,9 +22,11 @@ const prepared = { status: "prepared" as const, workspace_id: workspace, session
   consent_record_id: "00000000-0000-4000-8000-000000000004" };
 const identity = { mode: "clerk_jwt" as const, getToken: vi.fn() };
 let root: Root, container: HTMLDivElement, runtime: CaptureRuntime;
-let snapshot: CaptureFlowSnapshot;
+let snapshot: CaptureRuntime['controller']['snapshot'];
 let listener: ((value: CaptureFlowSnapshot) => void) | undefined;
 const factory = vi.fn<() => Promise<CaptureRuntime>>();
+
+const nativeState = () => ({phase:"ready",busy:false,input:"built_in" as const,signal:{version:2,signal:null}});
 
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
@@ -107,6 +109,40 @@ it("offers upload retry after reopening or failure, without interrupting an acti
   snapshot = {...snapshot,state:"error",statusCode:"synthetic_preview_failed"};
   await act(async () => listener?.(snapshot));
   expect(button("Retry saved work").disabled).toBe(false);
+});
+
+it("can cancel a pending native start and ignores its later failure", async () => {
+  runtime.sourceKind="microphone";runtime.captureMode="native_microphone";runtime.supportsContinuation=true;
+  snapshot={...snapshot,native:nativeState()};
+  let rejectStart!:(error:Error)=>void;
+  vi.mocked(runtime.controller.startRecording).mockImplementation(async()=>{
+    snapshot={...snapshot,native:{...nativeState(),phase:"starting"}};
+    listener?.(snapshot);
+    return new Promise<void>((_resolve,reject)=>{rejectStart=reject;});
+  });
+  vi.mocked(runtime.controller.stopRecording).mockImplementation(async()=>{
+    snapshot={...snapshot,state:"paused",native:{...nativeState(),phase:"paused"}};
+    listener?.(snapshot);
+  });
+  admitWorkspaceProtocol(identity,workspaceProtocolGeneration(identity));
+  await click("Open recording");await click("Start recording");
+  expect(button("Cancel start").disabled).toBe(false);
+  await click("Cancel start");
+  await act(async()=>rejectStart(new Error("late start failure")));
+  expect(runtime.controller.stopRecording).toHaveBeenCalledOnce();
+  expect(container.textContent).toContain("Recording paused");
+  expect(container.querySelector('[role="alert"]')).toBeNull();
+});
+
+it("selects an iPhone input while paused without starting a recording", async () => {
+  runtime.sourceKind="microphone";runtime.captureMode="native_microphone";runtime.supportsContinuation=true;
+  runtime.controller.selectMicrophoneInput=vi.fn().mockResolvedValue(undefined);
+  snapshot={...snapshot,state:"paused",native:{...nativeState(),phase:"paused"}};
+  await click("Open recording");
+  const select=container.querySelector<HTMLSelectElement>('[aria-label="Recording microphone"]')!;
+  await act(async()=>{select.value="bluetooth";select.dispatchEvent(new Event("change",{bubbles:true}));});
+  expect(runtime.controller.selectMicrophoneInput).toHaveBeenCalledWith("bluetooth");
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
 });
 
 it("opens a specific Scribe task without starting capture and keeps its identity on exact retries", async () => {

@@ -53,6 +53,17 @@ export async function openCaptureQueueStorage(workspaceId: string, sessionId: st
 /** Native keys include private workspace/session scope. Foreign records are never fetched. */
 export function scopedNativePlugin(plugin: NativeQueuePlugin, workspaceId: string, sessionId: string): NativeQueuePlugin {
   const prefix = `cosmas-queue:v1:${validId(workspaceId)}:${validId(sessionId)}:`;
+  return scopedPlugin(plugin, prefix);
+}
+
+/** The account recovery UUID is supplied by the verified native recording
+ * bridge. This namespace never adopts the legacy renderer-owned queue. */
+export function scopedNativeRecordingPlugin(plugin: NativeQueuePlugin, recoveryScope: string, workspaceId: string, sessionId: string): NativeQueuePlugin {
+  const prefix = `cosmas-provider-queue:v1:${validId(recoveryScope)}:${validId(workspaceId)}:${validId(sessionId)}:`;
+  return scopedPlugin(plugin, prefix);
+}
+
+function scopedPlugin(plugin: NativeQueuePlugin, prefix: string): NativeQueuePlugin {
   const key = (id: string) => prefix + validId(id);
   return {
     create: record => plugin.create({...record, key: key(record.key)}),

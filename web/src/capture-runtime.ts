@@ -13,6 +13,10 @@ import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
 import { CAPTURE_RECOVERY_BUILD, CAPTURE_SOURCE_BUILD, CAPTURE_LONG_VISITS_BUILD, workspaceCaptureBff } from "./capture-api";
 import { bindCaptureQueueStorage, openCaptureQueueStorage } from "./capture-storage";
 import {openDesktopCaptureRuntime} from './desktop-capture-runtime';
+import {openNativeCaptureRuntime} from './native-capture-runtime';
+import {EncryptedIndexedDbQueueStorage} from '../../clients/capture/src/storage/encrypted-indexeddb';
+import type {NativeRecorderSnapshot} from '../../clients/capture/src/native/owned-recorder';
+import type {MicrophoneInput} from '../../clients/capture/src/native/microphone-input';
 import type {ProviderRecorderSnapshot} from '../../clients/capture/src/configured/provider-binding';
 import {hasEmptyPreparationTransfer,transferEmptyPreparation} from '../../clients/capture/src/flow/empty-preparation-transfer';
 
@@ -20,8 +24,9 @@ export interface CaptureRuntime {
   controller: Pick<CaptureFlowController, "snapshot" | "subscribe" | "startRecording" |
     "stopRecording" | "resumePendingWork" | "acknowledgeGap" | "finishInterruptedCapture" | "refreshTranscriptionStatus"> & {
       pauseRecording?:()=>Promise<void>;refreshPermissions?:()=>Promise<void>;
-      snapshot:CaptureFlowController['snapshot'] & {desktop?:ProviderRecorderSnapshot['desktop']}};
-  captureMode?: 'desktop_meeting';
+      selectMicrophoneInput?:(input:MicrophoneInput)=>Promise<void>;
+      snapshot:CaptureFlowController['snapshot'] & {desktop?:ProviderRecorderSnapshot['desktop'];native?:NativeRecorderSnapshot['native']}};
+  captureMode?: 'desktop_meeting' | 'native_microphone';
   supportsContinuation?: boolean;
   recoveryOnly?: boolean;
   canFinishRecovery?: boolean;
@@ -62,6 +67,36 @@ export const openCaptureRuntime: CaptureRuntimeFactory = async (workspaceId, ses
     const preparation = await flow.getPreparationState();
     if (active && active.sessionId !== sessionId || preparation?.sessionId && preparation.sessionId !== sessionId) {
       throw new BffResponseError(409, "capture_saved_session_changed", null);
+    }
+    const owner = await flow.getCaptureStorageOwner(sessionId);
+    if (owner === 'owned:native' || configured && native && owner === null && !active && !preparation && mode !== 'desktop_meeting') {
+      if (!native || !configured || active || preparation || mode === 'desktop_meeting')
+        throw new BffResponseError(409, 'capture_saved_session_changed', null);
+      const {EncryptedIndexedDbFlowStore:ConfiguredStore}=await import('../../clients/capture/src/configured/flow/encrypted-store');
+      const prior=await ConfiguredStore.open({databaseName:`cosmas-configured-flow:v1:${workspaceId}`});
+      let priorWork: boolean;
+      try { priorWork = !!(await prior.getActiveCaptureState() || await prior.getPreparationState()); }
+      finally { prior.close(); }
+      if (owner === 'owned:native' && priorWork) throw new BffResponseError(409, 'capture_saved_session_changed', null);
+      if (!priorWork) {
+        if (owner === null) {
+          // No old journal/marker is enough only when both old queues are empty.
+          const browser = await EncryptedIndexedDbQueueStorage.open({databaseName:`cosmas-capture-queue:${workspaceId}`});
+          try {
+            if ((await browser.listMetadata()).some(row => row.reservation.sessionId === sessionId && row.state !== 'purged'))
+              throw new BffResponseError(409, 'capture_saved_session_changed', null);
+          } finally { browser.close(); }
+          const previous = await openCaptureQueueStorage(workspaceId, sessionId, true);
+          try {
+            if ((await previous.storage.listMetadata()).some(row => row.state !== 'purged'))
+              throw new BffResponseError(409, 'capture_saved_session_changed', null);
+          } finally { previous.close(); }
+        }
+        await flow.claimNativeRecordingStorage(sessionId);
+        const profiles = flow;
+        return await openNativeCaptureRuntime({workspaceId, sessionId, identity, upload:uploadTarget, abort,
+          release:async()=>{profiles.close();await release();}});
+      }
     }
     if(mode==='desktop_meeting'||await flow.usesDesktopCaptureStorage(sessionId)){
       if(!configured||active||preparation)throw new BffResponseError(409,'capture_saved_session_changed',null);
