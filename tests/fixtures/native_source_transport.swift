@@ -26,6 +26,11 @@ import CosmasNativeAuth
                 "body_base64": request.httpBody!.base64EncodedString()] as [String: Any]
         }
         rows.append(try await contextChecks(transport: transport))
+        let account = try transport.makeRequest(ProviderNativeRequest(recordingAccountID: UUID(),
+            revision: UUID().uuidString.lowercased()), token: "synthetic-test-token")
+        rows.append(["kind": "native_recording_account", "url": account.url!.absoluteString,
+            "method": account.httpMethod!, "headers": account.allHTTPHeaderFields!,
+            "body_base64": (account.httpBody ?? Data()).base64EncodedString()])
         let encoded = try JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys])
         FileHandle.standardOutput.write(encoded)
     }

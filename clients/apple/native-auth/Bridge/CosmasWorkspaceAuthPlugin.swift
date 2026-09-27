@@ -2,6 +2,7 @@
 import CosmasNativeAuth
 import Foundation
 import WebKit
+import AVFAudio
 
 @objc(CosmasWorkspaceAuthPlugin)
 @MainActor
@@ -18,9 +19,14 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
         CAPPluginMethod(name: "getToken", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "prepareProviderSource", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "closeProviderSource", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "openProviderRecording", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "providerRecordingCommand", returnType: CAPPluginReturnPromise),
     ]
 
     private var auth: NativeWorkspaceAuth?
+    private static var processRuntime: NativeProviderRecordingRuntime?
+    private var runtime: NativeProviderRecordingRuntime?
+    private let rendererID = UUID()
     private var recordNavigation: CosmaneuraNavigationHandler?
     private var providerConnection: NativeProviderConnection?
     private var sourceRecovery: NativeSourceRecovery?
@@ -68,6 +74,11 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
 
     @MainActor private func initializeAuth() {
         guard auth == nil else { return }
+        if let runtime = Self.processRuntime {
+            self.runtime = runtime; auth = runtime.auth
+            attachRuntimeObserver(runtime)
+            return
+        }
         let settings = Bundle.main.object(forInfoDictionaryKey: "CosmasNativeAuth") as? [String: Any] ?? [:]
         if settings["enabled"] as? Bool != true {
             auth = NativeWorkspaceAuth(enabled: false, organizationID: "",
@@ -93,13 +104,78 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
                     driver: { throw NativeAuthError.unavailable }, accessBlock: { throw NativeAuthError.unavailable })
             }
         }
-        auth?.onChange = { [weak self] state in
-            self?.providerConnection?.authChanged(state)
+        guard let auth else { return }
+        let runtime = NativeProviderRecordingRuntime(auth: auth) { auth in
+            guard let settings = Bundle.main.object(forInfoDictionaryKey: "CosmasConfiguredCapture") as? [String: Any],
+                  let group = Bundle.main.object(forInfoDictionaryKey: "CosmasSourceAccessGroup") as? String else {
+                throw ProviderNativeError.unavailable
+            }
+            let connection = NativeProviderConnection(auth: auth, wire: try WorkspaceSourceTransport(settings: settings))
+            let journal = try NativeSourceProofJournal(platform: .ios,
+                backing: KeychainNativeSourceJournal(platform: .ios,
+                    bundleIdentifier: Bundle.main.bundleIdentifier ?? "", accessGroup: group))
+            return (connection, NativeSourceRecovery(journal: journal))
+        }
+        Self.processRuntime = runtime; self.runtime = runtime
+        attachRuntimeObserver(runtime)
+    }
+
+    private func attachRuntimeObserver(_ runtime: NativeProviderRecordingRuntime) {
+        runtime.attach(rendererID) { [weak self] state in
             if state.phase != .ready || state.revision != self?.providerSourceRevision {
                 self?.invalidateProviderSource()
             }
-
             self?.notifyListeners("authStateChanged", data: Self.payload(state))
+        }
+    }
+
+    private func recordingCurrent(_ revision: String) throws {
+        try sourceLifecycle.requireOpen()
+        guard let runtime, runtime.auth.state().phase == .ready,
+              runtime.auth.state().revision == revision else { throw ProviderNativeError.unavailable }
+        try runtime.requireNativeAvailable()
+    }
+
+    @objc nonisolated public func openProviderRecording(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            do {
+                guard self.providerRequestsAvailable, let options = call.options as? [String: Any] else {
+                    throw ProviderNativeError.unavailable
+                }
+                let selection = try NativeProviderRecordingSelection(options)
+                self.initializeAuth()
+                try self.recordingCurrent(selection.revision)
+                guard let runtime = self.runtime else { throw ProviderNativeError.unavailable }
+                let resources = try runtime.resources()
+                let reply = try await runtime.recording.open(selection,
+                    current: { try self.recordingCurrent(selection.revision) },
+                    make: {
+                        try await NativeProviderRecordingHost.make(connection: resources.connection,
+                            auth: runtime.auth, recovery: resources.recovery,
+                            workspaceID: selection.workspaceID, sessionID: selection.sessionID,
+                            revision: selection.revision)
+                    }, inputMuted: { AVAudioApplication.shared.isInputMuted })
+                call.resolve(reply)
+            } catch { Self.rejectProvider(call) }
+        }
+    }
+
+    @objc nonisolated public func providerRecordingCommand(_ call: CAPPluginCall) {
+        Task { @MainActor in
+            do {
+                guard self.providerRequestsAvailable, let options = call.options as? [String: Any] else {
+                    throw ProviderNativeError.unavailable
+                }
+                let command = try NativeProviderRecordingCommand(options)
+                self.initializeAuth()
+                try self.sourceLifecycle.requireOpen()
+                guard let runtime = self.runtime else { throw ProviderNativeError.unavailable }
+                try runtime.requireNativeAvailable()
+                let reply = try await runtime.recording.command(command,
+                    current: { try self.recordingCurrent(command.revision) },
+                    inputMuted: { AVAudioApplication.shared.isInputMuted })
+                call.resolve(reply)
+            } catch { Self.rejectProvider(call) }
         }
     }
 
@@ -170,7 +246,11 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
                 defer { self.sourceLifecycle.finishOperation(operation) }
                 self.initializeAuth()
                 guard let auth = self.auth, auth.state().phase == .ready,
-                      auth.state().revision == revision else { throw ProviderNativeError.unavailable }
+                      auth.state().revision == revision, let runtime = self.runtime else { throw ProviderNativeError.unavailable }
+                try runtime.claimRendererSource(self.rendererID)
+                defer {
+                    runtime.finishRendererOperation(self.rendererID, retainingSource: self.providerSourceOwner != nil)
+                }
                 let preparation = try NativeSourcePreparation(workspaceID: workspace,
                     sessionID: session, leaseID: lease, leaseReceiptID: receipt,
                     leaseGeneration: generation, captureAuthorizedUntil: deadline, source: .ios,
@@ -178,12 +258,8 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
                 if let prior = self.providerSourcePreparation, prior != preparation {
                     throw ProviderNativeError.unavailable
                 }
-                if self.providerConnection == nil {
-                    guard let settings = Bundle.main.object(forInfoDictionaryKey: "CosmasConfiguredCapture") as? [String: Any]
-                    else { throw ProviderNativeError.unavailable }
-                    self.providerConnection = NativeProviderConnection(auth: auth,
-                        wire: try WorkspaceSourceTransport(settings: settings))
-                }
+                let resources = try runtime.resources()
+                self.providerConnection = resources.connection; self.sourceRecovery = resources.recovery
                 guard let connection = self.providerConnection else { throw ProviderNativeError.unavailable }
                 try await self.recoverSources(connection: connection)
                 try self.sourceLifecycle.requireOpen()
@@ -233,6 +309,10 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
             do {
                 let operation = try self.sourceLifecycle.beginOperation()
                 defer { self.sourceLifecycle.finishOperation(operation) }
+                if let runtime = self.runtime { try runtime.claimRendererSource(self.rendererID) }
+                defer {
+                    self.runtime?.finishRendererOperation(self.rendererID, retainingSource: self.providerSourceOwner != nil)
+                }
                 if let owner = self.providerSourceOwner, let ownerID = self.providerSourceID {
                     try NativeCaptureStartGate.confirmStopped(owner: ownerID)
                     try await owner.confirmStopped()
@@ -247,6 +327,7 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
     /// Neither method is registered as a JavaScript plugin operation.
     @nonobjc public func fenceForRendererLoss() {
         sourceLifecycle.fence { self.invalidateProviderSource() }
+        runtime?.detach(rendererID)
     }
 
     @nonobjc public func closeForRendererLoss(
@@ -268,19 +349,14 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
                     throw ProviderNativeError.unavailable
                 }
             }
-            // Verify the existing global barrier; never clear a different owner.
-            try await NativeCaptureStartGate.recoverWhileIdle {}
+            // Keep native recording alive only when the retained host accounts
+            // for the exact gate owner. Legacy capture was physically closed above.
+            if let runtime = self.runtime { try runtime.confirmRendererReplacement() }
+            else { try NativeCaptureStartGate.confirmRendererReplacement() }
         }
     }
 
     private func recoverSources(connection: NativeProviderConnection) async throws {
-        if sourceRecovery == nil {
-            guard let group = Bundle.main.object(forInfoDictionaryKey: "CosmasSourceAccessGroup") as? String else { throw ProviderNativeError.unavailable }
-            let journal = try NativeSourceProofJournal(platform: .ios,
-                backing: KeychainNativeSourceJournal(platform: .ios,
-                    bundleIdentifier: Bundle.main.bundleIdentifier ?? "", accessGroup: group))
-            sourceRecovery = NativeSourceRecovery(journal: journal)
-        }
         guard let sourceRecovery else { throw ProviderNativeError.unavailable }
         try await sourceRecovery.recover(connection: connection)
     }
@@ -296,6 +372,7 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
         if let owner = providerSourceID { NativeCaptureStartGate.clear(owner: owner) }
         providerSourceOwner?.close(); providerSourceOwner = nil; providerSourcePreparation = nil
         providerSourceRevision = nil; providerSourceID = nil
+        runtime?.releaseRendererSource(rendererID)
     }
 
     private static func rejectProvider(_ call: CAPPluginCall) {

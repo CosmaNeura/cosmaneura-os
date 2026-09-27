@@ -58,6 +58,8 @@ BRIDGE = [
         "NativeCaptureProcessFence",
         "NativeProviderRecordingRun",
         "NativeProviderRecordingHost",
+        "NativeProviderRecordingBridge",
+        "NativeProviderRecordingRuntime",
     ]
 ]
 
@@ -179,6 +181,7 @@ def main() -> None:
                     *map(str, BRIDGE),
                     str(REPO / "tests/native/recording-run/NativeProviderRecordingRunChecks.swift"),
                     str(REPO / "tests/native/recording-run/NativeProviderRecordingHostChecks.swift"),
+                    str(REPO / "tests/native/recording-run/NativeProviderRecordingAccountChecks.swift"),
                 ],
             )
             run("mac-run-checks", [executable])

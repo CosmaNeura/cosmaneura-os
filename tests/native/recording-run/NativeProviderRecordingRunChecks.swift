@@ -266,6 +266,8 @@ private actor SourceWire: ProviderNativeWire {
   @MainActor static func main() async throws {
     var checks = 0
     // Native custody cannot start until the renderer's physical state is known.
+    try await rejects { try NativeCaptureStartGate.confirmRendererReplacement() }
+    checks += 1
     try await rejects {
       try NativeCaptureStartGate.installEncrypted(owner: UUID(), idle: { true },
         renew: { _ in throw ProviderNativeError.unavailable }) { throw ProviderNativeError.unavailable }
@@ -284,6 +286,8 @@ private actor SourceWire: ProviderNativeWire {
           captureExpiresAt: Date().addingTimeInterval(900))
       }
       try runRequire(NativeCaptureStartGate.startTicket() == owner)
+      try await rejects { try NativeCaptureStartGate.confirmRendererReplacement(retaining: owner) }
+      checks += 1
       try await rejects {
         try await NativeCaptureStartGate.consume(owner: owner, consumer: .nativeEncryptedMicrophone)
         { _ in }
@@ -306,12 +310,19 @@ private actor SourceWire: ProviderNativeWire {
       try await run.start()
       try runRequire(
         run.phase == .recording && fixture.recorder.starts == 1 && fixture.source.issued == 1)
+      try run.confirmRendererReplacement()
+      try await rejects { try NativeCaptureStartGate.confirmRendererReplacement() }
+      try await rejects { try NativeCaptureStartGate.confirmRendererReplacement(retaining: UUID()) }
+      try runRequire(fixture.recorder.starts == 1 && fixture.recorder.stops == 0)
+      checks += 4
       try await fixture.recorder.validate?()
       try await rejects { _ = try NativeCaptureStartGate.startTicket() }
       try await rejects { try await run.start() }
       // A plugin reload adds its probe; it cannot overwrite the old active probe.
       legacy.value = false
       NativeCaptureStartGate.registerIdleProbe { true }
+      try await rejects { try run.confirmRendererReplacement() }
+      checks += 1
       try await rejects { try await run.stop() }
       try runRequire(run.phase == .stopPending && fixture.source.stopped == 0)
       legacy.value = true
@@ -574,6 +585,7 @@ private actor SourceWire: ProviderNativeWire {
       checks += 2
     }
     checks += try await CheckNativeRecordingHost.run()
+    checks += try await CheckNativeRecordingAccount.run()
     print("native recording run checks passed: \(checks)")
   }
 }

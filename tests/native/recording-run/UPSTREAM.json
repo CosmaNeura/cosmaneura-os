@@ -21,6 +21,14 @@
     {
       "path": "tests/native/recording-run/NativeProviderRecordingHostChecks.swift",
       "upstream_blob": "6980ae403a6ebd9945a1f26e6e8afb5ea82e7a34"
+    },
+    {
+      "path": "clients/apple/native-auth/Bridge/NativeProviderRecordingBridge.swift",
+      "upstream_blob": "bb254b506efafab2e8714821090252353a108e8f"
+    },
+    {
+      "path": "clients/apple/native-auth/Bridge/NativeProviderRecordingFactory.swift",
+      "upstream_blob": "98c6571e31cc48c111bdcac2d077ba0becc65eb3"
     }
   ],
   "adaptations": [
@@ -28,7 +36,10 @@
     "Use the current 360-position source profile, retain consumed permit generation and pass its actual remaining limit to PCM.",
     "Require a verified source_extend decision through NativeCaptureStartGate for each physical source continuation; lease/reservations alone do not extend audio.",
     "Keep renderer/native consumers distinct, retain active physical-idle probes across plugin reload and synchronously retire even a run not yet installed.",
-    "Include only retained-host tests; upstream renderer selection/bridge tests are not copied because CosmaBot's native identity factory and UI selection remain pending.",
-    "Use in-memory source/queue fixtures and generated PCM, not live device, account, Keychain or service access."
+    "Use in-memory source/queue fixtures and generated PCM, not live device, account, Keychain or service access.",
+    "Bridge selection uses exact OS workspace/session/revision IDs; upstream bindingRef is not accepted. Adopt the upstream metadata bridge checks with this contract.",
+    "Resolve the signed OS identity and immutable Core-backed context before opening native custody; derive UUIDv8 recovery namespace from native account digest and the server recovery scope.",
+    "Retain native auth, connection, source recovery and recording bridge across WebViews; serialize renderer source operations and preserve exact-owner native capture during reload.",
+    "Use the existing shared NativeRecordingQueueStore and explicit source-extension authorizer. Factory remains iOS-only; Mac bridge compilation does not establish Mac native recording."
   ]
 }
