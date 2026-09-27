@@ -2,7 +2,7 @@ import {readFile,writeFile,mkdir,lstat} from 'node:fs/promises';
 import {createHash} from 'node:crypto';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {validateOperationalNativeIdentity,validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
+import {STAGING_NATIVE_PROFILE,validateOperationalNativeIdentity,validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
 import {BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 
 // OpenTofu jsonencode orders object keys and escapes these five characters.
@@ -14,9 +14,9 @@ export function identityDigest(identity) {
 
 /** Reuse the existing native schema; all output values are public configuration. */
 export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE}) {
-  validateOperationalNativeDataMode(dataMode);
   if(![BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE].includes(nativeFeatureProfile))throw new Error('Unknown native feature profile');
   const desktop=validateOperationalNativeIdentity(candidate,'desktop',candidate?.apiOrigin);
+  validateOperationalNativeDataMode(dataMode,desktop);
   const apple=validateOperationalNativeIdentity({...desktop,client:'apple'},'apple',desktop.apiOrigin);
   if(!Array.isArray(captureUploadOrigins))throw new Error('Explicit upload origins required');
   const builds={};
@@ -43,13 +43,17 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
     'apple-identity.json':apple,
     'web-build-arguments.json':webArgs,
     ...Object.fromEntries(Object.entries(builds).map(([client,value])=>[client+'-build-env.json',value.env])),
-    'os.identity.tfvars.json':{
+    ...(desktop.profile===STAGING_NATIVE_PROFILE?{'os.runtime-identity.json':{
+      CLERK_SESSION_POLICY:'shared_staging',
+      CLERK_ORGANIZATION_ID:desktop.organizationId,CLERK_ISSUER:desktop.frontendOrigin,
+      CLERK_JWKS_URL:desktop.frontendOrigin+'/.well-known/jwks.json',CLERK_AUDIENCE:desktop.audience,
+    }}:{'os.identity.tfvars.json':{
       clerk_org_id:desktop.organizationId,clerk_issuer_url:desktop.frontendOrigin,
       clerk_jwks_url:desktop.frontendOrigin+'/.well-known/jwks.json',
       clerk_audience:desktop.audience,web_origin:webOrigin,workspace_operational_identity:desktop,
-    },
+    }}),
     'identity-bindings.json':{
-      version:1,profile:'operational-beta-v1',identity_sha256:digest,data_mode:dataMode,
+      version:1,profile:desktop.profile,identity_sha256:digest,data_mode:dataMode,
       native_feature_profile:nativeFeatureProfile,
       api_origin:desktop.apiOrigin,web_origin:webOrigin,core_web_origin:coreWebOrigin,
       native_origins:{desktop:'app://cosmas',apple:'capacitor://localhost'},

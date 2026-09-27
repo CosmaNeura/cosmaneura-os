@@ -173,6 +173,22 @@ class NativeDataMode(unittest.TestCase):
             with self.assertRaises(ValueError):
                 native.data_mode(identity, mode)
 
+    def test_shared_staging_identity_requires_synthetic_mode_in_both_composers(self):
+        self.identity.update(profile="operational-staging-v1", audience="",
+            frontendOrigin="https://invented.clerk.accounts.dev",
+            publishableKey="pk_test_" + base64.b64encode(b"invented.clerk.accounts.dev$").decode())
+        for client in ("desktop", "apple"):
+            with self.subTest(client=client):
+                web, path = self.inputs(client, "synthetic")
+                identity = native.load(path, client, self.identity["apiOrigin"])
+                self.assertEqual(identity["auth"]["profile"], "operational-staging-v1")
+                self.assertEqual(native.data_mode(identity, "synthetic"), "synthetic")
+                for selected in (None, "authorized_beta"):
+                    with self.assertRaises(ValueError):
+                        native.data_mode(identity, selected)
+                with self.assertRaises(PreflightComplete):
+                    self.invoke(client, web, path, "synthetic")
+
     def test_desktop_packager_keeps_beta_bundle_and_identity_for_both_modes(self):
         for data_mode in ("synthetic", "authorized_beta"):
             with self.subTest(data_mode=data_mode):

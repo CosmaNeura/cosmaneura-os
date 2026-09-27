@@ -42,3 +42,31 @@ claim an account is connected, a device is accepted, or a release is authorized.
 The input must be one bounded regular JSON file with no duplicate or extra fields.
 The output must be a new directory. Incomplete output retains `.incomplete` for
 inspection; it must not be consumed as a finished build input set.
+
+## Shared identity in synthetic staging
+
+The owner selected shared Cosmaneura identity with separate product permissions
+on September 27, 2026. `operational-staging-v1` accepts a matching `pk_test_`
+development frontend for the existing beta application bundles, only when the
+build explicitly selects `synthetic` data and the identity's `audience` is the
+empty string. This selects the shared instance's default session contract:
+the signed JWT must omit `aud` entirely. Null, empty and foreign audience claims
+are rejected; issuer, signature, session, origin and organization checks remain.
+`operational-beta-v1` continues to
+require a production key/frontend. This identity profile does not change the
+feature profile, grant workspace access or enable Core capabilities.
+
+This staging profile emits public VM settings in `os.runtime-identity.json`.
+It explicitly selects `CLERK_SESSION_POLICY=shared_staging` with an empty
+`CLERK_AUDIENCE`; the API refuses this policy outside synthetic staging with a
+development issuer. The default API policy still requires its configured audience.
+It does not emit `os.identity.tfvars.json`, because the existing Terraform
+environment accepts only production identity profiles. The production profile's
+outputs remain unchanged. Preparing settings does not apply them to a host.
+
+CosmaBot still requires its configured organization, an active local external
+identity binding and an active human principal in its own Box. Platform account
+membership alone grants no CosmaBot permission. Shared staging credentials use
+a frontend-specific native Keychain service, leaving prior credentials intact.
+An existing desktop installation still refuses an unreviewed identity change;
+the explicit account and saved-state transition must complete before rollout.

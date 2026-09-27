@@ -9,6 +9,8 @@ def data_mode(identity, requested: str | None = None):
     selected = requested if requested is not None else "authorized_beta" if identity is not None else "synthetic"
     if not isinstance(selected, str) or selected not in {"synthetic", "authorized_beta"} or (selected == "authorized_beta" and identity is None):
         raise ValueError("Select synthetic or authorized_beta with the matching native identity profile.")
+    if identity is not None and identity["identity"]["profile"] == "operational-staging-v1" and selected != "synthetic":
+        raise ValueError("The staging identity requires explicit synthetic data mode.")
     return selected
 
 
@@ -40,5 +42,5 @@ def validate(value, client: str, api_origin: str | None = None):
         (root / "clients/desktop/native-identity-config.mjs").as_uri(), json.dumps(value), client, origin or "",
     ], capture_output=True, text=True, timeout=15)
     if result.returncode:
-        raise ValueError("Operational native identity must match the client, exact API and production Clerk frontend.")
+        raise ValueError("Native identity must match the client, exact API and selected Clerk identity profile.")
     return json.loads(result.stdout)

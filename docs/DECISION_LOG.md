@@ -301,3 +301,21 @@ IMPLEMENTATION IMPACT:
   offboarding tests, store-release evidence, and a separately reviewed Scribe
   integration. No mobile build, store enrollment, signing, or upload is
   authorized by this scheduling decision alone.
+
+### DL-20260927-01
+
+- **Status:** ACCEPTED
+- **Ruling:** Use the existing Cosmaneura identity for CosmaBot, with separate
+  product permissions. CosmaBot remains a separate app and deployment. Its Box,
+  human principals, organization binding, subscriptions and audit history stay
+  independent of platform account membership and platform roles.
+- **Owner acceptance evidence:** "Lets go with shared identity and separate
+  permissions." Received September 27, 2026 UTC.
+- **Supersedes:** The separate Clerk application requirement in
+  `DL-20260903-04` and the continuing identity separation in `DL-20260903-05`.
+  Existing accounts and saved work must be preserved during the transition.
+- **Implementation impact:** Reuse the platform's identity instance; verify
+  local CosmaBot grants independently. Prepare an explicit account/device
+  transition and test it before changing live sign-in configuration. The
+  decision does not grant every platform user CosmaBot access or authorize a
+  production rollout. See `docs/validation/shared-identity-flight-plan.md`.

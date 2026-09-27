@@ -83,6 +83,37 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:], omit:
 }
 
 @Suite @MainActor struct NativeWorkspaceAuthTests {
+    @Test func sharedStagingSessionsRequireAbsentAudienceAndRetainIdentityChecks() throws {
+        let user = try identity()
+        for origin in ["capacitor://localhost", "app://cosmas"] {
+            let shared = try NativeTokenPolicy(issuer: "https://invented.clerk.accounts.dev",
+                audience: "", authorizedParty: origin, nativeSessionWithoutOrigin: true, sharedStagingSession: true)
+            try shared.validate(jwt(user, omit: ["aud", "azp"]), identity: user)
+            for value: Any in ["cosmas-workspace-local", "", [], NSNull()] {
+                #expect(throws: NativeAuthError.tokenUnavailable) {
+                    try shared.validate(jwt(user, changes: ["aud": value], omit: ["azp"]), identity: user)
+                }
+            }
+            for changes: [String: Any] in [["azp": NSNull()], ["azp": "https://other.invalid"],
+                ["iss": "https://other.clerk.accounts.dev"], ["org_id": "org_other"],
+                ["sub": "user_other"], ["sid": "sess_other"], ["exp": 1]] {
+                #expect(throws: NativeAuthError.tokenUnavailable) {
+                    try shared.validate(jwt(user, changes: changes,
+                        omit: changes["azp"] == nil ? ["aud", "azp"] : ["aud"]), identity: user)
+                }
+            }
+        }
+        for (issuer, audience, shared) in [
+            ("https://invented.clerk.accounts.dev", "", false),
+            ("https://invented.clerk.accounts.dev", "other-api", true),
+            ("https://production.example.invalid", "", true),
+        ] {
+            #expect(throws: NativeAuthError.unavailable) {
+                try NativeTokenPolicy(issuer: issuer, audience: audience, sharedStagingSession: shared)
+            }
+        }
+    }
+
     @Test func nativeSessionsWithoutOriginRetainIdentityAndRejectWrongPresentOrigin() throws {
         let user = try identity()
         let token = try jwt(user, omit: ["azp"])

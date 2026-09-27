@@ -3,6 +3,7 @@ import Foundation
 public enum NativeIdentityProfile: String, Sendable {
     case synthetic = "synthetic"
     case operationalBeta = "operational-beta-v1"
+    case operationalStaging = "operational-staging-v1"
 }
 
 public enum NativeWorkspaceOrigin: String, Sendable {
@@ -10,7 +11,7 @@ public enum NativeWorkspaceOrigin: String, Sendable {
     case desktopApp = "app://cosmas"
 
     public func accepts(bundleIdentifier: String, profile: NativeIdentityProfile = .synthetic) -> Bool {
-        if profile == .operationalBeta {
+        if profile != .synthetic {
             return bundleIdentifier == (self == .appleWebView
                 ? "com.cosmasos.beta.ios" : "com.cosmasos.beta.desktop.auth")
         }
@@ -31,11 +32,17 @@ public struct NativeClerkConfiguration: Sendable, Equatable {
     public let profile: NativeIdentityProfile
 
     public var callbackURL: String { bundleIdentifier + "://callback" }
+    // Preserve the previous instance's credentials without presenting them to
+    // the shared staging frontend during an explicit account transition.
+    public var keychainService: String {
+        let base = bundleIdentifier + ".clerk"
+        return profile == .operationalStaging ? base + "." + String(frontendOrigin.dropFirst(8)) : base
+    }
 
     public init(publishableKey: String, frontendOrigin: String, organizationID: String,
                 bundleIdentifier: String, workspaceOrigin: NativeWorkspaceOrigin = .appleWebView,
                 profile: NativeIdentityProfile = .synthetic) throws {
-        let prefix = profile == .synthetic ? "pk_test_" : "pk_live_"
+        let prefix = profile == .operationalBeta ? "pk_live_" : "pk_test_"
         guard publishableKey.hasPrefix(prefix), publishableKey.utf8.count <= 1024,
               organizationID.range(of: "^org_[A-Za-z0-9_]{1,251}$", options: .regularExpression) != nil,
               workspaceOrigin.accepts(bundleIdentifier: bundleIdentifier, profile: profile),
@@ -45,7 +52,7 @@ public struct NativeClerkConfiguration: Sendable, Equatable {
               host.range(of: "^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$", options: .regularExpression) != nil,
               frontendOrigin == "https://" + host, url.user == nil, url.password == nil,
               url.query == nil, url.fragment == nil else { throw NativeAuthError.unavailable }
-        if profile == .synthetic {
+        if profile != .operationalBeta {
             guard host.hasSuffix(".clerk.accounts.dev") else { throw NativeAuthError.unavailable }
         } else {
             guard !host.hasSuffix(".clerk.accounts.dev"), !host.hasSuffix(".localhost"),

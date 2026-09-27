@@ -41,6 +41,23 @@ def test_valid_beta_runtime_configuration() -> None:
     configured.validate_runtime_configuration()
 
 
+def test_shared_session_policy_is_explicit_and_limited_to_synthetic_development_identity():
+    values = dict(clerk_session_policy="shared_staging", clerk_audience="",
+                  clerk_issuer="https://invented.clerk.accounts.dev",
+                  clerk_jwks_url="https://invented.clerk.accounts.dev/.well-known/jwks.json",
+                  workspace_enabled=True, workspace_authenticated_enabled=True, workspace_hosted_enabled=True)
+    configured = _beta_settings(**values)
+    assert configured.runtime_configuration_errors() == []
+    assert configured.workspace_available
+    for changed in [dict(clerk_audience=None), dict(clerk_audience="another-api"),
+                    dict(data_mode="authorized_beta"), dict(cosmas_env="synth_os"),
+                    dict(auth_mode="synth_headers"), dict(clerk_issuer="https://production.example.invalid")]:
+        invalid = _beta_settings(**(values | changed))
+        assert invalid.clerk_session_configuration_errors()
+        assert invalid.runtime_configuration_errors()
+        assert not invalid.workspace_available
+
+
 def test_beta_configuration_fails_closed_without_real_prerequisites() -> None:
     configured = Settings(
         cosmas_env="early_adopter_beta",
