@@ -27,8 +27,21 @@ this lifecycle through its existing JavaScript bridge.
 
 Both the existing PCM plugin and the auth host resolve one shared PCM package
 in the Apple composition. Native encrypted graph code is compiled, but its
-retained app host, queue adapter and UI selection are not yet integrated. The
-selected duration profile and existing recording storage remain unchanged.
+retained app host and UI selection are not yet integrated. The
+selected duration profile remains unchanged.
+
+The native queue adapter now shares the existing encrypted queue's device key,
+file format, revision checks and process lock. The generic Capacitor interface
+cannot read or mutate `cosmas-native-*` journals; bulk clear rejects before
+removing any files while native custody exists. Ciphertext upload records retain
+their existing interface. Existing `cosmas-queue:v1` records are not migrated.
+The `secure-queue` overlay also includes the pinned privacy resource for its
+disk-space check. Native queue implementation and tests derive from Scribe
+`ec511ff1c3b979901e80f5033c1f02a05f65c4b3`, with CosmaBot journal prefixes.
+
+Do not rename the existing Keychain service/account or the
+`Application Support/CosmaneuraSecureQueue/v1` storage location: those identify
+retained files and their existing device key.
 
 The helper derives from upstream blob
 `5c1073986d10239947f285cfb74152169547928f` with its comment adjusted for

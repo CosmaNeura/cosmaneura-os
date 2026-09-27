@@ -1,0 +1,22 @@
+{
+  "repository": "CosmaNeura/cosmaneura-scribe",
+  "commit": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+  "files": [
+    {
+      "path": "NativeLongVisitStoreTests.swift",
+      "upstream_path": "apps/capture/native-plugins/secure-queue/ios/Tests/CosmaneuraSecureQueueTests/NativeLongVisitStoreTests.swift",
+      "upstream_blob": "37ab1f85afde3dfbfebbadc8bce4e50832fc88b2"
+    },
+    {
+      "path": "SecureQueueStoreTests.swift",
+      "upstream_path": "apps/capture/native-plugins/secure-queue/ios/Tests/CosmaneuraSecureQueueTests/SecureQueueStoreTests.swift",
+      "upstream_blob": "f5a88ec3b4654b39f15827742652d31e9a1aaa12"
+    }
+  ],
+  "adaptations": [
+    "CosmaBot native key prefixes.",
+    "Long-visit test uses explicit temporary storage and a unique test-only Keychain namespace instead of the default app store.",
+    "iPhone Data Protection assertions are retained for iOS; the Mac-only harness explicitly skips that assertion.",
+    "Added a prior-app compatibility test using the actual immutable ea7f99d storage sources."
+  ]
+}

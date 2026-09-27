@@ -69,6 +69,54 @@
       "source_git_blob": "24f179991a4b7e599b03e7ea36eaf7d69a5090a4",
       "source_sha256": "5cadd54405ef27f34d57dc0011ca5d33fde682e8b4c9db70bf3221fa73cc0b26",
       "sha256": "5cadd54405ef27f34d57dc0011ca5d33fde682e8b4c9db70bf3221fa73cc0b26"
+    },
+    "secure-queue/Package.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "b574a2231c9098f125bc20bc0c3ec30e1389b6d8",
+      "source_sha256": "c57d7b6d7dbc1f81a88990e92288ef770103d8fc42ad20de21513be39a8306ef",
+      "sha256": "c57d7b6d7dbc1f81a88990e92288ef770103d8fc42ad20de21513be39a8306ef"
+    },
+    "secure-queue/ios/Sources/CosmaneuraSecureQueue/NativeRecordingQueueStore.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "762af86e8688955f67b9b0c4082a1910f8171891",
+      "source_sha256": "d4949cb83920445e7c45f823a9e70f1a2e12b6403f353d92401ff921538d25a9",
+      "sha256": "12d5852c1423742135e68e5ed9f33d2d9e1b1d4bd312a6b4c010edbb24b8e1a8"
+    },
+    "secure-queue/ios/Sources/CosmaneuraSecureQueue/RendererSecureQueueStore.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "0bf1231476df42b46812157f714414e199a38717",
+      "source_sha256": "37268a4357d480ede10511fed91332ca45c2e2f44ea1f6d4fd39dd8ec4cd8c58",
+      "sha256": "37268a4357d480ede10511fed91332ca45c2e2f44ea1f6d4fd39dd8ec4cd8c58"
+    },
+    "secure-queue/ios/Sources/CosmaneuraSecureQueue/SecureQueueError.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "14f0d85c1b06e6f07cdd96f748fec36879129fa1",
+      "source_sha256": "e792a37799b22d5dab703f3ade449282b7f237c363c6082502c4a3232fc558b7",
+      "sha256": "e792a37799b22d5dab703f3ade449282b7f237c363c6082502c4a3232fc558b7"
+    },
+    "secure-queue/ios/Sources/CosmaneuraSecureQueue/SecureQueuePlugin.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "619d550041c32fffcd85d5ce0c3f7836af70c96c",
+      "source_sha256": "f8e08e40fd335c0f3f927bd8d4270e036102025680cb9e94d8c357cd9d8a77fc",
+      "sha256": "f8e08e40fd335c0f3f927bd8d4270e036102025680cb9e94d8c357cd9d8a77fc"
+    },
+    "secure-queue/ios/Sources/CosmaneuraSecureQueue/SecureQueueRecordCodec.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "06222cd594d92e1a0b920b4b58857e61e8f2be1f",
+      "source_sha256": "b7d1a5f91c8fad3611d776a722eb88e4cb3b209dd314762ef2250717af74a183",
+      "sha256": "aa17e2d9044422a69b63ef94428cb3dee02497fe6dbe58af2253883260829031"
+    },
+    "secure-queue/ios/Sources/CosmaneuraSecureQueue/SecureQueueStore.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "b9e1aef707c04f7c00041e224138c33ccb9e2287",
+      "source_sha256": "7e7075106522355bf7965e5d4c512e1a20f553127d761255c87be0fa52569fb5",
+      "sha256": "7e7075106522355bf7965e5d4c512e1a20f553127d761255c87be0fa52569fb5"
+    },
+    "secure-queue/ios/Sources/CosmaneuraSecureQueue/PrivacyInfo.xcprivacy": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "48367d79e22a2687ecdf223169b44d3fed24ddfe",
+      "source_sha256": "20e766f78a37f68cda3e2a84d68bfc74e6742b50ca5cee7a4843d518aff9db6f",
+      "sha256": "20e766f78a37f68cda3e2a84d68bfc74e6742b50ca5cee7a4843d518aff9db6f"
     }
   }
 }

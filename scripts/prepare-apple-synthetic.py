@@ -60,22 +60,24 @@ def digest(path: Path) -> str:
 
 
 def include_configured_capture(output: Path) -> dict[str, object]:
-    """Replace the two PCM packages only in this newly created composition."""
+    """Replace capture and secure queue sources only in this new composition."""
     owned = Path(__file__).parents[1] / "clients/capture/native-configured"
     manifest = json.loads((owned / "manifest.json").read_text())
     files = manifest["files"]
-    packages = {"ios-pcm-capture", "ios-pcm-capacitor"}
+    packages = {"ios-pcm-capture", "ios-pcm-capacitor", "secure-queue"}
+    privacy = Path("secure-queue/ios/Sources/CosmaneuraSecureQueue/PrivacyInfo.xcprivacy")
     destination = output / "apps/capture/native-plugins"
     for name, hashes in files.items():
         relative = Path(name)
         if (relative.is_absolute() or ".." in relative.parts or relative.parts[0] not in packages
-                or relative.suffix != ".swift" or (owned / relative).is_symlink()
+                or (relative.suffix != ".swift" and relative != privacy) or (owned / relative).is_symlink()
                 or digest(owned / relative) != hashes["sha256"]):
             raise ValueError("Configured native source differs from its reviewed input.")
     for package in packages:
         expected = {name for name in files if name.startswith(package + "/")}
-        actual = {str(path.relative_to(destination)) for path in (destination / package).rglob("*.swift")
-                  if "Tests" not in path.relative_to(destination / package).parts}
+        actual = {str(path.relative_to(destination)) for path in (destination / package).rglob("*")
+                  if path.is_file() and path.suffix in {".swift", ".xcprivacy"}
+                  and "Tests" not in path.relative_to(destination / package).parts}
         if not expected or actual - expected:
             raise ValueError("Unlisted native source would remain in the configured app.")
     for name in files:
