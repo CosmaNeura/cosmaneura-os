@@ -86,6 +86,11 @@ mock_provider "azurerm" {
       id = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-vm-staging-eus2-lab01/providers/Microsoft.OperationalInsights/workspaces/law-staging"
     }
   }
+  mock_resource "azurerm_monitor_data_collection_rule" {
+    defaults = {
+      id = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-vm-staging-eus2-lab01/providers/Microsoft.Insights/dataCollectionRules/dcr-health"
+    }
+  }
 }
 
 variables {
@@ -282,4 +287,42 @@ run "reject_runtime_identity_as_privileged_operator" {
     release_operator_object_id = "AAAAAAAA-0000-4000-8000-000000000011"
   }
   expect_failures = [azurerm_role_assignment.release_registry, azurerm_role_assignment.release_secrets]
+}
+
+run "bounded_runtime_monitoring" {
+  command = plan
+  variables {
+    runtime_monitoring_enabled = true
+  }
+  assert {
+    condition = (
+      length(azurerm_virtual_machine_extension.health) == 1 &&
+      azurerm_virtual_machine_extension.health[0].publisher == "Microsoft.Azure.Monitor" &&
+      jsondecode(azurerm_virtual_machine_extension.health[0].settings).authentication.managedIdentity["identifier-value"] == azurerm_user_assigned_identity.runtime.id &&
+      azurerm_monitor_data_collection_rule.health[0].kind == "Linux" &&
+      one(one(azurerm_monitor_data_collection_rule.health[0].data_sources).syslog).facility_names == tolist(["local6"]) &&
+      one(one(azurerm_monitor_data_collection_rule.health[0].data_sources).syslog).log_levels == tolist(["Info"]) &&
+      one(one(azurerm_monitor_data_collection_rule.health[0].destinations).log_analytics).workspace_resource_id == azurerm_log_analytics_workspace.staging.id &&
+      strcontains(one(azurerm_monitor_data_collection_rule.health[0].data_flow).transform_kql, "ProcessName == 'cosmabot-health'") &&
+      azurerm_monitor_data_collection_rule_association.health[0].target_resource_id == azurerm_linux_virtual_machine.workload.id
+    )
+    error_message = "Collect only the named health facility/format into the existing workspace using the existing identity."
+  }
+  assert {
+    condition = length(azurerm_monitor_scheduled_query_rules_alert_v2.runtime) == 2 && alltrue([
+      for alert in azurerm_monitor_scheduled_query_rules_alert_v2.runtime :
+      !alert.enabled && alert.auto_mitigation_enabled &&
+      toset(one(alert.action).action_groups) == toset([azurerm_monitor_action_group.health.id]) &&
+      strcontains(one(alert.criteria).query, "isnull(LastHealthy) or LastHealthy < ago(5m)")
+    ])
+    error_message = "Application and backup rules must cover missing reports and remain disabled until live ingestion is verified."
+  }
+}
+
+run "reject_alerts_without_monitoring" {
+  command = plan
+  variables {
+    runtime_alerts_enabled = true
+  }
+  expect_failures = [var.runtime_alerts_enabled]
 }

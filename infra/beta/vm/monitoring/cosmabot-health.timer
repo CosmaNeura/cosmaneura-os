@@ -1,0 +1,11 @@
+[Unit]
+Description=Observe CosmaBot health every minute
+
+[Timer]
+OnBootSec=90
+OnUnitActiveSec=60
+AccuracySec=5
+Unit=cosmabot-health.service
+
+[Install]
+WantedBy=timers.target
