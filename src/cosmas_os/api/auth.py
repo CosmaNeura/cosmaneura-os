@@ -90,7 +90,7 @@ class ClerkTokenVerifier:
         if (
             not runtime_settings.clerk_jwks_url
             or not runtime_settings.clerk_issuer
-            or not runtime_settings.clerk_audience
+            or runtime_settings.clerk_session_configuration_errors()
         ):
             raise RuntimeError("Clerk verifier configuration is incomplete")
         if native_origin is not None and native_clerk_origin(runtime_settings, [native_origin]) != native_origin:
@@ -223,7 +223,7 @@ class ClerkTokenVerifier:
         raise AuthenticationFailed("invalid bearer token")
 
     def verify(self, token: str) -> dict[str, Any]:
-        if not token or len(token) > 8192:
+        if not token or len(token) > 8192 or self._settings.clerk_session_configuration_errors():
             raise AuthenticationFailed("invalid bearer token")
         native_origin = self._native_origin
         if native_origin is not None and native_clerk_origin(self._settings, [native_origin]) != native_origin:
@@ -248,7 +248,7 @@ class ClerkTokenVerifier:
                 signing_key.key,
                 algorithms=["RS256"],
                 issuer=self._settings.clerk_issuer,
-                audience=self._settings.clerk_audience,
+                audience=None if self._settings.clerk_session_policy == "shared_staging" else self._settings.clerk_audience,
                 options=options,
                 leeway=5,
             )
@@ -258,8 +258,14 @@ class ClerkTokenVerifier:
             raise AuthenticationFailed("invalid bearer token") from exc
 
         subject = claims.get("sub")
+        session_id = claims.get("sid")
         authorized_party = claims.get("azp")
-        if not isinstance(subject, str) or not subject or len(subject) > 255:
+        # The shared development instance issues default sessions without aud.
+        # Require complete absence, including rejection of null/empty claims;
+        # verify_aud above still rejects tokens intended for another API.
+        if (not isinstance(subject, str) or not subject or len(subject) > 255
+                or not isinstance(session_id, str) or not session_id or len(session_id) > 255
+                or self._settings.clerk_session_policy == "shared_staging" and "aud" in claims):
             raise AuthenticationFailed("invalid bearer token")
         # Clerk native clients authenticate with Authorization and cannot send
         # Origin alongside it. Their signed session JWT can therefore omit azp.

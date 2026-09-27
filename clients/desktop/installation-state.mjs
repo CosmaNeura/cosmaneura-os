@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {lstat, mkdir, open, readdir, realpath} from 'node:fs/promises';
 import {isAbsolute, join, resolve} from 'node:path';
 import {exactHostedApiOrigin} from './hosted-auth-http.mjs';
-import {validateOperationalNativeIdentity} from './native-identity-config.mjs';
+import {validateOperationalNativeIdentity, validateOperationalNativeDataMode} from './native-identity-config.mjs';
 
 const unavailable = () => new Error('Saved workspace is incompatible or unavailable; local data was preserved');
 const markerName = 'cosmas-installation.json';
@@ -16,6 +16,7 @@ export async function prepareDesktopState(config, appData, electronVersion) {
   let identityBinding;
   if (operational) {
     const publicIdentity = validateOperationalNativeIdentity(config.nativeIdentity, 'desktop', config.apiOrigin);
+    validateOperationalNativeDataMode(config.dataMode, publicIdentity);
     identityBinding = createHash('sha256').update(JSON.stringify(publicIdentity, Object.keys(publicIdentity).sort())).digest('hex');
     if (config.installationRoot !== undefined) throw unavailable();
   } else if (config.nativeIdentity !== undefined) throw unavailable();

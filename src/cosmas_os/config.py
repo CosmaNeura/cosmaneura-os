@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     clerk_issuer: str | None = None
     clerk_jwks_url: str | None = None
     clerk_audience: str | None = None
+    clerk_session_policy: Literal["audience", "shared_staging"] = "audience"
     clerk_organization_id: str | None = None
     clerk_authorized_parties: str = ""
     beta_box_id: str | None = None
@@ -280,7 +281,7 @@ class Settings(BaseSettings):
             UUID(self.beta_box_id or "")
         except ValueError:
             errors.append("Authenticated workspace requires a configured Box UUID")
-        if not self.clerk_organization_id or not self.clerk_audience:
+        if not self.clerk_organization_id or self.clerk_session_configuration_errors():
             errors.append("Authenticated workspace requires a Clerk organization and audience")
         issuer = urlparse(self.clerk_issuer or "")
         jwks = urlparse(self.clerk_jwks_url or "")
@@ -364,6 +365,8 @@ class Settings(BaseSettings):
         """Return configuration faults without exposing configured values."""
 
         errors: list[str] = []
+        if self.clerk_session_policy == "shared_staging":
+            errors.extend(self.clerk_session_configuration_errors())
         if self.workspace_scheduling_enrollment_enabled:
             try:
                 practice = str(UUID(self.scheduling_enrollment_practice_id))
@@ -450,15 +453,25 @@ class Settings(BaseSettings):
 
         return errors + self._beta_configuration_errors()
 
+    def clerk_session_configuration_errors(self) -> list[str]:
+        if self.clerk_session_policy == "audience":
+            return [] if self.clerk_audience else ["CLERK_AUDIENCE is required"]
+        if (self.clerk_session_policy != "shared_staging" or self.clerk_audience != ""
+                or self.cosmas_env != "early_adopter_beta" or self.data_mode != "synthetic"
+                or self.auth_mode != "clerk_jwt"
+                or not self._is_exact_https_origin(self.clerk_issuer or "")
+                or not (urlparse(self.clerk_issuer or "").hostname or "").endswith(".clerk.accounts.dev")):
+            return ["Shared Clerk sessions require synthetic beta, a development issuer and explicitly empty audience"]
+        return []
+
     def _beta_configuration_errors(self) -> list[str]:
         """Independent cloud prerequisites; never call workspace_available here."""
-        errors: list[str] = []
+        errors = self.clerk_session_configuration_errors()
 
         required = {
             "BETA_BOX_ID": self.beta_box_id,
             "CLERK_ISSUER": self.clerk_issuer,
             "CLERK_JWKS_URL": self.clerk_jwks_url,
-            "CLERK_AUDIENCE": self.clerk_audience,
             "CLERK_ORGANIZATION_ID": self.clerk_organization_id,
             "CLERK_AUTHORIZED_PARTIES": self.clerk_authorized_parties,
             "AZURE_STORAGE_ACCOUNT_URL": self.azure_storage_account_url,

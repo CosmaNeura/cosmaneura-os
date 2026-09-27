@@ -10,6 +10,28 @@ private func configuration() throws -> NativeClerkConfiguration {
 }
 
 @Suite struct NativeClerkConfigurationTests {
+    @Test func sharedStagingIdentityKeepsBetaCallbacksAndIsolatesCredentials() throws {
+        let key = "pk_test_" + Data("invented.clerk.accounts.dev$".utf8).base64EncodedString()
+        for origin in [NativeWorkspaceOrigin.appleWebView, .desktopApp] {
+            let bundle = origin == .appleWebView ? "com.cosmasos.beta.ios" : "com.cosmasos.beta.desktop.auth"
+            let config = try NativeClerkConfiguration(publishableKey: key,
+                frontendOrigin: "https://invented.clerk.accounts.dev", organizationID: "org_beta",
+                bundleIdentifier: bundle, workspaceOrigin: origin, profile: .operationalStaging)
+            #expect(config.callbackURL == bundle + "://callback")
+            #expect(config.keychainService == bundle + ".clerk.invented.clerk.accounts.dev")
+            #expect(throws: NativeAuthError.unavailable) {
+                try NativeClerkConfiguration(publishableKey: key,
+                    frontendOrigin: config.frontendOrigin, organizationID: "org_beta",
+                    bundleIdentifier: bundle, workspaceOrigin: origin, profile: .operationalBeta)
+            }
+            #expect(throws: NativeAuthError.unavailable) {
+                try NativeClerkConfiguration(publishableKey: "pk_test_" + Data("clerk.example.invalid$".utf8).base64EncodedString(),
+                    frontendOrigin: "https://clerk.example.invalid", organizationID: "org_beta",
+                    bundleIdentifier: bundle, workspaceOrigin: origin, profile: .operationalStaging)
+            }
+        }
+    }
+
     @Test func operationalIdentityRequiresProductionKeyAndSeparateBundle() throws {
         let key = "pk_live_" + Data("clerk.example.invalid$".utf8).base64EncodedString()
         let config = try NativeClerkConfiguration(publishableKey: key,

@@ -153,6 +153,38 @@ def test_clerk_verifier_requires_configured_matching_audience() -> None:
         verifier.verify(_token(private_key, omit=("aud",)))
 
 
+@pytest.mark.parametrize("origin", [None, "app://cosmas", "capacitor://localhost"])
+def test_shared_staging_session_policy_accepts_no_audience_without_weakening_other_claims(origin):
+    private, _ = _verifier()
+    issuer = "https://invented.clerk.accounts.dev"
+    settings = _settings(clerk_session_policy="shared_staging", clerk_audience="",
+        clerk_issuer=issuer, clerk_jwks_url=issuer + "/.well-known/jwks.json",
+        workspace_enabled=True, workspace_authenticated_enabled=True, workspace_hosted_enabled=True,
+        workspace_apple_hosted_transport_enabled=True, workspace_desktop_hosted_transport_enabled=True,
+        cors_allowed_origins="https://beta.example.invalid,app://cosmas,capacitor://localhost",
+        clerk_authorized_parties="https://beta.example.invalid,app://cosmas,capacitor://localhost")
+    keys = SimpleNamespace(get_signing_keys=lambda **_: [SimpleNamespace(key_id="test-key", key=private.public_key())])
+    verifier = ClerkTokenVerifier(settings, jwks_client=keys, start_background_refresh=False, native_origin=origin)
+    omitted = ("aud", "azp") if origin else ("aud",)
+    assert verifier.verify(_token(private, iss=issuer, omit=omitted))["sub"] == "user_test_owner"
+    for audience in ["cosmas-beta-api", "", None, []]:
+        with pytest.raises(AuthenticationFailed):
+            verifier.verify(_token(private, iss=issuer, omit=tuple(c for c in omitted if c != "aud"), aud=audience))
+    for changes in [{"iss": "https://other.clerk.accounts.dev"}, {"azp": None}, {"azp": "https://other.invalid"},
+                    {"o": {"id": "org_other"}}, {"sid": ""}, {"sid": None}, {"sid": 123},
+                    {"exp": datetime.now(UTC) - timedelta(minutes=1)}]:
+        with pytest.raises((AuthenticationFailed, AccessDenied)):
+            verifier.verify(_token(private, omit=tuple(c for c in omitted if c not in changes), **({"iss": issuer} | changes)))
+    for claim in ["iss", "sub", "sid", "iat", "nbf", "exp"]:
+        with pytest.raises(AuthenticationFailed):
+            verifier.verify(_token(private, iss=issuer, omit=(*omitted, claim)))
+    settings.data_mode = "authorized_beta"
+    with pytest.raises(AuthenticationFailed):
+        verifier.verify(_token(private, iss=issuer, omit=omitted))
+    with pytest.raises(RuntimeError, match="configuration is incomplete"):
+        ClerkTokenVerifier(settings, jwks_client=keys, start_background_refresh=False, native_origin=origin)
+
+
 def test_clerk_verifier_rejects_conflicting_org_claim_shapes() -> None:
     private_key, verifier = _verifier()
     with pytest.raises(AccessDenied):

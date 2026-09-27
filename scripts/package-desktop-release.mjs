@@ -9,7 +9,7 @@ import {cp, lstat, mkdir, readFile, readdir, readlink, realpath, rm, writeFile} 
 import {basename, dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {promisify} from 'node:util';
-import {validateOperationalNativeIdentity, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
+import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
 import {validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
 import {verifyNativeHelper} from '../clients/desktop/spawn-auth-helper.mjs';
 import {verifyDesktopCapturePackage,CAPTURE_HELPERS} from '../clients/desktop/native-capture-package.mjs';
@@ -154,6 +154,7 @@ export async function verifyFuses(fuses, application) {
 /** The operational identity selects custody; the retained mode selects data scope. */
 export function validateOperationalReleaseProfile(config, manifest, info) {
   const identity=validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
+  validateOperationalNativeDataMode(config.dataMode,identity);
   const profile=validateBetaFeatureManifest(manifest);
   if (config.mode!=='hosted-beta-authenticated' || !['synthetic','authorized_beta'].includes(config.dataMode) || profile.client!=='desktop' ||
       profile.dataMode!==config.dataMode || profile.apiOrigin!==config.apiOrigin || config.appVersion!==info.CFBundleShortVersionString ||

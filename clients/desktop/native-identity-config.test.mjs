@@ -3,7 +3,7 @@ import test from 'node:test';
 import {mkdtemp, readFile, writeFile, realpath, rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {validateOperationalNativeIdentity, operationalNativeAuthSettings, operationalNativeBundle} from './native-identity-config.mjs';
+import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings, operationalNativeBundle} from './native-identity-config.mjs';
 import {prepareDesktopState} from './installation-state.mjs';
 
 const identity = {version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
@@ -12,6 +12,39 @@ const identity = {version:1,profile:'operational-beta-v1',client:'desktop',apiOr
 const config = {mode:'hosted-beta-authenticated',dataMode:'authorized_beta',apiOrigin:identity.apiOrigin,nativeIdentity:identity,
   installation:{version:1,profile:'beta',bundleIdentifier:'com.cosmasos.beta.desktop',storageGeneration:1,
     electronVersion:'43.4.1',rendererPartition:'persist:cosmasos-operational-beta',authHelperBundleIdentifier:'com.cosmasos.beta.desktop.auth'}};
+
+const stagingIdentity = {...identity, profile:'operational-staging-v1', audience:'',
+  frontendOrigin:'https://invented.clerk.accounts.dev', publishableKey:'pk_test_'+btoa('invented.clerk.accounts.dev$')};
+
+test('explicit staging identity uses the development issuer without accepting it as production',()=>{
+  for (const client of ['desktop','apple']) {
+    const value={...stagingIdentity,client};
+    assert.deepEqual(validateOperationalNativeIdentity(value,client,value.apiOrigin),value);
+    assert.equal(operationalNativeAuthSettings(value).profile,'operational-staging-v1');
+    assert.equal(validateOperationalNativeDataMode('synthetic',value),'synthetic');
+    assert.throws(()=>validateOperationalNativeDataMode('authorized_beta',value));
+    for (const changed of [{profile:'operational-beta-v1'}, {profile:'unknown'}, {audience:'other-api'}, {audience:null},
+      {publishableKey:'pk_live_'+btoa('invented.clerk.accounts.dev$')},
+      {frontendOrigin:'https://other.clerk.accounts.dev'},
+      {frontendOrigin:identity.frontendOrigin,publishableKey:'pk_test_'+btoa('clerk.example.invalid$')}])
+      assert.throws(()=>validateOperationalNativeIdentity({...value,...changed},client,value.apiOrigin));
+  }
+});
+
+test('staging launch cannot authorize real data or silently replace an installed identity',async t=>{
+  const base=await realpath(await mkdtemp(join(tmpdir(),'cosmas-shared-staging-')));
+  t.after(()=>rm(base,{recursive:true,force:true}));
+  const prior={...config,dataMode:'synthetic'};
+  const directory=await prepareDesktopState(prior,base,'43.4.1');
+  await writeFile(join(directory,'retained-draft'),'invented encrypted draft');
+  const marker=await readFile(join(directory,'cosmas-installation.json'));
+  await assert.rejects(prepareDesktopState({...prior,nativeIdentity:stagingIdentity},base,'43.4.1'));
+  await assert.rejects(prepareDesktopState({...config,nativeIdentity:stagingIdentity},base,'43.4.1'));
+  assert.deepEqual(await readFile(join(directory,'cosmas-installation.json')),marker);
+  assert.equal(await readFile(join(directory,'retained-draft'),'utf8'),'invented encrypted draft');
+  const fresh=join(base,'fresh');
+  assert.ok(await prepareDesktopState({...prior,nativeIdentity:stagingIdentity},fresh,'43.4.1'));
+});
 
 test('operational identity binds the decoded production frontend, client and API',()=>{
   assert.deepEqual(validateOperationalNativeIdentity(identity,'desktop',identity.apiOrigin),identity);

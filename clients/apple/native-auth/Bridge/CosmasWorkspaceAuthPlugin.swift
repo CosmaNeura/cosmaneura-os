@@ -83,7 +83,8 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
                 let configuration = try NativeClerkConfiguration(publishableKey: key, frontendOrigin: origin,
                     organizationID: organization, bundleIdentifier: bundle, profile: profile)
                 let policy = try NativeTokenPolicy(issuer: origin, audience: audience,
-                    nativeSessionWithoutOrigin: profile == .operationalBeta)
+                    nativeSessionWithoutOrigin: profile != .synthetic,
+                    sharedStagingSession: profile == .operationalStaging)
                 auth = NativeWorkspaceAuth(enabled: true, organizationID: organization, tokenPolicy: policy,
                     driver: { try ClerkKitWorkspaceDriver(configuration: configuration) },
                     accessBlock: { try KeychainAccessBlock(bundleIdentifier: bundle, profile: profile) })

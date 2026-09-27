@@ -8,15 +8,18 @@ public struct NativeTokenPolicy: Sendable {
     public let authorizedParty: String
     /// Selected by the native host, never by a renderer or a JWT claim.
     public let nativeSessionWithoutOrigin: Bool
+    /// Explicit shared staging contract; absence is required, not an audience bypass.
+    public let sharedStagingSession: Bool
 
     public init(issuer: String, audience: String,
                 authorizedParty: String = NativeClerkConfiguration.nativeOrigin,
-                nativeSessionWithoutOrigin: Bool = false) throws {
+                nativeSessionWithoutOrigin: Bool = false, sharedStagingSession: Bool = false) throws {
         guard let origin = URLComponents(string: issuer), origin.scheme == "https",
               let host = origin.host, issuer == "https://" + host,
               origin.user == nil, origin.password == nil, origin.port == nil,
               origin.query == nil, origin.fragment == nil,
-              !audience.isEmpty, audience.utf8.count <= 255,
+              (sharedStagingSession ? audience.isEmpty && host.hasSuffix(".clerk.accounts.dev") : !audience.isEmpty),
+              audience.utf8.count <= 255,
               audience.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 33 && $0.value <= 126 }),
               NativeWorkspaceOrigin(rawValue: authorizedParty) != nil else {
             throw NativeAuthError.unavailable
@@ -25,6 +28,7 @@ public struct NativeTokenPolicy: Sendable {
         self.audience = audience
         self.authorizedParty = authorizedParty
         self.nativeSessionWithoutOrigin = nativeSessionWithoutOrigin
+        self.sharedStagingSession = sharedStagingSession
     }
 
     public func validate(_ token: String, identity: NativeAuthIdentity, now: Date = Date()) throws {
@@ -43,7 +47,8 @@ public struct NativeTokenPolicy: Sendable {
         let legacy = claims["org_id"] as? String
         let compact = (claims["o"] as? [String: Any])?["id"] as? String
         let organizations = [legacy, compact].compactMap { $0 }
-        guard audiences.contains(audience), !organizations.isEmpty,
+        let audienceMatches = sharedStagingSession ? claims["aud"] == nil : audiences.contains(audience)
+        guard audienceMatches, !organizations.isEmpty,
               organizations.allSatisfy({ $0 == identity.organizationID }),
               let expiration = time(claims["exp"]), let issued = time(claims["iat"]),
               let notBefore = time(claims["nbf"]), expiration > now.timeIntervalSince1970,

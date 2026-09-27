@@ -10,12 +10,33 @@ const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrig
   frontendOrigin:'https://identity.example.invalid',organizationId:'org_w75_invented',audience:'cosmas-beta-api'};
 const options={webOrigin:'https://workspace.example.invalid',coreWebOrigin:'https://core.example.invalid',captureUploadOrigins:['https://uploads.example.invalid']};
 
+test('shared development identity produces all clients only with explicit synthetic data',()=>{
+  const staging={...identity,profile:'operational-staging-v1',audience:'',frontendOrigin:'https://invented.clerk.accounts.dev',
+    publishableKey:'pk_test_'+Buffer.from('invented.clerk.accounts.dev$').toString('base64')};
+  const files=workspaceIdentityInputs(staging,{...options,dataMode:'synthetic'});
+  assert.equal(files['identity-bindings.json'].profile,staging.profile);
+  for(const client of ['web','desktop','apple']) {
+    assert.equal(files[client+'-build-env.json'].VITE_CLERK_PUBLISHABLE_KEY,staging.publishableKey);
+    assert.equal(files[client+'-build-env.json'].VITE_WORKSPACE_DATA_MODE,'synthetic');
+  }
+  assert.equal(files['apple-identity.json'].profile,staging.profile);
+  assert.equal('os.identity.tfvars.json' in files,false);
+  assert.deepEqual(files['os.runtime-identity.json'],{
+    CLERK_SESSION_POLICY:'shared_staging',
+    CLERK_ORGANIZATION_ID:staging.organizationId,CLERK_ISSUER:staging.frontendOrigin,
+    CLERK_JWKS_URL:staging.frontendOrigin+'/.well-known/jwks.json',CLERK_AUDIENCE:staging.audience,
+  });
+  assert.throws(()=>workspaceIdentityInputs(staging,options));
+  assert.throws(()=>workspaceIdentityInputs(staging,{...options,dataMode:'authorized_beta'}));
+});
+
 test('one existing identity creates consistent full web/desktop/iPhone inputs without activation',()=>{
   const files=workspaceIdentityInputs(identity,options);
   assert.equal(Object.keys(files).length,8);
   assert.deepEqual(files['desktop-identity.json'],identity);
   assert.deepEqual(files['apple-identity.json'],{...identity,client:'apple'});
   const os=files['os.identity.tfvars.json'];
+  assert.equal('os.runtime-identity.json' in files,false);
   assert.equal(os.clerk_org_id,identity.organizationId);
   assert.equal(os.clerk_jwks_url,identity.frontendOrigin+'/.well-known/jwks.json');
   assert.equal(os.clerk_audience,identity.audience);
