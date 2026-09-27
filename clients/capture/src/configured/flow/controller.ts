@@ -228,12 +228,21 @@ export class CaptureFlowController {
       if (active.captureProfile) await this.#restoreCaptureProfile(active.captureProfile);
       await this.#bindStoredSessionKey(keyState);
       this.#setCapabilities(await this.#bff.getCapabilities(active.sessionId));
-      if (this.#canCreateOrRecoverReservations()) {
-        await this.#recoverReservationIntents();
-      }
       let records = (await this.#queue.listMetadata()).filter(
         (record) => record.reservation.sessionId === active.sessionId,
       );
+      // Seed identities before replaying a retained reservation request. It may
+      // overlap objects created by a previous automatic renewal.
+      for (const record of records) {
+        this.#requireChannel(record.reservation.channel);
+        this.#reservations.set(record.reservation.sequenceNumber, record.reservation);
+      }
+      if (this.#canCreateOrRecoverReservations()) {
+        await this.#recoverReservationIntents();
+        records = (await this.#queue.listMetadata()).filter(
+          (record) => record.reservation.sessionId === active.sessionId,
+        );
+      }
       if (records.length === 0 && this.#canCreateOrRecoverReservations()) {
         await this.#reserveInitialWindow();
         records = (await this.#queue.listMetadata()).filter(

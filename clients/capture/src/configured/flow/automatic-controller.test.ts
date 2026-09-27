@@ -153,6 +153,33 @@ async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
 }
 
 describe.each(["profile", "standard"] as const)("%s capture", mode => {
+it("reopens an uncertain explicit continuation after automatic renewal without replacing old chunks", async () => {
+  const f = await fixture(mode);
+  await f.controller.startRecording(); await f.emitTo(100);
+  const before = await f.queue.listMetadata();
+  await f.controller.pauseRecording();
+  const original = f.reserve.getMockImplementation()!;
+  f.reserve.mockImplementationOnce(async (...args) => {
+    await original(...args);
+    throw new BffResponseError(503,"capture_request_unconfirmed",null);
+  });
+  await expect(f.controller.resumeRecording()).rejects.toThrow();
+  const uncertain = f.reserve.mock.calls.at(-1);
+  await f.controller.deactivate(); await f.reopen();
+  const restored = f.create(); await restored.restore();
+  expect(f.reserve.mock.calls.at(-1)).toEqual(uncertain);
+  expect(f.source.start).toHaveBeenCalledOnce();
+  await restored.resumeRecording(); await f.source.emit();
+  expect(restored.snapshot.recordedChunks).toBe(101);
+  const after = await f.queue.listMetadata();
+  for (const row of before) {
+    const retained = after.find(r => r.reservation.objectId === row.reservation.objectId)!;
+    expect(retained.reservation).toEqual(row.reservation);
+    expect(retained.idempotencyKeys).toEqual(row.idempotencyKeys);
+  }
+  await restored.stopRecording(); expect(f.complete).toHaveBeenCalledOnce();
+});
+
 it("explicitly resumes after automatic renewal while preserving earlier reservations and keys", async () => {
   const f = await fixture(mode);
   await f.controller.startRecording(); await f.emitTo(100);
