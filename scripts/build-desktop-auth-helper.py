@@ -38,7 +38,7 @@ def run_compiler(command: list[str], output: Path, environment: dict[str, str], 
         return stdout.decode("utf-8").strip() if query else ""
 
 
-def build(qualified: Path, swift: Path, output: Path) -> Path:
+def build(qualified: Path, swift: Path, output: Path, *, configuration: str = "debug") -> Path:
     repo = Path(__file__).resolve().parents[1]
     qualified = binding.directory(qualified)
     manifest, qualification_hash = binding.qualification(qualified)
@@ -53,6 +53,7 @@ def build(qualified: Path, swift: Path, output: Path) -> Path:
     output = output.resolve()
     if output.is_relative_to(repo) or output.is_relative_to(qualified) or qualified.is_relative_to(output):
         raise ValueError("Build output must be separate from the repository and qualification.")
+    command = binding.build_command(swift, output, configuration)
     output.mkdir(mode=0o700)
     (output / ".incomplete").write_text("No completed compiler receipt; inspect compile.log before selecting a new output.\n")
     source = output / "source"
@@ -66,7 +67,7 @@ def build(qualified: Path, swift: Path, output: Path) -> Path:
     for name in ("scratch", "cache", "config", "security", "modules", "tmp", "home", "xdg-cache", "xdg-config"):
         (output / name).mkdir()
     environment = {"PATH": f"{swift.parent}:/usr/bin:/bin:/usr/sbin:/sbin",
-                   "HOME": str(output / "home"), "CFFIXED_USER_HOME": str(output / "home"),
+                   "CFFIXED_USER_HOME": str(output / "home"),
                    "XDG_CACHE_HOME": str(output / "xdg-cache"), "XDG_CONFIG_HOME": str(output / "xdg-config"),
                    "TMPDIR": str(output / "tmp"), "CLANG_MODULE_CACHE_PATH": str(output / "modules"),
                    "SWIFTPM_MODULECACHE_OVERRIDE": str(output / "modules")}
@@ -74,7 +75,6 @@ def build(qualified: Path, swift: Path, output: Path) -> Path:
         if parent.name == "Developer" and (parent / "Toolchains").is_dir():
             environment["DEVELOPER_DIR"] = str(parent)
             break
-    command = binding.build_command(swift, output)
     (output / "command.json").write_text(json.dumps({"argv": command, "environment": environment}, indent=2) + "\n")
     run_compiler(command, output, environment)
     reported = run_compiler([*command, "--show-bin-path"], output, environment, query=True)
@@ -92,7 +92,8 @@ def build(qualified: Path, swift: Path, output: Path) -> Path:
             or binding.qualification(source) != (manifest, qualification_hash)
             or binding.digest(swift) != swift_hash):
         raise ValueError("Source, compiler or products changed during the build; no compiler receipt issued.")
-    receipt = {"version": 1, "kind": "cosmas-desktop-auth-compiler-receipt", "exit_code": 0,
+    receipt = {"version": 2, "kind": "cosmas-desktop-auth-compiler-receipt", "exit_code": 0,
+               "configuration": configuration,
                "qualification_sha256": qualification_hash, "source_sha256": manifest["composed_sha256"],
                "swift": {"path": str(swift), "sha256": swift_hash}, "command": command,
                "compiler_products": compiled.relative_to(output).as_posix(), "product_files": files,
@@ -109,9 +110,10 @@ def main() -> None:
     parser.add_argument("--qualification", type=Path, required=True)
     parser.add_argument("--swift", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--configuration", choices=("debug", "release"), default="debug")
     args = parser.parse_args()
     try:
-        receipt = build(args.qualification, args.swift, args.output)
+        receipt = build(args.qualification, args.swift, args.output, configuration=args.configuration)
     except (OSError, ValueError, subprocess.TimeoutExpired) as error:
         parser.exit(1, f"Desktop auth build refused: {error}\n")
     print(f"Compiled desktop auth helper; local compiler receipt: {receipt}; not packaged or launched")

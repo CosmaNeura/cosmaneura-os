@@ -114,9 +114,11 @@ def product_inventory(products: Path) -> dict[str, dict]:
             **{f"{RESOURCES}/{name}": value for name, value in resources.items()}}
 
 
-def build_command(swift: Path, output: Path) -> list[str]:
+def build_command(swift: Path, output: Path, configuration: str = "debug") -> list[str]:
+    if configuration not in ("debug", "release"):
+        raise ValueError("Native build configuration must be debug or release.")
     return [*DENY_NETWORK, str(swift), "build", "--package-path", str(output / "source"),
-            "--scratch-path", str(output / "scratch"), "--configuration", "debug",
+            "--scratch-path", str(output / "scratch"), "--configuration", configuration,
             "--disable-automatic-resolution", "--disable-sandbox",
             "--cache-path", str(output / "cache"), "--config-path", str(output / "config"),
             "--security-path", str(output / "security"), "--product", PRODUCT]
@@ -134,10 +136,16 @@ def verify(receipt_path: Path, qualified: Path, products: Path) -> dict:
         raise ValueError("Use a completed compiler receipt from the owned build wrapper.")
     keys = {"version", "kind", "qualification_sha256", "source_sha256", "swift",
             "command", "exit_code", "compiler_products", "product_files", "compiler_log_sha256"}
-    if (set(receipt) != keys or type(receipt["version"]) is not int or receipt["version"] != 1
+    version = receipt.get("version")
+    if version == 2:
+        keys.add("configuration")
+    if (set(receipt) != keys or type(version) is not int or version not in (1, 2)
             or receipt["kind"] != "cosmas-desktop-auth-compiler-receipt"
             or type(receipt["exit_code"]) is not int or receipt["exit_code"] != 0):
         raise ValueError("Native compiler receipt is invalid.")
+    # Version 1 was issued only by the fixed Debug builder. Never reinterpret
+    # an old receipt as Release or let a new label contradict its command.
+    configuration = "debug" if version == 1 else receipt["configuration"]
     manifest, source_hash = qualification(qualified)
     copied, copied_hash = qualification(root / "source")
     if (source_hash != receipt["qualification_sha256"] or copied_hash != source_hash
@@ -147,7 +155,7 @@ def verify(receipt_path: Path, qualified: Path, products: Path) -> dict:
     if (not isinstance(swift, dict) or set(swift) != {"path", "sha256"}
             or not isinstance(swift["path"], str) or not Path(swift["path"]).is_absolute()
             or not isinstance(swift["sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", swift["sha256"])
-            or receipt["command"] != build_command(Path(swift["path"]), root)):
+            or receipt["command"] != build_command(Path(swift["path"]), root, configuration)):
         raise ValueError("Compiler receipt does not describe the fixed local build command.")
     compiled_relative = relative_path(receipt["compiler_products"])
     compiled = root / compiled_relative
