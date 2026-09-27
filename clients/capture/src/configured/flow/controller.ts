@@ -21,9 +21,9 @@ import { validateProfileRequest, validateProfileReceipt, validateProfileCapabili
   type CaptureProfileBff, type CaptureProfileReceipt, type CaptureProfileRequest } from "../../bff/profile-contracts";
 import { AudioCaptureError } from "../../audio/errors";
 import {canonicalCaptureTimestamp} from "../../bff/recovery-contracts";
-import {normalizedLease, requireRenewal, validateRenewalIntent, validateRenewalRecord,
-  type CaptureRenewalRecord} from "../../flow/renewal-contract";
-import {sameLease, type AutomaticCaptureRenewal} from "./automatic-renewal";
+import {normalizedLease, requireRenewal, validateRenewalIntent, validateStandardRenewalIntent} from "../../flow/renewal-contract";
+import {sameLease, validateConfiguredRenewalRecord,
+  type AutomaticCaptureRenewal} from "./automatic-renewal";
 import { CaptureStopAcknowledgementPending } from "../capture/stop-confirmation";
 import type {
   CapturedWavChunk,
@@ -42,6 +42,8 @@ import {
   CONTINUATION_FLOW_RECORD_SCHEMA_VERSION,
   PROFILE_FLOW_RECORD_SCHEMA_VERSION,
   AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION,
+  STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION,
+  STANDARD_NATIVE_MAXIMUM_CHUNKS,
   type ActiveCapturePhase,
   type ActiveCaptureState,
   type CaptureFlowState,
@@ -76,6 +78,8 @@ export interface CaptureFlowSnapshot {
 export interface CaptureFlowControllerOptions {
   readonly bff: CaptureBff;
   readonly profiles?: CaptureProfileBff;
+  /** Trusted native host only; no remote profile is selected or fabricated. */
+  readonly standardContinuousCapture?: true;
   readonly flowStore: CaptureFlowStore;
   readonly queue: CaptureQueue;
   readonly queueTransport: CaptureQueueTransport;
@@ -105,6 +109,8 @@ interface ContinuousRun {
 export class CaptureFlowController {
   readonly #bff: CaptureBff;
   readonly #profiles: CaptureProfileBff | undefined;
+  readonly #standardContinuousCapture: boolean;
+  #standardNativeCapture = false;
   #captureProfile: CaptureProfileReceipt | null = null;
   readonly #flowStore: CaptureFlowStore;
   readonly #queue: CaptureQueue;
@@ -154,6 +160,7 @@ export class CaptureFlowController {
   public constructor(options: CaptureFlowControllerOptions) {
     this.#bff = options.bff;
     this.#profiles = options.profiles;
+    this.#standardContinuousCapture = options.standardContinuousCapture === true;
     this.#flowStore = options.flowStore;
     this.#queue = options.queue;
     this.#queueTransport = options.queueTransport;
@@ -202,6 +209,7 @@ export class CaptureFlowController {
     }
     this.#setSnapshot({ state: "preparing", statusCode: "synthetic_preview_restoring" });
     try {
+      this.#restoreCapturePolicy(active.schemaVersion);
       if (!(active.reviewAfterUpload && active.phase === "processing")) this.#requireChannel(active.channel);
       this.#activeState = active;
       this.#reviewAfterUpload = active.reviewAfterUpload === true;
@@ -220,12 +228,21 @@ export class CaptureFlowController {
       if (active.captureProfile) await this.#restoreCaptureProfile(active.captureProfile);
       await this.#bindStoredSessionKey(keyState);
       this.#setCapabilities(await this.#bff.getCapabilities(active.sessionId));
-      if (this.#canCreateOrRecoverReservations()) {
-        await this.#recoverReservationIntents();
-      }
       let records = (await this.#queue.listMetadata()).filter(
         (record) => record.reservation.sessionId === active.sessionId,
       );
+      // Seed identities before replaying a retained reservation request. It may
+      // overlap objects created by a previous automatic renewal.
+      for (const record of records) {
+        this.#requireChannel(record.reservation.channel);
+        this.#reservations.set(record.reservation.sequenceNumber, record.reservation);
+      }
+      if (this.#canCreateOrRecoverReservations()) {
+        await this.#recoverReservationIntents();
+        records = (await this.#queue.listMetadata()).filter(
+          (record) => record.reservation.sessionId === active.sessionId,
+        );
+      }
       if (records.length === 0 && this.#canCreateOrRecoverReservations()) {
         await this.#reserveInitialWindow();
         records = (await this.#queue.listMetadata()).filter(
@@ -393,6 +410,7 @@ export class CaptureFlowController {
   }
 
   async #continuePreparation(initial: CapturePreparationState): Promise<void> {
+    this.#restoreCapturePolicy(initial.schemaVersion);
     this.#requireChannel(initial.mode === "configured_core" ? initial.channel : undefined);
     let preparation = initial.mode === "configured_core" ? initial : await this.#prepareDirectAdmission(initial);
     const sessionId = preparation.sessionId;
@@ -434,7 +452,8 @@ export class CaptureFlowController {
       { idempotencyKey: leaseIdempotencyKey },
     );
     this.#activeState = {
-      ...this.#channelState(),
+      schemaVersion: preparation.schemaVersion,
+      ...(preparation.mode === "configured_core" && preparation.channel ? {channel: preparation.channel} : {}),
       ...(this.#captureProfile ? {schemaVersion: PROFILE_FLOW_RECORD_SCHEMA_VERSION, captureProfile: this.#captureProfile} : {}),
       sessionId,
       lease: this.#lease,
@@ -478,7 +497,7 @@ export class CaptureFlowController {
     }
     this.#clearAuthorityTimeout();
     const capabilities = this.#captureCapabilitiesForReservedWindow();
-    const continuous = !!this.#captureProfile && !!this.#bff.getCaptureLeaseState && !!this.#source.extend
+    const continuous = (!!this.#captureProfile || this.#standardNativeCapture) && !!this.#bff.getCaptureLeaseState && !!this.#source.extend
       && await this.#source.supportsContinuousCapture?.() === true;
     this.#requireState("ready");
     this.#runFirstSequenceNumber = this.#requireActiveState().continuation?.firstSequenceNumber ?? 0;
@@ -578,7 +597,8 @@ export class CaptureFlowController {
           unused + Math.floor(capabilities.remaining_aggregate_plaintext_bytes / capabilities.max_envelope_bytes));
         if (!Number.isSafeInteger(count) || count < 1) throw new QueueInvariantError("capture_budget_exhausted");
         active = { ...active, automaticRenewal: undefined,
-          schemaVersion: active.schemaVersion === AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION ? AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION
+          schemaVersion: active.schemaVersion === STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION ? STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION
+            : active.schemaVersion === AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION ? AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION
             : active.captureProfile ? PROFILE_FLOW_RECORD_SCHEMA_VERSION : CONTINUATION_FLOW_RECORD_SCHEMA_VERSION,
           continuation: { prepared: false, firstSequenceNumber: first, reservationCount: count, previousLease: active.lease,
             renewIdempotencyKey: this.#operationKey("renew") } };
@@ -925,8 +945,17 @@ export class CaptureFlowController {
         additionalAuthenticatedData: remote.additional_authenticated_data,
         createdAt: remote.created_at,
       };
-      await this.#queue.reserve(reservation, intent.idempotencyKey);
-      this.#reservations.set(reservation.sequenceNumber, reservation);
+      // Automatic renewal stores canonical timestamps. Explicit continuation
+      // can return the same server object with a different timestamp spelling.
+      // Keep its original queue identity/keys after proving semantic identity.
+      const prior = this.#reservations.get(reservation.sequenceNumber);
+      if (prior && (prior.objectId !== reservation.objectId
+        || prior.additionalAuthenticatedData !== reservation.additionalAuthenticatedData
+        || canonicalCaptureTimestamp(prior.createdAt) !== canonicalCaptureTimestamp(reservation.createdAt))) {
+        throw new QueueInvariantError("reservation_identity_conflict");
+      }
+      await this.#queue.reserve(prior ?? reservation, intent.idempotencyKey);
+      this.#reservations.set(reservation.sequenceNumber, prior ?? reservation);
     }
     this.#setSnapshot({ queuedChunks: this.#reservations.size });
   }
@@ -1008,7 +1037,7 @@ export class CaptureFlowController {
 
   async #saveAutomatic(value:AutomaticCaptureRenewal):Promise<void> {
     const active=this.#requireActiveState(),record=value.record;
-    const next:ActiveCaptureState={...active,schemaVersion:AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION,automaticRenewal:value,
+    const next:ActiveCaptureState={...active,schemaVersion:active.captureProfile?AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION:STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION,automaticRenewal:value,
       lease:record.lease??record.intent.priorLease,
       captureAuthorizedUntil:value.state==="reconciled"?null:value.state==="extended"?record.lease!.expires_at:record.intent.priorCaptureAuthorizedUntil,
       ...(value.state==="reconciled"?{phase:"paused" as const}:{})};
@@ -1024,12 +1053,14 @@ export class CaptureFlowController {
       const count=Math.min(90,caps.max_reservations_per_batch,360-first,
         Math.floor((active.aggregatePlaintextBudgetBytes-this.#recordedPlaintextBytes)/caps.max_envelope_bytes)-1);
       requireRenewal(count>0 && first+count>run.first+run.maximumChunks);
-      const intent=validateRenewalIntent({schemaVersion:1,sessionId:active.sessionId,
-        profileReceiptId:this.#captureProfile!.receipt_id,segmentId:run.id,segmentOrdinal:run.first,
+      const fields={sessionId:active.sessionId,segmentId:run.id,segmentOrdinal:run.first,
         priorLease:active.lease,priorCaptureAuthorizedUntil:active.captureAuthorizedUntil!,firstSequenceNumber:first,count,
         leaseIdempotencyKey:this.#operationKey("renew-lease"),reservationIdempotencyKey:this.#operationKey("renew-reserve"),
-        createdAt:this.#now().toISOString()});
-      const next:CaptureRenewalRecord={intent,lease:null,reservations:null};
+        createdAt:this.#now().toISOString()};
+      const intent=this.#captureProfile
+        ? validateRenewalIntent({schemaVersion:1,profileReceiptId:this.#captureProfile.receipt_id,...fields})
+        : validateStandardRenewalIntent({schemaVersion:2,...fields});
+      const next=validateConfiguredRenewalRecord({intent,lease:null,reservations:null},this.#now(),this.#channel);
       await this.#saveAutomatic({record:next,state:"pending"});return next;
     });
     const intent=record.intent;
@@ -1043,7 +1074,7 @@ export class CaptureFlowController {
     this.#requireContinuous(run);
     const lease=await exactRetry(()=>this.#bff.renewLease(intent.sessionId,intent.priorLease.lease_id,
       {protocol_version:PROTOCOL_VERSION,expected_generation:intent.priorLease.generation},{idempotencyKey:intent.leaseIdempotencyKey}));
-    record=validateRenewalRecord({...record,lease},this.#now(),this.#channel);
+    record=validateConfiguredRenewalRecord({...record,lease},this.#now(),this.#channel);
     // Keep a returned lease even when Stop raced the request. Completion waits
     // for this journal write; no later network phase can cross the stop fence.
     await this.#withChunkPersistence(()=>this.#saveAutomatic({record,state:"pending"}));
@@ -1052,7 +1083,7 @@ export class CaptureFlowController {
       {protocol_version:PROTOCOL_VERSION,capture_lease_id:record.lease!.lease_id,capture_lease_generation:record.lease!.generation,
         channel:this.#channel,first_sequence_number:intent.firstSequenceNumber,count:intent.count},
       {idempotencyKey:intent.reservationIdempotencyKey}));
-    record=validateRenewalRecord({...record,reservations},this.#now(),this.#channel);
+    record=validateConfiguredRenewalRecord({...record,reservations},this.#now(),this.#channel);
     await this.#withChunkPersistence(async()=>{
       await this.#saveAutomatic({record,state:"pending"});
       for(const remote of record.reservations!.reservations){
@@ -1102,7 +1133,7 @@ export class CaptureFlowController {
         // recover its receipt but cannot issue a further renewal.
         const receipt=await this.#bff.renewLease(intent.sessionId,intent.priorLease.lease_id,
           {protocol_version:PROTOCOL_VERSION,expected_generation:intent.priorLease.generation},{idempotencyKey:intent.leaseIdempotencyKey});
-        record=validateRenewalRecord({...record,lease:receipt},this.#now(),this.#channel);
+        record=validateConfiguredRenewalRecord({...record,lease:receipt},this.#now(),this.#channel);
       }
       requireRenewal(sameLease(record.lease!,lease));
     }
@@ -1184,6 +1215,11 @@ export class CaptureFlowController {
     if (this.#captureProfile) {
       const validated = validateProfileCapabilities(capabilities, this.#captureProfile);
       capabilities = {...validated, max_chunks: this.#captureProfile.maximum_chunks_per_channel};
+    } else if (this.#standardNativeCapture) {
+      const validated=validateProfileCapabilities(capabilities,null);
+      capabilities={...validated,max_chunks:Math.min(validated.max_chunks,STANDARD_NATIVE_MAXIMUM_CHUNKS),
+        remaining_aggregate_plaintext_bytes:Math.min(validated.remaining_aggregate_plaintext_bytes,
+          STANDARD_NATIVE_MAXIMUM_CHUNKS*validated.max_envelope_bytes)};
     }
     this.#queue.configureUploadConcurrency(capabilities.upload_concurrency);
     this.#capabilities = capabilities;
@@ -1193,7 +1229,16 @@ export class CaptureFlowController {
     if ((channel ?? "microphone") !== this.#channel) throw new QueueInvariantError("capture_channel_conflict");
   }
 
+  #restoreCapturePolicy(schemaVersion: number): void {
+    this.#standardNativeCapture = schemaVersion === STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION;
+    if (this.#standardNativeCapture && !this.#standardContinuousCapture) {
+      throw new QueueInvariantError("capture_policy_unavailable");
+    }
+  }
+
   #channelState(): Pick<ConfiguredCapturePreparationState, "schemaVersion" | "channel"> {
+    if(this.#standardContinuousCapture) return {schemaVersion:STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION,
+      ...(this.#channel==="microphone"?{}:{channel:this.#channel})};
     return this.#channel === "microphone" ? { schemaVersion: FLOW_RECORD_SCHEMA_VERSION }
       : { schemaVersion: CHANNEL_FLOW_RECORD_SCHEMA_VERSION, channel: this.#channel };
   }

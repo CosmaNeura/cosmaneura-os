@@ -10,7 +10,6 @@ import {DesktopProviderRecorder} from './provider-recorder';
 import {InMemoryRecordingIndicator} from './recording-indicator';
 import {HttpCiphertextUploadTarget} from '../../capture/src/bff/upload-target';
 import {MockCaptureService} from '../../capture/src/configured/mock-bff/state';
-import {profileRequestHash,type CaptureProfileReceipt} from '../../capture/src/bff/profile-contracts';
 import {connectDesktopRecorderView,DESKTOP_RECORDER_CHANNELS} from '../../capture/src/configured/provider/desktop-recorder-view';
 
 type Options=Parameters<typeof installWorkspaceDesktopCapture>[0];
@@ -28,7 +27,6 @@ async function fixture(){
     all_parties_consented:true,granted_at:new Date().toISOString()},'consent');
   const session=service.createSession({...person,consent_record_id:consent.id,modality:'in_person'},'session');
   let status=session.status;
-  let profile:CaptureProfileReceipt|undefined;
   const calls:{kind:string;key:string;payload:unknown}[]=[];
   const request=vi.fn(async(request:Request)=>{
     expect(request.headers.get('X-Cosmas-Desktop-Session')).toBe(revision);
@@ -39,13 +37,8 @@ async function fixture(){
     let receipt:unknown;
     switch(op.kind){
       case 'creator_review':receipt={schema_version:'1.0',session_id:session.id,status,source:null,working:null,review_queue:null};break;
-      case 'select_capture_profile':
-        profile??={schema_version:'1.0',receipt_id:crypto.randomUUID(),session_id:session.id,request:op.payload,
-          request_sha256:await profileRequestHash(op.payload),created_at:new Date().toISOString(),
-          maximum_aggregate_plaintext_bytes:268435456,maximum_chunks:720,maximum_chunks_per_channel:360,maximum_track_duration_ms:3600000};
-        receipt=profile;break;
-      case 'capture_profile':receipt=profile;break;
-      case 'capabilities':receipt={...service.capabilities(),...(profile?{max_chunks:720,remaining_aggregate_plaintext_bytes:268435456}:{})};break;
+      // Current Scribe publishes ordinary capture capabilities and no profile API.
+      case 'capabilities':receipt={...service.capabilities(),max_chunks:2048,remaining_aggregate_plaintext_bytes:402653184};break;
       case 'encryption_key':receipt=service.audioEncryptionKey();break;
       case 'bind_key':receipt=service.bindSessionAudioKey(session.id,op.payload,key);break;
       case 'issue_lease':receipt=service.issueLease(op.payload,key);break;
@@ -159,27 +152,30 @@ it('requests first-install permissions only from the explicit action and still w
   await view.controller.startRecording();await f.emit();expect(f.start).toHaveBeenCalledTimes(1);
 });
 
-it('automatically crosses the first desktop capture window with one source and retained encrypted audio',async()=>{
+it('records the full one-hour desktop limit against the standard API with one source and encrypted audio',async()=>{
   const finish=vi.spyOn(DesktopProviderRecorder.prototype,'stopRecording');
   vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date());
   const f=await fixture();await f.open();const view=await f.view();
-  expect(f.calls.find(c=>c.kind==='select_capture_profile')?.payload).toEqual({schema_version:'1.0',profile_id:'visit-60m-v1',channels:['mixed']});
-  expect(f.calls.findIndex(c=>c.kind==='select_capture_profile')).toBeLessThan(f.calls.findIndex(c=>c.kind==='bind_key'));
+  expect(f.calls.some(c=>c.kind==='select_capture_profile'||c.kind==='capture_profile')).toBe(false);
   await view.controller.startRecording();
-  for(let i=0;i<91;i++){
+  for(let i=0;i<360;i++){
     vi.setSystemTime(Date.now()+10_000);await f.emit();
-    if(i===83)await vi.waitFor(()=>expect(f.extensions).toHaveLength(1));
+    if([83,168,253,338].includes(i))await vi.waitFor(()=>expect(f.extensions).toHaveLength([83,168,253,338].indexOf(i)+1));
+    if((i+1)%90===0)console.info('Synthetic desktop hour: encrypted chunks',i+1);
   }
-  expect(view.controller.snapshot.recordedChunks).toBe(91);expect(f.start).toHaveBeenCalledOnce();
-  expect(f.extensions[0]?.leaseGeneration).toBe(2);
+  expect(view.controller.snapshot.recordedChunks).toBe(360);expect(f.start).toHaveBeenCalledOnce();
+  expect(f.extensions.map(e=>e.leaseGeneration)).toEqual([2,3,4,5]);
+  expect(f.extensions.at(-1)?.maximumChunks).toBe(360);
+  expect(view.controller.snapshot.remainingBudgetSeconds).toBe(0);
+  console.info('Synthetic desktop hour: completing upload');
   try {await view.controller.stopRecording();} catch(error) {
     await finish.mock.results.at(-1)?.value;throw error;
   }
   expect(view.controller.snapshot.state).toBe('processing');
-  expect(f.calls.filter(c=>c.kind==='renew_lease')).toHaveLength(1);
+  expect(f.calls.filter(c=>c.kind==='renew_lease')).toHaveLength(4);
   expect(f.calls.filter(c=>c.kind==='complete')).toHaveLength(1);
   expect(JSON.stringify(f.messages)).not.toMatch(/leaseReceiptId|reservationBatchId|runId|pcmBytes|processFence/);
-},20_000);
+},120_000);
 
 it('retains the same native stop owner when quitting loses its stop response',async()=>{
   const f=await fixture();await f.open();const view=await f.view();await view.controller.startRecording();await f.emit();

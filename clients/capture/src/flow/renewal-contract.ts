@@ -24,6 +24,12 @@ export interface CaptureRenewalRecord {
   lease: CaptureLeaseReceipt | null;
   reservations: ChunkReservationBatchReceipt | null;
 }
+/** Standard native capture has no remote visit-profile receipt. Version 2
+ * cannot be read as a version-1 profile-bound intent by an older writer. */
+export type StandardCaptureRenewalIntent = Omit<CaptureRenewalIntent, "schemaVersion" | "profileReceiptId"> & { schemaVersion: 2 };
+export type StandardCaptureRenewalRecord = Omit<CaptureRenewalRecord, "intent"> & { intent: StandardCaptureRenewalIntent };
+type RenewalFields = Omit<CaptureRenewalIntent, "schemaVersion" | "profileReceiptId">;
+
 export interface CaptureRenewalStore {
   putCaptureRenewal(record: CaptureRenewalRecord): Promise<void>;
   getCaptureRenewal(sessionId: string, leaseId: string, priorGeneration: number): Promise<CaptureRenewalRecord | null>;
@@ -57,15 +63,24 @@ export function normalizedLease(value: unknown, sessionId: string): CaptureLease
 export function validateRenewalIntent(value: unknown): CaptureRenewalIntent {
   keys(value, ["schemaVersion", "sessionId", "profileReceiptId", "segmentId", "segmentOrdinal", "priorLease",
     "priorCaptureAuthorizedUntil", "firstSequenceNumber", "count", "leaseIdempotencyKey", "reservationIdempotencyKey", "createdAt"]);
-  requireRenewal(value.schemaVersion === 1 && renewalUuid(value.sessionId) && renewalUuid(value.profileReceiptId) &&
-    renewalUuid(value.segmentId) && integer(value.segmentOrdinal, 0, 999) && integer(value.firstSequenceNumber, 1, 359) &&
+  requireRenewal(value.schemaVersion === 1 && renewalUuid(value.profileReceiptId));
+  return { schemaVersion: 1, profileReceiptId: value.profileReceiptId, ...validateRenewalFields(value) };
+}
+export function validateStandardRenewalIntent(value: unknown): StandardCaptureRenewalIntent {
+  keys(value, ["schemaVersion", "sessionId", "segmentId", "segmentOrdinal", "priorLease",
+    "priorCaptureAuthorizedUntil", "firstSequenceNumber", "count", "leaseIdempotencyKey", "reservationIdempotencyKey", "createdAt"]);
+  requireRenewal(value.schemaVersion === 2);
+  return { schemaVersion: 2, ...validateRenewalFields(value) };
+}
+function validateRenewalFields(value: Record<string, unknown>): RenewalFields {
+  requireRenewal(renewalUuid(value.sessionId) && renewalUuid(value.segmentId) && integer(value.segmentOrdinal, 0, 999) && integer(value.firstSequenceNumber, 1, 359) &&
     integer(value.count, 1, 90) && value.firstSequenceNumber + value.count <= 360 && operationKey(value.leaseIdempotencyKey) &&
     operationKey(value.reservationIdempotencyKey) && value.leaseIdempotencyKey !== value.reservationIdempotencyKey);
   const priorLease = normalizedLease(value.priorLease, value.sessionId);
   const until = canonicalCaptureTimestamp(value.priorCaptureAuthorizedUntil), created = canonicalCaptureTimestamp(value.createdAt);
   requireRenewal(Date.parse(created) >= Date.parse(priorLease.issued_at) && Date.parse(created) < Date.parse(until) &&
     Date.parse(until) <= Date.parse(priorLease.expires_at));
-  return { schemaVersion: 1, sessionId: value.sessionId, profileReceiptId: value.profileReceiptId,
+  return { sessionId: value.sessionId,
     segmentId: value.segmentId, segmentOrdinal: value.segmentOrdinal, priorLease, priorCaptureAuthorizedUntil: until,
     firstSequenceNumber: value.firstSequenceNumber, count: value.count, leaseIdempotencyKey: value.leaseIdempotencyKey,
     reservationIdempotencyKey: value.reservationIdempotencyKey, createdAt: created };
@@ -73,7 +88,7 @@ export function validateRenewalIntent(value: unknown): CaptureRenewalIntent {
 export function sameRenewalIntent(left: CaptureRenewalIntent, right: CaptureRenewalIntent): boolean {
   return JSON.stringify(validateRenewalIntent(left)) === JSON.stringify(validateRenewalIntent(right));
 }
-export function validateRenewedLease(value: unknown, intent: CaptureRenewalIntent, now: Date): CaptureLeaseReceipt {
+export function validateRenewedLease(value: unknown, intent: RenewalFields, now: Date): CaptureLeaseReceipt {
   const lease = normalizedLease(value, intent.sessionId);
   requireRenewal(lease.lease_id === intent.priorLease.lease_id && lease.generation === intent.priorLease.generation + 1 &&
     lease.receipt_id !== intent.priorLease.receipt_id && Date.parse(lease.issued_at) >= Date.parse(intent.priorLease.issued_at) &&
@@ -81,7 +96,7 @@ export function validateRenewedLease(value: unknown, intent: CaptureRenewalInten
     Date.parse(lease.expires_at) > Date.parse(intent.priorLease.expires_at));
   return lease;
 }
-function normalizedReservations(value: unknown, intent: CaptureRenewalIntent, lease: CaptureLeaseReceipt, now: Date,
+function normalizedReservations(value: unknown, intent: RenewalFields, lease: CaptureLeaseReceipt, now: Date,
   channel: "microphone" | "mixed" | "system_audio"): ChunkReservationBatchReceipt {
   keys(value, ["protocol_version", "batch_id", "session_id", "capture_authorized_until", "reservations"]);
   requireRenewal(value.protocol_version === "1.0" && renewalUuid(value.batch_id) && value.session_id === intent.sessionId &&
@@ -112,9 +127,18 @@ function normalizedReservations(value: unknown, intent: CaptureRenewalIntent, le
 }
 export function validateRenewalRecord(value: unknown, now = new Date(),
   channel: "microphone" | "mixed" | "system_audio" = "microphone"): CaptureRenewalRecord {
+  return validateRecord(value, now, channel, validateRenewalIntent);
+}
+export function validateStandardRenewalRecord(value: unknown, now = new Date(),
+  channel: "microphone" | "mixed" | "system_audio" = "microphone"): StandardCaptureRenewalRecord {
+  return validateRecord(value, now, channel, validateStandardRenewalIntent);
+}
+function validateRecord<T extends RenewalFields>(value: unknown, now: Date,
+  channel: "microphone" | "mixed" | "system_audio", parseIntent: (value: unknown) => T):
+  {intent: T; lease: CaptureLeaseReceipt | null; reservations: ChunkReservationBatchReceipt | null} {
   try {
     keys(value, ["intent", "lease", "reservations"]);
-    const intent = validateRenewalIntent(value.intent);
+    const intent = parseIntent(value.intent);
     requireRenewal(Date.parse(intent.createdAt) <= now.getTime() + 5000);
     const lease = value.lease === null ? null : validateRenewedLease(value.lease, intent, now);
     requireRenewal(value.reservations === null || lease !== null);

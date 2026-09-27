@@ -17,6 +17,10 @@ export const CONTINUATION_FLOW_RECORD_SCHEMA_VERSION = 4 as const;
 export const PROFILE_FLOW_RECORD_SCHEMA_VERSION = 5 as const;
 /** Records an in-flight renewal before dispatch so restart cannot lose its key. */
 export const AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION = 6 as const;
+/** Standard server capture, bounded by this native host to one hour. Older
+ * writers must not reinterpret its renewal journal as a profile-bound visit. */
+export const STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION = 7 as const;
+export const STANDARD_NATIVE_MAXIMUM_CHUNKS = 360 as const;
 
 export interface CaptureContinuation {
   readonly prepared: boolean;
@@ -70,7 +74,7 @@ export interface PreparedCaptureSession {
 
 export interface ActiveCaptureState {
   readonly schemaVersion: typeof FLOW_RECORD_SCHEMA_VERSION | typeof CHANNEL_FLOW_RECORD_SCHEMA_VERSION
-    | typeof CONTINUATION_FLOW_RECORD_SCHEMA_VERSION | typeof PROFILE_FLOW_RECORD_SCHEMA_VERSION | typeof AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION;
+    | typeof CONTINUATION_FLOW_RECORD_SCHEMA_VERSION | typeof PROFILE_FLOW_RECORD_SCHEMA_VERSION | typeof AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION | typeof STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION;
   readonly automaticRenewal?: AutomaticCaptureRenewal;
   readonly captureProfile?: CaptureProfileReceipt;
   readonly continuation?: CaptureContinuation;
@@ -107,7 +111,7 @@ export interface DirectCapturePreparationState {
 
 export interface ConfiguredCapturePreparationState {
   readonly mode: "configured_core";
-  readonly schemaVersion: typeof FLOW_RECORD_SCHEMA_VERSION | typeof CHANNEL_FLOW_RECORD_SCHEMA_VERSION | typeof PROFILE_FLOW_RECORD_SCHEMA_VERSION;
+  readonly schemaVersion: typeof FLOW_RECORD_SCHEMA_VERSION | typeof CHANNEL_FLOW_RECORD_SCHEMA_VERSION | typeof PROFILE_FLOW_RECORD_SCHEMA_VERSION | typeof STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION;
   readonly profileSelection?: CaptureProfileSelection;
   readonly channel?: ChunkReservationBatchRequest["channel"];
   readonly startedAt: string;

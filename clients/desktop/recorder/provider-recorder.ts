@@ -33,6 +33,7 @@ export interface DesktopProviderRecorderOptions {
   readonly createBff: (signal: AbortSignal) => CaptureBff;
   readonly profiles?: CaptureProfileBff;
   readonly captureProfile?: CaptureProfileRequest;
+  readonly standardContinuousCapture?: true;
   /** Existing current Core creator/session read, before key binding or lease work. */
   readonly authorizePreparation: (signal: AbortSignal) => Promise<{
     readonly sessionId: string; readonly status: CreatorReviewView["status"];
@@ -116,7 +117,7 @@ export class DesktopProviderRecorder implements ProviderRecorderController {
       await options.coverage.persist(value); this.coverage = structuredClone(value); this.publish();
     });
     const bff = options.createBff(this.signal);
-    this.createFlow = () => new CaptureFlowController({ bff, profiles: options.profiles,
+    this.createFlow = () => new CaptureFlowController({ bff, profiles: options.profiles, standardContinuousCapture: options.standardContinuousCapture,
       flowStore: options.flowStore, createSessionKey: options.createSessionKey,
       source: this.source, queue: new CaptureQueue(options.queueStorage),
       queueTransport: new BffCaptureQueueTransport(bff, options.uploadTarget) });
