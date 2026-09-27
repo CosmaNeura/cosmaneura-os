@@ -11,6 +11,7 @@ enum ProviderNativeError: String, Error, Sendable {
 enum ProviderNativeAction: String, Sendable {
     case catalog, mount, recorder
     case sourceStart = "source-start"
+    case recordingContext = "native-recording-context"
     case admission = "capture-admissions", operation = "capture-operations", note = "capture-notes"
 
     var bodyLimit: Int {
@@ -19,6 +20,7 @@ enum ProviderNativeAction: String, Sendable {
         case .mount: 256
         case .recorder: 1024
         case .sourceStart: 4096
+        case .recordingContext: 1024
         case .admission: 2048
         case .operation: 4_194_304
         case .note: 262_144 + 8192
@@ -27,7 +29,7 @@ enum ProviderNativeAction: String, Sendable {
     var responseLimit: Int {
         switch self {
         case .catalog: 65_536
-        case .mount, .recorder, .sourceStart: 8192
+        case .mount, .recorder, .sourceStart, .recordingContext: 8192
         case .admission, .operation, .note: 8 * 1024 * 1024
         }
     }
@@ -44,7 +46,7 @@ struct ProviderNativeRequest: Sendable {
         guard let identifier = UUID(uuidString: id), identifier.uuidString.lowercased() == id,
               UUID(uuidString: revision)?.uuidString.lowercased() == revision,
               let operation = ProviderNativeAction(rawValue: action),
-              operation != .sourceStart,
+              operation != .sourceStart, operation != .recordingContext,
               key.range(of: "^[A-Za-z0-9._:-]{8,255}$", options: .regularExpression) != nil,
               body.utf8.count <= operation.bodyLimit, let data = body.data(using: .utf8),
               (try? JSONSerialization.jsonObject(with: data)) is [String: Any]
@@ -62,6 +64,34 @@ struct ProviderNativeRequest: Sendable {
         else { throw ProviderNativeError.invalidRequest }
         self.id = nativeStartID; self.revision = revision; self.action = .sourceStart
         self.key = key; self.body = body
+    }
+
+    // Native caller supplies only workspace/session; the OS API resolves Core.
+    init(recordingContextID: UUID, revision: String, workspaceID: UUID, sessionID: UUID) throws {
+        guard UUID(uuidString: revision)?.uuidString.lowercased() == revision else {
+            throw ProviderNativeError.invalidRequest
+        }
+        self.id = recordingContextID; self.revision = revision; self.action = .recordingContext
+        self.key = recordingContextID.uuidString.lowercased()
+        self.body = try JSONSerialization.data(withJSONObject: [
+            "workspace_id": workspaceID.uuidString.lowercased(),
+            "session_id": sessionID.uuidString.lowercased(),
+            "operation": ["kind": "native_recording_context"],
+        ])
+    }
+}
+
+struct NativeProviderRecordingContext: Equatable, Sendable {
+    let workspaceID: UUID
+    let tenantID: UUID
+    let sessionID: UUID
+    let accountDigest: String
+    let checkedAt: Date
+
+    fileprivate init(workspaceID: UUID, tenantID: UUID, sessionID: UUID,
+                     accountDigest: String, checkedAt: Date) {
+        self.workspaceID = workspaceID; self.tenantID = tenantID; self.sessionID = sessionID
+        self.accountDigest = accountDigest; self.checkedAt = checkedAt
     }
 }
 
@@ -119,6 +149,46 @@ protocol ProviderNativeWire: Sendable {
             throw ProviderNativeError.unavailable
         }
         return state.revision
+    }
+
+    func recordingRevision(accountDigest: String) throws -> String {
+        let state = auth.state()
+        try current(state.revision)
+        guard try auth.recordingAccountDigest(expectedRevision: state.revision) == accountDigest else {
+            throw ProviderNativeError.unavailable
+        }
+        return state.revision
+    }
+
+    /// Core nonce/freshness checks are performed by the authenticated OS API.
+    /// No tenant, account digest, token or service URL is supplied by JavaScript.
+    func recordingContext(workspaceID: UUID, sessionID: UUID, revision: String,
+                          requestID: UUID = UUID()) async throws -> NativeProviderRecordingContext {
+        try current(revision)
+        let account = try auth.recordingAccountDigest(expectedRevision: revision)
+        let request = try ProviderNativeRequest(recordingContextID: requestID, revision: revision,
+            workspaceID: workspaceID, sessionID: sessionID)
+        let reply = try await send(request)
+        try current(revision)
+        guard reply.status == 200,
+              try auth.recordingAccountDigest(expectedRevision: revision) == account,
+              let value = try JSONSerialization.jsonObject(with: reply.body) as? [String: Any],
+              Set(value.keys) == ["workspace_id", "session_id", "operation", "receipt"],
+              value["workspace_id"] as? String == workspaceID.uuidString.lowercased(),
+              value["session_id"] as? String == sessionID.uuidString.lowercased(),
+              value["operation"] as? String == "native_recording_context",
+              let receipt = value["receipt"] as? [String: Any],
+              Set(receipt.keys) == ["schema_version", "workspace_id", "tenant_id", "session_id", "status"],
+              receipt["schema_version"] as? String == "1.0",
+              receipt["workspace_id"] as? String == workspaceID.uuidString.lowercased(),
+              receipt["session_id"] as? String == sessionID.uuidString.lowercased(),
+              let tenant = receipt["tenant_id"] as? String, let tenantID = UUID(uuidString: tenant),
+              tenantID.uuidString.lowercased() == tenant,
+              let status = receipt["status"] as? String, ["created", "capturing"].contains(status) else {
+            throw ProviderNativeError.response
+        }
+        return NativeProviderRecordingContext(workspaceID: workspaceID, tenantID: tenantID,
+            sessionID: sessionID, accountDigest: account, checkedAt: Date())
     }
 
     func send(_ request: ProviderNativeRequest) async throws -> ProviderNativeReply {

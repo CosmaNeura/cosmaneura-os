@@ -66,7 +66,7 @@ def gated_api(monkeypatch):
         yield client, received
 
 
-@pytest.mark.parametrize("kind", ["source_start", "source_extend"])
+@pytest.mark.parametrize("kind", ["source_start", "source_extend", "native_recording_context"])
 def test_native_source_wire_passes_current_workspace_gates(native_requests, gated_api, kind):
     wire = native_requests[kind]
     client, received = gated_api
@@ -77,10 +77,12 @@ def test_native_source_wire_passes_current_workspace_gates(native_requests, gate
     assert result.headers["x-cosmas-workspace-protocol"] == "1"
     assert received == [body]
     assert json.loads(body) == {"session_id": "00000000-0000-4000-8000-000000000102",
-                               "idempotency_key": "synthetic-source-key", "operation": {"kind": kind}}
+                               "idempotency_key": "00000000-0000-4000-8000-000000000103"
+                               if kind == "native_recording_context" else "synthetic-source-key",
+                               "operation": {"kind": kind}}
 
 
-@pytest.mark.parametrize("kind", ["source_start", "source_extend"])
+@pytest.mark.parametrize("kind", ["source_start", "source_extend", "native_recording_context"])
 @pytest.mark.parametrize("header", ["x-cosmas-workspace-protocol", "x-cosmas-draft-recovery"])
 def test_each_native_protocol_header_remains_required(native_requests, gated_api, kind, header):
     wire = native_requests[kind]
@@ -90,3 +92,10 @@ def test_each_native_protocol_header_remains_required(native_requests, gated_api
                             headers=headers, content=base64.b64decode(wire["body_base64"]))
     assert result.status_code == 426
     assert received == []
+
+
+def test_native_context_rejects_unbound_receipts_and_authority_changes(native_requests):
+    assert native_requests["context_checks"] == {
+        "kind": "context_checks", "scenarios": 15,
+        "generic_rejected": True, "confused_action_rejected": True,
+    }
