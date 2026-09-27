@@ -1,0 +1,7 @@
+# This host program runs on Ubuntu 22.04's Python 3.10, independently of the API.
+target-version = "py310"
+line-length = 100
+
+[lint]
+select = ["E", "F", "I", "UP", "B"]
+ignore = ["E501"]
