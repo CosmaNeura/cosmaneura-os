@@ -156,6 +156,9 @@ extension NativeEncryptedPCMRecorder: NativeProviderEncryptedRecorder {}
 
   var captureState: NativeRecordingPCMState { recorder.captureState }
   var isPhysicallyIdle: Bool { recorder.isPhysicallyIdle }
+  func confirmRendererReplacement() throws {
+    try NativeCaptureStartGate.confirmRendererReplacement(retaining: installed ? authority.id : nil)
+  }
   func captureSignal() -> PCMSignalMonitor.Snapshot { recorder.captureSignal() }
   func continuationState() async -> NativeRecordingContinuationState? {
     await recorder.snapshot()

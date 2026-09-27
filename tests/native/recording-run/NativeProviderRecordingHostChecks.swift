@@ -174,6 +174,7 @@ import Security
         committedPlaintextBytes: prior + (committed ? 204 : 0), pendingReservations: 0)
     }
     func captureSignal() -> PCMSignalMonitor.Snapshot { meter.snapshot() }
+    func confirmRendererReplacement() throws { try NativeCaptureStartGate.confirmRendererReplacement() }
     func start() {
       phase = .recording
       isPhysicallyIdle = false
@@ -387,7 +388,143 @@ import Security
       try await host.close()
       checks += 1
     }
+    do {
+      let f = try Fixture()
+      let bridge = NativeProviderRecordingBridge()
+      let revision = UUID().uuidString.lowercased()
+      let raw: [String: Any] = [
+        "requestId": UUID().uuidString.lowercased(), "revision": revision,
+        "workspaceId": f.scope.workspaceID.uuidString.lowercased(),
+        "sessionId": f.scope.sessionID.uuidString.lowercased(),
+      ]
+      let selection = try NativeProviderRecordingSelection(raw)
+      let opened = try await bridge.open(
+        selection, current: {}, make: { f.host() }, inputMuted: { false })
+      let state = opened["recording"] as! [String: Any]
+      let id = state["recorderId"] as! String
+      try check(state["phase"] as? String == "ready" && f.sources.isEmpty)
+      try check(JSONSerialization.isValidJSONObject(opened))
+      func command(_ kind: String, revision override: String? = nil) throws
+        -> NativeProviderRecordingCommand
+      {
+        try NativeProviderRecordingCommand([
+          "requestId": UUID().uuidString.lowercased(), "revision": override ?? revision,
+          "recorderId": id, "kind": kind,
+        ])
+      }
+      try await rejects {
+        _ = try await bridge.command(
+          command("start", revision: UUID().uuidString.lowercased()), current: {},
+          inputMuted: { false })
+      }
+      let changed = try Fixture()
+      try await rejects {
+        _ = try await bridge.open(
+          selection, current: {}, make: { changed.host() }, inputMuted: { false })
+      }
+      _ = try await bridge.command(command("start"), current: {}, inputMuted: { false })
+      f.runs[0].failStop = true
+      let failed = try await bridge.command(
+        command("close"), current: { throw Failed(line: #line) }, inputMuted: { true })
+      try check(failed["ok"] as? Bool == false && failed["recording"] is NSNull)
+      f.runs[0].failStop = false
+      let closed = try await bridge.command(
+        command("close"), current: { throw Failed(line: #line) }, inputMuted: { true })
+      try check(closed["ok"] as? Bool == true && closed["recording"] is NSNull)
+      let duplicate = try await bridge.command(command("close"), current: {}, inputMuted: { false })
+      try check(duplicate["ok"] as? Bool == true && f.sources[0].stops == 1)
+      checks += 1
+    }
+    do {
+      let f = try Fixture()
+      let bridge = NativeProviderRecordingBridge()
+      let revision = UUID().uuidString.lowercased()
+      let raw: [String: Any] = [
+        "requestId": UUID().uuidString.lowercased(), "revision": revision,
+        "workspaceId": f.scope.workspaceID.uuidString.lowercased(),
+        "sessionId": f.scope.sessionID.uuidString.lowercased(),
+      ]
+      let selection = try NativeProviderRecordingSelection(raw)
+      await f.service.configure(failAll: true)
+      let opened = try await bridge.open(
+        selection, current: {}, make: { f.host() }, inputMuted: { false })
+      let state = opened["recording"] as! [String: Any]
+      let id = state["recorderId"] as! String
+      try check(opened["ok"] as? Bool == false && state["phase"] as? String == "failed")
+      await f.service.configure()
+      let retried = try await bridge.open(
+        selection, current: {}, make: { f.host() }, inputMuted: { false })
+      let next = retried["recording"] as! [String: Any]
+      try check(next["recorderId"] as? String == id && next["phase"] as? String == "ready")
+      let close = try NativeProviderRecordingCommand([
+        "requestId": UUID().uuidString.lowercased(), "revision": revision,
+        "recorderId": id, "kind": "close",
+      ])
+      _ = try await bridge.command(close, current: {}, inputMuted: { false })
+      checks += 1
+    }
+    do {
+      let raw: [String: Any] = [
+        "requestId": UUID().uuidString.lowercased(), "revision": UUID().uuidString.lowercased(),
+        "workspaceId": UUID().uuidString.lowercased(), "sessionId": UUID().uuidString.lowercased(),
+      ]
+      for key in raw.keys {
+        var missing = raw
+        missing.removeValue(forKey: key)
+        try await rejects { _ = try NativeProviderRecordingSelection(missing) }
+      }
+      var extra = raw
+      extra["audio"] = Data()
+      try await rejects { _ = try NativeProviderRecordingSelection(extra) }
+      var invalid = raw
+      invalid["revision"] = UUID().uuidString.uppercased()
+      try await rejects { _ = try NativeProviderRecordingSelection(invalid) }
+      let command: [String: Any] = [
+        "requestId": UUID().uuidString.lowercased(), "revision": UUID().uuidString.lowercased(),
+        "recorderId": UUID().uuidString.lowercased(), "kind": "input", "input": "external",
+      ]
+      _ = try NativeProviderRecordingCommand(command)
+      var injected = command
+      injected["kind"] = "start"
+      try await rejects { _ = try NativeProviderRecordingCommand(injected) }
+      checks += 1
+    }
+    do {
+      let f = try Fixture()
+      let (auth, driver) = try CheckNativeRecordingAccount.makeAuth()
+      let revision = auth.state().revision
+      let runtime = NativeProviderRecordingRuntime(auth: auth) { _ in throw Failed(line: #line) }
+      let selection = try NativeProviderRecordingSelection([
+        "requestId": UUID().uuidString.lowercased(), "revision": revision,
+        "workspaceId": f.scope.workspaceID.uuidString.lowercased(),
+        "sessionId": f.scope.sessionID.uuidString.lowercased(),
+      ])
+      let opened = try await runtime.recording.open(selection, current: {}, make: { f.host() }, inputMuted: { false })
+      let state = opened["recording"] as! [String: Any], id = state["recorderId"] as! String
+      try check(state["workspaceId"] as? String == f.scope.workspaceID.uuidString.lowercased())
+      try check(state["recoveryScope"] as? String == f.recovery.uuidString.lowercased())
+      func command(_ kind: String) throws -> NativeProviderRecordingCommand {
+        try NativeProviderRecordingCommand(["requestId": UUID().uuidString.lowercased(),
+          "revision": revision, "recorderId": id, "kind": kind])
+      }
+      _ = try await runtime.recording.command(command("start"), current: {}, inputMuted: { false })
+      let renderer = UUID()
+      runtime.attach(renderer) { _ in }
+      runtime.detach(renderer)
+      try runtime.confirmRendererReplacement()
+      let reopened = try await runtime.recording.open(selection, current: {}, make: { f.host() }, inputMuted: { false })
+      let live = reopened["recording"] as! [String: Any]
+      try check(live["recorderId"] as? String == id && live["phase"] as? String == "recording")
+      try check(f.runs.count == 1 && !f.runs[0].isPhysicallyIdle)
+      try await rejects { try runtime.claimRendererSource(UUID()) }
+      // Auth fencing still works with no listener or WebView attached.
+      driver.identity = nil
+      _ = auth.state()
+      try await wait { f.runs[0].isPhysicallyIdle }
+      _ = try await runtime.recording.command(command("close"), current: {}, inputMuted: { false })
+      try check(!runtime.recording.hasRetainedRecording && f.sources[0].stops == 1)
+      checks += 1
+    }
     return checks
   }
 }
-

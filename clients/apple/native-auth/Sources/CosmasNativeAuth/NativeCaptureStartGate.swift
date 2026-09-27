@@ -120,6 +120,19 @@ public struct NativeCaptureExtensionPermit: Sendable {
         }
     }
 
+    /// Replacing a WebView does not stop an independently retained native run.
+    /// Only that exact run may account for an occupied gate. This does not grant
+    /// permission to start, clear ownership, or retire a saved source proof.
+    public static func confirmRendererReplacement(retaining expected: UUID? = nil) throws {
+        guard let idle, idle(), !recovering else { throw NativeAuthError.busy }
+        if let owner {
+            guard owner == expected, consumer == .nativeEncryptedMicrophone,
+                  nativeIdle != nil else { throw NativeAuthError.busy }
+        } else {
+            guard !authorizing, !extending else { throw NativeAuthError.busy }
+        }
+    }
+
     public static func clear(owner: UUID) {
         if self.owner == owner {
             if consumer == .nativeEncryptedMicrophone {

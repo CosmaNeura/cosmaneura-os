@@ -19,31 +19,41 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
 
     func makeRequest(_ operation: ProviderNativeRequest, token: String) throws -> URLRequest {
         try Task.checkCancellation()
-        guard [.sourceStart, .recordingContext, .nativeRecording].contains(operation.action),
-              let value = try JSONSerialization.jsonObject(with: operation.body) as? [String: Any],
-              Set(value.keys) == ["workspace_id", "session_id", "operation"],
-              let workspace = value["workspace_id"] as? String,
-              UUID(uuidString: workspace)?.uuidString.lowercased() == workspace,
-              let sessionID = value["session_id"] as? String,
-              UUID(uuidString: sessionID)?.uuidString.lowercased() == sessionID,
-              let capture = value["operation"] as? [String: Any],
-              Self.permitted(capture, action: operation.action),
-              !token.isEmpty, token.utf8.count <= 8192,
+        guard !token.isEmpty, token.utf8.count <= 8192,
               token.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 33 && $0.value < 127 }) else {
             throw ProviderNativeError.invalidRequest
         }
-        var request = URLRequest(url: origin.appendingPathComponent("workspaces/" + workspace + "/capture/operations"))
-        request.httpMethod = "POST"
-        request.httpBody = try JSONSerialization.data(withJSONObject: ["session_id": sessionID,
-            "idempotency_key": operation.key, "operation": capture])
+        var request: URLRequest
+        if operation.action == .recordingAccount {
+            guard operation.body == Data("{}".utf8) else { throw ProviderNativeError.invalidRequest }
+            request = URLRequest(url: origin.appendingPathComponent("provider-team/identity"))
+            request.httpMethod = "GET"
+            request.setValue("2", forHTTPHeaderField: "X-Cosmas-Team-Contract")
+        } else {
+            guard [.sourceStart, .recordingContext, .nativeRecording].contains(operation.action),
+                  let value = try JSONSerialization.jsonObject(with: operation.body) as? [String: Any],
+                  Set(value.keys) == ["workspace_id", "session_id", "operation"],
+                  let workspace = value["workspace_id"] as? String,
+                  UUID(uuidString: workspace)?.uuidString.lowercased() == workspace,
+                  let sessionID = value["session_id"] as? String,
+                  UUID(uuidString: sessionID)?.uuidString.lowercased() == sessionID,
+                  let capture = value["operation"] as? [String: Any],
+                  Self.permitted(capture, action: operation.action) else {
+                throw ProviderNativeError.invalidRequest
+            }
+            request = URLRequest(url: origin.appendingPathComponent("workspaces/" + workspace + "/capture/operations"))
+            request.httpMethod = "POST"
+            request.httpBody = try JSONSerialization.data(withJSONObject: ["session_id": sessionID,
+                "idempotency_key": operation.key, "operation": capture])
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("1", forHTTPHeaderField: "X-Cosmas-Workspace-Protocol")
+        }
         #if os(macOS)
         request.setValue("app://cosmas", forHTTPHeaderField: "Origin")
         #else
         request.setValue("capacitor://localhost", forHTTPHeaderField: "Origin")
         #endif
-        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        request.setValue("1", forHTTPHeaderField: "X-Cosmas-Workspace-Protocol")
         request.setValue("2", forHTTPHeaderField: "X-Cosmas-Draft-Recovery")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
@@ -69,13 +79,14 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
         configuration.httpCookieStorage = nil; configuration.httpShouldSetCookies = false
         configuration.urlCredentialStorage = nil; configuration.urlCache = nil
         configuration.requestCachePolicy = .reloadIgnoringLocalAndRemoteCacheData
-        configuration.timeoutIntervalForRequest = 40; configuration.timeoutIntervalForResource = 45
+        configuration.timeoutIntervalForRequest = operation.action == .recordingAccount ? 15 : 40
+        configuration.timeoutIntervalForResource = operation.action == .recordingAccount ? 15 : 45
         let session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
         defer { session.invalidateAndCancel() }
         do {
             let (bytes, response) = try await session.bytes(for: request)
             guard let http = response as? HTTPURLResponse, http.url == request.url,
-                  [200, 401, 403, 409, 422, 503].contains(http.statusCode), http.mimeType == "application/json",
+                  operation.action.responseStatuses.contains(http.statusCode), http.mimeType == "application/json",
                   http.value(forHTTPHeaderField: "Cache-Control")?.split(separator: ",").contains(where: {
                       $0.trimmingCharacters(in: .whitespaces).lowercased() == "no-store"
                   }) == true else { throw ProviderNativeError.response }

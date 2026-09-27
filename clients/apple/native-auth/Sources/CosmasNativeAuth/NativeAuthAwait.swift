@@ -3,7 +3,7 @@ import Foundation
 /// A cancelled SDK task may ignore cancellation. Release its caller promptly,
 /// fence access first, and discard any late result without waiting for that task.
 /// The owner separately retains in-flight mutation guards until the SDK returns.
-@MainActor final class NativeAuthAwait<Value: Sendable> {
+@MainActor public final class NativeAuthAwait<Value: Sendable> {
     private var continuation: CheckedContinuation<Value, any Error>?
     private var worker: Task<Void, Never>?
     private var watchdog: Task<Void, Never>?
@@ -11,7 +11,9 @@ import Foundation
     private var completed = false
     private var onAbandon: (@MainActor () -> Void)?
 
-    func run(timeout: Duration, onAbandon: @escaping @MainActor () -> Void,
+    public init() {}
+
+    public func run(timeout: Duration, onAbandon: @escaping @MainActor () -> Void,
              operation: @escaping @MainActor () async throws -> Value) async throws -> Value {
         self.onAbandon = onAbandon
         return try await withTaskCancellationHandler {

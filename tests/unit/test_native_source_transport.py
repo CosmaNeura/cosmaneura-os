@@ -13,10 +13,11 @@ from types import SimpleNamespace
 from urllib.parse import urlsplit
 
 import pytest
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.testclient import TestClient
 
 from cosmas_os.api import app as api
+from cosmas_os.api import provider_identity_routes
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary
 
 pytestmark = pytest.mark.skipif(platform.system() != "Darwin", reason="Native Swift transport runs on macOS")
@@ -99,3 +100,26 @@ def test_native_context_rejects_unbound_receipts_and_authority_changes(native_re
         "kind": "context_checks", "scenarios": 15,
         "generic_rejected": True, "confused_action_rejected": True,
     }
+
+
+@pytest.mark.parametrize("omit", [None, "x-cosmas-team-contract", "x-cosmas-draft-recovery"])
+def test_native_account_get_passes_actual_identity_boundary(native_requests, omit):
+    wire = native_requests["native_recording_account"]
+    assert wire["method"] == "GET" and wire["body_base64"] == ""
+    assert wire["url"] == "https://api.example.invalid/provider-team/identity"
+    called = []
+
+    def authenticate():
+        called.append(True)
+        raise HTTPException(401, "synthetic authentication boundary")
+
+    app = FastAPI()
+    provider_identity_routes.register(app, lambda: None, authenticate, gate=lambda *args: None,
+                                      reauthenticate=lambda *args: None, recovery_scope=lambda *args: None)
+    headers = {key: value for key, value in wire["headers"].items() if key.lower() != omit}
+    with TestClient(app) as client:
+        result = client.request(wire["method"], urlsplit(wire["url"]).path, headers=headers)
+    # Passing the protocol reaches authentication; this does not claim a real sign-in.
+    assert result.status_code == (401 if omit is None else 426)
+    assert called == ([True] if omit is None else [])
+    assert result.headers["cache-control"] == "no-store"

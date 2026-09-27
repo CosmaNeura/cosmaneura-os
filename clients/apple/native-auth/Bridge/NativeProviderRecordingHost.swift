@@ -10,6 +10,7 @@ import Foundation
   var isPhysicallyIdle: Bool { get }
   var captureState: NativeRecordingPCMState { get }
   func captureSignal() -> PCMSignalMonitor.Snapshot
+  func confirmRendererReplacement() throws
   func start() async throws
   func stop() async throws
   func retire()
@@ -66,6 +67,11 @@ extension NativeProviderRecordingRun: NativeProviderRecordingInterval {}
   private(set) var phase: Phase = .unopened
   private(set) var failure: Failure?
   private(set) var saved: NativeRecordingFlowSnapshot?
+
+  func confirmRendererReplacement() throws {
+    if let run { try run.confirmRendererReplacement() }
+    else { try NativeCaptureStartGate.confirmRendererReplacement() }
+  }
 
   init(
     scope: NativeRecordingScope, recoveryScope: UUID, service: any Service,
@@ -369,4 +375,3 @@ extension NativeProviderRecordingRun: NativeProviderRecordingInterval {}
     return date
   }
 }
-

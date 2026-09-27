@@ -85,6 +85,12 @@ def prepare(
             raise ValueError("Native recording PCM dependency layout changed.")
         pcm_package.write_text(pcm_text.replace(marker, 'path: "../ios-pcm-capture"'))
     if include_bridge:
+        if shared_capture_packages:
+            if not (capture_root / "secure-queue/Package.swift").is_file():
+                raise ValueError("Shared native host requires the existing protected queue package.")
+        else:
+            shutil.copytree(root / "clients/capture/native-configured/secure-queue",
+                            capture_root / "secure-queue")
         shutil.copytree(owned / "Bridge", output / "Bridge")
         shutil.copyfile(root / "clients/shared/cosmaneura-navigation-dom.js", output / "Bridge/cosmaneura-navigation-dom.js")
     if include_desktop:
@@ -92,7 +98,8 @@ def prepare(
         for name in ("NativeProviderConnection.swift", "NativeSourceStartOwner.swift", "NativeSourceProofJournal.swift",
                      "NativeSourceRecovery.swift", "NativeCaptureProcessFence.swift", "WorkspaceSourceTransport.swift",
                      "NativeProviderRecordingService.swift", "NativeProviderRecordingRun.swift",
-                     "NativeProviderRecordingHost.swift"):
+                     "NativeProviderRecordingHost.swift", "NativeProviderRecordingBridge.swift",
+                     "NativeProviderRecordingRuntime.swift"):
             shutil.copyfile(owned / "Bridge" / name, output / "Desktop" / name)
     package = '''// swift-tools-version: 6.2
 import PackageDescription
@@ -118,6 +125,7 @@ let package = Package(
     dependencies: [
         .package(path: "__NATIVE_RECORDING__"),
         .package(path: "__NATIVE_RECORDING_PCM__"),
+        .package(path: "__SECURE_QUEUE__"),
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
     ],''',
         ).replace(
@@ -126,6 +134,7 @@ let package = Package(
             "CosmasNativeAuth", .product(name: "Capacitor", package: "capacitor-swift-pm"),
             .product(name: "CosmaneuraNativeRecording", package: "native-recording"),
             .product(name: "CosmaneuraNativeRecordingPCM", package: "native-recording-pcm"),
+            .product(name: "CosmaneuraScribeCapacitorSecureQueue", package: "secure-queue"),
         ], path: "Bridge", resources: [.copy("cosmaneura-navigation-dom.js")]),
         .testTarget(name: "CosmasNativeAuthTests",''',
         )
@@ -152,6 +161,7 @@ let package = Package(
     package_prefix = ".." if shared_capture_packages else "Sources"
     package = package.replace("__NATIVE_RECORDING__", f"{package_prefix}/native-recording")
     package = package.replace("__NATIVE_RECORDING_PCM__", f"{package_prefix}/native-recording-pcm")
+    package = package.replace("__SECURE_QUEUE__", f"{package_prefix}/secure-queue")
     (output / "Package.swift").write_text(package)
     (output / "qualification.json").write_text(json.dumps({
         "purpose": "local-synthetic-native-auth-core-qualification",
