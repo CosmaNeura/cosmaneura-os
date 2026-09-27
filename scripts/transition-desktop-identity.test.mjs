@@ -5,7 +5,20 @@ import {chmod, link, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, w
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {prepareDesktopState} from '../clients/desktop/installation-state.mjs';
-import {transitionDesktopIdentity} from './transition-desktop-identity.mjs';
+import {isDesktopProfileProcess, transitionDesktopIdentity} from './transition-desktop-identity.mjs';
+
+test('separate Scribe helpers do not block CosmaBot; its own helpers and profile users do', () => {
+  const profile = '/Users/invented/Library/Application Support/CosmasOS Beta/com.cosmasos.beta.desktop';
+  for (const helper of ['ScribeDesktopAudioHelper', 'ScribeProviderPresentationHelper']) {
+    const suffix = `/Contents/Resources/app/native/${helper}.app/Contents/MacOS/${helper}`;
+    assert.equal(isDesktopProfileProcess('/Applications/Cosmaneura Scribe Beta.app' + suffix, profile), false);
+    assert.equal(isDesktopProfileProcess('/Applications/CosmaBot-Desktop-0.1.48.app' + suffix, profile), true);
+    assert.equal(isDesktopProfileProcess('/Applications/CosmasOS Beta.app' + suffix, profile), true);
+  }
+  assert.equal(isDesktopProfileProcess('/prepared/CosmasDesktopAuth.app/Contents/MacOS/CosmasDesktopAuth', profile), true);
+  assert.equal(isDesktopProfileProcess(profile + '/helper', profile), true);
+  assert.equal(isDesktopProfileProcess('/Applications/Other.app/Contents/MacOS/Other', profile), false);
+});
 
 async function fixture(t) {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'cosmas-identity-transition-'));

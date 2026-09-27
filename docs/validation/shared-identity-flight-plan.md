@@ -79,7 +79,8 @@ that binding and records another event; it never deletes the original binding.
 profile. Its public manifest contains the two validated native identities,
 original marker SHA-256, transition UUID and UTC deadline. Quit CosmaBot normally
 and retain exclusive control of app launches throughout the operation. The
-operator command checks for running apps/helpers and open profile files; it does
+operator command checks for running CosmaBot apps/helpers and open profile files;
+helpers inside the separate Scribe app do not block this operation. It does
 not quit a recording or reset the profile. Run Node with `plan|apply|rollback`,
 the manifest filename and `--confirm-offline-staging-maintenance`. A private,
 durable recovery receipt retains the exact original marker before atomic
