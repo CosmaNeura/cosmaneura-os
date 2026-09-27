@@ -13,6 +13,7 @@ public final class IOSPCMCore: @unchecked Sendable {
   private let sink: any PCMEmissionSink
   private let clock: any PCMClock
   private let sourceClock: any PCMSourceClock
+  private let signalMonitor: PCMSignalMonitor?
   private var usedRunIDs: Set<String> = []
   private var nextSessionID: UInt64 = 0
   private var active: Active?
@@ -22,20 +23,23 @@ public final class IOSPCMCore: @unchecked Sendable {
     audio: any PCMAudioDriving,
     sink: any PCMEmissionSink,
     clock: any PCMClock = ContinuousPCMClock(),
-    sourceClock: any PCMSourceClock = ContinuousPCMSourceClock()
+    sourceClock: any PCMSourceClock = ContinuousPCMSourceClock(),
+    signalMonitor: PCMSignalMonitor? = nil
   ) {
     self.permission = permission
     self.audio = audio
     self.sink = sink
     self.clock = clock
     self.sourceClock = sourceClock
+    self.signalMonitor = signalMonitor
   }
 
   /// Claims ownership synchronously and returns a handle before permission or
   /// audio readiness can wait.
   public func start(configuration: PCMConfiguration) throws -> IOSPCMSessionHandle {
     let window = try configuration.authority.map {
-      try PCMSourceWindow(authority: $0, maximumChunks: configuration.maximumChunks,
+      try PCMSourceWindow(
+        authority: $0, maximumChunks: configuration.maximumChunks,
         now: sourceClock.now())
     }
     let sessionID: UInt64 = try lock.withLock {
@@ -58,6 +62,7 @@ public final class IOSPCMCore: @unchecked Sendable {
       sink: sink,
       clock: clock,
       sourceClock: sourceClock,
+      signalMonitor: signalMonitor,
       window: window,
       markCloseFailed: { [weak self] in self?.markCloseFailed(sessionID) },
       releaseOwnership: { [weak self] in self?.release(sessionID) }
@@ -103,6 +108,12 @@ public final class IOSPCMSessionHandle: Sendable {
 
   public func extend(_ extensionValue: PCMSourceExtension) async throws {
     try await state.extend(extensionValue)
+  }
+
+  /// Binds a native maintenance owner to this exact live source and allowance.
+  /// Inspection grants no new capture authority and cannot reopen a closed run.
+  public func verifySource(authority: PCMSourceAuthority, maximumChunks: Int) async throws {
+    try await state.verifySource(authority: authority, maximumChunks: maximumChunks)
   }
 
   public func stop(_ mode: PCMStopMode) async throws -> PCMStopResult {
@@ -190,6 +201,7 @@ private actor IOSPCMSessionState {
   private let sink: any PCMEmissionSink
   private let clock: any PCMClock
   private let sourceClock: any PCMSourceClock
+  private let signalMonitor: PCMSignalMonitor?
   private var window: PCMSourceWindow?
   private var sourceInputFrames: Int64 = 0
   private var authorityTask: Task<Void, Never>?
@@ -226,6 +238,7 @@ private actor IOSPCMSessionState {
     sink: any PCMEmissionSink,
     clock: any PCMClock,
     sourceClock: any PCMSourceClock,
+    signalMonitor: PCMSignalMonitor?,
     window: PCMSourceWindow?,
     markCloseFailed: @escaping @Sendable () -> Void,
     releaseOwnership: @escaping @Sendable () -> Void
@@ -237,6 +250,7 @@ private actor IOSPCMSessionState {
     self.sink = sink
     self.clock = clock
     self.sourceClock = sourceClock
+    self.signalMonitor = signalMonitor
     self.window = window
     self.markCloseFailed = markCloseFailed
     self.releaseOwnership = releaseOwnership
@@ -325,6 +339,13 @@ private actor IOSPCMSessionState {
   }
 
   private var maximumChunks: Int { window?.maximumChunks ?? configuration.maximumChunks }
+
+  func verifySource(authority: PCMSourceAuthority, maximumChunks: Int) throws {
+    guard phase == .active, let window, window.authority == authority,
+      window.maximumChunks == maximumChunks,
+      window.remainingNanoseconds(sourceClock.now()) > 0
+    else { throw PCMFailure(.invalidConfiguration) }
+  }
 
   func extend(_ value: PCMSourceExtension) throws {
     guard phase == .active, var next = window else {
@@ -443,19 +464,24 @@ private actor IOSPCMSessionState {
           for index in mono.indices { mono[index] = 0 }
         }
         if let window {
-          let maximumInput = Int64(configuration.targetFramesPerChunk * maximumChunks)
+          let maximumInput =
+            Int64(configuration.targetFramesPerChunk * maximumChunks)
             * Int64(frames.sampleRateHz) / Int64(PCMConfiguration.sampleRateHz)
           let remainingInput = max(0, maximumInput - sourceInputFrames)
-          let timeFrames = Int64(Double(window.remainingNanoseconds(sourceClock.now()))
-            * Double(frames.sampleRateHz) / 1_000_000_000)
+          let timeFrames = Int64(
+            Double(window.remainingNanoseconds(sourceClock.now()))
+              * Double(frames.sampleRateHz) / 1_000_000_000)
           let admitted = min(Int64(mono.count), remainingInput, timeFrames)
           if admitted < mono.count {
             for index in Int(admitted)..<mono.count { mono[index] = 0 }
             mono.removeLast(mono.count - Int(admitted))
           }
           sourceInputFrames += admitted
-          if sourceInputFrames >= maximumInput { windowEnd = .frameLimit }
-          else if admitted == timeFrames { windowEnd = .authorityExpired }
+          if sourceInputFrames >= maximumInput {
+            windowEnd = .frameLimit
+          } else if admitted == timeFrames {
+            windowEnd = .authorityExpired
+          }
         }
         if resampler == nil {
           let maximumOutput =
@@ -470,6 +496,7 @@ private actor IOSPCMSessionState {
         }
         return try resampler!.push(mono)
       }
+      signalMonitor?.recordConverted(output)
       try append(&output)
       if let windowEnd { beginWindowClose(windowEnd) }
     } catch let failure as PCMFailure {
@@ -747,7 +774,8 @@ private actor IOSPCMSessionState {
 
   private func authorityExpired(_ generation: Int) {
     guard let window, window.authority.generation == generation,
-      phase == .active || phase == .starting || phase == .requestingPermission else { return }
+      phase == .active || phase == .starting || phase == .requestingPermission
+    else { return }
     if window.remainingNanoseconds(sourceClock.now()) == 0 {
       beginWindowClose(.authorityExpired)
     } else {

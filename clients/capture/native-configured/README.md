@@ -1,6 +1,6 @@
 # Configured iPhone microphone source
 
-This source is composed into CosmaBot's operational iPhone builds after the
+This source is composed into CosmaBot's authenticated iPhone builds after the
 renewable-authority and renderer-recovery overlays. `manifest.json` binds every
 copied Swift input. The earlier overlay files remain unchanged.
 
@@ -16,10 +16,19 @@ profile, verifies it before the tap and before/after engine start, and clears
 the binding after deactivation. Later route changes and all non-route
 interruptions retain the driver's existing terminal behavior.
 
-CosmaBot preserves its existing play-and-record/voice-chat policy and automatic
-input selection. This adaptation does not import Scribe's newer microphone
-picker, signal diagnostics, background recorder or secure-queue changes.
-It does not change permissions, renewal, storage or network contracts.
+CosmaBot preserves its existing foreground play-and-record/voice-chat policy,
+automatic input selection, permanent renderer-loss fence and fresh extension
+decision checks. The September 27 native PCM integration additionally provides
+a native-only measurement-input profile, bounded signal/startup diagnostics,
+and the driver lifecycle used by `../native-recording-pcm`. That profile permits
+background events only after foreground startup has completed. Interruptions,
+route changes and permission loss remain terminal. The renderer cannot select
+this lifecycle through its existing JavaScript bridge.
+
+Both the existing PCM plugin and the auth host resolve one shared PCM package
+in the Apple composition. Native encrypted graph code is compiled, but its
+retained app host, queue adapter and UI selection are not yet integrated. The
+selected duration profile and existing recording storage remain unchanged.
 
 The helper derives from upstream blob
 `5c1073986d10239947f285cfb74152169547928f` with its comment adjusted for

@@ -56,8 +56,10 @@
     private let lock = NSLock()
     private let notificationCenter: NotificationCenter
     private let audioSession: AVAudioSession
+    private let signalMonitor: PCMSignalMonitor?
+    private let microphoneInput: AppleMicrophoneInputPreference
     private let inputRouteEvents = AppleInputRouteEvents()
-    private var activatedInputUID: String?
+    private var selectedInputUID: String?
     private var engine = AVAudioEngine()
     private var tapInstalled = false
     private var activationAttempted = false
@@ -66,10 +68,14 @@
 
     public init(
       notificationCenter: NotificationCenter = .default,
-      audioSession: AVAudioSession = .sharedInstance()
+      audioSession: AVAudioSession = .sharedInstance(),
+      signalMonitor: PCMSignalMonitor? = nil,
+      microphoneInput: AppleMicrophoneInputPreference = AppleMicrophoneInputPreference()
     ) {
       self.notificationCenter = notificationCenter
       self.audioSession = audioSession
+      self.signalMonitor = signalMonitor
+      self.microphoneInput = microphoneInput
     }
 
     deinit { clearEventHandler() }
@@ -103,9 +109,15 @@
           let raw = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue
           let reason = AVAudioSession.RouteChangeReason(rawValue: raw ?? 0)
           guard let self else { return }
-          let configured = reason == .categoryChange
+          // Activation can announce a route before setPreferredInput has set
+          // selectedInputUID, especially after deactivation on Pause. Treat
+          // notifications inside that bounded configuration operation as setup;
+          // the selected port is verified before installing/starting the tap.
+          // Once armed, even configuration notifications remain terminal.
+          let configured =
+            reason == .categoryChange
             || (reason == .override || reason == .routeConfigurationChange)
-              && self.hasActivatedInput()
+              && self.hasSelectedInput()
           self.emit(self.inputRouteEvents.routeChange(knownConfiguration: configured))
         },
         notificationCenter.addObserver(
@@ -122,7 +134,10 @@
           forName: .AVAudioEngineConfigurationChange,
           object: engine,
           queue: nil
-        ) { [weak self] _ in self?.emit(.captureFailed) },
+        ) { [weak self] _ in
+          PCMStartupDiagnostics.shared.record(.engineConfigurationChanged)
+          self?.emit(.captureFailed)
+        },
         notificationCenter.addObserver(
           forName: UIApplication.willResignActiveNotification,
           object: nil,
@@ -152,25 +167,53 @@
     }
 
     public func configureAndActivate(profile: AppleAudioSessionProfile) throws {
-      guard case .foregroundTwoPartySpeech = profile else {
-        throw AVFoundationDriverError.operationFailed
+      // Preserve the existing renderer recording route. Only the native
+      // encrypted graph selects measurement input and background lifecycle.
+      switch profile {
+      case .foregroundTwoPartySpeech, .nativeEncryptedSpeech: break
       }
       lock.withLock { activationAttempted = true }
       do {
         try inputRouteEvents.withInputConfiguration {
-          try audioSession.setCategory(
-            .playAndRecord,
-            mode: .voiceChat,
-            options: [.defaultToSpeaker, .allowBluetoothHFP]
-          )
-          try audioSession.setActive(true)
-          // Preserve this profile's automatic input choice. Bind the resulting
-          // route before admitting frames, including after a pause/deactivation.
-          let inputs = audioSession.currentRoute.inputs
-          guard inputs.count == 1, let input = inputs.first else {
-            throw AVFoundationDriverError.operationFailed
+          if profile == .foregroundTwoPartySpeech {
+            try audioSession.setCategory(
+              .playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetoothHFP])
+            try audioSession.setActive(true)
+            let inputs = audioSession.currentRoute.inputs
+            guard inputs.count == 1, let input = inputs.first else {
+              throw AVFoundationDriverError.operationFailed
+            }
+            lock.withLock { selectedInputUID = input.uid }
+          } else {
+            let selected = microphoneInput.selected
+            // This adapter records an in-person conversation and has no playback
+            // graph. Use recording input without the VoIP route/processing policy.
+            try audioSession.setCategory(
+              .record,
+              mode: .measurement,
+              options: selected == .bluetooth ? [.allowBluetoothHFP] : []
+            )
+            try audioSession.setActive(true)
+            let portTypes: [AVAudioSession.Port]
+            switch selected {
+            case .builtIn: portTypes = [.builtInMic]
+            case .bluetooth: portTypes = [.bluetoothHFP]
+            case .external: portTypes = [.usbAudio, .headsetMic]
+            }
+            let available = (audioSession.availableInputs ?? []).filter {
+              portTypes.contains($0.portType)
+            }
+            // Keep the current eligible accessory if several are connected.
+            let currentUID = audioSession.currentRoute.inputs.first?.uid
+            guard let port = available.first(where: { $0.uid == currentUID }) ?? available.first
+            else {
+              throw AVFoundationDriverError.operationFailed
+            }
+            lock.withLock { selectedInputUID = port.uid }
+            try audioSession.setPreferredInput(port)
+            guard hasSelectedInput() else { throw AVFoundationDriverError.operationFailed }
           }
-          lock.withLock { activatedInputUID = input.uid }
+          signalMonitor?.setRoute(Self.inputRoute(audioSession.currentRoute))
         }
       } catch {
         throw AVFoundationDriverError.operationFailed
@@ -183,7 +226,7 @@
     ) throws {
       guard frameCapacity > 0,
         frameCapacity <= UInt32(PCMConfiguration.maximumFramesPerInputBuffer),
-        !lock.withLock({ tapInstalled }), hasActivatedInput()
+        !lock.withLock({ tapInstalled }), hasSelectedInput()
       else { throw AVFoundationDriverError.operationFailed }
 
       let input = engine.inputNode
@@ -204,7 +247,7 @@
         bufferSize: AVAudioFrameCount(frameCapacity),
         format: source
       ) { [weak self] buffer, _ in
-        guard let frames = Self.copyFrames(buffer) else {
+        guard let frames = Self.copyFrames(buffer, signalMonitor: self?.signalMonitor) else {
           self?.emit(.captureFailed)
           return
         }
@@ -215,10 +258,10 @@
 
     public func startEngine() throws {
       do {
-        guard hasActivatedInput() else { throw AVFoundationDriverError.operationFailed }
+        guard hasSelectedInput() else { throw AVFoundationDriverError.operationFailed }
         engine.prepare()
         try engine.start()
-        guard hasActivatedInput() else { throw AVFoundationDriverError.operationFailed }
+        guard hasSelectedInput() else { throw AVFoundationDriverError.operationFailed }
       } catch {
         throw AVFoundationDriverError.operationFailed
       }
@@ -244,19 +287,31 @@
       }
       lock.withLock {
         activationAttempted = false
-        activatedInputUID = nil
+        selectedInputUID = nil
       }
       engine.reset()
       engine = AVAudioEngine()
     }
 
-    private func hasActivatedInput() -> Bool {
-      guard let uid = lock.withLock({ activatedInputUID }) else { return false }
+    private func hasSelectedInput() -> Bool {
+      guard let uid = lock.withLock({ selectedInputUID }) else { return false }
       let inputs = audioSession.currentRoute.inputs
       return inputs.count == 1 && inputs.first?.uid == uid
     }
 
     private func emit(_ event: AppleAudioSystemEvent) {
+      let diagnostic: PCMStartupEvent
+      switch event {
+      case .configurationChanged: diagnostic = .sessionConfigurationChanged
+      case .interruptionBegan: diagnostic = .interrupted
+      case .routeChanged: diagnostic = .routeChanged
+      case .mediaServicesLost: diagnostic = .mediaServicesLost
+      case .mediaServicesReset: diagnostic = .mediaServicesReset
+      case .backgrounded: diagnostic = .backgrounded
+      case .permissionRevoked: diagnostic = .permissionRevoked
+      case .captureFailed: diagnostic = .captureFailed
+      }
+      PCMStartupDiagnostics.shared.record(diagnostic)
       lock.withLock { eventHandler }?(event)
     }
 
@@ -265,7 +320,22 @@
       emit(.permissionRevoked)
     }
 
-    private static func copyFrames(_ buffer: AVAudioPCMBuffer) -> OwnedAudioFrames? {
+    private static func inputRoute(_ route: AVAudioSessionRouteDescription)
+      -> PCMSignalMonitor.InputRoute
+    {
+      guard let input = route.inputs.first else { return .none }
+      switch input.portType {
+      case .builtInMic: return .builtIn
+      case .bluetoothHFP, .bluetoothLE: return .bluetooth
+      case .headsetMic, .lineIn: return .wired
+      case .usbAudio: return .usb
+      default: return .other
+      }
+    }
+
+    private static func copyFrames(_ buffer: AVAudioPCMBuffer, signalMonitor: PCMSignalMonitor?)
+      -> OwnedAudioFrames?
+    {
       let count = Int(buffer.frameLength)
       let channelCount = Int(buffer.format.channelCount)
       let roundedRate = buffer.format.sampleRate.rounded()
@@ -294,6 +364,7 @@
       for channel in 0..<channelCount {
         channels.append(Array(UnsafeBufferPointer(start: data[channel], count: count)))
       }
+      signalMonitor?.recordInput(channels, sampleRateHz: Int(roundedRate))
       let frames = OwnedAudioFrames(sampleRateHz: Int(roundedRate), channels: channels)
       transferred = true
       return frames
