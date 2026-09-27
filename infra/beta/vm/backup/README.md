@@ -57,6 +57,19 @@ directory is inaccessible in that view; systemd supplies the named credentials
 through `LoadCredential`. Application releases and runtime configuration are
 not exposed. Do not broaden host directory permissions to make the service run.
 
+After a verified base/WAL backup and isolated restore, explicitly enable the
+receiver and the three timers. The receiver must be enabled for boot as well as
+running now. The full backup runs daily at 03:00 UTC with up to five minutes of
+delay; WAL switching runs every minute and status checks every two minutes.
+Keep the receiver and timers in the staging service's `PartOf` lifecycle, ordered
+after staging. A staging stop therefore stops scheduling before application
+shutdown, while a systemd restart restores both. Otherwise a timer's job can
+start its required receiver and staging service during maintenance. For a
+separate stop/start sequence, explicitly start all four units after staging is
+healthy. Do not treat enabled schedules as evidence of a completed backup or
+successful reboot; record the service invocation, resulting receipt and actual
+timer-triggered health checks.
+
 Before running `provision-postgres.sql`, activate the reviewed PostgreSQL backup
 runtime profile. Provisioning refuses the default unlimited slot retention or
 any limit other than 4 GiB before creating a role or reserving WAL. It also

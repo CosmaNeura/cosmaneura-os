@@ -3,6 +3,7 @@ Description=CosmaBot dedicated PostgreSQL WAL receiver
 After=network-online.target cosmabot-staging.service
 Wants=network-online.target
 Requires=cosmabot-staging.service
+PartOf=cosmabot-staging.service
 StartLimitIntervalSec=300
 StartLimitBurst=5
 
