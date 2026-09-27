@@ -6,24 +6,32 @@
       "sha256": "276b2b544f6746ff6a32177386bcd5ab3f00687a33c7b022f253f371b7d3e811"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift": {
-      "source_sha256": "e4aa314d90d5fc27cf4332898334b5e3e6ea97346c7bfd474edc9727beab7f14",
-      "sha256": "36361cd5ee06af79ae138531a783d344b1e76c93a50fe79ecb09a6c69df21de0"
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "ae8df46c94352b455796caa7e8b4d9458f9cafc5",
+      "source_sha256": "911b2b74eeb4d79a1cf3b7877cf4cec8e80cb4293b6d8c3e6f34fa9503436cb5",
+      "sha256": "7cab2d999d5b25c94575013f84c417f9b64cfb1d7f94c73a73781e9b945c966a"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift": {
-      "source_sha256": "62de3a2cf8d7d2fddce44f2617d06a02da7bf3f85583c1448320b14bb61b28cd",
-      "sha256": "62de3a2cf8d7d2fddce44f2617d06a02da7bf3f85583c1448320b14bb61b28cd"
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "75b4aed3982577e706a149c685e3e89f9e9b5618",
+      "source_sha256": "e25c89ef4059d3af0a9e32ea87b15edc8049b3c08472112b991325b207fd4c05",
+      "sha256": "36b13abdbc517938602d58eedf0f785307a5a3a211f21e632397b7d4dac60951"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift": {
-      "source_sha256": "e7ca858f0f7e4967790dfcdb16d12c793409b0b422a61143f4177f18c2f04b05",
-      "sha256": "e7ca858f0f7e4967790dfcdb16d12c793409b0b422a61143f4177f18c2f04b05"
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "3cf5192f116d4a738b1a94a28095c661b89852d2",
+      "source_sha256": "eff76c554110d8a7d22ebc5ea699c296a1320cd9dfede14fe976b2c0bbb1950f",
+      "sha256": "eff76c554110d8a7d22ebc5ea699c296a1320cd9dfede14fe976b2c0bbb1950f"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/AreaWeightedResampler.swift": {
       "source_sha256": "edcdb3199766d71b917df03daac04b5888b4dfde6b3724699756cdcb0c986934",
       "sha256": "edcdb3199766d71b917df03daac04b5888b4dfde6b3724699756cdcb0c986934"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMSourceAuthority.swift": {
-      "source_sha256": "e96e7f843aa250aabdd54ce97cf1640c922355c73afc776385e30cb189032bed",
-      "sha256": "295986e0561c0066e40c34a15b5e7fb649e6d6ca93dc389129dcfd83271e7cbb"
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "29ab22bb62e242796cc4a7921fa18a3600bcc21c",
+      "source_sha256": "3d959f681c6c0ad04a3d6716461aa4b71e4c6f7d0cb1bd6ad2c3161d7d3d54fd",
+      "sha256": "671715c7bb960ae823184be456c833a9272986d991fd2e40776328dee0e5b4ac"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMTypes.swift": {
       "source_sha256": "a3aa3af6f32d2466333ea8c8f1713216ff401e45bf786341d33b53f4bb1db35c",
@@ -49,6 +57,18 @@
       "source_ref": "ca8c70840b312c5ca21c0f143f32a943e62ec1f7",
       "source_git_blob": "5c1073986d10239947f285cfb74152169547928f",
       "sha256": "d5023d387a2f339cdb13637d05b71dafac387288cebd457eb238cf0f93c38dd1"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMSignalMonitor.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "67514e7c82a158786f0b395cba4a4d563cd7a7e1",
+      "source_sha256": "427d95afeba8212e599fa23ed25989b689b650a10ed1c5837ca8544dae771bfc",
+      "sha256": "427d95afeba8212e599fa23ed25989b689b650a10ed1c5837ca8544dae771bfc"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/PCMStartupDiagnostics.swift": {
+      "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+      "source_git_blob": "24f179991a4b7e599b03e7ea36eaf7d69a5090a4",
+      "source_sha256": "5cadd54405ef27f34d57dc0011ca5d33fde682e8b4c9db70bf3221fa73cc0b26",
+      "sha256": "5cadd54405ef27f34d57dc0011ca5d33fde682e8b4c9db70bf3221fa73cc0b26"
     }
   }
 }

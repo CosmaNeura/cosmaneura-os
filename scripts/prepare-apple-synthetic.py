@@ -439,10 +439,12 @@ def prepare(
             raise ValueError("Native auth composer is unavailable.")
         composer = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(composer)
+        # The auth host and existing PCM plugin must resolve the same audio
+        # package. Including the code does not enable capture in a disabled app.
+        configured_native = include_configured_capture(output)
         composer.prepare(native_auth_clerk_archive,
-                         output / "apps/capture/native-plugins/cosmas-native-auth", include_bridge=True)
-        if operational:
-            configured_native = include_configured_capture(output)
+                         output / "apps/capture/native-plugins/cosmas-native-auth", include_bridge=True,
+                         shared_capture_packages=True)
         package = package_path.read_text()
         package = package.replace(
             '    dependencies: [\n',
@@ -487,7 +489,7 @@ def prepare(
         "minimum_ios_version": MINIMUM_IOS_VERSION,
         "verification_variant": verification_variant,
         "native_auth": "configured-operational" if operational else "compiled-disabled" if native_auth_clerk_archive else "not-included",
-        "configured_native_capture": configured_native if operational else None,
+        "configured_native_capture": configured_native,
         "device_custody": {"enabled": operational, "requires_provisioning": operational},
         "local_workspace_policy": policy,
         "renewable_native_capture": native_capture_overlay,
