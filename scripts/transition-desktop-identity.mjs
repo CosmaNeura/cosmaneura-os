@@ -71,13 +71,19 @@ async function replace(path, bytes) {
   }
 }
 
+export function isDesktopProfileProcess(command, profile) {
+  // Scribe also uses the audio/presentation helper names. Its independent app
+  // must not block this transition; CosmaBot's packaged helpers match its path.
+  return command.includes(profile) ||
+    /\/(?:CosmaBot|CosmasOS)[^/]*\.app\//i.test(command) ||
+    /\/CosmasDesktopAuth(?:\s|$)/.test(command);
+}
+
 export async function assertMacQuiescent(profile) {
   if (process.platform !== 'darwin') refuse();
   // Inspect executable names, not argument strings that may contain this manifest path.
   const {stdout} = await run('/bin/ps', ['-axo', 'comm='], {maxBuffer: 4 * 1024 * 1024});
-  if (stdout.split('\n').some(command => command.includes(profile) ||
-      /\/(?:CosmaBot|CosmasOS)[^/]*\.app\//i.test(command) ||
-      /\/(?:CosmasDesktopAuth|ScribeDesktopAudioHelper|ScribeProviderPresentationHelper)(?:\s|$)/.test(command))) refuse();
+  if (stdout.split('\n').some(command => isDesktopProfileProcess(command, profile))) refuse();
   // Fail on open state files or any inspection error except lsof's no-match status.
   try {
     await run('/usr/sbin/lsof', ['-F', 'p', '+D', profile], {maxBuffer: 1024 * 1024});
