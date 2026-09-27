@@ -153,6 +153,24 @@ async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
 }
 
 describe.each(["profile", "standard"] as const)("%s capture", mode => {
+it("explicitly resumes after automatic renewal while preserving earlier reservations and keys", async () => {
+  const f = await fixture(mode);
+  await f.controller.startRecording(); await f.emitTo(100);
+  const before = await f.queue.listMetadata();
+  await f.controller.pauseRecording();
+  expect(f.source.start).toHaveBeenCalledOnce();
+  await f.controller.resumeRecording(); await f.source.emit();
+  expect(f.controller.snapshot.recordedChunks).toBe(101);
+  expect(f.source.start).toHaveBeenCalledTimes(2);
+  const after = await f.queue.listMetadata();
+  for (const row of before) {
+    const retained = after.find(r => r.reservation.objectId === row.reservation.objectId)!;
+    expect(retained.reservation).toEqual(row.reservation);
+    expect(retained.idempotencyKeys).toEqual(row.idempotencyKeys);
+  }
+  await f.controller.stopRecording(); expect(f.complete).toHaveBeenCalledOnce();
+});
+
 it("automatically extends twice while preserving one source and every reserved object",async()=>{
   const f=await fixture(mode);await f.controller.startRecording();
   const before=await f.queue.list();await f.emitTo(200);

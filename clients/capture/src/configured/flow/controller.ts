@@ -936,8 +936,17 @@ export class CaptureFlowController {
         additionalAuthenticatedData: remote.additional_authenticated_data,
         createdAt: remote.created_at,
       };
-      await this.#queue.reserve(reservation, intent.idempotencyKey);
-      this.#reservations.set(reservation.sequenceNumber, reservation);
+      // Automatic renewal stores canonical timestamps. Explicit continuation
+      // can return the same server object with a different timestamp spelling.
+      // Keep its original queue identity/keys after proving semantic identity.
+      const prior = this.#reservations.get(reservation.sequenceNumber);
+      if (prior && (prior.objectId !== reservation.objectId
+        || prior.additionalAuthenticatedData !== reservation.additionalAuthenticatedData
+        || canonicalCaptureTimestamp(prior.createdAt) !== canonicalCaptureTimestamp(reservation.createdAt))) {
+        throw new QueueInvariantError("reservation_identity_conflict");
+      }
+      await this.#queue.reserve(prior ?? reservation, intent.idempotencyKey);
+      this.#reservations.set(reservation.sequenceNumber, prior ?? reservation);
     }
     this.#setSnapshot({ queuedChunks: this.#reservations.size });
   }

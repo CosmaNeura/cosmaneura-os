@@ -23,6 +23,9 @@ continuation cannot downgrade the new journal to the older schema 4.
 Stop and restart recovery retain the existing durable renewal intent and exact
 idempotency keys. An uncertain renewal is observed/reconciled before completion;
 it cannot silently start another native recording source.
+Explicit resume also preserves an existing chunk when the server returns the
+same creation instant with different fractional-second precision; its original
+stored reservation and upload/registration keys remain unchanged.
 
 ## Local evidence and acceptance limits
 
