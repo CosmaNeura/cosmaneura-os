@@ -84,6 +84,7 @@ struct NativeSourceDecision: Sendable {
     private var busy = false
     private var closed = false
     private var issued = false
+    private var consumedMicrophoneRunID: String?
     private var retiring = false
     private var pendingExtension: (request: NativeCaptureExtensionRequest, key: String)?
     private var acceptedExtension: (request: NativeCaptureExtensionRequest, id: String,
@@ -161,7 +162,8 @@ struct NativeSourceDecision: Sendable {
     /// Called in the native microphone start path, immediately before acquiring
     /// audio. Returns metadata only. No permission can be manufactured in JavaScript.
     func consumeForMicrophone() async throws -> NativeCapturePermit {
-        guard preparation.source == .ios else { throw ProviderNativeError.unavailable }
+        guard preparation.source == .ios, consumedMicrophoneRunID == nil,
+              preparation.firstSequenceNumber < 360 else { throw ProviderNativeError.unavailable }
         let decision = try await authorize()
         guard let expiry = sourceDate(decision.expiresAt), expiry > Date(),
               NativeSourceConsumption.consumed.insert(decision.capabilityID).inserted else {
@@ -170,10 +172,26 @@ struct NativeSourceDecision: Sendable {
         guard let captureExpiry = sourceDate(decision.captureAuthorizedUntil) else {
             throw ProviderNativeError.response
         }
-        return try NativeCapturePermit(runID: decision.grant.sourceLeaseID,
+        let permit = try NativeCapturePermit(runID: decision.grant.sourceLeaseID,
                                        startExpiresAt: expiry, captureExpiresAt: captureExpiry,
                                        generation: preparation.leaseGeneration,
                                        hardMaximumChunks: 360 - preparation.firstSequenceNumber)
+        consumedMicrophoneRunID = permit.runID
+        return permit
+    }
+
+    var recordingPreparation: NativeSourcePreparation { preparation }
+
+    /// Renewal retains the original consumed source and its stop proof. The
+    /// short capture deadline is independently enforced by the PCM watchdog.
+    func requireActiveMicrophone(runID: String) throws {
+        try journal.requireUsable()
+        guard !closed, !retiring, issued, !proof.isEmpty, preparation.source == .ios,
+              consumedMicrophoneRunID == runID, grant?.sourceLeaseID == runID else {
+            throw ProviderNativeError.unavailable
+        }
+        guard try connection.stopRevision(userID: record.userID, organizationID: record.organizationID) == revision
+        else { throw ProviderNativeError.unavailable }
     }
 
     /// Reuse this owner's proof and original stop custody. An uncertain response

@@ -1,0 +1,34 @@
+{
+  "repository": "CosmaNeura/cosmaneura-scribe",
+  "commit": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
+  "files": [
+    {
+      "path": "clients/apple/native-auth/Bridge/NativeProviderRecordingRun.swift",
+      "upstream_blob": "fcb83b786c29c240019acfc1c920cc7653bc97d5"
+    },
+    {
+      "path": "clients/apple/native-auth/Bridge/NativeProviderRecordingHost.swift",
+      "upstream_blob": "3835c4b15f0d9bdbe66d1749b69248f43c678cea"
+    },
+    {
+      "path": "scripts/check-native-recording-run.py",
+      "upstream_blob": "1449a089a029f5042d319148a95a60b991ea522b"
+    },
+    {
+      "path": "tests/native/recording-run/NativeProviderRecordingRunChecks.swift",
+      "upstream_blob": "ca8fedfa2293010331e8abf48d9357b3e7682e3d"
+    },
+    {
+      "path": "tests/native/recording-run/NativeProviderRecordingHostChecks.swift",
+      "upstream_blob": "6980ae403a6ebd9945a1f26e6e8afb5ea82e7a34"
+    }
+  ],
+  "adaptations": [
+    "Use CosmaBot workspace/session envelopes, native account revision and original source-stop journal.",
+    "Use the current 360-position source profile, retain consumed permit generation and pass its actual remaining limit to PCM.",
+    "Require a verified source_extend decision through NativeCaptureStartGate for each physical source continuation; lease/reservations alone do not extend audio.",
+    "Keep renderer/native consumers distinct, retain active physical-idle probes across plugin reload and synchronously retire even a run not yet installed.",
+    "Include only retained-host tests; upstream renderer selection/bridge tests are not copied because CosmaBot's native identity factory and UI selection remain pending.",
+    "Use in-memory source/queue fixtures and generated PCM, not live device, account, Keychain or service access."
+  ]
+}

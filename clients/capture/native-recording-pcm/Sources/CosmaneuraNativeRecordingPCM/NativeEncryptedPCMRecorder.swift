@@ -20,6 +20,8 @@ import Foundation
   private let reservations: NativeRecordingReservationOwner
   private let sourceClock: any PCMSourceClock
   private let validateActiveSource: @Sendable () async throws -> Void
+  private let authorizeSourceExtension: @Sendable (NativeRecordingLease, NativeRecordingReservationBatch)
+    async throws -> PCMSourceExtension
   private let signal: PCMSignalMonitor
   private var claimed = false
   private var handle: IOSPCMSessionHandle?
@@ -37,7 +39,9 @@ import Foundation
     system: any AppleAudioSystem, foreground: any AppleApplicationForegroundProviding,
     signal: PCMSignalMonitor,
     sourceClock: any PCMSourceClock = ContinuousPCMSourceClock(),
-    validateActiveSource: @escaping @Sendable () async throws -> Void
+    validateActiveSource: @escaping @Sendable () async throws -> Void,
+    authorizeSourceExtension: @escaping @Sendable (NativeRecordingLease, NativeRecordingReservationBatch)
+      async throws -> PCMSourceExtension
   ) throws {
     self.records = records
     self.firstSequence = firstSequence
@@ -46,6 +50,7 @@ import Foundation
     self.reservations = reservations
     self.sourceClock = sourceClock
     self.validateActiveSource = validateActiveSource
+    self.authorizeSourceExtension = authorizeSourceExtension
     self.signal = signal
     sink = try NativeRecordingPCMSink(
       encryption: encryption, recoveryScope: recoveryScope, records: records,
@@ -63,16 +68,22 @@ import Foundation
   /// closure. The run ID/deadline come from its verified decision, not JS options.
   public func start(
     runID: String, captureExpiresAtMilliseconds: Int64,
+    generation: Int, hardMaximumChunks: Int,
     lease: NativeRecordingLease, batch: NativeRecordingReservationBatch
   ) throws {
     guard !claimed, handle == nil, stopping == nil else {
       throw NativeRecordingBindingFailure.operationInProgress
     }
+    guard generation == lease.generation, firstSequence >= 0, firstSequence < 2048,
+      (1...(2048 - firstSequence)).contains(hardMaximumChunks),
+      batch.reservations.count <= hardMaximumChunks else {
+      throw NativeRecordingBindingFailure.receiptMismatch
+    }
     try requireCapacity()
     try sink.stage(batch)
     let authority = try PCMSourceAuthority(
-      runID: runID, generation: 1, expiresAtMilliseconds: captureExpiresAtMilliseconds,
-      hardMaximumChunks: 2_048 - firstSequence)
+      runID: runID, generation: generation, expiresAtMilliseconds: captureExpiresAtMilliseconds,
+      hardMaximumChunks: hardMaximumChunks)
     let configuration = try PCMConfiguration(
       targetFramesPerChunk: 160_000, maximumChunks: batch.reservations.count,
       maximumInputFramesPerBuffer: PCMConfiguration.maximumFramesPerInputBuffer,
@@ -87,7 +98,8 @@ import Foundation
     continuation = try NativeRecordingContinuation(
       session: started, sink: sink, leases: leases, reservations: reservations,
       initialLease: lease, initialAuthority: authority, initialBatch: batch,
-      sourceClock: sourceClock, validateActiveSource: validateActiveSource)
+      sourceClock: sourceClock, validateActiveSource: validateActiveSource,
+      authorizeSourceExtension: authorizeSourceExtension)
   }
 
   public func ready() async throws {
