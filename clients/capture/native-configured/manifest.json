@@ -7,7 +7,7 @@
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/LiveAVFoundationSystem.swift": {
       "source_sha256": "e4aa314d90d5fc27cf4332898334b5e3e6ea97346c7bfd474edc9727beab7f14",
-      "sha256": "e4aa314d90d5fc27cf4332898334b5e3e6ea97346c7bfd474edc9727beab7f14"
+      "sha256": "36361cd5ee06af79ae138531a783d344b1e76c93a50fe79ecb09a6c69df21de0"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift": {
       "source_sha256": "62de3a2cf8d7d2fddce44f2617d06a02da7bf3f85583c1448320b14bb61b28cd",
@@ -44,6 +44,11 @@
     "ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift": {
       "source_sha256": "bf083158f9cd74fcecb74ce0c07daa7e18fd3a1e706df5c578b8729d4552a353",
       "sha256": "3f6554a7627dba79055c65ba084a088ae16f21cea4fc13b62026b851b0ae8911"
+    },
+    "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AppleInputRouteEvents.swift": {
+      "source_ref": "ca8c70840b312c5ca21c0f143f32a943e62ec1f7",
+      "source_git_blob": "5c1073986d10239947f285cfb74152169547928f",
+      "sha256": "d5023d387a2f339cdb13637d05b71dafac387288cebd457eb238cf0f93c38dd1"
     }
   }
 }
