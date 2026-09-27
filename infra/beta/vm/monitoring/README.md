@@ -17,6 +17,12 @@ Verify those exact hashes and run the service before enabling the timer.
 The host must have rsyslog enabled; the official Azure Monitor Agent supplies
 the supported forwarding integration. Docker application logs remain on the
 existing local driver, separate from the selected `local6` facility.
+The service labels its standard-output journal stream `cosmabot-health`,
+facility `local6`, level `info`. This uses systemd's preopened stream while
+preserving `PrivateDevices=yes`; direct `/dev/log` access is not required.
+Confirm that the host journal carries that identifier and facility before
+checking Azure ingestion. A message visible only under the unit's default
+Python identifier does not qualify the delivery path.
 
 Enable `runtime_monitoring_enabled` in the existing isolated foundation state.
 The official Microsoft Linux agent uses the VM's existing user-assigned identity;
