@@ -7,7 +7,6 @@ import re
 import socket
 import ssl
 import subprocess
-import syslog
 import time
 
 SERVICES = frozenset({"api", "worker", "web", "proxy", "postgres", "redis"})
@@ -184,11 +183,8 @@ def encode(application, backup, now):
 
 
 def main():
-    message = encode(*observe())
-    syslog.openlog(ident="cosmabot-health", logoption=syslog.LOG_NDELAY, facility=syslog.LOG_LOCAL6)
-    syslog.syslog(syslog.LOG_INFO, message)
-    syslog.closelog()
-    print(message)
+    # systemd supplies the journal stream even inside the private device namespace.
+    print(encode(*observe()))
 
 
 if __name__ == "__main__":
