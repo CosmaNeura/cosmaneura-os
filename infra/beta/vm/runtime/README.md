@@ -163,7 +163,14 @@ After initial preparation and acceptance, install `cosmabot-staging.service` wit
 a root-owned `/etc/cosmabot/active-release` containing only the canonical public
 `RELEASE_DIR`. The unit orders startup after Docker/network/data mount. Container
 restart is bounded `on-failure:3`; it does not start containers automatically on a
-Docker-daemon restart before the guard. A daemon restart needs the unit restarted.
+Docker-daemon restart before the guard. `PartOf=docker.service` propagates a
+systemd Docker restart through the staging unit's normal stop/start sequence,
+including the host preflight and IMDS guard. The backup receiver and timers are
+ordered after and part of staging, so they stop first and resume after its
+restart. They cannot keep scheduling jobs through an intentional staging stop.
+A separate stop followed by start is not a systemd restart: after such maintenance,
+explicitly start the receiver and timers alongside staging. Wait for any full
+backup to finish before planned maintenance; do not interrupt it to prove restart.
 Docker health status does not itself restart an unhealthy process; alert on it.
 
 **Still required before admission:** host provisioning and actual identity grant;

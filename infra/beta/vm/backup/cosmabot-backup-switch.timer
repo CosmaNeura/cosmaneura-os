@@ -1,5 +1,7 @@
 [Unit]
 Description=Close a PostgreSQL WAL segment each minute
+After=cosmabot-staging.service
+PartOf=cosmabot-staging.service
 
 [Timer]
 OnBootSec=90

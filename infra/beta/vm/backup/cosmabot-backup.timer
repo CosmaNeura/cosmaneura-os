@@ -1,5 +1,7 @@
 [Unit]
 Description=Daily CosmaBot full physical backup, no deletion
+After=cosmabot-staging.service
+PartOf=cosmabot-staging.service
 
 [Timer]
 OnCalendar=*-*-* 03:00:00 UTC

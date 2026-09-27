@@ -1,5 +1,7 @@
 [Unit]
 Description=Check complete backup age, receiver lag and off-host WAL presence
+After=cosmabot-staging.service
+PartOf=cosmabot-staging.service
 
 [Timer]
 OnBootSec=180
