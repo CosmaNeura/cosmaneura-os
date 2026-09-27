@@ -58,7 +58,8 @@ def compiler(tmp_path: Path, monkeypatch):
 
     def run(command, output, environment, *, query=False):
         calls.append((command, environment))
-        compiled = output / "scratch/target/debug"
+        configuration = command[command.index("--configuration") + 1]
+        compiled = output / "scratch/target" / configuration
         if query:
             return str(compiled)
         compiled.mkdir(parents=True)
@@ -75,10 +76,10 @@ def compiler(tmp_path: Path, monkeypatch):
     return swift, calls
 
 
-def compile_fixture(tmp_path: Path, compiler):
+def compile_fixture(tmp_path: Path, compiler, configuration="debug"):
     qualified = qualify(tmp_path / "qualification")
     output = tmp_path / "build"
-    receipt = builder.build(qualified, compiler[0], output)
+    receipt = builder.build(qualified, compiler[0], output, configuration=configuration)
     return qualified, output, receipt
 
 
@@ -89,9 +90,10 @@ def package(monkeypatch, qualified, output, receipt, app, *, extra=()):
     packager.main()
 
 
-def test_owned_build_and_normal_packaging_preserve_products(tmp_path, compiler, monkeypatch):
+@pytest.mark.parametrize("configuration", ["debug", "release"])
+def test_owned_build_and_normal_packaging_preserve_products(tmp_path, compiler, monkeypatch, configuration):
     monkeypatch.setenv("SWIFT_EXEC", "/unrelated/compiler")
-    qualified, output, receipt = compile_fixture(tmp_path, compiler)
+    qualified, output, receipt = compile_fixture(tmp_path, compiler, configuration)
     assert binding.verify(receipt, qualified, output / "products")["includes_desktop_helper"] is True
     assert len(compiler[1]) == 2
     command, environment = compiler[1][0]
@@ -102,8 +104,11 @@ def test_owned_build_and_normal_packaging_preserve_products(tmp_path, compiler, 
                          ("--config-path", "config"), ("--security-path", "security")):
         assert command[command.index(flag) + 1] == str(output / folder)
     assert "SWIFT_EXEC" not in environment
-    assert environment["HOME"] == str(output / "home")
-    assert environment["CFFIXED_USER_HOME"] == environment["HOME"]
+    assert "HOME" not in environment
+    assert environment["CFFIXED_USER_HOME"] == str(output / "home")
+    assert command[command.index("--configuration") + 1] == configuration
+    metadata = json.loads(receipt.read_text())
+    assert metadata["version"] == 2 and metadata["configuration"] == configuration
     assert environment["XDG_CACHE_HOME"] == str(output / "xdg-cache")
     assert environment["CLANG_MODULE_CACHE_PATH"] == str(output / "modules")
     assert compiler[1][1][0] == [*command, "--show-bin-path"]
@@ -117,6 +122,42 @@ def test_owned_build_and_normal_packaging_preserve_products(tmp_path, compiler, 
     assert info["CosmasNativeAuth"] == {"enabled": False}
     assert not (app / ".incomplete").exists()
     assert not list(app.rglob(binding.RECEIPT))
+
+
+def test_existing_version_one_debug_receipt_remains_packagable(tmp_path, compiler, monkeypatch):
+    qualified, output, receipt = compile_fixture(tmp_path, compiler)
+    metadata = json.loads(receipt.read_text())
+    metadata["version"] = 1
+    del metadata["configuration"]
+    receipt.write_text(json.dumps(metadata))
+    package(monkeypatch, qualified, output, receipt, tmp_path / "Legacy.app")
+    assert (tmp_path / "Legacy.app/Contents/MacOS/CosmasDesktopAuth").is_file()
+
+
+@pytest.mark.parametrize("damage", ["label", "command", "legacy-release"])
+def test_packaging_rejects_mislabeled_build_configuration(tmp_path, compiler, monkeypatch, damage):
+    qualified, output, receipt = compile_fixture(tmp_path, compiler, "release")
+    metadata = json.loads(receipt.read_text())
+    if damage == "label":
+        metadata["configuration"] = "debug"
+    elif damage == "command":
+        metadata["command"][metadata["command"].index("--configuration") + 1] = "debug"
+    else:
+        metadata["version"] = 1
+        del metadata["configuration"]
+    receipt.write_text(json.dumps(metadata))
+    app = tmp_path / "Mislabeled.app"
+    with pytest.raises(ValueError, match="fixed local build command"):
+        package(monkeypatch, qualified, output, receipt, app)
+    assert not app.exists()
+
+
+def test_unknown_configuration_never_starts_compiler(tmp_path, compiler):
+    qualified = qualify(tmp_path / "qualification")
+    output = tmp_path / "rejected"
+    with pytest.raises(ValueError, match="configuration"):
+        builder.build(qualified, compiler[0], output, configuration="production")
+    assert not output.exists() and not compiler[1]
 
 
 @pytest.mark.parametrize("profile,capture", [("operational-beta-v1", True), ("first-owner-staging-v1", False)])

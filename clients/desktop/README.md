@@ -163,3 +163,13 @@ stop only the corresponding local test API before running it. The checkpoint at
 `docs/reference/cosmasos-beta/W8_DESKTOP_AUTH_CHECKPOINT.md` records actual Mac
 window, signed-API and process-restart evidence and the remaining live-login,
 device, microphone and release work.
+
+## Release helper builds
+
+`scripts/build-desktop-auth-helper.py --configuration release` compiles the
+qualified native helper with Swift's Release configuration. Omit the option for
+the existing Debug default. Version-2 compiler receipts record the configuration
+and bind it to the compiler command; packaging continues to accept retained
+version-1 Debug receipts. The normal helper packager accepts either completed
+build. Building or packaging a Release helper does not sign, notarize, install,
+or launch it.
