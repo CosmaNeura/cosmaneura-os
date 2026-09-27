@@ -56,6 +56,8 @@
     private let lock = NSLock()
     private let notificationCenter: NotificationCenter
     private let audioSession: AVAudioSession
+    private let inputRouteEvents = AppleInputRouteEvents()
+    private var activatedInputUID: String?
     private var engine = AVAudioEngine()
     private var tapInstalled = false
     private var activationAttempted = false
@@ -99,10 +101,12 @@
           queue: nil
         ) { [weak self] note in
           let raw = (note.userInfo?[AVAudioSessionRouteChangeReasonKey] as? NSNumber)?.uintValue
-          let event: AppleAudioSystemEvent =
-            AVAudioSession.RouteChangeReason(rawValue: raw ?? 0) == .categoryChange
-            ? .configurationChanged : .routeChanged
-          self?.emit(event)
+          let reason = AVAudioSession.RouteChangeReason(rawValue: raw ?? 0)
+          guard let self else { return }
+          let configured = reason == .categoryChange
+            || (reason == .override || reason == .routeConfigurationChange)
+              && self.hasActivatedInput()
+          self.emit(self.inputRouteEvents.routeChange(knownConfiguration: configured))
         },
         notificationCenter.addObserver(
           forName: AVAudioSession.mediaServicesWereLostNotification,
@@ -153,12 +157,21 @@
       }
       lock.withLock { activationAttempted = true }
       do {
-        try audioSession.setCategory(
-          .playAndRecord,
-          mode: .voiceChat,
-          options: [.defaultToSpeaker, .allowBluetoothHFP]
-        )
-        try audioSession.setActive(true)
+        try inputRouteEvents.withInputConfiguration {
+          try audioSession.setCategory(
+            .playAndRecord,
+            mode: .voiceChat,
+            options: [.defaultToSpeaker, .allowBluetoothHFP]
+          )
+          try audioSession.setActive(true)
+          // Preserve this profile's automatic input choice. Bind the resulting
+          // route before admitting frames, including after a pause/deactivation.
+          let inputs = audioSession.currentRoute.inputs
+          guard inputs.count == 1, let input = inputs.first else {
+            throw AVFoundationDriverError.operationFailed
+          }
+          lock.withLock { activatedInputUID = input.uid }
+        }
       } catch {
         throw AVFoundationDriverError.operationFailed
       }
@@ -170,7 +183,7 @@
     ) throws {
       guard frameCapacity > 0,
         frameCapacity <= UInt32(PCMConfiguration.maximumFramesPerInputBuffer),
-        !lock.withLock({ tapInstalled })
+        !lock.withLock({ tapInstalled }), hasActivatedInput()
       else { throw AVFoundationDriverError.operationFailed }
 
       let input = engine.inputNode
@@ -202,8 +215,10 @@
 
     public func startEngine() throws {
       do {
+        guard hasActivatedInput() else { throw AVFoundationDriverError.operationFailed }
         engine.prepare()
         try engine.start()
+        guard hasActivatedInput() else { throw AVFoundationDriverError.operationFailed }
       } catch {
         throw AVFoundationDriverError.operationFailed
       }
@@ -227,9 +242,18 @@
           throw AVFoundationDriverError.operationFailed
         }
       }
-      lock.withLock { activationAttempted = false }
+      lock.withLock {
+        activationAttempted = false
+        activatedInputUID = nil
+      }
       engine.reset()
       engine = AVAudioEngine()
+    }
+
+    private func hasActivatedInput() -> Bool {
+      guard let uid = lock.withLock({ activatedInputUID }) else { return false }
+      let inputs = audioSession.currentRoute.inputs
+      return inputs.count == 1 && inputs.first?.uid == uid
     }
 
     private func emit(_ event: AppleAudioSystemEvent) {
