@@ -90,6 +90,32 @@ export class EncryptedIndexedDbFlowStore implements CaptureFlowStore, CaptureRen
     }
   }
 
+  /** Durable backend identity. Older writers reject the new native owner marker. */
+  async getCaptureStorageOwner(sessionId: string): Promise<string | null> {
+    assertUuid(sessionId, "invalid_session_id");
+    const transaction = this.#database.transaction(METADATA_STORE, "readonly"), done = transactionDone(transaction);
+    const value = await requestResult(transaction.objectStore(METADATA_STORE).get(`queue-storage:${sessionId}`));
+    await done;
+    if (value === undefined) return null;
+    if (!["browser", "native", "configured:browser", "configured:native", "configured:desktop", "owned:native"].includes(value)) {
+      throw new QueueInvariantError("queue_storage_profile_invalid");
+    }
+    return value;
+  }
+
+  async claimNativeRecordingStorage(sessionId: string): Promise<void> {
+    assertUuid(sessionId, "invalid_session_id");
+    const transaction = this.#database.transaction(METADATA_STORE, "readwrite"), metadata = transaction.objectStore(METADATA_STORE);
+    const key = `queue-storage:${sessionId}`;
+    let failure: QueueInvariantError | undefined;
+    const current = metadata.get(key);
+    current.addEventListener("success", () => {
+      if (current.result === undefined || current.result === "owned:native") metadata.put("owned:native", key);
+      else { failure = new QueueInvariantError("queue_storage_profile_changed"); transaction.abort(); }
+    });
+    await transactionDone(transaction, () => failure);
+  }
+
   async getQueueStorageKind(sessionId: string): Promise<CaptureQueueStorageKind | null> {
     assertUuid(sessionId, "invalid_session_id");
     const transaction = this.#database.transaction(METADATA_STORE, "readonly");

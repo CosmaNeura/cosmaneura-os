@@ -15,6 +15,7 @@ import type { WorkingReceipt } from "./capture-working-api";
 import { CaptureGapNotice } from "./CaptureGapNotice";
 import { sourceGapReview } from "./capture-gap-review";
 import {desktopMeetingCaptureAvailable} from './desktop-capture-runtime';
+import {microphoneInputs,type MicrophoneInput} from '../../clients/capture/src/native/microphone-input';
 import type { SavedScratchpad } from "./notebook-source";
 
 type Preparation = { attestation: CaptureAttestation | null; key: string; bot?: CaptureBotSelection; language?: CaptureLanguage };
@@ -56,6 +57,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
     return () => onNavigationLock?.(false);
   }, [busy, pending, snapshot.state, onNavigationLock]);
   const runtime = useRef<CaptureRuntime | null>(null);
+  const actionRevision = useRef(0);
   const lifetime = useRef<{ closed: boolean; unsubscribe?: () => void }>({ closed: false });
   const openedRequest = useRef(0);
   useEffect(() => {
@@ -101,8 +103,9 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
   }
 
   async function act(action: "start" | "pause" | "stop" | "retry" | "gap" | "finish_gap" | "transcript" | "permissions") {
-    if (busy || !runtime.current) return;
+    if (!runtime.current || busy && !(action === "stop" && busy === "start" && snapshot.native)) return;
     const current = lifetime.current;
+    const revision = ++actionRevision.current;
     const controller = runtime.current.controller;
     setBusy(action); setError("");
     try {
@@ -114,8 +117,17 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
       else if (action === "finish_gap") await controller.finishInterruptedCapture();
       else if (action === "transcript") await controller.refreshTranscriptionStatus();
       else await controller.resumePendingWork();
-    } catch (cause) { if (!current.closed) setError(message(cause)); }
-    finally { if (!current.closed) { setSnapshot(controller.snapshot); setBusy(""); } }
+    } catch (cause) { if (!current.closed && revision === actionRevision.current) setError(message(cause)); }
+    finally { if (!current.closed && revision === actionRevision.current) { setSnapshot(controller.snapshot); setBusy(""); } }
+  }
+
+  async function selectMicrophone(input: MicrophoneInput) {
+    if (busy || !runtime.current?.controller.selectMicrophoneInput) return;
+    const current = lifetime.current;
+    setBusy("input"); setError("");
+    try { await runtime.current.controller.selectMicrophoneInput(input); }
+    catch (cause) { if (!current.closed) setError(message(cause)); }
+    finally { if (!current.closed) setBusy(""); }
   }
 
   async function continuePreparation() {
@@ -173,9 +185,10 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
       <div className="capture-actions">
         {runtime.current?.continuePreparation&&snapshot.recordedChunks===0&&
           <button className="team-primary" disabled={!!busy} onClick={()=>void continuePreparation()}>Continue preparation</button>}
-        {snapshot.state === "ready" && !runtime.current?.recoveryOnly && <button className="team-primary" disabled={!!busy||snapshot.desktop?.phase==='permission_required'} onClick={() => void act("start")}>{sourceKind === "synthetic" ? "Start synthetic capture" : "Start recording"}</button>}
+        {snapshot.state === "ready" && snapshot.native?.phase !== "starting" && !runtime.current?.recoveryOnly && <button className="team-primary" disabled={!!busy||snapshot.desktop?.phase==='permission_required'} onClick={() => void act("start")}>{sourceKind === "synthetic" ? "Start synthetic capture" : "Start recording"}</button>}
+        {snapshot.native?.phase === "starting" && <button disabled={!!busy && busy !== "start"} onClick={() => void act("stop")}>Cancel start</button>}
         {snapshot.desktop?.phase==='permission_required'&&<button disabled={!!busy} onClick={()=>void act('permissions')}>Allow recording access</button>}
-        {snapshot.state === "recording" && <button className="capture-stop" disabled={!!busy} onClick={() => void act("stop")}>Stop and upload</button>}
+        {snapshot.state === "recording" && <button className="capture-stop" disabled={!!busy && !(busy === "start" && snapshot.native)} onClick={() => void act("stop")}>Stop and upload</button>}
         {snapshot.state === "recording" && runtime.current?.supportsContinuation && <button disabled={!!busy} onClick={()=>void act("pause")}>Pause recording</button>}
         {(snapshot.state === "error" || snapshot.state === "uploading" &&
           ["capture_recovered_uploading", "capture_upload_pending"].includes(snapshot.statusCode)) &&
@@ -183,6 +196,12 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
         {!configured && snapshot.state === "processing" && <button disabled={!!busy} onClick={() => void act("transcript")}>Check transcript</button>}
         {pending && !busy && <button onClick={() => void prepare(pending)}>Retry preparation</button>}
       </div>
+      {snapshot.native && ["ready", "paused"].includes(snapshot.state) && runtime.current?.controller.selectMicrophoneInput &&
+        <label>Microphone<select aria-label="Recording microphone" value={snapshot.native.input}
+          disabled={!!busy || snapshot.native.busy || snapshot.native.phase === "starting"}
+          onChange={event => void selectMicrophone(event.target.value as MicrophoneInput)}>
+          {microphoneInputs.map(input => <option key={input.value} value={input.value}>{input.label}</option>)}
+        </select></label>}
       {snapshot.desktop&&<p className="team-fine">Meeting audio and microphone · choose the Zoom or Chrome window when you start.
         {snapshot.desktop.phase==='permission_required'?' Allow microphone and screen/audio recording when asked. If macOS opens Settings, enable access there, then try this action again.':''}
         {snapshot.desktop.coverage==='incomplete'?' Part of this recording was interrupted. Review the transcript before using it for a note.':''}</p>}
