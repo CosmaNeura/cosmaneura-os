@@ -83,6 +83,45 @@ private func jwt(_ user: NativeAuthIdentity, changes: [String: Any] = [:], omit:
 }
 
 @Suite @MainActor struct NativeWorkspaceAuthTests {
+    @Test func recordingNamespaceSurvivesSessionRenewalButRejectsOldRevision() throws {
+        let driver = Driver(), block = Block()
+        driver.identity = try identity()
+        let auth = try controller(driver, block)
+        let first = auth.state()
+        let digest = try auth.recordingAccountDigest(expectedRevision: first.revision)
+        #expect(digest.count == 64)
+        driver.identity = try NativeAuthIdentity(userID: "user_one", sessionID: "sess_renewed", organizationID: "org_one")
+        let next = auth.state()
+        #expect(next.revision != first.revision)
+        #expect(try auth.recordingAccountDigest(expectedRevision: next.revision) == digest)
+        #expect(throws: NativeAuthError.sessionChanged) {
+            try auth.recordingAccountDigest(expectedRevision: first.revision)
+        }
+        block.value = true
+        #expect(throws: NativeAuthError.sessionChanged) {
+            try auth.recordingAccountDigest(expectedRevision: next.revision)
+        }
+    }
+
+    @Test func recordingNamespaceSeparatesAccountsAndNativePolicies() throws {
+        func digest(user: String = "user_one", org: String = "org_one",
+                    issuer: String = "https://invented.clerk.accounts.dev",
+                    audience: String = "cosmas-workspace-local", origin: String = "capacitor://localhost",
+                    withoutOrigin: Bool = false, shared: Bool = false) throws -> String {
+            let driver = Driver(), block = Block()
+            driver.identity = try NativeAuthIdentity(userID: user, sessionID: "sess_one", organizationID: org)
+            let policy = try NativeTokenPolicy(issuer: issuer, audience: audience, authorizedParty: origin,
+                nativeSessionWithoutOrigin: withoutOrigin, sharedStagingSession: shared)
+            let auth = NativeWorkspaceAuth(enabled: true, organizationID: org, tokenPolicy: policy,
+                driver: { driver }, accessBlock: { block })
+            return try auth.recordingAccountDigest(expectedRevision: auth.state().revision)
+        }
+        let values = try [digest(), digest(user: "user_two"), digest(org: "org_two"),
+            digest(issuer: "https://other.clerk.accounts.dev"), digest(audience: "other-api"),
+            digest(origin: "app://cosmas"), digest(withoutOrigin: true), digest(audience: "", shared: true)]
+        #expect(Set(values).count == values.count)
+    }
+
     @Test func sharedStagingSessionsRequireAbsentAudienceAndRetainIdentityChecks() throws {
         let user = try identity()
         for origin in ["capacitor://localhost", "app://cosmas"] {

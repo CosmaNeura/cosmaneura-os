@@ -19,7 +19,7 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
 
     func makeRequest(_ operation: ProviderNativeRequest, token: String) throws -> URLRequest {
         try Task.checkCancellation()
-        guard operation.action == .sourceStart,
+        guard [.sourceStart, .recordingContext].contains(operation.action),
               let value = try JSONSerialization.jsonObject(with: operation.body) as? [String: Any],
               Set(value.keys) == ["workspace_id", "session_id", "operation"],
               let workspace = value["workspace_id"] as? String,
@@ -27,7 +27,9 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
               let sessionID = value["session_id"] as? String,
               UUID(uuidString: sessionID)?.uuidString.lowercased() == sessionID,
               let capture = value["operation"] as? [String: Any],
-              ["source_start", "source_extend"].contains(capture["kind"] as? String ?? ""),
+              (operation.action == .sourceStart
+                ? ["source_start", "source_extend"].contains(capture["kind"] as? String ?? "")
+                : Set(capture.keys) == ["kind"] && capture["kind"] as? String == "native_recording_context"),
               !token.isEmpty, token.utf8.count <= 8192,
               token.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 33 && $0.value < 127 }) else {
             throw ProviderNativeError.invalidRequest

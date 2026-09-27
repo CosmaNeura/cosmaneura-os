@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 
 public enum NativeAuthError: String, Error, Sendable {
@@ -115,6 +116,25 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
             }
         } catch { change(.unavailable) }
         return snapshot()
+    }
+
+    /// Stable native key namespace across SDK sessions for the same account.
+    /// Identity-policy changes isolate custody; this digest grants no access.
+    public func recordingAccountDigest(expectedRevision: String) throws -> String {
+        let current = state()
+        guard current.phase == .ready, current.revision == expectedRevision,
+              let identity = current.identity, let policy = tokenPolicy else {
+            throw NativeAuthError.sessionChanged
+        }
+        let data = try JSONSerialization.data(withJSONObject: [
+            "purpose": "cosmas-native-recording-account-v1",
+            "issuer": policy.issuer, "audience": policy.audience,
+            "authorizedParty": policy.authorizedParty,
+            "nativeSessionWithoutOrigin": policy.nativeSessionWithoutOrigin,
+            "sharedStagingSession": policy.sharedStagingSession,
+            "user": identity.userID, "organization": identity.organizationID,
+        ], options: [.sortedKeys, .withoutEscapingSlashes])
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
     public func signIn() async throws -> NativeAuthState {
