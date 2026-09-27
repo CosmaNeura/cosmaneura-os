@@ -57,3 +57,41 @@ No production or full-Beta acceptance is implied by source checks. The former
 Clerk instance and account records remain intact until the reviewed transition
 and its recovery have been qualified; disabling a feature does not undo an
 identity or installed-state migration.
+
+## Reviewed staging transition tools
+
+`infra/beta/vm/operator/workspace_identity.py` is an operator command, outside the
+API image and HTTP routes. Its reviewed JSON manifest names the exact existing
+Box, owner, original binding and verified shared subject/organization, a new
+binding and transition UUID, membership verification evidence, and a UTC
+maintenance deadline no more than 24 hours away. Do not infer these from email.
+Run `plan` against the mounted staging runtime before scheduling the switch.
+For `apply` or `rollback`, fence incoming traffic and stop API/worker writers;
+invoke it as UID 10001 in a one-shot container with the canonical runtime and
+credential mounts. The command accepts the action, manifest JSON and
+`--confirm-reviewed-staging-maintenance`. Keep credentials out of arguments and
+logs. Its transaction rechecks the owner, existing identity and audit evidence.
+It refuses active model work or any unrevoked Core/Scheduling correspondence.
+Applying adds only the shared binding and an audit event. Rollback deactivates
+that binding and records another event; it never deletes the original binding.
+
+`scripts/transition-desktop-identity.mjs` handles the existing synthetic Mac
+profile. Its public manifest contains the two validated native identities,
+original marker SHA-256, transition UUID and UTC deadline. Quit CosmaBot normally
+and retain exclusive control of app launches throughout the operation. The
+operator command checks for running apps/helpers and open profile files; it does
+not quit a recording or reset the profile. Run Node with `plan|apply|rollback`,
+the manifest filename and `--confirm-offline-staging-maintenance`. A private,
+durable recovery receipt retains the exact original marker before atomic
+replacement. API origin, bundle identifiers, Electron/storage generation and
+renderer partition stay fixed; only the identity hash changes. An interrupted
+maintenance lock requires inspection before removal, never automatic expiry.
+Keep recovery receipts until the complete switch and rollback are accepted.
+
+Both commands are bounded to this synthetic staging transition. They do not
+provision Clerk users/organizations, deploy applications, grant clinical access,
+or change phone storage. Switch the API, web and native public configuration as
+one maintenance operation; restore the old configuration with any rollback.
+Local evidence covers database ownership/grant separation and populated-profile
+preservation, idempotency, interruption and rollback. Actual shared sign-in and
+device acceptance remain separate deployment checks.
