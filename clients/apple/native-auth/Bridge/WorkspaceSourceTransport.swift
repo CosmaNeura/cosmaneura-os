@@ -19,7 +19,7 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
 
     func makeRequest(_ operation: ProviderNativeRequest, token: String) throws -> URLRequest {
         try Task.checkCancellation()
-        guard [.sourceStart, .recordingContext].contains(operation.action),
+        guard [.sourceStart, .recordingContext, .nativeRecording].contains(operation.action),
               let value = try JSONSerialization.jsonObject(with: operation.body) as? [String: Any],
               Set(value.keys) == ["workspace_id", "session_id", "operation"],
               let workspace = value["workspace_id"] as? String,
@@ -27,9 +27,7 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
               let sessionID = value["session_id"] as? String,
               UUID(uuidString: sessionID)?.uuidString.lowercased() == sessionID,
               let capture = value["operation"] as? [String: Any],
-              (operation.action == .sourceStart
-                ? ["source_start", "source_extend"].contains(capture["kind"] as? String ?? "")
-                : Set(capture.keys) == ["kind"] && capture["kind"] as? String == "native_recording_context"),
+              Self.permitted(capture, action: operation.action),
               !token.isEmpty, token.utf8.count <= 8192,
               token.unicodeScalars.allSatisfy({ $0.isASCII && $0.value >= 33 && $0.value < 127 }) else {
             throw ProviderNativeError.invalidRequest
@@ -50,6 +48,19 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")
         return request
+    }
+
+    private static func permitted(_ value: [String: Any], action: ProviderNativeAction) -> Bool {
+        switch action {
+        case .sourceStart:
+            return ["source_start", "source_extend"].contains(value["kind"] as? String ?? "")
+        case .recordingContext:
+            return Set(value.keys) == ["kind"] && value["kind"] as? String == "native_recording_context"
+        case .nativeRecording:
+            return ["encryption_key", "bind_key", "issue_lease", "renew_lease", "reserve_chunks"]
+                .contains(value["kind"] as? String ?? "")
+        default: return false
+        }
     }
 
     func send(_ operation: ProviderNativeRequest, token: String) async throws -> ProviderNativeReply {

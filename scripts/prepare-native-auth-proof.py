@@ -53,13 +53,20 @@ def prepare(
     owned = root / "clients/apple/native-auth"
     for folder in ("Sources", "Tests"):
         shutil.copytree(owned / folder, output / folder)
+    if include_bridge or include_desktop:
+        recording = root / "clients/capture/native-recording"
+        for folder in ("Sources", "Tests"):
+            shutil.copytree(recording / folder, output / "Sources/native-recording" / folder)
+        for name in ("Package.swift", "UPSTREAM.json"):
+            shutil.copyfile(recording / name, output / "Sources/native-recording" / name)
     if include_bridge:
         shutil.copytree(owned / "Bridge", output / "Bridge")
         shutil.copyfile(root / "clients/shared/cosmaneura-navigation-dom.js", output / "Bridge/cosmaneura-navigation-dom.js")
     if include_desktop:
         shutil.copytree(owned / "Desktop", output / "Desktop")
         for name in ("NativeProviderConnection.swift", "NativeSourceStartOwner.swift", "NativeSourceProofJournal.swift",
-                     "NativeSourceRecovery.swift", "NativeCaptureProcessFence.swift", "WorkspaceSourceTransport.swift"):
+                     "NativeSourceRecovery.swift", "NativeCaptureProcessFence.swift", "WorkspaceSourceTransport.swift",
+                     "NativeProviderRecordingService.swift"):
             shutil.copyfile(owned / "Bridge" / name, output / "Desktop" / name)
     package = '''// swift-tools-version: 6.2
 import PackageDescription
@@ -83,12 +90,14 @@ let package = Package(
         .library(name: "CosmasWorkspaceAuthPlugin", targets: ["CosmasWorkspaceAuthPlugin"]),
     ],
     dependencies: [
+        .package(path: "Sources/native-recording"),
         .package(url: "https://github.com/ionic-team/capacitor-swift-pm.git", exact: "8.5.0"),
     ],''',
         ).replace(
             '        .testTarget(name: "CosmasNativeAuthTests",',
             '''        .target(name: "CosmasWorkspaceAuthPlugin", dependencies: [
             "CosmasNativeAuth", .product(name: "Capacitor", package: "capacitor-swift-pm"),
+            .product(name: "CosmaneuraNativeRecording", package: "native-recording"),
         ], path: "Bridge", resources: [.copy("cosmaneura-navigation-dom.js")]),
         .testTarget(name: "CosmasNativeAuthTests",''',
         )
@@ -100,10 +109,13 @@ let package = Package(
             '''products: [
         .library(name: "CosmasNativeAuth", targets: ["CosmasNativeAuth"]),
         .executable(name: "CosmasDesktopAuth", targets: ["CosmasDesktopAuth"]),
-    ],''',
+    ],
+    dependencies: [.package(path: "Sources/native-recording")],''',
         ).replace(
             '        .testTarget(name: "CosmasNativeAuthTests",',
-            '''        .executableTarget(name: "CosmasDesktopAuth", dependencies: ["CosmasNativeAuth"],
+            '''        .executableTarget(name: "CosmasDesktopAuth", dependencies: [
+            "CosmasNativeAuth", .product(name: "CosmaneuraNativeRecording", package: "native-recording"),
+        ],
                           path: "Desktop"),
         .testTarget(name: "CosmasNativeAuthTests",''',
         )

@@ -12,6 +12,7 @@ enum ProviderNativeAction: String, Sendable {
     case catalog, mount, recorder
     case sourceStart = "source-start"
     case recordingContext = "native-recording-context"
+    case nativeRecording = "native-recording-operation"
     case admission = "capture-admissions", operation = "capture-operations", note = "capture-notes"
 
     var bodyLimit: Int {
@@ -21,6 +22,7 @@ enum ProviderNativeAction: String, Sendable {
         case .recorder: 1024
         case .sourceStart: 4096
         case .recordingContext: 1024
+        case .nativeRecording: 4096
         case .admission: 2048
         case .operation: 4_194_304
         case .note: 262_144 + 8192
@@ -30,6 +32,7 @@ enum ProviderNativeAction: String, Sendable {
         switch self {
         case .catalog: 65_536
         case .mount, .recorder, .sourceStart, .recordingContext: 8192
+        case .nativeRecording: 131_072
         case .admission, .operation, .note: 8 * 1024 * 1024
         }
     }
@@ -46,7 +49,7 @@ struct ProviderNativeRequest: Sendable {
         guard let identifier = UUID(uuidString: id), identifier.uuidString.lowercased() == id,
               UUID(uuidString: revision)?.uuidString.lowercased() == revision,
               let operation = ProviderNativeAction(rawValue: action),
-              operation != .sourceStart, operation != .recordingContext,
+              operation != .sourceStart, operation != .recordingContext, operation != .nativeRecording,
               key.range(of: "^[A-Za-z0-9._:-]{8,255}$", options: .regularExpression) != nil,
               body.utf8.count <= operation.bodyLimit, let data = body.data(using: .utf8),
               (try? JSONSerialization.jsonObject(with: data)) is [String: Any]
@@ -63,6 +66,18 @@ struct ProviderNativeRequest: Sendable {
               (try? JSONSerialization.jsonObject(with: body)) is [String: Any]
         else { throw ProviderNativeError.invalidRequest }
         self.id = nativeStartID; self.revision = revision; self.action = .sourceStart
+        self.key = key; self.body = body
+    }
+
+    // Only the native recording service can construct this bounded operation.
+    init(nativeRecordingID: UUID, revision: String, key: String, body: Data) throws {
+        guard UUID(uuidString: revision)?.uuidString.lowercased() == revision,
+              UUID(uuidString: key)?.uuidString.lowercased() == key,
+              body.count <= ProviderNativeAction.nativeRecording.bodyLimit,
+              (try? JSONSerialization.jsonObject(with: body)) is [String: Any] else {
+            throw ProviderNativeError.invalidRequest
+        }
+        self.id = nativeRecordingID; self.revision = revision; self.action = .nativeRecording
         self.key = key; self.body = body
     }
 
