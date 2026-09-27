@@ -38,6 +38,8 @@ public actor NativeRecordingContinuation {
   // Must inspect the same native source owner and current authenticated mount;
   // never a renderer value or a fresh grant for a different source.
   private let validateActiveSource: @Sendable () async throws -> Void
+  private let authorizeSourceExtension: @Sendable (NativeRecordingLease, NativeRecordingReservationBatch)
+    async throws -> PCMSourceExtension
   private var lease: NativeRecordingLease
   private var generation: Int
   private var reservedEnd: Int
@@ -58,13 +60,15 @@ public actor NativeRecordingContinuation {
     initialLease: NativeRecordingLease, initialAuthority: PCMSourceAuthority,
     initialBatch: NativeRecordingReservationBatch,
     sourceClock: any PCMSourceClock = ContinuousPCMSourceClock(),
-    validateActiveSource: @escaping @Sendable () async throws -> Void
+    validateActiveSource: @escaping @Sendable () async throws -> Void,
+    authorizeSourceExtension: @escaping @Sendable (NativeRecordingLease, NativeRecordingReservationBatch)
+      async throws -> PCMSourceExtension
   ) throws {
     let state = sink.state
     guard state.phase == .accepting, state.committedChunks == 0,
       initialLease.sessionID == initialBatch.sessionID,
       initialBatch.authorizedUntil == initialLease.expiresAt,
-      initialAuthority.generation == 1,
+      initialAuthority.generation == initialLease.generation,
       (1...90).contains(initialBatch.reservations.count),
       initialBatch.reservations.first?.sequence == state.nextSequence,
       initialBatch.reservations.count <= initialAuthority.hardMaximumChunks,
@@ -80,6 +84,7 @@ public actor NativeRecordingContinuation {
     self.reservations = reservations
     self.sourceClock = sourceClock
     self.validateActiveSource = validateActiveSource
+    self.authorizeSourceExtension = authorizeSourceExtension
     lease = initialLease
     runID = initialAuthority.runID
     self.initialAuthority = initialAuthority
@@ -221,6 +226,12 @@ public actor NativeRecordingContinuation {
       }
       try requireLive()
       if pending == nil {
+        let unused = reservedEnd - sink.state.nextSequence
+        guard (0...90).contains(unused) else { throw NativeRecordingFailure.invalidBinding }
+        let count = min(90 - unused, hardEnd - reservedEnd)
+        // The source-extension contract requires a new reserved position. A
+        // stalled/full source cannot renew indefinitely without consuming audio.
+        guard count > 0 else { return }
         let renewed = try await leases.renew()
         try requireLive()
         guard renewed.leaseID == lease.leaseID, renewed.sessionID == lease.sessionID,
@@ -231,19 +242,14 @@ public actor NativeRecordingContinuation {
         // Allocate after the prior window, never over a packet that may commit
         // during the request. Replenish to one window instead of accumulating
         // ninety unused reservations at each early renewal.
-        let unused = reservedEnd - sink.state.nextSequence
-        guard (0...90).contains(unused) else { throw NativeRecordingFailure.invalidBinding }
         pending = Pending(
-          lease: renewed, first: reservedEnd,
-          count: min(90 - unused, hardEnd - reservedEnd))
+          lease: renewed, first: reservedEnd, count: count)
       }
       guard let next = pending else { throw NativeRecordingFailure.invalidBinding }
-      if next.count > 0 {
-        let batch = try await reservations.reserve(
-          lease: next.lease, first: next.first, count: next.count)
-        try requireLive()
-        try sink.stage(batch)
-      }
+      let batch = try await reservations.reserve(
+        lease: next.lease, first: next.first, count: next.count)
+      try requireLive()
+      try sink.stage(batch)
       do { try await validateActiveSource() } catch {
         await end(.sourceRetired)
         return
@@ -251,10 +257,17 @@ public actor NativeRecordingContinuation {
       try requireLive()
       let nextExpires = try Self.milliseconds(next.lease.expiresAt)
       let nextDeadline = try Self.deadline(nextExpires, now: sourceClock.now())
-      try await session.extend(
-        PCMSourceExtension(
-          runID: runID, generation: generation + 1, expiresAtMilliseconds: nextExpires,
-          maximumChunks: next.first + next.count - firstSequence))
+      let extensionPermit = try await authorizeSourceExtension(next.lease, batch)
+      try requireLive()
+      guard extensionPermit.runID == runID, extensionPermit.generation == generation + 1,
+        extensionPermit.expiresAtMilliseconds == nextExpires,
+        extensionPermit.maximumChunks == next.first + next.count - firstSequence,
+        let decisionExpiry = extensionPermit.authorizationExpiresAtMilliseconds,
+        decisionExpiry > sourceClock.now().epochMilliseconds, decisionExpiry <= expires
+      else { throw NativeRecordingBindingFailure.receiptMismatch }
+      // The audio actor checks the fresh decision expiry again when it applies
+      // this value. A lease/reservation receipt alone never extends the source.
+      try await session.extend(extensionPermit)
       // Stop/revocation may have won while the core actor handled the extension.
       guard active else { return }
       lease = next.lease

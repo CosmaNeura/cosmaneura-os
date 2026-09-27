@@ -68,7 +68,10 @@ public struct NativeCaptureExtensionPermit: Sendable {
 /// The standalone native microphone and authenticated provider bridge share this
 /// in-process gate. JavaScript can neither install a handler nor supply a permit.
 @MainActor public enum NativeCaptureStartGate {
+    public enum Consumer { case renderer, nativeEncryptedMicrophone }
     private static var owner: UUID?
+    private static var consumer: Consumer = .renderer
+    private static var nativeIdle: (@MainActor () -> Bool)?
     private static var authorize: (@MainActor () async throws -> NativeCapturePermit)?
     private static var renew: (@MainActor (NativeCaptureExtensionRequest) async throws -> NativeCaptureExtensionPermit)?
     private static var activePermit: NativeCapturePermit?
@@ -81,22 +84,50 @@ public struct NativeCaptureExtensionPermit: Sendable {
 
     /// Native PCM supplies the process-wide ownership check; no JS callback.
     public static func registerIdleProbe(_ probe: @escaping @MainActor () -> Bool) {
-        idle = probe
+        if let previous = idle, owner != nil || recovering || authorizing || extending {
+            // A plugin reload cannot hide an older recorder still shutting down.
+            idle = { previous() && probe() }
+        } else { idle = probe }
     }
 
     public static func install(owner: UUID,
                                renew: (@MainActor (NativeCaptureExtensionRequest) async throws -> NativeCaptureExtensionPermit)? = nil,
                                authorize: @escaping @MainActor () async throws -> NativeCapturePermit) throws {
-        guard !recovering, self.owner == nil || (self.owner == owner && !retiring) else { throw NativeAuthError.busy }
+        guard !recovering, !authorizing, !extending, activePermit == nil,
+              self.owner == nil || (self.owner == owner && !retiring && consumer == .renderer)
+        else { throw NativeAuthError.busy }
         if self.owner == nil { retiring = false }
+        consumer = .renderer
+        nativeIdle = nil
         self.owner = owner; self.authorize = authorize
         self.renew = renew
     }
 
+    /// Native custody and the renderer share one physical-source exclusion gate.
+    public static func installEncrypted(owner: UUID, idle probe: @escaping @MainActor () -> Bool,
+        renew: @escaping @MainActor (NativeCaptureExtensionRequest) async throws -> NativeCaptureExtensionPermit,
+        authorize: @escaping @MainActor () async throws -> NativeCapturePermit) throws {
+        guard self.owner == nil, !recovering, !authorizing, !extending,
+              let idle, idle(), probe() else { throw NativeAuthError.busy }
+        self.owner = owner; consumer = .nativeEncryptedMicrophone; nativeIdle = probe
+        self.authorize = authorize; self.renew = renew; retiring = false
+    }
+
+    public static func requireActiveEncryptedOwner(_ expected: UUID) throws {
+        guard owner == expected, consumer == .nativeEncryptedMicrophone,
+              !retiring, !recovering, activePermit != nil, nativeIdle != nil else {
+            throw NativeAuthError.unavailable
+        }
+    }
+
     public static func clear(owner: UUID) {
         if self.owner == owner {
+            if consumer == .nativeEncryptedMicrophone {
+                retiring = true
+                guard !authorizing, !extending, let idle, idle(), nativeIdle?() == true else { return }
+            }
             self.owner = nil; self.authorize = nil; renew = nil; retiring = true
-            activePermit = nil; latestExtension = nil
+            activePermit = nil; latestExtension = nil; nativeIdle = nil
         }
     }
 
@@ -109,20 +140,22 @@ public struct NativeCaptureExtensionPermit: Sendable {
     /// Capture before the first permission await so an old start can never
     /// consume a replacement owner's decision after close or navigation.
     public static func startTicket() throws -> UUID {
-        guard let owner, !retiring else { throw NativeAuthError.unavailable }
+        guard let owner, !retiring, consumer == .renderer else { throw NativeAuthError.unavailable }
         return owner
     }
 
     /// Final check and native begin execute together on MainActor, with no await
     /// between them. Retirement fences both pending authorization and later starts.
     public static func consume<T>(owner expected: UUID,
+        consumer expectedConsumer: Consumer = .renderer,
         start: @MainActor (NativeCapturePermit) throws -> T) async throws -> T {
-        guard owner == expected, !retiring, !authorizing, activePermit == nil, let authorize else {
+        guard owner == expected, consumer == expectedConsumer,
+              !retiring, !authorizing, activePermit == nil, let authorize else {
             throw NativeAuthError.unavailable
         }
         authorizing = true; defer { authorizing = false }
         let permit = try await authorize()
-        guard owner == expected, !retiring, permit.startExpiresAt > Date() else {
+        guard owner == expected, consumer == expectedConsumer, !retiring, permit.startExpiresAt > Date() else {
             throw NativeAuthError.unavailable
         }
         let result = try start(permit)
@@ -132,9 +165,10 @@ public struct NativeCaptureExtensionPermit: Sendable {
 
     /// The physical owner rechecks its monotonic deadline when applying this
     /// permit. A JavaScript expiry or chunk count is never a native grant.
-    public static func extend<T>(owner expected: UUID, request: NativeCaptureExtensionRequest,
+    public static func extend<T>(owner expected: UUID, consumer expectedConsumer: Consumer = .renderer,
+        request: NativeCaptureExtensionRequest,
         apply: @MainActor (NativeCaptureExtensionPermit) async throws -> T) async throws -> T {
-        guard owner == expected, !retiring, !authorizing, !extending,
+        guard owner == expected, consumer == expectedConsumer, !retiring, !authorizing, !extending,
               let activePermit, let renew else { throw NativeAuthError.unavailable }
         extending = true; defer { extending = false }
         let permit = try await renew(request)
@@ -168,6 +202,7 @@ public struct NativeCaptureExtensionPermit: Sendable {
     public static func confirmStopped(owner expected: UUID) throws {
         guard owner == expected else { throw NativeAuthError.unavailable }
         retiring = true
-        guard !authorizing, !extending, let idle, idle() else { throw NativeAuthError.busy }
+        guard !authorizing, !extending, let idle, idle(),
+              consumer == .renderer || nativeIdle?() == true else { throw NativeAuthError.busy }
     }
 }

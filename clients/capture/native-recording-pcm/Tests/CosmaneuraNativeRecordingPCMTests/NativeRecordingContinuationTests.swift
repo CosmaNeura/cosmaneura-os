@@ -40,6 +40,7 @@ import XCTest
   func testLostLeaseReplyReplaysExactIntentWithoutExtendingEarly() async throws {
     let f = try ContinuationFixture()
     let owner = try await f.open()
+    try await f.driver.offerPacket()
     f.clock.advance(780)
     await f.service.loseNextLeaseReply()
     await owner.maintain()
@@ -53,15 +54,15 @@ import XCTest
     let calls = await f.service.leaseIntents
     assertEqual(calls.count, 3)
     assertEqual(calls[1], calls[2])
-    // No new audio consumed: unused positions are retained without allocating
-    // another full ninety-position window just because time advanced.
-    assertEqual(state.reservedThroughSequence, 90)
+    // Only the consumed position is replenished; the unused window is retained.
+    assertEqual(state.reservedThroughSequence, 91)
     try await owner.stop()
   }
 
   func testExplicitCoreDenialStopsBeforeTheOldDeadline() async throws {
     let f = try ContinuationFixture()
     let owner = try await f.open()
+    try await f.driver.offerPacket()
     try await f.driver.offer(800)
     f.clock.advance(780)  // Two minutes of the old window still remain.
     await f.service.denyNextLease()
@@ -70,7 +71,7 @@ import XCTest
     assertEqual(state.phase, .stopped)
     assertEqual(state.reason, .sourceRetired)
     assertEqual(state.sourceGeneration, 1)
-    assertEqual(state.capture.committedChunks, 1)
+    assertEqual(state.capture.committedChunks, 2)
     assertEqual(await f.driver.releases, 1)
   }
 
@@ -98,6 +99,7 @@ import XCTest
   func testStopWinsAgainstLateRenewalAndDrainsPartialOnce() async throws {
     let f = try ContinuationFixture()
     let owner = try await f.open()
+    try await f.driver.offerPacket()
     try await f.driver.offer(800)
     f.clock.advance(780)
     let pause = ContinuationPause()
@@ -111,8 +113,8 @@ import XCTest
     let state = await owner.state
     assertEqual(state.phase, .stopped)
     assertEqual(state.sourceGeneration, 1)
-    assertEqual(state.capture.committedChunks, 1)
-    assertEqual(state.capture.committedPlaintextBytes, 1_644)
+    assertEqual(state.capture.committedChunks, 2)
+    assertEqual(state.capture.committedPlaintextBytes, 321_688)
     assertEqual((await f.service.counts).batches, 1)
     assertEqual(await f.driver.releases, 1)
   }
@@ -120,6 +122,7 @@ import XCTest
   func testDeadlineWinsAgainstLateRenewalEvenWithWallClockRollback() async throws {
     let f = try ContinuationFixture()
     let owner = try await f.open()
+    try await f.driver.offerPacket()
     try await f.driver.offer(800)
     f.clock.advance(780)
     let pause = ContinuationPause()
@@ -133,13 +136,14 @@ import XCTest
     assertEqual(state.phase, .stopped)
     assertEqual(state.reason, .authorityExpired)
     assertEqual(state.sourceGeneration, 1)
-    assertEqual(state.capture.committedChunks, 1)
+    assertEqual(state.capture.committedChunks, 2)
     assertEqual((await f.service.counts).batches, 1)
   }
 
   func testSourceRetirementStopsPendingRenewalWithoutRestart() async throws {
     let f = try ContinuationFixture()
     let owner = try await f.open()
+    try await f.driver.offerPacket()
     f.clock.advance(780)
     let pause = ContinuationPause()
     await f.service.pauseRenewal(pause)
@@ -189,8 +193,9 @@ import XCTest
     let owner = try await f.open(start: false)
     let pause = ContinuationPause()
     await f.service.pauseRenewal(pause)
-    f.clock.advance(780)
     try await owner.startMaintenance()
+    try await f.driver.offerPacket()
+    f.clock.advance(780)
     await pause.entered()
     // Let three actual native heartbeat periods pass: no WebView or test-driven
     // heartbeat. This exceeds the core's fifteen-second watchdog interval.
@@ -199,7 +204,7 @@ import XCTest
     assertEqual(f.sink.state.phase, .accepting)
     try await owner.stop()
     await pause.release()
-    assertEqual(f.sink.state.committedChunks, 1)
+    assertEqual(f.sink.state.committedChunks, 2)
   }
 
   func testEncryptedNativeGraphKeepsLargerTapAfterBackground() async throws {
@@ -211,7 +216,7 @@ import XCTest
     try recorder.start(
       runID: UUID().uuidString.lowercased(),
       captureExpiresAtMilliseconds: f.clock.now().epochMilliseconds + 900_000,
-      lease: lease, batch: batch)
+      generation: lease.generation, hardMaximumChunks: 360, lease: lease, batch: batch)
     try await recorder.ready()
     try await recorder.ready()  // Repeated UI readiness joins the same native start.
     assertFalse(recorder.isPhysicallyIdle)
@@ -253,7 +258,7 @@ import XCTest
       try recorder.start(
         runID: UUID().uuidString.lowercased(),
         captureExpiresAtMilliseconds: f.clock.now().epochMilliseconds + 900_000,
-        lease: lease, batch: batch))
+        generation: lease.generation, hardMaximumChunks: 360, lease: lease, batch: batch))
     assertTrue(recorder.isPhysicallyIdle)
     assertEqual(system.activations, 0)
     try await recorder.stop()
@@ -268,7 +273,7 @@ import XCTest
     try recorder.start(
       runID: UUID().uuidString.lowercased(),
       captureExpiresAtMilliseconds: f.clock.now().epochMilliseconds + 900_000,
-      lease: lease, batch: batch)
+      generation: lease.generation, hardMaximumChunks: 360, lease: lease, batch: batch)
     do {
       try await recorder.ready()
       XCTFail("Background start must fail")
@@ -288,7 +293,7 @@ import XCTest
       try recorder.start(
         runID: UUID().uuidString.lowercased(),
         captureExpiresAtMilliseconds: f.clock.now().epochMilliseconds + 899_000,
-        lease: lease, batch: batch))
+        generation: lease.generation, hardMaximumChunks: 360, lease: lease, batch: batch))
     assertFalse(recorder.isPhysicallyIdle)
     try await recorder.stop()
     assertTrue(recorder.isPhysicallyIdle)
@@ -304,7 +309,7 @@ import XCTest
     try recorder.start(
       runID: UUID().uuidString.lowercased(),
       captureExpiresAtMilliseconds: f.clock.now().epochMilliseconds + 900_000,
-      lease: lease, batch: batch)
+      generation: lease.generation, hardMaximumChunks: 360, lease: lease, batch: batch)
     try await recorder.ready()
     system.emit(.backgrounded)
     system.emit(.routeChanged)
@@ -316,6 +321,64 @@ import XCTest
     try await recorder.stop()
     assertTrue(recorder.isPhysicallyIdle)
   }
+  func testLeaseAndReservationsCannotExtendWithoutMatchingSourceDecision() async throws {
+    for fault in ["denied", "wrong-source", "missing-decision", "expired-decision"] {
+      let f = try ContinuationFixture()
+      let owner = try await f.open()
+      try await f.driver.offerPacket()
+      await f.fence.setFault(fault)
+      f.clock.advance(780)
+      await owner.maintain()
+      let state = await owner.state
+      assertEqual(state.phase, .stopped)
+      assertEqual(state.sourceGeneration, 1)
+      assertEqual(state.reason, fault == "denied" ? .sourceRetired : .renewalRejected)
+      assertEqual((await f.service.counts).leases, 2)
+      assertEqual(await f.driver.releases, 1)
+    }
+  }
+
+  func testIdleWindowDoesNotRequestUnboundedLeaseExtensions() async throws {
+    let f = try ContinuationFixture()
+    let owner = try await f.open()
+    f.clock.advance(780)
+    await owner.maintain()
+    assertEqual((await f.service.counts).leases, 1)
+    assertEqual((await owner.state).sourceGeneration, 1)
+    f.clock.advance(121)
+    assertFalse(await owner.heartbeatAndObserve())
+    assertEqual((await owner.state).reason, .authorityExpired)
+  }
+
+  func testAdmittedChunkLimitIsEnforcedBeforeNativeClaim() async throws {
+    let f = try ContinuationFixture()
+    let system = EncryptedAudioSystem()
+    let recorder = try f.recorder(system: system)
+    let lease = try await f.leases.open()
+    let batch = try await f.reservations.reserve(lease: lease, first: 0, count: 90)
+    XCTAssertThrowsError(try recorder.start(runID: UUID().uuidString.lowercased(),
+      captureExpiresAtMilliseconds: f.clock.now().epochMilliseconds + 900_000,
+      generation: lease.generation, hardMaximumChunks: 89, lease: lease, batch: batch))
+    XCTAssertTrue(recorder.isPhysicallyIdle)
+    XCTAssertEqual(system.activations, 0)
+    try await recorder.stop()
+  }
+
+  func testResumedLeaseKeepsItsGenerationInTheNativeRecorder() async throws {
+    let f = try ContinuationFixture()
+    _ = try await f.leases.open()
+    f.clock.advance(10)
+    let lease = try await f.leases.renew()
+    let batch = try await f.reservations.reserve(lease: lease, first: 0, count: 90)
+    let recorder = try f.recorder(system: EncryptedAudioSystem())
+    try recorder.start(runID: UUID().uuidString.lowercased(),
+      captureExpiresAtMilliseconds: f.clock.now().epochMilliseconds + 900_000,
+      generation: lease.generation, hardMaximumChunks: 360, lease: lease, batch: batch)
+    try await recorder.ready()
+    assertEqual((await recorder.snapshot())?.sourceGeneration, 2)
+    try await recorder.stop()
+  }
+
 }
 
 // Values are awaited before entering XCTest's non-async autoclosures.
@@ -378,6 +441,20 @@ private actor ContinuationPause {
 
 private actor ContinuationFence {
   private var retired = false
+  var fault = ""
+  func setFault(_ value: String) { fault = value }
+  func authorize(runID: String, lease: NativeRecordingLease,
+    batch: NativeRecordingReservationBatch, clock: ContinuationClock) throws -> PCMSourceExtension {
+    try validate()
+    if fault == "denied" { throw NativeRecordingBindingFailure.authorityChanged }
+    let expires = ISO8601DateFormatter().date(from: lease.expiresAt)!
+    return PCMSourceExtension(
+      runID: fault == "wrong-source" ? UUID().uuidString.lowercased() : runID,
+      generation: lease.generation, expiresAtMilliseconds: Int64(expires.timeIntervalSince1970 * 1000),
+      maximumChunks: batch.reservations.last!.sequence + 1,
+      authorizationExpiresAtMilliseconds: fault == "missing-decision" ? nil :
+        clock.now().epochMilliseconds + (fault == "expired-decision" ? -1 : 10_000))
+  }
   func retire() { retired = true }
   func validate() throws {
     if retired { throw NativeRecordingBindingFailure.authorityChanged }
@@ -605,7 +682,8 @@ private struct ContinuationConsent: MicrophonePermissionAuthorizing {
       firstSequence: 0, priorPlaintextBytes: 0, leases: leases, reservations: reservations,
       permission: ContinuationConsent(), system: system,
       foreground: EncryptedForeground(active: foreground), signal: PCMSignalMonitor(),
-      sourceClock: clock, validateActiveSource: { [fence] in try await fence.validate() })
+      sourceClock: clock, validateActiveSource: { [fence] in try await fence.validate() },
+      authorizeSourceExtension: { _, _ in throw NativeRecordingBindingFailure.authorityChanged })
   }
   func open(start: Bool = true, wrongRun: Bool = false) async throws -> NativeRecordingContinuation
   {
@@ -627,7 +705,10 @@ private struct ContinuationConsent: MicrophonePermissionAuthorizing {
     let owner = try NativeRecordingContinuation(
       session: handle, sink: sink, leases: leases, reservations: reservations,
       initialLease: lease, initialAuthority: supplied, initialBatch: batch, sourceClock: clock,
-      validateActiveSource: { [fence] in try await fence.validate() })
+      validateActiveSource: { [fence] in try await fence.validate() },
+      authorizeSourceExtension: { [clock, fence] renewed, batch in
+        try await fence.authorize(runID: supplied.runID, lease: renewed, batch: batch, clock: clock)
+      })
     if start { try await owner.beginMaintenance(automatic: false) }
     return owner
   }

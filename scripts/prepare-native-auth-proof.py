@@ -91,7 +91,8 @@ def prepare(
         shutil.copytree(owned / "Desktop", output / "Desktop")
         for name in ("NativeProviderConnection.swift", "NativeSourceStartOwner.swift", "NativeSourceProofJournal.swift",
                      "NativeSourceRecovery.swift", "NativeCaptureProcessFence.swift", "WorkspaceSourceTransport.swift",
-                     "NativeProviderRecordingService.swift"):
+                     "NativeProviderRecordingService.swift", "NativeProviderRecordingRun.swift",
+                     "NativeProviderRecordingHost.swift"):
             shutil.copyfile(owned / "Bridge" / name, output / "Desktop" / name)
     package = '''// swift-tools-version: 6.2
 import PackageDescription
