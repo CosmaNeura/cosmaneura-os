@@ -88,6 +88,14 @@ def test_workspace_operation_rechecks_admission_and_keeps_no_store(capture_case)
 def test_claimed_session_is_compared_before_any_capture_operation(capture_case):
     f = capture_case
     prepare(f)
+
+    def mismatched_admission(*args, **kwargs):
+        # Deliberately return the prior session. LocalCore's normal double
+        # asserts the requested session before this application guard can run.
+        f.port.step("admit")
+        return f.port.saved
+
+    f.port.admit_capture = mismatched_admission
     response = perform(f, session_id=str(uuid4()))
     assert response.status_code == 409
     assert response.json()["detail"] == "capture_session_changed"

@@ -148,7 +148,8 @@ class SelectCaptureProfile(ProtectedContract):
 
 class ReadOperation(ProtectedContract):
     kind: Literal["encryption_key", "capabilities", "transcription_status", "transcript", "working_transcript",
-                  "capture_recovery_state", "capture_source", "capture_profile", "capture_lease_state", "creator_review"]
+                  "capture_recovery_state", "capture_source", "capture_profile", "capture_lease_state", "creator_review",
+                  "native_recording_context"]
     profile_receipt_id: UUID | None = None
 
     @model_validator(mode="after")
@@ -156,6 +157,16 @@ class ReadOperation(ProtectedContract):
         if self.profile_receipt_id is not None and self.kind != "capabilities":
             raise ValueError("Unexpected capture profile acknowledgment")
         return self
+
+
+class NativeRecordingContext(ProtectedContract):
+    """Core-admitted Scribe key namespace; this does not grant microphone access."""
+
+    schema_version: Literal["1.0"]
+    workspace_id: UUID
+    tenant_id: UUID
+    session_id: UUID
+    status: Literal["created", "capturing"]
 
 
 class CorrectTranscript(ProtectedContract):

@@ -18,8 +18,14 @@ from cosmas_os.application.capture_deadline import (
 )
 from cosmas_os.models import AuditEvent, CoreCaptureAccount, ExternalIdentity, WorkspaceEntry
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable, supports_skill
-from cosmas_os.ports.capture_protocol import CaptureOperation, CaptureProfileReceipt, ReadOperation
+from cosmas_os.ports.capture_protocol import (
+    CaptureOperation,
+    CaptureProfileReceipt,
+    NativeRecordingContext,
+    ReadOperation,
+)
 from cosmas_os.ports.core_capture import (
+    ConfiguredCaptureSelection,
     CoreCaptureAdmissionPort,
     CoreCaptureSelection,
     CoreConsentAttestation,
@@ -59,7 +65,7 @@ def admit(
     port: CoreCaptureAdmissionPort,
     attestation: CoreConsentAttestation | None,
     idempotency_key: str,
-    configured_capture=None,
+    configured_capture: ConfiguredCaptureSelection | None = None,
     operation: CaptureOperation | None = None,
     expected_session_id: UUID | None = None,
     note_selection: CoreNoteSelection | None = None,
@@ -200,8 +206,8 @@ def admit(
             credential,
             attestation,
             f"verify:{expected_session_id}" if using_admission else idempotency_key,
-            **({"expected_session_id": expected_session_id} if using_admission else
-               {"configured_capture": configured_capture} if configured_capture is not None else {}),
+            expected_session_id=expected_session_id if using_admission else None,
+            configured_capture=None if using_admission else configured_capture,
         )
         if selection() != expected:
             raise ws.WorkspaceError("capture_context_changed", 409)
@@ -213,7 +219,7 @@ def admit(
                 result = port.capture_note(binding, credential, receipt.session_id, selected_note)
             else:
                 assert operation is not None
-                if operation.kind in {"source_start", "source_extend"} and receipt.configured_capture is None:
+                if operation.kind in {"source_start", "source_extend", "native_recording_context"} and receipt.configured_capture is None:
                     raise ws.WorkspaceError("capture_source_unavailable", 409)
                 profile_id = getattr(operation, "profile_receipt_id", None)
                 if profile_id is not None:
@@ -240,6 +246,12 @@ def admit(
                     result = port.perform_capture_operation(
                         binding, credential, receipt.session_id, operation, idempotency_key
                     )
+                if operation.kind == "native_recording_context" and (
+                    not isinstance(result, NativeRecordingContext)
+                    or result.workspace_id != binding.workspace_id
+                    or result.session_id != receipt.session_id
+                ):
+                    raise ConnectorUnavailable("core_capture_receipt_invalid")
             if selection(finalizing=finalize_note is not None or bot_selection is not None) != expected:
                 raise ws.WorkspaceError("capture_context_changed", 409)
             # An OS review/action can commit while the final private workspace,
