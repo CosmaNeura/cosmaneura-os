@@ -152,7 +152,7 @@ export function installWorkspaceDesktopCapture(options:Options):{close():Promise
       const coverage=new DurableDesktopCoverage(o.store.namespace('coverage'),sessionId);
       const bff=new WorkspaceCaptureBff(workspaceId,sessionId,(body,signal)=>request(o,`/workspaces/${workspaceId}/capture/operations`,body,false,signal));
       o.recorder=await DesktopProviderRecorder.open({enabled:true,sessionId,signal:o.abort.signal,
-        profiles:bff,captureProfile:{schema_version:'1.0',profile_id:'visit-60m-v1',channels:['mixed']},
+        profiles:bff,standardContinuousCapture:true,
         createBff:()=>bff,authorizePreparation:async()=>({sessionId,status:(await review(o)).status}),
         authorizeMount:prepared=>prepareSource(o,prepared),
         authority:{authorizeStart:async grant=>{

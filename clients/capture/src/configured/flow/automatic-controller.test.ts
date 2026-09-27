@@ -1,7 +1,7 @@
 import { webcrypto } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { IDBFactory } from "fake-indexeddb";
-import { afterEach, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { base64UrlEncode } from "@cosmaneura-scribe/capture-protocol";
 import { HttpCaptureBff, BffResponseError } from "../../bff/http-client";
 import type { CaptureLeaseReceipt, ChunkReservationBatchReceipt } from "../../bff/contracts";
@@ -14,6 +14,8 @@ import { EncryptedIndexedDbQueueStorage } from "../../storage/encrypted-indexedd
 import { EncryptedIndexedDbFlowStore } from "./encrypted-store";
 import { CaptureFlowController } from "./controller";
 import { CaptureStopAcknowledgementPending } from "../capture/stop-confirmation";
+import { validateRenewalRecord } from "../../flow/renewal-contract";
+import { validateConfiguredRenewalRecord } from "./automatic-renewal";
 
 const crypto = webcrypto as unknown as Crypto;
 const cleanup: (() => void | Promise<void>)[] = [];
@@ -56,7 +58,7 @@ class ControlledSource implements CaptureSource {
   }
 }
 
-async function fixture() {
+async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date());
   const service = new MockCaptureService();
   const consent = service.createConsent({ appointment_id: "synthetic-visit", practitioner_id: "synthetic-provider",
@@ -67,8 +69,8 @@ async function fixture() {
   const bff = new HttpCaptureBff(vi.fn().mockRejectedValue(new Error("unconfigured synthetic BFF")));
   vi.spyOn(bff, "getAudioEncryptionKey").mockImplementation(async () => service.audioEncryptionKey());
   vi.spyOn(bff, "bindSessionAudioKey").mockImplementation(async (id, request, options) => service.bindSessionAudioKey(id, request, options.idempotencyKey));
-  vi.spyOn(bff, "getCapabilities").mockImplementation(async () => ({ ...service.capabilities(), max_chunks: 720,
-    remaining_aggregate_plaintext_bytes: 268435456 }));
+  vi.spyOn(bff, "getCapabilities").mockImplementation(async () => ({ ...service.capabilities(), max_chunks: mode === "profile" ? 720 : 2048,
+    remaining_aggregate_plaintext_bytes: mode === "profile" ? 268435456 : 402653184 }));
   let lease!: CaptureLeaseReceipt;
   vi.spyOn(bff, "issueLease").mockImplementation(async (id) => {
     lease = { protocol_version: "1.0", session_id: id, lease_id: crypto.randomUUID(), receipt_id: crypto.randomUUID(),
@@ -133,37 +135,38 @@ async function fixture() {
   };
   const source = new ControlledSource();
   const timers: { callback: () => void; due: number; cancelled: boolean }[] = [];
-  const create = () => {
+  const create = (standard = mode === "standard") => {
     const controller = new CaptureFlowController({ bff, flowStore: flow, profiles, queue,
-      queueTransport: transport, source, crypto,
+      queueTransport: transport, source, crypto, ...(standard ? {standardContinuousCapture:true as const} : {}),
       scheduleTimeout: (callback, delay) => { const timer = { callback, due: Date.now() + delay, cancelled: false }; timers.push(timer); return timer; },
       cancelTimeout: handle => { (handle as typeof timers[number]).cancelled = true; } });
     cleanup.push(() => controller.deactivate()); return controller;
   };
   const controller = create();
-  await controller.prepareConfigured(session.id, profile.request);
+  await controller.prepareConfigured(session.id, mode === "profile" ? profile.request : undefined);
   return { controller, create, source, bff, renew, reserve, complete, queue, transport, timers, leaseState,
-    session, get flow() { return flow; },
+    session, profiles, get flow() { return flow; },
     reopen: async () => { flow.close(); flow = await EncryptedIndexedDbFlowStore.open({ indexedDB, databaseName: name, crypto }); },
     emitTo: async (count: number) => { while (source.next < count) { await source.emit();
       if (source.next >= source.maximum - 6 && source.maximum < 360) await until(() => source.maximum > source.next + 6); } },
   };
 }
 
+describe.each(["profile", "standard"] as const)("%s capture", mode => {
 it("automatically extends twice while preserving one source and every reserved object",async()=>{
-  const f=await fixture();await f.controller.startRecording();
+  const f=await fixture(mode);await f.controller.startRecording();
   const before=await f.queue.list();await f.emitTo(200);
   expect(f.source.start).toHaveBeenCalledOnce();expect(f.source.extend).toHaveBeenCalledTimes(2);
   expect(f.controller.snapshot.recordedChunks).toBe(200);
   const after=await f.queue.list();
   for(const row of before)expect(after.find(r=>r.reservation.objectId===row.reservation.objectId)?.idempotencyKeys).toEqual(row.idempotencyKeys);
-  expect(await f.flow.getActiveCaptureState()).toMatchObject({schemaVersion:6,lease:{generation:3},automaticRenewal:{state:"extended"}});
+  expect(await f.flow.getActiveCaptureState()).toMatchObject({schemaVersion:mode === "profile" ? 6 : 7,lease:{generation:3},automaticRenewal:{state:"extended"}});
   await f.controller.stopRecording();expect(f.complete).toHaveBeenCalledOnce();
   expect(f.controller.snapshot.state).toBe("processing");
 });
 
 it.each([false,true])("Stop reconciles an uncertain renewal, committed=%s, without issuing another one",async committed=>{
-  const f=await fixture(),blocked=gate(),original=f.renew.getMockImplementation()!;
+  const f=await fixture(mode),blocked=gate(),original=f.renew.getMockImplementation()!;
   await f.controller.startRecording();
   f.renew.mockImplementationOnce(async(...args)=>{
     if(committed)await original(...args);
@@ -180,7 +183,7 @@ it.each([false,true])("Stop reconciles an uncertain renewal, committed=%s, witho
 });
 
 it("reopens a pending committed renewal in the encrypted journal and finishes without starting capture",async()=>{
-  const f=await fixture(),blocked=gate(),original=f.renew.getMockImplementation()!;
+  const f=await fixture(mode),blocked=gate(),original=f.renew.getMockImplementation()!;
   await f.controller.startRecording();
   f.renew.mockImplementationOnce(async(...args)=>{await original(...args);await blocked.pending;throw new TypeError("Invented lost reply");});
   while(f.source.next<84)await f.source.emit();await until(()=>f.renew.mock.calls.length===1);
@@ -194,7 +197,7 @@ it("reopens a pending committed renewal in the encrypted journal and finishes wi
 
 it.each(["stopRecording", "pauseRecording", "deactivate"] as const)(
   "%s settles a busy native extension and retries the same stop without another provider action", async action => {
-    const f = await fixture(), blocked = gate();
+    const f = await fixture(mode), blocked = gate();
     let extending = false;
     f.source.extend.mockImplementationOnce(async () => {
       extending = true;
@@ -220,3 +223,61 @@ it.each(["stopRecording", "pauseRecording", "deactivate"] as const)(
     expect(f.complete).toHaveBeenCalledTimes(action === "stopRecording" ? 1 : 0);
   },
 );
+
+});
+
+it("standard capture uses no profile operation and cannot reopen under an unaware host", async () => {
+  const f = await fixture("standard");
+  expect(f.profiles.selectCaptureProfile).not.toHaveBeenCalled();
+  expect(f.profiles.acknowledgeCaptureProfile).not.toHaveBeenCalled();
+  const saved = await f.flow.getActiveCaptureState();
+  expect(saved).toMatchObject({schemaVersion:7,aggregatePlaintextBudgetBytes:360 * 327680});
+  expect(saved?.captureProfile).toBeUndefined();
+  await f.controller.deactivate();
+  const before = f.bff.getCapabilities as ReturnType<typeof vi.fn>;
+  const calls = before.mock.calls.length;
+  await expect(f.create(false).restore()).rejects.toThrow("capture_policy_unavailable");
+  expect(before).toHaveBeenCalledTimes(calls);
+  expect(f.source.start).not.toHaveBeenCalled();
+});
+
+it.each(["profile", "legacy"] as const)("the new native host preserves an existing %s journal", async mode => {
+  const f = await fixture(mode);
+  const saved = await f.flow.getActiveCaptureState();
+  await f.controller.deactivate();
+  const restored = f.create(true);
+  await restored.restore();
+  const reopened = await f.flow.getActiveCaptureState();
+  expect(reopened?.schemaVersion).toBe(saved?.schemaVersion);
+  expect(reopened?.captureProfile).toEqual(saved?.captureProfile);
+  expect(reopened?.aggregatePlaintextBudgetBytes).toBe(saved?.aggregatePlaintextBudgetBytes);
+  expect(reopened?.automaticRenewal).toBeUndefined();
+  expect(f.source.start).not.toHaveBeenCalled();
+});
+
+it("standard renewal rejects legacy reinterpretation, profile injection and altered durable intent", async () => {
+  const f = await fixture("standard");
+  await f.controller.startRecording(); await f.emitTo(100);
+  const saved = (await f.flow.getActiveCaptureState())!;
+  const record = saved.automaticRenewal!.record;
+  expect(record.intent.schemaVersion).toBe(2);
+  expect(() => validateRenewalRecord(record)).toThrow("capture_renewal_conflict");
+  expect(() => validateConfiguredRenewalRecord(null)).toThrow("capture_renewal_conflict");
+  expect(() => validateConfiguredRenewalRecord({...record,intent:{...record.intent,profileReceiptId:crypto.randomUUID()}}))
+    .toThrow("capture_renewal_conflict");
+  await expect(f.flow.putActiveCaptureState({...saved, schemaVersion:4, automaticRenewal:undefined}))
+    .rejects.toThrow();
+  await expect(f.flow.putActiveCaptureState({...saved, recordedChunks:361})).rejects.toThrow();
+  const changed = structuredClone(record);
+  changed.intent.leaseIdempotencyKey = "different-renew-key";
+  await expect(f.flow.putActiveCaptureState({...saved, automaticRenewal:{...saved.automaticRenewal!,record:changed}}))
+    .rejects.toThrow();
+  expect((await f.flow.getActiveCaptureState())?.automaticRenewal).toEqual(saved.automaticRenewal);
+  await f.controller.pauseRecording();
+  const paused = (await f.flow.getActiveCaptureState())!;
+  await expect(f.flow.putActiveCaptureState({...paused, schemaVersion:4, automaticRenewal:undefined,
+    continuation:{prepared:false,firstSequenceNumber:paused.recordedChunks,reservationCount:90,
+      previousLease:paused.lease,renewIdempotencyKey:"legacy-downgrade-key"}})).rejects.toThrow("active_capture_conflict");
+  await f.controller.resumeRecording();
+  expect((await f.flow.getActiveCaptureState())?.schemaVersion).toBe(7);
+});

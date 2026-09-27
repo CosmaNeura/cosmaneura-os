@@ -9,6 +9,8 @@ import {
   CONTINUATION_FLOW_RECORD_SCHEMA_VERSION,
   PROFILE_FLOW_RECORD_SCHEMA_VERSION,
   AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION,
+  STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION,
+  STANDARD_NATIVE_MAXIMUM_CHUNKS,
   type ActiveCaptureState,
   type CaptureFlowStore,
   type CapturePreparationState,
@@ -421,7 +423,7 @@ export function assertReservationIntent(value: unknown): asserts value is Reserv
 }
 
 function validCaptureChannelVersion(value: Record<string, unknown>): boolean {
-  return value.schemaVersion === PROFILE_FLOW_RECORD_SCHEMA_VERSION
+  return [PROFILE_FLOW_RECORD_SCHEMA_VERSION, STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION].includes(value.schemaVersion as 5 | 7)
       && (value.channel === undefined || value.channel === "mixed" || value.channel === "system_audio")
     || value.schemaVersion === FLOW_RECORD_SCHEMA_VERSION && value.channel === undefined
     || value.schemaVersion === CHANNEL_FLOW_RECORD_SCHEMA_VERSION
@@ -430,7 +432,7 @@ function validCaptureChannelVersion(value: Record<string, unknown>): boolean {
 
 function validActiveChannelVersion(value: Record<string, unknown>): boolean {
   return validCaptureChannelVersion(value) && value.continuation === undefined
-    || [CONTINUATION_FLOW_RECORD_SCHEMA_VERSION, PROFILE_FLOW_RECORD_SCHEMA_VERSION, AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION].includes(value.schemaVersion as 4 | 5 | 6) && value.reviewAfterUpload === true
+    || [CONTINUATION_FLOW_RECORD_SCHEMA_VERSION, PROFILE_FLOW_RECORD_SCHEMA_VERSION, AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION, STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION].includes(value.schemaVersion as 4 | 5 | 6 | 7) && value.reviewAfterUpload === true
       && (value.channel === undefined || value.channel === "mixed" || value.channel === "system_audio");
 }
 
@@ -554,10 +556,10 @@ export function assertActiveCaptureState(value: unknown): asserts value is Activ
     (value.reviewAfterUpload !== undefined && value.reviewAfterUpload !== true) ||
     !validActiveChannelVersion(value) ||
     ([PROFILE_FLOW_RECORD_SCHEMA_VERSION, AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION].includes(value.schemaVersion as 5 | 6)) !== (value.captureProfile !== undefined) ||
-    value.automaticRenewal !== undefined && value.schemaVersion !== AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION ||
+    value.automaticRenewal !== undefined && ![AUTOMATIC_FLOW_RECORD_SCHEMA_VERSION, STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION].includes(value.schemaVersion as 6 | 7) ||
     value.captureProfile !== undefined && (!isRecord(value.captureProfile) || value.reviewAfterUpload !== true
       || value.captureProfile.session_id !== value.sessionId) ||
-    (value.schemaVersion === CHANNEL_FLOW_RECORD_SCHEMA_VERSION && value.reviewAfterUpload !== true) ||
+    ([CHANNEL_FLOW_RECORD_SCHEMA_VERSION, STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION].includes(value.schemaVersion as 3 | 7) && value.reviewAfterUpload !== true) ||
     typeof value.sessionId !== "string" ||
     !isRecord(value.lease) ||
     (value.captureAuthorizedUntil !== null &&
@@ -567,6 +569,9 @@ export function assertActiveCaptureState(value: unknown): asserts value is Activ
     (value.aggregatePlaintextBudgetBytes as number) > (value.captureProfile === undefined ? MAX_AGGREGATE_PLAINTEXT_BYTES : 268435456) ||
     !isActiveCapturePhase(value.phase) ||
     typeof value.completeIdempotencyKey !== "string" ||
+    value.schemaVersion === STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION && (
+      (value.recordedChunks as number) > STANDARD_NATIVE_MAXIMUM_CHUNKS ||
+      (value.aggregatePlaintextBudgetBytes as number) > STANDARD_NATIVE_MAXIMUM_CHUNKS * 327680) ||
     !Number.isSafeInteger(value.recordedChunks) ||
     (value.recordedChunks as number) < 0 ||
     !Number.isSafeInteger(value.recordedPlaintextBytes) ||
@@ -597,7 +602,8 @@ export function assertActiveCaptureState(value: unknown): asserts value is Activ
       || (next.firstSequenceNumber as number) > (value.recordedChunks as number)
       || !Number.isSafeInteger(next.reservationCount) || (next.reservationCount as number) < 1
       || (next.reservationCount as number) > 90
-      || (next.firstSequenceNumber as number) + (next.reservationCount as number) > MAX_CHUNKS
+      || (next.firstSequenceNumber as number) + (next.reservationCount as number) >
+        (value.schemaVersion === STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION ? STANDARD_NATIVE_MAXIMUM_CHUNKS : MAX_CHUNKS)
       || typeof next.renewIdempotencyKey !== "string" || !isRecord(next.previousLease)) {
       throw new QueueInvariantError("invalid_active_capture_state");
     }
@@ -649,7 +655,9 @@ export function assertActiveCaptureProgression(
   if (
     (!same(existing.lease, replacement.lease) && !renewed && !automatic) ||
     (!same(existing.continuation, replacement.continuation) && !begins && !prepared) ||
-    (existing.schemaVersion !== replacement.schemaVersion && !startsAutomatic && !(begins && replacement.schemaVersion === CONTINUATION_FLOW_RECORD_SCHEMA_VERSION)) || existing.channel !== replacement.channel ||
+    (existing.schemaVersion !== replacement.schemaVersion && !startsAutomatic && !(begins
+      && [FLOW_RECORD_SCHEMA_VERSION, CHANNEL_FLOW_RECORD_SCHEMA_VERSION, CONTINUATION_FLOW_RECORD_SCHEMA_VERSION].includes(existing.schemaVersion as 2 | 3 | 4)
+      && replacement.schemaVersion === CONTINUATION_FLOW_RECORD_SCHEMA_VERSION)) || existing.channel !== replacement.channel ||
     existing.reviewAfterUpload !== replacement.reviewAfterUpload ||
     !same(existing.captureProfile, replacement.captureProfile) ||
     existing.completeIdempotencyKey !== replacement.completeIdempotencyKey ||
