@@ -482,6 +482,7 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
             if isinstance(operation, protocol.NativeSourceExtension):
                 return validate_native_extension(operation, envelope.receipt, session_id, binding.actor_ref, now)
             receipt_types = {
+                "native_recording_context": protocol.NativeRecordingContext,
                 "creator_review": CreatorReviewView,
                 "decide_translation": CreatorDecisionReceipt,
                 "encryption_key": protocol.EncryptionKey,
@@ -508,6 +509,8 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
             }
             receipt = receipt_types[operation.kind].model_validate(envelope.receipt)
             if getattr(receipt, "session_id", session_id) != session_id:
+                raise ValueError
+            if isinstance(receipt, protocol.NativeRecordingContext) and receipt.workspace_id != binding.workspace_id:
                 raise ValueError
             if isinstance(operation, protocol.ReserveChunks) and profile_id is not None:
                 assert isinstance(receipt, protocol.ReservationReceipt)
