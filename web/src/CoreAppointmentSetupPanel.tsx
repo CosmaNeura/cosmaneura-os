@@ -1,7 +1,7 @@
 import {useEffect,useRef,useState} from 'react';
 import {coreConnectionApi} from './core-connection-api';
 import type {AppointmentSetupCommand,AppointmentSetupResult} from './core-appointment-setup-contract';
-import type {CoreCursor,CoreWindow} from './core-connection-contract';
+import {isCoreWindow,type CoreCursor,type CoreWindow} from './core-connection-contract';
 import {useSetupNavigationBusy} from './connection-setup-flow';
 import {WORKSPACE_AUTHENTICATED_BUILD,WORKSPACE_BUILD,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
@@ -17,8 +17,7 @@ export function CoreAppointmentSetupPanel({identity,connectionSha,window,onBusyC
   const result=snapshot?.identity===identity&&snapshot.scope===scope?snapshot.result.appointment_setup:null;
   async function run(action:AppointmentSetupCommand['action'],cursor?:CoreCursor){
     if(running.current)return;
-    const difference=Date.parse(window.end_date)-Date.parse(window.start_date);
-    if(!Number.isFinite(difference)||difference<86400000||difference>31*86400000){setError('Choose a date range of 1 to 31 days.');return;}
+    if(!isCoreWindow(window)){setError('Choose a date range of 1 to 31 days, with the end date after the start date.');return;}
     if(action==='appointment_setup_connect'&&(!result||result.action!=='preview'||!result.eligible_count))return;
     running.current=true;const version=++epoch.current;controller.current?.abort();const abort=new AbortController();controller.current=abort;
     const isCurrent=()=>version===epoch.current&&currentScope.current.identity===identity&&currentScope.current.scope===scope;

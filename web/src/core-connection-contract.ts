@@ -18,6 +18,12 @@ const day=(v:unknown):v is string=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}$/.te
 const stamp=(v:unknown):v is string=>typeof v==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[+-]\d{2}:\d{2})?$/.test(v)&&day(v.slice(0,10))&&!Number.isNaN(Date.parse(v));
 const aware=(v:string)=>/(?:Z|[+-]\d{2}:\d{2})$/.test(v);
 
+export function isCoreWindow(value:unknown):value is CoreWindow{
+  if(!closed(value,'start_date,end_date')||!day(value.start_date)||!day(value.end_date))return false;
+  const days=(Date.parse(value.end_date)-Date.parse(value.start_date))/86400000;
+  return days>=1&&days<=31;
+}
+
 export function validateCoreCommand(command:CoreConnectionCommand){
   vendorCanonical(command);
   if(!vendorUuid(command.request_nonce))return fail();
@@ -25,7 +31,7 @@ export function validateCoreCommand(command:CoreConnectionCommand){
   if(!required||!closed(command,[...required,...(command.action==='encounters'&&command.cursor?['cursor']:[])].join(',')))return fail();
   if(command.action!=='connection'&&!sha(command.connection_sha256))return fail();
   if(['encounter','open'].includes(command.action)&&(!ref(command.appointment_ref,'appointment')||!sha(command.source_sha256)))return fail();
-  if(command.window&&(!closed(command.window,'start_date,end_date')||!day(command.window.start_date)||!day(command.window.end_date)||Date.parse(command.window.end_date)-Date.parse(command.window.start_date)<86400000||Date.parse(command.window.end_date)-Date.parse(command.window.start_date)>31*86400000))return fail();
+  if(command.action==='encounters'&&!isCoreWindow(command.window))return fail();
   if(command.cursor)validateCursor(command.cursor);
   if(new TextEncoder().encode(JSON.stringify(command)).length>2048)return fail();
 }

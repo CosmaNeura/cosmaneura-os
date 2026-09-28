@@ -1,6 +1,6 @@
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import fixture from './__fixtures__/core-connection.json';
-import {coreDigest,validateCoreConnection,type CoreConnectionCommand} from './core-connection-contract';
+import {coreDigest,validateCoreCommand,validateCoreConnection,type CoreConnectionCommand} from './core-connection-contract';
 
 beforeEach(()=>vi.setSystemTime(new Date(fixture.connection.response.discovery.checked_at)));
 afterEach(()=>vi.useRealTimers());
@@ -27,4 +27,18 @@ it('rejects a response that moves an appointment outside the requested dates eve
   entry.appointment.appointment_date='2026-10-23T09:00:00';
   const {source_sha256:_,...body}=entry;entry.source_sha256=await coreDigest(body);
   await expect(validateCoreConnection(item.response,item.command as CoreConnectionCommand)).rejects.toThrow();
+});
+it.each([
+  {start_date:'2026-03-08',end_date:'2026-03-09'},
+  {start_date:'2026-03-01',end_date:'2026-04-01'},
+])('accepts supported date-range boundaries across the daylight-saving transition',window=>{
+  expect(()=>validateCoreCommand({...fixture.encounters.command,action:'encounters',window})).not.toThrow();
+});
+it.each([
+  null,
+  {start_date:'2026-09-24',end_date:'2026-09-24'},
+  {start_date:'2026-09-01',end_date:'2026-10-03'},
+  {start_date:'2026-02-30',end_date:'2026-03-03'},
+])('rejects absent, empty, overlong or nonexistent date ranges before transport: %j',window=>{
+  expect(()=>validateCoreCommand({...fixture.encounters.command,window} as CoreConnectionCommand)).toThrow();
 });
