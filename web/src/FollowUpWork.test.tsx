@@ -23,7 +23,7 @@ describe("follow-up work", () => {
     Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); vi.clearAllMocks();
     container = document.createElement("div"); document.body.append(container); root = createRoot(container); await render();
   });
-  afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.unstubAllEnvs(); });
   const button = (name: string) => [...container.querySelectorAll("button")].find(b => b.textContent === name)!;
   async function click(name: string) { await act(async () => button(name).click()); }
   async function input(label: string, value: string) {
@@ -110,5 +110,26 @@ describe("follow-up work", () => {
     expect(container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
     await check("Share this message");
     expect(button("Save follow-up proposal").disabled).toBe(false);
+  });
+
+  it("directs hosted follow-up to connected delivery instead of the rejected local proposal route", async () => {
+    vi.stubEnv("VITE_WORKSPACE_HOSTED_ENABLED", "true");
+    await render();
+    expect(container.textContent).toContain("Messages and referrals");
+    expect(button("Save follow-up proposal")).toBeUndefined();
+    expect(container.querySelector("form")).toBeNull();
+    expect(onSave).not.toHaveBeenCalled();
+  });
+
+  it("retains older rehearsal records in hosted builds without approval or completion commands", async () => {
+    vi.stubEnv("VITE_WORKSPACE_HOSTED_ENABLED", "true");
+    for (const state of ["pending_approval", "approved", "sent", "closed"]) {
+      await render({...initial, follow_ups: [{...item, state}]});
+      expect(container.textContent).toContain(item.body);
+      expect(container.textContent).toContain("read-only rehearsal record");
+      for (const name of ["Approve local delivery", "Resume local delivery", "Dismiss proposal", "Record completion"])
+        expect(button(name)).toBeUndefined();
+    }
+    expect(onSave).not.toHaveBeenCalled();
   });
 });

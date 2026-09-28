@@ -52,7 +52,7 @@ beforeEach(()=>{
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);vi.clearAllMocks();records=new Map();failWrites=false;access=makeAccess();
   element=document.createElement("div");document.body.append(element);root=createRoot(element);
 });
-afterEach(async()=>{await act(async()=>root.unmount());access.journal.close();element.remove();vi.unstubAllGlobals();});
+afterEach(async()=>{await act(async()=>root.unmount());access.journal.close();element.remove();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 
 it("restores unsent proposal fields including a partial date without restoring sharing consent",async()=>{
   await render();await fillProposal();await check("Share this message");
@@ -141,4 +141,28 @@ it("blocks form actions when device storage fails and preserves earlier committe
 it("does not bypass recovery while the authenticated journal is unavailable",async()=>{
   await render(workspace,null);expect(field("Follow-up message").disabled).toBe(true);expect(field("Completion evidence").disabled).toBe(true);
   expect(button("Record completion").disabled).toBe(true);expect(onSave).not.toHaveBeenCalled();
+});
+
+it("keeps an earlier rehearsal proposal recoverable in the hosted delivery workflow",async()=>{
+  await render();await fillProposal();
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_ENABLED","true");
+  await restart();await click("Restore follow-up proposal draft");
+  expect(field("Earlier follow-up message").value).toBe("Unsent invented message");
+  expect(element.textContent).toContain("Unfinished invented result");
+  expect(element.textContent).toContain("10/");
+  expect(button("Save follow-up proposal")).toBeUndefined();
+  expect(data(proposalAddress)).toMatchObject({body:"Unsent invented message"});
+  expect(onSave).not.toHaveBeenCalled();
+  await click("Discard rehearsal draft");
+  expect(records.get(proposalAddress)?.value).toBeNull();
+});
+
+it("restores old completion text as read-only in hosted builds without claiming completion",async()=>{
+  await render();await input("Completion evidence","Earlier unsubmitted result");
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_ENABLED","true");
+  await restart();await click("Restore follow-up result draft");
+  expect(field("Earlier completion evidence").value).toBe("Earlier unsubmitted result");
+  expect(button("Record completion")).toBeUndefined();
+  expect(data(resultAddress)).toMatchObject({evidence:"Earlier unsubmitted result"});
+  expect(onSave).not.toHaveBeenCalled();
 });
