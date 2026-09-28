@@ -152,11 +152,35 @@ extension NativeProviderRecordingRun: NativeProviderRecordingInterval {}
       saved.committedPlaintextBytes < NativeRecordingFlowOwner.maximumPlaintextBytes
     else { throw ProviderNativeError.unavailable }
     try current(generation)
+    let recoverSavedPosition = failure == .recoveryFailed
     phase = .starting
     failure = nil
     let ticket = generation
     let task = Task { @MainActor [self] in
       do {
+        var checkpoint = saved
+        if recoverSavedPosition {
+          do {
+            // Stop may have committed audio before sealing failed. Authenticate
+            // retained audio before choosing the next source position.
+            checkpoint = try await flow.reconcileAfterStop(encryption: cipher)
+            try current(ticket)
+            self.saved = checkpoint
+          } catch {
+            if phase == .starting {
+              phase = .paused
+              failure = .recoveryFailed
+            }
+            throw error
+          }
+          if checkpoint.phase == .sealed {
+            phase = .sealed
+            throw ProviderNativeError.unavailable
+          }
+        }
+        guard checkpoint.committedChunks < 360,
+          checkpoint.committedPlaintextBytes < NativeRecordingFlowOwner.maximumPlaintextBytes
+        else { throw ProviderNativeError.unavailable }
         var lease = try await leases.open()
         try current(ticket)
         // Expired/near-expiry receipts remain useful for upload recovery but
@@ -169,14 +193,15 @@ extension NativeProviderRecordingRun: NativeProviderRecordingInterval {}
           throw ProviderNativeError.unavailable
         }
         let batch = try await reservations.reserve(
-          lease: lease, first: saved.committedChunks, count: min(90, 360 - saved.committedChunks))
+          lease: lease, first: checkpoint.committedChunks,
+          count: min(90, 360 - checkpoint.committedChunks))
         try current(ticket)
         // Retain the original source proof even if graph construction fails.
         // No discarded constructor error may orphan stop-only custody.
         source = try makeSource(lease, batch)
         run = nil
         let next = try makeRun(
-          source!, cipher, saved.committedPlaintextBytes, lease, batch, leases, reservations, input)
+          source!, cipher, checkpoint.committedPlaintextBytes, lease, batch, leases, reservations, input)
         run = next
         try await next.start()
         try current(ticket)
@@ -325,7 +350,7 @@ extension NativeProviderRecordingRun: NativeProviderRecordingInterval {}
           saved = try await flow.reconcileAfterStop(encryption: cipher)
           try current(ticket)
         }
-        phase = .paused
+        phase = saved?.phase == .sealed ? .sealed : .paused
         if failure == .stopPending || failure == .recoveryFailed { failure = nil }
       } catch {
         phase = .stopPending

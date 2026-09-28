@@ -41,5 +41,21 @@
     "Resolve the signed OS identity and immutable Core-backed context before opening native custody; derive UUIDv8 recovery namespace from native account digest and the server recovery scope.",
     "Retain native auth, connection, source recovery and recording bridge across WebViews; serialize renderer source operations and preserve exact-owner native capture during reload.",
     "Use the existing shared NativeRecordingQueueStore and explicit source-extension authorizer. Factory remains iOS-only; Mac bridge compilation does not establish Mac native recording."
-  ]
+  ],
+  "recovery_update": {
+    "commit": "feff473ab58b53beb980ee583523c63a7ea3ffd3",
+    "merge_commit": "1250e5b5c00ad5d99e402b623ab3ee77474498fa",
+    "pull_request": 186,
+    "paths": {
+      "apps/capture/native-plugins/cosmas-native-auth/Bridge/NativeProviderRecordingHost.swift": "49cf6487756872fd275aaba16f3ca03ab08beead",
+      "scripts/standalone-provider/check-native-recording-host.swift": "aecb1d2c687fe07ee106f21e2d4dcc60cca180c4",
+      "apps/capture/src/provider/native-recorder.ts": "cc2b778b3bf488c6f2edd3f5d328d028bfad792a"
+    },
+    "adaptations": [
+      "Retain the CosmaBot 360-position profile, source authority, key and queue namespaces.",
+      "Reconcile failed-seal Resume before reserving another source position.",
+      "CosmaBot Prepare to resume uses pause/reconciliation; preserve a recovered sealed phase and offer upload instead of another Start.",
+      "Enable explicit saving retry with an unconfirmed zero cached count; no automatic microphone restart."
+    ]
+  }
 }

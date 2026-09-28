@@ -146,6 +146,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
   const participantRegions = regions.split(",").map(value => value.trim().toUpperCase()).filter(Boolean);
   const validRegions = participantRegions.length > 0 && participantRegions.length <= 16 &&
     participantRegions.every(value => /^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$/.test(value)) && new Set(participantRegions).size === participantRegions.length;
+  const savingUnconfirmed = !!snapshot.native && snapshot.statusCode === "capture_recovery_pending";
   const status = busy === "prepare" ? "Preparing…" : busy === "start" ? "Starting…" :
     snapshot.state === "recording" ? "Recording" : snapshot.state === "ready" ? "Ready to start" :
     snapshot.state === "paused" ? "Recording paused" : snapshot.state === "processing" ? "Audio uploaded" :
@@ -215,7 +216,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
         </> : (recoveryEnabled && !configured || configured && runtime.current?.supportsContinuation) ? <>
           {snapshot.recoveryDecision ? <button disabled={!!busy} onClick={() => void act(snapshot.recoveryDecision === "finish_capture" ? "finish_gap" : "gap")}>Retry recovery</button> : <>
             <button disabled={!!busy} onClick={() => void act("gap")}>Prepare to resume</button>
-            <button disabled={!!busy || !snapshot.recordedChunks} onClick={() => void act("finish_gap")}>Finish this recording</button>
+            <button disabled={!!busy || !snapshot.recordedChunks && !savingUnconfirmed} onClick={() => void act("finish_gap")}>{savingUnconfirmed ? "Retry saving and upload" : "Finish this recording"}</button>
           </>}
           <small>The interruption stays in the record. Resuming requires a separate press of Start recording.</small>
         </> : <>
@@ -229,6 +230,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
       {snapshot.statusCode === "capture_start_unconfirmed" && <p className="team-fine">Recording could not start. Choose Prepare to resume to check the connection, then press Start recording.</p>}
       {snapshot.statusCode === "capture_stop_acknowledgement_pending" && <p className="team-fine">Audio capture has stopped. The connection must confirm this before recording can resume or upload. Choose Prepare to resume or Finish this recording to retry.</p>}
       {snapshot.statusCode === "capture_upload_pending" && <p className="team-fine">Audio is saved on this device. Choose Retry saved work when the connection is available to continue uploading.</p>}
+      {savingUnconfirmed && <p className="team-fine">Recording is stopped, but saving could not be confirmed. Retry saving and upload, or choose Prepare to resume to verify the saved audio before recording again.</p>}
       {!configured && snapshot.state === "processing" && <p className="team-fine">{snapshot.statusCode === "capture_gap_review_required" ? "Audio is saved. Interruption review is required before this recording can produce a note." : "Audio is saved. Check here for the transcript while transcription finishes."}</p>}
       {snapshot.statusCode === "capture_transcription_terminal" && <p className="capture-error" role="alert">Transcription could not finish. The saved recording needs attention before a note can be prepared.</p>}
       {snapshot.statusCode === "capture_renewal_unconfirmed" && <p className="team-fine">Recording has stopped and your audio is saved on this device. Choose Retry saved work when the connection is available to finish uploading.</p>}

@@ -145,6 +145,19 @@ it("selects an iPhone input while paused without starting a recording", async ()
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
 });
 
+it("lets a native recording retry saving even when its cached audio count is zero", async () => {
+  runtime.sourceKind="microphone";runtime.captureMode="native_microphone";runtime.supportsContinuation=true;
+  vi.mocked(prepareCapture).mockResolvedValue({...prepared,configured_capture:{schema_version:"1.0",language_mode:"en-US"}});
+  snapshot={...snapshot,state:"paused",statusCode:"capture_recovery_pending",recordedChunks:0,
+    native:{...nativeState(),phase:"paused"}};
+  await click("Open recording");
+  expect(container.textContent).toContain("saving could not be confirmed");
+  expect(button("Retry saving and upload").disabled).toBe(false);
+  await click("Retry saving and upload");
+  expect(runtime.controller.finishInterruptedCapture).toHaveBeenCalledOnce();
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+});
+
 it("opens a specific Scribe task without starting capture and keeps its identity on exact retries", async () => {
   const taskBot = {selection: {address: "00000000-0000-4000-8000-000000000005", team_revision: 2}, name: "Visit partner", enabled: true, includeNotebook: true};
   vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"})
