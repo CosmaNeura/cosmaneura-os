@@ -3,6 +3,7 @@ import { useUnsavedWork } from "./unsaved-work";
 import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from "./editor-recovery";
 import { DraftStoreError } from "./draft-store";
 import type { FollowUp, FollowUpOperation, Workspace } from "./workspace-api";
+import { hostedWorkspaceRequested } from "./hosted-workspace";
 
 function isoDate(value: string) {
   const parts = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value);
@@ -21,6 +22,7 @@ function relativeDate(days: number) {
 export function FollowUpWork({ workspace, locked: parentLocked, onSave, onReview }: {
   workspace: Workspace; locked: boolean; onSave: (operation: FollowUpOperation) => void; onReview: () => void;
 }) {
+  const rehearsal = !hostedWorkspaceRequested();
   const note = workspace.note?.latest;
   const [body, setBody] = useState("");
   const [due, setDue] = useState("");
@@ -46,7 +48,7 @@ export function FollowUpWork({ workspace, locked: parentLocked, onSave, onReview
   useEffect(() => { setShare(false); }, [note?.id, note?.sources_changed]);
   useEffect(() => { if (!hasText) setBaseNoteId(note?.id ?? null); }, [hasText, note?.id]);
   async function propose() {
-    if (locked || sending.current || changedNote || !note?.review || note.sources_changed || !share || !body.trim() || !outcome.trim() || !dueDate) return;
+    if (!rehearsal || locked || sending.current || changedNote || !note?.review || note.sources_changed || !share || !body.trim() || !outcome.trim() || !dueDate) return;
     sending.current = true; setSubmitting(true);
     const key = crypto.randomUUID(); setSubmitted(key);
     try {
@@ -60,7 +62,9 @@ export function FollowUpWork({ workspace, locked: parentLocked, onSave, onReview
   }
   return <section aria-label="Encounter follow-ups" className="team-follow-ups">
     <h2>Follow-ups</h2>
-    <p className="team-fine">Turn a reviewed plan into work with an owner, due date and result. Delivery currently runs only in the local synthetic rehearsal.</p>
+    <p className="team-fine">{rehearsal
+      ? "Turn a reviewed plan into work with an owner, due date and result. Delivery currently runs only in the local synthetic rehearsal."
+      : "Use Messages and referrals below to prepare a follow-up from your reviewed note, choose a connected recipient, and review and approve delivery."}</p>
     <EditorRecoveryNotice recovery={recovery} label="Follow-up proposal" onRestore={async draft => {
       const data = draft.data; editorData(data, "body,due,outcome,baseNoteId,submitted");
       if (draft.pending !== null || typeof data.body !== "string" || data.body.length > 4000 ||
@@ -70,12 +74,17 @@ export function FollowUpWork({ workspace, locked: parentLocked, onSave, onReview
       setBody(data.body); setDue(data.due); setOutcome(data.outcome); setBaseNoteId(data.baseNoteId as string | null);
       setShare(false); setSubmitted(data.submitted as string | null);
     }} />
-    {hasText && (changedNote || !note?.review || note.sources_changed) && <aside className="team-note-notice"><p>Your follow-up text belongs to an earlier note or source snapshot. Compare it with the current reviewed plan before sharing.</p>
+    {hasText && (!rehearsal || changedNote || !note?.review || note.sources_changed) && <aside className="team-note-notice"><p>{rehearsal
+      ? "Your follow-up text belongs to an earlier note or source snapshot. Compare it with the current reviewed plan before sharing."
+      : "Your earlier rehearsal draft is retained. You can copy the text into Messages and referrals and review it for the current note and recipient."}</p>
       <label>Earlier follow-up message<textarea readOnly value={body} /></label>
       <p>Due date: {due || "Not entered"} · Expected result: {outcome || "Not entered"}</p>
-      <button disabled={locked || !note?.review || note.sources_changed} onClick={() => { setBaseNoteId(note!.id); setShare(false); }}>Use this text with the current reviewed note</button>
+      {rehearsal ? <button disabled={locked || !note?.review || note.sources_changed} onClick={() => { setBaseNoteId(note!.id); setShare(false); }}>Use this text with the current reviewed note</button>
+        : <button disabled={locked} onClick={() => void recovery.commit(null).then(() => {
+          setBody(""); setDue(""); setOutcome(""); setShare(false); setSubmitted(null);
+        }).catch(() => {})}>Discard rehearsal draft</button>}
     </aside>}
-    {!note?.review || note.sources_changed ? <p>Review the current note and its sources before proposing work. <button className="team-subtle" onClick={onReview}>Open note review</button></p> :
+    {rehearsal && (!note?.review || note.sources_changed ? <p>Review the current note and its sources before proposing work. <button className="team-subtle" onClick={onReview}>Open note review</button></p> :
       <details className="team-follow-up-create"><summary>Propose a follow-up</summary>
         <form onSubmit={e => { e.preventDefault(); void propose(); }}>
           <p className="team-fine">Based on reviewed note version {note.version}. Owner: you. Target: {workspace.label} · local synthetic destination.</p>
@@ -92,13 +101,13 @@ export function FollowUpWork({ workspace, locked: parentLocked, onSave, onReview
           <p className="team-fine">Your private note stays private. Saving a proposal does not authorize delivery.</p>
           <button className="team-primary" disabled={locked || changedNote || !share || !body.trim() || !outcome.trim() || !dueDate}>Save follow-up proposal</button>
         </form>
-      </details>}
-    {workspace.follow_ups?.map(item => <FollowUpCard key={item.ticket_id} item={item} workspaceId={workspace.id} label={workspace.label} locked={locked} onSave={onSave} />)}
+      </details>)}
+    {workspace.follow_ups?.map(item => <FollowUpCard key={item.ticket_id} item={item} workspaceId={workspace.id} label={workspace.label} locked={locked} readOnly={!rehearsal} onSave={onSave} />)}
   </section>;
 }
 
-function FollowUpCard({ item, workspaceId, label, locked: parentLocked, onSave }: {
-  item: FollowUp; workspaceId: string; label: string; locked: boolean; onSave: (operation: FollowUpOperation) => void;
+function FollowUpCard({ item, workspaceId, label, locked: parentLocked, readOnly, onSave }: {
+  item: FollowUp; workspaceId: string; label: string; locked: boolean; readOnly: boolean; onSave: (operation: FollowUpOperation) => void;
 }) {
   const [confirmed, setConfirmed] = useState(false);
   const [evidence, setEvidence] = useState("");
@@ -129,6 +138,7 @@ function FollowUpCard({ item, workspaceId, label, locked: parentLocked, onSave }
     body: { revision_id: item.revision_id, payload_hash: item.payload_hash, choice } });
   return <article className="team-work-card team-follow-up-card" aria-label="Follow-up proposal">
     <span className="team-kicker">FOLLOW-UP · NOTE VERSION {item.note_version}</span>
+    {readOnly && <p className="team-fine">Saved read-only rehearsal record. Connected delivery is tracked separately in Messages and referrals.</p>}
     <p className="team-pill">{status}</p>
     <p className="team-follow-up-body">{item.body}</p>
     <p><strong>Expected result:</strong> {item.expected_outcome}</p>
@@ -140,17 +150,18 @@ function FollowUpCard({ item, workspaceId, label, locked: parentLocked, onSave }
       setEvidence(data.evidence); setBase({revisionId:data.revisionId,payloadHash:data.payloadHash});
       setResultChecked(false); setConfirmed(false);
     }} />
-    {evidence && (changedWork || item.state !== "sent" || !responsible) && <aside className="team-note-notice">
-      <p>Your earlier result text is retained. The work revision, status or responsibility differs; this text has not completed the current work.</p>
+    {evidence && (readOnly || changedWork || item.state !== "sent" || !responsible) && <aside className="team-note-notice">
+      <p>{readOnly ? "Your rehearsal result draft is retained for reference. It has not completed connected delivery work."
+        : "Your earlier result text is retained. The work revision, status or responsibility differs; this text has not completed the current work."}</p>
       <label>Earlier completion evidence<textarea readOnly value={evidence} /></label>
-      {item.state === "sent" && responsible && <button disabled={locked} onClick={() => {
+      {!readOnly && item.state === "sent" && responsible && <button disabled={locked} onClick={() => {
         setBase({revisionId:item.revision_id,payloadHash:item.payload_hash}); setResultChecked(false);
       }}>Use this text for the current result</button>}
       <button disabled={locked} onClick={() => void recovery.commit(null).then(() => {setEvidence("");setResultChecked(false);}).catch(() => {})}>Discard earlier result draft</button>
     </aside>}
     <p className="team-fine">Responsible: {responsible ? "you" : "a practice colleague · see Practice work"} · Due {dueDate.toLocaleDateString()}{overdue ? " · Overdue" : ""}<br />Target: {label} · local synthetic destination</p>
-    {item.source_changed && <p className="team-note-notice">The source note or evidence changed. {awaiting ? "Dismiss this proposal and create a new one from the current reviewed note." : "This record keeps the earlier note version as its source."}</p>}
-    {awaiting && <div className="team-follow-up-actions">
+    {item.source_changed && <p className="team-note-notice">The source note or evidence changed. {awaiting && !readOnly ? "Dismiss this proposal and create a new one from the current reviewed note." : "This record keeps the earlier note version as its source."}</p>}
+    {awaiting && !readOnly && <div className="team-follow-up-actions">
       {item.core_check_required && <p className="team-fine">Core will be checked again before approval and local delivery. Changed or unavailable notes leave delivery pending.</p>}
       {!item.source_changed && <><label className="team-check"><input type="checkbox" disabled={locked} checked={confirmed} onChange={e => setConfirmed(e.target.checked)} />I approve this exact message, target, owner, due date and expected result for local rehearsal.</label>
         <button className="team-primary" disabled={locked || !confirmed} onClick={() => decision("approve")}>{item.state === "approved" ? "Resume local delivery" : "Approve local delivery"}</button></>}
@@ -160,7 +171,7 @@ function FollowUpCard({ item, workspaceId, label, locked: parentLocked, onSave }
       <strong>{receipt.kind === "local_delivery" ? "Local delivery receipt" : receipt.actor_id === item.owner_id ? "Result recorded by you" : "Result recorded by your colleague"}</strong>
       <p>{receipt.content}</p><small>{new Date(receipt.created_at).toLocaleString()}</small>
     </div>)}
-    {item.state === "sent" && responsible && <details><summary>Record the result</summary>
+    {!readOnly && item.state === "sent" && responsible && <details><summary>Record the result</summary>
       <p className="team-fine">Local delivery does not prove that the intended result occurred. Record the evidence you checked. This result joins the shared work record.</p>
       <label>Completion evidence<textarea disabled={locked} rows={3} maxLength={2000} value={evidence} onChange={e => { setEvidence(e.target.value); setResultChecked(false); }} /></label>
       <label className="team-check"><input type="checkbox" disabled={locked || changedWork} checked={resultChecked} onChange={e => setResultChecked(e.target.checked)} />I checked that the expected result occurred.</label>
