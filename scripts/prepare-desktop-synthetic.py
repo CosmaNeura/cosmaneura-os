@@ -231,7 +231,7 @@ def main():
         prepare_native_capture(root, output, app)
     (app / "package.json").write_text(json.dumps({
         "name": "cosmas-os-beta" if operational else "cosmas-os-synthetic", "version": args.app_version, "private": True,
-        "type": "module", "main": "main.mjs", "productName": "CosmasOS Beta" if operational else "CosmasOS Synth",
+        "type": "module", "main": "main.mjs", "productName": "CosmaBot" if operational else "CosmasOS Synth",
     }, indent=2) + "\n")
     (app / "synthetic-build.json").write_text(json.dumps({
         "mode": "hosted-beta-authenticated" if hosted else "local-synthetic-authenticated" if args.native_auth_helper else "local-synthetic",

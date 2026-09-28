@@ -55,7 +55,7 @@ try {
   contentSecurityPolicy = privateDocumentContentSecurityPolicy(captureContentSecurityPolicy(RENDERER_CONTENT_SECURITY_POLICY, config.captureUploadOrigins));
   // Validate compatibility before Electron opens a persistent session or native helper.
   stateDirectory = await prepareDesktopState(config, app.getPath('appData'), process.versions.electron);
-  app.setName(hosted ? 'CosmasOS Beta' : 'CosmasOS Synth');app.setPath('userData',stateDirectory);app.setPath('sessionData',stateDirectory);
+  app.setName(config.nativeIdentity ? 'CosmaBot' : hosted ? 'CosmasOS Beta' : 'CosmasOS Synth');app.setPath('userData',stateDirectory);app.setPath('sessionData',stateDirectory);
   protocol.registerSchemesAsPrivileged([{...PACKAGED_APP_SCHEME,
     privileges: {...PACKAGED_APP_SCHEME.privileges,supportFetchAPI:true,corsEnabled:true}}]);
 } catch { startupFailed=true; }
@@ -91,7 +91,7 @@ async function bootstrap() {
   });
   const secure = createSecureBrowserWindowOptions(join(root, 'auth-preload.cjs'));
   window = new BrowserWindow({...secure, width: 1380, height: 900, minWidth: 360,
-    title: 'CosmasOS · Beta', backgroundColor: '#f7f8f6', autoHideMenuBar: true,
+    title: 'CosmaBot', backgroundColor: '#f7f8f6', autoHideMenuBar: true,
     webPreferences: {...secure.webPreferences, partition}});
   installElectronRendererSecurity(window.webContents, 'app://cosmas/index.html');
   installDesktopCloseProtection(window, dialog);
