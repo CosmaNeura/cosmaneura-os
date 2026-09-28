@@ -44,6 +44,7 @@ vi.mock("@clerk/react", () => ({
 }));
 
 import { type QueueItem } from "./api";
+import { ClerkBetaApp } from "./App";
 import { RuntimeApp, resolveBetaFrontendConfiguration } from "./runtime";
 
 const pendingTicket: QueueItem = {
@@ -177,6 +178,35 @@ describe("beta runtime", () => {
       expect(container.textContent).toContain(expectedCopy);
     },
   );
+
+  it("offers an account switch when the signed-in user has no organization", async () => {
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+    clerkHarness.auth.isLoaded = true; clerkHarness.auth.isSignedIn = true;
+    await act(async () => root.render(betaApp()));
+    const controls = container.querySelector('[aria-label="Account and organization"]');
+    expect(controls?.textContent).toContain("Organization switcher");
+    expect(controls?.textContent).toContain("User menu");
+    expect(container.textContent).toContain("accept your invitation");
+    expect(clerkHarness.auth.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
+    clerkHarness.auth.isSignedIn = false; await act(async () => root.render(betaApp()));
+    expect(container.textContent).toContain("Clerk sign in");
+    expect(container.textContent).not.toContain("Organization switcher");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each(["token getter", "user", "session"])("offers account recovery when the %s is missing", async missing => {
+    const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);
+    clerkHarness.auth = { isLoaded: true, isSignedIn: true, orgId: "org_offlineBetaLab",
+      userId: "user_test", sessionId: "sess_test", getToken: vi.fn() };
+    if (missing === "token getter") Object.assign(clerkHarness.auth, { getToken: undefined });
+    if (missing === "user") delete clerkHarness.auth.userId;
+    if (missing === "session") delete clerkHarness.auth.sessionId;
+    await act(async () => root.render(createElement(ClerkBetaApp, { workspace: true })));
+    expect(container.textContent).toContain("Secure session unavailable");
+    expect(container.querySelector('[aria-label="Account and organization"]')?.textContent).toContain("User menu");
+    expect(fetchMock).not.toHaveBeenCalled();
+    if (clerkHarness.auth.getToken) expect(clerkHarness.auth.getToken).not.toHaveBeenCalled();
+  });
 
   it("gets a new uncached token for the initial queue, action, and refresh", async () => {
     const sentTicket = { ...pendingTicket, state: "sent" };

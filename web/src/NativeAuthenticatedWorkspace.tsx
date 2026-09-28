@@ -114,7 +114,12 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;
   }
   if (state?.phase === "unavailable" || failed) return <StatusScreen title="Secure session is unavailable"
-    detail="Reopen the app to check your session again. Your workspace is closed." />;
+    detail="Try signing in again. If the problem continues, reopen the app. Your workspace stays closed until your account is verified.">
+    <div className="row account-controls" aria-label="Account recovery">
+      <button className="button" onClick={() => void act("signIn")}>Sign in again</button>
+      <button className="button secondary" onClick={() => void act("signOut")}>Sign out</button>
+    </div>
+  </StatusScreen>;
   if (!state || state.phase === "loading") return <StatusScreen title="Checking your session"
     detail="Your workspace will open after your account is verified." role="status" />;
   const pending = state.phase === "signOutPending";

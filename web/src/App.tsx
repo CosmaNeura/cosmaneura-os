@@ -372,29 +372,33 @@ export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
     );
   }
 
+  const accountControls = <div className="row account-controls" aria-label="Account and organization">
+    <OrganizationSwitcher hidePersonal /><UserButton />
+  </div>;
+
   if (!isValidClerkOrganizationId(auth.orgId)) {
     return (
       <StatusScreen
         title="Choose an organization"
-        detail="An active Cosmas Organization is required before any work can be loaded."
+        detail="Select your practice's organization. If it isn't listed, accept your invitation or use the account menu to sign in with your invited account."
       >
-        <OrganizationSwitcher hidePersonal />
+        {accountControls}
       </StatusScreen>
     );
   }
 
-  if (typeof auth.getToken !== "function") {
+  if (typeof auth.getToken !== "function" || (workspace && (!auth.sessionId || !auth.userId))) {
     return (
       <StatusScreen
         title="Secure session unavailable"
-        detail="Sign out and sign in again. No work has been loaded."
-      />
+        detail="Use the account menu to sign out, then sign in again. No work has been loaded."
+      >
+        {accountControls}
+      </StatusScreen>
     );
   }
 
   if (workspace) {
-    if (!auth.sessionId || !auth.userId) return <StatusScreen title="Secure session unavailable"
-      detail="Sign out and sign in again. No work has been loaded." />;
     return <SignedInWorkspace key={`${auth.userId}:${auth.sessionId}:${auth.orgId}`} getToken={auth.getToken} />;
   }
 

@@ -100,6 +100,33 @@ describe("native workspace session", () => {
     }
     expect(container.textContent).toContain("Private invented label");
   });
+  it("recovers an unavailable session without admitting events during sign-in", async () => {
+    const native = harness({ ...signedOut, phase: "unavailable" });
+    const signin = deferred<void>(); native.plugin.signIn.mockReturnValueOnce(signin.promise);
+    await render(native); await click("Sign in again");
+    await act(async () => native.emit(first));
+    expect(container.textContent).toContain("Updating your secure session");
+    expect(container.textContent).not.toContain("Choose an encounter");
+    expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
+    native.set(second); await act(async () => signin.resolve());
+    await click("Choose an encounter");
+    expect(native.plugin.signIn).toHaveBeenCalledOnce();
+    expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: second.revision }]]);
+    expect(container.textContent).toContain("Private invented label");
+  });
+  it("keeps a failed recovery closed and allows sign-out when session reads recover", async () => {
+    const native = harness(); native.plugin.getState.mockRejectedValue(new Error("private provider detail"));
+    native.plugin.signIn.mockRejectedValue(new Error("private provider detail"));
+    await render(native); await click("Sign in again");
+    expect(container.textContent).toContain("Secure session is unavailable");
+    expect(container.textContent).not.toContain("private provider detail");
+    expect(container.textContent).not.toContain("Choose an encounter");
+    expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
+    native.plugin.getState.mockResolvedValue(signedOut); await click("Sign out");
+    expect(native.plugin.signOut).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain("Sign in to Cosmas");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
   it("discards private labels and a pending token when identity changes", async () => {
     const native = harness(); await render(native); await click("Choose an encounter");
     const late = deferred<unknown>(); native.plugin.getToken.mockReturnValueOnce(late.promise);
