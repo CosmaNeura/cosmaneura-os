@@ -27,6 +27,40 @@ async function fixture() {
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe("native provider controller", () => {
+  it("keeps failed saving recoverable instead of claiming zero cached chunks means no audio", async () => {
+    const h = await fixture(), command = h.port.command;
+    h.port.command = async request => {
+      if (request.kind !== "seal") return command(request);
+      h.f.set({ phase: "paused", failure: "recoveryFailed" });
+      return h.f.response(request.requestId, false);
+    };
+    const view = await h.open();
+    try {
+      await expect(view.controller.stopRecording()).rejects.toThrow();
+      expect(view.controller.snapshot).toMatchObject({ state: "paused", recordedChunks: 0,
+        statusCode: "capture_recovery_pending" });
+      expect(h.commands.some(c => c.kind === "start")).toBe(false);
+    } finally { await view.deactivate(); h.storage.close(); }
+  });
+
+  it("offers upload when preparation recovers an already sealed recording", async () => {
+    const h = await fixture(), command = h.port.command;
+    h.f.set({ phase: "paused", failure: "recoveryFailed" });
+    h.port.command = async request => {
+      if (request.kind !== "pause") return command(request);
+      h.f.set({ phase: "sealed", failure: null, recordedChunks: 1, recordedPlaintextBytes: 204,
+        completion: { idempotencyKey: crypto.randomUUID(), leaseId: crypto.randomUUID(),
+          leaseGeneration: 1, finalSequence: 0 } });
+      return h.f.response(request.requestId);
+    };
+    const view = await h.open();
+    try {
+      await view.controller.prepareContinuation();
+      expect(view.controller.snapshot).toMatchObject({ state: "uploading", statusCode: "capture_upload_pending" });
+      expect(h.commands.some(c => c.kind === "start")).toBe(false);
+    } finally { await view.deactivate(); h.storage.close(); }
+  });
+
   it("shows Starting immediately, permits cancellation and ignores an older late start response", async () => {
     const h = await fixture(), pending = deferred<unknown>(), command = h.port.command;
     let startID = "";
