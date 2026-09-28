@@ -1808,6 +1808,10 @@ install_capture_boundaries(app, _capture_connection)
 
 app.include_router(core_connection_router(settings=lambda: settings, session_factory=lambda: SessionLocal(),
     identity_dependency=_identity, workspace_gate=_workspace_gate))
+from cosmas_os.api.connection_catalog import router as connection_catalog_router  # noqa: E402
+
+app.include_router(connection_catalog_router(settings=lambda: settings, runtime=lambda: app.state,
+    identity_dependency=_identity, workspace_gate=_workspace_gate))
 install_record_boundary(app)
 install_core_connection_boundary(app)
 

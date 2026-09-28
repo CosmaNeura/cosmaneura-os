@@ -628,3 +628,21 @@ test('forwards current Inbox and Membership team generations without changing ac
   }
   }
 });
+
+
+test('connection catalog is a bounded authenticated read with no setup mutation', async () => {
+  const path='/connections/catalog', headers={'X-Cosmas-Connection-Contract':'1'};
+  assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,'GET'),path);
+  for(const [suffix,method] of [['','POST'],['?account=other','GET'],['/google','GET']])
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path+suffix,method),null);
+  const denied=await proxyAuthenticatedWorkspaceRequest(request(path),fixture(),()=>assert.fail('contract required'));
+  assert.equal(denied.status,426);
+  const result=await proxyAuthenticatedWorkspaceRequest(request(path,{headers}),fixture(),async (_url,options)=>{
+    assert.equal(options.headers['X-Cosmas-Connection-Contract'],'1');
+    assert.equal(options.headers.Authorization,'Bearer local.binding.fixture');
+    return response({version:1,services:[]});
+  });
+  assert.equal(result.status,200);
+  const oversized=await proxyAuthenticatedWorkspaceRequest(request(path,{headers}),fixture(),async()=>response({body:'x'.repeat(4097)}));
+  assert.equal(oversized.status,503);
+});

@@ -8,6 +8,7 @@ import {accountIdentityApi} from "./account-identity-api";
 import {assertCurrentDesktopSession} from "./workspace-auth-headers";
 import {validActivityContext,type AiActivityContext,type AiActivitySelection} from "./model-activity-contract";
 import { SettingsHub } from "./SettingsHub";
+import { WelcomeActions } from './WelcomeActions';
 import {coreConnectionApi} from './core-connection-api';
 import type {CoreConnectionCommand} from './core-connection-contract';
 import { CoreConnectionPanel, CORE_CONNECTION_BUILD, CONNECTION_ONBOARDING_BUILD } from "./CoreConnectionPanel";
@@ -977,7 +978,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       {activityEnabled && settingsOpen && activityContextBusy && <p className="team-fine" role="status">Checking optional AI activity access…</p>}
       {activityEnabled && settingsOpen && activityContextError && <div className="team-banner error" role="alert"><p>{activityContextError}</p><button disabled={locked || activityContextBusy} onClick={()=>setActivityAttempt(value=>value+1)}>Recheck AI activity access</button></div>}
       {(authenticated || identity) && <SettingsHub key={generation.current} open={settingsOpen} navigationLocked={connectionNavigationLocked}
-        initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD}
+        initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
         google={GOOGLE_CONNECTION_BUILD&&authenticated?<GoogleConnectionPanel identity={authenticated} onBusyChange={reportGoogleBusy} onAuthenticationLost={failure}/>:undefined}
         microsoft={MICROSOFT_CONNECTION_BUILD&&authenticated?<MicrosoftConnectionPanel identity={authenticated} onBusyChange={reportMicrosoftBusy} onAuthenticationLost={failure}/>:undefined}
@@ -1012,8 +1013,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR NOTEBOOKS" : "A LITTLE MORE ROOM TO FOCUS"}</p>
         <h1>{encounters ? "Your encounters" : <>Your practice.<br />Your team.</>}</h1><p>{encounters ? "Choose a visit to open your private notebook." : "Prepare for the visit, keep your notes, and carry the next step forward. Your coworkers share the encounter context you choose."}</p>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
-        {authenticated&&CONNECTION_ONBOARDING_BUILD&&<button className="team-primary" disabled={busy||!!pending||connectionNavigationLocked} onClick={()=>void openSettings('connections')}>Connect your practice and services</button>}
-        <button className="team-primary" disabled={busy || !!pending} onClick={() => void (authenticated ? loadEncounters() : open())}>{busy ? "Loading…" : encounters ? "Refresh encounters" : authenticated ? "Choose an encounter" : "Open synthetic encounter"}<span aria-hidden="true"> ↗</span></button>
+        <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
+          connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
+          encounterLabel={busy?'Loading…':encounters?'Refresh encounters':authenticated?'Choose an encounter':'Open synthetic encounter'}
+          onConnections={()=>void openSettings('connections')} onEncounter={()=>void (authenticated?loadEncounters():open())}/>
         {authenticated && encounters && <section aria-label="Available encounters" className="team-encounter-picker">
           {encounters.length ? encounters.map((encounter, index) => <button className="team-encounter-option" key={encounter.appointment_id}
             disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id)}>
