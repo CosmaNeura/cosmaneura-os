@@ -47,3 +47,11 @@ it('checks the next batch only when requested',async()=>{
   await mount();await click('Check existing appointments');await click('Check next appointments');
   expect(coreConnectionApi.read).toHaveBeenCalledTimes(2);expect(vi.mocked(coreConnectionApi.read).mock.calls[1][1]).toMatchObject({action:'appointment_setup_preview',cursor:fixture.preview.response.appointment_setup.next_cursor});
 });
+it('rejects a normalized invalid calendar date before requesting an appointment preview',async()=>{
+  const lost=vi.fn();
+  await mount(identity,{start_date:'2026-02-30',end_date:'2026-03-03'},lost);
+  await click('Check existing appointments');
+  expect(coreConnectionApi.read).not.toHaveBeenCalled();
+  expect(host.querySelector('[role=alert]')?.textContent).toContain('1 to 31 days');
+  expect(lost).not.toHaveBeenCalled();
+});

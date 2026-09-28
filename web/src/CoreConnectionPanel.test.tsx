@@ -4,6 +4,7 @@ import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import fixture from './__fixtures__/core-connection.json';
 import {CoreConnectionPanel} from './CoreConnectionPanel';
 import {coreConnectionApi} from './core-connection-api';
+import {validateCoreCommand,type CoreConnectionCommand} from './core-connection-contract';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 vi.mock('./core-connection-api',()=>({coreConnectionApi:{read:vi.fn()}}));
 let host:HTMLDivElement,root:Root;
@@ -42,4 +43,34 @@ it('opens the exact observed visit through the private notebook owner flow',asyn
   const selected=fixture.encounters.response.discovery.encounters[0];
   expect(opened).toHaveBeenCalledWith({action:'open',request_nonce:expect.any(String),connection_sha256:selected.connection_sha256,appointment_ref:selected.appointment.appointment_ref,source_sha256:selected.source_sha256});
   expect(coreConnectionApi.read).toHaveBeenCalledTimes(2);
+});
+it.each([
+  {start_date:'',end_date:'2026-09-24'},
+  {start_date:'2026-09-24',end_date:'2026-09-23'},
+  {start_date:'2026-09-01',end_date:'2026-10-03'},
+])('keeps the verified practice while correcting an invalid date range: $start_date to $end_date',async dates=>{
+  vi.mocked(coreConnectionApi.read).mockImplementation(async(_identity,command)=>{
+    const request=command as unknown as CoreConnectionCommand;
+    validateCoreCommand(request);
+    return (request.action==='connection'?fixture.connect.response:fixture.encounters.response) as never;
+  });
+  const setDates=async(value:typeof dates)=>{
+    const inputs=host.querySelectorAll<HTMLInputElement>('input[type=date]');
+    expect(inputs).toHaveLength(2);
+    for(const [index,day] of [value.start_date,value.end_date].entries()){
+      await act(async()=>{
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(inputs[index],day);
+        inputs[index].dispatchEvent(new Event('change',{bubbles:true}));
+      });
+    }
+  };
+  await mount();await click('Check connection status');await setDates(dates);await click('View appointments');
+  expect(coreConnectionApi.read).toHaveBeenCalledOnce();
+  expect(host.textContent).toContain('Connected to your practice.');
+  expect(host.querySelector('[role=alert]')?.textContent).toContain('1 to 31 days');
+  await setDates(fixture.encounters.command.window);await click('View appointments');
+  expect(coreConnectionApi.read).toHaveBeenCalledTimes(2);
+  expect(vi.mocked(coreConnectionApi.read).mock.calls[1][1]).toMatchObject({action:'encounters',window:fixture.encounters.command.window});
+  expect(host.textContent).toContain('Invented W41 person');
+  expect(host.querySelector('[role=alert]')).toBeNull();
 });

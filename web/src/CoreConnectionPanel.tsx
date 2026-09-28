@@ -2,7 +2,7 @@ import {useEffect,useRef,useState} from 'react';
 import {coreConnectionApi} from './core-connection-api';
 import {CoreAppointmentSetupPanel,CORE_APPOINTMENT_SETUP_BUILD} from './CoreAppointmentSetupPanel';
 import {AthenaConnectionPanel,ATHENA_CONNECTION_BUILD} from './AthenaConnectionPanel';
-import type {CoreConnectionCommand,CoreConnectionResult,CoreCursor,CoreWindow} from './core-connection-contract';
+import {isCoreWindow,type CoreConnectionCommand,type CoreConnectionResult,type CoreCursor,type CoreWindow} from './core-connection-contract';
 import {useSetupNavigationBusy} from './connection-setup-flow';
 import {WORKSPACE_AUTHENTICATED_BUILD,WORKSPACE_BUILD,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
@@ -42,7 +42,10 @@ export function CoreConnectionPanel({identity,onBusyChange,onAuthenticationLost,
       else setError(command.action==='connect'?'The confirmation could not be verified. It may have been saved; check connection status before confirming again.':'The connection could not be checked. Your saved work is unchanged. Try again.');
     }finally{if(current===epoch.current&&currentIdentity.current===identity)setBusy(false);}
   }
-  function appointments(cursor?:CoreCursor){if(connection)void run({action:'encounters',connection_sha256:connection.discovery.connection.connection_sha256,window,...(cursor?{cursor}:{})});}
+  function appointments(cursor?:CoreCursor){
+    if(!isCoreWindow(window)){setError('Choose a date range of 1 to 31 days, with the end date after the start date.');setPage(null);return;}
+    if(connection)void run({action:'encounters',connection_sha256:connection.discovery.connection.connection_sha256,window,...(cursor?{cursor}:{})});
+  }
   const connected=connection?.connection_status==='connected';
   const locked=busy||athenaBusy||setupBusy;
   return <section className="core-connection-setup" aria-label="Connect Cosmaneura">
@@ -59,8 +62,8 @@ export function CoreConnectionPanel({identity,onBusyChange,onAuthenticationLost,
     </div>}
     {connected&&<section aria-label="Cosmaneura appointments">
       <h3>Your appointments</h3><p>Choose a date range to view appointments available to your account.</p>
-      <div className="connection-date-range"><label>From<input type="date" value={window.start_date} disabled={locked} onChange={e=>{setWindow({...window,start_date:e.target.value});setPage(null);}}/></label>
-        <label>Before<input type="date" value={window.end_date} disabled={locked} onChange={e=>{setWindow({...window,end_date:e.target.value});setPage(null);}}/></label></div>
+      <div className="connection-date-range"><label>From<input type="date" value={window.start_date} disabled={locked} onChange={e=>{setWindow({...window,start_date:e.target.value});setPage(null);setError('');}}/></label>
+        <label>Before<input type="date" value={window.end_date} disabled={locked} onChange={e=>{setWindow({...window,end_date:e.target.value});setPage(null);setError('');}}/></label></div>
       <p className="team-fine">Up to 31 days, using the dates recorded by your practice.</p>
       <button disabled={locked} onClick={()=>appointments()}>View appointments</button>
       {appointmentSetupEnabled&&!busy&&!athenaBusy&&<CoreAppointmentSetupPanel identity={identity} connectionSha={connection.discovery.connection.connection_sha256} window={window} onBusyChange={setSetupBusy} onConnected={()=>setPage(null)} onAccessLost={cause=>{
