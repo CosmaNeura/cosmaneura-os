@@ -147,7 +147,7 @@ it("selects an iPhone input while paused without starting a recording", async ()
 
 it("lets a native recording retry saving even when its cached audio count is zero", async () => {
   runtime.sourceKind="microphone";runtime.captureMode="native_microphone";runtime.supportsContinuation=true;
-  vi.mocked(prepareCapture).mockResolvedValue({...prepared,configured_capture:true});
+  vi.mocked(prepareCapture).mockResolvedValue({...prepared,configured_capture:{schema_version:"1.0",language_mode:"en-US"}});
   snapshot={...snapshot,state:"paused",statusCode:"capture_recovery_pending",recordedChunks:0,
     native:{...nativeState(),phase:"paused"}};
   await click("Open recording");
