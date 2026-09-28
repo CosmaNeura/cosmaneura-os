@@ -80,15 +80,16 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   };
   const blocked=busy||opening;
   return <section className="core-connection-setup microsoft-connection" aria-label="Gmail account">
-    <h2>Connect Gmail</h2>
+    <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>Connect Gmail</h2><p>Your inbox, at a glance.</p></div></header>
     <p>Connect your Google account to see Gmail inbox summaries here. Google will ask you to approve access.</p>
-    <p>CosmasOS reads sender, subject, date and unread status. Message bodies and attachments stay in Gmail.</p>
+    <p className="connection-access-summary">CosmasOS reads sender, subject, date and unread status. Message bodies and attachments stay in Gmail.</p>
+    {!status?.account&&!start&&unavailableFor!==identity&&<ol className="personal-connection-steps"><li>Choose your Google account.</li><li>Review access on Google’s secure sign-in page.</li><li>Return here to read recent email.</li></ol>}
     <button disabled={blocked} onClick={()=>void run('status')}>{busy?'Working…':'Check Google connection'}</button>
     {status&&<div className="connection-practice">
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Google connected.':status.state==='completing_sign_in'?'Completing Google sign-in…':status.state==='sign_in_pending'?'Google sign-in is ready to continue.':'Connect your Google account to continue.'}</p>
     </div>}
-    {(!status||status.state!=='completing_sign_in')&&!start&&<button disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>void run('start')}>{status?.state==='connected'?'Reconnect Google':'Connect with Google'}</button>}
+    {(!status||status.state!=='completing_sign_in')&&!start&&<button className="team-primary" disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>void run('start')}>{status?.state==='connected'?'Reconnect Google':'Connect with Google'}</button>}
     {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||!nativeReady}
       data-google-connection={blocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
       onClick={begin}>{opening?'Opening Google…':'Continue with Google'}</button>:

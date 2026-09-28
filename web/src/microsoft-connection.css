@@ -5,3 +5,8 @@
 .microsoft-items {list-style:none;margin:0;padding:0}
 .microsoft-items li {display:flex;flex-direction:column;gap:.35rem;padding:1rem 0;border-bottom:1px solid #d9ddd9}
 .microsoft-items span,.microsoft-items small {font-size:.9rem}
+.personal-connection-heading {display:flex;align-items:center;gap:14px;margin:12px 0 24px}
+.personal-connection-heading h2 {margin:0 0 4px}
+.personal-connection-heading p {margin:0;color:var(--team-muted)}
+.personal-connection-steps {padding-left:24px;margin:24px 0}
+.personal-connection-steps li {padding:6px 0;line-height:1.5}

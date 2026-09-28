@@ -176,6 +176,20 @@
 .preparation-work li button { text-align: left; overflow-wrap: anywhere; max-width: 100%; }
 .preparation-work .appointment-consent { display: flex; align-items: flex-start; }
 .core-connection-setup { max-width: 720px; }
+.team-welcome-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin: 28px 0; max-width: 580px; }
+.team-workspace .team-start-card { display: flex; flex-direction: column; align-items: flex-start; gap: 12px; width: 100%; min-width: 0; aspect-ratio: 1; padding: 24px; border: 1px solid var(--team-line); border-radius: 12px; background: #fff; text-align: left; color: var(--team-ink); }
+.team-start-card strong { font-size: 19px; line-height: 1.25; font-weight: 600; }
+.team-start-card > span:not(.team-start-icon):not(.team-start-arrow) { font-size: 14px; line-height: 1.5; color: var(--team-muted); }
+.team-start-icon { order: -1; font-size: 25px; color: #326c59; }
+.team-start-arrow { margin-top: auto; align-self: flex-end; font-size: 22px; color: #326c59; }
+.team-workspace .team-start-card:hover:not(:disabled) { background: #f3f7f2; border-color: #739584; }
+.team-workspace .team-start-card:focus-visible { outline: 3px solid #326c59; outline-offset: 4px; }
+.team-workspace .team-welcome-actions-compact .team-start-card { aspect-ratio: auto; min-height: 150px; padding: 18px; gap: 8px; }
+.team-welcome-actions-compact .team-start-icon { display: none; }
+@media (max-width: 480px) {
+  .team-welcome-actions { grid-template-columns: 1fr; gap: 14px; }
+  .team-workspace .team-start-card { aspect-ratio: auto; min-height: 170px; padding: 20px; gap: 8px; }
+}
 .core-connection-setup button, .core-connection-setup input { min-height: 44px; }
 .core-connection-setup button { margin: 8px 8px 8px 0; }
 .connection-practice, .connection-next-services { padding: 20px; margin: 20px 0; border: 1px solid #dce5dc; border-radius: 14px; }

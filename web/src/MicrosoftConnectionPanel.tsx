@@ -80,15 +80,16 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
   };
   const blocked=busy||opening;
   return <section className="core-connection-setup microsoft-connection" aria-label="Microsoft email and calendar">
-    <h2>Connect Microsoft</h2>
+    <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">M</span><div><h2>Connect Microsoft</h2><p>Email and the week ahead.</p></div></header>
     <p>Connect your work account to see Outlook email and upcoming calendar events here. Microsoft will ask you to approve access.</p>
-    <p>This connection is read-only. It cannot send email, change appointments or update your clinical records.</p>
+    <p className="connection-access-summary">This connection is read-only. It cannot send email, change appointments or update your clinical records.</p>
+    {!status?.account&&!start&&unavailableFor!==identity&&<ol className="personal-connection-steps"><li>Choose your Microsoft work or school account.</li><li>Review access on Microsoft’s secure sign-in page.</li><li>Return here to view your inbox or upcoming events.</li></ol>}
     <button disabled={blocked} onClick={()=>void run('status')}>{busy?'Working…':'Check Microsoft connection'}</button>
     {status&&<div className="connection-practice">
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Microsoft connected.':status.state==='completing_sign_in'?'Completing Microsoft sign-in…':status.state==='sign_in_pending'?'Microsoft sign-in is ready to continue.':'Connect your Microsoft account to continue.'}</p>
     </div>}
-    {(!status||status.state!=='completing_sign_in')&&!start&&<button disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>void run('start')}>{status?.state==='connected'?'Reconnect Microsoft':'Connect with Microsoft'}</button>}
+    {(!status||status.state!=='completing_sign_in')&&!start&&<button className="team-primary" disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>void run('start')}>{status?.state==='connected'?'Reconnect Microsoft':'Connect with Microsoft'}</button>}
     {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||!nativeReady}
       data-microsoft-connection={blocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
       onClick={begin}>{opening?'Opening Microsoft…':'Continue with Microsoft'}</button>:

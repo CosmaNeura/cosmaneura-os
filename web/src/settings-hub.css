@@ -30,6 +30,31 @@
 }
 
 .settings-navigation-notice { padding: 12px; border: 1px solid #dbcaa8; background: #fff8e8; border-radius: 9px; }
+.connection-directory-status { display:flex; align-items:center; justify-content:space-between; gap:16px; margin:20px 0; }
+.connection-directory-status p { font-size:13px; color:var(--team-muted); max-width:470px; }
+.connection-directory-status button { flex-shrink:0; }
+.connection-group { margin-top:28px; }
+.connection-group h2 { font-size:15px; font-weight:600; margin:0 0 12px; }
+.connection-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.team-workspace .connection-card { flex-direction:column; align-items:stretch; gap:18px; min-width:0; min-height:225px; background:#fff; border-radius:12px; }
+.connection-card .connection-card-top { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.connection-badge { display:inline-block; font-size:12px; line-height:1.4; padding:5px 9px; border-radius:6px; background:#f3f0e9; color:#735c2b; }
+.connection-badge-ready { background:#edf5ed; color:#285741; }
+.connection-card .connection-card-copy { min-width:0; }
+.connection-card .connection-card-copy strong { font-size:17px; line-height:1.35; }
+.connection-card .connection-card-copy small { font-size:14px; line-height:1.5; }
+.team-workspace .connection-card > .connection-card-action { display:flex; justify-content:space-between; margin:auto 0 0; color:#326c59; font-size:13px; }
+.connection-card:focus-visible { outline:3px solid #326c59; outline-offset:3px; }
+.connection-setup-guide { padding:24px; border:1px solid var(--team-line); border-radius:12px; background:#fff; }
+.connection-setup-guide h2 { margin-top:16px; }
+.connection-setup-guide p,.connection-setup-guide li { line-height:1.65; }
+.connection-setup-guide li { padding:5px 0; }
+.connection-access-summary { color:var(--team-muted); font-size:14px; border-top:1px solid var(--team-line); padding-top:16px; }
+@media (max-width:600px) {
+  .connection-cards { grid-template-columns:1fr; }
+  .connection-directory-status { align-items:flex-start; flex-direction:column; gap:4px; }
+  .team-workspace .connection-card { min-height:195px; }
+}
 @media (max-width: 600px) {
   .team-workspace[data-settings-open="true"]:not([data-settings-navigation-locked="true"]) .team-topbar { display: none; }
 }
