@@ -297,7 +297,7 @@ def prepare(
     if (not re.fullmatch(r"(?:0|[1-9][0-9]{0,3})(?:\.(?:0|[1-9][0-9]{0,3})){2}", app_version)
             or not re.fullmatch(r"[1-9][0-9]{0,3}", build_number)):
         raise ValueError("Use a numeric three-part app version and a build number from 1 to 9999.")
-    bundle_id, display_name = (identity["bundle"], "CosmasOS Beta") if operational else build_identity(verification_variant)
+    bundle_id, display_name = (identity["bundle"], "CosmaBot") if operational else build_identity(verification_variant)
     simulator_identity = simulator_custody_identity(verification_variant) if simulator_custody else None
     source, web, output = source.resolve(), web.resolve(), output.resolve()
     if output.exists():
@@ -348,6 +348,11 @@ def prepare(
             native_renderer_overlay = renderer_overlay.apply(output, SOURCE_REF)
             native_recovery_ui = include_recovery_ui(output)
     app = output / "apps/capture/ios/App/App"
+    # Replace only the inherited catalog in this fresh, isolated shell copy.
+    # iOS applies its own corner mask to the opaque square artwork.
+    app_icon = app / "Assets.xcassets/AppIcon.appiconset"
+    shutil.rmtree(app_icon)
+    shutil.copytree(Path(__file__).parents[1] / "clients/shared/branding/AppIcon.appiconset", app_icon)
     project = app.parent / "App.xcodeproj/project.pbxproj"
     text = project.read_text()
     text = re.sub(r"DEVELOPMENT_TEAM = [^;]+;", 'DEVELOPMENT_TEAM = "";', text)

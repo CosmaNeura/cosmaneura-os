@@ -92,8 +92,12 @@ def main():
     info["CFBundleShortVersionString"] = version
     info["CFBundleVersion"] = build
     info["CosmasElectronVersion"] = "43.4.1"
-    info["CFBundleName"] = "CosmasOS Beta" if hosted else "CosmasOS Synth"
+    info["CFBundleName"] = "CosmaBot" if operational else "CosmasOS Beta" if hosted else "CosmasOS Synth"
     info["CFBundleDisplayName"] = info["CFBundleName"]
+    resources = output / "Contents/Resources"
+    resources.mkdir(exist_ok=True)
+    shutil.copyfile(Path(__file__).parents[1] / "clients/shared/branding/CosmaBot.icns", resources / "CosmaBot.icns")
+    info["CFBundleIconFile"] = "CosmaBot.icns"
     if args.verification_variant:
         info["CFBundleIdentifier"] += "." + args.verification_variant
         info["CFBundleName"] += " " + args.verification_variant.upper()
