@@ -1,0 +1,122 @@
+{
+  "request": {
+    "expected_revision": 1,
+    "team_revision": 1,
+    "role": "visit_prep",
+    "idempotency_key": "invented-prep-question",
+    "content": "What should I discuss?",
+    "session_prep_analysis": {
+      "version": 1,
+      "consented": true,
+      "brief_id": "b344870847659dbc2620164de3b72e22df1f711aba1e7991ed4339abd421fa30",
+      "brief_version": 1,
+      "snapshot_sha256": "0ff7372d8cb5917833ee1337b9806461495dac7900ac81cca17e9346d0cd7219"
+    }
+  },
+  "observation": {
+    "contract_version": 1,
+    "workspace_id": "23f2e225-726f-4cbf-8f2f-1c8581127b98",
+    "idempotency_key": "invented-prep-question",
+    "request_sha256": "7a6d78e1a8d7b772394232fc6aa9321e1006047427525407dd5747c3ee12fd93",
+    "outcome": "saved",
+    "admission": {
+      "id": "36eef887-f38f-48f8-86a3-3445d1ebc468",
+      "state": "completed",
+      "unit": 1,
+      "admitted_at": "2026-09-29T17:59:04.624051Z",
+      "dispatch": "started",
+      "usage": "verified",
+      "input_tokens": 20,
+      "output_tokens": 7
+    },
+    "saved_entry": {
+      "id": "53a33cc7-eeed-4e06-90de-e873c4e9c94c",
+      "revision": 2
+    },
+    "reason": null
+  },
+  "workspace": {
+    "id": "23f2e225-726f-4cbf-8f2f-1c8581127b98",
+    "appointment_id": "bc77098d-f0da-4096-a55c-d6c5e724c2e2",
+    "label": "Invented encounter",
+    "revision": 2,
+    "entries": [
+      {
+        "id": "e518d64d-8471-4529-9626-55d4fad04f04",
+        "revision": 1,
+        "kind": "synthetic_source",
+        "content": "Invented visit preparation: discuss access to the practice and agree on next steps. No chart, medications, diagnoses or clinical history were retrieved. This fixed example is evidence for the workspace rehearsal only.",
+        "source_label": "Invented preparation \u00b7 v1",
+        "origin": "synthetic_fixture",
+        "ticket": null,
+        "created_at": "2026-09-29T17:59:04.205099+00:00",
+        "reply": null
+      },
+      {
+        "id": "53a33cc7-eeed-4e06-90de-e873c4e9c94c",
+        "revision": 2,
+        "kind": "conversation",
+        "content": "What should I discuss?",
+        "source_label": null,
+        "origin": "authenticated_human",
+        "ticket": null,
+        "created_at": "2026-09-29T17:59:04.568271+00:00",
+        "reply": {
+          "agent_name": "Visit Prep",
+          "agent_id": "8952bb82-6154-42d3-b1cf-294d051cbed3",
+          "role": "visit_prep",
+          "backend": "azure_gpt41",
+          "content": "Invented answer using the selected brief.",
+          "team_revision_id": "c7aeecfe-7c4e-4f4d-bc69-f017fb076ee4",
+          "context_revision": 1,
+          "citations": []
+        },
+        "model_request": {
+          "contract_version": 1,
+          "request_sha256": "7a6d78e1a8d7b772394232fc6aa9321e1006047427525407dd5747c3ee12fd93",
+          "request": {
+            "session_prep_analysis": {
+              "version": 1,
+              "consented": true,
+              "brief_id": "b344870847659dbc2620164de3b72e22df1f711aba1e7991ed4339abd421fa30",
+              "brief_version": 1,
+              "snapshot_sha256": "0ff7372d8cb5917833ee1337b9806461495dac7900ac81cca17e9346d0cd7219"
+            },
+            "kind": "conversation",
+            "expected_revision": 1,
+            "team_revision": 1,
+            "idempotency_key": "invented-prep-question",
+            "role": "visit_prep"
+          },
+          "bot": {
+            "address": "visit_prep",
+            "agent_id": "8952bb82-6154-42d3-b1cf-294d051cbed3",
+            "role": "visit_prep",
+            "name": "Visit Prep",
+            "team_revision": 1
+          },
+          "admission": {
+            "id": "36eef887-f38f-48f8-86a3-3445d1ebc468",
+            "state": "completed",
+            "unit": 1,
+            "admitted_at": "2026-09-29T17:59:04.624051Z",
+            "dispatch": "started",
+            "usage": "verified",
+            "input_tokens": 20,
+            "output_tokens": 7
+          },
+          "reason": null
+        }
+      }
+    ],
+    "handoffs": [],
+    "note": {
+      "latest": null,
+      "history": []
+    },
+    "follow_ups": [],
+    "work_candidates": [],
+    "model_contract_version": 1,
+    "model_observed_at": "2026-09-29T17:59:05.057158+00:00"
+  }
+}

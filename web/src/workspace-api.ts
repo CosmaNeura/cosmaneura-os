@@ -1,3 +1,4 @@
+import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import type {MembershipAnalysis} from "./membership-analysis-contract";
 import {workspaceFetch} from './workspace-protocol';
 import { permittedWorkspaceApi } from "./workspace-origin";
@@ -56,7 +57,7 @@ export type BotTemplate = {
 };
 export type ProviderTeam = { revision: number; template_version: string; configuration: TeamConfiguration; members: BotTemplate[]; recovery_scope?: string; custom_skills?: (BotTemplate["capabilities"][number] & {key: BotSkill})[]; scheduling?: { enabled: boolean }; templates?: BotTemplate[]; llm: { enabled: boolean; model: string }; capture?: { enabled: boolean; notes_enabled?: boolean; corrections_enabled?: boolean; prep_enabled?: boolean; prep_work_enabled?: boolean } };
 export type TeamSaveInput = { expected_revision: number; idempotency_key: string; configuration: TeamConfiguration; setup_review?: SetupReview };
-export type ConversationInput = { expected_revision: number; team_revision: number; idempotency_key: string; role: BotAddress; content: string; research_analysis?:ResearchAnalysis; inbox_analysis?:InboxAnalysis;membership_analysis?:MembershipAnalysis };
+export type ConversationInput = { expected_revision: number; team_revision: number; idempotency_key: string; role: BotAddress; content: string; research_analysis?:ResearchAnalysis; inbox_analysis?:InboxAnalysis;membership_analysis?:MembershipAnalysis;session_prep_analysis?:SessionPrepAnalysis };
 export type AssistantReply = { agent_name: string; agent_id?: string; role: BotRole; backend: string; content: string; context_revision: number;
   citations: { entry_id: string; revision: number; label: string; kind: string }[] };
 export type WorkspaceEntry = {
@@ -136,6 +137,8 @@ export type AppendInput = {
 export class WorkspaceApiError extends Error {
   constructor(public status: number, public code?: string) {
     super(code === "workspace_recovery_unavailable" ? "The workspace service could not confirm private draft recovery. Existing drafts are retained. Recheck recovery before continuing." :
+      code === "session_prep_analysis_too_large" ? "This brief and the selected saved notes are too large to review together. Ask without Session Prep, or narrow this bot's saved sources." :
+      ["session_prep_analysis_unavailable","session_prep_not_ready","session_prep_context_changed","session_prep_request_conflict","session_prep_unavailable","invalid_session_prep_analysis"].includes(code??'') ? "Session Prep could not be confirmed. Keep this request for recovery, then open the current brief before starting a new question." :
       code === "inbox_selection_required" ? "Open Incoming messages, review the patient and message, then choose Draft a reply." :
       ["inbox_human_review_required","inbox_analysis_unavailable","inbox_bot_required"].includes(code??'') ? "Inbox drafting needs a current reviewed message, administrative human triage, and an enabled Inbox coworker. Review this item in Incoming messages." :
       code === "inbox_analysis_too_large" ? "This message is too large for Inbox drafting. Keep it with human review." :

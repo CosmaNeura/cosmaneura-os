@@ -141,6 +141,7 @@
 .session-prep-citations { white-space: nowrap; }
 .session-prep-citations a { color: var(--team-green, #00693e); padding-inline: .15rem; }
 .session-prep-sources { font-size: .82rem; border-top: 1px solid var(--team-border, #d9dfdb); padding-top: .8rem; }
+.team-composer .session-prep-included { gap: 8px; margin-bottom: 8px; padding: 4px 9px; background: #edf5ef; color: #24533c; border-radius: 7px; flex-wrap: wrap; }
 .appointment-panel { margin: 1rem -1rem -1rem; border-bottom: 0; border-top: 1px solid var(--team-border, #d9dfdb); font-size: .86rem; line-height: 1.5; overflow-wrap: anywhere; }
 .appointment-panel h3 { margin-top: 0; }
 .appointment-panel label { display: block; margin: 1rem 0; }
@@ -246,3 +247,7 @@
   .team-welcome-roles { margin: 22px 0 12px; }
   .team-welcome-roles .bot-avatar.large { width: 48px; height: 48px; border-radius: 14px; }
 }
+
+.session-prep-detail { margin-top: 12px; }
+.session-prep-detail > summary, .team-additional-prep > summary { padding: 10px 0; cursor: pointer; font-size: 13px; }
+.team-additional-prep { border-top: 1px solid var(--team-line, #d9dfdb); padding: 6px 16px; }

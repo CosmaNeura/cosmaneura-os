@@ -958,6 +958,40 @@ def _refresh_model_identity(request, session, identity):
         raise ws.WorkspaceError("workspace_access_denied", error.status_code) from None
 
 
+def _session_prep_analysis_sources(request, session, identity, workspace_id, body):
+    from uuid import uuid5
+
+    from cosmas_os.api.capture_schemas import CaptureBotSelection
+    from cosmas_os.application import session_prep, session_prep_analysis
+
+    def current():
+        _refresh_model_identity(request, session, identity)
+        if not settings.workspace_session_prep_available:
+            raise ws.WorkspaceError("session_prep_analysis_unavailable", 503)
+        if identity.auth_mode != "clerk_jwt" or identity.external_identity_id is None:
+            raise ws.WorkspaceError("session_prep_access_unavailable", 403)
+
+    def read(phase):
+        current()
+        budget = current_budget()
+        if budget is None:
+            raise ws.WorkspaceError("session_prep_analysis_unavailable", 503)
+        with session_prep_connection(settings, budget) as port:
+            return session_prep.read(
+                session, box=identity.box_id, owner=identity.principal_id,
+                external_identity_id=identity.external_identity_id, workspace_id=str(workspace_id),
+                bot=CaptureBotSelection(address=body.role, team_revision=body.team_revision),
+                bearer=SecretStr(request.headers["authorization"].partition(" ")[2]),
+                idempotency_key=str(uuid5(workspace_id, f"prep-chat:{body.idempotency_key}:{phase}")),
+                reauthenticate=current, port=port,
+            )["receipt"]
+
+    return session_prep_analysis.Sources(
+        str(workspace_id), identity.box_id, identity.principal_id, body.role,
+        body.team_revision, body.session_prep_analysis.model_dump(mode="json"), read,
+    )
+
+
 @app.post("/workspaces/{workspace_id}/conversation", dependencies=[Depends(_workspace_gate)])
 async def converse(request: Request, workspace_id: UUID, session: Session = Depends(get_session),
                    identity: RequestIdentity = Depends(_identity)):
@@ -969,12 +1003,17 @@ async def converse(request: Request, workspace_id: UUID, session: Session = Depe
     def submit():
         if body.inbox_analysis:
             session.info["inbox_analysis_sources"] = _inbox_analysis_sources()
+        if body.session_prep_analysis:
+            session.info["session_prep_analysis_sources"] = _session_prep_analysis_sources(
+                request, session, identity, workspace_id, body
+            )
         value = conversation.ask(session, identity.box_id, identity.principal_id, str(workspace_id),
             expected=body.expected_revision, team_revision=body.team_revision, key=body.idempotency_key,
             role=body.role, content=body.content, model_contract=negotiated,
             research_analysis=body.research_analysis.model_dump(mode="json") if body.research_analysis else None,
             inbox_analysis=body.inbox_analysis.model_dump(mode="json") if body.inbox_analysis else None,
             membership_analysis=body.membership_analysis.model_dump(mode="json") if body.membership_analysis else None,
+            session_prep_analysis=body.session_prep_analysis.model_dump(mode="json") if body.session_prep_analysis else None,
             external_identity_id=identity.external_identity_id,
             reauthenticate=lambda: _refresh_model_identity(request, session, identity))
         return JSONResponse(value, status_code=409 if negotiated and value["outcome"] != "saved" else 200,
@@ -1000,6 +1039,7 @@ async def resolve_conversation(request: Request, workspace_id: UUID, session: Se
             research_analysis=body.research_analysis.model_dump(mode="json") if body.research_analysis else None,
             inbox_analysis=body.inbox_analysis.model_dump(mode="json") if body.inbox_analysis else None,
             membership_analysis=body.membership_analysis.model_dump(mode="json") if body.membership_analysis else None,
+            session_prep_analysis=body.session_prep_analysis.model_dump(mode="json") if body.session_prep_analysis else None,
             reauthenticate=lambda: _refresh_model_identity(request, session, identity))
         return JSONResponse(value, headers={"Cache-Control": "no-store"})
     return await run_in_threadpool(observe)
@@ -1843,6 +1883,10 @@ install_record_boundary(app)
 install_core_connection_boundary(app)
 
 install_research_boundary(app)
+
+from cosmas_os.api.conversation_deadline import install_conversation_boundary  # noqa: E402
+
+install_conversation_boundary(app)
 
 
 app.include_router(scheduling_login_router(

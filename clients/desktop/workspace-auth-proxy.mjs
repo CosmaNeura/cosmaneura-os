@@ -126,7 +126,8 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   const controller = new AbortController();
   const signal = AbortSignal.any([controller.signal, request.signal]);
   let expired = false, authorityStatus = null;
-  const timer = setTimeout(() => { expired = true; controller.abort(); }, identityPath || activityPath ? 15000 : connector ? connector.seconds * 1000 : routineRun || modelContract === '1' ? 30000 : path.endsWith('/capture/notes') ? 120000 : 45000);
+  const startedAt = Date.now();
+  let timer = setTimeout(() => { expired = true; controller.abort(); }, identityPath || activityPath ? 15000 : connector ? connector.seconds * 1000 : routineRun || modelContract === '1' ? 30000 : path.endsWith('/capture/notes') ? 120000 : 45000);
   const remove = auth.subscribe(state => { if (state.phase !== 'ready' || state.revision !== revision) controller.abort(); });
   try {
     const before = await untilAborted(() => auth.getState(), signal);
@@ -138,7 +139,13 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
       path.endsWith('/capture/operations') ? 4194304 : path.includes('/capture/') ? 1048576 : 128000;
     const body = await boundedBytes(request.body, maximumInput, signal);
     if (request.method === 'GET' && body.length) return unavailable(400);
-    if (request.method === 'POST') JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(body));
+    if (request.method === 'POST') {
+      const parsed = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(body));
+      if (modelReceipt && path.endsWith('/conversation') && parsed?.session_prep_analysis) {
+        clearTimeout(timer);
+        timer = setTimeout(() => { expired = true; controller.abort(); }, Math.max(0, 90000 - (Date.now() - startedAt)));
+      }
+    }
     const token = await untilAborted(() => auth.getToken(revision), signal);
     signal.throwIfAborted();
     if (!sameAuthState(before, auth.snapshot()) || typeof token !== 'string' || token.length > 8192 ||

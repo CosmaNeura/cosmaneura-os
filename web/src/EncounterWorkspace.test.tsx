@@ -1,3 +1,8 @@
+import {readSessionPrep} from "./session-prep-api";
+import {sessionPrepFixture} from "./test-fixtures/session-prep";
+import {sessionPrepAnalysis} from "./session-prep-analysis-contract";
+vi.mock("./session-prep-api",async original=>({...await original<typeof import("./session-prep-api")>(),readSessionPrep:vi.fn()}));
+vi.mock("./encounter-prep-api",async original=>({...await original<typeof import("./encounter-prep-api")>(),ENCOUNTER_PREP_BUILD:true}));
 import { settingsNavigation } from "./settings-test-navigation";
 import { memoryDraftStorage } from "./draft-test-fixture";
 import { act } from "react";
@@ -74,6 +79,32 @@ describe("private encounter workspace", () => {
       element.dispatchEvent(new Event("input", { bubbles: true }));
     });
   }
+
+  it("includes only the chosen Session Prep in chat and drops selection when switching bots",async()=>{
+    const access={mode:"clerk_jwt" as const,getToken:vi.fn()};
+    const connected=structuredClone(team);connected.llm.enabled=true;connected.capture={enabled:false,prep_enabled:true};
+    connected.members[1].capabilities.push({key:"core.session_prep.read",label:"Session Prep",state:"enabled",connector:"Core",contract:"core.session-prep.brief.v1"});
+    vi.mocked(workspaceApi.team).mockResolvedValue(connected);
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:connected});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    vi.mocked(readSessionPrep).mockResolvedValue(sessionPrepFixture());
+    vi.mocked(workspaceApi.ask).mockImplementation(async(_,id,body)=>modelReceipt(body,id));
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    await click("Choose an encounter");await act(async()=>container.querySelector<HTMLButtonElement>(".team-encounter-option")!.click());
+    await click("Open Session Prep");expect(container.textContent).not.toContain("Session Prep included");
+    await click("Include in chat");await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain("Session Prep included"));});
+    expect(container.querySelector<HTMLDetailsElement>(".session-prep-detail")?.open).toBe(false);
+    expect(document.activeElement).toBe(container.querySelector("#team-question"));
+    await input("Thought or question","What changed since the previous visit?");await click("Send message");
+    await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain("Conversation saved."));});
+    const first=vi.mocked(workspaceApi.ask).mock.calls[0][2];
+    expect(first.session_prep_analysis).toEqual(await sessionPrepAnalysis(sessionPrepFixture()));
+    expect(JSON.stringify(first)).not.toContain("Invented reviewed visit summary");
+    await chooseBot("Scribe");expect(container.textContent).not.toContain("Session Prep included");
+    await input("Thought or question","Use my saved notebook.");await click("Send message");
+    await act(async()=>{await vi.waitFor(()=>expect(workspaceApi.ask).toHaveBeenCalledTimes(2));});
+    expect(vi.mocked(workspaceApi.ask).mock.calls[1][2]).not.toHaveProperty("session_prep_analysis");
+  });
 
   it("starts without a request and labels unsupported capabilities", async () => {
     expect(workspaceApi.open).not.toHaveBeenCalled();

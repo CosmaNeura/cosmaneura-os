@@ -3,7 +3,7 @@ from uuid import UUID
 
 from pydantic import UUID4, BaseModel, ConfigDict, Field, model_serializer, model_validator
 
-from cosmas_os.api.membership_analysis_schemas import ConversationAnalysisFields
+from cosmas_os.api.session_prep_analysis_schemas import ConversationAnalysisFields
 from cosmas_os.api.workspace_schemas import IdempotencyKey
 
 BotRole = Literal["scribe", "visit_prep", "follow_up", "chief", "custom", "research"]

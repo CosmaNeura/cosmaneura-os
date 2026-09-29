@@ -29,6 +29,8 @@ def build_context(
     draft_only=False,
     agent_id=None,
     handoff_targets=(),
+    additional_sources=(),
+    session_prep_analysis=None,
 ):
     # Only the latest typed draft is current. Evidence remains explicitly attributed.
     notes = [e for e in snapshot["entries"] if e["kind"] == "scratchpad"][-1:]
@@ -49,6 +51,8 @@ def build_context(
         )
         for e in selected
     )
+    latest_source_revision = max((source.revision for source in sources), default=0)
+    sources += tuple(additional_sources)
     source_ids = {source.entry_id for source in sources}
     follow_ups = tuple(
         FollowUpStatus(
@@ -63,7 +67,6 @@ def build_context(
         if can_read_work
     )
     follow_up_ids = {item.ticket_id for item in follow_ups}
-    latest_source_revision = max((source.revision for source in sources), default=0)
     history = []
     for past in snapshot["entries"] if include_history else ():
         response = past.get("reply")
@@ -81,6 +84,9 @@ def build_context(
         ):
             continue
         # A prior answer must not reintroduce a source excluded by new settings or a superseded draft.
+        prior_prep = past.get("model_request", {}).get("request", {}).get("session_prep_analysis")
+        if prior_prep is not None and prior_prep != session_prep_analysis:
+            continue  # Even an uncited answer can contain a now-excluded brief.
         if not {c["entry_id"] for c in response["citations"]} <= source_ids:
             continue
         history.extend([("user", past["content"]), ("assistant", response["content"])])
@@ -131,6 +137,7 @@ def ask(
     research_analysis=None,
     inbox_analysis=None,
     membership_analysis=None,
+    session_prep_analysis=None,
     external_identity_id=None,
     reauthenticate=None,
 ):
@@ -157,6 +164,12 @@ def ask(
         command["membership_analysis"] = selection(membership_analysis)
         if not model_contract:
             raise ws.WorkspaceError("model_contract_required", 426)
+    if session_prep_analysis is not None:
+        from cosmas_os.application.session_prep_analysis import selection
+
+        command["session_prep_analysis"] = selection(session_prep_analysis)
+        if not model_contract:
+            raise ws.WorkspaceError("model_contract_required", 426)
     s.rollback()
     model_work.lock_owner(s, box, owner)
     if reauthenticate:
@@ -166,6 +179,7 @@ def ask(
     digest = model_work.conversation_request_hash(
         expected=expected, team_revision=team_revision, role=role, content=content,
         research_analysis=research_analysis, inbox_analysis=inbox_analysis, membership_analysis=membership_analysis,
+        session_prep_analysis=session_prep_analysis,
     )
     prior = model_work.conversation_observation(
         s, w, key=key, request_hash=digest, as_of=model_work.now(s)
@@ -188,7 +202,7 @@ def ask(
     use_model = runtime_settings.workspace_llm_available and not team.blocked(
         settings, "model_answer"
     )
-    if (research_analysis is not None or inbox_analysis is not None or membership_analysis is not None) and not use_model:
+    if any(value is not None for value in (research_analysis, inbox_analysis, membership_analysis, session_prep_analysis)) and not use_model:
         raise ws.WorkspaceError("model_unavailable")
     if use_model:
         if not model_contract:
@@ -209,7 +223,7 @@ def ask(
     if not content or len(content) > 4000:
         raise ws.WorkspaceError("invalid_entry", 400)
     context = build_context(
-        ws.read(s, box, owner, wid),
+        model_work.project_workspace(s, ws.read(s, box, owner, wid)),
         version,
         settings,
         settings["role"],

@@ -8,7 +8,7 @@ from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, model_validator
 
-from cosmas_os.api.membership_analysis_schemas import ConversationAnalysisFields
+from cosmas_os.api.session_prep_analysis_schemas import ConversationAnalysisFields
 from cosmas_os.api.team_schemas import BotAddress, ConversationRequest, HandoffRetry
 from cosmas_os.api.workspace_schemas import IdempotencyKey
 from cosmas_os.application.workspace import WorkspaceError
