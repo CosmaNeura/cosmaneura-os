@@ -14,7 +14,7 @@ SESSION_PREP_PATH_LIMITS = {
     "/embed/v1/context-tokens/exchange": 16384,
     "/service/v1/agent/mount-context/resolve": 16384,
     "/service/v1/agent/conversation-turns/write": 16384,
-    "/service/v1/agent/tools/invoke": 262144,
+    "/service/v1/companion/session-prep/brief": 262144,
 }
 
 

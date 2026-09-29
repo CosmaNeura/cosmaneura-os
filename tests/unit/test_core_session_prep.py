@@ -154,7 +154,7 @@ def test_exact_brief_request_preserves_authorized_turn_and_core_result_state(sta
     request = calls[0]
     assert (
         request.method == "POST"
-        and str(request.url) == "https://core.example.invalid/service/v1/agent/tools/invoke"
+        and str(request.url) == "https://core.example.invalid/service/v1/companion/session-prep/brief"
     )
     assert request.headers["Authorization"] == "Bearer synthetic_PRIVATE_prep_identity"
     assert request.headers["X-Cosmaneura-Mount-Context"] == "synthetic_PRIVATE_mount_token"
