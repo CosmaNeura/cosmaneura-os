@@ -1,5 +1,6 @@
 """Personal Google consent, callback and read-only data views."""
 
+import logging
 from typing import Literal
 from urllib.parse import parse_qsl
 
@@ -14,6 +15,8 @@ from cosmas_os.application.capture_deadline import run_in_threadpool
 from cosmas_os.ports.scribe_capture import ProtectedModel
 
 PATH = "/connections/google/session"
+GOOGLE_AUTHORIZATION_ISSUER = "https://accounts.google.com"
+logger = logging.getLogger(__name__)
 HEADERS = {
     "Cache-Control": "no-store",
     "Referrer-Policy": "no-referrer",
@@ -88,12 +91,14 @@ def router(*, runtime, identity_dependency, workspace_gate):
                 {"detail": "google_connection_unavailable"}, status_code=404, headers=HEADERS
             )
         success = False
+        stage = "query"
         try:
             raw = request.scope.get("state", {}).pop("google_callback_query", b"")
             pairs = parse_qsl(
-                raw.decode("ascii"), keep_blank_values=True, strict_parsing=True, max_num_fields=8
+                raw.decode("ascii"), keep_blank_values=True, strict_parsing=True, max_num_fields=9
             )
             data = dict(pairs)
+            stage = "parameters"
             if (
                 len(pairs) != len(data)
                 or set(data)
@@ -107,15 +112,24 @@ def router(*, runtime, identity_dependency, workspace_gate):
                     "scope",
                     "prompt",
                     "hd",
+                    "iss",
                 }
                 or ("code" in data) == ("error" in data)
             ):
                 raise ValueError
+            stage = "issuer"
+            if data.get("iss", GOOGLE_AUTHORIZATION_ISSUER) != GOOGLE_AUTHORIZATION_ISSUER:
+                raise ValueError
+            stage = "completion"
             success = await run_in_threadpool(
                 service.callback, data.get("state"), data.get("code"), "error" in data
             )
+            if not success:
+                logger.warning("Google callback did not complete the sign-in attempt")
         except Exception:
-            pass
+            # Stage names are fixed; query values and exception messages can
+            # contain authorization codes and must never enter diagnostics.
+            logger.warning("Google callback rejected at %s", stage)
         return RedirectResponse(
             service.return_origin + ("/#google-connected" if success else "/#google-sign-in"),
             status_code=303,
