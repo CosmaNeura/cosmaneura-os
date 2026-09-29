@@ -49,6 +49,7 @@ async function open(includeEvidence=true, prepEnabled=true) {
 it("loads actual visit context without offering or dispatching the empty model shortcut",async()=>{
   await open();
   expect(host.querySelector(".team-conversation-empty")).toBeNull();
+  expect(host.querySelector(".team-messages")?.hasAttribute("hidden")).toBe(true);
   expect(button("Review the saved preparation")).toBeUndefined();
   expect(readEncounterPrep).not.toHaveBeenCalled();
   await click("Review visit context");

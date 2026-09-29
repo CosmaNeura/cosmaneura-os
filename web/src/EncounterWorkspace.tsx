@@ -1090,7 +1090,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onDenied={failure} onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}}/>
             : <p className="research-status">Sign in to use private Research settings and check public source connections.</p>}
             <button className="team-subtle" aria-expanded={savedResearchChat} onClick={()=>setSavedResearchChat(value=>!value)}>Saved encounter conversation</button></>}
-          <div hidden={bot?.role==='research'&&!savedResearchChat} className="team-messages" aria-live="polite" aria-relevant="additions">
+          <div hidden={bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
             {!turns.length && !visitPrepReader && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
               <h3>{stage === "Before" ? "A clear start to the visit" : stage === "During" ? "Space to think and take notes" : "Keep the next step in view"}</h3>
