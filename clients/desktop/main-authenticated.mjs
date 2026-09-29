@@ -10,6 +10,7 @@ import {preparePackagedAuthHelper} from './spawn-auth-helper.mjs';
 import {createAuthAccessStore} from './auth-access-store.mjs';
 import {createDesktopAuthSession} from './auth-session.mjs';
 import {installAuthIpc} from './auth-ipc.mjs';
+import {installSignInPresentation} from './sign-in-presentation.mjs';
 import {installCosmaneuraNavigation} from './cosmaneura-navigation.mjs';
 import {proxyAuthenticatedWorkspaceRequest} from './workspace-auth-proxy.mjs';
 import {fetchLocalAuthenticatedWorkspace} from './local-auth-http.mjs';
@@ -25,17 +26,20 @@ import {preparePackagedDesktopCapture} from './native-capture-package.mjs';
 import {validateOperationalNativeIdentity} from './native-identity-config.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
-let window, auth, captureHost, disposeIpc, disposeLifecycle, disposeNavigation, failureClosing = false;
+let window, auth, captureHost, disposeIpc, disposeLifecycle, disposeNavigation, disposeSignInPresentation, failureClosing = false;
 const cleanup = () => {
   // Failure cleanup retires acquisition immediately. Saved native proofs survive
   // unavailable credentials and are recovered before a later recording start.
   void captureHost?.close().catch(() => {});
   const lifecycle = disposeLifecycle, ipc = disposeIpc, navigation = disposeNavigation, session = auth;
+  const presentation = disposeSignInPresentation;
+  disposeSignInPresentation = undefined;
   disposeLifecycle = undefined; disposeIpc = undefined; disposeNavigation = undefined; auth = undefined;
   // Each capability closes independently even if another teardown fails.
   try { lifecycle?.(); } catch { /* No private diagnostics. */ }
   try { ipc?.(); } catch { /* Continue closing auth. */ }
   try { navigation?.(); } catch { /* Continue closing auth. */ }
+  try { presentation?.(); } catch { /* Continue closing auth. */ }
   try { session?.close(); } catch { /* The failure path also destroys the renderer. */ }
 };
 const fail = createDesktopFailureHandler({app, dialog,
@@ -96,6 +100,7 @@ async function bootstrap() {
   installCaptureContentSecurityPolicy(rendererSession.webRequest, contentSecurityPolicy);
   installMicrophonePermissions(window.webContents, auth, config.microphoneCaptureEnabled);
   disposeIpc = installAuthIpc(ipcMain, window.webContents, auth);
+  disposeSignInPresentation = installSignInPresentation(auth, window);
   if(config.nativeCaptureEnabled===true){
     if(config.mode!=='hosted-beta-authenticated'||!['synthetic','authorized_beta'].includes(config.dataMode))throw new Error('Desktop recording unavailable');
     validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);

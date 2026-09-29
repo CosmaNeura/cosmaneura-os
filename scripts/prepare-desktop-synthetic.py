@@ -215,7 +215,7 @@ def main():
                       for p in sorted(destination.rglob("*")) if p.is_file()},
         }, indent=2) + "\n")
         for filename in ("auth-helper-client.mjs", "auth-access-store.mjs", "auth-session.mjs",
-                         "auth-ipc.mjs", "auth-preload.cjs", "workspace-auth-proxy.mjs", "connector-api-routes.mjs",
+                         "auth-ipc.mjs", "sign-in-presentation.mjs", "auth-preload.cjs", "workspace-auth-proxy.mjs", "connector-api-routes.mjs",
                          "spawn-auth-helper.mjs", "local-auth-http.mjs", "hosted-auth-http.mjs", "capture-content-security.mjs",
                          "microphone-permissions.mjs", "installation-state.mjs", "native-capture-package.mjs"):
             shutil.copyfile(root / "clients/desktop" / filename, app / filename)
