@@ -21,6 +21,13 @@ from .transport import (
     submission,
 )
 
+# Published v1 result codes: https://docs.documo.com/#result-codes
+# A failure code alone is not terminal; require the matching failed status.
+FAILURE_CODES = frozenset({
+    "4000", "5000", "5100", "5200", "6000", "6100", "6200", "6300",
+    "6400", "6500", "6600", "6700", "6800", "7000", "8000", "9000",
+})
+
 
 class DocumoConnector:
     def __init__(self, runtime):
@@ -79,6 +86,9 @@ class DocumoConnector:
             state = "pending" if data["status"] in {"processing", "transmitting"} else "unknown"
             if data["status"] == "success" and data.get("resultCode") == "0" and total == complete and total > 0:
                 state = "transport_delivered"
+            elif (data["status"] == "failed" and type(data.get("resultCode")) is str
+                    and data["resultCode"] in FAILURE_CODES):
+                state = "transport_failed"
             return DeliveryObservation(reference=ref, observed_at=result.observed_at, state=state,
                 pages_total=total, pages_delivered=complete, response_sha256=result.sha256)
         except (ValueError, TypeError, KeyError):
