@@ -34,7 +34,11 @@ export function sameAuthState(a, b) {
 /** Dedicated pipes to one packaged helper. The renderer never receives this object. */
 // The native coordinator fences access at 30/180 seconds. Leave five seconds
 // for its error/state frames to arrive before treating the helper as dead.
-export function createAuthHelperClient(child, {startupTimeoutMs = 10000, requestTimeoutMs = 35000, signInTimeoutMs = 185000} = {}) {
+// A deliberate recovery may first need macOS approval for an existing Keychain
+// item after release signing. Background startup retains the short deadline.
+export function createAuthHelperClient(child, {interactiveStartup = false,
+  startupTimeoutMs = interactiveStartup === true ? 185000 : 10000,
+  requestTimeoutMs = 35000, signInTimeoutMs = 185000} = {}) {
   let alive = true;
   let ready = false;
   let current = closedAuthState('loading');

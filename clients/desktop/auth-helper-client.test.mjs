@@ -118,6 +118,44 @@ test('startup and request timeouts terminate only the owned helper', async () =>
   await assert.rejects(second.client.getState(), /Native session unavailable/); assert.equal(second.child.kills, 1);
 });
 
+test('explicit recovery can finish Keychain startup after the background deadline', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = fixture({interactiveStartup: true});
+  const pending = f.client.signIn();
+  try {
+    t.mock.timers.tick(120000); await tick();
+    assert.equal(f.child.kills, 0); assert.equal(f.requests.length, 0);
+    assert.equal(f.client.snapshot().phase, 'loading');
+    f.send({event: 'ready', version: 1}); await tick();
+    assert.equal(f.requests[0].method, 'signIn');
+    f.send({id: f.requests[0].id, ok: true, result: ready});
+    assert.deepEqual(await pending, ready);
+    t.mock.timers.tick(185000); assert.equal(f.child.kills, 0);
+  } finally { f.client.close(); }
+});
+
+test('both startup modes remain bounded and only an explicit boolean extends the deadline', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  for (const interactiveStartup of [false, 'true', true]) {
+    const f = fixture({interactiveStartup});
+    const pending = assert.rejects(f.client.getState(), /Native session unavailable/);
+    const deadline = interactiveStartup === true ? 185000 : 10000;
+    t.mock.timers.tick(deadline - 1); assert.equal(f.child.kills, 0);
+    t.mock.timers.tick(1); await pending;
+    assert.equal(f.child.kills, 1); assert.equal(f.requests.length, 0);
+    assert.equal(f.client.snapshot().phase, 'unavailable');
+  }
+});
+
+test('closing during interactive startup immediately rejects work without waiting for its deadline', async t => {
+  t.mock.timers.enable({apis: ['setTimeout']});
+  const f = fixture({interactiveStartup: true});
+  const pending = assert.rejects(f.client.signIn(), /Native session unavailable/);
+  t.mock.timers.tick(20000); f.client.close(); await pending;
+  assert.equal(f.child.kills, 1); assert.equal(f.requests.length, 0);
+  t.mock.timers.tick(185000); assert.equal(f.child.kills, 1);
+});
+
 for (const [method, nativeDeadline] of [['signIn', 180000], ['signOut', 30000]]) {
   test('allows the native ' + method + ' deadline to report a closed state before terminating its pipe', async t => {
     t.mock.timers.enable({apis: ['setTimeout']});

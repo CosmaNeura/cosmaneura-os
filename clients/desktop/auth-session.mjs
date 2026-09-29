@@ -41,7 +41,7 @@ export async function createDesktopAuthSession({enabled = false, createHelper, a
     previous?.close();
   }
   async function openHelper(operation = null) {
-    const candidate = await createHelper();
+    const candidate = await createHelper({interactive: operation !== null});
     if (disposed || storageFailed || operation && !currentOperation(operation)) {
       candidate.close(); throw unavailable();
     }

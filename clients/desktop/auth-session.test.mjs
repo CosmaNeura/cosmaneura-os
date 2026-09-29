@@ -122,8 +122,9 @@ test('failed helper startup retries only after explicit sign-in and a durable ac
   const f = fixture('allowed'); let attempts = 0, closed = 0;
   const failed = {...f.helper, getState: async () => { throw new Error('helper exited'); }, close: () => { closed++; }};
   const session = await createDesktopAuthSession({enabled: true, accessStore: f.store,
-    createHelper: async () => {
+    createHelper: async options => {
       attempts++;
+      assert.deepEqual(options, {interactive: attempts > 1});
       if (attempts > 1) assert.equal(f.access(), 'logout_pending');
       return attempts === 1 ? failed : f.helper;
     }});
