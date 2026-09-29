@@ -47,8 +47,15 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
     }
   }
   const sources = value?.sources.filter(source => source.included) ?? [];
+  function showSource(ref: string) {
+    const target = document.getElementById(`${sourceId}-${ref}`);
+    // Native requests are bound to the exact document URL, including its fragment.
+    target?.scrollIntoView({block: "nearest"});
+    target?.focus({preventScroll: true});
+  }
   const citations = (refs: string[]) => <sup className="session-prep-citations" aria-label={`Sources ${refs.map(ref => sources.findIndex(s => s.source_id === ref) + 1).join(", ")}`}>
-    {refs.map(ref => <a key={ref} href={`#${sourceId}-${ref}`}>[{sources.findIndex(s => s.source_id === ref) + 1}]</a>)}</sup>;
+    {refs.map(ref => <button key={ref} type="button" aria-label={`Show source ${sources.findIndex(s => s.source_id === ref) + 1}`}
+      aria-controls={`${sourceId}-${ref}`} onClick={() => showSource(ref)}>[{sources.findIndex(s => s.source_id === ref) + 1}]</button>)}</sup>;
   const items = (title: string, entries: CitedText[]) => entries.length > 0 && <section><h4>{title}</h4><ul>{entries.map((item, i) =>
     <li key={i}>{item.text} {citations(item.source_refs)}</li>)}</ul></section>;
   return <section className="team-prep session-prep" aria-label="Session Prep brief" aria-busy={current.busy}>
@@ -73,7 +80,7 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
       {items("Cautions", brief.cautions)}
       {items("Suggested visit outline", brief.suggested_outline)}
       {brief.patient_reported && <section><h4>Patient-reported preparation</h4><p>{brief.patient_reported.summary} {citations(brief.patient_reported.source_refs)}</p></section>}
-      <section className="session-prep-sources"><h4>Sources</h4><ol>{sources.map(source => <li key={source.source_id} id={`${sourceId}-${source.source_id}`}>
+      <section className="session-prep-sources"><h4>Sources</h4><ol>{sources.map(source => <li key={source.source_id} id={`${sourceId}-${source.source_id}`} tabIndex={-1}>
         {source.source_class === "clinician_finalized_note" ? "Finalized clinician note" : "Patient-reported Visit Prep"} · {new Date(source.source_at!).toLocaleDateString()} · version {source.source_version}</li>)}</ol>
         {value.sources.some(s => !s.included && s.reason_code === "selection_limit") && <p className="team-fine">Additional records fall outside this brief's source limit.</p>}
         {value.sources.some(s => !s.included && s.reason_code === "source_temporarily_unavailable") && <p className="team-fine">A source was temporarily unavailable.</p>}

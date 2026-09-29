@@ -139,8 +139,9 @@
 .session-prep ul, .session-prep ol { padding-inline-start: 1.4rem; }
 .session-prep li { margin-block: .45rem; overflow-wrap: anywhere; line-height: 1.5; }
 .session-prep-citations { white-space: nowrap; }
-.session-prep-citations a { color: var(--team-green, #00693e); padding-inline: .15rem; }
+.session-prep-citations button { color: var(--team-green, #00693e); padding: 0 .15rem; background: none; border: 0; font: inherit; text-decoration: underline; cursor: pointer; }
 .session-prep-sources { font-size: .82rem; border-top: 1px solid var(--team-border, #d9dfdb); padding-top: .8rem; }
+.session-prep-sources li:focus { outline: 2px solid var(--team-green, #00693e); outline-offset: 3px; }
 .team-composer .session-prep-included { gap: 8px; margin-bottom: 8px; padding: 4px 9px; background: #edf5ef; color: #24533c; border-radius: 7px; flex-wrap: wrap; }
 .appointment-panel { margin: 1rem -1rem -1rem; border-bottom: 0; border-top: 1px solid var(--team-border, #d9dfdb); font-size: .86rem; line-height: 1.5; overflow-wrap: anywhere; }
 .appointment-panel h3 { margin-top: 0; }
