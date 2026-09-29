@@ -242,7 +242,7 @@ def test_retained_admission_stops_after_late_remote_phase(monkeypatch, phase):
             return self.value('resolve', object())
         def resolve_binding(self, *a):
             return self.value('binding', object())
-        def admit_capture(self, *a):
+        def admit_capture(self, *a, **kwargs):
             return self.value('admission', SimpleNamespace(session_id=session_id))
         def encounter_context(self, *a):
             return self.value('prep', SimpleNamespace())

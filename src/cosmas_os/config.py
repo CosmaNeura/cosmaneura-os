@@ -139,6 +139,10 @@ class Settings(BaseSettings):
     core_capture_origin: str = ""
     core_capture_scope: str = ""
     core_capture_managed_identity_client_id: str = ""
+    # Separate activation and caller configuration for Core's prepared artifact.
+    workspace_session_prep_enabled: bool = False
+    core_session_prep_scope: str = ""
+    core_session_prep_managed_identity_client_id: str = ""
     workspace_llm_backend: Literal["disabled", "azure_gpt41"] = "disabled"
     workspace_llm_endpoint: str = "https://cosmascode.services.ai.azure.com/openai/v1"
     workspace_llm_deployment: str = "gpt-4.1"
@@ -179,6 +183,18 @@ class Settings(BaseSettings):
             and self.core_capture_scope.endswith("/.default")
             and not any(c.isspace() for c in self.core_capture_scope)
         )
+
+    @property
+    def workspace_session_prep_available(self) -> bool:
+        try:
+            UUID(self.core_session_prep_managed_identity_client_id)
+        except ValueError:
+            return False
+        return bool(self.workspace_session_prep_enabled and self.workspace_capture_available
+                    and self.workspace_prep_enabled and self.auth_mode == "clerk_jwt"
+                    and self.core_session_prep_scope.startswith("api://")
+                    and self.core_session_prep_scope.endswith("/.default")
+                    and not any(c.isspace() for c in self.core_session_prep_scope))
 
     @property
     def workspace_core_connection_available(self) -> bool:

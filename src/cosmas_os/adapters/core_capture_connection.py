@@ -111,8 +111,9 @@ class _CaptureHTTP:
 
 
 class _CoreClient:
-    def __init__(self, origin, budget, transport_factory):
+    def __init__(self, origin, budget, transport_factory, *, path_limits=None):
         self.origin, self.budget, self.transport_factory = origin, budget, transport_factory
+        self.path_limits = dict(PATH_LIMITS if path_limits is None else path_limits)
         self.closed = False
 
     @contextmanager
@@ -120,10 +121,10 @@ class _CoreClient:
         self.budget.check()
         path = url.removeprefix(self.origin)
         if (self.closed or method != "POST" or url != self.origin + path
-            or path not in PATH_LIMITS or timeout not in {None, 30, 100}):
+            or path not in self.path_limits or timeout not in {None, 30, 100}):
             raise ConnectorUnavailable("core_capture_request_unconfirmed")
         transport = _CaptureHTTP(
-            self.budget, PATH_LIMITS[path], timeout or 10, self.transport_factory
+            self.budget, self.path_limits[path], timeout or 10, self.transport_factory
         )
         try:
             response = transport.request(method, url, headers=headers, json=json)

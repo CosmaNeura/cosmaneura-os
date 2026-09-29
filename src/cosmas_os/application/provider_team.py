@@ -113,6 +113,9 @@ def read(s: Session, box: str, owner: str, *, version: ProviderTeamRevision | No
                     capability["label"] = "Saved intake and prior visit drafts"
                     capability["state"] = "enabled" if capture_enabled and runtime_settings.workspace_prep_enabled else "awaiting_connection"
                     capability["contract"] = "core.encounter-context.v1"
+                    if runtime_settings.workspace_session_prep_available:
+                        capability.update(label="Session Prep brief", state="enabled",
+                                          contract="core.session-prep.brief.v1")
         capabilities.append(
             {
                 "key": "assistant.answer",

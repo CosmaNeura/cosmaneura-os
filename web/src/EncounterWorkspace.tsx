@@ -52,6 +52,7 @@ import { MICROSOFT_CONNECTION_BUILD } from './microsoft-connection-api';
 import { SchedulingConnectionPanel } from "./SchedulingConnectionPanel";
 import { APPOINTMENTS_BUILD } from "./appointment-api";
 import { EncounterPrepPanel } from "./EncounterPrepPanel";
+import { SessionPrepPanel } from "./SessionPrepPanel";
 import { ENCOUNTER_PREP_BUILD } from "./encounter-prep-api";
 import { CAPTURE_CORRECTIONS_BUILD, CAPTURE_NOTES_BUILD, CAPTURE_WORKSPACE_BUILD } from "./capture-api";
 import type { CaptureDraft } from "./capture-notes-api";
@@ -1057,6 +1058,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             <div className="capture-actions team-scribe-actions"><button disabled={locked || !bot.enabled || !team.revision}
               onClick={() => setCaptureRequest(value => value + 1)}>{CAPTURE_NOTES_BUILD && team.capture.notes_enabled ? "Record visit / prepare SOAP draft" : "Record visit"}</button>
               <small>{CAPTURE_NOTES_BUILD && team.capture.notes_enabled ? "Consent → saved transcript and scratch notes → editable Core draft" : "Consent → recording and saved scratch notes"}</small></div>}
+          {bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
+            template?.capabilities.some(capability => capability.key === "core.session_prep.read" &&
+              capability.state === "enabled" && capability.contract === "core.session-prep.brief.v1") &&
+            <SessionPrepPanel workspaceId={workspace.id} identity={authenticated}
+              bot={{address: botAddress(bot), team_revision: team.revision}}
+              enabled={bot.enabled && bot.include_evidence && team.revision > 0} locked={locked} onAccessLost={failure} />}
           {bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
             <EncounterPrepPanel workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}} name={bot.name}
