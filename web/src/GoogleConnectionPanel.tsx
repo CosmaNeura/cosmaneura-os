@@ -3,6 +3,7 @@ import {googleConnectionRequest,type GoogleAction,type GoogleStatus,type GoogleS
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {useSetupNavigationBusy} from './connection-setup-flow';
 import {parseRecordNavigationResult,RECORD_NAVIGATION_EVENT} from './core-record-location';
+import {useConnectionReturnCheck} from './use-connection-return-check';
 import './microsoft-connection.css';
 
 declare global {interface Window {cosmasGoogleNavigation?:{version:1;available:boolean;mode:'trusted-click'}}}
@@ -16,19 +17,20 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   const owner=useRef(identity);owner.current=identity;
   // Hide prior-account values during render, before identity-change effects run.
   const visible=data?.owner===identity?data:null,status=visible?.status,start=visible?.start,view=visible?.view;
-  const epoch=useRef(0),pending=useRef<AbortController|null>(null),navigationPending=useRef<string|null>(null),awaitingReturn=useRef(false);
+  const epoch=useRef(0),pending=useRef<AbortController|null>(null),navigationPending=useRef<string|null>(null);
   const denied=useRef(onAuthenticationLost);denied.current=onAuthenticationLost;
   const native=identity.mode==='desktop_native'?{revision:identity.revision,isCurrent:identity.isCurrent}:identity.nativeSession;
   const capability=window.cosmasGoogleNavigation;
   const nativeReady=!native||capability?.version===1&&capability.available&&capability.mode==='trusted-click';
   useSetupNavigationBusy(busy||opening,onBusyChange);
   useEffect(()=>{
-    epoch.current++;pending.current?.abort();pending.current=null;navigationPending.current=null;awaitingReturn.current=false;
+    epoch.current++;pending.current?.abort();pending.current=null;navigationPending.current=null;
     setData(null);setMessage('');setBusy(false);setOpening(false);setUnavailableFor(null);
     return()=>{epoch.current++;pending.current?.abort();pending.current=null;};
   },[identity]);
   const run=useCallback(async(action:GoogleAction)=>{
-    if(pending.current||owner.current!==identity)return;
+    if(owner.current!==identity)return;
+    if(pending.current)return 'busy' as const;
     const current=++epoch.current,controller=new AbortController();pending.current=controller;setBusy(true);setMessage('');
     setData(previous=>previous?.owner===identity?{...previous,start:null,view:null}:null);
     try{
@@ -38,7 +40,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       if('authorization_url' in result){setData({owner:identity,status:null,start:result,view:null});setRequestId(crypto.randomUUID());setMessage('Continue with Google, then return here. Your connection will be checked when you return.');}
       else if('kind' in result)setData(previous=>({owner:identity,status:previous?.owner===identity?previous.status:null,start:null,view:result}));
       else if(result.state==='disconnected'){setData(null);setMessage('Google disconnected from CosmasOS. You can reconnect when ready.');}
-      else setData({owner:identity,status:result,start:null,view:null});
+      else {setData({owner:identity,status:result,start:null,view:null});return result.state;}
     }catch(error){
       if(epoch.current!==current||owner.current!==identity)return;
       setData(null);
@@ -49,11 +51,8 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     }finally{if(epoch.current===current&&owner.current===identity){pending.current=null;setBusy(false);}}
   },[identity]);
   useEffect(()=>{void run('status');},[run]);
-  useEffect(()=>{
-    const returned=()=>{if(awaitingReturn.current&&document.visibilityState!=='hidden'&&!pending.current){awaitingReturn.current=false;void run('status');}};
-    window.addEventListener('focus',returned);document.addEventListener('visibilitychange',returned);
-    return()=>{window.removeEventListener('focus',returned);document.removeEventListener('visibilitychange',returned);};
-  },[run]);
+  const returnCheck=useConnectionReturnCheck(identity,()=>run('status'),()=>setMessage('Sign-in is still finishing. You can check the connection again in a moment.'));
+  const manual=(action:GoogleAction)=>{returnCheck.cancel();void run(action);};
   useEffect(()=>{
     if(!start)return;
     const timer=setTimeout(()=>{setData(null);setMessage('That sign-in link expired. Check your connection or start again.');},Math.max(0,Date.parse(start.expires_at)-Date.now()));
@@ -75,7 +74,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   },[opening]);
   const begin=(event:{preventDefault:()=>void})=>{
     if(busy||opening||!start||owner.current!==identity||Date.parse(start.expires_at)<=Date.now()||native&&!native.isCurrent()){event.preventDefault();return;}
-    awaitingReturn.current=true;
+    returnCheck.begin();
     if(native){navigationPending.current=requestId;setOpening(true);}
   };
   const blocked=busy||opening;
@@ -84,19 +83,19 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     <p>Connect your Google account to see Gmail inbox summaries here. Google will ask you to approve access.</p>
     <p className="connection-access-summary">CosmasOS reads sender, subject, date and unread status. Message bodies and attachments stay in Gmail.</p>
     {!status?.account&&!start&&unavailableFor!==identity&&<ol className="personal-connection-steps"><li>Choose your Google account.</li><li>Review access on Google’s secure sign-in page.</li><li>Return here to read recent email.</li></ol>}
-    <button disabled={blocked} onClick={()=>void run('status')}>{busy?'Working…':'Check Google connection'}</button>
+    <button disabled={blocked} onClick={()=>manual('status')}>{busy?'Working…':'Check Google connection'}</button>
     {status&&<div className="connection-practice">
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Google connected.':status.state==='completing_sign_in'?'Completing Google sign-in…':status.state==='sign_in_pending'?'Google sign-in is ready to continue.':'Connect your Google account to continue.'}</p>
     </div>}
-    {(!status||status.state!=='completing_sign_in')&&!start&&<button className="team-primary" disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>void run('start')}>{status?.state==='connected'?'Reconnect Google':'Connect with Google'}</button>}
+    {(!status||status.state!=='completing_sign_in')&&!start&&<button className="team-primary" disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>manual('start')}>{status?.state==='connected'?'Reconnect Google':'Connect with Google'}</button>}
     {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||!nativeReady}
       data-google-connection={blocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
       onClick={begin}>{opening?'Opening Google…':'Continue with Google'}</button>:
       <a className="team-primary microsoft-continue" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Google</a>}</p>}
     {!nativeReady&&<p>Google connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
-    {status?.state==='connected'&&<div className="microsoft-actions"><button disabled={blocked} onClick={()=>void run('mail')}>Read recent email</button></div>}
-    {(start||status&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>void run('disconnect')}>{status?.state==='connected'?'Disconnect Google':'Cancel Google connection'}</button>}
+    {status?.state==='connected'&&<div className="microsoft-actions"><button disabled={blocked} onClick={()=>manual('mail')}>Read recent email</button></div>}
+    {(start||status&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>manual('disconnect')}>{status?.state==='connected'?'Disconnect Google':'Cancel Google connection'}</button>}
     {view&&<section aria-label="Gmail inbox summaries">
       <h3>Inbox summaries</h3><p>{view.account.email} · Checked {when(view.observed_at)}</p>
       {view.items.length===0&&<p>Your inbox has no messages.</p>}
