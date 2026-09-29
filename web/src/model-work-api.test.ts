@@ -82,3 +82,14 @@ it('transports and resolves the exact selected analysis on existing model paths 
  await modelWorkApi.submit(access,id,selected);await modelWorkApi.resolve(access,id,selected);expect(fetcher.mock.calls.map(c=>c[0])).toEqual([`http://127.0.0.1:8018/workspaces/${id}/conversation`,`http://127.0.0.1:8018/workspaces/${id}/conversation/resolve`]);expect(fetcher.mock.calls.every(c=>c[1].body===JSON.stringify(analysisBody))).toBe(true);
  const {research_analysis:_,...omitted}=analysisBody;fetcher.mockResolvedValueOnce(json(await modelReceipt(omitted)));await expect(modelWorkApi.resolve(access,id,selected)).rejects.toMatchObject({status:503});
 });
+it('retains a selected brief through the longer submit window and keeps resolve read-only and shorter',async()=>{
+  const {default:actual}=await import('./__fixtures__/session-prep-chat.json');
+  const selected={type:'ask' as const,body:actual.request as import('./workspace-api').ConversationInput};
+  vi.useFakeTimers();const fetcher=vi.fn().mockImplementation(()=>new Promise(()=>{}));vi.stubGlobal('fetch',fetcher);
+  let submitEnded=false;
+  const submitted=expect(modelWorkApi.submit(access,id,selected).finally(()=>{submitEnded=true;})).rejects.toMatchObject({status:503});
+  const resolved=expect(modelWorkApi.resolve(access,id,selected)).rejects.toMatchObject({status:503});
+  await vi.advanceTimersByTimeAsync(30000);await resolved;expect(submitEnded).toBe(false);
+  await vi.advanceTimersByTimeAsync(60000);await submitted;
+  expect(fetcher).toHaveBeenCalledTimes(2);expect(fetcher.mock.calls.every(c=>c[1].body===JSON.stringify(selected.body))).toBe(true);
+});

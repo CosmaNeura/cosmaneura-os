@@ -364,7 +364,7 @@ def conversation_observation(s, workspace, *, key, request_hash, as_of):
     return checked_response(result, ModelRequestObservation)
 
 
-def conversation_request_hash(*, expected, team_revision, role, content, research_analysis=None, inbox_analysis=None, membership_analysis=None):
+def conversation_request_hash(*, expected, team_revision, role, content, research_analysis=None, inbox_analysis=None, membership_analysis=None, session_prep_analysis=None):
     value = {"expected": expected, "team_revision": team_revision, "role": role, "content": content}
     if research_analysis is not None:
         from cosmas_os.application.research_analysis import selection
@@ -382,6 +382,12 @@ def conversation_request_hash(*, expected, team_revision, role, content, researc
         if research_analysis is not None or inbox_analysis is not None:
             raise ws.WorkspaceError("invalid_membership_analysis", 422)
         value["membership_analysis"] = selection(membership_analysis)
+    if session_prep_analysis is not None:
+        from cosmas_os.application.session_prep_analysis import selection
+
+        if any(item is not None for item in (research_analysis, inbox_analysis, membership_analysis)):
+            raise ws.WorkspaceError("invalid_session_prep_analysis", 422)
+        value["session_prep_analysis"] = selection(session_prep_analysis)
     return payload_hash(value)
 
 
@@ -399,6 +405,7 @@ def resolve_conversation(
     research_analysis=None,
     inbox_analysis=None,
     membership_analysis=None,
+    session_prep_analysis=None,
     external_identity_id=None,
     reauthenticate=None,
     clock=None,
@@ -409,6 +416,7 @@ def resolve_conversation(
     request_hash = conversation_request_hash(
         expected=expected, team_revision=team_revision, role=role, content=content,
         research_analysis=research_analysis, inbox_analysis=inbox_analysis, membership_analysis=membership_analysis,
+        session_prep_analysis=session_prep_analysis,
     )
     return conversation_observation(
         s, workspace, key=key, request_hash=request_hash, as_of=now(s, clock)
@@ -496,10 +504,20 @@ def _finish(s, row, state, reason, at, *, dispatch=None, outcome=None, reply=Non
 
 
 def _context_for(
-    s, workspace, version, settings, bot, command, *, handoff_roles=(), draft_only=False
+    s, workspace, version, settings, bot, command, *, handoff_roles=(), draft_only=False, session_prep_phase="before"
 ):
     from cosmas_os.application import conversation
 
+    if "session_prep_analysis" in command:
+        from cosmas_os.application import session_prep_analysis
+
+        if draft_only or any(key in command for key in ("research_analysis", "inbox_analysis", "membership_analysis")):
+            raise ws.WorkspaceError("invalid_session_prep_analysis", 422)
+        if not team.runtime_settings.workspace_session_prep_available:
+            raise ws.WorkspaceError("authority_changed")
+        return session_prep_analysis.build_context(
+            s, workspace, version, settings, bot, command, phase=session_prep_phase
+        )
     if "membership_analysis" in command:
         from cosmas_os.application import membership_analysis
 
@@ -536,7 +554,7 @@ def _context_for(
         if team.bot_address(candidate) in handoff_roles
     )
     return conversation.build_context(
-        ws.read(s, workspace.box_id, workspace.owner_id, workspace.id),
+        project_workspace(s, ws.read(s, workspace.box_id, workspace.owner_id, workspace.id)),
         version,
         settings,
         settings["role"],
@@ -633,6 +651,7 @@ def reserve_conversation(
     research_analysis=None,
     inbox_analysis=None,
     membership_analysis=None,
+    session_prep_analysis=None,
     external_identity_id=None,
     reauthenticate=None,
     clock=None,
@@ -648,6 +667,7 @@ def reserve_conversation(
     request_hash = conversation_request_hash(
         expected=expected, team_revision=team_revision, role=role, content=content,
         research_analysis=research_analysis, inbox_analysis=inbox_analysis, membership_analysis=membership_analysis,
+        session_prep_analysis=session_prep_analysis,
     )
     at = now(s, clock)
     prior = conversation_observation(s, workspace, key=key, request_hash=request_hash, as_of=at)
@@ -723,10 +743,14 @@ def reserve_conversation(
         from cosmas_os.application.membership_analysis import selection
 
         command["membership_analysis"] = selection(membership_analysis)
+    if session_prep_analysis is not None:
+        from cosmas_os.application.session_prep_analysis import selection
+
+        command["session_prep_analysis"] = selection(session_prep_analysis)
     context = _context_for(s, workspace, version, settings, bot, command, handoff_roles=roles)
     from dataclasses import replace
 
-    context = replace(context, handoff_limit=0 if research_analysis is not None or inbox_analysis is not None or membership_analysis is not None else handoff_limit)
+    context = replace(context, handoff_limit=0 if any(item is not None for item in (research_analysis, inbox_analysis, membership_analysis, session_prep_analysis)) else handoff_limit)
     row = _new_admission(
         s,
         workspace,
@@ -755,7 +779,7 @@ class ModelClaim:
     envelope: dict
 
 
-def _current_input(s, row, *, reauthenticate=None):
+def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
     if reauthenticate:
         reauthenticate()
     _identity(s, row.box_id, row.owner_id, row.external_identity_id)
@@ -764,13 +788,14 @@ def _current_input(s, row, *, reauthenticate=None):
     version, bot, settings = team.active_bot(
         s, row.box_id, row.owner_id, command["role"], command["team_revision"]
     )
-    if ("research_analysis" in command or "inbox_analysis" in command or "membership_analysis" in command) and (
+    if any(key in command for key in ("research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")) and (
         row.kind != "conversation" or bot.agent_id != row.agent_id
         or version.id != row.team_revision_id
         or conversation_request_hash(
             expected=command["expected_revision"], team_revision=command["team_revision"],
             role=command["role"], content=command["content"],
             research_analysis=command.get("research_analysis"), inbox_analysis=command.get("inbox_analysis"), membership_analysis=command.get("membership_analysis"),
+            session_prep_analysis=command.get("session_prep_analysis"),
         ) != row.request_hash
     ):
         raise ws.WorkspaceError("source_changed")
@@ -808,6 +833,7 @@ def _current_input(s, row, *, reauthenticate=None):
         command,
         handoff_roles=frozen.handoff_roles,
         draft_only=row.kind == "private_handoff",
+        session_prep_phase=session_prep_phase,
     )
     if source_digest(context) != row.source_sha256:
         raise ws.WorkspaceError("source_changed")
@@ -981,7 +1007,7 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
         return
     assert isinstance(result, BotReply)
     try:
-        workspace, version, bot, settings = _current_input(s, row, reauthenticate=reauthenticate)
+        workspace, version, bot, settings = _current_input(s, row, reauthenticate=reauthenticate, session_prep_phase="after")
         frozen = _context(row.prepared_envelope["context"])
         if (
             not result.backend.startswith("azure_gpt41")
@@ -1062,7 +1088,7 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
                 content=f"Private draft requests: {queued} queued; {refused} not started. Review each teammate’s recorded status below.",
             )
         # Pending child entries have no answer and do not alter selected inputs.
-        _current_input(s, row, reauthenticate=reauthenticate)
+        _current_input(s, row, reauthenticate=reauthenticate, session_prep_phase="after")
         conversation.record_reply(s, workspace, entry, version, bot, settings, frozen, published)
         s.flush()
         if reauthenticate:
@@ -1131,6 +1157,23 @@ def run_conversation(
     dispatch=None,
     **command,
 ):
+    sources = None
+    if command.get("session_prep_analysis") is not None:
+        from cosmas_os.application.session_prep_analysis import Sources
+
+        # Exact historical lookup precedes Core I/O, configuration and model gates.
+        s.rollback()
+        prior = resolve_conversation(
+            s, box, owner, wid, external_identity_id=external_identity_id,
+            reauthenticate=reauthenticate, clock=clock, **command,
+        )
+        s.rollback()
+        if prior["outcome"] != "not_found":
+            return prior
+        sources = s.info.get("session_prep_analysis_sources")
+        if not isinstance(sources, Sources):
+            raise ws.WorkspaceError("session_prep_analysis_unavailable", 503)
+        sources.refresh("before")
     admission_id, prior = reserve_conversation(
         s,
         box,
@@ -1149,6 +1192,14 @@ def run_conversation(
             result = (dispatch or dispatch_claim)(claimed)
         except ModelCallFailure as failure:
             result = failure
+        if sources is not None and isinstance(result, BotReply):
+            s.rollback()
+            try:
+                sources.refresh("after")
+            except ws.WorkspaceError:
+                # Cleared sources withhold output while retaining actual usage.
+                # Cancellation keeps the existing unknown-outcome lease.
+                pass
         settle(s, claimed, result, reauthenticate=reauthenticate, clock=clock)
     return resolve_conversation(
         s,
@@ -1212,6 +1263,10 @@ def project_workspace(s, value, *, as_of=None):
                 from cosmas_os.application.membership_analysis import selection
 
                 binding["membership_analysis"] = selection(command["membership_analysis"])
+            if "session_prep_analysis" in command:
+                from cosmas_os.application.session_prep_analysis import selection
+
+                binding["session_prep_analysis"] = selection(command["session_prep_analysis"])
         else:
             attempt = s.get(WorkspaceHandoffAttempt, row.handoff_attempt_id)
             binding = {

@@ -66,7 +66,35 @@ workspace, external identity and idempotency key. Core rejects a changed mount
 under that turn, so a lost-response retry cannot silently open another action.
 Recovering across exchanged mounts requires a new explicit UI check; this flow
 does not persist private mount credentials to promise transparent recovery.
-This view does not yet supply the brief to subsequent AI chat turns.
+After reviewing a displayed brief, the human can choose **Include in chat**.
+The existing composer shows one removable selection. Opening alone does not
+include the brief, and changing the encounter, account, bot, team permissions or
+explicitly refreshing clears the choice. Sending a question requires no new
+setup form. The brief stays separate from the current recording and SOAP review.
+
+The negotiated conversation command carries only `session_prep_analysis` version
+1: explicit `consented: true`, opaque brief ID, brief version and SHA-256 of the
+exact canonical public display, including freshness and coverage. The server
+re-reads and matches that brief before admission and after successful inference.
+Those reads use the existing authorized Core lifecycle with distinct stable keys
+for each phase, outside model SQL locks. The model receives the whole bounded
+brief with its provenance and permitted local notebook/evidence. Oversized
+selected context is refused rather than silently dropped. Citations identify
+Session Prep sections, without claiming they are the underlying signed notes.
+
+Saved model requests retain the exact selection for retries, resolve and reopen.
+An existing admission is returned before new Core or model work. A source or
+permission change after inference withholds the answer and retains usage; an
+uncertain dispatch remains uncertain and is never automatically resent. Removing
+or changing a selected brief also excludes earlier answers based on it from
+model history, including answers that omitted citations. Starting a new attempt
+requires reviewing the current brief again.
+
+The complete conversation dependency graph has a finite 120-second server
+owner. Selected-brief submissions have a 90-second shared web/native client
+window; read-only recovery keeps its existing 30-second window. Cancellation
+fences further work and leaves the original durable admission available to
+resolve. No new database schema or Core capability is introduced by chat use.
 
 Activation requires `WORKSPACE_SESSION_PREP_ENABLED=true`, an explicit
 `CORE_SESSION_PREP_MANAGED_IDENTITY_CLIENT_ID`, and `CORE_SESSION_PREP_SCOPE`, in
@@ -77,3 +105,8 @@ staging manifest enables this feature. The owning Core deployment must separatel
 enable the narrow companion receiver permission for the explicitly selected
 CosmaBot identity. Do not broaden the generic provider-tool allowlist or copy
 Scribe/Sovereign credentials. Local checks do not establish real-service acceptance.
+
+Roll out the matching API, web, Mac and iPhone clients before enabling chat use.
+Older clients cannot interpret the new selected-brief recovery metadata; do not
+activate this feature for an older native cohort. Staging activation remains off
+until the separate Core deployment and current-client acceptance are complete.

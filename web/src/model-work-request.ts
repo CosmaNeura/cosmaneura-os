@@ -1,3 +1,4 @@
+import {validSessionPrepAnalysis,type SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {validMembershipAnalysis,type MembershipAnalysis} from "./membership-analysis-contract";
 import type {BotAddress, BotRole, ConversationInput, HandoffRetryInput, Workspace, WorkspaceEntry} from "./workspace-api";
 import {teamAddress, teamCanonical, teamClosed as closed, teamHash, teamLiteral, teamNatural, teamText, teamUuid} from "./team-setup-request";
@@ -15,7 +16,7 @@ export type HandoffRetryObservation={contract_version:1;workspace_id:string;hand
   outcome:"recorded"|"not_found";recorded:null|{attempt_id:string;attempt_number:2|3;recorded_at:string;workspace_revision:number;
     status:"queued"|"running"|"completed"|"failed"|"interrupted";result_entry:{id:string;revision:number}|null;admission:AdmissionObservation|null;
     coverage:"durable_admission"|"retained_legacy";reason:ModelReason|"legacy_queued_unadmitted"|"legacy_running_unconfirmed"|null}};
-export type EntryModelRequest={contract_version:1;request_sha256:string;request:{kind:"conversation";expected_revision:number;team_revision:number;idempotency_key:string;role:BotAddress;research_analysis?:ResearchAnalysis;inbox_analysis?:InboxAnalysis;membership_analysis?:MembershipAnalysis}|{kind:"private_handoff";handoff_id:string;attempt_id:string};
+export type EntryModelRequest={contract_version:1;request_sha256:string;request:{kind:"conversation";expected_revision:number;team_revision:number;idempotency_key:string;role:BotAddress;research_analysis?:ResearchAnalysis;inbox_analysis?:InboxAnalysis;membership_analysis?:MembershipAnalysis;session_prep_analysis?:SessionPrepAnalysis}|{kind:"private_handoff";handoff_id:string;attempt_id:string};
   bot:{address:BotAddress;agent_id:string;role:BotRole;name:string;team_revision:number};admission:AdmissionObservation;reason:ModelReason|null};
 export type ModelOrigin="durable_admission_v1"|"legacy_unknown";
 export type ModelOperation=({type:"ask";body:ConversationInput}|{type:"retry";handoffId:string;body:HandoffRetryInput})&{
@@ -36,8 +37,8 @@ export function modelTime(v:unknown):v is string {
 const positive=(v:unknown):v is number=>teamNatural(v)&&v>=1;
 const encodedSize=(v:unknown)=>new TextEncoder().encode(JSON.stringify(v)).length;
 export function validConversation(v:unknown):v is ConversationInput {
-  return closed(v,"expected_revision,team_revision,idempotency_key,role,content","research_analysis,inbox_analysis,membership_analysis")&&positive(v.expected_revision)&&positive(v.team_revision)&&modelKey(v.idempotency_key)&&
-    teamAddress(v.role)&&typeof v.content==="string"&&teamText(modelStrip(v.content),4000,1)&&(!('research_analysis' in v)||validResearchAnalysis(v.research_analysis))&&(!('inbox_analysis' in v)||!('research_analysis' in v)&&validInboxAnalysis(v.inbox_analysis))&&(!('membership_analysis' in v)||!('research_analysis' in v)&&!('inbox_analysis' in v)&&validMembershipAnalysis(v.membership_analysis))&&encodedSize(v)<=MODEL_REQUEST_BYTES;
+  return closed(v,"expected_revision,team_revision,idempotency_key,role,content","research_analysis,inbox_analysis,membership_analysis,session_prep_analysis")&&positive(v.expected_revision)&&positive(v.team_revision)&&modelKey(v.idempotency_key)&&
+    teamAddress(v.role)&&typeof v.content==="string"&&teamText(modelStrip(v.content),4000,1)&&(!('research_analysis' in v)||validResearchAnalysis(v.research_analysis))&&(!('inbox_analysis' in v)||!('research_analysis' in v)&&validInboxAnalysis(v.inbox_analysis))&&(!('membership_analysis' in v)||!('research_analysis' in v)&&!('inbox_analysis' in v)&&validMembershipAnalysis(v.membership_analysis))&&(!('session_prep_analysis' in v)||!('research_analysis' in v)&&!('inbox_analysis' in v)&&!('membership_analysis' in v)&&validSessionPrepAnalysis(v.session_prep_analysis))&&encodedSize(v)<=MODEL_REQUEST_BYTES;
 }
 export function validHandoffRetry(v:unknown):v is HandoffRetryInput {
   return closed(v,"expected_revision,previous_attempt_id,idempotency_key")&&positive(v.expected_revision)&&teamUuid(v.previous_attempt_id)&&modelKey(v.idempotency_key)&&encodedSize(v)<=MODEL_RETRY_BYTES;
@@ -45,7 +46,7 @@ export function validHandoffRetry(v:unknown):v is HandoffRetryInput {
 // Match Python json.dumps(sort_keys=True, separators=(",",":"), ensure_ascii=True).
 export const modelCanonical=(v:unknown)=>teamCanonical(v).replace(/[\u007f-\uffff]/g,c=>"\\u"+c.charCodeAt(0).toString(16).padStart(4,"0"));
 export async function modelRequestHash(body:ConversationInput|HandoffRetryInput):Promise<string> {
-  const selected="content" in body?{expected:body.expected_revision,team_revision:body.team_revision,role:modelStrip(body.role),content:modelStrip(body.content),...(body.research_analysis?{research_analysis:body.research_analysis}:{}),...(body.inbox_analysis?{inbox_analysis:body.inbox_analysis}:{}),...(body.membership_analysis?{membership_analysis:body.membership_analysis}:{})}:
+  const selected="content" in body?{expected:body.expected_revision,team_revision:body.team_revision,role:modelStrip(body.role),content:modelStrip(body.content),...(body.research_analysis?{research_analysis:body.research_analysis}:{}),...(body.inbox_analysis?{inbox_analysis:body.inbox_analysis}:{}),...(body.membership_analysis?{membership_analysis:body.membership_analysis}:{}),...(body.session_prep_analysis?{session_prep_analysis:body.session_prep_analysis}:{})}:
     {expected:body.expected_revision,previous_attempt:body.previous_attempt_id};
   const bytes=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(modelCanonical(selected)));
   return [...new Uint8Array(bytes)].map(v=>v.toString(16).padStart(2,"0")).join("");
@@ -92,7 +93,7 @@ export function validEntryModel(v:unknown):v is EntryModelRequest {
   if(!closed(v,"contract_version,request_sha256,request,bot,admission,reason")||v.contract_version!==1||!teamHash(v.request_sha256)||!validAdmission(v.admission)||!reason(v.reason)||encodedSize(v)>2048)return false;
   const b=v.bot;if(!closed(b,"address,agent_id,role,name,team_revision")||!teamAddress(b.address)||!teamUuid(b.agent_id)||!teamLiteral(b.role,["scribe","visit_prep","follow_up","chief","custom","research"])||!teamText(b.name,40,1)||!positive(b.team_revision))return false;
   const r=v.request;
-  if(closed(r,"kind,expected_revision,team_revision,idempotency_key,role","research_analysis,inbox_analysis,membership_analysis")&&r.kind==="conversation")return positive(r.expected_revision)&&positive(r.team_revision)&&modelKey(r.idempotency_key)&&teamAddress(r.role)&&r.role===b.address&&r.team_revision===b.team_revision&&(!('research_analysis' in r)||b.role==='research'&&validResearchAnalysis(r.research_analysis))&&(!('inbox_analysis' in r)||!('research_analysis' in r)&&b.role==='custom'&&validInboxAnalysis(r.inbox_analysis))&&(!('membership_analysis' in r)||!('research_analysis' in r)&&!('inbox_analysis' in r)&&b.role==='custom'&&validMembershipAnalysis(r.membership_analysis));
+  if(closed(r,"kind,expected_revision,team_revision,idempotency_key,role","research_analysis,inbox_analysis,membership_analysis,session_prep_analysis")&&r.kind==="conversation")return positive(r.expected_revision)&&positive(r.team_revision)&&modelKey(r.idempotency_key)&&teamAddress(r.role)&&r.role===b.address&&r.team_revision===b.team_revision&&(!('research_analysis' in r)||b.role==='research'&&validResearchAnalysis(r.research_analysis))&&(!('inbox_analysis' in r)||!('research_analysis' in r)&&b.role==='custom'&&validInboxAnalysis(r.inbox_analysis))&&(!('membership_analysis' in r)||!('research_analysis' in r)&&!('inbox_analysis' in r)&&b.role==='custom'&&validMembershipAnalysis(r.membership_analysis))&&(!('session_prep_analysis' in r)||!('research_analysis' in r)&&!('inbox_analysis' in r)&&!('membership_analysis' in r)&&validSessionPrepAnalysis(r.session_prep_analysis));
   return closed(r,"kind,handoff_id,attempt_id")&&r.kind==="private_handoff"&&teamUuid(r.handoff_id)&&teamUuid(r.attempt_id);
 }
 export async function validModelWorkspace(value:unknown,workspaceId:string):Promise<boolean> {
@@ -119,7 +120,7 @@ export async function validModelWorkspace(value:unknown,workspaceId:string):Prom
 /** Reconstruct the exact retained intent; omitting an analysis selection changes its hash. */
 export function conversationFromEntry(entry:WorkspaceEntry):ConversationInput|null{
  const metadata=entry.model_request;if(!metadata||!validEntryModel(metadata)||metadata.request.kind!=='conversation'||typeof entry.content!=='string')return null;
- const r=metadata.request;return {expected_revision:r.expected_revision,team_revision:r.team_revision,idempotency_key:r.idempotency_key,role:r.role,content:entry.content,...(r.research_analysis?{research_analysis:structuredClone(r.research_analysis)}:{}),...(r.inbox_analysis?{inbox_analysis:structuredClone(r.inbox_analysis)}:{}),...(r.membership_analysis?{membership_analysis:structuredClone(r.membership_analysis)}:{})};
+ const r=metadata.request;return {expected_revision:r.expected_revision,team_revision:r.team_revision,idempotency_key:r.idempotency_key,role:r.role,content:entry.content,...(r.research_analysis?{research_analysis:structuredClone(r.research_analysis)}:{}),...(r.inbox_analysis?{inbox_analysis:structuredClone(r.inbox_analysis)}:{}),...(r.membership_analysis?{membership_analysis:structuredClone(r.membership_analysis)}:{}),...(r.session_prep_analysis?{session_prep_analysis:structuredClone(r.session_prep_analysis)}:{})};
 }
 export function validModelOperation(v:unknown,previous=true):v is ModelOperation {
   if(!v||typeof v!=="object")return false;

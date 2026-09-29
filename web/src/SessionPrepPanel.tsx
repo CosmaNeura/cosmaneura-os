@@ -1,15 +1,19 @@
 import {useEffect, useId, useMemo, useRef, useState} from "react";
 import {BffResponseError} from "../../clients/capture/src/bff/http-client";
 import {readSessionPrep, type CitedText, type SessionPrep} from "./session-prep-api";
+import {sessionPrepAnalysis, type SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity, type CaptureBotSelection} from "./workspace-api";
 
-export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, onAccessLost}: {
+export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, onAccessLost, onSelect, selected=false}: {
   workspaceId: string; identity: AuthenticatedWorkspaceIdentity; bot: CaptureBotSelection;
   enabled: boolean; locked: boolean; onAccessLost?: (cause: WorkspaceApiError) => void;
+  onSelect?: (selection:SessionPrepAnalysis|null)=>void; selected?:boolean;
 }) {
   const scope = useMemo(() => Symbol(), [workspaceId, identity, bot.address, bot.team_revision, enabled]);
   const currentScope = useRef(scope); currentScope.current = scope;
+  const blocked = useRef(locked); blocked.current = locked;
   const active = useRef<AbortController | null>(null);
+  const [expanded,setExpanded]=useState(false);
   const [state, setState] = useState<{scope: symbol; busy: boolean; value?: SessionPrep; error?: string}>({scope, busy: false});
   const current = state.scope === scope ? state : {busy: false, value: undefined, error: undefined};
   const sourceId = useId();
@@ -17,10 +21,11 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
   async function open() {
     if (!enabled || locked || current.busy) return;
     const controller = new AbortController(); active.current?.abort(); active.current = controller;
+    onSelect?.(null);
     setState({scope, busy: true});
     try {
       const value = await readSessionPrep(workspaceId, identity, bot, controller.signal);
-      if (!controller.signal.aborted && currentScope.current === scope) setState({scope, busy: false, value});
+      if (!controller.signal.aborted && currentScope.current === scope) {setState({scope, busy: false, value});setExpanded(true);}
     } catch (error) {
       if (controller.signal.aborted || currentScope.current !== scope) return;
       setState({scope, busy: false, error: "Session Prep could not be confirmed. Refresh the encounter and check your connection before trying again."});
@@ -29,6 +34,18 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
   }
   const value = current.value;
   const brief = value?.prepared_brief;
+  async function include() {
+    if(!value?.prepared_brief||!enabled||locked||current.busy||!onSelect)return;
+    if(selected){onSelect(null);return;}
+    const sourceRequest=active.current;
+    try {
+      const chosen=await sessionPrepAnalysis(value);
+      if(currentScope.current===scope&&!blocked.current&&active.current===sourceRequest&&!sourceRequest?.signal.aborted) {onSelect(chosen);setExpanded(false);}
+    } catch {
+      if(currentScope.current===scope&&active.current===sourceRequest&&!sourceRequest?.signal.aborted)
+        setState({scope,busy:false,value,error:"This brief could not be included. Refresh Session Prep and try again."});
+    }
+  }
   const sources = value?.sources.filter(source => source.included) ?? [];
   const citations = (refs: string[]) => <sup className="session-prep-citations" aria-label={`Sources ${refs.map(ref => sources.findIndex(s => s.source_id === ref) + 1).join(", ")}`}>
     {refs.map(ref => <a key={ref} href={`#${sourceId}-${ref}`}>[{sources.findIndex(s => s.source_id === ref) + 1}]</a>)}</sup>;
@@ -37,7 +54,7 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
   return <section className="team-prep session-prep" aria-label="Session Prep brief" aria-busy={current.busy}>
     <h3>Session Prep</h3>
     <p>A visit brief from your finalized notes and available patient-reported preparation.</p>
-    <div className="capture-actions"><button className="team-primary" disabled={!enabled || locked || current.busy} onClick={() => void open()}>
+    <div className="capture-actions"><button className={value?"team-subtle":"team-primary"} disabled={!enabled || locked || current.busy} onClick={() => void open()}>
       {current.busy ? "Opening Session Prep…" : value?.state === "pending" ? "Check for completed brief" : value ? "Refresh Session Prep" : "Open Session Prep"}</button></div>
     {current.error && <p role="alert">{current.error}</p>}
     {value?.state === "pending" && <p role="status">Your brief is being prepared in Cosmaneura. Check again shortly; you can continue working in the meantime.</p>}
@@ -45,8 +62,10 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
       "No finalized notes or patient-reported preparation are available for this visit yet." : "Session Prep is temporarily unavailable. Try again shortly."}</p>}
     {brief && value && <>
       <p className="team-fine">AI-prepared brief · review against the cited sources. Prepared {new Date(value.generated_at!).toLocaleString()}.</p>
+      {onSelect&&!selected&&<button className="team-subtle" disabled={!enabled||locked||current.busy} onClick={()=>void include()}>Include in chat</button>}
       {value.state === "refreshing" && <p role="status">An updated brief is being prepared. This is the previous version, using sources through {new Date(value.current_through!).toLocaleString()}.</p>}
       {value.completeness === "partial" && <p role="status">Some records are not included. Review the source list before using this brief.</p>}
+      <details className="session-prep-detail" open={expanded} onToggle={event=>setExpanded(event.currentTarget.open)}><summary>Review brief · version {value.brief_version}</summary>
       <section><h4>Recap</h4><p className="team-prep-content">{brief.recap.text} {citations(brief.recap.source_refs)}</p></section>
       {items("Talking points", brief.talking_points)}
       {items("Changes since prior visits", brief.trajectory_and_material_changes)}
@@ -59,6 +78,7 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
         {value.sources.some(s => !s.included && s.reason_code === "selection_limit") && <p className="team-fine">Additional records fall outside this brief's source limit.</p>}
         {value.sources.some(s => !s.included && s.reason_code === "source_temporarily_unavailable") && <p className="team-fine">A source was temporarily unavailable.</p>}
       </section>
+      </details>
     </>}
   </section>;
 }

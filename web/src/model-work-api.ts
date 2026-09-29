@@ -7,15 +7,15 @@ import {exactModelObservation, MODEL_RECEIPT_BYTES, MODEL_REQUEST_BYTES, MODEL_R
   validModelWorkspace, validRetryObservation, type HandoffRetryObservation, type ModelOperation, type ModelRequestObservation} from "./model-work-request";
 
 const ERRORS=new Set(["model_contract_required","model_contract_unsupported","team_work_limit","model_attempt_in_progress","bot_resource_restricted","team_resource_changed",
-  "model_request_too_large","invalid_membership_analysis","membership_analysis_too_large","membership_analysis_unavailable","membership_bot_required","membership_selection_required","invalid_inbox_analysis","inbox_analysis_too_large","inbox_analysis_unavailable","inbox_bot_required","inbox_human_review_required","inbox_selection_required","invalid_research_analysis","research_analysis_too_large","research_bot_required","source_changed","idempotency_conflict","workspace_revision_conflict","team_revision_conflict","invalid_workspace_request","invalid_team_request",
+  "session_prep_analysis_unavailable","session_prep_analysis_too_large","invalid_session_prep_analysis","session_prep_not_ready","session_prep_context_changed","session_prep_request_conflict","session_prep_unavailable","bot_source_unavailable","model_request_too_large","invalid_membership_analysis","membership_analysis_too_large","membership_analysis_unavailable","membership_bot_required","membership_selection_required","invalid_inbox_analysis","inbox_analysis_too_large","inbox_analysis_unavailable","inbox_bot_required","inbox_human_review_required","inbox_selection_required","invalid_research_analysis","research_analysis_too_large","research_bot_required","source_changed","idempotency_conflict","workspace_revision_conflict","team_revision_conflict","invalid_workspace_request","invalid_team_request",
   "bot_unavailable","model_unavailable","workspace_not_found","workspace_forbidden","invalid_model_work_request","invalid_model_request","model_observation_unavailable"]);
 type Receipt=ModelRequestObservation|HandoffRetryObservation;
 
 /** Credentials, HTTP stream and asynchronous receipt checks share this deadline. */
-async function bounded<T>(identity:WorkspaceIdentity,path:string,body:unknown|undefined,inputLimit:number,outputLimit:number,validate:(value:unknown,status:number)=>Promise<T>,signal?:AbortSignal):Promise<T> {
-  const controller=new AbortController(),abort=()=>controller.abort(),deadline=Date.now()+30000;
+async function bounded<T>(identity:WorkspaceIdentity,path:string,body:unknown|undefined,inputLimit:number,outputLimit:number,validate:(value:unknown,status:number)=>Promise<T>,signal?:AbortSignal,timeoutMs=30000):Promise<T> {
+  const controller=new AbortController(),abort=()=>controller.abort(),deadline=Date.now()+timeoutMs;
   const check=()=>{if(Date.now()>=deadline)controller.abort();controller.signal.throwIfAborted();};
-  const timer=setTimeout(abort,30000);signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
+  const timer=setTimeout(abort,timeoutMs);signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,onAbort:(()=>void)|undefined;
   const cancel=(stream:{cancel:()=>Promise<unknown>}|undefined|null)=>{try{void stream?.cancel().catch(()=>{});}catch{/* Cancellation cannot delay or replace the outcome. */}};
   const stopRead=()=>cancel(reader);controller.signal.addEventListener("abort",stopRead,{once:true});
@@ -65,7 +65,7 @@ async function command(identity:WorkspaceIdentity,id:string,operation:ModelOpera
       if(!validModelObservation(value)||resolve&&status!==200||!resolve&&(status===200?value.outcome!=="saved":value.outcome==="saved"||value.outcome==="not_found"))throw new WorkspaceApiError(503);
     }else if(!validRetryObservation(value)||status!==200||!resolve&&value.outcome!=="recorded")throw new WorkspaceApiError(503);
     return value as Receipt;
-  },signal);
+  },signal,!resolve&&operation.type==="ask"&&operation.body.session_prep_analysis?90000:30000);
 }
 export const modelWorkApi={
   submit:(identity:WorkspaceIdentity,id:string,operation:ModelOperation,signal?:AbortSignal)=>command(identity,id,operation,false,signal),

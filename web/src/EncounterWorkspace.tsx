@@ -1,3 +1,4 @@
+import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {MembershipAnalysisPanel} from "./MembershipAnalysisPanel";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
 import type {PracticeAccessContext} from './PracticeAccessGate';
@@ -107,6 +108,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [mobilePanel, setMobilePanel] = useState("Conversation");
   const [note, setNote] = useState("");
   const [thought, setThought] = useState("");
+  const [prepSelection,setPrepSelection]=useState<{scope:symbol;selection:SessionPrepAnalysis}|null>(null);
+  const [prepEpoch,setPrepEpoch]=useState(0);
+  const questionRef=useRef<HTMLTextAreaElement|null>(null);
   const [evidence, setEvidence] = useState("");
   const [source, setSource] = useState("");
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
@@ -548,7 +552,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   async function replaceModelRequest(){
     if(!workspace||!team||!replacementDraft||!modelObservation||(pending?.type!=='ask'&&pending?.type!=='retry')||busy||modelBusy.current)return;
     const old=pending,receipt=modelObservation.receipt;
-    if(old.type==='ask'&&(old.body.research_analysis||old.body.inbox_analysis||old.body.membership_analysis))return; // A new selected analysis requires its own packet review and consent.
+    if(old.type==='ask'&&(old.body.research_analysis||old.body.inbox_analysis||old.body.membership_analysis||old.body.session_prep_analysis))return; // A new selected analysis requires its own packet review and consent.
     if(receipt.outcome!=='not_found'&&!['unknown','failed','abandoned'].includes(receipt.outcome))return;
     if(old.origin!=='durable_admission_v1'&&!replacementDraft.acknowledged)return;
     const current=generation.current;
@@ -576,15 +580,16 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     finally{if(current===generation.current){modelBusy.current=false;setBusy(false);}}
   }
   async function prepareNewSelectedAnalysis(){
-    if(!workspace||!identity||busy||modelBusy.current||pending?.type!=='ask'||!(pending.body.research_analysis||pending.body.inbox_analysis||pending.body.membership_analysis)||!modelObservation||!replacementDraft?.acknowledged||!['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome))return;
+    if(!workspace||!identity||busy||modelBusy.current||pending?.type!=='ask'||!(pending.body.research_analysis||pending.body.inbox_analysis||pending.body.membership_analysis||pending.body.session_prep_analysis)||!modelObservation||!replacementDraft?.acknowledged||!['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome))return;
     const old=pending,current=generation.current,active=journal.current?.value;if(!active||recoveryBlocked)return;
     modelBusy.current=true;setBusy(true);
     try{
       const prior:PreviousModelRequest={workspace_id:workspace.id,operation:{type:'ask',body:structuredClone(old.body)},request_sha256:await modelRequestHash(old.body),outcome:modelObservation.receipt.outcome,observed_at:modelObservation.observedAt,origin:old.origin??'legacy_unknown',legacy_uncertainty_acknowledged:true};
       await active.persist(`workspace:${workspace.id}`,makeNotebookDraft(workspace,note,thought,evidence,source,null,prior));if(current!==generation.current)return;
       setPending(null);setPreviousModelRequest(prior);setModelObservation(null);setReplacementDraft(null);setSelected(old.body.role);setSavedResearchChat(false);
+      if(old.body.session_prep_analysis){setPrepSelection(null);setPrepEpoch(value=>value+1);}
       if(old.body.inbox_analysis){setInboxSelection(null);setPracticeOpened(true);setPracticeOpen(true);}
-      setMessage(old.body.membership_analysis?'Previous Membership/Billing request retained. Review the current record and consent to a new review from this coworker.':old.body.inbox_analysis?'Previous Inbox request retained. Review the current message and encounter in Incoming messages, then consent to a new draft.':'Previous analysis request retained. Review a saved source packet and question, then consent to a new model request. Nothing has been sent.');
+      setMessage(old.body.session_prep_analysis?'Previous request retained. Open the current Session Prep brief and include it in chat before sending a new question. Nothing has been sent.':old.body.membership_analysis?'Previous Membership/Billing request retained. Review the current record and consent to a new review from this coworker.':old.body.inbox_analysis?'Previous Inbox request retained. Review the current message and encounter in Incoming messages, then consent to a new draft.':'Previous analysis request retained. Review a saved source packet and question, then consent to a new model request. Nothing has been sent.');
     }catch(cause){if(current===generation.current)modelFailure(cause);}finally{if(current===generation.current){modelBusy.current=false;setBusy(false);}}
   }
   async function checkEntryResult(entry:WorkspaceEntry){
@@ -623,7 +628,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   function ask(content = thought) {
     if (!workspace || !team?.revision || !content.trim() || pending || conflict || !team.configuration.bots.find(b => botAddress(b) === selected)?.enabled) return;
     void save({ type: "ask", model_contract:1,origin:'durable_admission_v1',body: { expected_revision: workspace.revision, team_revision: team.revision,
-      idempotency_key: crypto.randomUUID(), role: selected, content } });
+      idempotency_key: crypto.randomUUID(), role: selected, content, ...(selectedPrep?{session_prep_analysis:structuredClone(selectedPrep)}:{}) } });
   }
   async function refresh() {
     const access = authenticated || identity;
@@ -633,7 +638,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       const [latest, latestTeam] = await Promise.all([workspace ? workspaceApi.read(access, workspace.id) : Promise.resolve(null), workspaceApi.team(access)]);
       if (current !== generation.current) return;
       checkRecoveryOwner(latestTeam);
-      setWorkspace(latest); setTeam(latestTeam); setConflict(false);
+      setWorkspace(latest); setTeam(latestTeam); setConflict(false);setPrepEpoch(value=>value+1);
       setMessage("Latest saved history and team loaded. Your unsaved text and settings are preserved; compare them before saving.");
       // Keep the account editor controller and its retained input alive while rechecking parent addresses.
       await recoverAfterRead(latestTeam, latest, current, recoveryState === "failed");
@@ -727,6 +732,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const reviewWorkspace = workspace ? withObservedCaptureDraft(workspace, observedCaptureDraft) : null;
   const bot = team?.configuration.bots.find(b => botAddress(b) === selected);
   const template = team?.members.find(b => botAddress(b) === selected);
+  const prepAvailable=!!(bot&&supportsSkill(bot,"encounter_prep")&&ENCOUNTER_PREP_BUILD&&authenticated&&team?.capture?.prep_enabled&&
+    template?.capabilities.some(capability=>capability.key==="core.session_prep.read"&&capability.state==="enabled"&&capability.contract==="core.session-prep.brief.v1"));
+  const prepScope=useMemo(()=>Symbol(),[workspace?.id,authenticated,selected,team?.revision,bot?.enabled,bot?.include_evidence,prepAvailable,prepEpoch]);
+  const selectedPrep=prepAvailable&&prepSelection?.scope===prepScope?prepSelection.selection:null;
+  useEffect(()=>{if(selectedPrep)questionRef.current?.focus();},[selectedPrep]);
   const visitPrepReader = bot?.role === "visit_prep" && ENCOUNTER_PREP_BUILD && !!authenticated && !!team?.capture?.prep_enabled;
   const scribe = bot?.role === "scribe" ? bot : team?.configuration.bots.find(b => b.role === "scribe" && !b.instance_id);
   const latestNote = workspace?.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "";
@@ -957,6 +967,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         <button disabled={recoveryBlocked} onClick={() => void save(pending)}>Retry same save</button></div>}
       {localModelPending&&<section className="team-recovery" aria-label="Unconfirmed model request"><p>The retained request is unconfirmed. Check its saved result; checking never starts another model call.</p>
         {localModelPending.type==='ask'&&localModelPending.body.research_analysis&&<details className="research-model-selection"><summary>Retained selected-source request</summary><p>{localModelPending.body.content}</p><p>Only this exact question and saved public-source selection belong to this key.</p><ul>{localModelPending.body.research_analysis.entries.map(anchor=><li key={anchor.entry_id}>Saved packet revision {anchor.entry_revision} · {anchor.entry_id}<small>Lookup {anchor.run_id} · save proof {anchor.save_request_sha256}</small></li>)}</ul></details>}
+        {localModelPending.type==='ask'&&localModelPending.body.session_prep_analysis&&<details><summary>Retained Session Prep question</summary><p>{localModelPending.body.content}</p><p>This request includes the selected Session Prep brief, version {localModelPending.body.session_prep_analysis.brief_version}. Checking its result retains that exact selection.</p></details>}
         {localModelPending.type==='ask'&&localModelPending.body.membership_analysis&&<details><summary>Retained Membership/Billing review request</summary><p>{localModelPending.body.content}</p><p>This exact selected {localModelPending.body.membership_analysis.kind} record and consent belong to the saved request. A new review requires current evidence and fresh consent.</p></details>}
         {localModelPending.type==='ask'&&localModelPending.body.inbox_analysis&&<details><summary>Retained Inbox draft request</summary><p>{localModelPending.body.content}</p><p>Message {localModelPending.body.inbox_analysis.item_id}, source {localModelPending.body.inbox_analysis.source_id}, local version {localModelPending.body.inbox_analysis.item_version}. This exact selection and consent belong to the saved request.</p></details>}
         {modelObservation&&<p>Last verified result: {modelObservation.receipt.outcome.replaceAll('_',' ')}. {modelObservation.receipt.outcome==='not_found'?(localModelPending.origin==='durable_admission_v1'?
@@ -965,13 +976,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         <button disabled={busy||recoveryBlocked} onClick={()=>void saveModel(localModelPending,'resolve')}>Check saved result</button>
         {modelObservation?.receipt.outcome==='not_found'&&localModelPending.origin==='durable_admission_v1'&&<button disabled={busy||recoveryBlocked}
           onClick={()=>void saveModel(localModelPending,'submit')}>Send this saved request</button>}
-        {modelObservation&&!(localModelPending.type==='ask'&&(localModelPending.body.research_analysis||localModelPending.body.inbox_analysis||localModelPending.body.membership_analysis))&&['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome)&&<button disabled={busy||recoveryBlocked} onClick={()=>setReplacementDraft({
+        {modelObservation&&!(localModelPending.type==='ask'&&(localModelPending.body.research_analysis||localModelPending.body.inbox_analysis||localModelPending.body.membership_analysis||localModelPending.body.session_prep_analysis))&&['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome)&&<button disabled={busy||recoveryBlocked} onClick={()=>setReplacementDraft({
           content:localModelPending.type==='ask'?localModelPending.body.content:'',role:localModelPending.type==='ask'?localModelPending.body.role:selected,acknowledged:false})}>Start another attempt</button>}
-        {localModelPending.type==='ask'&&(localModelPending.body.research_analysis||localModelPending.body.inbox_analysis||localModelPending.body.membership_analysis)&&modelObservation&&['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome)&&<div className="research-model-recovery">
+        {localModelPending.type==='ask'&&(localModelPending.body.research_analysis||localModelPending.body.inbox_analysis||localModelPending.body.membership_analysis||localModelPending.body.session_prep_analysis)&&modelObservation&&['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome)&&<div className="research-model-recovery">
           <label><input type="checkbox" checked={replacementDraft?.acknowledged??false} disabled={busy||recoveryBlocked} onChange={event=>setReplacementDraft({content:localModelPending.body.content,role:localModelPending.body.role,acknowledged:event.target.checked})}/>I understand the earlier model outcome may remain unconfirmed.</label>
           <button disabled={busy||recoveryBlocked||!replacementDraft?.acknowledged} onClick={()=>void prepareNewSelectedAnalysis()}>Review sources for a new request</button>
         </div>}
-        {replacementDraft&&!(localModelPending.type==='ask'&&(localModelPending.body.research_analysis||localModelPending.body.inbox_analysis||localModelPending.body.membership_analysis))&&<div><p>A new attempt uses a new key and the current saved context. The prior exact binding is retained in the local transition record; this does not resolve an earlier uncertain provider outcome.</p>
+        {replacementDraft&&!(localModelPending.type==='ask'&&(localModelPending.body.research_analysis||localModelPending.body.inbox_analysis||localModelPending.body.membership_analysis||localModelPending.body.session_prep_analysis))&&<div><p>A new attempt uses a new key and the current saved context. The prior exact binding is retained in the local transition record; this does not resolve an earlier uncertain provider outcome.</p>
           {localModelPending.type==='ask'&&<><label>Bot for new attempt<select value={replacementDraft.role} disabled={busy} onChange={e=>setReplacementDraft({...replacementDraft,role:e.target.value})}>
             {team?.configuration.bots.filter(b=>!b.retired&&b.enabled).map(b=><option key={botAddress(b)} value={botAddress(b)}>{b.name}</option>)}</select></label>
             <label>Review new question<textarea maxLength={4000} value={replacementDraft.content} disabled={busy} onChange={e=>setReplacementDraft({...replacementDraft,content:e.target.value})}/></label></>}
@@ -1066,18 +1077,19 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
             <div><h2>{bot?.name ?? "Your team"}</h2><p>{template?.description}</p></div>
             <button className="team-subtle" onClick={() => setSettingsOpen(true)}>Skills & settings</button></header>
-          {bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
-            template?.capabilities.some(capability => capability.key === "core.session_prep.read" &&
-              capability.state === "enabled" && capability.contract === "core.session-prep.brief.v1") &&
-            <SessionPrepPanel workspaceId={workspace.id} identity={authenticated}
+          {prepAvailable && bot && authenticated && team &&
+            <SessionPrepPanel key={prepEpoch} workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}}
-              enabled={bot.enabled && bot.include_evidence && team.revision > 0} locked={locked} onAccessLost={failure} />}
+              enabled={bot.enabled && bot.include_evidence && team.revision > 0} locked={locked} onAccessLost={failure}
+              selected={!!selectedPrep} onSelect={team.llm.enabled&&!bot.blocked_capabilities?.includes("model_answer")?
+                selection=>setPrepSelection(selection?{scope:prepScope,selection}:null):undefined} />}
           {bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
-            <EncounterPrepPanel workspaceId={workspace.id} identity={authenticated}
+            <details className={prepAvailable?"team-additional-prep":undefined} open={prepAvailable?undefined:true}>
+            <summary hidden={!prepAvailable}>Other saved visit context</summary><EncounterPrepPanel workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}} name={bot.name}
               enabled={bot.enabled && bot.include_evidence && team.revision > 0} locked={locked}
               entryRevision={workspace.revision} workEnabled={team.capture.prep_work_enabled===true} onAccessLost={failure}
-              onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}} />}
+              onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}} /></details>}
           {bot && supportsSkill(bot, "calendar_availability") && SCHEDULING_BUILD && authenticated && team && (team.scheduling?.enabled || APPOINTMENTS_BUILD) &&
             <SchedulingPanel workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}} name={bot.name}
@@ -1114,7 +1126,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             {turns.map(entry => <div className="team-turn" key={entry.id} id={`turn-${entry.id}`} tabIndex={-1}><article className="team-human-message"><small>{entry.kind === "handoff_result" ? "Brief from Chief" : "You"}</small><p>{entry.content}</p></article>
               {entry.reply && <article className="team-bot-message"><header><BotAvatar role={entry.reply.role} />
                 <strong>{entry.reply.agent_name}</strong><span className="team-pill">{entry.reply.backend === "azure_gpt41_work_status_v1" ? "Saved work status" : entry.reply.backend === "azure_gpt41_unavailable" ? "GPT-4.1 unavailable" : entry.reply.backend.startsWith("azure_gpt41") ? "GPT-4.1" : "Local review"}</span>{(entry.kind === "handoff_result" || entry.model_request?.request.kind==='conversation'&&(entry.model_request.request.inbox_analysis||entry.model_request.request.membership_analysis)) && <span className="team-pill pending">Unreviewed draft</span>}</header>
-                <p>{entry.reply.content}</p><div className="team-citations">{entry.reply.citations.map((citation, index) => ["membership_work","payment_work"].includes(citation.kind)?<button key={citation.entry_id} onClick={()=>{setPanel("Work");setMobilePanel("Work");}}>[{index+1}] {citation.label} · r{citation.revision}</button>:["inbox_message","inbox_triage"].includes(citation.kind)?<span key={citation.entry_id}>[{index+1}] {citation.label} · r{citation.revision}</span>:<button key={citation.entry_id}
+                <p>{entry.reply.content}</p><div className="team-citations">{entry.reply.citations.map((citation, index) => ["membership_work","payment_work"].includes(citation.kind)?<button key={citation.entry_id} onClick={()=>{setPanel("Work");setMobilePanel("Work");}}>[{index+1}] {citation.label} · r{citation.revision}</button>:["inbox_message","inbox_triage","session_prep"].includes(citation.kind)?<span key={citation.entry_id}>[{index+1}] {citation.label} · r{citation.revision}</span>:<button key={citation.entry_id}
                   onClick={() => { setPanel("Sources"); setMobilePanel("Sources"); setSelectedSource(citation.entry_id); }}>[{index + 1}] {citation.label} <span>r{citation.revision}</span></button>)}</div>
                 <small className="team-fine">Context through revision {entry.reply.context_revision}{latestSourceRevision > entry.reply.context_revision ? " · Newer sources available — ask again to review them" : ""}</small>
               </article>}
@@ -1130,9 +1142,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </div>
           <div hidden={bot?.role==='research'&&!savedResearchChat} className="team-composer-wrap">{!team?.revision ? <button className="team-primary" onClick={() => setSettingsOpen(true)}>Set up your Provider Team</button> :
             <form className="team-composer" onSubmit={event => { event.preventDefault(); ask(); }}>
+              {selectedPrep&&<div className="session-prep-included" role="status"><span>Session Prep included · v{selectedPrep.brief_version}</span>
+                <button type="button" className="team-subtle" disabled={locked} onClick={()=>setPrepSelection(null)} aria-label="Remove Session Prep from this question">Remove</button></div>}
               <label className="team-sr-only" htmlFor="team-question">Thought or question</label>
-              <textarea id="team-question" rows={2} maxLength={4000} disabled={locked || !bot?.enabled} value={thought} onChange={e => setThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? `Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`} />
-              <div><span>{bot?.name} <span className="team-fine">· saved encounter only</span></span><button className="team-send" disabled={locked || !thought.trim() || !bot?.enabled} aria-label="Send message">↑</button></div>
+              <textarea ref={questionRef} id="team-question" rows={2} maxLength={4000} disabled={locked || !bot?.enabled} value={thought} onChange={e => setThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? `Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`} />
+              <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={locked || !thought.trim() || !bot?.enabled} aria-label="Send message">↑</button></div>
             </form>}
             <p className="team-fine">{bot?.blocked_capabilities?.includes("model_answer") ? "AI answers are blocked for this bot. Available local source checks retain their existing scope." : team?.llm.enabled ? "GPT-4.1 requests require current scope checks. Review drafts and sources." : "Local tools can review saved context. AI conversation awaits its service connection."} {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled ? "Use the Scribe visit controls for consented recording." : "Recording awaits its service connection."}</p>
           </div>

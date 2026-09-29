@@ -646,3 +646,15 @@ test('connection catalog is a bounded authenticated read with no setup mutation'
   const oversized=await proxyAuthenticatedWorkspaceRequest(request(path,{headers}),fixture(),async()=>response({body:'x'.repeat(4097)}));
   assert.equal(oversized.status,503);
 });
+
+test('selected Session Prep gets one bounded 90-second window while exact resolve retains 30 seconds', async t => {
+  t.mock.timers.enable({apis:['setTimeout','Date']});
+  const body=JSON.stringify({session_prep_analysis:{version:1,consented:true,brief_id:'a'.repeat(64),brief_version:1,snapshot_sha256:'b'.repeat(64)}});
+  let submitted, resolved;
+  const never=()=>new Promise(()=>{});
+  const submit=proxyAuthenticatedWorkspaceRequest(request(`/workspaces/${id}/conversation`,{method:'POST',body,headers:modelHeaders}),fixture(),never).then(r=>{submitted=r;});
+  const resolve=proxyAuthenticatedWorkspaceRequest(request(`/workspaces/${id}/conversation/resolve`,{method:'POST',body,headers:modelHeaders}),fixture(),never).then(r=>{resolved=r;});
+  await tick();t.mock.timers.tick(30000);await tick();assert.equal(submitted,undefined);assert.equal(resolved?.status,401);
+  t.mock.timers.tick(59999);await tick();assert.equal(submitted,undefined);
+  t.mock.timers.tick(1);await Promise.all([submit,resolve]);assert.equal(submitted.status,401);
+});
