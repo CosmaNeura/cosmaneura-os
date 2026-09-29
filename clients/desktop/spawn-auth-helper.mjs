@@ -58,6 +58,7 @@ export async function preparePackagedAuthHelper(root, temporaryDirectory) {
   if (!stat.isFile() || stat.size > 16384 || stat.isSymbolicLink()) throw new Error('Native session unavailable');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const executable = await verifyNativeHelper(directory, manifest);
-  return () => createAuthHelperClient(spawn(executable, [], {shell: false, stdio: ['pipe', 'pipe', 'pipe'],
-    env: {PATH: '/usr/bin:/bin', LANG: 'en_US.UTF-8', TMPDIR: temporaryDirectory}}));
+  return ({interactive = false} = {}) => createAuthHelperClient(spawn(executable, [], {shell: false, stdio: ['pipe', 'pipe', 'pipe'],
+    env: {PATH: '/usr/bin:/bin', LANG: 'en_US.UTF-8', TMPDIR: temporaryDirectory}}),
+    {interactiveStartup: interactive === true});
 }

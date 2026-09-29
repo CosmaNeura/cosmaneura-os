@@ -71,7 +71,7 @@ cleanupOnConfirmedQuit(app,cleanup,{beforeCleanup:()=>captureHost?.close(),onFai
 
 async function bootstrap() {
   await mkdir(stateDirectory, {recursive: true, mode: 0o700});
-  const createHelper = async () => (await preparePackagedAuthHelper(root, app.getPath('temp')))();
+  const createHelper = async options => (await preparePackagedAuthHelper(root, app.getPath('temp')))(options);
   auth = await createDesktopAuthSession({enabled: true, createHelper, accessStore: createAuthAccessStore(stateDirectory)});
   // Capture ciphertext and nonextractable IndexedDB keys must survive a process restart.
   const partition = config.installation?.rendererPartition ?? 'persist:cosmasos-authenticated-local';
