@@ -15,12 +15,21 @@ async function click() {await act(async () => container.querySelector("button")!
 beforeEach(() => {vi.stubGlobal("crypto",webcrypto);Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); vi.clearAllMocks(); vi.mocked(readSessionPrep).mockResolvedValue(sessionPrepFixture());
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);});
 afterEach(async () => {await act(async () => root.unmount()); container.remove();vi.unstubAllGlobals();});
-it("opens only on request and links each statement to its displayed source", async () => {
+it("opens only on request and focuses a citation without changing the authenticated document URL", async () => {
   await mount(); expect(readSessionPrep).not.toHaveBeenCalled(); await click();
   expect(container.textContent).toContain("Invented reviewed visit summary.");
   expect(container.textContent).toContain("Finalized clinician note");
-  const link = container.querySelector("a")!;
-  expect(document.getElementById(link.hash.slice(1))?.textContent).toContain("Finalized clinician note");
+  const citation = container.querySelector<HTMLButtonElement>('[aria-label="Show source 1"]')!;
+  const source = document.getElementById(citation.getAttribute("aria-controls")!)!;
+  source.scrollIntoView = vi.fn();
+  const url = window.location.href;
+  await act(async () => citation.click());
+  expect(document.activeElement).toBe(source);
+  expect(source.textContent).toContain("Finalized clinician note");
+  expect(source.scrollIntoView).toHaveBeenCalledWith({block: "nearest"});
+  expect(window.location.href).toBe(url);
+  expect(container.querySelector('a[href^="#"]')).toBeNull();
+  await click(); expect(readSessionPrep).toHaveBeenCalledTimes(2);
 });
 it("keeps pending separate from ready and lets the provider check again", async () => {
   vi.mocked(readSessionPrep).mockResolvedValueOnce(sessionPrepFixture("pending")); await mount(); await click();
