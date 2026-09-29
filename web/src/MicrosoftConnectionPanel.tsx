@@ -44,6 +44,25 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
     }catch(error){
       if(epoch.current!==current||owner.current!==identity)return;
       setData(null);
+      // Recheck connection state, never replay the failed mailbox/calendar read.
+      if((action==='mail'||action==='calendar')&&!(error instanceof WorkspaceApiError&&[401,403,404].includes(error.status))){
+        const content=action==='mail'?'Email':'Calendar';
+        setMessage(`${content} could not be loaded. Checking your connection…`);
+        const recoveryTimer=setTimeout(()=>controller.abort(),10000);
+        try{
+          const checked=await microsoftConnectionRequest(identity,'status',controller.signal);
+          if(epoch.current!==current||owner.current!==identity)return;
+          if('state' in checked&&checked.state!=='disconnected'){
+            setData({owner:identity,status:checked,start:null,view:null});
+            setMessage(checked.state==='connected'?`${content} could not be loaded. Your account is still connected. Try again.`:
+              checked.state==='sign_in_required'?`Connect your Microsoft account again to load ${content.toLowerCase()}.`:'Finish Microsoft sign-in, then try again.');
+            return;
+          }
+        }catch(recoveryError){
+          if(epoch.current!==current||owner.current!==identity)return;
+          error=recoveryError;
+        }finally{clearTimeout(recoveryTimer);}
+      }
       if(error instanceof WorkspaceApiError&&[401,403].includes(error.status)){setMessage('Sign in to CosmasOS again to continue.');denied.current(error);}
       else if(error instanceof WorkspaceApiError&&error.status===409)setMessage('Microsoft sign-in needs to finish or be renewed. Check your connection, then reconnect if needed.');
       else if(error instanceof WorkspaceApiError&&error.status===404){setUnavailableFor(identity);setMessage('Microsoft email and calendar are not enabled for this practice yet.');}

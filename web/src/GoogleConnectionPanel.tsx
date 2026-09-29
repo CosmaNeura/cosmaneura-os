@@ -44,6 +44,24 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     }catch(error){
       if(epoch.current!==current||owner.current!==identity)return;
       setData(null);
+      // Recheck connection state, never replay the failed mailbox read.
+      if(action==='mail'&&!(error instanceof WorkspaceApiError&&[401,403,404].includes(error.status))){
+        setMessage('Email could not be loaded. Checking your connection…');
+        const recoveryTimer=setTimeout(()=>controller.abort(),10000);
+        try{
+          const checked=await googleConnectionRequest(identity,'status',controller.signal);
+          if(epoch.current!==current||owner.current!==identity)return;
+          if('state' in checked&&checked.state!=='disconnected'){
+            setData({owner:identity,status:checked,start:null,view:null});
+            setMessage(checked.state==='connected'?'Email could not be loaded. Your account is still connected. Try again.':
+              checked.state==='sign_in_required'?'Connect your Google account again to load email.':'Finish Google sign-in, then try again.');
+            return;
+          }
+        }catch(recoveryError){
+          if(epoch.current!==current||owner.current!==identity)return;
+          error=recoveryError;
+        }finally{clearTimeout(recoveryTimer);}
+      }
       if(error instanceof WorkspaceApiError&&[401,403].includes(error.status)){setMessage('Sign in to CosmasOS again to continue.');denied.current(error);}
       else if(error instanceof WorkspaceApiError&&error.status===409)setMessage('Google sign-in needs to finish or be renewed. Check your connection, then reconnect if needed.');
       else if(error instanceof WorkspaceApiError&&error.status===404){setUnavailableFor(identity);setMessage('Gmail accounts are not enabled for this practice yet.');}
