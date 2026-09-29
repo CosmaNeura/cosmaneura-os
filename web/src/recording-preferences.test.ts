@@ -16,3 +16,12 @@ it('rejects missing scope, malformed defaults, duplicated or invalid regions', (
   localStorage.setItem(`cosmas.recording-preferences.v1.${owner}`, '{');
   expect(readRecordingPreferences(owner).regions).toBe('');
 });
+it('remembers the selected source without retaining consent or a meeting window', () => {
+  saveRecordingPreferences(owner, {regions:'US-NY',language:'en-US',captureMode:'desktop_meeting'});
+  expect(readRecordingPreferences(owner).captureMode).toBe('desktop_meeting');
+  expect(readRecordingPreferences(other).captureMode).toBeUndefined();
+  const stored = JSON.parse(localStorage.getItem(localStorage.key(0)!)!);
+  expect(Object.keys(stored).sort()).toEqual(['captureMode','language','regions']);
+  localStorage.setItem(`cosmas.recording-preferences.v1.${owner}`, JSON.stringify({...stored,captureMode:'all_windows'}));
+  expect(readRecordingPreferences(owner).captureMode).toBeUndefined();
+});
