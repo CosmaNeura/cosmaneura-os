@@ -59,7 +59,7 @@ class HttpSchedulingAvailability:
             valid = (
                 parsed.scheme == "https" and bool(parsed.hostname)
                 and parsed.port in (None, 443) and not parsed.username and not parsed.password
-                and parsed.path in ("", "/") and not parsed.query and not parsed.fragment
+                and parsed.path in ("", "/", "/api") and not parsed.query and not parsed.fragment
                 and origin.isascii() and not any(c.isspace() or ord(c) < 32 for c in origin)
             )
         except (ValueError, TypeError, AttributeError):

@@ -49,7 +49,7 @@ def operation(selected, action="book"):
 
 def client(handler, **kwargs):
     return HttpSchedulingAppointments(
-        "https://scheduling.example.invalid", kwargs.pop("staff_credential", lambda s: SecretStr("PRIVATE_fixture")),
+        kwargs.pop("origin", "https://scheduling.example.invalid"), kwargs.pop("staff_credential", lambda s: SecretStr("PRIVATE_fixture")),
         transport=httpx.MockTransport(handler), now=kwargs.pop("now", lambda: NOW), **kwargs,
     )
 
@@ -76,18 +76,19 @@ def receipt(request, op):
             "request_hash": op.request_hash(), "calendar_state": "pending"}
 
 
-def test_read_requires_verified_revision_and_exact_patient_staff_scope(selected):
+@pytest.mark.parametrize("base_path", ["", "/api"])
+def test_read_requires_verified_revision_and_exact_patient_staff_scope(selected, base_path):
     observed = snapshot(selected)
     calls = []
 
     def handler(request):
         calls.append(request)
         assert request.method == "GET"
-        assert request.url.path == f"/v1/appointments/{observed.id}/verified"
+        assert request.url.path == f"{base_path}/v1/appointments/{observed.id}/verified"
         assert not request.content and "idempotency-key" not in request.headers
         return httpx.Response(200, json=envelope(request, selected, observed), headers=HEADERS)
 
-    port = client(handler)
+    port = client(handler, origin="https://scheduling.example.invalid" + base_path)
     try:
         result = port.read_appointment(selected, observed.id)
         assert result.appointment == observed and result.selection == selected
@@ -98,7 +99,8 @@ def test_read_requires_verified_revision_and_exact_patient_staff_scope(selected)
 
 
 @pytest.mark.parametrize("action", ["book", "reschedule", "cancel"])
-def test_exact_operation_and_explicit_retry_keep_one_identity_and_payload(selected, action):
+@pytest.mark.parametrize("base_path", ["", "/api"])
+def test_exact_operation_and_explicit_retry_keep_one_identity_and_payload(selected, action, base_path):
     op = operation(selected, action)
     calls, credentials = [], []
 
@@ -108,7 +110,7 @@ def test_exact_operation_and_explicit_retry_keep_one_identity_and_payload(select
 
     def handler(request):
         calls.append(request)
-        assert request.url.path == "/v1/appointment-operations"
+        assert request.url.path == base_path + "/v1/appointment-operations"
         assert request.method == "POST"
         assert json.loads(request.content) == op.request_payload()
         assert request.headers["idempotency-key"] == "os-appointment:" + str(op.operation_id)
@@ -120,7 +122,7 @@ def test_exact_operation_and_explicit_retry_keep_one_identity_and_payload(select
             assert str(local_id).encode() not in request.content
         return httpx.Response(200, json=receipt(request, op), headers={**HEADERS, "Set-Cookie": "private=PRIVATE; Path=/"})
 
-    port = client(handler, staff_credential=staff)
+    port = client(handler, staff_credential=staff, origin="https://scheduling.example.invalid" + base_path)
     try:
         first = port.submit(op)
         second = port.submit(op)
@@ -133,7 +135,8 @@ def test_exact_operation_and_explicit_retry_keep_one_identity_and_payload(select
         port.close()
 
 
-def test_lost_reply_is_unknown_and_reconciles_same_operation_after_expiry(selected):
+@pytest.mark.parametrize("base_path", ["", "/api"])
+def test_lost_reply_is_unknown_and_reconciles_same_operation_after_expiry(selected, base_path):
     op = operation(selected)
     calls = []
     now = [NOW]
@@ -142,13 +145,13 @@ def test_lost_reply_is_unknown_and_reconciles_same_operation_after_expiry(select
         calls.append(request)
         if request.method == "POST":
             raise httpx.ReadTimeout("PRIVATE reply lost after commit", request=request)
-        assert request.url.path == f"/v1/appointment-operations/{op.operation_id}"
+        assert request.url.path == f"{base_path}/v1/appointment-operations/{op.operation_id}"
         assert not request.content
         result = receipt(request, op)
         result["checked_at"] = now[0].isoformat()
         return httpx.Response(200, json=result, headers=HEADERS)
 
-    port = client(handler, now=lambda: now[0])
+    port = client(handler, now=lambda: now[0], origin="https://scheduling.example.invalid" + base_path)
     try:
         with pytest.raises(ConnectorUnavailable, match="^scheduling_action_unconfirmed$"):
             port.submit(op)

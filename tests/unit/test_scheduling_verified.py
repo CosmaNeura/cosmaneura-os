@@ -19,14 +19,15 @@ def envelope(request, selected, period):
             connection_id=str(uuid4()), connected_at=(NOW-timedelta(days=1)).isoformat(), checked_at=NOW.isoformat()), slots=[SLOT])
 
 
-def test_verified_request_is_bound_to_nonce_staff_and_window(selection, window):
+@pytest.mark.parametrize("base_path", ["", "/api"])
+def test_verified_request_is_bound_to_nonce_staff_and_window(selection, window, base_path):
     calls = []
     def handler(request):
-        assert request.url.path.endswith('/availability/verified')
+        assert request.url.path == f'{base_path}/v1/practitioners/{selection.practitioner_id}/availability/verified'
         value = envelope(request, selection, window)
         calls.append(value['request_nonce'])
         return httpx.Response(200, json=value, headers=HEADERS)
-    port = client(handler)
+    port = client(handler, origin="https://scheduling.example.invalid" + base_path)
     try:
         for _ in range(2):
             result = port.verified_availability(selection, window)

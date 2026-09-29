@@ -26,13 +26,20 @@ a nonce, one-use state, and encrypted credentials. Google provider acceptance an
 consent-screen configuration must be completed for the selected beta environment.
 
 Set `WORKSPACE_SCHEDULING_ENABLED=true`, `WORKSPACE_SCHEDULING_LOGIN_ENABLED=true`,
-`SCHEDULING_ORIGIN` to the fixed HTTPS receiver origin, and
+`SCHEDULING_ORIGIN` to the fixed HTTPS receiver API base (origin or origin plus
+exactly `/api`, with no trailing slash), and
 `SCHEDULING_GOOGLE_CLIENT_ID`, `SCHEDULING_GOOGLE_CLIENT_SECRET`,
 `SCHEDULING_GOOGLE_CALLBACK_URI`, `SCHEDULING_LOGIN_RETURN_ORIGIN` to the fixed
 HTTPS frontend origin. `SCHEDULING_LOGIN_ENCRYPTION_KEY` must contain a base64url
 encoded 32-byte key. Keep both secrets in the server secret manager. Preserve the
 key across process restarts; changing it requires users to sign in again. Do not
 install a separate SchedulingServiceProfile alongside this credential provider.
+
+The `/api` option applies only to `SCHEDULING_ORIGIN`; frontend and callback
+origins remain exact origins. Changing the API base invalidates the installed
+login configuration and requires reconnecting. The service must provide the
+companion staff/catalog and verified appointment routes under that base; serving
+its web app or passing `/healthz` alone does not establish connector readiness.
 
 The existing authenticated workspace profile must be valid. Build the shared
 client with `VITE_WORKSPACE_SCHEDULING_ENABLED=true` and

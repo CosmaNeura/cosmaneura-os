@@ -100,20 +100,21 @@ def uuid(value):
     return value
 
 
-def origin(value):
+def origin(value, *, allow_api_path=False):
     if not isinstance(value, str) or len(value) > 253:
         raise ValueError("An exact HTTPS origin is required")
     parsed = urlsplit(value)
+    suffix = "/api" if allow_api_path and parsed.path == "/api" else ""
     if (
         parsed.scheme != "https"
         or parsed.port
         or parsed.username
         or parsed.password
-        or parsed.path
+        or parsed.path != suffix
         or parsed.query
         or parsed.fragment
         or not parsed.hostname
-        or value != "https://" + parsed.hostname
+        or value != "https://" + parsed.hostname + suffix
         or not re.fullmatch(
             r"[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+",
             parsed.hostname,
@@ -191,8 +192,9 @@ def compile_inputs(identity, bindings):
             "google_calendar_client_id",
         },
     )
-    for item in (core, scribe, scheduling):
+    for item in (core, scribe):
         origin(item["origin"])
+    origin(scheduling["origin"], allow_api_path=True)
     origin(core["web_origin"])
     for value in (
         core["api_audience"],

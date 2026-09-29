@@ -26,12 +26,12 @@ class SchedulingIdentityVerifier:
             or parsed.username
             or parsed.password
             or parsed.port not in {None, 443}
-            or parsed.path
+            or parsed.path not in {"", "/api"}
             or parsed.query
             or parsed.fragment
             or parsed.hostname.endswith(".")
-            or not re.fullmatch(r"https://[a-z0-9.-]+", origin)
-            or origin != "https://" + parsed.hostname
+            or not re.fullmatch(r"https://[a-z0-9.-]+(?:/api)?", origin)
+            or origin != "https://" + parsed.hostname + parsed.path
         ):
             raise ValueError("A fixed HTTPS Scheduling origin is required")
         self._client = httpx.Client(
