@@ -6,7 +6,7 @@
 import {createHash} from 'node:crypto';
 import {execFile} from 'node:child_process';
 import {cp, lstat, mkdir, readFile, readdir, readlink, realpath, rm, writeFile} from 'node:fs/promises';
-import {basename, dirname, isAbsolute, join, relative, resolve, sep} from 'node:path';
+import {basename, dirname, extname, isAbsolute, join, relative, resolve, sep} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {promisify} from 'node:util';
 import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
@@ -50,6 +50,29 @@ const stable = value => Array.isArray(value) ? value.map(stable) : value && type
   ? Object.fromEntries(Object.entries(value).sort(([a],[b])=>a.localeCompare(b)).map(([key,item])=>[key,stable(item)])) : value;
 const canonical = object => JSON.stringify(stable(object));
 const equal = (a,b) => { if (canonical(a) !== canonical(b)) fail(); };
+
+/** Refuse stale renderer routing before copying or sealing a release. Do not execute candidate code. */
+export async function verifyStaticAssetInventory(app, files) {
+  const code=await readFile(join(app,'static-assets.mjs'),'utf8');
+  const declarations=[...code.matchAll(/^const RENDERER_ASSETS = Object\.freeze\((\{[\s\S]*?^\})\);$/gm)];
+  if (declarations.length!==1) fail();
+  let assets;
+  try { assets=JSON.parse(declarations[0][1]); } catch { fail(); }
+  const names=Object.keys(files).filter(name=>name.startsWith('public/'));
+  if (!names.includes('public/index.html') || names.some(name=>files[name].link)) fail();
+  equal(Object.keys(assets).sort(),['/',...names.map(name=>name.slice('public'.length))].sort());
+  const requiredTypes={'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript',
+    '.css':'text/css','.json':'application/json','.wasm':'application/wasm'};
+  for (const route of Object.keys(assets)) {
+    const entry=assets[route], file=route==='/'?'public/index.html':`public${route}`;
+    if (!entry || typeof entry!=='object' || Array.isArray(entry)) fail();
+    equal(Object.keys(entry).sort(),['contentType','file']);
+    if (entry.file!==file || typeof entry.contentType!=='string' ||
+        !/^[a-z0-9.+-]+\/[a-z0-9.+-]+$/i.test(entry.contentType) ||
+        requiredTypes[extname(file)] && entry.contentType!==requiredTypes[extname(file)]) fail();
+  }
+  return {files:names.length,routes:Object.keys(assets).length,assetMapSHA256:digest(canonical(assets))};
+}
 
 export async function loadBuildTools(directory) {
   const lock = JSON.parse(await readFile(join(source,'clients/desktop/release/build-tools-lock.json'),'utf8'));
@@ -179,6 +202,7 @@ export async function packageRelease({application,inputManifest,toolsDirectory,o
       typeof info.CFBundleExecutable!=='string' || basename(info.CFBundleExecutable)!==info.CFBundleExecutable) fail();
   const app=join(application,'Contents/Resources/app'), appFiles=await inventory(app);
   if (Object.values(appFiles).some(item=>item.link)) fail();
+  const staticAssets=await verifyStaticAssetInventory(app,appFiles);
   const config=JSON.parse(await readFile(join(app,'synthetic-build.json'),'utf8'));
   const identity=validateOperationalReleaseProfile(config,
     JSON.parse(await readFile(join(app,'public/cosmas-beta-features.json'),'utf8')),info);
@@ -224,7 +248,7 @@ export async function packageRelease({application,inputManifest,toolsDirectory,o
         templateArchive && name==='Contents/Resources/default_app.asar') continue;
     equal(final[name],item);
   }
-  const receipt={...intent,completed:true,archive:verified,fuses:wire,changedFramework,replacedElectronDefaultArchive:templateArchive,
+  const receipt={...intent,completed:true,archive:verified,staticAssets,fuses:wire,changedFramework,replacedElectronDefaultArchive:templateArchive,
     buildToolsLockSHA256:tools.lockSHA256,bundleIdentifier:info.CFBundleIdentifier,appVersion:config.appVersion,buildNumber:config.buildNumber,
     files:final,sourcePreserved:true,signed:false,notarized:false,installedOrLaunched:false,distributionAllowed:false};
   await writeFile(output+'.receipt.json',JSON.stringify(receipt,null,2)+'\n',{flag:'wx',mode:0o600});
