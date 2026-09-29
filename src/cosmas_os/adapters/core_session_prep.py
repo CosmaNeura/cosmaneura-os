@@ -15,7 +15,7 @@ from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
 from cosmas_os.ports.core_session_prep import CoreSessionPrepRead, CoreSessionPrepReceipt
 
 MAX_RECEIPT_BYTES = 262_144
-TOOL_PATH = "/service/v1/agent/tools/invoke"
+TOOL_PATH = "/service/v1/companion/session-prep/brief"
 
 
 def _closed_object(pairs):

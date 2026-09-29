@@ -87,7 +87,7 @@ def handler(selected, calls, mutate=lambda phase, body, headers: None, state="re
                 headers["Idempotency-Replayed"] = "false"
                 status = 201
             else:
-                assert phase == "invoke"
+                assert path == "/service/v1/companion/session-prep/brief"
                 assert body["arguments"]["source_turn_ref"] == "conversation_turn_invented_current"
                 assert body["arguments"]["context_snapshot_ref"] == "context_invented_current"
                 response = receipt(state)
@@ -131,11 +131,15 @@ def test_canonical_provider_action_and_brief_use_only_dedicated_bounded_transpor
             )
             == 3
         )
-        with pytest.raises(ConnectorUnavailable):
-            with port._client.stream(
-                "POST", "https://core.example.invalid/service/v1/scribe/capture/admit", headers={}
-            ):
-                pytest.fail("Session Prep must not admit recording")
+        for forbidden in (
+            "/service/v1/scribe/capture/admit",
+            "/service/v1/agent/tools/invoke",
+        ):
+            with pytest.raises(ConnectorUnavailable):
+                with port._client.stream(
+                    "POST", "https://core.example.invalid" + forbidden, headers={}
+                ):
+                    pytest.fail("Session Prep must not reach capture or generic tools")
         assert len(calls) == 5
     finally:
         port.close()

@@ -1,11 +1,13 @@
 # Core Session Prep brief reader
 
-`HttpCoreSessionPrep` implements the existing
-`POST /service/v1/agent/tools/invoke` contract for
-`session-prep.context.read` version `1.0.0`, `detail=brief`. The reference is the
-Core service contract at commit `9f09bafa87bfb468a627f01d27ff31791c07c9f5`:
-`app/routes/agent.py`, `app/services/session_prep.py`, and the provider artifact
-implementation in `app/services/session_prep_runtime.py`.
+`HttpCoreSessionPrep` uses the dedicated
+`POST /service/v1/companion/session-prep/brief` receiver for
+`session-prep.context.read` version `1.0.0`, `detail=brief`. The receiver is
+merged in Core PR #539, commit `7da82a1a23b59827cf8fe65d88fbeaf3fe33949b`:
+`app/routes/companion_session_prep.py` reuses the existing provider brief and
+receipt lifecycle in `app/services/session_prep_runtime.py`. Core deployment
+remains separate; a merged receiver is not proof of live availability.
+The bounded client transport rejects `/service/v1/agent/tools/invoke`.
 
 The client consumes Core's prepared artifact and provenance. It does not
 generate a second summary or treat the existing capture/prep endpoint's prior
@@ -24,9 +26,11 @@ Reading the tool can queue Core's existing preparation build when no current
 artifact exists; it therefore follows the human's accepted action.
 
 The token callback must supply the specifically approved Session Prep workload
-identity. Core deliberately restricts its tool caller separately from capture
-callers; a working Scribe capture connection does not establish this permission.
-No fallback to capture or Sovereign credentials is implemented.
+identity. Core requires an additional, default-off `COMPANION_SESSION_PREP_ENABLED`
+permission for its existing `AGENT_API_COMPANION_CLIENT_ID`. CosmaBot can
+explicitly configure that same CosmaBot identity for Session Prep; a working
+capture connection alone does not establish this permission. No implicit
+fallback to capture credentials or use of Scribe/Sovereign identities is implemented.
 
 The transport bounds the response, verifies its client-turn header, rejects
 redirects and duplicate fields, and checks receipt state, chronology, versions,
@@ -64,11 +68,12 @@ Recovering across exchanged mounts requires a new explicit UI check; this flow
 does not persist private mount credentials to promise transparent recovery.
 This view does not yet supply the brief to subsequent AI chat turns.
 
-Activation requires `WORKSPACE_SESSION_PREP_ENABLED=true`, a dedicated
+Activation requires `WORKSPACE_SESSION_PREP_ENABLED=true`, an explicit
 `CORE_SESSION_PREP_MANAGED_IDENTITY_CLIENT_ID`, and `CORE_SESSION_PREP_SCOPE`, in
 addition to the existing authenticated Core preparation configuration. The
 capability advertises `core.session-prep.brief.v1` only when these inputs are
 present; otherwise the UI continues to offer the existing source reader. No
 staging manifest enables this feature. The owning Core deployment must separately
-authorize the dedicated caller; copying capture or Sovereign credentials is not
-an activation procedure. Local checks do not establish real-service acceptance.
+enable the narrow companion receiver permission for the explicitly selected
+CosmaBot identity. Do not broaden the generic provider-tool allowlist or copy
+Scribe/Sovereign credentials. Local checks do not establish real-service acceptance.
