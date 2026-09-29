@@ -4,10 +4,53 @@ import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,realpath,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile} from './package-desktop-release.mjs';
+import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory} from './package-desktop-release.mjs';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
 const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
+
+async function rendererFixture(t) {
+  const app=await realpath(await mkdtemp(join(tmpdir(),'cosmas-renderer-routing-')));
+  t.after(()=>rm(app,{recursive:true,force:true}));
+  await mkdir(join(app,'public/assets'),{recursive:true});
+  await writeFile(join(app,'public/index.html'),'<script type="module" src="./assets/index-old.js"></script>');
+  await writeFile(join(app,'public/assets/index-old.js'),'export const ready=true;');
+  const assets={'/':{file:'public/index.html',contentType:'text/html'},
+    '/index.html':{file:'public/index.html',contentType:'text/html'},
+    '/assets/index-old.js':{file:'public/assets/index-old.js',contentType:'text/javascript'}};
+  const writeMap=map=>writeFile(join(app,'static-assets.mjs'),
+    'throw new Error("Candidate code must not execute during inventory checks");\n'+
+    `const RENDERER_ASSETS = Object.freeze(${JSON.stringify(map,null,2)});\n`);
+  await writeMap(assets);
+  return {app,assets,writeMap};
+}
+
+test('renderer replacement refuses stale routes and accepts the regenerated map without executing it',async t=>{
+  const {app,assets,writeMap}=await rendererFixture(t);
+  assert.equal((await verifyStaticAssetInventory(app,await inventory(app))).routes,3);
+  await rm(join(app,'public/assets/index-old.js'));
+  await writeFile(join(app,'public/assets/index-new.js'),'export const ready="updated";');
+  await writeFile(join(app,'public/index.html'),'<script type="module" src="./assets/index-new.js"></script>');
+  await assert.rejects(verifyStaticAssetInventory(app,await inventory(app)));
+  delete assets['/assets/index-old.js'];
+  assets['/assets/index-new.js']={file:'public/assets/index-new.js',contentType:'text/javascript'};
+  await writeMap(assets);
+  const checked=await verifyStaticAssetInventory(app,await inventory(app));
+  assert.equal(checked.files,2);assert.equal(checked.routes,3);
+  assert.match(checked.assetMapSHA256,/^[a-f0-9]{64}$/);
+});
+
+test('renderer routing rejects missing entry points, wrong destinations and non-module MIME types',async t=>{
+  const {app,assets,writeMap}=await rendererFixture(t),files=await inventory(app);
+  for (const alter of [map=>delete map['/'],map=>map['/'].file='main.mjs',
+    map=>map['/assets/index-old.js'].contentType='text/plain',map=>map['/unknown']=map['/']]) {
+    const invalid=structuredClone(assets);alter(invalid);await writeMap(invalid);
+    await assert.rejects(verifyStaticAssetInventory(app,files));
+  }
+  await writeMap(assets);
+  await rm(join(app,'public/index.html'));
+  await assert.rejects(verifyStaticAssetInventory(app,await inventory(app)));
+});
 
 test('first-owner release preserves operational identity and refuses native capture or connector activation',()=>{
   const identity={version:1,profile:'operational-beta-v1',client:'desktop',apiOrigin:'https://api.example.invalid',
