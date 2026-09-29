@@ -86,7 +86,7 @@ async function open(number: number) {
 async function start() {
   await open(1);
   await click("Scribe", container.querySelector('[aria-label="Provider Team"]')!);
-  await click("Record visit");
+  await click("Open recording");
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   await click("Start synthetic capture");
 }
@@ -138,8 +138,27 @@ it("requires a new recording request after closing one encounter and opening ano
   expect(openCaptureRuntime).toHaveBeenCalledTimes(1);
   expect(container.querySelector('[aria-label="Scribe recording"]')?.textContent).toContain("Consent first");
   expect(container.querySelector<HTMLTextAreaElement>("#team-notebook")?.value).toBe("");
-  await click("Record visit");
+  await click("Open recording");
   expect(prepareCapture).toHaveBeenCalledTimes(2);
   expect(vi.mocked(prepareCapture).mock.calls[1][0]).toBe(visit(2).id);
   expect(runtime.controller.startRecording).toHaveBeenCalledTimes(1);
+});
+
+it('opens a listed visit, confirms fresh consent and starts in three explicit actions with saved defaults', async () => {
+  const {saveRecordingPreferences} = await import('./recording-preferences');
+  saveRecordingPreferences(team.recovery_scope, {regions:'US-NY',language:'en-US'});
+  vi.mocked(prepareCapture).mockRejectedValueOnce({code:'capture_consent_required'});
+  await click('Choose an encounter'); // Meeting selection is available; no recorder has opened.
+  await click('Record Invented visit 1'); // 1: Select the visit and prepare its consent screen.
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  expect(container.querySelector('[aria-label="Recording consent"]')?.textContent).toContain('US-NY');
+  expect(container.querySelector<HTMLDetailsElement>('.capture-options')?.open).toBe(false);
+  await click('Everyone agrees — prepare recording'); // 2: Fresh per-visit consent.
+  expect(prepareCapture).toHaveBeenLastCalledWith(visit(1).id, authenticated,
+    expect.objectContaining({all_parties_consented:true,participant_regions:['US-NY']}),
+    expect.any(String),undefined,expect.objectContaining({address:'scribe',team_revision:1}),undefined);
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  await click('Start synthetic capture'); // 3: Explicit start; defaults never start a recorder.
+  expect(runtime.controller.startRecording).toHaveBeenCalledTimes(1);
+  localStorage.clear();
 });

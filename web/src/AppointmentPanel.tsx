@@ -213,6 +213,7 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
       {!pending&&<><p>Retained choices do not reserve a time. Refresh availability before sharing a recovered proposal.</p>
         <button disabled={busy||locked} onClick={()=>void discardChoices()}>Discard retained appointment choices</button></>}
     </div>}
+    <details className="team-optional-settings" open={!!selectedSlot || !!earlier}><summary>Arrange or change a follow-up visit</summary>
     <div className="capture-actions">
       <button disabled={disabled || !enabled} onClick={() => void read("current")}>Refresh linked visit</button>
       <button disabled={disabled} onClick={() => void read("catalog")}>Refresh saved proposals</button>
@@ -246,6 +247,7 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
       bot: {...bot}, action, slot: action === "cancel" ? null : selectedSlot,
       share: true, idempotency_key: crypto.randomUUID()}});
     }}>Prepare appointment proposal</button>
+    </details>
     {unconfirmed&&<p>Check the existing operation below before preparing another appointment change.</p>}
     {message && <p role="status">{message}</p>}
     {pending && !busy && <div className="capture-actions">

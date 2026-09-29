@@ -63,7 +63,7 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
   if(view === "hidden")return null;
   if(view === "overview")return <section className="team-coworker-overview" aria-label="Your coworkers">
     <ul>{draft.bots.filter(member=>!member.retired).map(member=><li key={botAddress(member)}><button onClick={()=>setSelected(botAddress(member))}>
-      <BotAvatar role={member.role}/><span><strong>{member.name||"Name this coworker"}</strong><small>{member.role==='custom'?(member.job_focus||'Give this coworker a job'):member.job_focus||'Private encounter help'}</small></span>
+      <BotAvatar role={member.role}/><span><strong>{member.name||"Name this coworker"}</strong><small>{member.role==='custom'?(member.job_focus||'Give this coworker a job'):member.job_focus||'Ready to help with this visit'}</small></span>
       <span className="team-flow-state">{member.enabled?'On':'Paused'}</span><span aria-hidden="true">›</span></button></li>)}</ul>
     {draft.bots.some(member=>member.retired)&&<details><summary>Retired coworkers · history kept</summary>{draft.bots.filter(member=>member.retired).map(member=><button key={botAddress(member)} onClick={()=>setSelected(botAddress(member))}>{member.name} · Retired</button>)}</details>}
   </section>;
@@ -97,23 +97,23 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
         <div><h3>{template.name}</h3><p>{template.description}</p></div></div>}
       <div className="team-settings-form">
         {essential&&<><label>Bot name<input maxLength={40} value={bot.name} disabled={fieldsLocked} onChange={e => change({ name: e.target.value })} /></label>
-        <label>{bot.role === "custom" ? "Job (required)" : "Job focus"}<input maxLength={500} value={bot.job_focus ?? ""} disabled={fieldsLocked} required={bot.role === "custom"}
-          placeholder={bot.role === "custom" ? "For example, prepare referral checklists" : "For example, visit documentation"} onChange={e => change({ job_focus: e.target.value })} /></label>
+        <details className="team-optional-settings" open={bot.role === "custom"}><summary>{bot.role === "custom" ? "Define this bot’s job" : "Adjust its job focus"}</summary><label>{bot.role === "custom" ? "Job (required)" : "Job focus"}<input maxLength={500} value={bot.job_focus ?? ""} disabled={fieldsLocked} required={bot.role === "custom"}
+          placeholder={bot.role === "custom" ? "For example, prepare referral checklists" : "For example, visit documentation"} onChange={e => change({ job_focus: e.target.value })} /></label></details>
         <label>{bot.role === "custom" ? "Instructions" : "Working preferences"}<textarea rows={3} maxLength={2000} value={bot.working_preferences ?? ""} disabled={fieldsLocked}
           placeholder="How would you like this bot to help?" onChange={e => change({ working_preferences: e.target.value })} /></label></>}
         {advanced&&<><label className="team-check"><input type="checkbox" checked={bot.enabled} disabled={fieldsLocked} onChange={e => change({ enabled: e.target.checked })} />Enable this bot</label>
         <label>Review length<select value={bot.response_style} disabled={fieldsLocked} onChange={e => change({ response_style: e.target.value as "brief" | "detailed" })}>
           <option value="brief">Brief</option><option value="detailed">More detail</option>
         </select></label>
-        <fieldset disabled={fieldsLocked}><legend>Sources this bot can use in your encounter</legend>
+        <details className="team-optional-settings"><summary>Sources this bot can use</summary><fieldset disabled={fieldsLocked}><legend>Sources this bot can use in your encounter</legend>
           <label className="team-check"><input type="checkbox" checked={bot.include_notebook} onChange={e => change({ include_notebook: e.target.checked })} />My saved notebook</label>
           <label className="team-check"><input type="checkbox" checked={bot.include_evidence} onChange={e => change({ include_evidence: e.target.checked })} />Saved preparation and evidence</label>
-        </fieldset>
-        <fieldset disabled={fieldsLocked || !setupAvailable}><legend>Capability restrictions</legend>
+        </fieldset></details>
+        <details className="team-optional-settings"><summary>Restrict what this bot can do</summary><fieldset disabled={fieldsLocked || !setupAvailable}><legend>Capability restrictions</legend>
           {BLOCKED_CAPABILITIES.map(capability => <label className="team-check" key={capability}><input type="checkbox"
             checked={bot.blocked_capabilities?.includes(capability) ?? false} onChange={e => change({blocked_capabilities:e.target.checked
               ? [...(bot.blocked_capabilities ?? []), capability] : (bot.blocked_capabilities ?? []).filter(value => value !== capability)})}/>{blockedLabels[capability]}</label>)}
-        </fieldset>
+        </fieldset></details>
         {!setupAvailable && <p className="team-fine">Capability changes require the current team setup prerequisites to be available.</p>}
         <p className="team-fine">Responsible human: you. These settings do not grant external action authority. Your conversations remain private.</p>
         {bot.instance_id && savedBot && <div className="team-retirement">
@@ -121,7 +121,7 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
           {!savedBot.retired && <button type="button" disabled={locked} onClick={toggleRetirement}>{bot.retired ? "Undo retirement" : "Retire bot when saved"}</button>}
         </div>}</>}
       </div>
-      {advanced&&<><h4>Skills & connections</h4>
+      {advanced&&<details className="team-optional-settings"><summary>Skills & connections</summary>
       {bot.role === "custom" && <fieldset disabled={fieldsLocked} className="team-custom-skills"><legend>Choose this bot's skills</legend>
         {(team.custom_skills ?? []).map(skill => <label className="team-check" key={skill.key}>
           <input type="checkbox" checked={(bot.skills ?? []).includes(skill.key)} onChange={e => change({skills: e.target.checked
@@ -133,7 +133,7 @@ export function ProviderTeamSettings({ team, draft, setDraft, selected, setSelec
       <ul className="team-capability-list">{template.capabilities.map(capability => <li key={capability.key}>
         <span><strong>{capability.label}</strong><small>{capability.connector}</small></span>
         <span className={`team-pill ${capability.state === "awaiting_connection" ? "pending" : "available"}`}>{status(capability.key,capability.state)}</span>
-      </li>)}</ul></>}
+      </li>)}</ul></details>}
       {full&&<><label className="team-practice">Practice context<textarea rows={2} maxLength={1000} value={draft.practice_context} disabled={locked}
         onChange={e => setDraft({ ...draft, practice_context: e.target.value })} /></label>
       <p className="team-fine">{team.llm.enabled && !bot.blocked_capabilities?.includes("model_answer") ? "Used as preferences for permitted GPT-4.1 requests. These cannot grant permission to act." : "Saved for connected skills. Local source lookup does not interpret practice instructions."}</p></>}

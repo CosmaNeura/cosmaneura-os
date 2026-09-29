@@ -78,7 +78,7 @@ describe("private encounter workspace", () => {
   it("starts without a request and labels unsupported capabilities", async () => {
     expect(workspaceApi.open).not.toHaveBeenCalled();
     await click("Open synthetic encounter");
-    expect(container.textContent).toContain("Private to you");
+    expect(container.textContent).toContain("Private encounter notebook");
     expect(container.textContent).toContain("AI conversation awaits its service connection");
     await click("During");
     expect((([...container.querySelectorAll("button")].find(b => b.textContent === "Start recording")) as HTMLButtonElement).disabled).toBe(true);
@@ -343,7 +343,7 @@ describe("private encounter workspace", () => {
     await act(async () => root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={authenticated} />));
     await click("Choose an encounter");
     expect(workspaceApi.open).not.toHaveBeenCalled();
-    expect(container.querySelector('[aria-label="Available encounters"]')?.textContent).toContain("Resume your notebook");
+    expect(container.querySelector('[aria-label="Available encounters"]')?.textContent).toContain("Open saved notes");
     const second = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("Second invented visit"));
     await act(async () => second!.click());
     expect(workspaceApi.open).toHaveBeenCalledWith(authenticated, fixture.appointment_id);

@@ -393,7 +393,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     } catch (cause) { if (current === generation.current) failure(cause); }
     finally { if (current === generation.current) setBusy(false); }
   }
-  async function open(appointmentId?: string, coreSelection?: CoreConnectionCommand, incoming?:InboxDraftSelection) {
+  async function open(appointmentId?: string, coreSelection?: CoreConnectionCommand, incoming?:InboxDraftSelection, recordVisit = false) {
     if (pending || busy) return;
     if ((coreSelection || incoming) && (locked || captureNavigationLocked || captureDraftLocked || hasUnsavedWork())) {
       setError('Save or recover unfinished work before opening a notebook. Your text and requests are retained.'); return;
@@ -422,7 +422,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       setIdentity(result.identity); setWorkspace(result.workspace); setTeam(result.team);
       setPreviousModelRequest(null);
       setThought('');setEvidence('');setSource('');setModelObservation(null);setReplacementDraft(null);setModelHashes({});
-      setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(0);setStage('Before');setPanel('Notebook');
+      setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(recordVisit ? 1 : 0);setStage('Before');setPanel('Notebook');
+      if (recordVisit) {
+        const recorder = result.team.configuration.bots.find(item => item.role === "scribe" && !item.retired && !item.instance_id);
+        if (recorder) setSelected(botAddress(recorder));
+        setMobilePanel("Notebook");
+      }
       if (!preserveTeamDraft) setTeamDraft(structuredClone(result.team.configuration));
       setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
       setSettingsOpen(result.team.revision === 0);
@@ -908,9 +913,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       <nav aria-label="Provider Team" className="team-roster">{team?.members.map(member => {
         const address = botAddress(member);
         const config = team.configuration.bots.find(b => botAddress(b) === address)!;
-        return <button key={address} disabled={connectionNavigationLocked} aria-pressed={selected === address} onClick={() => { setPracticeOpen(false); setSelected(address); setSettingsOpen(false); setMobilePanel("Conversation"); }}>
+        return <button key={address} disabled={connectionNavigationLocked} aria-pressed={selected === address} onClick={() => { setPracticeOpen(false); setSelected(address); setSettingsOpen(false); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); }}>
           <BotAvatar role={member.role} /><span><strong>{config.name}</strong>
-            <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{config.retired ? "Retired · history kept" : !team.revision ? "Set up your team" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : "Configured · scoped requests"}</small></span>
+            <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{config.retired ? "Retired · history kept" : !team.revision ? "Set up your team" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : "On"}</small></span>
         </button>;
       })}</nav>
       <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>Invented data · private to you</small></div>
@@ -937,7 +942,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       {recoveryState === "failed" && <div className="team-recovery" role="alert"><p>This device's draft storage could not be checked. Existing drafts are retained. Recheck recovery before editing or saving.</p>
         <button disabled={busy} onClick={() => void recheckRecovery()}>Recheck draft recovery</button></div>}
       {recoveryState === "saving" && <p className="team-fine" role="status">Saving notebook and team drafts on this device…</p>}
-      {recoveryState === "saved" && <p className="team-fine">Notebook and team draft recovery is up to date on this device.</p>}
+      {recoveryState === "saved" && <p className="team-fine">Drafts saved on this device.</p>}
       {practiceOpen && error && <div className="team-banner error" role="alert">{error}</div>}
       {practiceOpened && (authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><fieldset disabled={recoveryBlocked} hidden={!practiceOpen} style={{border:0,padding:0,margin:0,minWidth:0}}><PracticeHub identity={(authenticated || identity)!} onDenied={failure} onBusyChange={reportInboxBusy} onDraftInbox={authenticated?selection=>{setInboxNavigation({selection,identity:authenticated,generation:generation.current});}:undefined}><PracticeWork identity={(authenticated || identity)!}
         onChanged={() => { if (workspace) setConflict(true); }} onAccessLost={failure} />
@@ -1012,52 +1017,55 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </fieldset>
         </AccountRecoveryContext.Provider> : undefined}
       />}
-      {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR NOTEBOOKS" : "A LITTLE MORE ROOM TO FOCUS"}</p>
-        <h1>{encounters ? "Your encounters" : <>Your practice.<br />Your team.</>}</h1><p>{encounters ? "Choose a visit to open your private notebook." : "Prepare for the visit, keep your notes, and carry the next step forward. Your coworkers share the encounter context you choose."}</p>
+      {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
+        <h1>{encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{encounters ? "Record a visit, or open its notes." : "Choose a visit. Record the conversation. Review your note."}</p>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
           encounterLabel={busy?'Loading…':encounters?'Refresh encounters':authenticated?'Choose an encounter':'Open synthetic encounter'}
           onConnections={()=>void openSettings('connections')} onEncounter={()=>void (authenticated?loadEncounters():open())}/>
         {authenticated && encounters && <section aria-label="Available encounters" className="team-encounter-picker">
-          {encounters.length ? encounters.map((encounter, index) => <button className="team-encounter-option" key={encounter.appointment_id}
-            disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id)}>
-            <strong>{encounter.label}</strong><span>Encounter {index + 1} · {encounter.workspace_id ? "Resume your notebook" : "Open a private notebook"}</span>
-          </button>) : <p>No confirmed encounters are available for this account.</p>}
+          {encounters.length ? encounters.map(encounter => <article className="team-encounter-row" key={encounter.appointment_id}>
+            <button className="team-encounter-option" disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id)}>
+              <strong>{encounter.label}</strong><span>{encounter.workspace_id ? "Open saved notes" : "Open visit"}</span>
+            </button>
+            {CAPTURE_WORKSPACE_BUILD && (!team || team.capture?.enabled) && <button className="team-primary team-record-visit" aria-label={`Record ${encounter.label}`}
+              disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id, undefined, undefined, true)}>Record visit</button>}
+          </article>) : <p>No confirmed encounters are available for this account. Connect your practice to find its appointments.</p>}
         </section>}
-        <p className="team-fine">A local rehearsal with invented data. Your team's available connections appear in its settings.</p>
+        <p className="team-fine">Connect your practice once. Add other services whenever you need them.</p>
       </section> : <>
+        <section hidden={settingsOpen} className="team-encounter-heading"><div><p className="team-kicker">ENCOUNTER NOTEBOOK</p><h1>{workspace.label}</h1>
+          <p>Private encounter notebook</p>
+          <button className="team-subtle" disabled={busy || !!pending} onClick={() => void refresh()}>Refresh encounter</button>
+          {import.meta.env.VITE_COSMANEURA_RECORD_ENABLED === "true" && authenticated && team?.capture?.enabled &&
+            <CoreRecordLink key={workspace.id} identity={authenticated} workspaceId={workspace.id}
+              locked={busy || !!pending || captureNavigationLocked || recoveryBlocked} onDenied={failure} />}</div>
+          {bot?.role !== "scribe" && <nav aria-label="Encounter stage" className="team-stages">{["Before", "During", "After"].map(value => <button key={value} aria-pressed={stage === value} onClick={() => { setStage(value); if (value === "After") { setPanel("Review"); setMobilePanel("Review"); } }}>{value}</button>)}</nav>}
+        </section>
         {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled &&
-          <CapturePanel key={workspace.id} workspaceId={workspace.id} identity={authenticated}
+          <CapturePanel key={workspace.id} workspaceId={workspace.id} identity={authenticated} encounterLabel={workspace.label}
             notesEnabled={CAPTURE_NOTES_BUILD && team.capture.notes_enabled === true} onDraftLock={setCaptureDraftLocked} onNavigationLock={setCaptureNavigationLocked}
             correctionsEnabled={CAPTURE_CORRECTIONS_BUILD && team.capture.corrections_enabled === true}
             scratchpad={workspace.entries.filter(e => e.kind === "scratchpad").at(-1)} notebookDirty={note !== latestNote}
             taskBot={scribe ? {selection: {address: botAddress(scribe), team_revision: team.revision},
               name: scribe.name, enabled: scribe.enabled && team.revision > 0, includeNotebook: scribe.include_notebook} : undefined}
-            openRequest={captureRequest}
+            openRequest={locked || settingsOpen || practiceOpen ? 0 : captureRequest} preferencesScope={team.recovery_scope}
             onNotebook={() => { setPanel("Notebook"); setMobilePanel("Notebook"); }}
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} reviewLocked={locked} />}
         <div hidden={settingsOpen}>
-        <section className="team-encounter-heading"><div><p className="team-kicker">ENCOUNTER NOTEBOOK</p><h1>{workspace.label}</h1>
-          <p>Invented encounter <span>·</span> Private to you <span>·</span> Revision {workspace.revision}</p>
-          <button className="team-subtle" disabled={busy || !!pending} onClick={() => void refresh()}>Refresh encounter</button>
-          {import.meta.env.VITE_COSMANEURA_RECORD_ENABLED === "true" && authenticated && team?.capture?.enabled &&
-            <CoreRecordLink key={workspace.id} identity={authenticated} workspaceId={workspace.id}
-              locked={busy || !!pending || captureNavigationLocked || recoveryBlocked} onDenied={failure} />}</div>
-          <nav aria-label="Encounter stage" className="team-stages">{["Before", "During", "After"].map(value => <button key={value} aria-pressed={stage === value} onClick={() => { setStage(value); if (value === "After") { setPanel("Review"); setMobilePanel("Review"); } }}>{value}</button>)}</nav>
-        </section>
-        <nav className="team-mobile-tabs" aria-label="Mobile encounter view">{["Conversation", "Notebook", "Sources", "Review", "Work"].map(value => <button key={value} aria-pressed={mobilePanel === value}
-          onClick={() => { setMobilePanel(value); if (value !== "Conversation") setPanel(value); }}>{value}</button>)}</nav>
-        <div className="team-content" data-mobile-panel={mobilePanel}><section className="team-conversation" aria-label="Encounter conversation">
+        <nav className={`team-mobile-tabs${bot?.role === "scribe" ? " team-scribe-tabs" : ""}`} aria-label={bot?.role === "scribe" ? "Visit view" : "Mobile encounter view"}>
+          {(bot?.role === "scribe" ? ["Notebook", "Conversation", "Review"] : ["Conversation", "Notebook", "Sources", "Review", "Work"]).map(value => <button key={value} aria-pressed={mobilePanel === value}
+            onClick={() => { setMobilePanel(value); if (value !== "Conversation") setPanel(value); }}>{bot?.role === "scribe" ? ({Notebook:"Visit notes",Conversation:"Ask Scribe",Review:"Review note"})[value] : value}</button>)}
+          {bot?.role === "scribe" && <details className="team-visit-more"><summary>More</summary><div>{["Sources", "Work"].map(value => <button key={value} aria-pressed={mobilePanel === value}
+            onClick={event => {setPanel(value); setMobilePanel(value); const menu = event.currentTarget.closest('details'); if (menu) menu.open = false;}}>{value === "Sources" ? "Saved sources" : "Follow-up work"}</button>)}</div></details>}
+        </nav>
+        <div className="team-content" data-mobile-panel={mobilePanel} data-scribe-focus={bot?.role === "scribe" ? "true" : undefined}><section className="team-conversation" aria-label="Encounter conversation">
           <header className="team-conversation-header"><BotAvatar role={bot?.role ?? "scribe"}
             active={busy && pending?.type === "ask" && pending.body.role === selected||workspace.entries.some(e=>modelActive(e)&&e.model_request?.bot.address===selected)}
             enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
             <div><h2>{bot?.name ?? "Your team"}</h2><p>{template?.description}</p></div>
             <button className="team-subtle" onClick={() => setSettingsOpen(true)}>Skills & settings</button></header>
-          {bot?.role === "scribe" && CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled &&
-            <div className="capture-actions team-scribe-actions"><button disabled={locked || !bot.enabled || !team.revision}
-              onClick={() => setCaptureRequest(value => value + 1)}>{CAPTURE_NOTES_BUILD && team.capture.notes_enabled ? "Record visit / prepare SOAP draft" : "Record visit"}</button>
-              <small>{CAPTURE_NOTES_BUILD && team.capture.notes_enabled ? "Consent → saved transcript and scratch notes → editable Core draft" : "Consent → recording and saved scratch notes"}</small></div>}
           {bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
             template?.capabilities.some(capability => capability.key === "core.session_prep.read" &&
               capability.state === "enabled" && capability.contract === "core.session-prep.brief.v1") &&
