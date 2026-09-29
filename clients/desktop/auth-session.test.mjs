@@ -102,7 +102,8 @@ test('storage failures close access before helper creation or any sign-in reques
   let created = false;
   const noRead = await createDesktopAuthSession({enabled: true, createHelper: () => { created = true; },
     accessStore: {read: async () => { throw new Error('private filesystem path'); }}});
-  assert.equal(created, false); assert.equal(noRead.snapshot().phase, 'unavailable'); noRead.close();
+  assert.equal(created, false); assert.equal(noRead.snapshot().phase, 'unavailable');
+  await assert.rejects(noRead.signIn(), /unavailable/); assert.equal(created, false); noRead.close();
   const f = fixture('allowed'); const session = await f.create();
   f.store.write = async () => { throw new Error('private path'); };
   await assert.rejects(session.signIn(), /^Error: Native session unavailable$/);
@@ -115,4 +116,86 @@ test('helper failure and session disposal deny old tokens', async () => {
   f.emit({...nativeOut, phase: 'unavailable'}); assert.equal(session.snapshot().phase, 'unavailable');
   await assert.rejects(session.getToken(revision), /Native session unavailable/);
   session.close(); await assert.rejects(session.getToken(revision), /Native session unavailable/);
+});
+
+test('failed helper startup retries only after explicit sign-in and a durable access fence', async () => {
+  const f = fixture('allowed'); let attempts = 0, closed = 0;
+  const failed = {...f.helper, getState: async () => { throw new Error('helper exited'); }, close: () => { closed++; }};
+  const session = await createDesktopAuthSession({enabled: true, accessStore: f.store,
+    createHelper: async () => {
+      attempts++;
+      if (attempts > 1) assert.equal(f.access(), 'logout_pending');
+      return attempts === 1 ? failed : f.helper;
+    }});
+  assert.equal(session.snapshot().phase, 'unavailable'); assert.equal(closed, 1);
+  await session.getState(); await assert.rejects(session.getToken(session.snapshot().revision), /unavailable/);
+  assert.equal(attempts, 1);
+  const ready = await session.signIn();
+  assert.equal(ready.phase, 'ready'); assert.equal(attempts, 2);
+  assert.deepEqual(f.writes, ['logout_pending', 'allowed']);
+  assert.equal(await session.getToken(ready.revision), 'local.binding.fixture'); session.close();
+});
+
+test('bundle verification failure remains closed and is reverified on each explicit recovery', async () => {
+  const f = fixture('allowed'); let attempts = 0;
+  const session = await createDesktopAuthSession({enabled: true, accessStore: f.store,
+    createHelper: async () => { if (++attempts < 3) throw new Error('bundle verification failed'); return f.helper; }});
+  assert.equal(session.snapshot().phase, 'unavailable');
+  await assert.rejects(session.signIn(), /unavailable/);
+  assert.equal(f.access(), 'logout_pending'); assert.equal(f.calls.length, 0);
+  assert.equal((await session.signIn()).phase, 'ready');
+  assert.equal(attempts, 3); assert.deepEqual(f.calls, ['signOut', 'signIn']); session.close();
+});
+
+test('late state replies and events from a replaced helper cannot disturb recovered access', async () => {
+  const f = fixture('allowed'), fresh = fixture('allowed'), oldPoll = deferred();
+  let attempts = 0, oldListener;
+  f.helper.subscribe = listener => { oldListener = listener; return () => {}; };
+  // Both helpers share the same durable access decision, as real processes do.
+  fresh.helper.signIn = f.helper.signIn;
+  const session = await createDesktopAuthSession({enabled: true, accessStore: f.store,
+    createHelper: async () => ++attempts === 1 ? f.helper : fresh.helper});
+  const oldRevision = session.snapshot().revision;
+  f.helper.getState = () => oldPoll.promise;
+  const pending = session.getState(); await tick();
+  oldListener({...nativeOut, phase: 'unavailable'});
+  const ready = await session.signIn();
+  oldListener({...nativeReady, identity: {...nativeReady.identity, userId: 'user_stale'}});
+  oldPoll.reject(new Error('old helper exited')); await pending;
+  assert.deepEqual(session.snapshot(), ready); assert.notEqual(ready.revision, oldRevision);
+  await assert.rejects(session.getToken(oldRevision), /unavailable/); session.close();
+});
+
+test('sign-out supersedes asynchronous helper recovery and closes the late process', async () => {
+  const f = fixture('allowed'), creation = deferred(); let attempts = 0, lateClosed = 0;
+  const session = await createDesktopAuthSession({enabled: true, accessStore: f.store,
+    createHelper: async () => {
+      attempts++;
+      if (attempts === 1) throw new Error('initial helper missing');
+      return attempts === 2 ? creation.promise : f.helper;
+    }});
+  const pending = session.signIn(), rejected = assert.rejects(pending, /unavailable/); await tick();
+  const out = await session.signOut(); assert.equal(out.phase, 'signedOut');
+  creation.resolve({...f.helper, close: () => { lateClosed++; }}); await rejected;
+  assert.equal(lateClosed, 1); assert.equal(f.access(), 'needs_login');
+  assert.equal(session.snapshot().phase, 'signedOut'); assert.ok(!f.writes.includes('allowed'));
+  assert.deepEqual(f.calls, ['signOut']); session.close();
+});
+
+test('closing the session disposes an asynchronously created recovery helper', async () => {
+  const f = fixture(), creation = deferred(); let attempts = 0, closed = 0;
+  const session = await createDesktopAuthSession({enabled: true, accessStore: f.store,
+    createHelper: async () => { if (++attempts === 1) throw new Error('initial failure'); return creation.promise; }});
+  const pending = session.signIn(), rejected = assert.rejects(pending, /unavailable/); await tick();
+  session.close(); creation.resolve({...f.helper, close: () => { closed++; }}); await rejected;
+  assert.equal(closed, 1); assert.equal(f.access(), 'logout_pending'); assert.equal(f.calls.length, 0);
+});
+
+test('a state-read failure during sign-in rejects a late result from that closed helper', async () => {
+  const f = fixture(), login = deferred();
+  const session = await f.create(); f.helper.signIn = () => login.promise;
+  const pending = session.signIn(), rejected = assert.rejects(pending, /unavailable/); await tick();
+  f.helper.getState = async () => { throw new Error('helper unavailable'); };
+  await session.getState(); login.resolve(nativeReady); await rejected;
+  assert.equal(f.access(), 'logout_pending'); assert.equal(session.snapshot().phase, 'unavailable'); session.close();
 });
