@@ -10,7 +10,8 @@ from sqlalchemy.orm import Session
 
 from cosmas_os.adapters.local import FakeNotifyAdapter, InjectableClock, LocalBlobAdapter
 from cosmas_os.application import services as svc
-from cosmas_os.db import Base, make_engine, make_session_factory
+from cosmas_os.db import make_engine, make_session_factory
+from cosmas_os.model_registry import metadata
 
 
 @pytest.fixture(scope="session")
@@ -19,7 +20,7 @@ def engine():
         "DATABASE_URL", "postgresql+psycopg://cosmas:cosmas@localhost:54329/cosmas_os"
     )
     eng = make_engine(url)
-    Base.metadata.create_all(eng)
+    metadata.create_all(eng)
     yield eng
 
 
