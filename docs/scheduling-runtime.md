@@ -15,8 +15,11 @@ configure_scheduling(app, SchedulingServiceProfile(
 ))
 ```
 
-The installed origin must be HTTPS on the standard port, with no credentials,
-path, query or fragment. The callable must return SchedulingStaffCredential,
+The installed API base must be HTTPS on the standard port, with no credentials,
+query or fragment. It may be the service origin or end in exactly `/api` for
+Scheduling's shared web/API host; arbitrary paths are rejected. Requests append
+their `/v1/...` route to this base without redirects or fallback to another path.
+The callable must return SchedulingStaffCredential,
 including the exact supplied SchedulingSelection, a Microsoft staff access or
 Google staff identity token, and its verified expiry. A token needs at least
 30 seconds of remaining validity and no more than one day. The provider owns

@@ -34,13 +34,14 @@ def window():
 
 def client(handler, **kwargs):
     return HttpSchedulingAvailability(
-        "https://scheduling.example.invalid",
+        kwargs.pop("origin", "https://scheduling.example.invalid"),
         kwargs.pop("staff_credential", lambda selected: SecretStr("PRIVATE_synthetic_staff")),
         transport=httpx.MockTransport(handler), now=kwargs.pop("now", lambda: NOW), **kwargs,
     )
 
 
-def test_existing_staff_route_uses_fresh_scoped_identity_without_ambient_cookies(selection, window):
+@pytest.mark.parametrize("base_path", ["", "/api"])
+def test_existing_staff_route_uses_fresh_scoped_identity_without_ambient_cookies(selection, window, base_path):
     identities, requests = [], []
 
     def identity(selected):
@@ -51,7 +52,7 @@ def test_existing_staff_route_uses_fresh_scoped_identity_without_ambient_cookies
         requests.append(request)
         current = identities[-1]
         assert request.method == "GET"
-        assert request.url.path == f"/v1/practitioners/{current.practitioner_id}/availability"
+        assert request.url.path == f"{base_path}/v1/practitioners/{current.practitioner_id}/availability"
         assert dict(request.url.params) == {
             "from": window.starts_at.isoformat(), "to": window.ends_at.isoformat(),
             "appointmentTypeId": str(current.appointment_type_id), "locationId": str(current.location_id),
@@ -65,7 +66,7 @@ def test_existing_staff_route_uses_fresh_scoped_identity_without_ambient_cookies
         assert str(current.box_id) not in str(request.url)
         return httpx.Response(200, json=[SLOT], headers={**HEADERS, "Set-Cookie": "scope=PRIVATE; Path=/"})
 
-    port = client(handle, staff_credential=identity)
+    port = client(handle, staff_credential=identity, origin="https://scheduling.example.invalid" + base_path)
     try:
         first = port.availability(selection, window)
         other = selection.model_copy(update={"owner_id": uuid4(), "practice_id": uuid4()})

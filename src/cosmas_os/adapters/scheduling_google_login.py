@@ -50,20 +50,21 @@ def canonical(value):
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
 
 
-def exact_origin(value):
+def exact_origin(value, *, allow_api_path=False):
     parts = urlsplit(value)
+    suffix = "/api" if allow_api_path and parts.path == "/api" else ""
     if (
         parts.scheme != "https"
         or not parts.hostname
         or parts.username
         or parts.password
         or parts.port not in {None, 443}
-        or parts.path
+        or parts.path != suffix
         or parts.query
         or parts.fragment
         or parts.hostname.endswith(".")
-        or not re.fullmatch(r"https://[a-z0-9.-]+", value)
-        or value != "https://" + parts.hostname
+        or not re.fullmatch(r"https://[a-z0-9.-]+" + suffix, value)
+        or value != "https://" + parts.hostname + suffix
     ):
         raise ValueError("A fixed HTTPS origin is required")
     return value
@@ -85,7 +86,7 @@ class SchedulingGoogleLogin:
         ):
             raise ValueError("Authenticated Scheduling must be enabled")
         self.settings, self.sessions, self.now = settings, sessions, now
-        self.origin = exact_origin(settings.scheduling_origin)
+        self.origin = exact_origin(settings.scheduling_origin, allow_api_path=True)
         self.return_origin = exact_origin(settings.scheduling_login_return_origin)
         callback = urlsplit(settings.scheduling_google_callback_uri)
         exact_origin(f"{callback.scheme}://{callback.netloc}")

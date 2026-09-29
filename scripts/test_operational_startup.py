@@ -69,6 +69,28 @@ class OperationalStartup(unittest.TestCase):
             )
         self.assertFalse(result["service-bindings.json"]["deployable_now"])
 
+    def test_scheduling_api_mount_is_emitted_without_relaxing_other_origins(self):
+        self.bindings["scheduling"]["origin"] += "/api"
+        result = startup.compile_inputs(self.identity, self.bindings)
+        self.assertEqual(
+            result["os.services.tfvars.json"]["workspace_public_configuration"]["SCHEDULING_ORIGIN"],
+            self.bindings["scheduling"]["origin"],
+        )
+        for service, field in (("core", "origin"), ("scribe", "origin"), ("core", "web_origin")):
+            with self.subTest(service=service, field=field):
+                altered = copy.deepcopy(self.bindings)
+                altered[service][field] += "/api"
+                with self.assertRaises(ValueError):
+                    startup.compile_inputs(self.identity, altered)
+
+    def test_scheduling_base_rejects_ambiguous_and_arbitrary_paths(self):
+        for suffix in ("/api/", "/API", "/api/v1", "/%61pi", "/api/..", "/api?x=1", "/api#x"):
+            with self.subTest(suffix=suffix):
+                altered = copy.deepcopy(self.bindings)
+                altered["scheduling"]["origin"] += suffix
+                with self.assertRaises(ValueError):
+                    startup.compile_inputs(self.identity, altered)
+
     def test_worker_and_athena_layers_are_separate_from_service_startup(self):
         result = startup.compile_inputs(self.identity, self.bindings)
         service = result["scribe.service.tfvars.json"]
