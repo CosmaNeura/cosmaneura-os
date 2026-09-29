@@ -34,29 +34,56 @@ export async function createDesktopAuthSession({enabled = false, createHelper, a
     catch { storageFailed = true; change('unavailable'); throw unavailable(); }
   }
   const currentOperation = operation => !disposed && !storageFailed && pending === operation;
+  function closeHelper() {
+    const previous = helper;
+    helper = null; native = null;
+    removeListener?.(); removeListener = null;
+    previous?.close();
+  }
+  async function openHelper(operation = null) {
+    const candidate = await createHelper();
+    if (disposed || storageFailed || operation && !currentOperation(operation)) {
+      candidate.close(); throw unavailable();
+    }
+    helper = candidate;
+    removeListener = candidate.subscribe(value => {
+      if (disposed || helper !== candidate) return;
+      try { native = parseAuthState(value); reconcile(); }
+      catch { storageFailed = true; closeHelper(); change('unavailable'); }
+    });
+  }
   async function getState() {
     if (!helper || disposed || storageFailed) return state;
+    const candidate = helper;
     const observed = version;
     try {
-      const next = await helper.getState();
-      if (version === observed && !disposed && !storageFailed) { native = parseAuthState(next); reconcile(); }
-    } catch { if (version === observed) change('unavailable'); }
+      const next = await candidate.getState();
+      if (helper === candidate && version === observed && !disposed && !storageFailed) { native = parseAuthState(next); reconcile(); }
+    } catch {
+      if (helper === candidate) { closeHelper(); reconcile(); }
+    }
     return state;
   }
   async function signIn() {
-    if (!helper || disposed || storageFailed || pending) throw unavailable();
+    if (!enabled || disposed || storageFailed || pending) throw unavailable();
     const priorAccess = access;
+    const recovery = !helper || state.phase === 'unavailable';
     const operation = {id: randomUUID(), action: 'signIn'};
     pending = operation; reconcile();
     try {
       await persist('logout_pending');
       if (!currentOperation(operation)) throw unavailable();
-      if (priorAccess === 'logout_pending') await helper.signOut();
+      // Recovery is explicit and fenced before replacing the failed process.
+      // The factory verifies the installed bundle anew on every attempt.
+      if (recovery || !helper) { closeHelper(); await openHelper(operation); }
       if (!currentOperation(operation)) throw unavailable();
-      const result = parseAuthState(await helper.signIn());
-      if (!currentOperation(operation) || result.phase !== 'ready') throw unavailable();
+      const candidate = helper;
+      if (priorAccess === 'logout_pending') await candidate.signOut();
+      if (!currentOperation(operation) || helper !== candidate) throw unavailable();
+      const result = parseAuthState(await candidate.signIn());
+      if (!currentOperation(operation) || helper !== candidate || result.phase !== 'ready') throw unavailable();
       await persist('allowed');
-      if (!currentOperation(operation)) throw unavailable();
+      if (!currentOperation(operation) || helper !== candidate) throw unavailable();
       pending = null; native = result; reconcile(); return state;
     } catch {
       if (pending === operation) { pending = null; reconcile(); }
@@ -64,16 +91,20 @@ export async function createDesktopAuthSession({enabled = false, createHelper, a
     }
   }
   async function signOut() {
-    if (!helper || disposed || storageFailed || (pending && pending.action !== 'signIn')) throw unavailable();
+    if (!enabled || disposed || storageFailed || (pending && pending.action !== 'signIn')) throw unavailable();
+    const recovery = !helper || state.phase === 'unavailable';
     const operation = {id: randomUUID(), action: 'signOut'};
     pending = operation; reconcile();
     try {
       await persist('logout_pending');
       if (!currentOperation(operation)) throw unavailable();
-      const result = parseAuthState(await helper.signOut());
-      if (!currentOperation(operation) || result.phase !== 'signedOut') throw unavailable();
-      await persist('needs_login');
+      if (recovery || !helper) { closeHelper(); await openHelper(operation); }
       if (!currentOperation(operation)) throw unavailable();
+      const candidate = helper;
+      const result = parseAuthState(await candidate.signOut());
+      if (!currentOperation(operation) || helper !== candidate || result.phase !== 'signedOut') throw unavailable();
+      await persist('needs_login');
+      if (!currentOperation(operation) || helper !== candidate) throw unavailable();
       pending = null; native = result; reconcile(); return state;
     } catch {
       if (pending === operation) { pending = null; reconcile(); }
@@ -113,18 +144,15 @@ export async function createDesktopAuthSession({enabled = false, createHelper, a
     try {
       access = await accessStore.read();
       if (!['needs_login', 'logout_pending', 'allowed'].includes(access)) throw unavailable();
-      helper = createHelper();
-      removeListener = helper.subscribe(value => {
-        if (disposed) return;
-        try { native = parseAuthState(value); reconcile(); }
-        catch { storageFailed = true; change('unavailable'); helper.close(); }
-      });
-      await getState();
-    } catch { storageFailed = true; change('unavailable'); helper?.close(); }
+    } catch { storageFailed = true; change('unavailable'); }
+    if (!storageFailed) {
+      try { await openHelper(); await getState(); }
+      catch { closeHelper(); change('unavailable'); }
+    }
   }
   return Object.freeze({
     getState, signIn, signOut, getToken, sourceRequest, snapshot: () => state,
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
-    close: () => { if (disposed) return; disposed = true; removeListener?.(); reconcile(); helper?.close(); },
+    close: () => { if (disposed) return; disposed = true; closeHelper(); reconcile(); },
   });
 }
