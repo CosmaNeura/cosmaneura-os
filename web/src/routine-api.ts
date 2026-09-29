@@ -31,13 +31,16 @@ const date = (v: unknown): v is string => typeof v === "string" && /^\d{4}-\d{2}
 export const isRoutineClockTime = (v: unknown): v is string => typeof v === "string" && /^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(v);
 const text = (v: unknown, max: number): v is string => typeof v === "string" && v.length > 0 && [...v].length <= max;
 function invalid():never { throw new WorkspaceApiError(503); }
+export function isRoutineTimeZone(v:unknown):v is string {
+  if(!text(v,80))return false;
+  try {new Intl.DateTimeFormat("en",{timeZone:v});return true;} catch {return false;}
+}
 export function validSchedule(v: unknown): v is BriefSchedule {
   if (!closed(v,"kind,enabled,timezone,at,weekdays,quiet_start,quiet_end,max_runs_per_seven_days") ||
-      v.kind !== "practice_work_brief" || typeof v.enabled !== "boolean" || !text(v.timezone,80) || !isRoutineClockTime(v.at) ||
+      v.kind !== "practice_work_brief" || typeof v.enabled !== "boolean" || !isRoutineTimeZone(v.timezone) || !isRoutineClockTime(v.at) ||
       !Array.isArray(v.weekdays) || !v.weekdays.length || v.weekdays.length > 7 ||
       !v.weekdays.every((day: unknown) => integer(day,7,1)) || new Set(v.weekdays).size !== v.weekdays.length ||
       !integer(v.max_runs_per_seven_days,7,1)) return false;
-  try { new Intl.DateTimeFormat("en", { timeZone:v.timezone }); } catch { return false; }
   if (v.quiet_start === null && v.quiet_end === null) return true;
   if (!isRoutineClockTime(v.quiet_start) || !isRoutineClockTime(v.quiet_end) || v.quiet_start === v.quiet_end) return false;
   return !(v.quiet_start < v.quiet_end ? v.quiet_start <= v.at && v.at < v.quiet_end : v.at >= v.quiet_start || v.at < v.quiet_end);
