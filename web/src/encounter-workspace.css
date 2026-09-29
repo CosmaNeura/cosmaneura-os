@@ -235,4 +235,14 @@
   .team-roster { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: minmax(64px,1fr); overflow-x: auto; }
   .team-scribe-tabs { margin: 0 12px 12px; gap: 4px; padding: 4px 0; }
   .team-visit-more > summary { padding: 12px 6px; }
+  .team-topbar.team-topbar-authenticated { min-height: 0; padding-block: 8px; gap: 6px; }
+  .team-welcome { padding: 24px 16px; }
+  .team-welcome h1 { font-size: 32px; letter-spacing: -1px; margin: 10px 0 12px; }
+  .team-welcome > p:not(.team-kicker):not(.team-fine) { font-size: 15px; line-height: 1.5; }
+  .team-welcome-actions { grid-template-columns: repeat(2,minmax(0,1fr)); gap: 12px; margin: 20px 0; }
+  .team-workspace .team-start-card { min-height: 124px; padding: 16px; gap: 8px; }
+  .team-start-card strong { font-size: 16px; }
+  .team-start-card > span:not(.team-start-icon) { display: none; }
+  .team-welcome-roles { margin: 22px 0 12px; }
+  .team-welcome-roles .bot-avatar.large { width: 48px; height: 48px; border-radius: 14px; }
 }

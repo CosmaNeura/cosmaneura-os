@@ -1019,11 +1019,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       />}
       {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
         <h1>{encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{encounters ? "Record a visit, or open its notes." : "Choose a visit. Record the conversation. Review your note."}</p>
-        {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
           encounterLabel={busy?'Loading…':encounters?'Refresh encounters':authenticated?'Choose an encounter':'Open synthetic encounter'}
           onConnections={()=>void openSettings('connections')} onEncounter={()=>void (authenticated?loadEncounters():open())}/>
+        {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {authenticated && encounters && <section aria-label="Available encounters" className="team-encounter-picker">
           {encounters.length ? encounters.map(encounter => <article className="team-encounter-row" key={encounter.appointment_id}>
             <button className="team-encounter-option" disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id)}>
