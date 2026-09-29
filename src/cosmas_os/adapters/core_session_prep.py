@@ -67,15 +67,7 @@ class HttpCoreSessionPrep:
     def close(self):
         self._client.close()
 
-    def read_brief(self, selection: CoreSessionPrepRead) -> CoreSessionPrepReceipt:
-        try:
-            # A caller cannot bypass the port boundary with model_construct or
-            # mutable input. No token acquisition occurs for an invalid request.
-            selection = CoreSessionPrepRead.model_validate(
-                selection.model_dump(mode="python"), strict=True
-            )
-        except (ValueError, TypeError, AttributeError):
-            raise ConnectorUnavailable("session_prep_scope_invalid") from None
+    def _workload_headers(self):
         try:
             token = self._token()
             if (
@@ -88,6 +80,18 @@ class HttpCoreSessionPrep:
                 raise ValueError
         except Exception:
             raise ConnectorUnavailable("session_prep_identity_unavailable") from None
+        return {"Authorization": "Bearer " + token}
+
+    def read_brief(self, selection: CoreSessionPrepRead) -> CoreSessionPrepReceipt:
+        try:
+            # A caller cannot bypass the port boundary with model_construct or
+            # mutable input. No token acquisition occurs for an invalid request.
+            selection = CoreSessionPrepRead.model_validate(
+                selection.model_dump(mode="python"), strict=True
+            )
+        except (ValueError, TypeError, AttributeError):
+            raise ConnectorUnavailable("session_prep_scope_invalid") from None
+        workload = self._workload_headers()
         credential = selection.credential
         try:
             with self._client.stream(
@@ -105,7 +109,7 @@ class HttpCoreSessionPrep:
                     },
                 },
                 headers={
-                    "Authorization": "Bearer " + token,
+                    **workload,
                     "X-Cosmaneura-Mount-Context": credential.mount_context_token.get_secret_value(),
                     "X-Cosmaneura-Interaction-Ref": credential.interaction_ref,
                     "X-Cosmaneura-Client-Turn-ID": str(credential.client_turn_id),

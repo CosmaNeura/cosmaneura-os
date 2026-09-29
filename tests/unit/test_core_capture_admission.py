@@ -81,7 +81,11 @@ def core_handler(selected, calls, mutate=lambda phase, body, headers: None):
         else:
             assert phase == "capture-admissions"
             assert isinstance(body, dict)
-            assert set(body) == {"binding_ref", "workspace_id", "request_nonce", "attestation"}
+            expected_keys = {"binding_ref", "workspace_id", "request_nonce", "attestation"}
+            if body["attestation"] is None:
+                expected_keys.add("resume_current")
+                assert body["resume_current"] is True
+            assert set(body) == expected_keys
             response = {
                 "contract_version": "1",
                 "binding_ref": body["binding_ref"],

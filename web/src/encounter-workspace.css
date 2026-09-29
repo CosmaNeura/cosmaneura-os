@@ -134,6 +134,13 @@
 .team-prep details { margin-top: .6rem; }
 .team-prep summary { cursor: pointer; font-size: .86rem; }
 .team-prep-content { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .86rem; line-height: 1.55; }
+.session-prep section { margin-top: 1rem; }
+.session-prep h4 { margin: 0 0 .35rem; }
+.session-prep ul, .session-prep ol { padding-inline-start: 1.4rem; }
+.session-prep li { margin-block: .45rem; overflow-wrap: anywhere; line-height: 1.5; }
+.session-prep-citations { white-space: nowrap; }
+.session-prep-citations a { color: var(--team-green, #00693e); padding-inline: .15rem; }
+.session-prep-sources { font-size: .82rem; border-top: 1px solid var(--team-border, #d9dfdb); padding-top: .8rem; }
 .appointment-panel { margin: 1rem -1rem -1rem; border-bottom: 0; border-top: 1px solid var(--team-border, #d9dfdb); font-size: .86rem; line-height: 1.5; overflow-wrap: anywhere; }
 .appointment-panel h3 { margin-top: 0; }
 .appointment-panel label { display: block; margin: 1rem 0; }

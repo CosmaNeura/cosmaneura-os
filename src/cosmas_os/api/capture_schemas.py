@@ -1,6 +1,7 @@
 """Small closed request; identity and canonical encounter stay server-owned."""
 
 import json
+from typing import Literal
 from uuid import UUID
 
 from fastapi import Request
@@ -38,6 +39,13 @@ class CaptureOperationRequest(ProtectedModel):
 class EncounterPrepRequest(ProtectedModel):
     idempotency_key: IdempotencyKey
     bot: CaptureBotSelection | None = None
+    view: Literal["sources", "brief"] = "sources"
+
+    @model_validator(mode="after")
+    def brief_bot_required(self):
+        if self.view == "brief" and self.bot is None:
+            raise ValueError("session_prep_bot_required")
+        return self
 
 
 class CaptureNoteRequest(ProtectedModel):

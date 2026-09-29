@@ -1,0 +1,64 @@
+import {useEffect, useId, useMemo, useRef, useState} from "react";
+import {BffResponseError} from "../../clients/capture/src/bff/http-client";
+import {readSessionPrep, type CitedText, type SessionPrep} from "./session-prep-api";
+import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity, type CaptureBotSelection} from "./workspace-api";
+
+export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, onAccessLost}: {
+  workspaceId: string; identity: AuthenticatedWorkspaceIdentity; bot: CaptureBotSelection;
+  enabled: boolean; locked: boolean; onAccessLost?: (cause: WorkspaceApiError) => void;
+}) {
+  const scope = useMemo(() => Symbol(), [workspaceId, identity, bot.address, bot.team_revision, enabled]);
+  const currentScope = useRef(scope); currentScope.current = scope;
+  const active = useRef<AbortController | null>(null);
+  const [state, setState] = useState<{scope: symbol; busy: boolean; value?: SessionPrep; error?: string}>({scope, busy: false});
+  const current = state.scope === scope ? state : {busy: false, value: undefined, error: undefined};
+  const sourceId = useId();
+  useEffect(() => () => active.current?.abort(), [scope]);
+  async function open() {
+    if (!enabled || locked || current.busy) return;
+    const controller = new AbortController(); active.current?.abort(); active.current = controller;
+    setState({scope, busy: true});
+    try {
+      const value = await readSessionPrep(workspaceId, identity, bot, controller.signal);
+      if (!controller.signal.aborted && currentScope.current === scope) setState({scope, busy: false, value});
+    } catch (error) {
+      if (controller.signal.aborted || currentScope.current !== scope) return;
+      setState({scope, busy: false, error: "Session Prep could not be confirmed. Refresh the encounter and check your connection before trying again."});
+      if (error instanceof BffResponseError && [401, 403, 404].includes(error.status)) onAccessLost?.(new WorkspaceApiError(error.status));
+    }
+  }
+  const value = current.value;
+  const brief = value?.prepared_brief;
+  const sources = value?.sources.filter(source => source.included) ?? [];
+  const citations = (refs: string[]) => <sup className="session-prep-citations" aria-label={`Sources ${refs.map(ref => sources.findIndex(s => s.source_id === ref) + 1).join(", ")}`}>
+    {refs.map(ref => <a key={ref} href={`#${sourceId}-${ref}`}>[{sources.findIndex(s => s.source_id === ref) + 1}]</a>)}</sup>;
+  const items = (title: string, entries: CitedText[]) => entries.length > 0 && <section><h4>{title}</h4><ul>{entries.map((item, i) =>
+    <li key={i}>{item.text} {citations(item.source_refs)}</li>)}</ul></section>;
+  return <section className="team-prep session-prep" aria-label="Session Prep brief" aria-busy={current.busy}>
+    <h3>Session Prep</h3>
+    <p>A visit brief from your finalized notes and available patient-reported preparation.</p>
+    <div className="capture-actions"><button className="team-primary" disabled={!enabled || locked || current.busy} onClick={() => void open()}>
+      {current.busy ? "Opening Session Prep…" : value?.state === "pending" ? "Check for completed brief" : value ? "Refresh Session Prep" : "Open Session Prep"}</button></div>
+    {current.error && <p role="alert">{current.error}</p>}
+    {value?.state === "pending" && <p role="status">Your brief is being prepared in Cosmaneura. Check again shortly; you can continue working in the meantime.</p>}
+    {value?.state === "unavailable" && <p role="status">{value.reason_code === "no_eligible_sources" ?
+      "No finalized notes or patient-reported preparation are available for this visit yet." : "Session Prep is temporarily unavailable. Try again shortly."}</p>}
+    {brief && value && <>
+      <p className="team-fine">AI-prepared brief · review against the cited sources. Prepared {new Date(value.generated_at!).toLocaleString()}.</p>
+      {value.state === "refreshing" && <p role="status">An updated brief is being prepared. This is the previous version, using sources through {new Date(value.current_through!).toLocaleString()}.</p>}
+      {value.completeness === "partial" && <p role="status">Some records are not included. Review the source list before using this brief.</p>}
+      <section><h4>Recap</h4><p className="team-prep-content">{brief.recap.text} {citations(brief.recap.source_refs)}</p></section>
+      {items("Talking points", brief.talking_points)}
+      {items("Changes since prior visits", brief.trajectory_and_material_changes)}
+      {items("Open threads", brief.open_threads)}
+      {items("Cautions", brief.cautions)}
+      {items("Suggested visit outline", brief.suggested_outline)}
+      {brief.patient_reported && <section><h4>Patient-reported preparation</h4><p>{brief.patient_reported.summary} {citations(brief.patient_reported.source_refs)}</p></section>}
+      <section className="session-prep-sources"><h4>Sources</h4><ol>{sources.map(source => <li key={source.source_id} id={`${sourceId}-${source.source_id}`}>
+        {source.source_class === "clinician_finalized_note" ? "Finalized clinician note" : "Patient-reported Visit Prep"} · {new Date(source.source_at!).toLocaleDateString()} · version {source.source_version}</li>)}</ol>
+        {value.sources.some(s => !s.included && s.reason_code === "selection_limit") && <p className="team-fine">Additional records fall outside this brief's source limit.</p>}
+        {value.sources.some(s => !s.included && s.reason_code === "source_temporarily_unavailable") && <p className="team-fine">A source was temporarily unavailable.</p>}
+      </section>
+    </>}
+  </section>;
+}

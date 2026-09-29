@@ -20,6 +20,7 @@ from starlette.requests import Request
 
 from cosmas_os.adapters.core_capture_admission import HttpCoreCaptureAdmission
 from cosmas_os.adapters.core_record_connection import record_connection as core_record_connection
+from cosmas_os.adapters.core_session_prep_connection import session_prep_connection
 from cosmas_os.adapters.google_connection_runtime import google_connection_lifespan
 from cosmas_os.adapters.managed_services import managed_services, managed_services_lifespan
 from cosmas_os.adapters.microsoft_connection_runtime import microsoft_connection_lifespan
@@ -578,6 +579,32 @@ async def read_workspace_prep(request: Request, workspace_id: UUID,
     session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity),
     port: CoreCaptureAdmissionPort | None = Depends(_capture_connection)):
     body = await read_capture_request(request, EncounterPrepRequest)
+    if body.view == "brief":
+        from cosmas_os.application import session_prep
+        from cosmas_os.application.capture_deadline import run_in_threadpool
+
+        authorization = request.headers["authorization"]
+
+        def reauthenticate():
+            _prep_gate()
+            if not settings.workspace_session_prep_available:
+                raise ws.WorkspaceError("session_prep_unavailable", 404)
+            if (identity.auth_mode != "clerk_jwt" or identity.external_identity_id is None
+                or _identity(request=request, session=session, authorization=authorization,
+                    x_box_id=None, x_actor_principal_id=None) != identity):
+                raise ws.WorkspaceError("session_prep_access_unavailable", 403)
+
+        def read_brief():
+            reauthenticate()
+            with session_prep_connection(settings, current_budget()) as brief_port:
+                return session_prep.read(session, box=identity.box_id, owner=identity.principal_id,
+                    external_identity_id=identity.external_identity_id, workspace_id=str(workspace_id),
+                    bot=body.bot, bearer=SecretStr(authorization.partition(" ")[2]),
+                    idempotency_key=body.idempotency_key,
+                    reauthenticate=reauthenticate, port=brief_port)
+
+        result = await run_in_threadpool(read_brief)
+        return JSONResponse(content=result, headers={"Cache-Control": "no-store"})
     result = await _execute_workspace_capture(request, workspace_id, session, identity, port, body)
     if not isinstance(result, CorePrepReceipt):
         raise ws.WorkspaceError("capture_request_unconfirmed", 503)
