@@ -56,7 +56,7 @@ describe("private encounter workspace", () => {
   });
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); });
   async function click(text: string) {
-    const button = [...container.querySelectorAll("button")].find(b => b.textContent?.replace(/\s*↗$/, "").trim() === text || b.getAttribute("aria-label") === text);
+    const button = [...container.querySelectorAll("button")].find(b => b.textContent?.replace(/\s*↗$/, "").trim() === text || b.getAttribute("aria-label") === text || [...b.querySelectorAll("strong")].some(label => label.textContent?.trim() === text));
     expect(button, text).toBeTruthy();
     await act(async () => button!.click());
   }
