@@ -11,9 +11,11 @@ import sourceGolden from "../../tests/fixtures/capture_source.json";
 import type { CaptureSourceEnvelope } from "../../clients/capture/src/bff/source-contracts";
 import { readWorking, correctWorking, type WorkingReceipt } from "./capture-working-api";
 import { captureDraft, captureNoteTemplates, type CaptureDraft } from "./capture-notes-api";
+import { desktopMeetingCaptureAvailable } from "./desktop-capture-runtime";
 
 vi.mock("./capture-api", () => ({ prepareCapture: vi.fn(), CAPTURE_RECOVERY_BUILD: false }));
 vi.mock("./capture-runtime", () => ({ openCaptureRuntime: vi.fn() }));
+vi.mock("./desktop-capture-runtime", () => ({desktopMeetingCaptureAvailable: vi.fn(() => false)}));
 vi.mock("./capture-working-api", async original => ({...await original<object>(),readWorking:vi.fn(),correctWorking:vi.fn()}));
 vi.mock("./capture-notes-api", () => ({captureDraft:vi.fn(),captureNoteTemplates:vi.fn(),saveCaptureDraft:vi.fn()}));
 const workspace = "00000000-0000-4000-8000-000000000002";
@@ -31,6 +33,7 @@ const nativeState = () => ({phase:"ready",busy:false,input:"built_in" as const,s
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.clearAllMocks();
+  vi.mocked(desktopMeetingCaptureAvailable).mockReturnValue(false);
   snapshot = { state: "ready", statusCode: "ready", sessionId: session, recordedChunks: 0,
     queuedChunks: 90, elapsedSeconds: 0, remainingBudgetSeconds: 900, remainingAuthoritySeconds: 900,
     transcriptionStatus: null, transcript: null };
@@ -50,7 +53,7 @@ beforeEach(async () => {
   container = document.createElement("div"); document.body.append(container); root = createRoot(container);
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} />));
 });
-afterEach(async () => { await act(async () => root.unmount()); container.remove(); });
+afterEach(async () => { await act(async () => root.unmount()); container.remove(); localStorage.clear(); });
 const button = (label: string) => [...container.querySelectorAll("button")].find(value => value.textContent === label)!;
 it("shows retained gaps and sends the qualified source to the transcript editor without approving review", async () => {
   const qualifiedSource = sourceGolden.base as CaptureSourceEnvelope;
@@ -73,22 +76,91 @@ async function consent() {
   });
 }
 
-it("requires consent and regions, prepares without recording, then starts and stops explicitly", async () => {
+it("requires valid regions and a fresh combined consent/start click, then stops explicitly", async () => {
   vi.mocked(prepareCapture).mockRejectedValueOnce({ code: "capture_consent_required" });
   await click("Open recording");
   expect(factory).not.toHaveBeenCalled();
-  expect(button("Everyone agrees — prepare recording").disabled).toBe(true);
-  await consent(); await click("Everyone agrees — prepare recording");
+  expect(button("Confirm consent & record").disabled).toBe(true);
+  await consent(); await click("Confirm consent & record");
   expect(prepareCapture).toHaveBeenLastCalledWith(workspace, identity, expect.objectContaining({
     all_parties_consented: true, participant_regions: ["US-NY"], method: "verbal_attestation",
   }), expect.any(String), undefined, undefined, undefined);
-  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   expect(container.textContent).toContain("microphone off");
-  await click("Start synthetic capture");
   expect(runtime.controller.startRecording).toHaveBeenCalledTimes(1);
   await click("Stop and upload");
   expect(runtime.controller.stopRecording).toHaveBeenCalledTimes(1);
   expect(container.textContent).toContain("Audio uploaded");
+});
+
+it("does not attest on form submission and consumes a double consent click once", async () => {
+  vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
+  await click("Open recording"); await consent();
+  await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", {bubbles: true, cancelable: true})));
+  expect(prepareCapture).toHaveBeenCalledTimes(1);
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  const confirm = button("Confirm consent & record");
+  await act(async () => { confirm.click(); confirm.click(); });
+  expect(prepareCapture).toHaveBeenCalledTimes(2);
+  expect(runtime.controller.startRecording).toHaveBeenCalledOnce();
+  await act(async () => confirm.click()); // A detached button cannot replay consent.
+  expect(runtime.controller.startRecording).toHaveBeenCalledOnce();
+});
+
+it("shows and attests virtual modality for selected meeting audio", async () => {
+  vi.mocked(desktopMeetingCaptureAvailable).mockReturnValue(true);
+  vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
+  await click("Open recording"); await consent();
+  const source = container.querySelector<HTMLSelectElement>('[aria-label="Recording source"]')!;
+  await act(async () => { source.value = "desktop_meeting"; source.dispatchEvent(new Event("change", {bubbles: true})); });
+  expect(container.querySelector(".capture-defaults")?.textContent).toContain("Online meeting · microphone and meeting audio");
+  await click("Confirm consent & record");
+  expect(vi.mocked(prepareCapture).mock.calls.at(-1)?.[2]).toMatchObject({modality: "virtual", all_parties_consented: true});
+  expect(factory).toHaveBeenLastCalledWith(workspace, session, identity, undefined, "desktop_meeting");
+  expect(runtime.controller.startRecording).toHaveBeenCalledOnce();
+});
+
+it.each([true, false])("restores the source preference only where meeting capture is available (%s)", async available => {
+  const {saveRecordingPreferences} = await import("./recording-preferences");
+  const scope = "a".repeat(64);
+  saveRecordingPreferences(scope, {regions: "US-NY", language: "en-US", captureMode: "desktop_meeting"});
+  vi.mocked(desktopMeetingCaptureAvailable).mockReturnValue(available);
+  vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
+  await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} preferencesScope={scope} />));
+  await click("Open recording");
+  expect(container.querySelector(".capture-defaults")?.textContent).toContain(available ? "Online meeting" : "In-person visit");
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  await click("Confirm consent & record");
+  expect(vi.mocked(prepareCapture).mock.calls.at(-1)?.[2]?.modality).toBe(available ? "virtual" : "in_person");
+  expect(runtime.controller.startRecording).toHaveBeenCalledOnce();
+});
+
+it.each(["paused", "audio", "resume", "legacy", "transfer", "permission"])(
+  "does not turn consent into an automatic start for %s recovery", async recovery => {
+    if (recovery === "paused") snapshot = {...snapshot, state: "paused"};
+    if (recovery === "audio") snapshot = {...snapshot, recordedChunks: 1};
+    if (recovery === "resume") snapshot = {...snapshot, recoveryDecision: "resume_capture"};
+    if (recovery === "legacy") runtime.recoveryOnly = true;
+    if (recovery === "transfer") runtime.continuePreparation = vi.fn();
+    if (recovery === "permission") snapshot = {...snapshot, desktop: {
+      phase: "permission_required", coverage: "not_started", trimmedStartMs: 0, trimmedEndMs: null,
+    }};
+    vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
+    await click("Open recording"); await consent(); await click("Confirm consent & record");
+    expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  },
+);
+
+it("closes a late consent preparation without capture after the account changes", async () => {
+  vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
+  let finish!: (value: CaptureRuntime) => void;
+  factory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await click("Open recording"); await consent(); await click("Confirm consent & record");
+  const changedIdentity = {...identity, getToken: vi.fn()};
+  await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={changedIdentity} runtimeFactory={factory} />));
+  await act(async () => finish(runtime));
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  expect(runtime.close).toHaveBeenCalledOnce();
+  expect(container.querySelector('[role="alert"]')?.textContent).toContain("changed");
 });
 
 it("offers upload retry after reopening or failure, without interrupting an active automatic upload", async () => {
@@ -110,7 +182,7 @@ it("offers upload retry after reopening or failure, without interrupting an acti
   expect(button("Retry saved work").disabled).toBe(false);
 });
 
-it("can cancel a pending native start and ignores its later failure", async () => {
+it.each([false, true])("can cancel a pending native start and ignores its later failure (combined consent: %s)", async combined => {
   runtime.sourceKind="microphone";runtime.captureMode="native_microphone";runtime.supportsContinuation=true;
   snapshot={...snapshot,native:nativeState()};
   let rejectStart!:(error:Error)=>void;
@@ -124,7 +196,10 @@ it("can cancel a pending native start and ignores its later failure", async () =
     listener?.(snapshot);
   });
   admitWorkspaceProtocol(identity,workspaceProtocolGeneration(identity));
-  await click("Open recording");await click("Start recording");
+  if (combined) vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
+  await click("Open recording");
+  if (combined) { await consent(); await click("Confirm consent & record"); }
+  else await click("Start recording");
   expect(button("Cancel start").disabled).toBe(false);
   await click("Cancel start");
   await act(async()=>rejectStart(new Error("late start failure")));
@@ -163,7 +238,7 @@ it("opens a specific Scribe task without starting capture and keeps its identity
     .mockRejectedValueOnce(new Error("lost reply"));
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} taskBot={taskBot} openRequest={1} />));
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
-  await consent(); await click("Everyone agrees — prepare recording");
+  await consent(); await click("Confirm consent & record");
   const original = vi.mocked(prepareCapture).mock.calls[1];
   expect(original[5]).toEqual(taskBot.selection);
   await click("Retry preparation");
@@ -177,7 +252,7 @@ it("opens a specific Scribe task without starting capture and keeps its identity
 it("retries the exact consent and key after an unconfirmed preparation", async () => {
   vi.mocked(prepareCapture).mockRejectedValueOnce({ code: "capture_consent_required" })
     .mockRejectedValueOnce(new Error("private upstream error"));
-  await click("Open recording"); await consent(); await click("Everyone agrees — prepare recording");
+  await click("Open recording"); await consent(); await click("Confirm consent & record");
   const first = vi.mocked(prepareCapture).mock.calls[1];
   expect(container.textContent).not.toContain("private upstream error");
   await click("Retry preparation");
@@ -202,10 +277,12 @@ it("closes the runtime when leaving the workspace, including a transient close f
   expect(runtime.close).toHaveBeenCalledTimes(2);
 });
 
-it("closes a runtime that finishes preparing after the workspace has already unmounted", async () => {
+it.each([false, true])("closes a runtime that finishes preparing after unmount (combined consent: %s)", async combined => {
   let resolve: (value: CaptureRuntime) => void = () => {};
   factory.mockImplementationOnce(() => new Promise(value => { resolve = value; }));
+  if (combined) vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
   await click("Open recording");
+  if (combined) { await consent(); await click("Confirm consent & record"); }
   await act(async () => root.unmount());
   await act(async () => resolve(runtime));
   expect(runtime.close).toHaveBeenCalledTimes(1);

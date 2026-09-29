@@ -37,7 +37,9 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
 }) {
   const [expanded, setExpanded] = useState(false);
   const [snapshot, setSnapshot] = useState<CaptureRuntime['controller']['snapshot']>(idle);
-  const [captureMode,setCaptureMode]=useState<'microphone'|'desktop_meeting'>('microphone');
+  const [captureMode,setCaptureMode]=useState<'microphone'|'desktop_meeting'>(() =>
+    desktopMeetingCaptureAvailable(identity) && readRecordingPreferences(preferencesScope).captureMode === 'desktop_meeting'
+      ? 'desktop_meeting' : 'microphone');
   const [consentRequired, setConsentRequired] = useState(false);
   const [optionsOpen, setOptionsOpen] = useState(() => !readRecordingPreferences(preferencesScope).regions);
   const [regions, setRegions] = useState(() => readRecordingPreferences(preferencesScope).regions);
@@ -51,6 +53,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
   useEffect(() => {
     const defaults = readRecordingPreferences(preferencesScope);
     setRegions(defaults.regions); setLanguage(defaults.language); setOptionsOpen(!defaults.regions);
+    setCaptureMode(desktopMeetingCaptureAvailable(identity) && defaults.captureMode === 'desktop_meeting' ? 'desktop_meeting' : 'microphone');
   }, [preferencesScope]);
   const [configured, setConfigured] = useState<PreparedCapture["configured_capture"]>();
   const [reviewed, setReviewed] = useState<CreatorReviewView | null>(null);
@@ -62,6 +65,12 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
     return () => onNavigationLock?.(false);
   }, [busy, pending, snapshot.state, onNavigationLock]);
   const runtime = useRef<CaptureRuntime | null>(null);
+  const preparing = useRef(false);
+  const contextKey = JSON.stringify([workspaceId, preferencesScope, taskBot?.selection, taskBot?.enabled]);
+  const captureContext = useRef({identity, key: contextKey});
+  if (captureContext.current.identity !== identity || captureContext.current.key !== contextKey) {
+    captureContext.current = {identity, key: contextKey};
+  }
   const actionRevision = useRef(0);
   const lifetime = useRef<{ closed: boolean; unsubscribe?: () => void }>({ closed: false });
   const openedRequest = useRef(0);
@@ -86,9 +95,11 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
     if (!runtime.current && !busy) void prepare(pending ?? {attestation: null, key: crypto.randomUUID(), bot: taskBot?.selection});
   }, [openRequest]);
 
-  async function prepare(request: Preparation) {
-    if (busy) return;
+  async function prepare(request: Preparation, startContext?: typeof captureContext.current) {
+    if (busy || preparing.current) return;
+    preparing.current = true;
     const current = lifetime.current;
+    const revision = ++actionRevision.current;
     setExpanded(true); setBusy("prepare"); setError(""); setPending(request);
     try {
       const admitted = await prepareCapture(workspaceId, identity, request.attestation, request.key, undefined, request.bot, request.language);
@@ -96,19 +107,36 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
       const opened = await runtimeFactory(workspaceId, admitted.session_id, identity, admitted.configured_capture,
         captureMode==='desktop_meeting'?'desktop_meeting':undefined);
       if (current.closed) { await closeRuntime(opened); return; }
+      if (startContext && startContext !== captureContext.current) {
+        await closeRuntime(opened); setPending(null);
+        throw Object.assign(new Error("Recording context changed"), {code: "capture_context_changed"});
+      }
       runtime.current = opened;
       setConfigured(admitted.configured_capture);
       setSourceKind(opened.sourceKind);
       current.unsubscribe = opened.controller.subscribe(setSnapshot);
       setPending(null); setConsentRequired(false); setOptionsOpen(false);
       if (request.attestation) saveRecordingPreferences(preferencesScope, {
-        regions: request.attestation.participant_regions.join(", "), language: request.language ?? language,
+        regions: request.attestation.participant_regions.join(", "), language: request.language ?? language, captureMode,
       });
+      const ready = opened.controller.snapshot;
+      // Only this fresh consent click can continue into capture. Exact retries,
+      // old preparations, recovered audio and permission recovery keep Start.
+      if (startContext && request.attestation && !opened.recoveryOnly && !opened.continuePreparation &&
+          ready.state === "ready" && ready.recordedChunks === 0 && !ready.recoveryDecision &&
+          (!ready.native || ready.native.phase === "ready") && ready.desktop?.phase !== "permission_required") {
+        setBusy("start"); requireWorkspaceProtocol(identity);
+        await opened.controller.startRecording();
+        if (!current.closed && revision === actionRevision.current) setSnapshot(opened.controller.snapshot);
+      }
     } catch (cause) {
-      if (current.closed) return;
-      if (code(cause) === "capture_consent_required") { setConsentRequired(true); setPending(null); }
+      if (current.closed || revision !== actionRevision.current) return;
+      if (!runtime.current && code(cause) === "capture_consent_required") { setConsentRequired(true); setPending(null); }
       else setError(message(cause));
-    } finally { if (!current.closed) setBusy(""); }
+    } finally {
+      preparing.current = false;
+      if (!current.closed && revision === actionRevision.current) setBusy("");
+    }
   }
 
   async function act(action: "start" | "pause" | "stop" | "retry" | "gap" | "finish_gap" | "transcript" | "permissions") {
@@ -169,8 +197,8 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
     {expanded && <div className="capture-details">
       {consentRequired && <form onSubmit={event => event.preventDefault()} aria-label="Recording consent">
         <h3>Ready to record this visit?</h3>
-        <p>Confirm that everyone present agrees. Then press Start recording.</p>
-        {validRegions && <p className="capture-defaults">In-person visit · {participantRegions.join(", ")} · {language === "en-US" ? "English" : "English and Spanish"}</p>}
+        <p>By choosing “Confirm consent &amp; record,” you confirm that everyone agrees to recording and transcription.</p>
+        {validRegions && <p className="capture-defaults">{captureMode === "desktop_meeting" ? "Online meeting · microphone and meeting audio" : "In-person visit · microphone"} · {participantRegions.join(", ")} · {language === "en-US" ? "English" : "English and Spanish"}</p>}
         <details className="capture-options" open={optionsOpen} onToggle={event => setOptionsOpen(event.currentTarget.open)}>
           <summary>{validRegions ? "Change location or recording options" : "Set your recording defaults"}</summary>
           <label>Participants’ regions<input value={regions} disabled={!!busy || !!pending} onChange={event => setRegions(event.target.value)} placeholder="For example, US-NY" maxLength={160} /></label>
@@ -182,14 +210,14 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
       value={captureMode} onChange={event=>setCaptureMode(event.target.value as 'microphone'|'desktop_meeting')}>
       <option value="microphone">Microphone</option><option value="desktop_meeting">Online meeting · Zoom or Chrome</option>
     </select></label>}
-          {preferencesScope && <small>Your location and language choices are remembered on this device for your account. Consent is confirmed separately for every visit.</small>}
+          {preferencesScope && <small>Your location, language and recording source are remembered on this device for your account. Consent and the meeting window are confirmed for every visit.</small>}
         </details>
-        <button type="button" className="team-primary" disabled={!!busy || !!pending || !validRegions || !!taskBot && !taskBot.enabled} onClick={() => {
-          if (busy || pending || !participantRegions || taskBot && !taskBot.enabled) return;
+        <button type="button" className="team-primary" disabled={!!busy || !!pending || !validRegions || !!taskBot && !taskBot.enabled} onClick={event => {
+          if (event.currentTarget.disabled || !event.currentTarget.isConnected || busy || preparing.current || pending || !participantRegions || taskBot && !taskBot.enabled) return;
           void prepare({key: crypto.randomUUID(), bot: taskBot?.selection, ...(notesEnabled ? {language} : {}),
-            attestation: {modality: "in_person", participant_regions: participantRegions, method: "verbal_attestation",
-              all_parties_consented: true, granted_at: new Date().toISOString()}});
-        }}>Everyone agrees — prepare recording</button>
+            attestation: {modality: captureMode === "desktop_meeting" ? "virtual" : "in_person", participant_regions: participantRegions, method: "verbal_attestation",
+              all_parties_consented: true, granted_at: new Date().toISOString()}}, captureContext.current);
+        }}>Confirm consent &amp; record</button>
       </form>}
       {!consentRequired && !runtime.current && <details className="capture-options"><summary>Recording options</summary>{!runtime.current&&desktopMeetingCaptureAvailable(identity)&&<label>Recording source <select aria-label="Recording source" disabled={!!busy||!!pending}
       value={captureMode} onChange={event=>setCaptureMode(event.target.value as 'microphone'|'desktop_meeting')}>
@@ -290,6 +318,7 @@ function code(cause: unknown): string {
 }
 function message(cause: unknown): string {
   switch (code(cause)) {
+    case "capture_context_changed": return "The encounter or team changed. Open recording again to confirm consent.";
     case "bot_paused": case "team_revision_conflict": return "This bot's settings changed. Refresh the encounter and check its settings before starting a new task.";
     case "capture_connection_required": return "Recording is not connected for this encounter yet.";
     case "capture_consent_unavailable": return "Recording consent is no longer available. Capture cannot continue.";

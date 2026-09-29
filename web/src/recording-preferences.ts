@@ -1,6 +1,6 @@
 import type { CaptureLanguage } from './capture-api';
 
-export type RecordingPreferences = { regions: string; language: CaptureLanguage };
+export type RecordingPreferences = { regions: string; language: CaptureLanguage; captureMode?: 'microphone' | 'desktop_meeting' };
 const empty: RecordingPreferences = { regions: '', language: 'en-US' };
 export function recordingRegions(value: string): string[] | null {
   const regions = value.split(',').map(part => part.trim().toUpperCase()).filter(Boolean);
@@ -10,7 +10,7 @@ export function recordingRegions(value: string): string[] | null {
 function key(scope?: string): string | null {
   return scope && /^[a-f0-9]{64}$/.test(scope) ? `cosmas.recording-preferences.v1.${scope}` : null;
 }
-/** Only user-entered location/language defaults. Never retain consent or visit data. */
+/** Only location, language and source defaults. Never retain consent, windows or visit data. */
 export function readRecordingPreferences(scope?: string): RecordingPreferences {
   try {
     const address = key(scope);
@@ -19,12 +19,15 @@ export function readRecordingPreferences(scope?: string): RecordingPreferences {
     if (!value || typeof value !== 'object' || !('regions' in value) || !('language' in value) ||
       typeof value.regions !== 'string' || !recordingRegions(value.regions) ||
       !['en-US', 'en-US+es-US'].includes(String(value.language))) return { ...empty };
-    return { regions: recordingRegions(value.regions)!.join(', '), language: value.language as CaptureLanguage };
+    return { regions: recordingRegions(value.regions)!.join(', '), language: value.language as CaptureLanguage,
+      ...('captureMode' in value && (value.captureMode === 'microphone' || value.captureMode === 'desktop_meeting')
+        ? {captureMode: value.captureMode} : {}) };
   } catch { return { ...empty }; }
 }
 export function saveRecordingPreferences(scope: string | undefined, preferences: RecordingPreferences): void {
   try {
     const address = key(scope), regions = recordingRegions(preferences.regions);
-    if (address && regions) localStorage.setItem(address, JSON.stringify({ regions: regions.join(', '), language: preferences.language }));
+    if (address && regions) localStorage.setItem(address, JSON.stringify({ regions: regions.join(', '), language: preferences.language,
+      ...(['microphone', 'desktop_meeting'].includes(preferences.captureMode ?? '') ? {captureMode: preferences.captureMode} : {}) }));
   } catch { /* A device that disallows preferences still supports recording. */ }
 }

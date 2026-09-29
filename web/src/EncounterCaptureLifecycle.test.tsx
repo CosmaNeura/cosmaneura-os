@@ -144,7 +144,7 @@ it("requires a new recording request after closing one encounter and opening ano
   expect(runtime.controller.startRecording).toHaveBeenCalledTimes(1);
 });
 
-it('opens a listed visit, confirms fresh consent and starts in three explicit actions with saved defaults', async () => {
+it('opens a listed visit, confirms fresh consent and starts in two explicit actions with saved defaults', async () => {
   const {saveRecordingPreferences} = await import('./recording-preferences');
   saveRecordingPreferences(team.recovery_scope, {regions:'US-NY',language:'en-US'});
   vi.mocked(prepareCapture).mockRejectedValueOnce({code:'capture_consent_required'});
@@ -153,12 +153,10 @@ it('opens a listed visit, confirms fresh consent and starts in three explicit ac
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   expect(container.querySelector('[aria-label="Recording consent"]')?.textContent).toContain('US-NY');
   expect(container.querySelector<HTMLDetailsElement>('.capture-options')?.open).toBe(false);
-  await click('Everyone agrees — prepare recording'); // 2: Fresh per-visit consent.
+  await click('Confirm consent & record'); // 2: Fresh per-visit consent and recording.
   expect(prepareCapture).toHaveBeenLastCalledWith(visit(1).id, authenticated,
     expect.objectContaining({all_parties_consented:true,participant_regions:['US-NY']}),
     expect.any(String),undefined,expect.objectContaining({address:'scribe',team_revision:1}),undefined);
-  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
-  await click('Start synthetic capture'); // 3: Explicit start; defaults never start a recorder.
   expect(runtime.controller.startRecording).toHaveBeenCalledTimes(1);
   localStorage.clear();
 });
