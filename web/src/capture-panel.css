@@ -52,3 +52,13 @@
 .capture-gap-observations { max-height: 18rem; overflow: auto; padding-left: 1.5rem; }
 .capture-gap-observations li + li { margin-top: 1rem; }
 .capture-gap-observations p { overflow-wrap: anywhere; }
+
+.capture-details h3 { margin: 8px 0 0; font-size: 18px; }
+.capture-options, .team-optional-settings { border-top: 1px solid #d9dfd6; padding: 10px 0; }
+.capture-options > summary, .team-optional-settings > summary { cursor: pointer; font-size: 14px; font-weight: 600; min-height: 32px; align-content: center; }
+.capture-options label + label, .team-optional-settings > label { margin-top: 12px; }
+.capture-defaults { padding: 10px 12px; border-radius: 8px; background: #eaf0e7; }
+.capture-details form > .team-primary { min-height: 48px; font-size: 15px; }
+.capture-options select { box-sizing: border-box; min-width: 0; max-width: 100%; padding: 10px; color: inherit; border: 1px solid #cbd5c8; border-radius: 7px; background: white; font: inherit; }
+@media (max-width: 700px) { .capture-options input, .capture-options select { font-size: 16px; } .capture-details form > .team-primary { width: 100%; } }
+.team-workspace .capture-stop { background: #9f3c31; color: white; border: 0; min-height: 48px; }

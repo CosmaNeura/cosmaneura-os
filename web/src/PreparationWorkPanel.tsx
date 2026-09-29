@@ -148,7 +148,7 @@ export function PreparationWorkPanel({workspaceId,identity,bot,entryRevision,rec
       {rejected&&<button disabled={busy||locked||recovery.blocked} onClick={()=>void inspectRejected()}>Check rejected preparation request</button>}
       {checkedRejected&&<button disabled={busy||locked||recovery.blocked} onClick={()=>void discard(true)}>Set aside rejected preparation request</button>}
     </div>}
-    <div className="preparation-form">
+    <details className="team-optional-settings"><summary>Assign a preparation task</summary><div className="preparation-form">
       <label>Shared preparation brief<textarea value={body} maxLength={4000} disabled={disabled||!enabled} onChange={e=>{setBody(e.target.value);setShare(false);}}/></label>
       <label>Due date<input type="date" value={dueDate} disabled={disabled||!enabled} onChange={e=>{setDueDate(e.target.value);setShare(false);}}/></label>
       <label>Expected result<textarea value={outcome} maxLength={500} disabled={disabled||!enabled} onChange={e=>{setOutcome(e.target.value);setShare(false);}}/></label>
@@ -159,7 +159,7 @@ export function PreparationWorkPanel({workspaceId,identity,bot,entryRevision,rec
         bot:{...bot},expected_entry_revision:entryRevision,snapshot_sha256:receipt.snapshot_sha256,body:body.trim(),due_date:dueDate,
         expected_outcome:outcome.trim(),share_context:true,idempotency_key:crypto.randomUUID()}})}>Create preparation proposal</button>
       {!pending&&(body||dueDate||outcome)&&<button disabled={disabled} onClick={()=>void discard()}>Discard preparation draft</button>}
-    </div>
+    </div></details>
     {message&&<p role="status">{message}</p>}
     <button disabled={disabled} onClick={()=>void read()}>Refresh preparation work</button>
     {items.length>0&&<ul>{items.map(saved=><li key={saved.ticket_id}><button disabled={disabled} onClick={()=>void read(saved.ticket_id)}>{saved.body} · {status(saved)}</button></li>)}</ul>}

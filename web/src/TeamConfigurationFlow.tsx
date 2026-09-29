@@ -55,7 +55,7 @@ export function TeamConfigurationFlow(props:TeamConfigurationFlowProps){
   const common={team,draft,setDraft,selected,setSelected,locked:locked||activityBusy,setupAvailable,reviewRequired,onSave,onClose};
   return <section className="team-configuration-flow" aria-label="Team configuration" data-page={page}>
     <header className="team-flow-heading"><div>{page!=='overview'&&<button className="team-flow-back" disabled={page==='activity'&&(locked||activityBusy)} onClick={back}>← Back</button>}<h2 tabIndex={-1} ref={heading}>{titles[page]}</h2>
-      {page==='overview'?<p>{team.revision?'Your coworkers and preferences. Change only what you need.':'Start with Scribe, Visit Prep, Follow-up and Chief. You can personalize them later.'}</p>:['edit','advanced','sources'].includes(page)?<p>{bot?.name||'New coworker'}</p>:null}</div>
+      {page==='overview'?<p>{team.revision?'Your saved team is ready for each visit. Personalization is optional.':'Your team comes ready to use: Scribe, Visit Prep, Follow-up, Chief and Research. No need to fill out each bot.'}</p>:['edit','advanced','sources'].includes(page)?<p>{bot?.name||'New coworker'}</p>:null}</div>
       </header>
     {page==='overview'&&<p className="team-flow-status">{changed?'Unsaved team changes':team.revision?'Saved team':'Not yet saved'} · {draft.bots.filter(item=>!item.retired).length} coworkers</p>}
     <ProviderTeamSettings {...common} view={providerView} setSelected={address=>{setSelected(address);if(page==='overview')setPage('edit');}} onBotAdded={()=>setPage('edit')}/>
@@ -70,7 +70,7 @@ export function TeamConfigurationFlow(props:TeamConfigurationFlowProps){
     {props.activity&&<AiActivityPanel identity={identity} context={props.activity.context} active={page==='activity'} locked={locked} onOpenEncounter={props.activity.onOpenEncounter} onAccessLost={onAccessLost} onBusyChange={activityBusyChange}/>}
     {!['add','groups','preferences','readiness','activity'].includes(page)&&<footer className="team-flow-footer">
       {page==='review'?<button className="team-primary" disabled={locked||reviewRequired||!valid||!changed&&team.revision>0} onClick={onSave}>{team.revision?'Save team changes':'Set up my team'}</button>:
-      page==='overview'?<button className="team-primary" disabled={locked} onClick={()=>setPage('review')}>{team.revision?'Review changes':'Review my team'}</button>:
+      page==='overview'?<button className="team-primary" disabled={locked} onClick={()=>setPage('review')}>{team.revision?'Review changes':'Use this team'}</button>:
       <button className="team-primary" disabled={locked} onClick={()=>setPage(page==='advanced'?'edit':page==='sources'?'advanced':page==='limits'?'preferences':'overview')}>Done editing</button>}
     </footer>}
   </section>;

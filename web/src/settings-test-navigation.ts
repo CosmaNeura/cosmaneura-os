@@ -37,8 +37,8 @@ export function settingsNavigation(container: HTMLElement) {
   async function review() {
     if (page() === 'review') return;
     await overview();
-    const initial = [...container.querySelectorAll('button')].some(button => visible(button) && text(button) === 'Review my team');
-    await click(initial ? 'Review my team' : 'Review changes');
+    const initial = [...container.querySelectorAll('button')].some(button => visible(button) && text(button) === 'Use this team');
+    await click(initial ? 'Use this team' : 'Review changes');
   }
   async function save() {
     await review();

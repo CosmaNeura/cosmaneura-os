@@ -66,7 +66,6 @@ it("shows retained gaps and sends the qualified source to the transcript editor 
 });
 async function click(label: string) { await act(async () => button(label).click()); }
 async function consent() {
-  await act(async () => container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
   const region = container.querySelector<HTMLInputElement>('input:not([type="checkbox"])')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!.call(region, "US-NY");
@@ -78,8 +77,8 @@ it("requires consent and regions, prepares without recording, then starts and st
   vi.mocked(prepareCapture).mockRejectedValueOnce({ code: "capture_consent_required" });
   await click("Open recording");
   expect(factory).not.toHaveBeenCalled();
-  expect(button("Prepare recording").disabled).toBe(true);
-  await consent(); await click("Prepare recording");
+  expect(button("Everyone agrees — prepare recording").disabled).toBe(true);
+  await consent(); await click("Everyone agrees — prepare recording");
   expect(prepareCapture).toHaveBeenLastCalledWith(workspace, identity, expect.objectContaining({
     all_parties_consented: true, participant_regions: ["US-NY"], method: "verbal_attestation",
   }), expect.any(String), undefined, undefined, undefined);
@@ -164,7 +163,7 @@ it("opens a specific Scribe task without starting capture and keeps its identity
     .mockRejectedValueOnce(new Error("lost reply"));
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} taskBot={taskBot} openRequest={1} />));
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
-  await consent(); await click("Prepare recording");
+  await consent(); await click("Everyone agrees — prepare recording");
   const original = vi.mocked(prepareCapture).mock.calls[1];
   expect(original[5]).toEqual(taskBot.selection);
   await click("Retry preparation");
@@ -178,7 +177,7 @@ it("opens a specific Scribe task without starting capture and keeps its identity
 it("retries the exact consent and key after an unconfirmed preparation", async () => {
   vi.mocked(prepareCapture).mockRejectedValueOnce({ code: "capture_consent_required" })
     .mockRejectedValueOnce(new Error("private upstream error"));
-  await click("Open recording"); await consent(); await click("Prepare recording");
+  await click("Open recording"); await consent(); await click("Everyone agrees — prepare recording");
   const first = vi.mocked(prepareCapture).mock.calls[1];
   expect(container.textContent).not.toContain("private upstream error");
   await click("Retry preparation");
