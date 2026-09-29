@@ -31,7 +31,9 @@ export function EncounterPrepPanel({workspaceId, identity, bot, name, enabled, l
     } finally { if (!controller.signal.aborted) setBusy(false); }
   }
   return <section className="team-prep" aria-label="Visit preparation">
-    <div className="capture-actions"><button disabled={!enabled || locked || busy} onClick={() => void read()}>
+    <h3>Saved visit context</h3>
+    <p>Review the saved intake summary and prior visit drafts from Cosmaneura.</p>
+    <div className="capture-actions"><button className="team-primary" disabled={!enabled || locked || busy} onClick={() => void read()}>
       {busy ? "Checking visit context…" : value ? "Refresh visit context" : "Review visit context"}</button>
       <small>{name} · saved intake and prior visit drafts</small></div>
     {error && <p role="alert">{error}</p>}

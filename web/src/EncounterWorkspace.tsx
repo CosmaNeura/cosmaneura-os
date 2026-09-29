@@ -721,6 +721,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const reviewWorkspace = workspace ? withObservedCaptureDraft(workspace, observedCaptureDraft) : null;
   const bot = team?.configuration.bots.find(b => botAddress(b) === selected);
   const template = team?.members.find(b => botAddress(b) === selected);
+  const visitPrepReader = bot?.role === "visit_prep" && ENCOUNTER_PREP_BUILD && !!authenticated && !!team?.capture?.prep_enabled;
   const scribe = bot?.role === "scribe" ? bot : team?.configuration.bots.find(b => b.role === "scribe" && !b.instance_id);
   const latestNote = workspace?.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "";
   // Activity is read-only: its own busy navigation lock is excluded here so the
@@ -1089,8 +1090,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onDenied={failure} onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}}/>
             : <p className="research-status">Sign in to use private Research settings and check public source connections.</p>}
             <button className="team-subtle" aria-expanded={savedResearchChat} onClick={()=>setSavedResearchChat(value=>!value)}>Saved encounter conversation</button></>}
-          <div hidden={bot?.role==='research'&&!savedResearchChat} className="team-messages" aria-live="polite" aria-relevant="additions">
-            {!turns.length && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
+          <div hidden={bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
+            {!turns.length && !visitPrepReader && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
               <h3>{stage === "Before" ? "A clear start to the visit" : stage === "During" ? "Space to think and take notes" : "Keep the next step in view"}</h3>
               <p>{team?.llm.enabled ? "Ask a question, organize your notes, or think through the next step. Your team works from the saved context you choose." : "Review saved sources with your team. Advanced skills will connect here as their services become ready."}</p>
