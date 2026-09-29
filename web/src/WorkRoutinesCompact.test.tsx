@@ -91,24 +91,24 @@ it('starts with the dated brief, saved status and next run but no visible schedu
 it('keeps an unconfigured routine compact until explicitly opened',async()=>{
   vi.mocked(routineApi.read).mockResolvedValue({...routine(),revision:0,configuration:null,status:'not_configured',next_scheduled_at:null,runs:[]});
   await mount();expect(host.textContent).toContain('Not scheduled');expect(host.textContent).toContain('No saved brief yet.');expect(visibleScheduleFields()).toHaveLength(0);
-  await click('Edit schedule');expect(visible(field('Time zone'))).toBe(true);expect((field('Prepare scheduled briefs') as HTMLInputElement).checked).toBe(false);
+  await click('Edit schedule');expect([...host.querySelectorAll('label')].some(label=>/time.?zone/i.test(label.textContent??''))).toBe(false);expect((field('Prepare scheduled briefs') as HTMLInputElement).checked).toBe(false);
   expect(routineApi.save).not.toHaveBeenCalled();expect(routineApi.run).not.toHaveBeenCalled();
 });
 
 it('opens only essentials and exposes repeat, quiet hours and limits on demand',async()=>{
-  await mount();await click('Edit schedule');expect(visible(field('Time zone'))).toBe(true);expect(visible(field('Brief time'))).toBe(true);
+  await mount();await click('Edit schedule');expect([...host.querySelectorAll('label')].some(label=>/time.?zone/i.test(label.textContent??''))).toBe(false);expect(visible(field('Brief time'))).toBe(true);
   expect(visible(field('Mon'))).toBe(false);expect(visible(field('Use quiet hours'))).toBe(false);expect(visible(field('Maximum briefs in seven days'))).toBe(false);
   await toggleDetails('Repeat, quiet hours and limits');expect(visible(field('Mon'))).toBe(true);expect(visible(field('Quiet hours start'))).toBe(true);
   expect(routineApi.save).not.toHaveBeenCalled();
 });
 
 it('returns to the dated brief and reopens the same mounted editor with every draft choice intact',async()=>{
-  await mount();await click('Edit schedule');const timezone=field('Time zone');await edit('Time zone','America/');await edit('Brief time','');
+  await mount();await click('Edit schedule');const briefTime=field('Brief time');await edit('Brief time','');
   await toggleDetails('Repeat, quiet hours and limits');await act(async()=>(field('Sat') as HTMLInputElement).click());await edit('Maximum briefs in seven days','6');
-  const saved=await record();expect(saved?.data).toMatchObject({configuration:{timezone:'America/',at:'',weekdays:[1,2,3,4,5,6],max_runs_per_seven_days:6}});
+  const saved=await record();expect(saved?.data).toMatchObject({configuration:{timezone:'UTC',at:'',weekdays:[1,2,3,4,5,6],max_runs_per_seven_days:6}});
   await click('Back to briefs');expect(visibleScheduleFields()).toHaveLength(0);expect(visible(host.querySelector('.routine-report')!)).toBe(true);
   expect(host.textContent).toContain('Unfinished schedule retained');expect(await record()).toEqual(saved);
-  await click('Edit schedule');expect(field('Time zone')).toBe(timezone);expect(field('Time zone').value).toBe('America/');expect(field('Brief time').value).toBe('');
+  await click('Edit schedule');expect(field('Brief time')).toBe(briefTime);expect(field('Brief time').value).toBe('');
   expect(details('Repeat, quiet hours and limits').open).toBe(true);expect(button('Save schedule').disabled).toBe(true);expect(routineApi.save).not.toHaveBeenCalled();
 });
 
@@ -160,12 +160,12 @@ it('keeps an unsent pending request visible if journaling fails before dispatch'
 });
 
 it('explicit restoration opens the retained incomplete custom-bot editor without saving or running it',async()=>{
-  await mount();await edit('Coworker',routineId(9));await click('Edit schedule');await edit('Time zone','America/');await edit('Brief time','');const original=await record();await restart();
+  await mount();await edit('Coworker',routineId(9));await click('Edit schedule');await edit('Brief time','');const original=await record();await restart();
   expect(visibleScheduleFields()).toHaveLength(0);const runsBefore=vi.mocked(routineApi.run).mock.calls.length;await click('Restore work routine draft');
-  expect(visible(field('Time zone'))).toBe(true);expect(field('Time zone').value).toBe('America/');expect(field('Brief time').value).toBe('');expect(field('Coworker').value).toBe(routineId(9));
+  expect([...host.querySelectorAll('label')].some(label=>/time.?zone/i.test(label.textContent??''))).toBe(false);expect(field('Brief time').value).toBe('');expect(field('Coworker').value).toBe(routineId(9));
   expect(button('Save schedule').disabled).toBe(true);expect(access.authorize).toHaveBeenCalledOnce();expect(await record()).toEqual(original);
   expect(routineApi.save).not.toHaveBeenCalled();expect(routineApi.run).toHaveBeenCalledTimes(runsBefore);
-  await edit('Time zone','UTC');await edit('Brief time','09:00');expect(button('Save schedule').disabled).toBe(false);expect(routineApi.save).not.toHaveBeenCalled();
+  await edit('Brief time','09:00');expect(button('Save schedule').disabled).toBe(false);expect(routineApi.save).not.toHaveBeenCalled();
 });
 
 it('opens restored exact pending input and exposes only explicit retry after a restart',async()=>{
@@ -183,8 +183,8 @@ it('keeps stale restored settings visible until the current saved revision is ex
 });
 
 it('removes both mounted form and private report when refreshed access is revoked',async()=>{
-  await mount();await click('Edit schedule');await edit('Time zone','Private draft');await click('Back to briefs');vi.mocked(routineApi.read).mockRejectedValueOnce(new WorkspaceApiError(403));await click('Reload saved schedule');
-  expect(host.querySelector('.routine-form')).toBeNull();expect(host.querySelector('.routine-report')).toBeNull();expect(host.innerHTML).not.toContain('Private draft');expect(lost).toHaveBeenCalledOnce();
+  await mount();await click('Edit schedule');await edit('Brief time','09:45');await click('Back to briefs');vi.mocked(routineApi.read).mockRejectedValueOnce(new WorkspaceApiError(403));await click('Reload saved schedule');
+  expect(host.querySelector('.routine-form')).toBeNull();expect(host.querySelector('.routine-report')).toBeNull();expect(lost).toHaveBeenCalledOnce();
 });
 
 

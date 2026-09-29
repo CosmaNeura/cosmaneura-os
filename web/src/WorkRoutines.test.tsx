@@ -3,7 +3,7 @@ import {createRoot,type Root} from "react-dom/client";
 import {afterEach,beforeEach,expect,it,vi} from "vitest";
 import {WorkRoutines} from "./WorkRoutines";
 import {routineApi} from "./routine-api";
-import {brief,routine,routineId} from "./routine-test-fixture";
+import {brief,routine,routineId,schedule} from "./routine-test-fixture";
 import {WorkspaceApiError,type ProviderTeam} from "./workspace-api";
 import {AccountRecoveryContext,type AccountRecoveryAccess} from "./account-recovery";
 import {DraftJournal,type AccountEditorDraft} from "./draft-journal";
@@ -30,6 +30,43 @@ async function click(label:string){if(["Save schedule","Pause routine"].includes
 async function input(label:string,value:string){if(label!=="Coworker")await openEditor();const el=[...container.querySelectorAll("label")].find(l=>l.textContent?.startsWith(label))!.querySelector("input,select") as HTMLInputElement|HTMLSelectElement;
   await act(async()=>{Object.getOwnPropertyDescriptor(el.tagName==="SELECT"?HTMLSelectElement.prototype:HTMLInputElement.prototype,"value")!.set!.call(el,value);
     el.dispatchEvent(new Event(el.tagName==="SELECT"?"change":"input",{bubbles:true}));});}
+it("fills new schedules from the device without a timezone control or automatic save",async()=>{
+  vi.mocked(routineApi.read).mockResolvedValue({...routine(),revision:0,configuration:null,status:"not_configured",next_scheduled_at:null,runs:[]});
+  await render();await openEditor();
+  expect([...container.querySelectorAll("label")].some(label=>/time.?zone/i.test(label.textContent??""))).toBe(false);
+  expect(routineApi.save).not.toHaveBeenCalled();
+  await click("Save schedule");expect(vi.mocked(routineApi.save).mock.calls[0][2]).toMatchObject({expected_revision:0,
+    configuration:{timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,enabled:false,at:"08:00"}});
+});
+it("keeps the saved schedule's timezone while editing from a device in another region",async()=>{
+  const zone=Intl.DateTimeFormat().resolvedOptions().timeZone==="Pacific/Auckland"?"America/New_York":"Pacific/Auckland";
+  vi.mocked(routineApi.read).mockResolvedValue({...routine(),configuration:{...schedule(),timezone:zone}});
+  await render();await input("Brief time","09:00");await click("Save schedule");
+  expect(vi.mocked(routineApi.save).mock.calls[0][2].configuration).toEqual({...schedule(),timezone:zone,at:"09:00"});
+});
+it.each([true,false])("repairs only an invalid unsent legacy zone using saved timing when available (%s)",async configured=>{
+  const saved={...routine(),...(configured?{configuration:{...schedule(),timezone:"Pacific/Auckland"}}:
+    {revision:0,configuration:null,status:"not_configured" as const,next_scheduled_at:null,runs:[]})};
+  vi.mocked(routineApi.read).mockResolvedValue(saved);
+  await access.journal.load("account-editor:work-routine");
+  await access.journal.persist("account-editor:work-routine",{kind:"account-editor",editor:"work-routine",pending:null,data:{
+    selected:"chief",configuration:{...schedule(),timezone:"America/",at:""},baseRevision:saved.revision,teamRevision:1,pending:null}});
+  await render();await click("Restore work routine draft");
+  const zone=configured?"Pacific/Auckland":Intl.DateTimeFormat().resolvedOptions().timeZone;
+  expect((await savedDraft())?.data).toMatchObject({configuration:{timezone:zone,at:""},pending:null});
+  expect(container.textContent).toContain("filled in automatically");expect(routineApi.save).not.toHaveBeenCalled();
+  await input("Brief time","09:00");await click("Save schedule");
+  expect(vi.mocked(routineApi.save).mock.calls[0][2].configuration).toEqual({...schedule(),timezone:zone,at:"09:00"});
+});
+it("preserves a valid legacy draft and its exact pending timezone across restart and retry",async()=>{
+  const body={expected_revision:1,team_revision:1,idempotency_key:routineId(44),configuration:{...schedule(),timezone:"Pacific/Auckland",at:"09:00"}};
+  await access.journal.load("account-editor:work-routine");
+  await access.journal.persist("account-editor:work-routine",{kind:"account-editor",editor:"work-routine",pending:body.idempotency_key,data:{
+    selected:"chief",configuration:body.configuration,baseRevision:1,teamRevision:1,pending:body}});
+  await render();await click("Restore work routine draft");
+  expect((await savedDraft())?.data).toMatchObject({configuration:body.configuration,pending:body});expect(routineApi.save).not.toHaveBeenCalled();
+  await click("Retry same schedule save");expect(vi.mocked(routineApi.save).mock.calls[0][2]).toEqual(body);
+});
 it("shows a dated brief and keeps completion attached to its existing work",async()=>{
   await render();expect(container.textContent).toContain("Work observed on 2026-09-21");expect(container.textContent).toContain("Confirm invented appointment");
   expect(container.textContent).toContain("Awaiting result");expect(container.textContent).not.toContain("Record completion");expect(routineApi.save).not.toHaveBeenCalled();
@@ -89,13 +126,13 @@ it("shows partial and withheld history without restoring removed source text",as
 });
 
 it("recovers incomplete settings for a custom bot without enabling or submitting its routine",async()=>{
-  await render();await input("Coworker",routineId(9));await input("Time zone","America/");await input("Brief time","");
-  expect((await savedDraft())?.data).toMatchObject({selected:routineId(9),configuration:{timezone:"America/",at:""},pending:null});
+  await render();await input("Coworker",routineId(9));await input("Brief time","");
+  expect((await savedDraft())?.data).toMatchObject({selected:routineId(9),configuration:{timezone:"UTC",at:""},pending:null});
   await restart();expect(container.querySelector<HTMLSelectElement>("select")!.value).toBe("chief");
   await click("Restore work routine draft");expect(access.authorize).toHaveBeenCalledOnce();
   expect(container.querySelector<HTMLSelectElement>("select")!.value).toBe(routineId(9));
   expect(container.querySelector<HTMLInputElement>('input[type="time"]')!.value).toBe("");
-  expect(container.textContent).toContain("valid time zone");expect(routineApi.save).not.toHaveBeenCalled();
+  expect(container.textContent).toContain("a valid time outside quiet hours");expect(routineApi.save).not.toHaveBeenCalled();
 });
 
 it("journals before dispatch and restores the exact custom-bot schedule after a lost reply",async()=>{
@@ -119,9 +156,9 @@ it("requires explicit comparison when another save changes the restored routine"
 });
 
 it("withholds a routine draft after revoked authority and retains the original local record",async()=>{
-  await render();await input("Time zone","Private incomplete setting");const before=await savedDraft();
+  await render();await input("Brief time","09:45");const before=await savedDraft();
   await restart();vi.mocked(access.authorize).mockRejectedValue(new WorkspaceApiError(403));await click("Restore work routine draft");
-  expect(container.textContent).not.toContain("Private incomplete setting");expect(await savedDraft()).toEqual(before);
+  expect(container.querySelector<HTMLInputElement>('input[type="time"]')?.value).not.toBe("09:45");expect(await savedDraft()).toEqual(before);
   expect(routineApi.save).not.toHaveBeenCalled();expect(lost).toHaveBeenCalledOnce();
 });
 

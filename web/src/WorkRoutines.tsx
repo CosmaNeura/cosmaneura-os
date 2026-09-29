@@ -2,7 +2,7 @@ import {IncomingBriefNavigation} from './incoming-brief-navigation';
 import {RoutineIncomingBrief} from './RoutineIncomingBrief';
 import { useContext,useEffect, useId, useRef, useState } from "react";
 import { botAddress, supportsSkill, WorkspaceApiError, type AuthenticatedWorkspaceIdentity, type ProviderTeam } from "./workspace-api";
-import { routineApi, validSchedule, validRoutineSave, type BriefItem, type BriefSchedule, type Routine, type RoutineSave, type WorkBrief } from "./routine-api";
+import { routineApi, isRoutineTimeZone, validSchedule, validRoutineSave, type BriefItem, type BriefSchedule, type Routine, type RoutineSave, type WorkBrief } from "./routine-api";
 import { useUnsavedWork } from "./unsaved-work";
 import {accountEditorDraft,AccountEditorRecoveryNotice,useAccountEditorRecovery} from "./account-editor-recovery";
 import type {AccountEditorDraft} from "./draft-journal";
@@ -14,6 +14,12 @@ import "./WorkRoutines.css";
 const defaults = (): BriefSchedule => ({kind:"practice_work_brief",enabled:false,
   timezone:Intl.DateTimeFormat().resolvedOptions().timeZone,at:"08:00",weekdays:[1,2,3,4,5],
   quiet_start:"18:00",quiet_end:"07:00",max_runs_per_seven_days:5});
+function scheduleTimeLabel(timezone:string):string {
+  if(!isRoutineTimeZone(timezone))return "Times follow your saved schedule.";
+  const label=new Intl.DateTimeFormat(undefined,{timeZone:timezone,timeZoneName:"longGeneric"})
+    .formatToParts(new Date()).find(part=>part.type==="timeZoneName")?.value??timezone;
+  return `Times shown in ${label}.`;
+}
 const statuses: Record<string,string> = {not_configured:"Not scheduled",paused:"Paused",team_changed:"Review after team changes",
   bot_unavailable:"Bot unavailable",skill_unavailable:"Work status skill unavailable",restricted:"Blocked by your team settings",waiting:"Waiting for scheduled time",
   missed:"Today's time was missed",quiet_hours:"Quiet hours",already_run:"Today's brief is saved",run_limit:"Run limit reached",due:"Brief is due"};
@@ -104,7 +110,12 @@ export function WorkRoutines({identity,team,onAccessLost,onRefreshTeam,onOpenInc
     const latest=await routineApi.read(identity,data.selected,controller.current.signal);
     if(!isCurrent()||current!==generation.current)return;
     if(selected!==data.selected){restoredSelection.current=data.selected;setSelected(data.selected);}
-    setRoutine(latest);setReport(null);setDraft(configuration as BriefSchedule);
+    // Older versions allowed incomplete manual zones. Repair only an unsent
+    // draft; valid saved zones and exact pending requests retain their meaning.
+    const needsZone=data.pending===null&&!isRoutineTimeZone(configuration.timezone);
+    setRoutine(latest);setReport(null);setDraft(needsZone?{...configuration as BriefSchedule,
+      timezone:latest.configuration?.timezone??defaults().timezone}:configuration as BriefSchedule);
+    if(needsZone)setMessage("Local time was filled in automatically for your unfinished schedule. Review the brief time before saving.");
     setBase({revision:Number(data.baseRevision),teamRevision:Number(data.teamRevision)});
     setPending(data.pending as RoutineSave|null);setDirty(true);setConflict(false);setCheckedRejected(false);setEditing(true);
   }
@@ -185,7 +196,7 @@ export function WorkRoutines({identity,team,onAccessLost,onRefreshTeam,onOpenInc
         <button aria-controls={editorId} aria-expanded={editing} disabled={busy} onClick={()=>{if(!busy)setEditing(true);}}>Edit schedule</button>
         {dirty&&<p className="team-fine">Unfinished schedule retained. Open Edit schedule to continue. Returning did not save these edits.</p>}
       </div>
-      {(dirty||editing)&&!validSchedule(draft)&&<p>Choose a valid time zone, at least one day, a time outside quiet hours, and a limit from 1 to 7.</p>}
+      {(dirty||editing)&&!validSchedule(draft)&&<p>Choose at least one day, a valid time outside quiet hours, and a limit from 1 to 7.</p>}
       <div id={editorId} className="routine-editor" hidden={!editing}>
         <div className="routine-editor-nav"><button disabled={returnBlocked} onClick={returnToBriefs}>Back to briefs</button>
           <p className="team-fine">Returning keeps your draft. Only Save schedule or Pause routine changes the saved routine.</p></div>
@@ -193,8 +204,8 @@ export function WorkRoutines({identity,team,onAccessLost,onRefreshTeam,onOpenInc
         {returnBlocked&&<p className="team-fine">Resolve the pending save or device recovery before returning to briefs.</p>}
       <fieldset disabled={locked} className="routine-form"><legend>Schedule for {bot?.name??"this coworker"}</legend>
         <label className="team-check"><input type="checkbox" checked={draft.enabled} disabled={locked||!canEnable&&!(restricted&&bot?.enabled&&!bot.retired&&draft.enabled)} onChange={event=>change({enabled:event.target.checked})}/>Prepare scheduled briefs</label>
-        <label>Time zone<input value={draft.timezone} maxLength={80} onChange={event=>change({timezone:event.target.value})}/></label>
         <RoutineTimeInput label="Brief time" value={draft.at} disabled={locked} onChange={at=>change({at})}/>
+        <p className="team-fine">{scheduleTimeLabel(draft.timezone)}</p>
         <details className="routine-options"><summary>Repeat, quiet hours and limits</summary>
         <fieldset className="routine-days"><legend>Days</legend>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"].map((day,index)=><label key={day}>
           <input type="checkbox" checked={draft.weekdays.includes(index+1)} onChange={event=>change({weekdays:event.target.checked?[...draft.weekdays,index+1].sort() : draft.weekdays.filter(d=>d!==index+1)})}/>{day}</label>)}</fieldset>
