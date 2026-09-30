@@ -13,7 +13,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
 from cosmas_os.adapters.google_connection import GooglePersonalConnection
-from cosmas_os.adapters.microsoft_connection import MicrosoftPersonalConnection
+from cosmas_os.adapters.microsoft_connection import (
+    MicrosoftConnectionFailure,
+    MicrosoftPersonalConnection,
+)
 from cosmas_os.api.auth import RequestIdentity
 from cosmas_os.models import AuditEvent, BoxContext, ExternalIdentity, Principal
 
@@ -42,7 +45,7 @@ def connection(request, engine):
         setattr(settings, provider + "_connection_callback_uri", "https://api.example.invalid/connections/" + provider + "/callback")
         setattr(settings, provider + "_connection_client_secret", SecretStr("synthetic_PRIVATE_secret"))
         setattr(settings, provider + "_connection_encryption_key", SecretStr(base64.urlsafe_b64encode(b"x" * 32).decode()))
-    case = SimpleNamespace(factory=factory, fault=None, calls=[], account=account)
+    case = SimpleNamespace(factory=factory, fault=None, scopes=None, calls=[], account=account)
 
     def respond(incoming):
         case.calls.append(incoming.method)
@@ -57,6 +60,8 @@ def connection(request, engine):
                     identity.active = False
                     session.commit()
             scopes = "User.Read Mail.Read Calendars.Read" if microsoft else "openid email https://www.googleapis.com/auth/gmail.metadata"
+            if case.scopes is not None:
+                scopes = case.scopes
             if case.fault == "scope":
                 scopes += " Mail.Send"
             payload = dict(access_token="synthetic_PRIVATE_token", refresh_token="synthetic_PRIVATE_refresh",
@@ -93,7 +98,7 @@ def test_failure_is_private_durable_single_use_and_explicitly_recoverable(connec
     case.fault = fault
     state = start(case)
     assert case.service.callback(state, "synthetic_PRIVATE_code") is False
-    reason = ({"http": "token_http", "scope": "permissions", "exception": "token_exchange"}
+    reason = ({"http": "token_http", "scope": "permissions_unexpected", "exception": "token_exchange"}
         if case.service.provider == "microsoft" else
         {"http": "token_exchange", "scope": "account_verification", "exception": "token_exchange"})[fault]
     assert outcomes(case) == [("failed_" + reason, {})]
@@ -130,3 +135,45 @@ def test_declining_consent_remains_distinct_from_failure(connection):
     assert case.service.callback(start(case), denied=True) is False
     assert case.calls == []
     assert outcomes(case) == [("declined", {})]
+
+
+@pytest.mark.parametrize("connection", [MicrosoftPersonalConnection], indirect=True)
+@pytest.mark.parametrize("scopes", [
+    "user.read mail.read calendars.read",
+    "https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Calendars.Read",
+    "https%3A%2F%2Fgraph.microsoft.com%2Fuser.read https%3A%2F%2Fgraph.microsoft.com%2Fmail.read https%3A%2F%2Fgraph.microsoft.com%2Fcalendars.read",
+    "offline_access%20User.Read%20Mail.Read%20Calendars.Read",
+])
+def test_microsoft_documented_scope_spellings_save_the_same_read_only_connection(connection, scopes):
+    case = connection
+    case.scopes = scopes
+    started = case.service.start(case.identity)
+    query = parse_qs(urlsplit(started["authorization_url"]).query)
+    assert query["scope"] == ["offline_access User.Read Mail.Read Calendars.Read"]
+    assert case.service.callback(query["state"][0], "synthetic_PRIVATE_code") is True
+    assert case.service.status(case.identity)["state"] == "connected"
+    assert case.calls == ["POST", "GET"]
+    assert outcomes(case) == [("connected", {})]
+
+
+@pytest.mark.parametrize("scopes,reason", [
+    (None, "format"), ({"scope": "Mail.Read"}, "format"), ("", "format"),
+    ("x" * 2049, "format"), ("User.Read Mail.Read Calendars.Read%0A", "format"),
+    ("User.Read Mail.Read Calendars.Read%FF", "format"),
+    ("User.Read Mail.Read", "missing"),
+    ("user.read mail.read calendars.readwrite", "missing"),
+    ("https://other.example.invalid/User.Read Mail.Read Calendars.Read", "missing"),
+    ("https://graph.microsoft.com.evil.example/User.Read Mail.Read Calendars.Read", "missing"),
+    ("https%253A%252F%252Fgraph.microsoft.com%252FUser.Read Mail.Read Calendars.Read", "missing"),
+    ("User.Read Mail.Read Calendars.Read openid profile email", "identity"),
+    ("User.Read Mail.Read Calendars.Read Mail.Send", "unexpected"),
+    ("User.Read Mail.Read Calendars.Read Calendars.ReadWrite", "unexpected"),
+    ("User.Read Mail.Read Calendars.Read .default", "unexpected"),
+    ("User.Read Mail.Read Calendars.Read https://other.example.invalid/User.Read", "unexpected"),
+    ("User.Read Mail.Read Calendars.Read synthetic_PRIVATE_token", "unexpected"),
+])
+def test_scope_compatibility_never_accepts_missing_or_broader_access(scopes, reason):
+    with pytest.raises(MicrosoftConnectionFailure) as error:
+        MicrosoftPersonalConnection._verify_scopes(scopes)
+    assert error.value.reason == "permissions_" + reason
+    assert str(error.value) == "Microsoft connection unavailable"

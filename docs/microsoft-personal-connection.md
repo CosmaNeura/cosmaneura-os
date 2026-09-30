@@ -8,6 +8,13 @@ The first beta adapter is for a configured Entra work/school tenant; consumer
 Microsoft accounts and cross-tenant onboarding are not included in this profile.
 
 The app requests delegated `offline_access User.Read Mail.Read Calendars.Read`.
+Token-response validation accepts Microsoft's documented URL-encoded, Graph-qualified
+and lower-case spellings of those same permissions. It decodes once, requires all
+three resource permissions and rejects additional scopes, including write scopes,
+identity scopes outside this grant, and scopes for other resources. Failure audits
+distinguish malformed, missing, identity-only-extra and other unexpected permissions
+using fixed categories without retaining the provider's scope string. Reference:
+[Microsoft token response](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow#successful-response-2).
 Graph operations are limited to GET `/v1.0/me`, GET
 `/v1.0/me/mailFolders/inbox/messages`, and GET `/v1.0/me/calendarView`.
 Only 25 message headers or event summaries are returned per request. The calendar
