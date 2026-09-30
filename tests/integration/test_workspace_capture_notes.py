@@ -93,7 +93,17 @@ def test_notes_default_gate_and_claimed_session(capture_case):
     assert perform(f).status_code == 404
     assert not f.port.calls
     f.configuration.workspace_capture_notes_enabled = True
-    assert perform(f, session_id=str(uuid4())).status_code == 409
+
+    def mismatched_admission(*args, **kwargs):
+        # Exercise the application guard rather than LocalCore's assertion.
+        # The operation test uses the same deliberately mismatched receipt.
+        f.port.step("admit")
+        return f.port.saved
+
+    f.port.admit_capture = mismatched_admission
+    response = perform(f, session_id=str(uuid4()))
+    assert response.status_code == 409
+    assert response.json()["detail"] == "capture_session_changed"
     assert f.port.calls == ["exchange", "resolve", "binding", "admit"]
 
 
