@@ -7,6 +7,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select, text
 from sqlalchemy.orm import Session
+from tests.helpers.task_brief import REQUIREMENTS
 
 from cosmas_os.application import model_work as work
 from cosmas_os.application import provider_team as team
@@ -241,7 +242,7 @@ def chief_answer(claim):
         "azure_gpt41",
         30,
         9,
-        (DraftBrief("scribe", "Organize the invented saved notes."),),
+        (DraftBrief("scribe", "Organize the invented saved notes.", REQUIREMENTS),),
     )
 
 

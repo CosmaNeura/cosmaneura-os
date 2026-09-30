@@ -7,6 +7,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from tests.helpers.task_brief import REQUIREMENTS
 from tests.integration.test_workspace_capture import capture_case as _capture_case
 
 from cosmas_os.api import app as api
@@ -265,7 +266,7 @@ def test_signed_handoff_retry_records_queue_once_and_resolves_that_exact_attempt
             "azure_gpt41",
             13,
             5,
-            (DraftBrief("scribe", "Organize saved invented notes."),),
+            (DraftBrief("scribe", "Organize saved invented notes.", REQUIREMENTS),),
         ),
     )
     result = f.client.post(

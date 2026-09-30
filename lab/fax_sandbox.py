@@ -109,7 +109,7 @@ def exercise_fax(app, root, scenario="delivered", *, provider="documo"):
 def _exercise(app, root, scenario, provider):
     if scenario not in FAX_SCENARIOS.get(provider, ()):
         raise LabError("unknown_fax_scenario")
-    calls, checks = [], {}
+    calls, checks, receipt_stages = [], {}, []
     factory = sessionmaker(app.engine, expire_on_commit=False)
     store = LocalVendorArtifactStore(root)
     pdf = synthetic_pdf()
@@ -227,6 +227,8 @@ def _exercise(app, root, scenario, provider):
         _, duplicate = vendor_execution.claim_submit(s, *scope, tid, request)
         checks["lost_submit_reply_cannot_dispatch_twice"] = duplicate is None
         detail = vendor_work.detail(s, *scope, tid)
+        receipt_stages.append({"stage": "submission_response", "submit_calls": len(calls),
+            **{key: detail["summary"][key] for key in ("acceptance", "transport", "state")}})
         if scenario != "lost_reply":
             read_request = p.BoundCommand.model_validate(bound(detail, "fax-observe"))
             _, read = vendor_execution.claim_read(s, *scope, tid, read_request)
@@ -234,6 +236,10 @@ def _exercise(app, root, scenario, provider):
             read = None
     if read:
         asyncio.run(executor.invoke(read))
+        with factory() as s:
+            observed = vendor_work.detail(s, *scope, tid)["summary"]
+            receipt_stages.append({"stage": "status_read", "submit_calls": 1,
+                **{key: observed[key] for key in ("acceptance", "transport", "state")}})
     if scenario in RECOVERY_SCENARIOS:
         with factory() as s:
             first = vendor_work.detail(s, *scope, tid)["summary"]
@@ -279,6 +285,9 @@ def _exercise(app, root, scenario, provider):
         reopened = vendor_work.detail(s, *scope, tid)["summary"]
     checks["delivery_evidence_survives_database_reopen"] = all(reopened[key] == final[key]
         for key in ("operation_id", "state", "acceptance", "transport", "observation_head", "evidence_sha256"))
+    receipt_stages.append({"stage": "reopened_receipt", "submit_calls": sum(c["action"] == "submit" for c in calls),
+        **{key: reopened[key] for key in ("acceptance", "transport", "state")}})
     return {"provider": provider, "scenario": scenario, "passed": all(checks.values()), "checks": checks,
         "requests": calls, "ticket": reopened, "document_sha256": artifact["sha256"],
+        "receipt_stages": receipt_stages,
         "evidence_level": "real F-8, file custody and connector; scripted human, synthetic HTTP; no real fax"}

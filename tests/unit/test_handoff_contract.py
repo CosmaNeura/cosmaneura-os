@@ -3,6 +3,7 @@ import json
 import httpx
 import pytest
 from pydantic import ValidationError
+from tests.helpers.task_brief import REQUIREMENTS
 
 from cosmas_os.adapters.gpt41 import GPT41Connector
 from cosmas_os.api.team_schemas import HandoffRetry
@@ -30,6 +31,7 @@ def test_chief_receives_a_closed_draft_handoff_contract():
                                         {
                                             "role": "scribe",
                                             "intended_role": "scribe",
+                                            "requirements": REQUIREMENTS,
                                             "brief": "Organize the saved notes; flag missing information.",
                                         }
                                     ],

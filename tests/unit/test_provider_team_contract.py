@@ -5,6 +5,7 @@ from uuid import uuid4
 import httpx
 import pytest
 from pydantic import ValidationError
+from tests.helpers.task_brief import REQUIREMENTS
 
 from cosmas_os.adapters.gpt41 import ENDPOINT, GPT41Connector
 from cosmas_os.adapters.workspace_review import WorkspaceReviewConnector
@@ -148,7 +149,7 @@ def test_named_instance_and_preferences_reach_only_the_closed_model_contract():
     calls = []
     def respond(request):
         calls.append(json.loads(request.content))
-        return httpx.Response(200, json=completion(source_ids=[], handoffs=[{"role": address, "intended_role": "scribe", "brief": "Review saved notes"}]))
+        return httpx.Response(200, json=completion(source_ids=[], handoffs=[{"role": address, "intended_role": "scribe", "requirements": REQUIREMENTS, "brief": "Review saved notes"}]))
     target = {"address": address, "role": "scribe", "name": "Visit partner", "job_focus": "Documentation"}
     result = GPT41Connector(lambda: "invented", transport=httpx.MockTransport(respond)).review(
         context(role="chief", handoff_roles=(address,), handoff_targets=(target,),

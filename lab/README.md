@@ -20,6 +20,9 @@ python -m lab.runner --mode replay --cases all --fault lost_save_reply --serve
 python -m lab.runner --mode replay --cases clinic,connectors \
   --fault read_timeout --checks --capture-checks --serve
 
+# Incoming email/fax replay, real Chief/Research/Prep handoffs and reviewed work.
+python -m lab.runner --mode replay --cases inbound --checks --serve
+
 # Real agents use synthetic account tools and pass generated outputs to Chief.
 python -m lab.runner --mode azure --cases clinic --repeat 3 \
   --fault lost_save_reply --max-tokens 500000 --serve
@@ -158,10 +161,41 @@ by the text-rescoring command.
 | `walk_in`, `telehealth` | Unknown DOB stays unknown; confirmed recording consent permits starting | Capture admission and handoff contracts |
 | `walk_in_no_consent` | Missing DOB is optional; absent recording consent still blocks starting | Capture admission and handoff contracts |
 | `journey` | Chief decomposes three encounter outputs, assigns drafts and verifies results | Actual durable private handoffs plus regression suite |
+| `inbound` | Immutable arrivals, attachments, Chief → Prep/Research/Follow-up and human review | Real workspace/model-work/F-8 services; actual Spruce inbox adapter; offline fax receipts |
 
 Full physical Scribe recording is outside this runner. Live Microsoft/Gmail, fax, payment,
 Scheduling, portal, Core and Scribe endpoints are not used by this lab. Unsupported
 operations remain coverage gaps; they are not replaced with optimistic receipts.
+
+### Inbound workflow evaluation
+
+`--cases inbound` replays four synthetic provider envelopes with immutable event,
+message, thread, account and encounter identities. Duplicate and older arrivals
+cannot create another current source. A missing or altered PDF, conflicting
+identity, or absent human source review blocks import. A deliberately lost import
+response recovers the exact PostgreSQL workspace entry after reopening the lab
+ledger. The ledger is evaluation state, not a product inbox or clinical queue.
+
+The real Chief service then admits three independent tasks for Prep, Research and
+Follow-up, with current task requirements, exact source versions and the saved
+Chief dependency. A different owner cannot claim them. All three save attributed
+replies; Chief verifies those receipts. A separate scripted human reviews the
+generated draft, approves one local F-8 operation and verifies its result. The
+suite also calls the actual Spruce inbox adapter through offline HTTP and checks
+source ordering, attachment warnings and the full human review chain.
+
+The dashboard measures arrival-to-saved-Chief-plan time, correct handoff identities,
+duplicate actions, recovery and queue wait. Six scripted provider task steps are
+a workflow proxy; browser clicks, human dwell time and clinician usability are
+not measured by this case. Documo/SRFax submission, acceptance, status reads and
+reopened receipts remain separate; unknown acceptance never authorizes resending.
+
+Email bodies, email attachments and fax ingress have no product transport in this
+case: their arrival is a **lab-only reviewed-source bridge**. Files are hash-checked,
+not OCR-extracted. Research receives its actual assignment but makes no public
+lookup or clinical eligibility claim in this administrative case. This case always
+uses deterministic replies even if the surrounding run selects Azure mode. It
+tests application behavior and persistence, not model reasoning or live delivery.
 
 ## Expanded virtual clinic
 

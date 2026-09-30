@@ -16,7 +16,7 @@ const changed=vi.fn(),denied=vi.fn(),workspace:Workspace={id:researchWorkspaceId
 function button(label:string){const found=[...element.querySelectorAll('button')].find(b=>b.textContent?.trim()===label);expect(found,label).toBeTruthy();return found!;}
 async function click(label:string){const found=button(label);expect(found.disabled,label).toBe(false);await act(async()=>found.click());}
 async function settle(){await act(async()=>{});}
-async function workSettled(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20));});await vi.waitFor(async()=>{await settle();expect(element.textContent).not.toContain('Checking research…');});}
+async function workSettled(){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,20));});await vi.waitFor(async()=>{await settle();expect(element.querySelector('[aria-label="Research operation"]')).toBeNull();});}
 async function fill(text:string){const area=element.querySelector('textarea')!;expect(area.disabled).toBe(false);await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(area,text);area.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function check(label:string){const found=[...element.querySelectorAll('label')].find(l=>l.textContent?.includes(label))?.querySelector('input')!;expect(found).toBeTruthy();expect(found.disabled).toBe(false);await act(async()=>found.click());}
 async function mount(props:Partial<Parameters<typeof ResearchWorkspace>[0]>={}){await act(async()=>root.render(<EditorRecoveryContext.Provider value={access}><ResearchWorkspace identity={researchIdentity} workspaceId={researchWorkspaceId} workspaceRevision={2} bot={{address:researchBotId,team_revision:1}} enabled locked={false} port={port} onChanged={changed} onDenied={denied} {...props}/></EditorRecoveryContext.Provider>));await settle();}
@@ -143,4 +143,30 @@ it('preselects the configured trial registry only after choosing trials and stil
  expect(port.search).not.toHaveBeenCalled();await fill('myocardial infarction AND stem cell');await click('Review query');
  expect(button('Search selected sources').disabled).toBe(true);expect(element.querySelector('.research-query-review')?.textContent).toContain('ClinicalTrials.gov');
  expect(port.search).not.toHaveBeenCalled();
+});
+
+it('shows the actual lookup operation without an unconfirmed banner while it is running',async()=>{
+ let complete!:(value:ResearchObservation)=>void;
+ vi.mocked(port.search).mockImplementation(()=>new Promise(resolve=>{complete=resolve;}));
+ await mount();await prepare();await click('Search selected sources');
+ expect(element.textContent).toContain('Searching selected public sources…');
+ expect(element.querySelector('[aria-label="Unconfirmed research request"]')).toBeNull();
+ expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Stop waiting')).toBe(false);
+ const request=vi.mocked(port.search).mock.calls[0][2];
+ await act(async()=>complete(await researchObservation(request)));await workSettled();
+ expect(element.textContent).toContain('Sources retrieved');
+});
+it('cancels a saved-history read and fences a late reply while allowing another read',async()=>{
+ let complete!:(value:Awaited<ReturnType<ResearchPort['history']>>)=>void;
+ vi.mocked(port.history).mockImplementationOnce(()=>new Promise(resolve=>{complete=resolve;}));
+ await mount();await fill('Keep my question');await click('Load saved research');
+ expect(element.textContent).toContain('Loading saved research history…');
+ const signal=vi.mocked(port.history).mock.calls[0][3]!;
+ await click('Stop waiting');expect(signal.aborted).toBe(true);
+ expect(element.querySelector('textarea')!.disabled).toBe(false);
+ await click('Load saved research');await workSettled();
+ await act(async()=>complete({contract:'research.history.v1',runs:[await researchObservation()]}));
+ expect(element.querySelectorAll('.research-history strong')).toHaveLength(0);
+ expect(element.querySelector('textarea')!.value).toBe('Keep my question');
+ expect(port.search).not.toHaveBeenCalled();expect(port.save).not.toHaveBeenCalled();
 });

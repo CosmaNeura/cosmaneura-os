@@ -26,7 +26,8 @@ describe.each([
   it('retains usable read controls after one status check without repeating the failed read',async()=>{
     request.mockResolvedValueOnce(connected).mockRejectedValueOnce(new WorkspaceApiError(502)).mockResolvedValueOnce(connected);
     await mount();await click('Read recent email');
-    expect(host.textContent).toContain('Your account is still connected. Try again.');
+    expect(host.textContent).toContain('Your account is still connected.');
+    if(name==='Microsoft')expect(host.textContent).toContain('If your email and calendar are hosted by Google, use Google Workspace.');
     expect(button('Read recent email')?.disabled).toBe(false);
     expect(request.mock.calls.map(call=>call[1])).toEqual(['status','mail','status']);
     request.mockResolvedValueOnce({kind:'mail',account:connected.account,observed_at:'2026-09-29T10:00:00Z',items:[],more:false});
@@ -75,7 +76,8 @@ it('recovers calendar controls with a calendar-specific explanation',async()=>{
   vi.mocked(microsoftConnectionRequest).mockResolvedValueOnce(connected).mockRejectedValueOnce(new WorkspaceApiError(409)).mockResolvedValueOnce(connected);
   await act(async()=>root.render(<MicrosoftConnectionPanel identity={identity} onAuthenticationLost={vi.fn()}/>));
   await click('View next 7 days');
-  expect(host.textContent).toContain('Calendar could not be loaded. Your account is still connected. Try again.');
+  expect(host.textContent).toContain('Calendar could not be loaded. Your account is still connected.');
+  expect(host.textContent).toContain('Check that it has an Outlook or Exchange mailbox.');
   expect(button('View next 7 days')?.disabled).toBe(false);
   expect(vi.mocked(microsoftConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status','calendar','status']);
 });

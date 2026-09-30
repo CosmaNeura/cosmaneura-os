@@ -6,8 +6,8 @@ import {useUnsavedWork} from './unsaved-work';
 import {readExistingScribeSource,saveScribeSourcePacket,validScribeSourceRequest,type ExistingScribeSource,type ScribeSourceRequest} from './scribe-source-api';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
 
-export function ExistingScribeSourcePanel({workspace,identity,locked,onSaved,onBusyChange,onAccessLost}:{
-  workspace:Workspace;identity:AuthenticatedWorkspaceIdentity;locked:boolean;
+export function ExistingScribeSourcePanel({workspace,identity,locked,onSaved,onBusyChange,onAccessLost,openRequest=0}:{
+  workspace:Workspace;identity:AuthenticatedWorkspaceIdentity;locked:boolean;openRequest?:number;
   onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onAccessLost?:(error:WorkspaceApiError)=>void;
 }){
   const [preview,setPreview]=useState<{owner:AuthenticatedWorkspaceIdentity;workspaceId:string;value:ExistingScribeSource}|null>(null);
@@ -25,6 +25,15 @@ export function ExistingScribeSourcePanel({workspace,identity,locked,onSaved,onB
   useEffect(()=>{generation.current++;active.current?.abort();setPreview(null);setPending(null);setBusy(false);setReviewed(false);setMessage('');setSaved(false);
     return()=>{generation.current++;active.current?.abort();};},[identity,workspace.id]);
   useEffect(()=>{onBusyChange?.(busy||!!pending||!!recovery.offer);return()=>onBusyChange?.(false);},[busy,pending,recovery.offer,onBusyChange]);
+  const opened=useRef<{identity:AuthenticatedWorkspaceIdentity;workspace:string;request:number}|null>(null);
+  useEffect(()=>{
+    if(!openRequest)return;
+    const prior=opened.current;
+    if(prior?.identity===identity&&prior.workspace===workspace.id&&prior.request===openRequest)return;
+    if(pending||recovery.offer){opened.current={identity,workspace:workspace.id,request:openRequest};return;}
+    if(locked||busy||recovery.blocked)return;
+    opened.current={identity,workspace:workspace.id,request:openRequest};void lookup();
+  },[openRequest,identity,workspace.id,locked,busy,recovery.blocked,recovery.offer,pending]);
   const current=(version:number,controller:AbortController)=>version===generation.current&&!controller.signal.aborted&&live.current.identity===identity&&live.current.workspaceId===workspace.id;
   function failure(cause:unknown,saveUnconfirmed=false){
     const status=cause instanceof BffResponseError||cause instanceof WorkspaceApiError?cause.status:undefined;

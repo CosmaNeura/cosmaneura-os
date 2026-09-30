@@ -89,6 +89,8 @@ def test_v3_wrong_recipient_role_cannot_save_any_handoff_or_reply(engine, includ
     briefs = [{"role":"scribe", "intended_role":"research", "brief":"Compare supplied trial evidence."}]
     if include_valid_brief:
         briefs.insert(0, {"role":"follow_up", "intended_role":"follow_up", "brief":"Draft follow-up questions."})
+    from tests.helpers.task_brief import REQUIREMENTS
+    briefs = [{**brief, "requirements": REQUIREMENTS} for brief in briefs]
     calls = []
 
     def respond(request):

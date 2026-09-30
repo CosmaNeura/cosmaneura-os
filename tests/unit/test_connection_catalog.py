@@ -40,7 +40,8 @@ def test_catalog_does_not_advertise_missing_oauth_runtimes_or_claim_account_conn
     (True, True, {"X-Cosmas-Connection-Contract": "1"}, "?provider=google", 422),
     (True, True, {"X-Cosmas-Connection-Contract": "1"}, "", 200),
 ])
-def test_catalog_uses_existing_auth_and_workspace_gates(authenticated, gate, headers, query, expected):
+@pytest.mark.parametrize("path", ["/connections/catalog", "/connections/plugins"])
+def test_catalog_uses_existing_auth_and_workspace_gates(authenticated, gate, headers, query, expected, path):
     app = FastAPI()
 
     def identity():
@@ -60,8 +61,12 @@ def test_catalog_uses_existing_auth_and_workspace_gates(authenticated, gate, hea
     app.include_router(router(settings=configuration, runtime=SimpleNamespace,
                               identity_dependency=identity, workspace_gate=workspace_gate))
     with TestClient(app) as client:
-        response = client.get("/connections/catalog" + query, headers=headers)
+        response = client.get(path + query, headers=headers)
     assert response.status_code == expected
     if expected == 200:
         assert response.headers["cache-control"] == "no-store"
-        assert response.json() == catalog(configuration(), SimpleNamespace())
+        if path.endswith("/catalog"):
+            assert response.json() == catalog(configuration(), SimpleNamespace())
+        else:
+            from cosmas_os.api.plugin_catalog import plugin_catalog
+            assert response.json() == plugin_catalog(configuration(), SimpleNamespace())

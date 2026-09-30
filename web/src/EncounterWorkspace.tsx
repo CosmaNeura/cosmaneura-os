@@ -21,7 +21,7 @@ import { EditorRecoveryContext, type EditorRecoveryAccess } from "./editor-recov
 import { AccountRecoveryContext, type AccountRecoveryAccess } from "./account-recovery";
 import { supportsSkill, requireRecoveryScope, validRecoveryScope } from "./workspace-api";
 import { BotAvatar } from "./BotAvatar";
-import { HandoffCard } from "./HandoffCard";
+import { TeamWorkPanel } from "./TeamWorkPanel";
 import {modelWorkApi} from "./model-work-api";
 import {conversationFromEntry, exactModelObservation, modelActive, modelRequestHash, modelStateLabel, validModelOperation, type HandoffRetryObservation, type ModelOperation, type ModelRequestObservation, type PreviousModelRequest} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
@@ -106,6 +106,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
   const [selected, setSelected] = useState<string>("visit_prep");
   const [researchEntry,setResearchEntry]=useState(false);
+  const [entryIntent,setEntryIntent]=useState<"record"|"recording"|null>(null);
+  const [recordingSourceRequest,setRecordingSourceRequest]=useState(0);
   const [savedResearchChat,setSavedResearchChat]=useState(false);
   const [stage, setStage] = useState("Before");
   const [panel, setPanel] = useState("Notebook");
@@ -230,9 +232,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   useEffect(() => {
     if (selectedResult && mobilePanel === "Conversation" && !settingsOpen) {
       const result = document.getElementById(`turn-${selectedResult}`);
-      result?.scrollIntoView?.({ block: "center" }); result?.focus();
+      if(result && !result.closest("[hidden]")){
+        result.scrollIntoView?.({ block: "center" }); result.focus(); setSelectedResult(null);
+      }
     }
-  }, [selectedResult, mobilePanel, workspace?.revision, settingsOpen]);
+  }, [selectedResult, selected, savedResearchChat, mobilePanel, workspace?.revision, settingsOpen]);
   useEffect(() => {
     if (!workspace || !identity || busy || conflict || !(workspace.entries.some(modelActive)||workspace.handoffs?.some(h =>
       ["queued", "running"].includes(h.status) || (h.result_entry_id && !workspace.entries.some(e => e.id === h.result_entry_id))))) return;
@@ -383,7 +387,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setConnectionLocks({google:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
-    setNote(""); setThought(""); setEvidence(""); setSource(""); setSelectedSource(null); setSelectedResult(null);
+    setEntryIntent(null);setRecordingSourceRequest(0);setNote(""); setThought(""); setEvidence(""); setSource(""); setSelectedSource(null); setSelectedResult(null);
     setPending(null); setConflict(false); setMessage(""); setError(""); setBusy(false);
     setModelObservation(null);setReplacementDraft(null);setModelHashes({});
     setPreviousModelRequest(null);
@@ -416,6 +420,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     if ((coreSelection || incoming) && (locked || captureNavigationLocked || captureDraftLocked || hasUnsavedWork())) {
       setError('Save or recover unfinished work before opening a notebook. Your text and requests are retained.'); return;
     }
+    recordVisit = recordVisit || !incoming && entryIntent === "record";
+    const useRecording = !recordVisit && !incoming && entryIntent === "recording";
     const preserveTeamDraft = !!team && !!teamDraft && JSON.stringify(teamDraft) !== JSON.stringify(team.configuration);
     const current = ++generation.current; setBusy(true); setError("");
     try {
@@ -440,13 +446,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       setIdentity(result.identity); setWorkspace(result.workspace); setTeam(result.team);
       setPreviousModelRequest(null);
       setThought('');setEvidence('');setSource('');setModelObservation(null);setReplacementDraft(null);setModelHashes({});
-      setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(recordVisit ? 1 : 0);setStage('Before');setPanel('Notebook');
-      if (recordVisit) {
+      setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(recordVisit ? 1 : 0);setRecordingSourceRequest(useRecording?1:0);setEntryIntent(null);setStage('Before');setPanel('Notebook');
+      if (recordVisit || useRecording) {
         const recorder = result.team.configuration.bots.find(item => item.role === "scribe" && !item.retired && !item.instance_id);
         if (recorder) setSelected(botAddress(recorder));
         setMobilePanel("Notebook");
       }
-      if (researchEntry && !recordVisit && !incoming) {
+      if (researchEntry && !recordVisit && !useRecording && !incoming) {
         const researcher=result.team.configuration.bots.find(item=>item.role==='research'&&!item.retired);
         if(researcher){setSelected(botAddress(researcher));setMobilePanel('Conversation');setSavedResearchChat(false);}
         else setMessage('Research is not on this team yet. Add it in Team settings.');
@@ -898,7 +904,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         if(savedBefore!==savedAfter && activityLive.current.note!==savedBefore)setConflict(true);
         else if(activityLive.current.note===savedBefore)setNote(savedAfter);
       }
-      setWorkspace(latest);setSelected(address);setSelectedResult(entry.id);setMobilePanel('Conversation');setSettingsOpen(false);setPracticeOpen(false);setError('');
+      setWorkspace(latest);setSelected(address);if(entry.reply?.role==='research'||entry.model_request?.bot.role==='research')setSavedResearchChat(true);setSelectedResult(entry.id);setMobilePanel('Conversation');setSettingsOpen(false);setPracticeOpen(false);setError('');
     }catch(cause){
       if(sameAccount() && cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status))failure(cause);
       else if(sameAccount() && cause instanceof DraftStoreError)setRecoveryState('failed');
@@ -934,11 +940,16 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const localModelPending=pending?.type==='ask'||pending?.type==='retry'?pending:null;
   const localQuestionRepresented=pending?.type==='ask'&&workspace?.entries.some(entry=>entry.model_request?.request.kind==='conversation'&&
     entry.model_request.request.idempotency_key===pending.body.idempotency_key&&entry.model_request.request_sha256===modelHashes[pending.body.idempotency_key]);
-  function handoffCard(handoff: DraftHandoff) {
-    return <HandoffCard key={handoff.id} handoff={handoff} locked={locked} onRetry={() => {
-      if (workspace) void save({ type: "retry", model_contract:1,origin:'durable_admission_v1',handoffId: handoff.id, body: { expected_revision: workspace.revision,
-        previous_attempt_id: handoff.attempt_id, idempotency_key: crypto.randomUUID() } });
-    }} onShow={() => { setMobilePanel("Conversation"); setSelected(handoff.recipient_key ?? handoff.recipient_role); setSelectedResult(handoff.result_entry_id); }} />;
+  function retryTeamTask(handoff:DraftHandoff) {
+    if(workspace)void save({type:"retry",model_contract:1,origin:"durable_admission_v1",handoffId:handoff.id,
+      body:{expected_revision:workspace.revision,previous_attempt_id:handoff.attempt_id,idempotency_key:crypto.randomUUID()}});
+  }
+  function reviewTeamResult(handoff:DraftHandoff) {
+    if(!handoff.result_entry_id)return;
+    setSettingsOpen(false);setPracticeOpen(false);setMobilePanel("Conversation");
+    setSelected(handoff.recipient_key??handoff.recipient_role);
+    if(handoff.recipient_role==='research')setSavedResearchChat(true);
+    setSelectedResult(handoff.result_entry_id);
   }
 
   return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
@@ -951,7 +962,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       <nav aria-label="Provider Team" className="team-roster">{team?.members.map(member => {
         const address = botAddress(member);
         const config = team.configuration.bots.find(b => botAddress(b) === address)!;
-        return <button key={address} disabled={connectionNavigationLocked} aria-pressed={selected === address} onClick={() => { setPracticeOpen(false); setSelected(address); setSettingsOpen(false); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); }}>
+        return <button key={address} disabled={connectionNavigationLocked} aria-pressed={selected === address} onClick={() => { setPracticeOpen(false); setSelectedResult(null); setSelected(address); setSettingsOpen(false); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); }}>
           <BotAvatar role={member.role} /><span><strong>{config.name}</strong>
             <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{config.retired ? "Retired · history kept" : !team.revision ? "Set up your team" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : "On"}</small></span>
         </button>;
@@ -1057,19 +1068,21 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         </AccountRecoveryContext.Provider> : undefined}
       />}
       {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
-        <h1>{researchEntry ? "Choose a visit for Research" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : encounters ? "Record a visit, or open its notes." : "Choose a visit. Record the conversation. Review your note."}</p>
+        <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : encounters ? "Record a visit, or open its notes." : "Choose a visit. Record the conversation. Review your note."}</p>
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
           encounterLabel={busy?'Loading…':encounters?'Refresh encounters':authenticated?'Choose an encounter':'Open synthetic encounter'}
-          onConnections={()=>void openSettings('connections')} onEncounter={()=>{setResearchEntry(false);void (authenticated?loadEncounters():open());}}
-          onResearch={authenticated?()=>{setResearchEntry(true);void loadEncounters();}:undefined}/>
+          onConnections={()=>void openSettings('connections')} onEncounter={()=>{setResearchEntry(false);setEntryIntent(null);void (authenticated?loadEncounters():open());}}
+          onRecord={authenticated?()=>{setResearchEntry(false);setEntryIntent("record");void loadEncounters();}:undefined}
+          onRecording={authenticated?()=>{setResearchEntry(false);setEntryIntent("recording");void loadEncounters();}:undefined}
+          onResearch={authenticated?()=>{setResearchEntry(true);setEntryIntent(null);void loadEncounters();}:undefined}/>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {authenticated && encounters && <section aria-label="Available encounters" className="team-encounter-picker">
           {CORE_CONNECTION_BUILD && <p><button className="team-subtle"
             disabled={busy || !!pending || connectionNavigationLocked} onClick={() => void openSettings('core')}><span aria-hidden="true">🗓️ </span>Find another visit</button></p>}
           {encounters.length ? encounters.map(encounter => <article className="team-encounter-row" key={encounter.appointment_id}>
             <button className="team-encounter-option" disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id)}>
-              <strong>{encounter.label}</strong><span>{encounter.workspace_id ? "Open saved notes" : "Open visit"}</span>
+              <strong>{encounter.label}</strong><span>{entryIntent==="record"?"Continue to recording consent":entryIntent==="recording"?"Review the existing recording":encounter.workspace_id ? "Open saved notes" : "Open visit"}</span>
             </button>
             {CAPTURE_WORKSPACE_BUILD && (!team || team.capture?.enabled) && <button className="team-primary team-record-visit" aria-label={`Record ${encounter.label}`}
               disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id, undefined, undefined, true)}><span aria-hidden="true">🎙️ </span>Record visit</button>}
@@ -1097,6 +1110,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} reviewLocked={locked} />}
         {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled && !settingsOpen && !practiceOpen &&
           <ExistingScribeSourcePanel key={`scribe-source:${workspace.id}`} workspace={workspace} identity={authenticated}
+            openRequest={settingsOpen||practiceOpen?0:recordingSourceRequest}
             locked={baseLocked || captureNavigationLocked || captureDraftLocked || note !== latestNote}
             onBusyChange={setScribeSourceBusy} onAccessLost={failure} onSaved={latest=>{
               setWorkspace(previous=>previous?.id===latest.id&&previous.revision<=latest.revision?latest:previous);
@@ -1113,6 +1127,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             <button className="team-primary capture-record" disabled={locked || connectionNavigationLocked} onClick={() => void openSettings('connections')}>Set up recording</button>
           </header></section>}
         <div hidden={settingsOpen}>
+        <TeamWorkPanel handoffs={workspace.handoffs??[]} entries={workspace.entries} locked={locked} onRetry={retryTeamTask} onReview={reviewTeamResult}/>
         <nav className={`team-mobile-tabs${bot?.role === "scribe" ? " team-scribe-tabs" : ""}`} aria-label={bot?.role === "scribe" ? "Visit view" : "Mobile encounter view"}>
           {(bot?.role === "scribe" ? ["Notebook", "Conversation", "Review"] : ["Conversation", "Notebook", "Sources", "Review", "Work"]).map(value => <button key={value} aria-pressed={mobilePanel === value}
             onClick={() => { setMobilePanel(value); if (value !== "Conversation") setPanel(value); }}>{bot?.role === "scribe" ? ({Notebook:"Visit notes",Conversation:"Ask Scribe",Review:"Review note"})[value] : value}</button>)}
@@ -1183,7 +1198,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
                 <strong>{entry.model_request.bot.name}</strong></header><p>{modelStateLabel(entry.model_request.admission.state)}</p>
                 <p className="team-fine">A saved request is not a completed draft or clinical evidence.</p>
                 {entry.model_request.request.kind==='conversation'&&<button disabled={busy||recoveryBlocked} onClick={()=>void checkEntryResult(entry)}>Check saved result</button>}</article>}
-              {workspace.handoffs?.filter(h => h.origin_entry_id === entry.id).map(handoffCard)}
+
             </div>)}
             {pending?.type === "ask" && !localQuestionRepresented && <div className="team-turn"><article className="team-human-message"><small>You · {busy?'request in progress':'unconfirmed request'}</small><p>{pending.body.content}</p></article>
               {busy && <p className="team-thinking" role="status">{team?.configuration.bots.find(b => botAddress(b) === pending.body.role)?.name} is {team?.llm.enabled ? "thinking" : "reviewing"}…</p>}</div>}
@@ -1225,7 +1240,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               onPrep={team?.configuration.bots.some(member=>member.role==='visit_prep'&&member.enabled)?()=>{const reader=team.configuration.bots.find(member=>member.role==='visit_prep'&&member.enabled)!;setSelected(botAddress(reader));setMobilePanel('Conversation');}:undefined}
               source={source} evidence={evidence} setSource={setSource} setEvidence={setEvidence}
               onSave={() => append("evidence", evidence, source)} onNotebook={() => { setPanel("Notebook"); setMobilePanel("Notebook"); }} />}
-            {panel === "Work" && <>{!!workspace.handoffs?.length && <><h2>Team drafts</h2><p className="team-fine">Bot drafts ready for your review. Human assignments are shown above. Most recent first.</p>{[...workspace.handoffs].reverse().map(handoffCard)}</>}
+            {panel === "Work" && <>
               <h2>Linked work</h2><p className="team-fine">Existing work and approvals stay together. Private notes are not copied.</p>
               {workspace.entries.filter(e => e.kind === "work_link").map(e => <article className="team-work-card" key={e.id}>{e.ticket ? <><span className="team-kicker">EXISTING WORK</span><h3>{e.ticket.lane.replaceAll("_", " ")}</h3><span className="team-pill">{e.ticket.state.replaceAll("_", " ")}</span></> : "Linked work is no longer available in this encounter."}</article>)}
               {workspace.work_candidates.filter(t => !workspace.follow_ups?.some(f => f.ticket_id === t.id) && !workspace.entries.some(e => e.ticket?.id === t.id)).map(t => <button className="team-link-work" key={t.id} disabled={locked} onClick={() => void save({ type: "link", body: { expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(), ticket_id: t.id } })}>Link existing {t.lane.replaceAll("_", " ")} work</button>)}

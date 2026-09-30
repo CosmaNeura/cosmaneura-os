@@ -12,6 +12,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
+from tests.helpers.task_brief import REQUIREMENTS
 from tests.integration.test_routines import configuration as routine_configuration
 from tests.integration.test_workspace_capture import capture_case as _capture_case
 
@@ -275,7 +276,7 @@ def test_queued_handoff_is_failed_before_model_after_owner_adds_restriction(case
     f.configuration.workspace_llm_api_key=SecretStr('invented-model-token')
     installed,_=reviewed_save(f,team.default_configuration())
     monkeypatch.setattr(model_work,'dispatch_claim',lambda claim: BotReply('Invented private draft request',(),
-        'azure_gpt41',handoffs=(DraftBrief('scribe','Organize saved context for human review.'),)))
+        'azure_gpt41',handoffs=(DraftBrief('scribe','Organize saved context for human review.', REQUIREMENTS),)))
     assigned=f.client.post('/workspaces/'+f.workspace['id']+'/conversation',headers=f.headers,
         json={'expected_revision':1,'team_revision':1,'role':'chief','content':'Prepare a private draft','idempotency_key':'w33-queue'})
     assert assigned.status_code==200,assigned.text

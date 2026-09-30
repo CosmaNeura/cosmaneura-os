@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select
 
+from cosmas_os.application import handoff_briefs
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.config import settings as runtime_settings
@@ -116,6 +117,7 @@ def read(s, w, revision):
                 "attempt_count": latest.number,
                 "result_entry_id": latest.result_entry_id,
                 "error_code": states[latest.id][1],
+                **handoff_briefs.projection(s, handoff, states[latest.id][2]),
                 "attempts": [
                     {
                         "id": a.id,
@@ -192,21 +194,29 @@ def process_next(factory):
 
 
 async def run_worker(factory, stop, *, progress=None):
-    try:
+    async def lane():
         while not stop.is_set():
+            worked = False
             try:
-                await asyncio.to_thread(process_next, factory)
+                worked = await asyncio.to_thread(process_next, factory)
             except Exception:
-                # Preserve private errors and the existing durable lease recovery.
+                # Private failure details stay out of worker health.
                 if progress is not None:
                     progress.failed()
             else:
                 if progress is not None:
                     progress.succeeded()
+            if worked:
+                continue  # No artificial dwell between already-admitted jobs.
             try:
                 await asyncio.wait_for(stop.wait(), timeout=2)
             except TimeoutError:
                 pass
+
+    try:
+        # Claims commit before model I/O. Existing owner locks, leases, source
+        # checks and single-dispatch records fence all three independent lanes.
+        await asyncio.gather(*(lane() for _ in range(3)))
     finally:
         if progress is not None:
             progress.stopped()

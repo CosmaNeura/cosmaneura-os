@@ -21,9 +21,10 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def case_catalog():
+    from lab.inbound_workflow import INBOUND
     from lab.journey import INPUTS
 
-    return {**CASES, "clinic": CLINIC, "connectors": Case("connectors", "Email, calendar and fax fault laboratory",
+    return {**CASES, "clinic": CLINIC, "inbound": INBOUND, "connectors": Case("connectors", "Email, calendar and fax fault laboratory",
         "Exercise actual adapters and durable OAuth against synthetic providers.", "SYNTHETIC connector clinic", ()),
         "journey": Case("journey", "Chief prepares and verifies encounter handoffs",
         "Decompose intake, Session Prep and Scribe outputs into accountable private draft handoffs.",
@@ -31,6 +32,8 @@ def case_catalog():
 
 
 def case_checks(key):
+    if key == "inbound":
+        return ["tests/integration/test_lab_inbound.py"]
     if key == "clinic":
         return ["tests/integration/test_workspace_handoffs.py", "tests/integration/test_follow_up.py",
                 "tests/integration/test_vendor_work.py", "tests/integration/test_vendor_artifact_ledger.py"]
@@ -130,6 +133,10 @@ def worker(args):
                     from lab.connector_checks import run_connectors
 
                     result = run_connectors(app, store, episode)
+                elif key == "inbound":
+                    from lab.inbound_workflow import run_inbound
+
+                    result = run_inbound(app, store, episode)
                 elif key == "journey":
                     from lab.journey import run_journey
 

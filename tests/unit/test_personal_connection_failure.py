@@ -187,8 +187,30 @@ def test_google_calendar_uses_bounded_primary_read_and_rechecks_authority(connec
     assert "PRIVATE" not in caplog.text
     with case.factory() as session:
         audits = session.scalars(select(AuditEvent).where(AuditEvent.aggregate_id == case.account,
-            AuditEvent.event_type.endswith("calendar_read"))).all()
-        assert len(audits) == (0 if revoke else 1)
+            AuditEvent.event_type.in_(["workspace.google_calendar_read", "workspace.google_mail_read"]))).all()
+        assert [row.event_type for row in audits] == ([] if revoke else ["workspace.google_calendar_read"])
+
+
+@pytest.mark.parametrize("connection", [GooglePersonalConnection], indirect=True)
+@pytest.mark.parametrize("invalid_response", [
+    {"items": [{"id": "invented_event_without_interval"}]},
+    {"items": [], "unexpected": "invented_value"},
+])
+def test_invalid_calendar_read_never_records_success_and_valid_retry_stays_calendar(connection, invalid_response):
+    case = connection
+    case.scopes = "openid email https://www.googleapis.com/auth/gmail.metadata " + CALENDAR_SCOPE
+    assert case.service.callback(start(case), "synthetic_PRIVATE_code")
+    case.calendar_response = invalid_response
+    with pytest.raises(ValueError):
+        case.service.calendar(case.identity)
+    query = select(AuditEvent).where(AuditEvent.aggregate_id == case.account,
+        AuditEvent.event_type.in_(["workspace.google_calendar_read", "workspace.google_mail_read"]))
+    with case.factory() as session:
+        assert session.scalars(query).all() == []
+    case.calendar_response = {"items": []}
+    assert case.service.calendar(case.identity)["items"] == []
+    with case.factory() as session:
+        assert [row.event_type for row in session.scalars(query)] == ["workspace.google_calendar_read"]
 
 
 @pytest.mark.parametrize("connection", [MicrosoftPersonalConnection], indirect=True)
