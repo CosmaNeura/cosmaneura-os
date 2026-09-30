@@ -10,10 +10,13 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 from tests.integration.test_workspace_capture import capture_case  # noqa: F401
 
+from cosmas_os.adapters.gpt41 import GPT41Connector
 from cosmas_os.adapters.public_research import PublicResearch, record
 from cosmas_os.api import app as api
 from cosmas_os.application import database_preparation as preparation
 from cosmas_os.application import provider_team as team
+from cosmas_os.application import research_analysis
+from cosmas_os.models import EncounterWorkspace, WorkspaceEntry
 from cosmas_os.ports.research import research_digest
 from cosmas_os.research_models import ResearchRun
 
@@ -54,7 +57,11 @@ def runtime_research(request, monkeypatch):
             assert row.request_sha256 == research_digest(command)
         return [record(source, query, "a" * 64, identity="NCT12345678", title="Invented clinical study",
             url="https://clinicaltrials.gov/study/NCT12345678", excerpt="Wholly invented registry excerpt.",
-            fields=(("Eligibility", "Invented study criteria; no individual eligibility determination."),))]
+            updated="2026-09-20", scope="limited",
+            fields=(("Recruitment status", "RECRUITING"), ("Phase", "PHASE2"),
+                    ("Interventions", "Type: BIOLOGICAL; Name: Invented cell intervention"),
+                    ("Locations", "Facility: Invented Research Center; Site status: RECRUITING"),
+                    ("Eligibility", "Invented study criteria; no individual eligibility determination.")))]
 
     monkeypatch.setattr(PublicResearch, "lookup", lookup)
     quoted_role = f.engine.dialect.identifier_preparer.quote_identifier(role)
@@ -106,6 +113,28 @@ def test_restricted_role_recovers_missing_helper_then_searches_resolves_and_save
     assert f.client.post(save_path + "/resolve", headers=r.headers, json=saved_resolve).json() == saved.json()
     assert f.client.post(save_path, headers=r.headers, json=save).json() == saved.json()
     assert len(r.calls) == 1
+    receipt = saved.json()
+    with Session(r.engine) as session:
+        entry = session.get(WorkspaceEntry, receipt["entry_id"])
+        assert entry is not None
+        saved_text = entry.content
+        assert "PHASE2" not in saved_text  # Historical immutable excerpt format.
+        workspace = session.get(EncounterWorkspace, f.workspace["id"])
+        command = {"content": "Compare the selected trial; do not determine individual eligibility.",
+            "research_analysis": {"version": 1, "consented": True, "entries": [{
+                "entry_id": receipt["entry_id"], "entry_revision": receipt["entry_revision"],
+                "run_id": receipt["run_id"], "save_request_sha256": receipt["request_sha256"]}]}}
+        context = research_analysis.build_context(session, workspace,
+            {"role": "research", "response_style": "brief"}, command)
+        prepared = GPT41Connector(lambda: pytest.fail("Model credentials accessed")).prepare(context)
+        source = prepared["sources"][0]
+        for detail in ("RECRUITING", "PHASE2", "Invented cell intervention", "Invented Research Center",
+                       "no individual eligibility determination", "2026-09-20", source_hash,
+                       "Reported result scope: limited", "Wholly invented registry excerpt."):
+            assert detail in source["text"]
+        assert source["truncated"] is False and source["source_id"] == entry.id
+        session.refresh(entry)
+        assert entry.content == saved_text
 
 
 def test_runtime_only_executes_exact_pure_validators_and_readiness_detects_extra_grants(runtime_research):

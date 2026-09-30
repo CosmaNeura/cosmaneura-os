@@ -206,6 +206,96 @@ def test_selected_context_and_actual_prepared_body_contain_only_exact_selected_e
     assert "PRIVATE" not in json.dumps(envelope)
 
 
+def trial_fixture(*, excerpt="Invented eligibility criteria.", fields=(), count=1):
+    case = fixture(count)
+    s, _, _, _, _, command = case
+    for anchor in command["research_analysis"]["entries"]:
+        run = s.rows[(ResearchRun, anchor["run_id"])]
+        receipt = next(row for (cls, _), row in s.rows.items()
+                       if cls is ResearchSave and row.entry_id == anchor["entry_id"])
+        run.request.update(topic="trials", sources=["clinical_trials"])
+        run.request_sha256 = research_digest(run.request)
+        source = record("clinical_trials", run.request["query"], "a" * 64,
+            identity="NCT12345678", title="Invented cell therapy study",
+            url="https://clinicaltrials.gov/study/NCT12345678", updated="2026-09-20",
+            excerpt=excerpt, fields=fields, scope="limited")
+        run.results = [source]
+        receipt.request["source_hashes"] = [source["sha256"]]
+        receipt.request_sha256 = research_digest(receipt.request)
+        anchor["save_request_sha256"] = receipt.request_sha256
+        entry = s.rows[(WorkspaceEntry, anchor["entry_id"])]
+        entry.content, entry.request_hash = research.source_excerpt([source]), receipt.request_sha256
+    return case
+
+
+def test_realistic_trial_hydrates_all_selected_fields_and_full_retained_eligibility():
+    excerpt = ("Invented eligibility criterion; " * 90)[:2400]
+    fields = (("Recruitment status", "RECRUITING"), ("Phase", "PHASE2"),
+              ("Interventions", "Invented biological cell intervention; " * 8),
+              ("Locations", "Invented academic center; Site status: RECRUITING; " * 8),
+              ("Minimum age", "18 Years"), ("Maximum age", "75 Years"), ("Sex", "ALL"))
+    s, w, _, _, settings, command = trial_fixture(excerpt=excerpt, fields=fields)
+    anchor = command["research_analysis"]["entries"][0]
+    run = s.rows[(ResearchRun, anchor["run_id"])]
+    selected = run.results[0]
+    run.results.append(record("clinical_trials", run.request["query"], "b" * 64,
+        identity="NCT87654321", title="Unselected source", url="https://clinicaltrials.gov/study/NCT87654321",
+        fields=(("Locations", "UNSELECTED LOCATION MUST NOT ENTER CONTEXT"),)))
+    entry = s.rows[(WorkspaceEntry, anchor["entry_id"])]
+    original = entry.content
+    context = analysis.build_context(s, w, settings, command)
+    prepared = GPT41Connector(lambda: pytest.fail("Model I/O")).prepare(context)
+    source = prepared["sources"][0]
+    assert len(source["text"]) <= 5000 and source["truncated"] is False
+    assert selected["excerpt"] == excerpt.strip()
+    assert selected["excerpt"] in source["text"] and selected["sha256"] in source["text"]
+    for field in selected["fields"]:
+        assert field["label"] + ": " + field["text"] in source["text"]
+    assert "2026-09-20" in source["text"] and "Reported result scope: limited" in source["text"]
+    assert "UNSELECTED LOCATION" not in source["text"]
+    assert source["source_id"] == entry.id and entry.content == original
+    assert s.added == [] and s.commits == 0
+
+
+@pytest.mark.parametrize("corruption", ["metadata", "workspace"])
+def test_retained_trial_metadata_cannot_bypass_hash_or_workspace_binding(corruption):
+    s, w, _, _, settings, command = trial_fixture(fields=(("Recruitment status", "RECRUITING"),))
+    anchor = command["research_analysis"]["entries"][0]
+    run = s.rows[(ResearchRun, anchor["run_id"])]
+    if corruption == "metadata":
+        run.results[0]["fields"][0]["text"] = "CHANGED WITHOUT A NEW SOURCE HASH"
+    else:
+        run.workspace_id = str(uuid4())
+    with pytest.raises(WorkspaceError, match="source_changed"):
+        analysis.build_context(s, w, settings, command)
+    assert s.added == [] and s.commits == 0
+
+
+def test_overbudget_trial_refuses_instead_of_shortening_fields_or_eligibility():
+    fields = tuple((label, "x" * 750) for label in ("Recruitment status", "Phase", "Interventions", "Locations"))
+    s, w, _, _, settings, command = trial_fixture(excerpt="e" * 2500, fields=fields)
+    entry = s.rows[(WorkspaceEntry, command["research_analysis"]["entries"][0]["entry_id"])]
+    original = entry.content
+    assert len(original) < 5000
+    with pytest.raises(WorkspaceError, match="research_analysis_too_large") as error:
+        analysis.build_context(s, w, settings, command)
+    assert error.value.status == 422 and entry.content == original
+    assert s.added == [] and s.commits == 0
+
+
+def test_retained_trial_metadata_counts_toward_aggregate_utf8_limit():
+    fields = tuple((label, "漢" * 700) for label in ("Recruitment status", "Phase", "Interventions", "Locations"))
+    s, w, _, _, settings, command = trial_fixture(excerpt="漢" * 900, fields=fields, count=3)
+    contents = [research.analysis_excerpt(s.rows[(ResearchRun, anchor["run_id"])].results)
+                for anchor in command["research_analysis"]["entries"]]
+    assert all(len(content) <= 5000 for content in contents)
+    assert sum(len(content) for content in contents) <= 15000
+    assert sum(len(content.encode()) for content in contents) > 32768
+    with pytest.raises(WorkspaceError, match="research_analysis_too_large"):
+        analysis.build_context(s, w, settings, command)
+    assert s.added == [] and s.commits == 0
+
+
 @pytest.mark.parametrize("corruption", ["missing_receipt", "foreign_workspace", "foreign_box", "foreign_owner",
     "wrong_run", "wrong_save_hash", "wrong_revision", "ordinary_evidence", "changed_text", "wrong_actor",
     "changed_record", "changed_save", "running_run", "missing_entry", "changed_run_request"])
