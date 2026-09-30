@@ -3,7 +3,7 @@ import react from '@vitejs/plugin-react';
 import {fileURLToPath} from 'node:url';
 const path=(value:string)=>fileURLToPath(new URL(value,import.meta.url));
 export default defineConfig({
-  root:path('./clinician-lab'),plugins:[react()],
+  root:path('./clinician-lab'),publicDir:path('./public'),plugins:[react()],
   resolve:{alias:[{find:'./session-prep-api',replacement:path('./clinician-lab/prep.ts')},
     {find:'./VendorWorkMount',replacement:path('./clinician-lab/unsupported.tsx')},
     {find:'@cosmaneura-scribe/capture-protocol',replacement:path('../clients/capture/protocol/generated.ts')},
