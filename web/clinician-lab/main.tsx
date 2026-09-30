@@ -7,7 +7,7 @@ installFixtures();
 createRoot(document.getElementById('root')!).render(<>
   <aside style={{padding:'10px 20px',background:'#e7efe9',color:'#203d32',font:'14px system-ui'}}>
     <strong>Clinician usability test · invented patient only.</strong> Real interface with scripted services and saved example drafts.
-    Notebook and private review changes stay in this browser tab. Recording, account sign-in and external actions are unavailable. Do not enter real information.
+    Notebook and private review changes stay in this browser tab. The recorder uses simulated audio; your microphone stays off. Account sign-in and external actions are unavailable. Do not enter real information.
   </aside>
   <EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>
 </>);

@@ -60,7 +60,7 @@ it("shows retained gaps and sends the qualified source to the transcript editor 
   snapshot = {...snapshot,state:"complete",sessionId:qualifiedSource.session_id,transcript:qualifiedSource.raw_transcript,qualifiedSource};
   vi.mocked(readWorking).mockResolvedValue(qualifiedSource.working_transcript);
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} correctionsEnabled />));
-  await click("Open recording");
+  await click("Record visit");
   expect(container.querySelector('[aria-label="Capture interruptions"]')?.textContent).toContain("Recording has 1 interruption");
   expect(container.textContent).toContain("Original recording transcript");
   expect(vi.mocked(readWorking).mock.calls.at(-1)?.[5]).toEqual(qualifiedSource);
@@ -78,7 +78,7 @@ async function consent() {
 
 it("requires valid regions and a fresh combined consent/start click, then stops explicitly", async () => {
   vi.mocked(prepareCapture).mockRejectedValueOnce({ code: "capture_consent_required" });
-  await click("Open recording");
+  await click("Record visit");
   expect(factory).not.toHaveBeenCalled();
   expect(button("Confirm consent & record").disabled).toBe(true);
   await consent(); await click("Confirm consent & record");
@@ -94,7 +94,7 @@ it("requires valid regions and a fresh combined consent/start click, then stops 
 
 it("does not attest on form submission and consumes a double consent click once", async () => {
   vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
-  await click("Open recording"); await consent();
+  await click("Record visit"); await consent();
   await act(async () => container.querySelector("form")!.dispatchEvent(new Event("submit", {bubbles: true, cancelable: true})));
   expect(prepareCapture).toHaveBeenCalledTimes(1);
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
@@ -109,7 +109,7 @@ it("does not attest on form submission and consumes a double consent click once"
 it("shows and attests virtual modality for selected meeting audio", async () => {
   vi.mocked(desktopMeetingCaptureAvailable).mockReturnValue(true);
   vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
-  await click("Open recording"); await consent();
+  await click("Record visit"); await consent();
   const source = container.querySelector<HTMLSelectElement>('[aria-label="Recording source"]')!;
   await act(async () => { source.value = "desktop_meeting"; source.dispatchEvent(new Event("change", {bubbles: true})); });
   expect(container.querySelector(".capture-defaults")?.textContent).toContain("Online meeting · microphone and meeting audio");
@@ -126,7 +126,7 @@ it.each([true, false])("restores the source preference only where meeting captur
   vi.mocked(desktopMeetingCaptureAvailable).mockReturnValue(available);
   vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} preferencesScope={scope} />));
-  await click("Open recording");
+  await click("Record visit");
   expect(container.querySelector(".capture-defaults")?.textContent).toContain(available ? "Online meeting" : "In-person visit");
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   await click("Confirm consent & record");
@@ -145,7 +145,7 @@ it.each(["paused", "audio", "resume", "legacy", "transfer", "permission"])(
       phase: "permission_required", coverage: "not_started", trimmedStartMs: 0, trimmedEndMs: null,
     }};
     vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
-    await click("Open recording"); await consent(); await click("Confirm consent & record");
+    await click("Record visit"); await consent(); await click("Confirm consent & record");
     expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   },
 );
@@ -154,7 +154,7 @@ it("closes a late consent preparation without capture after the account changes"
   vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
   let finish!: (value: CaptureRuntime) => void;
   factory.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
-  await click("Open recording"); await consent(); await click("Confirm consent & record");
+  await click("Record visit"); await consent(); await click("Confirm consent & record");
   const changedIdentity = {...identity, getToken: vi.fn()};
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={changedIdentity} runtimeFactory={factory} />));
   await act(async () => finish(runtime));
@@ -165,7 +165,7 @@ it("closes a late consent preparation without capture after the account changes"
 
 it("offers upload retry after reopening or failure, without interrupting an active automatic upload", async () => {
   snapshot = {...snapshot,state:"uploading",statusCode:"synthetic_preview_uploading",recordedChunks:360};
-  await click("Open recording");
+  await click("Record visit");
   expect(container.textContent).toContain("Uploading audio");
   expect(button("Retry saved work")).toBeUndefined();
   snapshot = {...snapshot,statusCode:"capture_recovered_uploading"};
@@ -197,7 +197,7 @@ it.each([false, true])("can cancel a pending native start and ignores its later 
   });
   admitWorkspaceProtocol(identity,workspaceProtocolGeneration(identity));
   if (combined) vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
-  await click("Open recording");
+  await click("Record visit");
   if (combined) { await consent(); await click("Confirm consent & record"); }
   else await click("Start recording");
   expect(button("Cancel start").disabled).toBe(false);
@@ -212,7 +212,7 @@ it("selects an iPhone input while paused without starting a recording", async ()
   runtime.sourceKind="microphone";runtime.captureMode="native_microphone";runtime.supportsContinuation=true;
   runtime.controller.selectMicrophoneInput=vi.fn().mockResolvedValue(undefined);
   snapshot={...snapshot,state:"paused",native:{...nativeState(),phase:"paused"}};
-  await click("Open recording");
+  await click("Record visit");
   const select=container.querySelector<HTMLSelectElement>('[aria-label="Recording microphone"]')!;
   await act(async()=>{select.value="bluetooth";select.dispatchEvent(new Event("change",{bubbles:true}));});
   expect(runtime.controller.selectMicrophoneInput).toHaveBeenCalledWith("bluetooth");
@@ -224,7 +224,7 @@ it("lets a native recording retry saving even when its cached audio count is zer
   vi.mocked(prepareCapture).mockResolvedValue({...prepared,configured_capture:{schema_version:"1.0",language_mode:"en-US"}});
   snapshot={...snapshot,state:"paused",statusCode:"capture_recovery_pending",recordedChunks:0,
     native:{...nativeState(),phase:"paused"}};
-  await click("Open recording");
+  await click("Record visit");
   expect(container.textContent).toContain("saving could not be confirmed");
   expect(button("Retry saving and upload").disabled).toBe(false);
   await click("Retry saving and upload");
@@ -252,7 +252,7 @@ it("opens a specific Scribe task without starting capture and keeps its identity
 it("retries the exact consent and key after an unconfirmed preparation", async () => {
   vi.mocked(prepareCapture).mockRejectedValueOnce({ code: "capture_consent_required" })
     .mockRejectedValueOnce(new Error("private upstream error"));
-  await click("Open recording"); await consent(); await click("Confirm consent & record");
+  await click("Record visit"); await consent(); await click("Confirm consent & record");
   const first = vi.mocked(prepareCapture).mock.calls[1];
   expect(container.textContent).not.toContain("private upstream error");
   await click("Retry preparation");
@@ -262,7 +262,7 @@ it("retries the exact consent and key after an unconfirmed preparation", async (
 
 it("restores a paused recording for review without resuming its source", async () => {
   snapshot = { ...snapshot, state: "paused", statusCode: "capture_gap_ack_required", recordedChunks: 1 };
-  await click("Open recording");
+  await click("Record visit");
   expect(button("Start synthetic capture")).toBeUndefined();
   expect(container.textContent).toContain("Saved audio is retained");
   await click("Acknowledge the interruption");
@@ -272,7 +272,7 @@ it("restores a paused recording for review without resuming its source", async (
 
 it("closes the runtime when leaving the workspace, including a transient close failure", async () => {
   vi.mocked(runtime.close).mockRejectedValueOnce(new Error("synthetic stop failure"));
-  await click("Open recording"); await click("Start synthetic capture");
+  await click("Record visit"); await click("Start synthetic capture");
   await act(async () => root.unmount());
   expect(runtime.close).toHaveBeenCalledTimes(2);
 });
@@ -281,7 +281,7 @@ it.each([false, true])("closes a runtime that finishes preparing after unmount (
   let resolve: (value: CaptureRuntime) => void = () => {};
   factory.mockImplementationOnce(() => new Promise(value => { resolve = value; }));
   if (combined) vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
-  await click("Open recording");
+  await click("Record visit");
   if (combined) { await consent(); await click("Confirm consent & record"); }
   await act(async () => root.unmount());
   await act(async () => resolve(runtime));
@@ -301,7 +301,7 @@ it("checks an uploaded recording and shows source speech as text with speaker/ti
     } };
     listener?.(snapshot);
   });
-  await click("Open recording");
+  await click("Record visit");
   await click("Check transcript");
   expect(container.textContent).toContain("Transcript available");
   expect(container.textContent).toContain("Clinician · 1:02");
@@ -322,7 +322,7 @@ async function correctedPanel() {
   vi.mocked(captureDraft).mockResolvedValue(draft);
   await act(async()=>root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory}
     notesEnabled correctionsEnabled onReviewDraft={vi.fn()}/>));
-  await click("Open recording");return draft;
+  await click("Record visit");return draft;
 }
 async function textarea(label:string,text:string){await act(async()=>{
   const input=container.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${label}"]`)!;
@@ -354,7 +354,7 @@ it("prepares recovery without starting capture and retains the explicit Start ac
     listener?.(snapshot);
   });
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} recoveryEnabled />));
-  await click("Open recording"); await click("Prepare to resume");
+  await click("Record visit"); await click("Prepare to resume");
   expect(runtime.controller.acknowledgeGap).toHaveBeenCalledTimes(1);
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   expect(container.textContent).toContain("The interruption is saved");
@@ -370,7 +370,7 @@ it("retries an unconfirmed finish decision without changing it to resume", async
     throw new Error("discarded reply");
   });
   await act(async () => root.render(<CapturePanel workspaceId={workspace} identity={identity} runtimeFactory={factory} recoveryEnabled />));
-  await click("Open recording"); await click("Finish this recording"); await click("Retry recovery");
+  await click("Record visit"); await click("Finish this recording"); await click("Retry recovery");
   expect(runtime.controller.finishInterruptedCapture).toHaveBeenCalledTimes(2);
   expect(runtime.controller.acknowledgeGap).not.toHaveBeenCalled();
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
@@ -381,7 +381,7 @@ it("keeps Stop available and prevents a new recording while workspace compatibil
   vi.stubEnv('VITE_WORKSPACE_HOSTED_ENABLED','true');
   try {
     admitWorkspaceProtocol(identity,workspaceProtocolGeneration(identity));
-    await click('Open recording');await click('Start synthetic capture');
+    await click('Record visit');await click('Start synthetic capture');
     vi.stubGlobal('fetch',vi.fn(async()=>new Response('{}',{status:426,headers:{'X-Cosmas-Workspace-Protocol':'1'}})));
     await expect(workspaceFetch(identity,'https://api.example.invalid/workspaces',{headers:{'X-Cosmas-Workspace-Protocol':'1'}})).rejects.toMatchObject({status:503});
     await click('Stop and upload');expect(runtime.controller.stopRecording).toHaveBeenCalledOnce();
@@ -396,7 +396,7 @@ it("offers finish-only recovery for an older configured recording", async () => 
   runtime.recoveryOnly = true; runtime.canFinishRecovery = true;
   vi.mocked(prepareCapture).mockResolvedValue({...prepared,configured_capture:{schema_version:"1.0",language_mode:"en-US"}});
   snapshot = {...snapshot,state:"paused",recordedChunks:1};
-  await click("Open recording");
+  await click("Record visit");
   expect(button("Prepare to resume")).toBeUndefined();
   expect(button("Start recording")).toBeUndefined();
   await click("Finish this recording");
@@ -406,7 +406,7 @@ it("offers finish-only recovery for an older configured recording", async () => 
 
 it("keeps an older empty preparation visible without a Start action", async () => {
   runtime.recoveryOnly = true;
-  await click("Open recording");
+  await click("Record visit");
   expect(button("Start synthetic capture")).toBeUndefined();
   expect(container.textContent).toContain("older recording preparation is retained");
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
@@ -416,7 +416,7 @@ it('continues an empty preparation without recording until a separate Start',asy
   const original=runtime;
   const current:CaptureRuntime={...original,recoveryOnly:false};
   original.recoveryOnly=true;original.continuePreparation=vi.fn().mockResolvedValue(current);
-  await click('Open recording');
+  await click('Record visit');
   expect(button('Start synthetic capture')).toBeUndefined();
   await click('Continue preparation');
   expect(original.continuePreparation).toHaveBeenCalledOnce();
@@ -429,7 +429,7 @@ it('continues an empty preparation without recording until a separate Start',asy
 
 it('keeps a failed preparation transfer retryable',async()=>{
   runtime.recoveryOnly=true;runtime.continuePreparation=vi.fn().mockRejectedValue(Error('interrupted'));
-  await click('Open recording');await click('Continue preparation');
+  await click('Record visit');await click('Continue preparation');
   expect(button('Continue preparation')).toBeDefined();
   expect(button('Start synthetic capture')).toBeUndefined();
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
@@ -439,7 +439,7 @@ it('keeps a failed preparation transfer retryable',async()=>{
 it.each(["paused","ready"] as const)("can finish an older %s recording with an earlier Resume decision",async state=>{
   runtime.recoveryOnly=true;runtime.canFinishRecovery=true;
   snapshot={...snapshot,state,recordedChunks:1,recoveryDecision:"resume_capture"};
-  await click("Open recording");
+  await click("Record visit");
   expect(button("Prepare to resume")).toBeUndefined();
   expect(button("Start synthetic capture")).toBeUndefined();
   await click("Finish this recording");

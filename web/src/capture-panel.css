@@ -1,11 +1,19 @@
 .capture-panel { margin: 0 28px 20px; border: 1px solid #d9dfd6; border-radius: 14px; background: #fafbf7; color: #273c32; }
 .capture-panel > header { display: flex; align-items: center; gap: 12px; padding: 14px 18px; }
 .capture-panel header > div { flex: 1; }
+.capture-heading { min-width: 0; }
+.capture-heading h2 { margin: 0; font-size: 20px; line-height: 1.4; }
+.capture-encounter { margin: 4px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.capture-description { margin: 5px 0 0; font-size: 14px; line-height: 1.5; }
+.capture-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 9px; font-size: 13px; font-weight: 600; }
+.capture-state time { font-variant-numeric: tabular-nums; }
+.capture-panel .capture-record { min-height: 48px; padding: 12px 24px; font-size: 16px; flex-shrink: 0; }
+.capture-consent-hint { margin: -5px 18px 14px; font-size: 13px; color: #526459; }
 .capture-panel strong, .capture-panel small { display: block; }
 .capture-panel small { color: #69776d; font-size: 12px; line-height: 1.5; }
 .capture-indicator { width: 9px; height: 9px; border-radius: 50%; background: #92a88a; flex: 0 0 auto; }
 .capture-indicator.recording { background: #b34136; box-shadow: 0 0 0 5px #b3413615; }
-.capture-details { padding: 0 18px 16px 39px; }
+.capture-details { padding: 0 18px 16px; }
 .capture-details form { max-width: 500px; display: grid; gap: 10px; }
 .capture-details label { display: grid; gap: 6px; font-size: 13px; }
 .capture-details .capture-consent { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; }
@@ -26,7 +34,7 @@
 .capture-error { color: #9b382e; }
 .capture-gap { background: #f6eedc; border-radius: 8px; padding: 10px 14px; }
 .capture-gap small { margin-top: 8px; }
-@media (max-width: 700px) { .capture-panel { margin: 0 14px 14px; } .capture-panel > header { padding: 12px; gap: 10px; } .capture-details { padding: 0 12px 14px; } .capture-panel header button { font-size: 12px; } }
+@media (max-width: 700px) { .capture-panel { margin: 0 14px 14px; } .capture-panel > header { padding: 14px; gap: 12px; flex-wrap: wrap; } .capture-heading { flex-basis: 100% !important; } .capture-panel .capture-record { width: 100%; } .capture-consent-hint { margin: -3px 14px 14px; } .capture-details { padding: 0 14px 14px; } }
 .capture-note { border-top: 1px solid #dce3dc; margin-top: 1rem; padding-top: 1rem; min-width: 0; }
 .capture-note h3 { margin: 0 0 .5rem; }
 .capture-note label { display: grid; gap: .45rem; font-size: .9rem; max-width: 28rem; }

@@ -86,7 +86,7 @@ async function open(number: number) {
 async function start() {
   await open(1);
   await click("Scribe", container.querySelector('[aria-label="Provider Team"]')!);
-  await click("Open recording");
+  await click("Record visit");
   expect(runtime.controller.startRecording).not.toHaveBeenCalled();
   await click("Start synthetic capture");
 }
@@ -138,7 +138,7 @@ it("requires a new recording request after closing one encounter and opening ano
   expect(openCaptureRuntime).toHaveBeenCalledTimes(1);
   expect(container.querySelector('[aria-label="Scribe recording"]')?.textContent).toContain("Consent first");
   expect(container.querySelector<HTMLTextAreaElement>("#team-notebook")?.value).toBe("");
-  await click("Open recording");
+  await click("Record visit");
   expect(prepareCapture).toHaveBeenCalledTimes(2);
   expect(vi.mocked(prepareCapture).mock.calls[1][0]).toBe(visit(2).id);
   expect(runtime.controller.startRecording).toHaveBeenCalledTimes(1);

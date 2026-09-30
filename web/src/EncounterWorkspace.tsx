@@ -749,6 +749,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   useEffect(()=>{if(selectedPrep)questionRef.current?.focus();},[selectedPrep]);
   const visitPrepReader = bot?.role === "visit_prep" && ENCOUNTER_PREP_BUILD && !!authenticated && !!team?.capture?.prep_enabled;
   const scribe = bot?.role === "scribe" ? bot : team?.configuration.bots.find(b => b.role === "scribe" && !b.instance_id);
+  useEffect(() => {
+    if (bot?.role === "scribe" && !settingsOpen && !practiceOpen)
+      document.querySelector('[aria-label="Scribe recording"]')?.scrollIntoView?.({block: "start"});
+  }, [selected, workspace?.id, settingsOpen, practiceOpen]);
   const latestNote = workspace?.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "";
   // Activity is read-only: its own busy navigation lock is excluded here so the
   // final selection can still inspect independently retained unsaved work.
@@ -1051,7 +1055,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               <strong>{encounter.label}</strong><span>{encounter.workspace_id ? "Open saved notes" : "Open visit"}</span>
             </button>
             {CAPTURE_WORKSPACE_BUILD && (!team || team.capture?.enabled) && <button className="team-primary team-record-visit" aria-label={`Record ${encounter.label}`}
-              disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id, undefined, undefined, true)}>Record visit</button>}
+              disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id, undefined, undefined, true)}><span aria-hidden="true">🎙️ </span>Record visit</button>}
           </article>) : <p>No confirmed encounters are available for this account. Connect your practice to find its appointments.</p>}
         </section>}
         <p className="team-fine">Connect your practice once. Add other services whenever you need them.</p>
@@ -1074,6 +1078,14 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             openRequest={locked || settingsOpen || practiceOpen ? 0 : captureRequest} preferencesScope={team.recovery_scope}
             onNotebook={() => { setPanel("Notebook"); setMobilePanel("Notebook"); }}
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} reviewLocked={locked} />}
+        {bot?.role === "scribe" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && !settingsOpen &&
+          <section className="capture-panel" aria-label="Scribe recording"><header>
+            <div className="capture-heading"><h2><span aria-hidden="true">🎙️</span> {bot.name} recording</h2>
+              <p className="capture-description">Record a visit here and review Scribe’s draft afterward.</p>
+              <div className="capture-state" role="status">Recording needs a connection</div>
+              <p className="capture-description">Connect Scribe for this practice to use the recorder.</p></div>
+            <button className="team-primary capture-record" disabled={locked || connectionNavigationLocked} onClick={() => void openSettings('connections')}>Set up recording</button>
+          </header></section>}
         <div hidden={settingsOpen}>
         <nav className={`team-mobile-tabs${bot?.role === "scribe" ? " team-scribe-tabs" : ""}`} aria-label={bot?.role === "scribe" ? "Visit view" : "Mobile encounter view"}>
           {(bot?.role === "scribe" ? ["Notebook", "Conversation", "Review"] : ["Conversation", "Notebook", "Sources", "Review", "Work"]).map(value => <button key={value} aria-pressed={mobilePanel === value}

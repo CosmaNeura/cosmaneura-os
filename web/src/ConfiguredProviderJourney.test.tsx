@@ -91,7 +91,7 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());access.journal.close();node.remove();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 
 it('connects recording, translation review, Core editing and reopening the saved version',async()=>{
-  await display();await click('Open recording');await click('Start synthetic capture');await click('Stop and upload');
+  await display();await click('Record visit');await click('Start synthetic capture');await click('Stop and upload');
   await settleUntil(()=>node.textContent!.includes('No tengo fiebre.'));expect(button('Continue to note')).toBeUndefined();
   await click('Accept English translation');await click('Continue to note');
   expect(runtime.releaseUploadedCapture).toHaveBeenCalledOnce();
@@ -104,7 +104,7 @@ it('connects recording, translation review, Core editing and reopening the saved
   await click('Save draft edits');await click('Use saved draft for review');
   await settleUntil(()=>selected!==undefined);
   expect(selected?.fields?.Plan).toBe('Provider corrected this invented plan.');expect(selected?.reviewed_source?.working_version).toBe(2);
-  await act(async()=>root.render(<div/>));await display();await click('Open recording');await click('Continue to note');
+  await act(async()=>root.render(<div/>));await display();await click('Record visit');await click('Continue to note');
   await settleUntil(()=>node.textContent!.includes('Provider corrected this invented plan.'));
   expect(calls.filter(c=>c.path==='notes'&&c.body.note.action==='prepare')).toHaveLength(1);
   expect(runtime.controller.refreshTranscriptionStatus).not.toHaveBeenCalled();
@@ -112,12 +112,12 @@ it('connects recording, translation review, Core editing and reopening the saved
 
 it('recovers a lost translation decision after remount with its exact original key',async()=>{
   state={...state,state:'processing'};loseReview=true;
-  await display();await click('Open recording');await click('Accept English translation');
+  await display();await click('Record visit');await click('Accept English translation');
   await settleUntil(()=>node.textContent!.includes('save is unconfirmed'));
   await act(async()=>root.render(<div/>));
   access.journal.close();
   access={...access,journal:new DraftJournal(await openDraftStore({scope:'a'.repeat(64),native:false,indexedDB:idb,crypto:webcrypto}))};
-  await display();await click('Open recording');await click('Retry the same decision');
+  await display();await click('Record visit');await click('Retry the same decision');
   await settleUntil(()=>!!button('Continue to note'));
   const decisions=calls.filter(c=>c.path==='operations'&&c.body.operation.kind==='decide_translation');
   expect(decisions).toHaveLength(2);expect(decisions[0].body).toEqual(decisions[1].body);
@@ -136,7 +136,7 @@ it('requires an explicit restart after pause and retries an unconfirmed native s
   runtime.controller.finishInterruptedCapture=vi.fn(async()=>{
     state={...state,state:'processing'};publish(state);
   });
-  await display();await click('Open recording');await click('Start recording');await click('Pause recording');
+  await display();await click('Record visit');await click('Start recording');await click('Pause recording');
   expect(node.textContent).toContain('Audio capture has stopped.');
   await click('Prepare to resume');expect(start).toHaveBeenCalledTimes(1);
   expect(node.textContent).toContain('Press Start recording when you are ready to continue.');
@@ -150,7 +150,7 @@ it('offers upload retry without starting another recording',async()=>{
   state={...state,state:'uploading',statusCode:'capture_upload_pending',recordedChunks:1};
   const start=vi.spyOn(runtime.controller,'startRecording');
   runtime.controller.resumePendingWork=vi.fn(async()=>{state={...state,state:'processing'};publish(state);});
-  await display();await click('Open recording');await click('Retry saved work');
+  await display();await click('Record visit');await click('Retry saved work');
   expect(runtime.controller.resumePendingWork).toHaveBeenCalledOnce();expect(start).not.toHaveBeenCalled();
   expect(calls.filter(c=>c.path==='admission')).toHaveLength(1);
 });

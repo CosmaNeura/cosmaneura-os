@@ -5,6 +5,8 @@ const path=(value:string)=>fileURLToPath(new URL(value,import.meta.url));
 export default defineConfig({
   root:path('./clinician-lab'),publicDir:path('./public'),plugins:[react()],
   resolve:{alias:[{find:'./session-prep-api',replacement:path('./clinician-lab/prep.ts')},
+    {find:'./capture-api',replacement:path('./clinician-lab/capture.ts')},
+    {find:'./capture-runtime',replacement:path('./clinician-lab/capture.ts')},
     {find:'./VendorWorkMount',replacement:path('./clinician-lab/unsupported.tsx')},
     {find:'@cosmaneura-scribe/capture-protocol',replacement:path('../clients/capture/protocol/generated.ts')},
     {find:'@cosmaneura-scribe/capacitor-ios-pcm',replacement:path('../clients/capture/plugins/ios-pcm/index.ts')},
