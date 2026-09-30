@@ -1173,12 +1173,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             <div hidden={panel !== "Work"}><FollowUpWork key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
               onSave={operation => void save(operation)} onReview={() => {setPanel("Review");setMobilePanel("Review");}} /></div>
             {panel === "Notebook" && <>
-              <div className="team-notebook-title"><h2>Jotted notes</h2><span className="team-pill">{note === latestNote ? "Saved" : "Not saved to notebook"}</span></div>
+              <div className="team-task-actions"><div className="team-notebook-title"><h2>Jotted notes</h2><span className="team-pill">{note === latestNote ? "Saved" : "Not saved to notebook"}</span></div>
+                <button className="team-primary" disabled={locked || !note.trim()} onClick={()=>append("scratchpad",note)}>Save notebook revision</button></div>
               {stage === "During" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && <div className="team-capture"><span>Recording awaits Scribe connection</span><button disabled>Start recording</button><button disabled>Voice instruction</button></div>}
               <p className="team-fine">Your working notebook. Shape the visit note in Review when you are ready.</p>
               <form onSubmit={event => { event.preventDefault(); append("scratchpad", note); }}><label className="team-sr-only" htmlFor="team-notebook">Jotted notes</label>
                 <textarea id="team-notebook" className="workspace-notepad team-notepad" rows={14} maxLength={20000} value={note} disabled={locked} onChange={e => setNote(e.target.value)} placeholder="An agenda, a thought, the details you want to keep…" />
-                <button className="team-primary" disabled={locked || !note.trim()}>Save notebook revision</button><p className="team-fine">Your bots use saved notebook entries. Working copies on this device are separate from saved entries.</p></form>
+                <p className="team-fine">Your bots use saved notebook entries. Working copies on this device are separate from saved entries.</p></form>
               <details className="team-history"><summary>Saved notebook history</summary>{workspace.entries.filter(e => e.kind === "scratchpad").map(e => <article key={e.id}><small>Revision {e.revision}</small><p>{e.content}</p></article>)}</details>
             </>}
             {panel === "Sources" && <EncounterSources workspace={workspace} selectedSource={selectedSource} locked={locked}
