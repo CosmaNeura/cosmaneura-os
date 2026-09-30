@@ -26,6 +26,11 @@ exchanges. It does not revoke the application's consent in Microsoft; that can b
 removed in the user's Microsoft account permissions. Read results stay in the
 current screen's memory and clear when identity changes or another action begins.
 Audits contain operation metadata only. Unknown outcomes are not auto-replayed.
+Failed callbacks now record one fixed failure category in the existing audit,
+alongside atomically invalidating the single-use attempt. Provider response bodies,
+exception messages, authorization codes and tokens are never included. Google inherits the same
+durable failure handling. A timeout in the app distinguishes an unreceived callback
+from an unconfirmed connection; it does not imply that sign-in is still running.
 
 Ordinary migration `c48b673e219a` adds the two personal-connection tables after
 `b1839fb874da`. The default-off runtime requires authenticated Clerk workspace mode,

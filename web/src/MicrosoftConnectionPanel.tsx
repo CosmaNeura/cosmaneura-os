@@ -70,7 +70,9 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
     }finally{if(epoch.current===current&&owner.current===identity){pending.current=null;setBusy(false);}}
   },[identity]);
   useEffect(()=>{void run('status');},[run]);
-  const returnCheck=useConnectionReturnCheck(identity,()=>run('status'),()=>setMessage('Sign-in is still finishing. You can check the connection again in a moment.'));
+  const returnCheck=useConnectionReturnCheck(identity,()=>run('status'),last=>setMessage(last==='sign_in_pending'
+    ?'CosmaBot has not received the Microsoft sign-in result. Finish in your browser, then check the connection here.'
+    :'CosmaBot has not confirmed the Microsoft connection. Check the connection again to see the latest result.'));
   const manual=(action:MicrosoftAction)=>{returnCheck.cancel();void run(action);};
   useEffect(()=>{
     if(!start)return;

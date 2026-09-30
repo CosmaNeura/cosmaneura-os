@@ -72,8 +72,20 @@ describe.each([
     await focus(); await focus(); await focus(); expect(api).toHaveBeenCalledTimes(3);
     await advance(30_000);
     expect(actions().filter(action => action === 'status')).toHaveLength(11); // initial + ten return observations
-    expect(host.textContent).toContain('Sign-in is still finishing.');
+    expect(host.textContent).toContain(`CosmaBot has not confirmed the ${name} connection.`);
     await advance(60_000); await focus(); expect(api).toHaveBeenCalledTimes(12);
+  });
+
+  it('distinguishes a missing callback from a connection still being processed', async () => {
+    await begin(); api.mockResolvedValue(status('sign_in_pending'));
+    await focus(); await advance(30_000);
+    expect(host.textContent).toContain(`CosmaBot has not received the ${name} sign-in result.`);
+    expect(host.textContent).not.toContain('still finishing');
+    api.mockResolvedValueOnce(status('sign_in_required'));
+    await click(`Check ${name} connection`);
+    expect(host.textContent).toContain(`Connect your ${name} account to continue.`);
+    expect(host.textContent).not.toContain('has not received');
+    expect(actions().filter(action => action === 'start')).toHaveLength(1);
   });
 
   it('stops automatic checks after the owner cancels the connection', async () => {

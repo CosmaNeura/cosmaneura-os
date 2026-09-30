@@ -8,6 +8,7 @@ type ReturnCheck = {
   attempts: number;
   running: boolean;
   timer: ReturnType<typeof setTimeout> | null;
+  lastState: CheckState;
 };
 
 // Only observe account status after a human opens OAuth and returns. A slow
@@ -16,7 +17,7 @@ type ReturnCheck = {
 export function useConnectionReturnCheck(
   identity: AuthenticatedWorkspaceIdentity,
   check: () => Promise<CheckState>,
-  onTimeout: () => void,
+  onTimeout: (lastState: CheckState) => void,
 ) {
   const current = useRef(identity); current.current = identity;
   const callbacks = useRef({check, onTimeout}); callbacks.current = {check, onTimeout};
@@ -27,7 +28,7 @@ export function useConnectionReturnCheck(
   }, []);
   const begin = useCallback(() => {
     cancel();
-    active.current = {owner: identity, deadline: null, attempts: 0, running: false, timer: null};
+    active.current = {owner: identity, deadline: null, attempts: 0, running: false, timer: null, lastState: undefined};
   }, [identity, cancel]);
 
   useEffect(() => {
@@ -37,7 +38,7 @@ export function useConnectionReturnCheck(
       if (!flow || flow.owner !== current.current || flow.running || flow.timer !== null || document.visibilityState === 'hidden') return;
       flow.deadline ??= Date.now() + 30_000;
       if (flow.attempts >= 10 || Date.now() >= flow.deadline) {
-        cancel(); callbacks.current.onTimeout(); return;
+        cancel(); callbacks.current.onTimeout(flow.lastState); return;
       }
       flow.running = true;
       flow.attempts++;
@@ -46,6 +47,7 @@ export function useConnectionReturnCheck(
       catch { result = undefined; }
       if (active.current !== flow || flow.owner !== current.current) return;
       flow.running = false;
+      flow.lastState = result;
       if (result === 'sign_in_pending' || result === 'completing_sign_in' || result === 'busy') {
         flow.timer = setTimeout(() => { flow.timer = null; void poll(); }, 3000);
       } else cancel();
