@@ -1,4 +1,5 @@
 import json
+import threading
 from copy import deepcopy
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ from lab.journey import (
     OWNERS,
     Journey,
     Review,
+    deliver_recipients,
     readable_draft,
     validate_draft,
     validate_plan,
@@ -114,3 +116,79 @@ def test_shared_worker_cannot_expose_another_episode_claim_to_the_model(tmp_path
     with pytest.raises(ModelCallFailure):
         journey.dispatch(claim)
     assert not journey.acknowledged and not journey.artifacts
+
+
+def test_independent_durable_admissions_run_together_once_each():
+    barrier = threading.Barrier(3)
+    seen = []
+    lock = threading.Lock()
+
+    def receive(admission):
+        with lock:
+            seen.append(admission)
+        barrier.wait(timeout=2)
+
+    deliver_recipients(SimpleNamespace(recipient=receive), ["a", "b", "c"], 3)
+    assert sorted(seen) == ["a", "b", "c"]
+    with pytest.raises(LabError):
+        deliver_recipients(SimpleNamespace(recipient=receive), ["a", "a", "c"], 3)
+
+
+@pytest.mark.parametrize("mode", ["valid", "stale_input", "transient", "unauthorized", "revoked"])
+def test_inline_input_acknowledgment_and_bounded_retry_keep_authority(tmp_path, monkeypatch, mode):
+    receipts = [{"status": "completed", "result_entry_id": str(i)} for i in range(3)]
+    inputs = {"saved_draft_receipts": receipts}
+    calls = []
+    revoked = False
+    monkeypatch.setattr("lab.journey.time.sleep", lambda _: None)
+
+    def check(role):
+        if revoked:
+            raise LabError("agent_authority_unavailable")
+
+    class Model:
+        def reply(self, messages, tools):
+            nonlocal revoked
+            calls.append(messages)
+            if len(calls) == 1 and mode in {"transient", "unauthorized", "revoked"}:
+                revoked = mode == "revoked"
+                raise LabError("model_http_401" if mode == "unauthorized" else "model_http_500")
+            args = {"body": "Three draft results are saved; human review remains outstanding.",
+                    "result_entry_ids": ["0", "1", "2"], "unresolved": ["Review the unresolved source conflict."],
+                    "external_action": "not_performed", "input_sha256": "0" * 64 if mode == "stale_input" else digest(inputs)}
+            return {"role": "assistant", "tool_calls": [{"id": str(len(calls)), "type": "function",
+                    "function": {"name": "submit_draft", "arguments": json.dumps(args)}}]}, {}
+
+    journey = Journey(SimpleNamespace(check_agent=check), Store(tmp_path), "one", Model(), "none", input_mode="inline")
+    if mode in {"valid", "transient"}:
+        result = journey.request("chief", inputs, Review, lambda v: validate_review(v, receipts), lambda: {})
+        assert result.result_entry_ids == ["0", "1", "2"]
+        assert len(calls) == (2 if mode == "transient" else 1)
+        assert journey.acknowledged == {("chief", "plan")}
+    else:
+        with pytest.raises(LabError):
+            journey.request("chief", inputs, Review, lambda v: validate_review(v, receipts), lambda: {})
+        assert not journey.acknowledged
+        if mode != "stale_input":
+            assert len(calls) == 1
+
+
+@pytest.mark.parametrize("bad", ["failed", "partial", "source_changed"])
+def test_latency_comparison_refuses_incomplete_or_confounded_evidence(bad):
+    from lab.compare import compare
+
+    before = {"mode": "azure", "model": "fixed", "fault": "none", "status": "passed",
+              "source": {"source_sha256": "same"}, "concurrency": 1, "expected_episode_count": 1,
+              "usage": {"tokens": 100, "model_calls": 10},
+              "episodes": [{"case": "journey", "passed": True, "duration_ms": 100}]}
+    after = deepcopy(before)
+    after["episodes"][0]["duration_ms"] = 50
+    assert compare(before, after)["observed_reduction_percent"] == 50
+    if bad == "failed":
+        after["status"] = "failed"
+    elif bad == "partial":
+        after["expected_episode_count"] = 2
+    else:
+        after["source"]["source_sha256"] = "different"
+    with pytest.raises(ValueError):
+        compare(before, after)

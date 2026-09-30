@@ -82,10 +82,27 @@ inputs, prerequisites, completion criteria and required human review.
 
 These assignments use the existing application's durable private-handoff service
 and model-work admission, claim, source-fencing and publication paths. Each
-recipient reads its assigned brief, submits a draft bound to the exact assignment
+recipient receives its admitted inputs upfront and acknowledges their exact hash,
+then submits a draft bound to the exact assignment
 hash, and saves an attributed application reply. Chief then reads the actual
 saved results and cites all three result IDs in its verification. Fresh database
 sessions and duplicate publication/request recovery exercise durability.
+
+The three independent drafts run concurrently through separate application
+claims and database sessions. Chief's planning finishes before they start, and
+Chief's result verification waits for all three to settle. Only exact admissions
+from the selected encounter are dispatched; this is not a second work queue.
+`--concurrency 1` restores serial execution. `--journey-inputs tool` restores the
+extra model round trip for fetching inputs; the default `inline` delivers the
+already admitted input with the first model request and requires its exact hash
+in the output. The trace distinguishes application input delivery from model tool
+calls. Missing inline input must be recovered using the read tool.
+
+Each model response records elapsed time. The report separates Chief planning,
+recipient work and Chief verification, plus each recipient's persisted queue
+wait and execution time. Confirmed HTTP 500/502/503/504 responses get at most one
+250 ms retry; both requests consume the shared budget and authority is checked
+again before retrying. Other failures remain visible and are not retried here.
 
 The lab supplies the model transport using Azure CLI authentication; a scoped
 synthetic marker satisfies the application's key-based availability gate and is
@@ -95,6 +112,13 @@ scripted content and is labeled accordingly.
 
 ```sh
 python -m lab.runner --mode azure --cases journey --fault lost_save_reply --checks
+
+# Compare the former serial/read-tool path with the optimized path on one source.
+python -m lab.runner --mode azure --cases journey --repeat 3 --concurrency 1 \
+  --journey-inputs tool --output /tmp/chief-before
+python -m lab.runner --mode azure --cases journey --repeat 3 --concurrency 3 \
+  --journey-inputs inline --output /tmp/chief-after
+python -m lab.compare /tmp/chief-before /tmp/chief-after
 ```
 
 This tests Chief's decomposition and recipient draft work. The three starting
