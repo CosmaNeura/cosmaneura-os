@@ -480,10 +480,12 @@ class MicrosoftPersonalConnection:
         granted = {scope.removeprefix(GRAPH_ORIGIN + "/").lower() for scope in decoded.split()}
         if not {"user.read", "mail.read", "calendars.read"} <= granted:
             raise MicrosoftConnectionFailure("permissions_missing")
-        extra = granted - {scope.lower() for scope in SCOPES.split()}
-        if extra:
-            reason = "permissions_identity" if extra <= {"openid", "profile", "email"} else "permissions_unexpected"
-            raise MicrosoftConnectionFailure(reason)
+        # Entra can include its standard identity scopes in the token response.
+        # They do not substitute for Graph read permissions. We do not request
+        # them, consume ID tokens, or add any new Graph operation here.
+        allowed = {scope.lower() for scope in SCOPES.split()} | {"openid", "profile", "email"}
+        if granted - allowed:
+            raise MicrosoftConnectionFailure("permissions_unexpected")
 
     @staticmethod
     def _text(value, limit):

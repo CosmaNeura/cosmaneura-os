@@ -143,6 +143,8 @@ def test_declining_consent_remains_distinct_from_failure(connection):
     "https://graph.microsoft.com/User.Read https://graph.microsoft.com/Mail.Read https://graph.microsoft.com/Calendars.Read",
     "https%3A%2F%2Fgraph.microsoft.com%2Fuser.read https%3A%2F%2Fgraph.microsoft.com%2Fmail.read https%3A%2F%2Fgraph.microsoft.com%2Fcalendars.read",
     "offline_access%20User.Read%20Mail.Read%20Calendars.Read",
+    "User.Read Mail.Read Calendars.Read openid profile email",
+    "user.read mail.read calendars.read https://graph.microsoft.com/openid profile email",
 ])
 def test_microsoft_documented_scope_spellings_save_the_same_read_only_connection(connection, scopes):
     case = connection
@@ -165,7 +167,10 @@ def test_microsoft_documented_scope_spellings_save_the_same_read_only_connection
     ("https://other.example.invalid/User.Read Mail.Read Calendars.Read", "missing"),
     ("https://graph.microsoft.com.evil.example/User.Read Mail.Read Calendars.Read", "missing"),
     ("https%253A%252F%252Fgraph.microsoft.com%252FUser.Read Mail.Read Calendars.Read", "missing"),
-    ("User.Read Mail.Read Calendars.Read openid profile email", "identity"),
+    ("openid profile email", "missing"),
+    ("User.Read Mail.Read openid profile email", "missing"),
+    ("User.Read Mail.Read Calendars.Read openid profile email Mail.Send", "unexpected"),
+    ("User.Read Mail.Read Calendars.Read https://other.example.invalid/openid", "unexpected"),
     ("User.Read Mail.Read Calendars.Read Mail.Send", "unexpected"),
     ("User.Read Mail.Read Calendars.Read Calendars.ReadWrite", "unexpected"),
     ("User.Read Mail.Read Calendars.Read .default", "unexpected"),
