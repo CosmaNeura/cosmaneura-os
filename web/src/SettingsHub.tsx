@@ -10,7 +10,7 @@ type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging'
 type Editor = Exclude<Screen, 'home' | 'connections'>;
 const titles: Record<Screen, string> = {
   home: 'Settings', connections: 'Connections', members:'Practice access', team: 'Your team',
-  core: 'Cosmaneura account & appointments', scheduling: 'Scheduling & Google sign-in', microsoft:'Microsoft email & calendar', google:'Gmail inbox',
+  core: 'Cosmaneura account & appointments', scheduling: 'Scheduling & Google sign-in', microsoft:'Microsoft email & calendar', google:'Google email & calendar',
   messaging: 'Messaging & fax', payments: 'Payments', portals: 'Patient portals',
 };
 

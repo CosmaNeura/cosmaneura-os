@@ -30,6 +30,8 @@ from cosmas_os.google_connection_models import GoogleConnectionAttempt, GoogleCo
 
 CALLBACK_PATH = "/connections/google/callback"
 SCOPES = "openid email https://www.googleapis.com/auth/gmail.metadata"
+CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
+CALENDAR_URL = "https://www.googleapis.com/calendar/v3/calendars/primary/events"
 GMAIL_ORIGIN = "https://gmail.googleapis.com"
 MESSAGES_PATH = "/gmail/v1/users/me/messages"
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
@@ -116,7 +118,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             "client_id": self.client_id,
             "redirect_uri": self.callback_uri,
             "response_type": "code",
-            "scope": SCOPES,
+            "scope": SCOPES + " " + CALENDAR_SCOPE,
             "state": private["state"],
             "access_type": "offline",
             "prompt": "consent select_account",
@@ -141,7 +143,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             (method == "POST" and url == self.token_url and token is None and params is None)
             or (
                 method == "GET"
-                and (url == USERINFO_URL or gmail)
+                and (url in {USERINFO_URL, CALENDAR_URL} or gmail)
                 and fields is None
                 and isinstance(token, str)
             )
@@ -221,7 +223,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             "email" if scope == "https://www.googleapis.com/auth/userinfo.email" else scope
             for scope in scopes.split()
         }
-        if granted != set(SCOPES.split()):
+        if granted not in (set(SCOPES.split()), set(SCOPES.split()) | {CALENDAR_SCOPE}):
             raise ValueError("Google permissions unavailable")
         if (
             value.get("token_type", "").lower() != "bearer"
@@ -253,6 +255,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             "subject": account_subject,
             "label": "Gmail",
             "email": email,
+            "calendar_read": CALENDAR_SCOPE in granted,
         }, self.now() + timedelta(seconds=expires)
 
     def _read_current(self, identity, private, binding, account_id, *, audit=False):
@@ -270,7 +273,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             ):
                 raise ws.WorkspaceError("google_connection_changed", 409)
             if audit:
-                self._audit(session, selected, account.id, "mail_read", "read")
+                self._audit(session, selected, account.id, "calendar_read" if audit == "calendar" else "mail_read", "read")
                 session.commit()
 
     @staticmethod
@@ -383,7 +386,15 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
         }
 
     def calendar(self, identity):
-        raise ValueError("Use the separately connected Scheduling calendar")
+        from cosmas_os.adapters.google_calendar import read_calendar
+
+        if current_budget() is None:
+            with capture_budget(CaptureBudget(40)):
+                return self.calendar(identity)
+        private, binding, account_id = self.credential(identity)
+        if private.get("calendar_read") is not True:
+            raise ws.WorkspaceError("google_calendar_consent_required", 409)
+        return read_calendar(self, identity, private, binding, account_id)
 
     def close(self):
         self._closed = True

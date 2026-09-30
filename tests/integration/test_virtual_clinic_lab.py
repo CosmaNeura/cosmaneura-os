@@ -33,6 +33,13 @@ def test_real_account_adapter_failure_and_recovery(clinic, provider, fault):
     assert result["requests"]
 
 
+@pytest.mark.parametrize("fault", ["normal", "read_timeout", "throttled", "token_expiry", "oversized", "revoked_during_read"])
+def test_google_calendar_failure_and_recovery(clinic, fault):
+    result = exercise_mail(clinic[0], "google", fault, kind="calendar")
+    assert result["passed"], result
+    assert result["requests"]
+
+
 def test_calendar_rejects_unrecognized_timezone_without_disclosure(clinic):
     result = exercise_mail(clinic[0], "microsoft", "invalid_timezone")
     assert result["passed"]

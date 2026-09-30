@@ -6,6 +6,21 @@ import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null};
 const status={state:'connected',account:{label:'Invented account',email:'invented@example.invalid'},connected_at:new Date().toISOString()};
 afterEach(()=>vi.unstubAllGlobals());
+it('accepts bounded calendar summaries and rejects ambiguous dates or unrequested contents',()=>{
+ const event={id:'invented',subject:'Invented visit',starts_at:'2026-11-01',ends_at:'2026-11-02',all_day:true,cancelled:false};
+ const view={kind:'calendar',account:status.account,more:false,observed_at:new Date().toISOString(),items:[event]};
+ expect(validateGoogleResponse(view,'calendar')).toEqual(view);
+ for(const items of [[event,event],[{...event,starts_at:'2026-02-30'}],[{...event,description:'not projected'}],
+  Array.from({length:26},(_,i)=>({...event,id:'event'+i}))]){
+  expect(()=>validateGoogleResponse({...view,items},'calendar')).toThrow();
+ }
+});
+it('projects only the known calendar-consent error from a no-store bounded response',async()=>{
+ const respond=(detail:string)=>new Response(JSON.stringify({detail}),{status:409,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValueOnce(respond('google_calendar_consent_required')).mockResolvedValueOnce(respond('untrusted secret')));
+ await expect(googleConnectionRequest(identity,'calendar')).rejects.toMatchObject({status:409,code:'google_calendar_consent_required'});
+ await expect(googleConnectionRequest(identity,'calendar')).rejects.toMatchObject({status:409,code:undefined});
+});
 it('sends the closed no-store command and validates the private account response',async()=>{
  const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify(status),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));vi.stubGlobal('fetch',fetcher);
  expect(await googleConnectionRequest(identity,'status')).toMatchObject({state:'connected'});

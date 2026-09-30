@@ -15,7 +15,7 @@ import httpx
 from pydantic import SecretStr
 from sqlalchemy.orm import sessionmaker
 
-from cosmas_os.adapters.google_connection import GooglePersonalConnection
+from cosmas_os.adapters.google_connection import CALENDAR_SCOPE, GooglePersonalConnection
 from cosmas_os.adapters.microsoft_connection import MicrosoftPersonalConnection
 from cosmas_os.api.auth import RequestIdentity
 from cosmas_os.models import ExternalIdentity
@@ -66,11 +66,12 @@ class MailSandbox:
         microsoft = host == "graph.microsoft.com" and path in {
             "/v1.0/me", "/v1.0/me/mailFolders/inbox/messages", "/v1.0/me/calendarView"}
         google = (host == "openidconnect.googleapis.com" and path == "/v1/userinfo" or
-                  host == "gmail.googleapis.com" and path in {"/gmail/v1/users/me/messages", "/gmail/v1/users/me/messages/lab1"})
+                  host == "gmail.googleapis.com" and path in {"/gmail/v1/users/me/messages", "/gmail/v1/users/me/messages/lab1"} or
+                  host == "www.googleapis.com" and path == "/calendar/v3/calendars/primary/events")
         if not token and not (request.method == "GET" and (microsoft or google)):
             raise LabError("unexpected_provider_route")
         self.calls.append({"method": request.method, "path": path})
-        is_data = "messages" in path or "calendarView" in path
+        is_data = "messages" in path or "calendarView" in path or path.endswith("/events")
         if is_data and self.fault == "read_timeout":
             self.fault = None
             raise httpx.ReadTimeout("injected synthetic timeout")
@@ -86,13 +87,24 @@ class MailSandbox:
                 row.active = False
                 session.commit()
         if token:
-            scopes = "User.Read Mail.Read Calendars.Read" if self.provider == "microsoft" else "openid email https://www.googleapis.com/auth/gmail.metadata"
+            scopes = "User.Read Mail.Read Calendars.Read" if self.provider == "microsoft" else "openid email https://www.googleapis.com/auth/gmail.metadata " + CALENDAR_SCOPE
             payload = dict(access_token="invented-access", refresh_token="invented-refresh", expires_in=3600,
                 token_type="Bearer", scope=scopes)
         elif path == "/v1.0/me":
             payload = dict(id=self.remote, displayName="Synthetic clinician", mail="clinician@example.invalid")
         elif path == "/v1/userinfo":
             payload = dict(sub=self.remote, email="clinician@example.invalid", email_verified=True)
+        elif path == "/calendar/v3/calendars/primary/events":
+            params = request.url.params
+            start, end = datetime.fromisoformat(params["timeMin"]), datetime.fromisoformat(params["timeMax"])
+            if (params.get("maxResults") != "25" or end - start != timedelta(days=7)
+                or params.get("singleEvents") != "true" or params.get("showDeleted") != "false"
+                or params.get("fields") != "items(id,summary,status,start(date,dateTime),end(date,dateTime)),nextPageToken"):
+                raise LabError("unbounded_google_calendar_query")
+            row = {"id": "lab_event", "summary": "Synthetic Jordan Cypress follow-up", "status": "confirmed",
+                   "start": {"dateTime": (self.now + timedelta(hours=1)).isoformat()},
+                   "end": {"dateTime": (self.now + timedelta(hours=2)).isoformat()}}
+            payload = {"items": [row] * (26 if self.fault == "oversized" else 1)}
         elif path == "/v1.0/me/calendarView":
             if request.url.params.get("$top") != "25":
                 raise LabError("unbounded_calendar_query")
@@ -128,19 +140,19 @@ class MailSandbox:
             stream=httpx.ByteStream(json.dumps(payload).encode()))
 
     def read(self, kind="mail"):
-        if kind not in {"mail", "calendar"} or kind == "calendar" and self.provider != "microsoft":
+        if kind not in {"mail", "calendar"}:
             raise LabError("calendar_not_supported_by_this_adapter")
         return getattr(self.service, kind)(self.identity)
 
 
-def exercise_mail(app, provider, scenario):
+def exercise_mail(app, provider, scenario, kind="mail"):
     """Independent episodes keep revoked accounts and faults out of later cases."""
     box = MailSandbox(app, provider)
     checks = {}
     try:
         box.connect()
         checks["oauth_connection_saved"] = True
-        kind = "calendar" if scenario == "invalid_timezone" else "mail"
+        kind = "calendar" if scenario == "invalid_timezone" else kind
         if scenario == "token_expiry":
             box.now += timedelta(hours=2)
         elif scenario != "normal":
@@ -158,13 +170,13 @@ def exercise_mail(app, provider, scenario):
                 checks["account_connection_retained"] = box.service.status(box.identity)["state"] == "connected"
                 checks["explicit_retry_recovers"] = len(box.read(kind)["items"]) == 1
         else:
-            checks["bounded_mail_read"] = not failed and value is not None and len(value["items"]) == 1
-            if provider == "microsoft":
+            checks["bounded_" + kind + "_read"] = not failed and value is not None and len(value["items"]) == 1
+            if kind == "mail":
                 checks["seven_day_calendar_read"] = len(box.read("calendar")["items"]) == 1
             if scenario == "token_expiry":
                 checks["one_refresh_exchange"] = sum(r["method"] == "POST" for r in box.calls[before:]) == 1
         checks["no_mail_or_calendar_writes"] = all(r["method"] == "GET" or "token" in r["path"] for r in box.calls)
-        return {"provider": provider, "scenario": scenario, "checks": checks, "passed": all(checks.values()),
+        return {"provider": provider, "scenario": scenario, "kind": kind, "checks": checks, "passed": all(checks.values()),
                 "requests": box.calls, "evidence_level": "real adapter and PostgreSQL; synthetic HTTP responses"}
     finally:
         box.close()

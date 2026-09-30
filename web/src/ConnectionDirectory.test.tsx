@@ -18,9 +18,9 @@ it('shows disabled services with useful setup steps without mounting a dead edit
   const editor=vi.fn();function Google(){useEffect(()=>{editor();},[]);return <p>OAuth editor</p>;}
   vi.mocked(readConnectionCatalog).mockResolvedValue(catalog);await mount(<Google/>);
   expect(host.querySelectorAll('.connection-card')).toHaveLength(7);expect(host.textContent).toContain('Admin setup');
-  await click('Gmail inbox');expect(editor).not.toHaveBeenCalled();expect(host.textContent).toContain('Google sign-in has not been enabled');
-  expect(host.textContent).toContain('Review the requested Gmail access');
-  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true});await click('Check availability again');await click('Gmail inbox');
+  await click('Google email & calendar');expect(editor).not.toHaveBeenCalled();expect(host.textContent).toContain('Google sign-in has not been enabled');
+  expect(host.textContent).toContain('Review the requested email and calendar access');
+  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true});await click('Check availability again');await click('Google email & calendar');
   expect(editor).toHaveBeenCalledOnce();expect(host.querySelector('[data-settings-screen="google"]')?.hasAttribute('hidden')).toBe(false);
 });
 it('does not turn a failed availability read into an available or connected badge',async()=>{
@@ -38,7 +38,7 @@ it('shows independent account results without confusing enabled setup with a con
   });
   await mount(<p>Google</p>);
   const row=(name:string)=>[...host.querySelectorAll('.connection-card')].find(x=>x.textContent?.includes(name))!;
-  expect(row('Gmail inbox').textContent).toContain('Connected');expect(row('Gmail inbox').textContent).toContain('Checked');
+  expect(row('Google email & calendar').textContent).toContain('Connected');expect(row('Google email & calendar').textContent).toContain('Checked');
   expect(row('Microsoft email').textContent).toContain('Couldn’t check');
   expect(row('Cosmaneura account').textContent).toContain('Needs review');
   expect(readConnectionSummary).toHaveBeenCalledTimes(3);

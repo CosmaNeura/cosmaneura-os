@@ -16,7 +16,7 @@ def failure_location(error):
 def run_connectors(app, store, episode):
     started = time.monotonic()
     outcomes = []
-    for provider in ("microsoft", "google"):
+    for provider, kind in (("microsoft", "mail"), ("google", "mail"), ("google", "calendar")):
         scenarios = ["normal", "read_timeout", "throttled", "token_expiry", "oversized", "revoked_during_read"]
         if provider == "microsoft":
             scenarios.append("invalid_timezone")
@@ -24,14 +24,15 @@ def run_connectors(app, store, episode):
             tick = time.monotonic()
             try:
                 isolated = Application(app.engine, app.case, app.event)
-                result = exercise_mail(isolated, provider, scenario)
+                result = exercise_mail(isolated, provider, scenario, kind)
             except Exception as error:
                 result = {"provider": provider, "scenario": scenario, "passed": False,
                           "checks": {"scenario_completed": False}, "error": type(error).__name__, "location": failure_location(error)}
+            result["scenario"] = ("calendar_" if kind == "calendar" else "") + scenario
             result["duration_ms"] = round((time.monotonic() - tick) * 1000)
             outcomes.append(result)
             store.event(episode, "synthetic_provider", "connector_scenario", provider=provider,
-                        scenario=scenario, ok=result["passed"], duration_ms=result["duration_ms"])
+                        scenario=result["scenario"], ok=result["passed"], duration_ms=result["duration_ms"])
     for scenario in ("delivered", "failed", "partial", "lost_reply", "wrong_account"):
         tick = time.monotonic()
         try:

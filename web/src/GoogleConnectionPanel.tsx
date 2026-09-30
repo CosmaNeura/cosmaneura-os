@@ -44,17 +44,20 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     }catch(error){
       if(epoch.current!==current||owner.current!==identity)return;
       setData(null);
-      // Recheck connection state, never replay the failed mailbox read.
-      if(action==='mail'&&!(error instanceof WorkspaceApiError&&[401,403,404].includes(error.status))){
-        setMessage('Email could not be loaded. Checking your connection…');
+      // Recheck connection state, never replay the failed read.
+      if((action==='mail'||action==='calendar')&&!(error instanceof WorkspaceApiError&&[401,403,404].includes(error.status))){
+        const content=action==='mail'?'Email':'Calendar';
+        const needsCalendar=error instanceof WorkspaceApiError&&error.code==='google_calendar_consent_required';
+        setMessage(content+' could not be loaded. Checking your connection…');
         const recoveryTimer=setTimeout(()=>controller.abort(),10000);
         try{
           const checked=await googleConnectionRequest(identity,'status',controller.signal);
           if(epoch.current!==current||owner.current!==identity)return;
           if('state' in checked&&checked.state!=='disconnected'){
             setData({owner:identity,status:checked,start:null,view:null});
-            setMessage(checked.state==='connected'?'Email could not be loaded. Your account is still connected. Try again.':
-              checked.state==='sign_in_required'?'Connect your Google account again to load email.':'Finish Google sign-in, then try again.');
+            setMessage(checked.state==='connected'?(needsCalendar?'Your Google account is connected. Choose Reconnect Google and allow calendar access to view your week.':
+              content+' could not be loaded. Your account is still connected. Try again.'):
+              checked.state==='sign_in_required'?'Connect your Google account again to continue.':'Finish Google sign-in, then try again.');
             return;
           }
         }catch(recoveryError){
@@ -98,10 +101,10 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     if(native){navigationPending.current=requestId;setOpening(true);}
   };
   const blocked=busy||opening;
-  return <section className="core-connection-setup microsoft-connection" aria-label="Gmail account">
-    <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>Connect Gmail</h2><p>Your inbox, at a glance.</p></div></header>
-    <p>Connect your Google account to see Gmail inbox summaries here. Google will ask you to approve access.</p>
-    <p className="connection-access-summary">CosmasOS reads sender, subject, date and unread status. Message bodies and attachments stay in Gmail.</p>
+  return <section className="core-connection-setup microsoft-connection" aria-label="Google email and calendar">
+    <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>Connect Google Workspace</h2><p>Email and the week ahead.</p></div></header>
+    <p>Connect your Google account to see Gmail inbox summaries and your primary calendar here. Google will ask you to approve access.</p>
+    <p className="connection-access-summary">CosmaBot reads email headers and event titles and times. Message bodies and attachments stay in Gmail. It cannot send email or change calendar events.</p>
     {!status?.account&&!start&&unavailableFor!==identity&&<ol className="personal-connection-steps"><li>Choose your Google account.</li><li>Review access on Google’s secure sign-in page.</li><li>Return here to read recent email.</li></ol>}
     <button disabled={blocked} onClick={()=>manual('status')}>{busy?'Working…':'Check Google connection'}</button>
     {status&&<div className="connection-practice">
@@ -114,13 +117,21 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       onClick={begin}>{opening?'Opening Google…':'Continue with Google'}</button>:
       <a className="team-primary microsoft-continue" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Google</a>}</p>}
     {!nativeReady&&<p>Google connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
-    {status?.state==='connected'&&<div className="microsoft-actions"><button disabled={blocked} onClick={()=>manual('mail')}>Read recent email</button></div>}
+    {status?.state==='connected'&&<div className="microsoft-actions"><button disabled={blocked} onClick={()=>manual('mail')}>Read recent email</button><button disabled={blocked} onClick={()=>manual('calendar')}>View next 7 days</button></div>}
     {(start||status&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>manual('disconnect')}>{status?.state==='connected'?'Disconnect Google':'Cancel Google connection'}</button>}
-    {view&&<section aria-label="Gmail inbox summaries">
+    {view?.kind==='mail'&&<section aria-label="Gmail inbox summaries">
       <h3>Inbox summaries</h3><p>{view.account.email} · Checked {when(view.observed_at)}</p>
       {view.items.length===0&&<p>Your inbox has no messages.</p>}
       <ul className="microsoft-items">{view.items.map((item,index)=><li key={`${index}:${item.id}`}><strong>{item.subject||'(No subject)'}</strong><span>{item.sender||'Sender unavailable'} · {when(item.received_at)}</span>{!item.is_read&&<small>Unread</small>}</li>)}</ul>
       {view.more&&<p>Showing up to 10 messages. More are available in Gmail.</p>}
+    </section>}
+    {view?.kind==='calendar'&&<section aria-label="Upcoming Google events">
+      <h3>Next 7 days</h3><p>{view.account.email} · Checked {when(view.observed_at)}</p>
+      {view.items.length===0&&<p>No events in the next 7 days.</p>}
+      <ul className="microsoft-items">{view.items.map(item=><li key={item.id}><strong>{item.subject||'(Untitled event)'}</strong>
+        <span>{item.all_day?new Date(item.starts_at+'T12:00:00Z').toLocaleDateString(undefined,{dateStyle:'medium',timeZone:'UTC'}):when(item.starts_at)+' – '+when(item.ends_at)}</span>
+        {item.all_day&&<small>All day</small>}{item.cancelled&&<small>Cancelled</small>}</li>)}</ul>
+      {view.more&&<p>Showing up to 25 events. More are available in Google Calendar.</p>}
     </section>}
     {message&&<p role="status">{message}</p>}
   </section>;

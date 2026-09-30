@@ -12,12 +12,17 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from cosmas_os.adapters.google_connection import GooglePersonalConnection
+from cosmas_os.adapters.google_connection import (
+    CALENDAR_SCOPE,
+    CALENDAR_URL,
+    GooglePersonalConnection,
+)
 from cosmas_os.adapters.microsoft_connection import (
     MicrosoftConnectionFailure,
     MicrosoftPersonalConnection,
 )
 from cosmas_os.api.auth import RequestIdentity
+from cosmas_os.application.workspace import WorkspaceError
 from cosmas_os.models import AuditEvent, BoxContext, ExternalIdentity, Principal
 
 
@@ -45,11 +50,19 @@ def connection(request, engine):
         setattr(settings, provider + "_connection_callback_uri", "https://api.example.invalid/connections/" + provider + "/callback")
         setattr(settings, provider + "_connection_client_secret", SecretStr("synthetic_PRIVATE_secret"))
         setattr(settings, provider + "_connection_encryption_key", SecretStr(base64.urlsafe_b64encode(b"x" * 32).decode()))
-    case = SimpleNamespace(factory=factory, fault=None, scopes=None, calls=[], account=account)
+    case = SimpleNamespace(factory=factory, fault=None, scopes=None, calls=[], requests=[], account=account, calendar_response={"items": []})
 
     def respond(incoming):
         case.calls.append(incoming.method)
+        case.requests.append(incoming)
         microsoft = request.param is MicrosoftPersonalConnection
+        if not microsoft and str(incoming.url).split("?", 1)[0] == CALENDAR_URL:
+            if case.fault == "calendar_revoke":
+                with factory() as session:
+                    session.get(ExternalIdentity, account).active = False
+                    session.commit()
+            return httpx.Response(200, headers={"content-type": "application/json"},
+                stream=httpx.ByteStream(json.dumps(case.calendar_response).encode()))
         if incoming.method == "POST":
             if case.fault == "exception":
                 raise RuntimeError("synthetic_PRIVATE_exception")
@@ -135,6 +148,47 @@ def test_declining_consent_remains_distinct_from_failure(connection):
     assert case.service.callback(start(case), denied=True) is False
     assert case.calls == []
     assert outcomes(case) == [("declined", {})]
+
+
+@pytest.mark.parametrize("connection", [GooglePersonalConnection], indirect=True)
+def test_google_calendar_requires_its_explicit_grant_and_keeps_existing_gmail(connection):
+    case = connection
+    assert case.service.callback(start(case), "synthetic_PRIVATE_code")
+    before = len(case.requests)
+    with pytest.raises(WorkspaceError, match="google_calendar_consent_required"):
+        case.service.calendar(case.identity)
+    assert len(case.requests) == before
+    assert case.service.status(case.identity)["state"] == "connected"
+
+
+@pytest.mark.parametrize("connection", [GooglePersonalConnection], indirect=True)
+@pytest.mark.parametrize("revoke", [False, True])
+def test_google_calendar_uses_bounded_primary_read_and_rechecks_authority(connection, revoke, caplog):
+    from datetime import datetime, timedelta
+    case = connection
+    case.scopes = "openid email https://www.googleapis.com/auth/gmail.metadata " + CALENDAR_SCOPE
+    fields = parse_qs(urlsplit(case.service.start(case.identity)["authorization_url"]).query)
+    assert fields["scope"] == [case.scopes]
+    assert case.service.callback(fields["state"][0], "synthetic_PRIVATE_code")
+    case.fault = "calendar_revoke" if revoke else None
+    if revoke:
+        with pytest.raises(WorkspaceError):
+            case.service.calendar(case.identity)
+    else:
+        result = case.service.calendar(case.identity)
+        assert result["kind"] == "calendar" and result["items"] == [] and not result["more"]
+    request = case.requests[-1]
+    assert request.method == "GET" and str(request.url).split("?", 1)[0] == CALENDAR_URL
+    params = request.url.params
+    assert params["maxResults"] == "25" and params["singleEvents"] == "true"
+    assert params["showDeleted"] == "false" and params["orderBy"] == "startTime"
+    assert datetime.fromisoformat(params["timeMax"]) - datetime.fromisoformat(params["timeMin"]) == timedelta(days=7)
+    assert params["fields"] == "items(id,summary,status,start(date,dateTime),end(date,dateTime)),nextPageToken"
+    assert "PRIVATE" not in caplog.text
+    with case.factory() as session:
+        audits = session.scalars(select(AuditEvent).where(AuditEvent.aggregate_id == case.account,
+            AuditEvent.event_type.endswith("calendar_read"))).all()
+        assert len(audits) == (0 if revoke else 1)
 
 
 @pytest.mark.parametrize("connection", [MicrosoftPersonalConnection], indirect=True)
