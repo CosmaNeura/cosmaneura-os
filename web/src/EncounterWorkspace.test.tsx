@@ -27,7 +27,7 @@ vi.mock('./VendorWorkMount',async original=>({...await original<typeof import('.
 let draftStorage: ReturnType<typeof memoryDraftStorage>;
 vi.mock("./workspace-api", async importOriginal => {
   const actual = await importOriginal<typeof import("./workspace-api")>();
-  return { ...actual, workspaceApi: { practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn() } };
+  return { ...actual, workspaceApi: { practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn() } };
 });
 
 const fixture: Workspace = {
@@ -92,17 +92,17 @@ describe("private encounter workspace", () => {
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
     await click("Choose an encounter");await act(async()=>container.querySelector<HTMLButtonElement>(".team-encounter-option")!.click());
     await click("Open Session Prep");expect(container.textContent).not.toContain("Session Prep included");
-    await click("Include in chat");await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain("Session Prep included"));});
+    await click("Include in chat");await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Session Prep included");});
     expect(container.querySelector<HTMLDetailsElement>(".session-prep-detail")?.open).toBe(false);
     expect(document.activeElement).toBe(container.querySelector("#team-question"));
     await input("Thought or question","What changed since the previous visit?");await click("Send message");
-    await act(async()=>{await vi.waitFor(()=>expect(container.textContent).toContain("Conversation saved."));});
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Conversation saved.");});
     const first=vi.mocked(workspaceApi.ask).mock.calls[0][2];
     expect(first.session_prep_analysis).toEqual(await sessionPrepAnalysis(sessionPrepFixture()));
     expect(JSON.stringify(first)).not.toContain("Invented reviewed visit summary");
     await chooseBot("Scribe");expect(container.textContent).not.toContain("Session Prep included");
     await input("Thought or question","Use my saved notebook.");await click("Send message");
-    await act(async()=>{await vi.waitFor(()=>expect(workspaceApi.ask).toHaveBeenCalledTimes(2));});
+    await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledTimes(2);});
     expect(vi.mocked(workspaceApi.ask).mock.calls[1][2]).not.toHaveProperty("session_prep_analysis");
   });
 
@@ -110,7 +110,7 @@ describe("private encounter workspace", () => {
     expect(workspaceApi.open).not.toHaveBeenCalled();
     await click("Open synthetic encounter");
     expect(container.textContent).toContain("Private encounter notebook");
-    expect(container.textContent).toContain("AI conversation awaits its service connection");
+    expect(container.textContent).toContain("AI chat needs a service connection");
     await click("During");
     expect((([...container.querySelectorAll("button")].find(b => b.textContent === "Start recording")) as HTMLButtonElement).disabled).toBe(true);
     expect(container.querySelector('nav[aria-label="Encounter stage"] button[aria-pressed="true"]')?.textContent).toBe("During");

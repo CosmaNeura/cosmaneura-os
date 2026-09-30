@@ -61,7 +61,7 @@ export function useEditorRecovery(workspaceId: string, kind: EditorKind, value: 
       await access.journal.persist(address,next);
       if (!current(access,generation)) throw new DraftStoreError("unavailable");
       if (write === writeSequence.current && ready.current) {
-        setPhase("ready"); setMessage(next ? "Draft saved on this device." : "No unsaved editor changes.");
+        setPhase("ready"); setMessage(next ? "Working copy saved on this device." : "No unsaved editor changes.");
       }
     } catch (error) {
       if (current(access,generation)) { ready.current = false; setPhase("failed"); }

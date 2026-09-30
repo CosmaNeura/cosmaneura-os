@@ -78,7 +78,7 @@ it("permits a bounded source transcript beyond the smaller control-response limi
 });
 
 it("bounds transcript streaming independently of control receipts", async () => {
-  const transcript = { session_id: session, segments: [{ content: "x".repeat(4_198_401) }] };
+  const transcript = { session_id: session, segments: [{ content: "x".repeat(25 * 1024 * 1024) }] };
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ session_id: session, workspace_id: workspace,
     operation: "transcript", receipt: transcript })));
   await expect(workspaceCaptureBff(workspace, session, identity()).getTranscript(session))

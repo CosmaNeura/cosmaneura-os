@@ -26,6 +26,8 @@ it("opens only on request and focuses a citation without changing the authentica
   await act(async () => citation.click());
   expect(document.activeElement).toBe(source);
   expect(source.textContent).toContain("Finalized clinician note");
+  expect(source.querySelector("details")?.open).toBe(true);
+  expect(source.textContent).toContain("original text is not available in this view");
   expect(source.scrollIntoView).toHaveBeenCalledWith({block: "nearest"});
   expect(window.location.href).toBe(url);
   expect(container.querySelector('a[href^="#"]')).toBeNull();

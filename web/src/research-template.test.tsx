@@ -34,7 +34,7 @@ it('recovers the exact fifth template settings with pause/retirement and stable 
  const configuration={...team.configuration,bots:[...team.configuration.bots,{...team.configuration.bots[0],role:'research' as const,instance_id:'00000000-0000-4000-8000-000000000005',name:'Literature partner',enabled:false,retired:true,include_notebook:false,include_evidence:false,job_focus:'Compare cited versions'}]};
  const draft=teamDraft(team,configuration,null)!;await journal.persist('team',draft);journal.close();const reopened=new DraftJournal(await factory(scope));expect(await reopened.load('team')).toEqual(draft);expect(configuration.bots.slice(0,4)).toEqual(team.configuration.bots);reopened.close();
 });
-it('uses a code-native Research portrait without claiming or fetching new motion assets',async()=>{
+it('uses the existing Research still portrait without fetching motion assets',async()=>{
  vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);const element=document.createElement('div'),root=createRoot(element);
- try{await act(async()=>root.render(<BotAvatar role="research" active greeting/>));expect(element.querySelector('svg')).toBeTruthy();expect(element.querySelector('img')).toBeNull();expect(element.querySelector('[data-motion-phase]')?.getAttribute('data-motion-phase')).toBe('idle');}finally{await act(async()=>root.unmount());vi.unstubAllGlobals();}
+ try{await act(async()=>root.render(<BotAvatar role="research" active greeting/>));expect(element.querySelector('img')?.getAttribute('src')).toBe('/bots/research.png');expect(element.querySelector('.bot-avatar-motion')).toBeNull();expect(element.querySelector('[data-motion-phase]')?.getAttribute('data-motion-phase')).toBe('idle');}finally{await act(async()=>root.unmount());vi.unstubAllGlobals();}
 });

@@ -78,6 +78,18 @@ describe("private note review", () => {
     expect(onSave).toHaveBeenCalledWith({type: "note", body: expect.objectContaining({source_reply_id: "reply"})});
   });
 
+  it("opens an available Scribe draft into an empty review without replacing existing edits", async () => {
+    await act(async () => root.unmount()); root = createRoot(container);
+    const w:Workspace={...initial,note:{latest:null,history:[]},entries:[{id:"scribe",revision:2,kind:"handoff_result",origin:"agent_handoff",content:"",source_label:null,ticket:null,created_at:saved.created_at,
+      reply:{agent_name:"Scribe",role:"scribe",backend:"azure_gpt41_source_draft_v1",content:"Draft to review",context_revision:1,citations:[]}}]};
+    await act(async()=>root.render(<NoteReview workspace={w} active locked={false} onSave={onSave} onSources={onSources}/>));
+    expect(container.querySelector("textarea")!.value).toBe("Draft to review");
+    expect(container.textContent).toContain("Review version not saved");expect(onSave).not.toHaveBeenCalled();
+    await input("My working edit");await render(w);
+    await act(async()=>root.render(<NoteReview workspace={w} active locked={false} onSave={onSave} onSources={onSources}/>));
+    expect(container.querySelector("textarea")!.value).toBe("My working edit");
+  });
+
   it("adopts a remotely created note only when the editor is still empty", async () => {
     await act(async () => root.unmount()); root = createRoot(container);
     await render({...initial, revision: 1, note: {latest: null, history: []}});

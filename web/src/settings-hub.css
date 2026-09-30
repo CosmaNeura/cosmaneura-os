@@ -70,3 +70,7 @@
 @media (max-width: 600px) {
   .team-workspace[data-settings-open="true"]:not([data-settings-navigation-locked="true"]) .team-topbar { display: none; }
 }
+.connection-setup-guide { padding:18px; }
+.connection-setup-guide h3 { margin:18px 0 6px; font-size:15px; }
+.connection-setup-guide p { margin:6px 0 12px; }
+.team-workspace .connection-card { min-height:84px; }
