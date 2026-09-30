@@ -42,6 +42,14 @@ receipts retain their original recovery protocol; a failed or unknown profile
 request is never silently replaced. This path was qualified with generated PCM,
 including one hour across four lease renewals and encrypted offline restoration.
 
+A browser preparation rejected before profile confirmation can offer **Continue
+preparation**. This explicitly retains the original encrypted intent and switches
+the empty local setup to standard capture only after checking an untouched server
+session, full standard capacity, no local key/lease, and an empty audio queue.
+The checks repeat on the click; Start recording remains a separate action.
+Unknown replies, confirmed profiles, native journals and existing audio keep their
+original recovery path.
+
 The shared recorder currently selects only the microphone track and enforces
 360 ten-second chunks for the longer profile. The backend supports two tracks,
 but continuous lease/reservation renewal and dual-track native recording remain
