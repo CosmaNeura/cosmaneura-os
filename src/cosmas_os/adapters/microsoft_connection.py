@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Any
-from urllib.parse import urlencode, urlsplit
+from urllib.parse import unquote, urlencode, urlsplit
 from uuid import UUID, uuid4
 
 import httpx
@@ -51,7 +51,8 @@ class MicrosoftConnectionFailure(ValueError):
 
     REASONS = frozenset({
         "token_http", "profile_http", "response_format", "response_limit",
-        "permissions", "credential_format",
+        "permissions", "permissions_format", "permissions_missing",
+        "permissions_identity", "permissions_unexpected", "credential_format",
     })
 
     def __init__(self, reason):
@@ -431,13 +432,7 @@ class MicrosoftPersonalConnection:
         refresh = value.get("refresh_token", prior_refresh)
         expires = value.get("expires_in")
         scopes = value.get("scope")
-        if not isinstance(scopes, str) or len(scopes) > 2048:
-            raise MicrosoftConnectionFailure("permissions")
-        granted = {scope.removeprefix(GRAPH_ORIGIN + "/") for scope in scopes.split()}
-        if not {"User.Read", "Mail.Read", "Calendars.Read"} <= granted or granted - set(
-            SCOPES.split()
-        ):
-            raise MicrosoftConnectionFailure("permissions")
+        self._verify_scopes(scopes)
         if (
             value.get("token_type", "").lower() != "bearer"
             or not isinstance(token, str)
@@ -469,6 +464,26 @@ class MicrosoftPersonalConnection:
             "label": label,
             "email": email,
         }, self.now() + timedelta(seconds=expires)
+
+    @staticmethod
+    def _verify_scopes(scopes):
+        # Microsoft documents encoded, qualified, lower-case token-response scopes.
+        # Decode once; only the exact Graph resource and approved names can match.
+        if not isinstance(scopes, str) or not scopes or len(scopes) > 2048:
+            raise MicrosoftConnectionFailure("permissions_format")
+        try:
+            decoded = unquote(scopes, errors="strict")
+        except UnicodeError:
+            raise MicrosoftConnectionFailure("permissions_format") from None
+        if any(ord(c) < 32 or ord(c) > 126 for c in decoded):
+            raise MicrosoftConnectionFailure("permissions_format")
+        granted = {scope.removeprefix(GRAPH_ORIGIN + "/").lower() for scope in decoded.split()}
+        if not {"user.read", "mail.read", "calendars.read"} <= granted:
+            raise MicrosoftConnectionFailure("permissions_missing")
+        extra = granted - {scope.lower() for scope in SCOPES.split()}
+        if extra:
+            reason = "permissions_identity" if extra <= {"openid", "profile", "email"} else "permissions_unexpected"
+            raise MicrosoftConnectionFailure(reason)
 
     @staticmethod
     def _text(value, limit):
