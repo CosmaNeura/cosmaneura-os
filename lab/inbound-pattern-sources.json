@@ -1,0 +1,20 @@
+{
+  "schema": "cosmabot-lab-source-influence.v1",
+  "source": "https://github.com/DMontgomery40/Faxbot",
+  "commit": "7e0c15fa960d24b59c7581eeb1163b3d93439e32",
+  "license": "MIT",
+  "copyright": "Copyright (c) 2025 David Montgomery",
+  "license_url": "https://github.com/DMontgomery40/Faxbot/blob/7e0c15fa960d24b59c7581eeb1163b3d93439e32/LICENSE",
+  "code_copied": false,
+  "dependencies_added": false,
+  "influence": [
+    "Separate provider inbound capability from outbound submission/status capability (config/provider_traits.json).",
+    "Inspect metadata before separately retrieving an attachment (api/app/main.py:2984-3016).",
+    "Failure-mode contrast: Phaxio inbound dedup commits before file retrieval, then substitutes a placeholder PDF after failed retrieval (api/app/main.py:3189-3226). Our original synthetic test proves that a missing attachment blocks source publication and remains recoverable under the same immutable event."
+  ],
+  "not_adopted": [
+    "Provider runtime, generic URL configuration, credentials, MCP send tools and compliance claims.",
+    "Outbound automatic retries without an idempotency binding.",
+    "Attachment placeholder fallback and unbounded provider-supplied media fetch."
+  ]
+}

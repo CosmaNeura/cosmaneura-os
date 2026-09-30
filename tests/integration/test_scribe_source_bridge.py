@@ -9,6 +9,7 @@ import pytest
 from pydantic import SecretStr
 from sqlalchemy import event, select
 from sqlalchemy.orm import Session
+from tests.helpers.task_brief import REQUIREMENTS
 from tests.integration.test_workspace_capture import capture_case as _capture_case
 from tests.unit.test_core_scribe_bridge import catalog_case, reviewed_fixture
 
@@ -292,7 +293,7 @@ def test_chief_and_research_receive_all_saved_parts_and_later_crowding_blocks_mo
             20,
             7,
             handoffs=(
-                DraftBrief(research_id, "Review the invented saved transcript for open questions."),
+                DraftBrief(research_id, "Review the invented saved transcript for open questions.", REQUIREMENTS),
             )
             if context["role"] == "chief"
             else (),

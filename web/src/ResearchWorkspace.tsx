@@ -22,6 +22,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const [review,setReview]=useState<ResearchSearch|null>(null),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  const [observation,setObservation]=useState<ResearchObservation|null>(null),[selected,setSelected]=useState<string[]>([]),[history,setHistory]=useState<ResearchObservation[]>([]);
  const [historyMore,setHistoryMore]=useState(false),[packets,setPackets]=useState<ResearchSavedPacket[]>([]),[packetsMore,setPacketsMore]=useState(false);
+ const [progress,setProgress]=useState(''),[cancellable,setCancellable]=useState(false);
  const [savedReceipt,setSavedReceipt]=useState<ResearchSaved|null>(null);
  const [replacement,setReplacement]=useState<ResearchPrevious|null>(null),[replaceAcknowledged,setReplaceAcknowledged]=useState(false),[previousResult,setPreviousResult]=useState<ResearchObservation|null>(null);
  const [showSavedChat,setShowSavedChat]=useState(false); // Reserved only for the focused view's explanation; no query forwarding.
@@ -33,10 +34,12 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const recovery=useEditorRecovery(workspaceId,kind,value,busy,{required:true,identity,scopeKey:bot.address});
  const blocked=locked||busy||recovery.blocked,canSearch=enabled&&!blocked&&!draft.pending;
  useUnsavedWork(!!draft.pending||!!draft.query||!!draft.analysis_draft?.question||busy);
- useEffect(()=>{generation.current++;return()=>{generation.current++;operation.current?.abort();};},[identity,workspaceId,bot.address]);
+ useEffect(()=>{generation.current++;inFlight.current=false;setBusy(false);setCancellable(false);setProgress('');return()=>{generation.current++;operation.current?.abort();};},[identity,workspaceId,bot.address]);
  useEffect(()=>{setSavedReceipt(null);setObservation(null);setHistory([]);setPackets([]);setHistoryMore(false);setPacketsMore(false);},[identity,workspaceId,bot.address]);
  useEffect(()=>{setReview(null);setConfirmed(false);},[workspaceRevision,bot.team_revision,enabled,locked]);
  function current(n:number,controller:AbortController){return n===generation.current&&!controller.signal.aborted&&live.current.identity===identity&&live.current.workspaceId===workspaceId&&live.current.bot.address===bot.address;}
+ function beginProgress(label:string,readOnly=false){setBusy(true);setProgress(label);setCancellable(readOnly);}
+ function cancelRead(){if(!cancellable||!operation.current)return;operation.current.abort();operation.current=null;inFlight.current=false;setBusy(false);setCancellable(false);setMessage('Stopped waiting for this read. Your saved work and retained requests are unchanged.');}
  function denied(cause:unknown){if(cause instanceof WorkspaceApiError&&[401,403].includes(cause.status))onDenied?.(cause);}
  async function loadCatalog(){
   const n=generation.current,controller=new AbortController();catalogRequest.current?.abort();catalogRequest.current=controller;setCatalogError(false);
@@ -52,7 +55,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  function snapshot(next:ResearchDraft):EditorDraft{return editorDraft(workspaceId,kind,next,next.pending?.request.idempotency_key??null);}
  async function execute(pending:ResearchPending,resolve=false){
   if(inFlight.current||blocked||!resolve&&(!enabled||draft.pending))return;
-  inFlight.current=true;setBusy(true);setMessage('');setReview(null);setConfirmed(false);
+  inFlight.current=true;beginProgress(resolve?'Checking the saved result…':pending.kind==='search'?'Searching selected public sources…':'Saving selected excerpts to this encounter…');setMessage('');setReview(null);setConfirmed(false);
   const controller=new AbortController(),n=generation.current;operation.current=controller;
   const retained={...draft,pending};
   try{
@@ -73,19 +76,19 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  }
  async function replaceSearch(){
   if(blocked||!enabled||!replaceAcknowledged||!replacement||draft.pending?.kind!=='search'||replacement.request.idempotency_key!==draft.pending.request.idempotency_key)return;
-  const next={...draft,query:'',pending:null,previous_request:replacement};const controller=new AbortController(),n=generation.current;inFlight.current=true;setBusy(true);
+  const next={...draft,query:'',pending:null,previous_request:replacement};const controller=new AbortController(),n=generation.current;inFlight.current=true;beginProgress('Retaining the previous request…');
   try{await recovery.commit(snapshot(next));if(current(n,controller)){setDraft(next);setReplacement(null);setReplaceAcknowledged(false);setReview(null);setConfirmed(false);setMessage('Previous request retained. Write and review a new question; nothing has been sent.');}}
   catch{if(current(n,controller))setMessage('The prior request could not be retained safely. Existing work is unchanged.');}
   finally{if(current(n,controller)){setBusy(false);inFlight.current=false;}}
  }
  async function checkPrevious(){
-  if(blocked||inFlight.current||!draft.previous_request)return;const prior=draft.previous_request;inFlight.current=true;setBusy(true);const controller=new AbortController(),n=generation.current;operation.current=controller;
+  if(blocked||inFlight.current||!draft.previous_request)return;const prior=draft.previous_request;inFlight.current=true;beginProgress('Checking the previous lookup…',true);const controller=new AbortController(),n=generation.current;operation.current=controller;
   try{const result=await validateResearchObservation(await port.resolve(identity,workspaceId,prior.request,controller.signal),workspaceId,prior.request,bot.address);if(current(n,controller))setPreviousResult(result);}
   catch(cause){if(current(n,controller)){setMessage('The previous result could not be confirmed. Its exact request is still retained.');denied(cause);}}
   finally{if(current(n,controller)){setBusy(false);inFlight.current=false;}if(operation.current===controller)operation.current=null;}
  }
  async function loadHistory(before?:string){
-  if(blocked||inFlight.current)return;inFlight.current=true;setBusy(true);setMessage('');const controller=new AbortController(),n=generation.current;operation.current=controller;
+  if(blocked||inFlight.current)return;inFlight.current=true;beginProgress('Loading saved research history…',true);setMessage('');const controller=new AbortController(),n=generation.current;operation.current=controller;
   try{
    const result=await validateResearchHistory(await port.history(identity,workspaceId,bot.address,controller.signal,before),workspaceId,bot.address);
    if(current(n,controller)){
@@ -98,7 +101,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
   finally{if(current(n,controller)){setBusy(false);inFlight.current=false;}if(operation.current===controller)operation.current=null;}
  }
  async function loadPackets(before?:string){
-  if(blocked||inFlight.current)return;inFlight.current=true;setBusy(true);setMessage('');const controller=new AbortController(),n=generation.current;operation.current=controller;
+  if(blocked||inFlight.current)return;inFlight.current=true;beginProgress('Loading saved source packets…',true);setMessage('');const controller=new AbortController(),n=generation.current;operation.current=controller;
   try{
    const result=await validateResearchSavedHistory(await port.savedHistory(identity,workspaceId,bot.address,controller.signal,before),workspaceId,bot.address);
    if(current(n,controller)){
@@ -120,7 +123,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const analysisRun=observation?.run_id===draft.saved_packet?.run_id?observation:history.find(run=>run.run_id===draft.saved_packet?.run_id)??null;
  async function loadAnalysisSources(){
   if(blocked||inFlight.current||!draft.saved_packet)return;
-  const anchor=draft.saved_packet,controller=new AbortController(),n=generation.current;operation.current=controller;inFlight.current=true;setBusy(true);setMessage('');
+  const anchor=draft.saved_packet,controller=new AbortController(),n=generation.current;operation.current=controller;inFlight.current=true;beginProgress('Loading retained source details…',true);setMessage('');
   try{
    // Two bounded reads of retained history, never a new public lookup or save.
    const [savedPage,runPage]=await Promise.all([
@@ -138,7 +141,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  function saveSelected(){if(!canSearch||!observation||!selected.length||selected.length>5)return;void execute({kind:'save',run_id:observation.run_id,request:{contract_version:1,idempotency_key:crypto.randomUUID(),expected_revision:workspaceRevision,source_hashes:[...selected]}});}
  async function submitAnalysis(body:ConversationInput){
   if(inFlight.current||blocked||draft.pending||!enabled||!analysis?.model.enabled||analysis.modelBlocked||!draft.saved_packet||!validConversation(body)||body.role!==bot.address||body.expected_revision!==workspaceRevision||body.team_revision!==bot.team_revision||JSON.stringify(body.research_analysis?.entries)!==JSON.stringify([draft.saved_packet]))return;
-  const controller=new AbortController(),n=generation.current,model=JSON.stringify(analysis.model);operation.current=controller;inFlight.current=true;setBusy(true);setMessage('');
+  const controller=new AbortController(),n=generation.current,model=JSON.stringify(analysis.model);operation.current=controller;inFlight.current=true;beginProgress('Preparing the reviewed Research request…');setMessage('');
   try{
    await recovery.commit(snapshot(draft));
    if(!current(n,controller)||!live.current.enabled||live.current.locked||live.current.bot.team_revision!==body.team_revision||live.current.analysis?.workspace.id!==workspaceId||live.current.analysis.workspace.revision!==body.expected_revision||live.current.analysis.modelBlocked||JSON.stringify(live.current.analysis.model)!==model)return;
@@ -178,10 +181,10 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
    </fieldset>
   </form>
   {review&&<section className="research-query-review" aria-label="Review public query"><h3>Check what will be sent</h3><p>{review.query}</p><p>To: {review.sources.map(id=>sourceLabel(id,catalog)).join(', ')}</p><label><input type="checkbox" checked={confirmed} disabled={blocked} onChange={event=>setConfirmed(event.target.checked)}/>This is a general public question, with no patient identifiers.</label><div><button disabled={blocked} onClick={()=>{setReview(null);setConfirmed(false);}}>Edit query</button><button className="team-primary" disabled={!confirmed||!canSearch||!selectedAvailable} onClick={()=>{if(confirmed&&canSearch&&selectedAvailable&&review.expected_revision===workspaceRevision&&review.team_revision===bot.team_revision)void execute({kind:'search',request:review});}}>Search selected sources</button></div></section>}
-  {draft.pending&&<section className="research-status" aria-label="Unconfirmed research request"><strong>{draft.pending.kind==='search'?'Research request retained':'Evidence save retained'}</strong><p>Check the saved result. This does not start another lookup or save.</p><button disabled={blocked} onClick={()=>draft.pending&&void execute(draft.pending,true)}>Check saved result</button></section>}
+  {draft.pending&&!busy&&<section className="research-status" aria-label="Unconfirmed research request"><strong>{draft.pending.kind==='search'?'Research request retained':'Evidence save retained'}</strong><p>Check the saved result. This does not start another lookup or save.</p><button disabled={blocked} onClick={()=>draft.pending&&void execute(draft.pending,true)}>Check saved result</button></section>}
   {replacement&&draft.pending?.kind==='search'&&<section className="research-status" aria-label="Prepare replacement search"><p>The previous request is retained and may still finish. A new search is a separate public lookup.</p><label><input type="checkbox" checked={replaceAcknowledged} disabled={blocked} onChange={event=>setReplaceAcknowledged(event.target.checked)}/>I understand the previous request may still finish.</label><button disabled={blocked||!enabled||!replaceAcknowledged} onClick={()=>void replaceSearch()}>Start a new search</button></section>}
   {draft.previous_request&&<details className="research-history"><summary>Previous request retained</summary><p>{draft.previous_request.request.query}</p><p className="team-fine">Its outcome was {draft.previous_request.outcome==='not_found'?'not found when checked':'interrupted when checked'}. This does not confirm that a prior upstream request stopped.</p><button disabled={blocked} onClick={()=>void checkPrevious()}>Check previous result</button>{previousResult&&<><p>{stateLabel[previousResult.state]}</p><ul>{previousResult.results.map(result=><li key={result.sha256}>{result.title}</li>)}</ul></>}</details>}
-  {busy&&<p role="status">Checking research…</p>}{message&&<p role="status" className="research-status">{message}</p>}
+  {busy&&<div className="research-status" aria-label="Research operation"><p role="status">{progress}</p>{cancellable&&<button onClick={cancelRead}>Stop waiting</button>}</div>}{message&&<p role="status" className="research-status">{message}</p>}
   {analysis&&draft.saved_packet&&<ResearchAnalysisPanel access={analysis} packet={draft.saved_packet} draft={draft.analysis_draft??{question:'',selected:false}}
    run={analysisRun} saved={analysisSaved} onLoadSources={()=>void loadAnalysisSources()}
    bot={bot.address} teamRevision={bot.team_revision} enabled={enabled} locked={blocked||!!draft.pending}

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -18,6 +18,7 @@ from cosmas_os.api.model_work_schemas import (
     ModelRequestObservation,
     checked_response,
 )
+from cosmas_os.application import handoff_briefs
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.encounter_access import patient_visible
@@ -37,6 +38,7 @@ from cosmas_os.models import (
     WorkspaceReply,
 )
 from cosmas_os.ports.bot_capabilities import BotReply, ModelCallFailure
+from cosmas_os.ports.task_brief import TaskRequirements
 
 ACTIVE = {"reserved", "running"}
 TERMINAL = {"completed", "failed", "unknown", "abandoned"}
@@ -553,7 +555,7 @@ def _context_for(
         for candidate in version.configuration["bots"]
         if team.bot_address(candidate) in handoff_roles
     )
-    return conversation.build_context(
+    context = conversation.build_context(
         project_workspace(s, ws.read(s, workspace.box_id, workspace.owner_id, workspace.id)),
         version,
         settings,
@@ -565,6 +567,16 @@ def _context_for(
         agent_id=bot.agent_id,
         handoff_targets=targets,
     )
+    if "task_brief" in command:
+        try:
+            if not draft_only:
+                raise ValueError("task brief requires private handoff")
+            task = command["task_brief"]
+            handoff_briefs.validate(task, context, goal=command["content"], origin_id=task["depends_on"]["entry_id"])
+            context = replace(context, question=handoff_briefs.question(task))
+        except (ValueError, TypeError, KeyError):
+            raise ws.WorkspaceError("source_changed") from None
+    return context
 
 
 def _allowance(s, box, owner, as_of, configuration):
@@ -815,6 +827,12 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
             not in handoffs.available_roles(s, row.box_id, row.owner_id, version, chief_settings)
         ):
             raise ws.WorkspaceError("authority_changed")
+        if "task_brief" in command:
+            origin = s.get(WorkspaceEntry, assignment.origin_entry_id)
+            if (command["content"] != assignment.brief or origin is None
+                or not isinstance(command["task_brief"], dict)
+                or command["task_brief"].get("depends_on") != {"entry_id": origin.id, "revision": origin.revision}):
+                raise ws.WorkspaceError("source_changed")
     if (
         not team.runtime_settings.workspace_llm_available
         or team.blocked(settings, "model_answer")
@@ -1009,6 +1027,12 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
     try:
         workspace, version, bot, settings = _current_input(s, row, reauthenticate=reauthenticate, session_prep_phase="after")
         frozen = _context(row.prepared_envelope["context"])
+        if row.envelope_contract == "cosmas-gpt41-prepared.v4":
+            try:
+                for brief in result.handoffs:
+                    TaskRequirements.model_validate(brief.requirements)
+            except (ValueError, TypeError):
+                raise ws.WorkspaceError("invalid_model_output") from None
         if (
             not result.backend.startswith("azure_gpt41")
             or not result.content.strip()
@@ -1102,12 +1126,12 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
                 s,
                 row,
                 "failed",
-                "source_changed" if error.code == "source_changed" else "authority_changed",
+                "source_changed" if error.code == "source_changed" else "model_unavailable" if error.code == "invalid_model_output" else "authority_changed",
                 at,
                 dispatch="response_received",
                 outcome="source_withheld"
                 if error.code == "source_changed"
-                else "authority_withheld",
+                else "invalid_output" if error.code == "invalid_model_output" else "authority_withheld",
                 reply=result,
             )
             s.commit()
@@ -1380,6 +1404,13 @@ def reserve_children(
             s, workspace, version, config, recipient, command, draft_only=True
         )
         child_context = replace(child_context, context_revision=context.context_revision)
+        if brief.requirements is not None:
+            try:
+                task = handoff_briefs.prepare(brief, child_context, origin)
+            except (ValueError, TypeError, KeyError):
+                raise ws.WorkspaceError("invalid_model_output") from None
+            command["task_brief"] = task
+            child_context = replace(child_context, question=handoff_briefs.question(task))
         request_hash = payload_hash({"handoff": assignment.id, "attempt": attempt.id})
         _new_admission(
             s,
@@ -1594,6 +1625,12 @@ def reserve_retry(
         raise ws.WorkspaceError("handoff_attempt_conflict")
     if latest.number >= 3 or workspace_units(s, wid) >= 50:
         raise ws.WorkspaceError("handoff_limit")
+    original = s.scalar(select(ModelWorkAdmission).join(
+        WorkspaceHandoffAttempt, WorkspaceHandoffAttempt.id == ModelWorkAdmission.handoff_attempt_id
+    ).where(WorkspaceHandoffAttempt.handoff_id == hid).order_by(WorkspaceHandoffAttempt.number).limit(1))
+    parent = s.scalar(select(ModelWorkAdmission).where(ModelWorkAdmission.request_entry_id == assignment.origin_entry_id))
+    if parent and parent.envelope_contract == "cosmas-gpt41-prepared.v4" and (original is None or "task_brief" not in original.request_body):
+        raise ws.WorkspaceError("handoff_context_changed")
     _allowance(s, box, owner, now(s, clock), version.configuration)
     if old and old.state in ACTIVE:
         _finish(s, old, effective_state(old, at), reason, at)
@@ -1619,6 +1656,8 @@ def reserve_retry(
         "role": team.bot_address(settings),
         "content": assignment.brief,
     }
+    if original and "task_brief" in original.request_body:
+        command["task_brief"] = original.request_body["task_brief"]
     context = _context_for(s, workspace, version, settings, bot, command, draft_only=True)
     _new_admission(
         s,
@@ -1703,22 +1742,24 @@ def recover_expired(s, *, clock=None, maximum=100):
 def process_next(factory, *, dispatch=None, clock=None):
     with factory() as s:
         recover_expired(s, clock=clock)
-        candidate = s.execute(
+        candidates = s.execute(
             select(ModelWorkAdmission.id, ModelWorkAdmission.box_id, ModelWorkAdmission.owner_id)
             .where(
                 ModelWorkAdmission.kind == "private_handoff", ModelWorkAdmission.state == "reserved"
             )
             .order_by(ModelWorkAdmission.admitted_at, ModelWorkAdmission.id)
-            .limit(1)
-        ).first()
-        if candidate is None:
-            return False
-        aid, box, owner = candidate
-        claimed = claim(s, box, owner, aid, clock=clock)
-    if claimed is None:
-        with factory() as s:
+            .limit(3)
+        ).all()
+        claimed = None
+        for aid, box, owner in candidates:
+            claimed = claim(s, box, owner, aid, clock=clock)
+            if claimed is not None:
+                break
             current = s.get(ModelWorkAdmission, aid)
-            return current is not None and current.state in {"failed", "abandoned"}
+            if current is not None and current.state in {"failed", "abandoned"}:
+                return True
+    if claimed is None:
+        return False
     try:
         result = (dispatch or dispatch_claim)(claimed)
     except ModelCallFailure as failure:

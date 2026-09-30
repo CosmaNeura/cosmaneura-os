@@ -24,8 +24,8 @@ function recording():ExistingScribeSource{
 let host:HTMLDivElement,root:Root,access:EditorRecoveryAccess,onSaved:ReturnType<typeof vi.fn>,onBusy:ReturnType<typeof vi.fn>;
 const button=(label:string)=>[...host.querySelectorAll('button')].find(item=>item.textContent?.includes(label))!;
 const click=(label:string)=>act(async()=>button(label).click());
-const mount=(owner=identity,recovery:EditorRecoveryAccess|null=access)=>act(async()=>root.render(<EditorRecoveryContext.Provider value={recovery}>
-  <ExistingScribeSourcePanel workspace={workspace} identity={owner} locked={false} onSaved={onSaved} onBusyChange={onBusy}/></EditorRecoveryContext.Provider>));
+const mount=(owner=identity,recovery:EditorRecoveryAccess|null=access,openRequest=0)=>act(async()=>root.render(<EditorRecoveryContext.Provider value={recovery}>
+  <ExistingScribeSourcePanel workspace={workspace} identity={owner} locked={false} openRequest={openRequest} onSaved={onSaved} onBusyChange={onBusy}/></EditorRecoveryContext.Provider>));
 beforeEach(async()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();host=document.createElement('div');document.body.append(host);root=createRoot(host);
   access={workspaceId:wid,journal:new DraftJournal(await memoryDraftStorage()({scope:'a'.repeat(64)})),authorize:vi.fn().mockResolvedValue(workspace),denied:vi.fn()};
@@ -94,4 +94,19 @@ it('distinguishes the first save from checking an uncertain saved result',async(
   expect(host.textContent).toContain('Saving reviewed version…');expect(host.textContent).not.toContain('Keep this request for checking');
   await act(async()=>finish({workspace:{...workspace,revision:2}} as ScribeSourcePacket));
   expect(onSaved).toHaveBeenCalledOnce();
+});
+
+it('consumes an explicit home-screen lookup once after recovery is ready, without sharing',async()=>{
+  await mount(identity,null,1);expect(readExistingScribeSource).not.toHaveBeenCalled();
+  await mount(identity,access,1);expect(readExistingScribeSource).toHaveBeenCalledOnce();
+  expect(host.textContent).toContain('Invented complete transcript');
+  await mount(identity,access,1);expect(readExistingScribeSource).toHaveBeenCalledOnce();
+  expect(saveScribeSourcePacket).not.toHaveBeenCalled();expect(onSaved).not.toHaveBeenCalled();
+});
+it('does not replace a retained uncertain save with a home-screen lookup',async()=>{
+  vi.mocked(saveScribeSourcePacket).mockRejectedValueOnce(new Error('lost invented response'));
+  await mount();await click('Use a Scribe recording');await act(async()=>host.querySelector<HTMLInputElement>('input')!.click());await click('Use this version with my team');
+  await act(async()=>root.unmount());root=createRoot(host);
+  await mount(identity,access,1);expect(host.textContent).toContain('save is unconfirmed');
+  expect(readExistingScribeSource).toHaveBeenCalledOnce();expect(saveScribeSourcePacket).toHaveBeenCalledOnce();
 });

@@ -1,3 +1,4 @@
+import {PERSONAL_CONNECTION_DEADLINE_MS} from './connection-operation-health';
 import {workspaceFetch} from './workspace-protocol';
 import {WorkspaceApiError, WORKSPACE_BUILD, WORKSPACE_AUTHENTICATED_BUILD, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {assertCurrentDesktopSession, workspaceAuthHeaders} from './workspace-auth-headers';
@@ -55,7 +56,7 @@ export async function microsoftConnectionRequest(identity:AuthenticatedWorkspace
   const interrupted=new Promise<never>((_,reject)=>{rejectAbort=()=>reject(new WorkspaceApiError(503));});
   void interrupted.catch(()=>{}); // An already-aborted caller may exit before the first race.
   controller.signal.addEventListener('abort',rejectAbort,{once:true});
-  const timer=setTimeout(abort,50000);signal?.addEventListener('abort',abort,{once:true});
+  const timer=setTimeout(abort,PERSONAL_CONNECTION_DEADLINE_MS);signal?.addEventListener('abort',abort,{once:true});
   let response:Response|undefined,reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
   const cancel=(body:{cancel:()=>Promise<unknown>}|null|undefined)=>{try{void body?.cancel().catch(()=>{});}catch{/* canceled */}};
   const check=()=>{controller.signal.throwIfAborted();assertCurrentDesktopSession(identity);if(identity.mode!=='desktop_native'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);};

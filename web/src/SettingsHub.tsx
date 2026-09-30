@@ -3,7 +3,8 @@ import './settings-hub.css';
 import {ATHENA_CONNECTION_BUILD} from './AthenaConnectionPanel';
 import {readConnectionCatalog, type ConnectionCatalog, type ConnectionId} from './connection-catalog-api';
 import {CONNECTION_GUIDES} from './connection-guides';
-import {accountStatusSupported,readConnectionSummary,type ConnectionSummary} from './connection-summary';
+import {accountStatusSupported,readConnectionSummary,personalConnectionSummary,type ConnectionSummary} from './connection-summary';
+import {useConnectionHealth} from './connection-operation-health';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
 type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google';
@@ -24,6 +25,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [visited, setVisited] = useState<Editor[]>(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
+  const googleHealth=useConnectionHealth(connectionIdentity,'google'),microsoftHealth=useConnectionHealth(connectionIdentity,'microsoft');
   type Check = {value?:ConnectionSummary; last?:ConnectionSummary; busy:boolean};
   const [directory,setDirectory]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog|null;error:boolean;busy:boolean;checks:Partial<Record<ConnectionId,Check>>}|null>(null);
   const [refreshCatalog,setRefreshCatalog]=useState(0);
@@ -47,7 +49,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       setDirectory(previous=>({owner:connectionIdentity,catalog:value,error:false,busy:false,
         checks:Object.fromEntries(Object.keys(value).map(key=>{
           const id=key as ConnectionId,last=previous?.owner===connectionIdentity?previous.checks[id]?.last:undefined;
-          const setup:ConnectionSummary={label:'Admin setup',reason:'Your practice administrator needs to finish setup.',action:'View requirements',tone:'attention',checkedAt:Date.now()};
+          const setup:ConnectionSummary={label:'Admin setup',reason:'Your practice administrator needs to finish setup.',action:'View requirements',tone:'attention',checkedAt:Date.now(),checkKind:'availability'};
           return [id,!value[id]?{value:setup,last:setup,busy:false}:{last,busy:ids.includes(id)&&accountStatusSupported(id)}];
         }))}));
       for(const id of ids){
@@ -105,7 +107,13 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     if(catalogError)return {label:'Couldn’t check',reason:'Current status is unknown. Try again or open the connection.',action:'Review connection',tone:'attention'};
     const check=current?.checks[id];
     if(check?.busy)return {label:check.last?'Checking again…':'Checking…',reason:'Checking your account connection.',action:'View connection',tone:'neutral'};
-    if(check?.value)return check.value;
+    if(check?.value){
+      if(check.value.services&&(id==='google'||id==='microsoft')){
+        const health=id==='google'?googleHealth:microsoftHealth;
+        return personalConnectionSummary(id,health,check.value.accountVersion===health.accountVersion?check.value.reason:'Account connection changed. Open to review it.');
+      }
+      return check.value;
+    }
     return {label:catalog?.[id]===true?'Review setup':connectionIdentity?'Checking…':'Not checked',reason:catalog?.[id]===true?'Open to review configured accounts and permissions.':'Account status has not been verified.',action:'Review setup',tone:'neutral'};
   }
   return <section className="settings-hub" hidden={!open} aria-label="Settings">
@@ -144,10 +152,13 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
         const cards=connectionCards.filter(item=>item.group===group);return cards.length>0&&<section className="connection-group" key={group} aria-label={group}>
           <h2>{group}</h2><div className="connection-cards">{cards.map(item=>{const state=summary(item.id);return <button disabled={navigationLocked||!!connectionIdentity&&!catalog&&!catalogError} className="settings-card connection-card" key={item.id} onClick={()=>visit(item.id)}>
             <span className="settings-card-icon" aria-hidden="true">{item.icon}</span>
-            <span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{state.reason}</small></span>
+            <span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{state.reason}</small>
+              {state.services&&<span className="connection-service-summary">{state.services.map(service=><small key={service.kind}><b>{service.name}:</b> {service.label}
+                {service.lastSuccessAt&&<span className="connection-operation-time">Last successful read: {new Date(service.lastSuccessAt).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})}</span>}</small>)}</span>}
+            </span>
             <span className="connection-card-state"><span role="status" aria-atomic="true" className={`connection-badge connection-badge-${state.tone}`}>{state.tone==='ready'&&<span aria-hidden="true">✓ </span>}{state.label}</span>
               {!state.checkedAt&&current?.checks[item.id]?.last&&<small>Last confirmed: {current.checks[item.id]!.last!.label}{current.checks[item.id]!.last!.checkedAt?` · ${new Date(current.checks[item.id]!.last!.checkedAt!).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`:''}</small>}
-              {state.checkedAt&&<small>Checked {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</small>}
+              {state.checkedAt&&<small>{state.checkKind==='availability'?'Availability checked':'Account checked'} {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</small>}
               <span className="connection-card-action">{state.action} <span aria-hidden="true">›</span></span></span>
           </button>;})}</div>
         </section>;

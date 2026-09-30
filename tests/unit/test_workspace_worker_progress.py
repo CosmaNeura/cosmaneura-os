@@ -81,6 +81,11 @@ def test_actual_loop_reports_empty_success_failure_recovery_and_exit(worker, mon
                 return
             raise TimeoutError
 
+    async def inline(function, *args, **kwargs):
+        return function(*args, **kwargs)
+    # Isolate the progress state machine from scheduling order; parallel lanes
+    # are exercised separately with actual threads.
+    monkeypatch.setattr(asyncio, "to_thread", inline)
     monkeypatch.setattr(module, "process_next" if worker == "handoffs" else "process_batch", process)
     arguments = {} if worker == "handoffs" else {"incoming_sources": source}
     asyncio.run(module.run_worker("invented-factory", Stop(), progress=progress, **arguments))
@@ -190,3 +195,28 @@ def test_ordinary_lifespan_and_http_ready_include_worker_progress(monkeypatch):
             assert (await client.get("/ready")).status_code == 503
 
     asyncio.run(exercise())
+
+
+def test_handoff_worker_has_three_bounded_lanes_and_no_dwell_for_admitted_work(monkeypatch):
+    barrier = threading.Barrier(3)
+    lock = threading.Lock()
+    done = threading.Event()
+    calls = []
+    class Stop:
+        def is_set(self):
+            return done.is_set()
+        async def wait(self):
+            pytest.fail("already-admitted work must not wait between dispatches")
+    def process(factory):
+        with lock:
+            calls.append(threading.get_ident())
+            count = len(calls)
+        assert count <= 6
+        barrier.wait(timeout=2)
+        if count > 3:
+            done.set()
+        return True
+    monkeypatch.setattr(handoffs, "process_next", process)
+    asyncio.run(handoffs.run_worker(None, Stop()))
+    assert len(calls) == 6
+    assert len(set(calls[:3])) == 3 and len(set(calls[3:])) == 3

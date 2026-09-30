@@ -37,13 +37,34 @@ def render(root, report):
         stages = ("<details open><summary>Encounter stages</summary><ul>" + "".join(
             "<li>" + ("✓ " if r["passed"] else "✕ ") + html.escape(r["name"]) + "</li>" for r in phases)
             + "</ul><p class=meta>Approvals and provider replies use synthetic test actors.</p></details>") if phases else ""
+        incoming = ""
+        if episode.get("inbound_scenarios"):
+            incoming = "<details open><summary>Incoming work evaluation</summary>"
+            for row in episode["inbound_scenarios"]:
+                metrics = row.get("metrics", {})
+                incoming += "<p><strong>" + html.escape(row["provider"].title()) + "</strong> · " + ("Passed" if row["passed"] else "Needs work") + "</p>"
+                if metrics:
+                    incoming += (f'<p>First useful Chief plan: {metrics["time_to_first_useful_result_ms"] / 1000:.2f}s · '
+                        f'Handoffs correct: {metrics["handoff_correct"]}/{metrics["handoff_total"]} · '
+                        f'Duplicate actions: {metrics["duplicate_actions"]} · '
+                        f'Longest handoff wait: {metrics["max_handoff_wait_ms"] / 1000:.2f}s · '
+                        f'Recovered responses: {metrics["recovered_lost_responses"]}</p>'
+                        f'<p>{metrics["persona_task_steps"]} scripted provider steps; browser clicks and real usability are unmeasured.</p>')
+            incoming += "<p class=meta>" + html.escape(" ".join(episode.get("limits", []))) + "</p></details>"
+            incoming += "<details><summary>Fax submission and delivery receipts</summary><ul>"
+            for fax in episode.get("fax_receipts", []):
+                incoming += "<li>" + html.escape(fax["provider"].title() + " · " + fax["scenario"].replace("_", " "))
+                incoming += "<ul>" + "".join("<li>" + html.escape(stage["stage"].replace("_", " "))
+                    + f' · {stage["submit_calls"]} submit call · ' + html.escape(stage["acceptance"] + " · " + stage["transport"])
+                    + "</li>" for stage in fax["receipt_stages"]) + "</ul></li>"
+            incoming += "</ul><p class=meta>Provider acceptance is separate from delivery and human completion. All HTTP is simulated.</p></details>"
         cards.append(f'''<article class="episode" data-case="{episode['case']}">
 <div class="episode-head"><div><p class="eyebrow">{html.escape(episode['id'])}</p><h2>{html.escape(episode['title'])}</h2></div>
 <span class="badge {'pass' if episode['passed'] else 'fail'}">{'Passed' if episode['passed'] else 'Needs work'}</span></div>
 <p>{episode['duration_ms'] / 1000:.1f}s · {episode['tool_calls']} tool calls · application: {html.escape(episode['application']['status'])}</p>
 {handoffs}
 {phase_times}
-{matrix}{stages}
+{matrix}{stages}{incoming}
 {('<p class="error">'+html.escape(failures)+'</p>') if failures else ''}
 <details><summary>What was checked</summary><ul>{''.join('<li>'+('✓ ' if ok else '✕ ')+html.escape(k.replace('_',' '))+'</li>' for k,ok in episode['checks'].items())}</ul></details>
 {artifacts}</article>''')

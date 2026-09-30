@@ -17,6 +17,7 @@ FIXTURE = Path(__file__).parents[1] / "fixtures/model_envelopes_v1_roles.json"
 LEGACY = json.loads(FIXTURE.read_text())
 V2_FIXTURE = Path(__file__).parents[1] / "fixtures/model_envelope_v2_chief_research.json"
 V2_CHIEF = json.loads(V2_FIXTURE.read_text())
+V3_FIXTURE = Path(__file__).parents[1] / "fixtures/model_envelope_v3_chief_research.json"
 
 
 def legacy_schema(envelope):
@@ -25,6 +26,9 @@ def legacy_schema(envelope):
     if handoffs and "intended_role" in handoffs["items"]["properties"]:
         del handoffs["items"]["properties"]["intended_role"]
         handoffs["items"]["required"].remove("intended_role")
+    if handoffs and "requirements" in handoffs["items"]["properties"]:
+        del handoffs["items"]["properties"]["requirements"]
+        handoffs["items"]["required"].remove("requirements")
     return schema
 
 
@@ -35,6 +39,19 @@ def test_pre_change_fixture_bytes_are_unchanged():
     assert hashlib.sha256(V2_FIXTURE.read_bytes()).hexdigest() == (
         "182988930add1e62c634f36d83ab60257acb8c8e0347bb2954b8b41105902edf"
     )
+    assert hashlib.sha256(V3_FIXTURE.read_bytes()).hexdigest() == (
+        "b19156c96afa236f04befdaa26a4c1cf9412a8bdf5d2d383fcc7fe559a2fb15f"
+    )
+
+
+@pytest.mark.parametrize("order", ["sorted", "reverse"])
+def test_pre_task_brief_v3_fixture_dispatches_exact_original_body(order):
+    original = json.loads(V3_FIXTURE.read_text())
+    saved = roundtrip(original, order)
+    calls = []
+    connector(saved, calls).review_prepared(saved)
+    assert json.loads(calls[0]) == original["body"]
+    assert digest(saved) == digest(original)
 
 
 @pytest.mark.parametrize("role", LEGACY)
@@ -56,8 +73,8 @@ def test_new_preparation_changes_only_versioned_instructions(role):
     old = LEGACY[role]
     port = GPT41Connector(lambda: pytest.fail("preparation cannot read credentials"))
     new = port.prepare(_context(old["context"]))
-    assert new["contract"] == "cosmas-gpt41-prepared.v3"
-    assert new["decoder"] == "cosmas-gpt41-decoder.v3"
+    assert new["contract"] == "cosmas-gpt41-prepared.v4"
+    assert new["decoder"] == "cosmas-gpt41-decoder.v4"
     # The legacy fixture includes truncated excerpts; preserve its truncation
     # marker when comparing exactly the same bounded source selection.
     equivalent = port._prepare_value(_context(old["context"]), source_records=old["sources"])
@@ -77,7 +94,7 @@ def test_new_preparation_changes_only_versioned_instructions(role):
     assert len(calls) == 1
 
 
-@pytest.mark.parametrize("version", ["v1", "v2", "v3"])
+@pytest.mark.parametrize("version", ["v1", "v2", "v3", "v4"])
 @pytest.mark.parametrize("fault", ["relabel", "mixed_decoder", "unknown", "instructions", "tools", "invented_capability"])
 def test_version_or_authority_tampering_is_rejected_before_credentials(version, fault):
     value = deepcopy(LEGACY["chief"])
@@ -143,13 +160,16 @@ def test_new_chief_routing_preserves_limits_and_never_grants_missing_research(av
     _checked_envelope(roundtrip(new))
 
 
-@pytest.mark.parametrize("version", ["v1", "v2", "v3"])
+@pytest.mark.parametrize("version", ["v1", "v2", "v3", "v4"])
 def test_exact_research_address_dispatches_with_versioned_brief_decoder(version):
     context = _context(V2_CHIEF["context"])
     address = context.handoff_targets[-1]["address"]
     brief = {"role": address, "brief": "Compare the supplied evidence; eligibility is unconfirmed."}
-    if version == "v3":
+    if version in {"v3", "v4"}:
         brief["intended_role"] = "research"
+    if version == "v4":
+        from tests.helpers.task_brief import REQUIREMENTS
+        brief["requirements"] = REQUIREMENTS
     calls = []
 
     def respond(request):
@@ -184,5 +204,6 @@ def test_v3_rejects_wrong_intended_role_even_when_address_is_allowed(fault):
                 "answer":"Draft queued.", "source_ids":[], "handoffs":[brief]})}}]})
 
     with pytest.raises(ModelCallFailure) as failure:
-        GPT41Connector(lambda:"invented", transport=httpx.MockTransport(respond)).review(context)
+        GPT41Connector(lambda:"invented", transport=httpx.MockTransport(respond)).review_prepared(
+            GPT41Connector(lambda: "")._prepare_value(context, contract="cosmas-gpt41-prepared.v3"))
     assert len(calls) == 1 and failure.value.outcome == "invalid_output"

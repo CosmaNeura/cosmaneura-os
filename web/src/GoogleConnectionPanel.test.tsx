@@ -34,13 +34,13 @@ it('uses the latest capability check if Calendar permission changed during recov
   .mockRejectedValueOnce(new WorkspaceApiError(409,'google_calendar_consent_required'))
   .mockResolvedValueOnce({...connected,capabilities:{mail:true,calendar:true}});
  await mount();await click('View next 7 days');
- expect(host.textContent).toContain('Calendar: access ready');expect(host.textContent).toContain('View next 7 days');
+ expect(host.querySelector('[data-connection-operation="google.calendar_summaries"]')?.textContent).toContain('Permission granted; a read has not been verified.');expect(host.textContent).toContain('View next 7 days');
  expect(host.textContent).not.toContain('Add calendar access');
  expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','calendar','status']);
 });
 it('shows missing Calendar permission before a failed read and preserves email access',async()=>{
  vi.mocked(googleConnectionRequest).mockResolvedValueOnce({...connected,capabilities:{mail:true,calendar:false}}).mockResolvedValueOnce(inbox).mockResolvedValueOnce(link);
- await mount();expect(host.textContent).toContain('Calendar: needs permission');expect(host.textContent).not.toContain('View next 7 days');
+ await mount();expect(host.querySelector('[data-connection-operation="google.calendar_summaries"]')?.textContent).toContain('Permission needed');expect(host.textContent).not.toContain('View next 7 days');
  await click('Read recent email');expect(host.textContent).toContain('Invented message subject');
  await click('Add calendar access');expect(host.querySelector('a')?.textContent).toBe('Continue with Google');
  expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','mail','start']);

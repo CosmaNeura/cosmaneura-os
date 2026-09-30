@@ -1,0 +1,17 @@
+.team-work-overview{margin:0 0 1rem;padding:1rem;border:1px solid var(--team-line,#e6e8eb);border-radius:16px;background:var(--surface,#fff)}
+.team-work-overview>header{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:.65rem}
+.team-work-overview h2{margin:0;font-size:1rem}.team-work-overview>header p{margin:.3rem 0 0;font-size:.85rem;color:var(--team-muted,#687078)}
+.team-task-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,250px),1fr));gap:.7rem;align-items:start}
+.team-task-grid .team-handoff{margin:0;padding:.85rem;min-width:0;overflow-wrap:anywhere}
+.team-task-goal{font-weight:550}.team-task-output{font-size:.9rem;line-height:1.45}.team-task-details{font-size:.85rem;margin:.6rem 0}
+.team-task-details h4{margin:.65rem 0 .25rem}.team-task-details ul{padding-left:1.1rem;margin:.25rem 0}.team-task-details small{display:block;overflow-wrap:anywhere;color:var(--team-muted,#687078)}
+.team-task-details summary,.team-earlier-tasks>summary{cursor:pointer}.team-earlier-tasks{margin-top:.65rem}.team-earlier-tasks>.team-task-grid{margin-top:.65rem}
+@media(max-width:600px){.team-work-overview{padding:.7rem}.team-work-overview>header{align-items:flex-start}.team-task-grid{grid-template-columns:1fr}}
+
+.team-task-grid .team-handoff p{font-size:14px;line-height:1.45}.team-task-grid .team-handoff header strong{font-size:14px}.team-task-grid .team-handoff button{font-size:14px;min-height:44px}.team-task-grid .team-handoff details{font-size:13px}.team-task-grid .team-handoff summary{min-height:44px;box-sizing:border-box;padding:10px 0}
+
+.team-task-grid .team-handoff>.team-task-goal{margin:.55rem 0 .4rem;white-space:normal}
+.team-task-grid .team-handoff>.team-task-review{margin:.4rem 0 .45rem}
+.team-task-grid .team-handoff>.team-task-summary{font-size:12px;line-height:1.4;margin:.4rem 0;color:var(--team-muted,#687078)}
+.team-task-grid .team-handoff>.team-task-details{margin:.25rem 0 0}
+.team-task-grid .team-handoff>.team-task-details>summary{padding:10px 0}

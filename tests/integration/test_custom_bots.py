@@ -5,6 +5,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from tests.helpers.task_brief import REQUIREMENTS
 from tests.integration.test_provider_team import ask, case
 from tests.integration.test_workspace_capture import admit, capture_case
 from tests.integration.test_workspace_handoffs import model, worker
@@ -85,7 +86,7 @@ def test_chief_assignments_to_custom_bot_obey_scope_and_revalidate_before_execut
     def reply(ctx):
         contexts.append(ctx)
         return BotReply("Private draft", ctx.sources, "azure_gpt41", handoffs=(
-            (DraftBrief(bot["instance_id"], "Prepare a referral checklist"),) if ctx.role == "chief" else ()))
+            (DraftBrief(bot["instance_id"], "Prepare a referral checklist", REQUIREMENTS),) if ctx.role == "chief" else ()))
     monkeypatch.setattr(model_work, "dispatch_claim", lambda claim: reply(_context(claim.envelope["context"])))
     result = ask(session, (box, owner, w, saved), role="chief")
     assert bot["instance_id"] in contexts[0].handoff_roles

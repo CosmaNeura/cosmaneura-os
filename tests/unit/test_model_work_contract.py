@@ -5,6 +5,7 @@ from copy import deepcopy
 
 import pytest
 from starlette.requests import Request
+from tests.helpers.task_brief import REQUIREMENTS
 
 from cosmas_os.api.model_work_schemas import (
     AdmissionObservation,
@@ -331,7 +332,7 @@ def test_chief_recipient_inventory_and_output_limit_are_independent():
             200,
             json=completion(
                 source_ids=[],
-                handoffs=[{"role": recipients[-1], "intended_role": "custom", "brief": "Review the saved preparation."}],
+                handoffs=[{"role": recipients[-1], "intended_role": "custom", "requirements": REQUIREMENTS, "brief": "Review the saved preparation."}],
             ),
         )
 
@@ -348,7 +349,7 @@ def test_chief_recipient_inventory_and_output_limit_are_independent():
             json=completion(
                 source_ids=[],
                 handoffs=[
-                    {"role": address, "intended_role": "custom", "brief": "Review the saved preparation."}
+                    {"role": address, "intended_role": "custom", "requirements": REQUIREMENTS, "brief": "Review the saved preparation."}
                     for address in recipients[:2]
                 ],
             ),

@@ -13,6 +13,7 @@ from datetime import UTC, datetime, timedelta
 from email.header import decode_header, make_header
 from email.utils import parseaddr
 from time import monotonic
+from typing import Literal
 from urllib.parse import urlsplit
 
 import httpx
@@ -271,7 +272,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             "calendar_read": CALENDAR_SCOPE in granted,
         }, self.now() + timedelta(seconds=expires)
 
-    def _read_current(self, identity, private, binding, account_id, *, audit=False):
+    def _read_current(self, identity, private, binding, account_id, *, audit: bool | Literal["calendar"] = False) -> None:
         with self._session() as session:
             account, selected, current_binding = self._account(session, identity=identity)
             credential = session.get(self.Credential, account.id)

@@ -74,3 +74,15 @@
 .connection-setup-guide h3 { margin:18px 0 6px; font-size:15px; }
 .connection-setup-guide p { margin:6px 0 12px; }
 .team-workspace .connection-card { min-height:84px; }
+
+/* Compact service rows retain readable targets and separate operation proof. */
+.team-workspace .connection-card { min-height:68px; padding:10px 12px; gap:10px; }
+.connection-card .settings-card-icon { width:30px; height:30px; font-size:19px; border-radius:8px; }
+.connection-group { margin-top:16px; }
+.connection-group h2 { margin-bottom:8px; }
+.connection-service-summary { display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:6px; }
+.connection-card .connection-service-summary small { font-size:12px; margin:0; }
+.connection-operation-time { display:block; font-size:11px; color:var(--team-muted); margin-top:2px; }
+.connection-card .connection-card-state { max-width:10rem; }
+.connection-card .connection-card-state > small { text-align:right; }
+@media(max-width:600px) { .team-workspace .connection-card { padding:10px; }.connection-card .connection-card-state { max-width:none; }.connection-card .connection-card-state > small { text-align:left; }.connection-service-summary { display:grid; gap:6px; } }

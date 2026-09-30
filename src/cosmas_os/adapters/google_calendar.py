@@ -2,6 +2,7 @@
 
 import re
 from datetime import UTC, date, datetime, timedelta
+from typing import Literal
 
 from cosmas_os.adapters.google_connection import CALENDAR_URL
 
@@ -24,7 +25,7 @@ def boundary(value):
 
 
 def read_calendar(service, identity, private, binding, account_id):
-    def current(*, audit=False):
+    def current(*, audit: bool | Literal["calendar"] = False) -> None:
         service._read_current(identity, private, binding, account_id, audit=audit)
 
     current()

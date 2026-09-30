@@ -83,6 +83,23 @@ def verify_input(value, expected):
     return {key: item for key, item in value.items() if key != "input_sha256"}
 
 
+def task_goal(question):
+    """The v4 application wraps the original goal in its bound task contract."""
+    if question.startswith("Goal\n"):
+        goal, separator, _ = question[5:].partition("\n\nExpected output\n")
+        if not separator:
+            raise LabError("structured_task_goal_missing")
+        return goal
+    return question
+
+
+def task_requirements():
+    return {"missing_facts": ["Confirm missing visit details and contact permission."],
+        "expected_output": "A private draft for clinician review with source gaps preserved.",
+        "completion_criteria": ["Cite the exact supplied evidence and distinguish planned actions from completed work."],
+        "independent": True}
+
+
 def readable_draft(text):
     if re.search(r"\b(?:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|[a-f0-9]{64})\b", text, re.I):
         raise LabError("remove_internal_ids_from_body_use_structured_fields")
@@ -305,10 +322,10 @@ class Journey:
                 + "\nPrerequisites: " + "; ".join(t.prerequisites)
                 + "\nReady when: " + "; ".join(t.completion_criteria)
                 + "\nHuman review required. External action not authorized." for t in plan.tasks)
-            briefs = tuple(DraftBrief(t.owner, json.dumps(t.model_dump())) for t in plan.tasks)
+            briefs = tuple(DraftBrief(t.owner, json.dumps(t.model_dump()), task_requirements()) for t in plan.tasks)
             artifact_role, dependencies = "chief_plan", []
         elif self.phase == "recipients":
-            task = Task.model_validate_json(context.question).model_dump()
+            task = Task.model_validate_json(task_goal(context.question)).model_dump()
             if task["owner"] != role:
                 raise LabError("wrong_assignment_recipient")
             draft = self.request(role, {"sources": sources, "task": task, "task_sha256": digest(task)}, Draft,

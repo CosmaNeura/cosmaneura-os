@@ -29,16 +29,28 @@ def catalog(settings, runtime):
 def router(*, settings, runtime, identity_dependency, workspace_gate):
     routes = APIRouter()
 
+    @routes.get("/connections/plugins", dependencies=[Depends(workspace_gate)])
+    def read_plugins(request: Request, identity=Depends(identity_dependency)):
+        from cosmas_os.api.plugin_catalog import plugin_catalog
+
+        validate(request, identity)
+        return JSONResponse(plugin_catalog(settings(), runtime()), headers={
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        })
+
     @routes.get("/connections/catalog", dependencies=[Depends(workspace_gate)])
     def read(request: Request, identity=Depends(identity_dependency)):
+        validate(request, identity)
+        return JSONResponse(catalog(settings(), runtime()), headers={
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+        })
+
+    def validate(request: Request, identity):
         if identity.auth_mode != "clerk_jwt" or identity.external_identity_id is None:
             raise ws.WorkspaceError("workspace_access_denied", 403)
         if request.headers.getlist("x-cosmas-connection-contract") != ["1"]:
             raise ws.WorkspaceError("connection_catalog_contract_required", 426)
         if request.query_params or request.headers.getlist("content-encoding"):
             raise ws.WorkspaceError("invalid_connection_catalog_request", 422)
-        return JSONResponse(catalog(settings(), runtime()), headers={
-            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
-        })
 
     return routes

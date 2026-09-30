@@ -68,9 +68,15 @@ export type WorkspaceEntry = {
   reply?: AssistantReply | null;
   model_request?: EntryModelRequest;
 };
+export type TaskSourceVersion = {entry_id:string;revision:number;label:string;kind:string;sha256:string};
+export type HandoffTaskBrief = {version:1;goal:string;missing_facts:string[];expected_output:string;
+  completion_criteria:string[];independent:true;source_versions:TaskSourceVersion[];
+  allowed_actions:["prepare_private_draft"];depends_on:{entry_id:string;revision:number}};
 export type DraftHandoff = {
   id: string; origin_entry_id: string; recipient_role: Exclude<BotRole, "chief">; recipient_name: string;
   recipient_agent_id?: string; recipient_key?: BotAddress;
+  task_brief?:HandoffTaskBrief;task_brief_unavailable?:boolean;
+  completion_evidence?:{kind:"saved_private_draft";entry_id:string;revision:number;sha256:string;source_versions:TaskSourceVersion[]};
   brief: string; context_revision: number; status: "queued" | "running" | "completed" | "failed" | "interrupted";
   attempt_id: string; attempt_count: number; result_entry_id: string | null; error_code: string | null;
   attempts: { id: string; number: number; status: string; error_code: string | null }[];

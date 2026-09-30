@@ -11,6 +11,7 @@ from pydantic import SecretStr
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from tests.helpers.task_brief import REQUIREMENTS
 
 from cosmas_os.adapters.gpt41 import _context
 from cosmas_os.api import app as api_module
@@ -79,7 +80,7 @@ def model(monkeypatch):
                 "Queuing a draft.",
                 context.sources,
                 "azure_gpt41",
-                handoffs=(DraftBrief("scribe", "Organize a draft from saved sources."),),
+                handoffs=(DraftBrief("scribe", "Organize a draft from saved sources.", REQUIREMENTS),),
             )
         backend = (
             "azure_gpt41_source_draft_v1"
@@ -169,7 +170,7 @@ def test_chief_assigns_exact_same_template_instances_and_rechecks_configuration(
     def review(context):
         calls.append(context)
         return BotReply("Fixture draft", (), "azure_gpt41_source_draft_v1" if context.draft_only else "azure_gpt41",
-                        handoffs=(DraftBrief("scribe", "Baseline draft"), DraftBrief(address, "Extra draft")) if context.role == "chief" else ())
+                        handoffs=(DraftBrief("scribe", "Baseline draft", REQUIREMENTS), DraftBrief(address, "Extra draft", REQUIREMENTS)) if context.role == "chief" else ())
     monkeypatch.setattr(model_work, "dispatch_claim", lambda claim: review(_context(claim.envelope["context"])))
     result = assign(session, case, team_revision=2)
     targets = {t["address"]: t for t in calls[0].handoff_targets}

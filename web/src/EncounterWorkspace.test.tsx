@@ -91,12 +91,24 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:configured});
     vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
-    const launch=container.querySelector<HTMLButtonElement>('.team-welcome-actions button:nth-child(2)')!;
+    const launch=[...container.querySelectorAll<HTMLButtonElement>('.team-welcome-shortcuts button')].find(button=>button.textContent?.includes('Research'))!;
     expect(launch.textContent).toContain('Research');await act(async()=>launch.click());
     expect(container.textContent).toContain('Choose a visit for Research');expect(workspaceApi.open).not.toHaveBeenCalled();
     await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
     expect(container.querySelector('.team-roster [aria-pressed="true"] strong')?.textContent,container.textContent??'').toBe('Research');
     expect(container.querySelector('.research-workspace')).not.toBeNull();expect(workspaceApi.ask).not.toHaveBeenCalled();catalogSpy.mockRestore();
+  });
+
+  it.each([['Record a visit','Choose the visit to record'],['Use an existing recording','Choose the recorded visit']])('keeps the %s home action tied to the chosen visit',async(action,title)=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    await click(action);expect(container.querySelector('.team-welcome h1')?.textContent).toBe(title);expect(workspaceApi.open).not.toHaveBeenCalled();
+    await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+    expect(workspaceApi.open).toHaveBeenCalledExactlyOnceWith(access,fixture.appointment_id);
+    expect(container.querySelector('.team-roster [aria-pressed="true"] strong')?.textContent).toBe('Scribe');
+    expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
   });
 
   it("includes only the chosen Session Prep in chat and drops selection when switching bots",async()=>{
@@ -658,11 +670,34 @@ describe("private encounter workspace", () => {
     expect(container.textContent).toContain("Draft ready");
     expect(container.textContent).not.toContain("Brief from Chief");
     expect(container.querySelector<HTMLTextAreaElement>("#team-notebook")?.value).toBe("My unsaved private thought");
-    await click("View Scribe draft");
+    await click("Review Scribe result");
     expect(container.textContent).toContain("Brief from Chief");
     expect(document.activeElement?.id).toBe("turn-draft-result");
     expect(container.querySelector("#turn-draft-result .team-pill")?.textContent).toBe("GPT-4.1");
     expect(workspaceApi.ask).not.toHaveBeenCalled();
+  });
+
+  it("reveals a Research result and focuses it once without stealing focus on later polling",async()=>{
+    vi.useFakeTimers();
+    const configured=structuredClone(team),address=modelUuid(810),agent=modelUuid(811);
+    configured.configuration.bots.push({role:'research',instance_id:address,name:'Research',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true});
+    configured.members.push({role:'research',instance_id:address,agent_id:agent,name:'Research',initials:'Re',description:'Evidence review',prompt:'Review sources',capabilities:[]});
+    const value=assignedWorkspace(),resultId=modelUuid(812);
+    value.revision=3;
+    value.handoffs!.push({...value.handoffs![0],id:modelUuid(813),recipient_key:address,recipient_agent_id:agent,recipient_role:'research',recipient_name:'Research',status:'completed',result_entry_id:resultId});
+    value.entries.push({...value.entries[1],id:resultId,revision:3,kind:'handoff_result',content:'Review the invented cardiac evidence',
+      reply:{role:'research',agent_id:agent,agent_name:'Research',backend:'azure_gpt41',content:'Cardiac history and eligibility remain unconfirmed.',context_revision:1,citations:[]}});
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:value,team:configured});
+    await click('Open synthetic encounter');await chooseBot('Research');
+    expect(container.querySelector('.team-messages')?.hasAttribute('hidden')).toBe(true);
+    await click('Review Research result');
+    expect(container.querySelector('.team-messages')?.hasAttribute('hidden')).toBe(false);
+    expect(document.activeElement?.id).toBe(`turn-${resultId}`);
+    const question=container.querySelector<HTMLTextAreaElement>('#team-question')!;question.focus();
+    vi.mocked(workspaceApi.read).mockResolvedValue({...value,revision:4});
+    await act(async()=>{await vi.advanceTimersByTimeAsync(5000);});
+    expect(document.activeElement).toBe(question);
+    expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.retryHandoff).not.toHaveBeenCalled();
   });
 
   it("requires comparison when another client changes the notebook during a handoff", async () => {

@@ -16,7 +16,7 @@ it.each(['google','microsoft','scheduling'] as const)('uses only the %s status r
   vi.mocked(googleConnectionRequest).mockResolvedValue({state:'connected',account:{label:'Invented',email:'provider@example.invalid'},connected_at:null});
   vi.mocked(microsoftConnectionRequest).mockResolvedValue({state:'connected',account:{label:'Invented',email:'provider@example.invalid'},connected_at:null});
   const signal=new AbortController().signal;
-  expect(await readConnectionSummary(identity,id,signal)).toMatchObject({label:'Connected',tone:'ready'});
+  expect(await readConnectionSummary(identity,id,signal)).toMatchObject(id==='scheduling'?{label:'Connected',tone:'ready'}:{label:'Account connected',tone:'neutral',services:expect.arrayContaining([expect.objectContaining({name:'Email',label:'Not verified'}),expect.objectContaining({name:'Calendar',label:'Not verified'})])});
   expect(reader).toHaveBeenCalledExactlyOnceWith(identity,'status',signal);
 });
 it.each([['sign_in_required','Not connected'],['sign_in_pending','Sign-in pending'],['completing_sign_in','Finishing sign-in']] as const)('keeps %s distinct from connection success',async(state,label)=>{
@@ -29,7 +29,7 @@ it('preserves status-read failure instead of returning an optimistic badge',asyn
 });
 it('marks a Gmail-only account as partly connected without reading calendar contents',async()=>{
  vi.mocked(googleConnectionRequest).mockResolvedValue({state:'connected',account:{label:'Invented',email:'provider@example.invalid'},connected_at:null,capabilities:{mail:true,calendar:false}});
- expect(await readConnectionSummary(identity,'google',new AbortController().signal)).toMatchObject({label:'Partly connected',tone:'attention',reason:'Email connected. Calendar needs permission.',action:'Add calendar access'});
+ expect(await readConnectionSummary(identity,'google',new AbortController().signal)).toMatchObject({label:'Partly connected',tone:'attention',services:expect.arrayContaining([expect.objectContaining({name:'Email',label:'Not verified'}),expect.objectContaining({name:'Calendar',label:'Permission needed'})]),action:'Add calendar access'});
  expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status']);
 });
 it('does not mark a practice review as connected or read encounter contents',async()=>{

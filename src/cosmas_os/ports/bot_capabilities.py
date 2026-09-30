@@ -247,6 +247,7 @@ class BotContext:
 class DraftBrief:
     role: str
     brief: str
+    requirements: dict | None = None
 
 
 @dataclass(frozen=True)

@@ -11,3 +11,10 @@ it('withholds unknown error text and honors the existing three-attempt boundary'
  await act(async()=>root.render(<HandoffCard handoff={{...base,error_code:'private raw provider failure'}} locked={false} onRetry={retry} onShow={show}/>));expect(el.textContent).not.toContain('private raw provider');expect(el.querySelector('button')).toBeNull();
  await act(async()=>root.render(<HandoffCard handoff={{...base,error_code:'team_work_limit',attempt_count:3}} locked={false} onRetry={retry} onShow={show}/>));expect(el.textContent).toContain('Three attempts recorded');expect(el.querySelector('button')).toBeNull();
 });
+it('keeps a 160-character goal intact and preserves longer legacy assignments in details',async()=>{
+ const goal='📝'.repeat(160);await act(async()=>root.render(<HandoffCard handoff={{...base,brief:goal,status:'running'}} locked={false} onRetry={retry} onShow={show}/>));
+ expect(el.querySelector('.team-task-goal')?.textContent).toBe(goal);expect(el.querySelector('.team-task-full-goal')).toBeNull();expect(el.querySelector('header')?.textContent).toContain('Working on draft');
+ const longer=goal+' Keep the full legacy assignment.';await act(async()=>root.render(<HandoffCard handoff={{...base,brief:longer,error_code:'source_changed'}} locked={false} onRetry={retry} onShow={show}/>));
+ const details=el.querySelector('details')!;expect(details.querySelector('.team-task-full-goal')?.textContent).toBe(longer);expect(el.querySelector('header')?.textContent).toContain('Needs attention');
+ const reason=el.querySelector('.team-handoff-error')!;expect(reason.textContent).toContain('saved source versions changed');expect(details.contains(reason)).toBe(false);expect(el.querySelector('button')).toBeNull();
+});
