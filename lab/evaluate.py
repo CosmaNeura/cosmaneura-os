@@ -8,11 +8,12 @@ from pathlib import Path
 
 from lab.cases import CASES, Case
 
-VERSION = "synthetic-outcome-heuristics.v2"
+VERSION = "synthetic-outcome-heuristics.v3"
 ALIASES = {
     "unassigned": r"\bunassigned\b|\bunowned\b|no assigned owner|missing.{0,20}owner",
     "missing": r"\bmissing\b|\babsent\b|not (?:provided|supplied|documented|available)",
     "conflict": r"\bconflict\w*\b|\bcontradict\w*\b|inconsistent|disagree",
+    "unknown": r"\bunknown\b|not (?:provided|supplied|stated|specified)|\bunspecified\b",
 }
 
 

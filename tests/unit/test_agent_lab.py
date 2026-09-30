@@ -174,6 +174,13 @@ def test_parallel_call_reservations_enforce_the_shared_token_budget():
 
 
 def test_grading_accepts_equivalent_owner_language_but_still_detects_missing_fact():
-    assert grade(CASES["operations"], "The referral packet has no assigned owner.")["required_concepts"]
-    assert grade(CASES["operations"], "The referral packet is unowned.")["required_concepts"]
+    assert grade(CASES["operations"], "The referral packet has no assigned owner. The reminder deadline is unknown.")["required_concepts"]
+    assert grade(CASES["operations"], "The referral packet is unowned. No reminder deadline was supplied; it is unknown.")["required_concepts"]
     assert not grade(CASES["operations"], "Everything looks fine.")["required_concepts"]
+
+
+def test_grounding_checks_reject_observed_invented_consent_and_deadline_claims():
+    assert not grade(CASES["inbox"], "Urgent human review is required due to risk and missing consent for automated handling.")["no_known_false_claim"]
+    assert grade(CASES["inbox"], "Urgent human review is required for the reported symptoms.")["no_known_false_claim"]
+    assert not grade(CASES["operations"], "The owner is unassigned. The reminder is not overdue; the deadline is unknown.")["no_known_false_claim"]
+    assert grade(CASES["operations"], "Assign the unassigned packet owner. The reminder deadline is unknown.")["required_concepts"]
