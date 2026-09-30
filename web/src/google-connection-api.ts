@@ -5,12 +5,13 @@ import {assertCurrentDesktopSession, workspaceAuthHeaders} from './workspace-aut
 import {parseVendorJson} from './vendor-contract';
 
 export const GOOGLE_CONNECTION_BUILD=WORKSPACE_BUILD&&WORKSPACE_AUTHENTICATED_BUILD&&import.meta.env.VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED==='true';
-export type GoogleAction='status'|'start'|'disconnect'|'mail';
+export type GoogleAction='status'|'start'|'disconnect'|'mail'|'calendar';
 export type GoogleAccount={label:string;email:string};
 export type GoogleStatus={state:'connected'|'sign_in_required'|'sign_in_pending'|'completing_sign_in';account:GoogleAccount|null;connected_at:string|null};
 export type GoogleStart={authorization_url:string;expires_at:string};
 export type GoogleMail={id:string;subject:string;sender:string;received_at:string;is_read:boolean};
-export type GoogleView={kind:'mail';items:GoogleMail[];account:GoogleAccount;more:boolean;observed_at:string};
+export type GoogleEvent={id:string;subject:string;starts_at:string;ends_at:string;all_day:boolean;cancelled:boolean};
+export type GoogleView=({kind:'mail';items:GoogleMail[]}|{kind:'calendar';items:GoogleEvent[]})&{account:GoogleAccount;more:boolean;observed_at:string};
 const closed=(value:unknown,keys:string):value is Record<string,unknown>=>!!value&&typeof value==='object'&&!Array.isArray(value)&&Object.keys(value).sort().join(',')===keys.split(',').sort().join(',');
 const string=(value:unknown,max:number):value is string=>typeof value==='string'&&value.length<=max&&!/[\u0000-\u001f\u007f]/.test(value);
 const instant=(value:unknown):value is string=>typeof value==='string'&&/(?:Z|[+-]\d\d:\d\d)$/.test(value)&&Number.isFinite(Date.parse(value));
@@ -32,6 +33,14 @@ export function validateGoogleResponse(value:unknown,action:GoogleAction):Google
     new Set(value.items.map(row=>row?.id)).size===value.items.length&&value.items.every(row=>
       closed(row,'id,subject,sender,received_at,is_read')&&string(row.id,128)&&/^[A-Za-z0-9_-]+$/.test(row.id)&&
       string(row.subject,998)&&string(row.sender,320)&&instant(row.received_at)&&typeof row.is_read==='boolean'))return value as GoogleView;
+  if(action==='calendar'&&closed(value,'kind,account,items,more,observed_at')&&value.kind==='calendar'&&account(value.account)&&
+    typeof value.more==='boolean'&&instant(value.observed_at)&&Array.isArray(value.items)&&value.items.length<=25&&
+    new Set(value.items.map(row=>row?.id)).size===value.items.length&&value.items.every(row=>
+      closed(row,'id,subject,starts_at,ends_at,all_day,cancelled')&&string(row.id,1024)&&/^[A-Za-z0-9_-]+$/.test(row.id)&&
+      string(row.subject,998)&&typeof row.all_day==='boolean'&&typeof row.cancelled==='boolean'&&
+      (row.all_day?[row.starts_at,row.ends_at].every(v=>typeof v==='string'&&/^\d{4}-\d\d-\d\d$/.test(v)&&
+        Number.isFinite(Date.parse(v))&&new Date(v).toISOString().slice(0,10)===v):instant(row.starts_at)&&instant(row.ends_at))&&
+      Date.parse(String(row.ends_at))>Date.parse(String(row.starts_at))))return value as GoogleView;
   throw new WorkspaceApiError(502);
 }
 
@@ -57,14 +66,15 @@ export async function googleConnectionRequest(identity:AuthenticatedWorkspaceIde
       if(controller.signal.aborted){cancel(value.body);throw new WorkspaceApiError(503);}return value;
     }));check();
     if(!response)throw new WorkspaceApiError(503);
-    if([401,403,404,409].includes(response.status))throw new WorkspaceApiError(response.status);
-    if(response.status!==200||response.redirected||response.headers.has('content-encoding')||
+    if([401,403,404].includes(response.status))throw new WorkspaceApiError(response.status);
+    if(![200,409].includes(response.status)||response.redirected||response.headers.has('content-encoding')||
       response.headers.get('content-type')?.split(';',1)[0]!=='application/json'||
       !response.headers.get('cache-control')?.split(',').some(v=>v.trim()==='no-store'))throw new WorkspaceApiError(502);
     reader=response.body?.getReader();if(!reader)throw new WorkspaceApiError(502);
-    const bytes=new Uint8Array(131072);let size=0;
+    const bytes=new Uint8Array(response.status===409?1024:131072);let size=0;
     for(;;){const part=await wait(reader.read());check();if(part.done)break;if(part.value.byteLength>bytes.length-size)throw new WorkspaceApiError(502);bytes.set(part.value,size);size+=part.value.byteLength;}
     const value:unknown=parseVendorJson(new TextDecoder('utf-8',{fatal:true}).decode(bytes.subarray(0,size)));check();
+    if(response.status===409)throw new WorkspaceApiError(409,closed(value,'detail')&&value.detail==='google_calendar_consent_required'?value.detail:undefined);
     return validateGoogleResponse(value, action);
   }finally{
     clearTimeout(timer);signal?.removeEventListener('abort',abort);controller.signal.removeEventListener('abort',rejectAbort);

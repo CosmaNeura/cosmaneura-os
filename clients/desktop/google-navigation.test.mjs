@@ -19,3 +19,10 @@ test('native proxy admits only the protected bounded Google command',()=>{
  for(const method of ['GET','PUT','DELETE'])assert.equal(connectorApiRoute('/connections/google/session',method),null);
  assert.equal(connectorApiRoute('/connections/google/session?code=anything','POST'),null);
 });
+test('Google calendar consent admits only the exact read-only scope',()=>{
+ const scope=fields.scope+' https://www.googleapis.com/auth/calendar.events.readonly';
+ assert.equal(validGoogleNavigationUrl(url({...fields,scope}),config),true);
+ for(const invalid of [scope.replace('events.readonly','events'),scope+' https://www.googleapis.com/auth/gmail.send',scope+' openid']){
+  assert.equal(validGoogleNavigationUrl(url({...fields,scope:invalid}),config),false);
+ }
+});

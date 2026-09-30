@@ -15,6 +15,17 @@ beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.cle
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();delete window.cosmasGoogleNavigation;});
 const mount=(identity:AuthenticatedWorkspaceIdentity=browser,onAuthenticationLost:(error:unknown)=>void=()=>{})=>act(async()=>root.render(<GoogleConnectionPanel identity={identity} onAuthenticationLost={onAuthenticationLost}/>));
 const click=(label:string)=>act(async()=>{const button=[...host.querySelectorAll('button')].find(b=>b.textContent===label);expect(button).toBeDefined();button!.click();});
+it('shows calendar dates and explains missing consent without replaying the read',async()=>{
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected)
+  .mockRejectedValueOnce(new WorkspaceApiError(409,'google_calendar_consent_required')).mockResolvedValueOnce(connected)
+  .mockResolvedValueOnce({kind:'calendar',account:connected.account,more:false,observed_at:new Date().toISOString(),items:[
+   {id:'invented',subject:'Invented all-day visit',starts_at:'2026-11-01',ends_at:'2026-11-03',all_day:true,cancelled:false}]});
+ const denied=vi.fn();await mount(browser,denied);await click('View next 7 days');
+ expect(host.textContent).toContain('Choose Reconnect Google and allow calendar access');expect(denied).not.toHaveBeenCalled();
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','calendar','status']);
+ await click('View next 7 days');expect(host.textContent).toContain('Invented all-day visit');expect(host.textContent).toContain('Nov 1, 2026');
+ expect(host.textContent).toContain('All day');
+});
 it('connects, checks on browser return, reads inbox and disconnects without browser persistence',async()=>{
  vi.mocked(googleConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link).mockResolvedValueOnce(connected).mockResolvedValueOnce(inbox).mockResolvedValueOnce({state:'disconnected'}).mockResolvedValueOnce(link);
  const storage=vi.spyOn(Storage.prototype,'setItem');await mount();await click('Connect with Google');

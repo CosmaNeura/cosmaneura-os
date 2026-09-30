@@ -25,7 +25,7 @@ HEADERS = {
 
 
 class GoogleCommand(ProtectedModel):
-    action: Literal["status", "start", "disconnect", "mail"]
+    action: Literal["status", "start", "disconnect", "mail", "calendar"]
 
 
 class GoogleConnectionBoundary:

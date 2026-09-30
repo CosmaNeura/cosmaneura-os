@@ -182,8 +182,8 @@ through the real Documo adapter, reads delivery status and records separate huma
 verification. A fresh database session reopens the same encounter. The PDF is a
 fixed synthetic administrative test document, not a model-generated clinical packet.
 
-`--cases connectors` runs 18 independent scenarios through the real adapters and
-owned PostgreSQL. Microsoft and Gmail each cover connection/read, timeout and
+`--cases connectors` runs 24 independent scenarios through the real adapters and
+owned PostgreSQL. Microsoft, Gmail and Google Calendar each cover connection/read, timeout and
 explicit recovery, throttling, token refresh, oversized responses and account
 revocation during a read. Microsoft also rejects an invalid calendar timezone.
 Documo covers complete delivery, failure, partial pages, lost submission response
@@ -193,7 +193,7 @@ unresolved; it cannot cause an automatic resend or a successful closure.
 
 All provider HTTP is handled by strictly allowlisted `httpx.MockTransport`
 responders, so no provider network request is possible. These are not vendor-hosted
-sandboxes. Google Calendar, calendar writes, incoming-fax ingestion, live OAuth UI,
+sandboxes. Calendar writes, incoming-fax ingestion, live OAuth UI,
 physical audio and speech-to-text remain explicit gaps. There is no live-account
 mode in this runner.
 

@@ -26,7 +26,7 @@ public struct GoogleConnectionNavigation {
         // OAuth form encoding uses '+' for spaces; URLComponents preserves it.
         let values = Dictionary(uniqueKeysWithValues: items.map { ($0.name, ($0.value ?? "").replacingOccurrences(of: "+", with: " ")) })
         return values["client_id"] == clientID && values["redirect_uri"] == callbackURI &&
-            values["response_type"] == "code" && values["scope"] == "openid email https://www.googleapis.com/auth/gmail.metadata" && values["access_type"] == "offline" &&
+            values["response_type"] == "code" && ["openid email https://www.googleapis.com/auth/gmail.metadata", "openid email https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/calendar.events.readonly"].contains(values["scope"] ?? "") && values["access_type"] == "offline" &&
             values["include_granted_scopes"] == "false" && values["prompt"] == "consent select_account" && values["code_challenge_method"] == "S256" &&
             ["state", "code_challenge"].allSatisfy { Self.matches(values[$0] ?? "", #"[A-Za-z0-9_-]{43}"#) }
     }
