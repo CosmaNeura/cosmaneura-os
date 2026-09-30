@@ -61,8 +61,10 @@ class Review(Arguments):
 def readable_draft(text):
     if re.search(r"\b(?:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|[a-f0-9]{64})\b", text, re.I):
         raise LabError("remove_internal_ids_from_body_use_structured_fields")
-    if re.search(r"neither action (?:has been|is) completed|none of these tasks have been initiated or completed", text, re.I):
-        raise LabError("completion_is_not_documented_do_not_claim_the_actions_definitely_never_happened")
+    if re.search(r"neither action (?:has been|is) completed|none of these tasks have been initiated or completed"
+                 r"|actions? (?:are|have) (?:not|never) (?:been )?completed", text, re.I):
+        raise LabError("Use the exact wording 'completion is not documented' for planned staff actions. "
+                       "Remove claims that they definitely have not happened.")
 
 
 def validate_plan(value, sources):
@@ -76,6 +78,7 @@ def validate_plan(value, sources):
             raise LabError("foreign_or_duplicate_source")
         if len(json.dumps(task.model_dump())) > 3000:
             raise LabError("brief_too_large")
+        readable_draft(task.next_action + " ".join(task.completion_criteria))
         used.update(task.source_ids)
     if used != allowed:
         raise LabError("chief_must_use_all_three_input_outputs")
@@ -145,7 +148,10 @@ class Journey:
             "Each task needs an owner, next action, source IDs, prerequisites and completion criteria. Keep fields concise. "
             "RECIPIENT: execute the exact task and identify unresolved human work; copy the assignment hash. "
             "Chief REVIEW: read all actual saved results and verify their result entry IDs, reporting remaining human work. "
-            "Use human-readable wording in body; do not include IDs there."},
+            "Use human-readable wording in body; do not include IDs there. "
+            "For planned staff actions use 'completion is not documented'; absence of documentation does not prove "
+            "they never happened. Apply this to Chief's briefs too. Preserve contact-time conflict without selecting "
+            "either time as confirmed. Any contact remains conditional on human consent and preference review."},
             {"role": "user", "content": json.dumps({"role": role, "phase": self.phase})}]
         read = False
         for turn in range(8):
@@ -185,11 +191,20 @@ class Journey:
                     self.event(role, "tool", tool=name, ok=True)
                 except (LabError, ValidationError, ValueError, TypeError) as error:
                     result = {"error": str(error)[:500]}
-                    self.event(role, "tool", tool=name, ok=False, error=type(error).__name__)
+                    self.event(role, "tool", tool=name, ok=False, error=str(error)[:500])
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
         raise LabError("journey_draft_not_submitted")
 
     def dispatch(self, claim):
+        from cosmas_os.ports.bot_capabilities import ModelCallFailure
+
+        try:
+            return self.draft(claim)
+        except (LabError, ValidationError) as error:
+            self.event(claim.envelope["context"]["role"], "draft_rejected", error=str(error)[:500])
+            raise ModelCallFailure(dispatch="response_received", outcome="invalid_output") from error
+
+    def draft(self, claim):
         from cosmas_os.adapters.gpt41 import _context
         from cosmas_os.ports.bot_capabilities import BotReply, DraftBrief
 
@@ -250,6 +265,7 @@ class Journey:
         from sqlalchemy.orm import Session
 
         from cosmas_os.application import model_work, workspace
+        from cosmas_os.ports.bot_capabilities import ModelCallFailure
 
         with Session(self.app.engine) as session:
             w = workspace.read(session, self.app.box, self.app.owner, self.app.workspace)
@@ -259,7 +275,10 @@ class Journey:
             claim = model_work.claim(session, self.app.box, self.app.owner, admission)
         if claim is None:
             raise LabError("chief_claim_failed")
-        result = self.dispatch(claim)
+        try:
+            result = self.dispatch(claim)
+        except ModelCallFailure as failure:
+            result = failure
         with Session(self.app.engine) as session:
             model_work.settle(session, claim, result)
         # A new session observes the committed result; duplicate settlement and
