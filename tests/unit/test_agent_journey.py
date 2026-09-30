@@ -62,7 +62,7 @@ def test_recipient_cannot_substitute_another_task_or_claim_delivery(bad):
         validate_draft(draft, assignment)
 
 
-@pytest.mark.parametrize("bad", ["queued", "missing", "duplicate"])
+@pytest.mark.parametrize("bad", ["queued", "missing", "duplicate", "id_at_body_end"])
 def test_chief_cannot_verify_unfinished_missing_or_repeated_results(bad):
     receipts = [{"status": "completed", "result_entry_id": str(i)} for i in range(3)]
     review = {"body": "Three private drafts are saved; human review remains outstanding.",
@@ -73,8 +73,10 @@ def test_chief_cannot_verify_unfinished_missing_or_repeated_results(bad):
         receipts[0]["status"] = "queued"
     elif bad == "missing":
         review["result_entry_ids"] = ["0", "1", "invented-receipt"]
-    else:
+    elif bad == "duplicate":
         review["result_entry_ids"] = ["0", "1", "1"]
+    else:
+        review["body"] += " Assignment hash: 88df02d2-d522-4fb4-b290-87bf9b91d06a"
     with pytest.raises(LabError):
         validate_review(review, receipts)
 

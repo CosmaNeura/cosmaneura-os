@@ -78,7 +78,7 @@ def validate_plan(value, sources):
             raise LabError("foreign_or_duplicate_source")
         if len(json.dumps(task.model_dump())) > 3000:
             raise LabError("brief_too_large")
-        readable_draft(task.next_action + " ".join(task.completion_criteria))
+        readable_draft("\n".join([task.next_action, *task.prerequisites, *task.completion_criteria]))
         used.update(task.source_ids)
     if used != allowed:
         raise LabError("chief_must_use_all_three_input_outputs")
@@ -89,7 +89,7 @@ def validate_draft(value, task):
     draft = Draft.model_validate(value)
     if draft.task_sha256 != digest(task) or set(draft.source_ids) != set(task["source_ids"]):
         raise LabError("assignment_or_source_mismatch")
-    readable_draft(draft.body + " ".join(draft.unresolved))
+    readable_draft("\n".join([draft.body, *draft.unresolved]))
     return draft
 
 
@@ -98,7 +98,7 @@ def validate_review(value, receipts):
     expected = {r["result_entry_id"] for r in receipts if r["status"] == "completed"}
     if len(expected) != 3 or set(review.result_entry_ids) != expected or len(set(review.result_entry_ids)) != 3:
         raise LabError("chief_must_verify_three_distinct_completed_draft_receipts")
-    readable_draft(review.body + " ".join(review.unresolved))
+    readable_draft("\n".join([review.body, *review.unresolved]))
     return review
 
 
