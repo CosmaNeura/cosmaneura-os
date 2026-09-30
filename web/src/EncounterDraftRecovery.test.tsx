@@ -16,7 +16,7 @@ vi.mock("./team-setup-api", async () => {
 
 vi.mock("./workspace-api", async original => {
   const actual = await original<typeof import("./workspace-api")>();
-  return { ...actual, workspaceApi: { ...actual.workspaceApi, open: vi.fn(), catalog: vi.fn(), team: vi.fn(),
+  return { ...actual, workspaceApi: { ...actual.workspaceApi, practiceWorkItem:vi.fn().mockRejectedValue(new Error("Unavailable fixture")), open: vi.fn(), catalog: vi.fn(), team: vi.fn(),
     read: vi.fn(), append: vi.fn(), saveTeam: vi.fn(), saveNote: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn() } };
 });
 // Namespace hashing and encryption are exercised by private-drafts.test.ts and
@@ -41,7 +41,7 @@ const factory = async ({scope}:{scope:string}): Promise<DraftStore> => {
     }};
 };
 async function click(text:string) {
-  const button=[...element.querySelectorAll("button")].find(b=>b.textContent?.replace("↗","").trim()===text);
+  const button=[...element.querySelectorAll("button")].find(b=>b.textContent?.replace("↗","").trim()===text||[...b.querySelectorAll("strong")].some(label=>label.textContent?.trim()===text));
   expect(button, text).toBeTruthy();expect(button!.disabled,text).toBe(false);
   await act(async()=>{button!.click();});
 }

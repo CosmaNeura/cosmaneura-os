@@ -4,10 +4,10 @@ import {readSessionPrep, type CitedText, type SessionPrep} from "./session-prep-
 import {sessionPrepAnalysis, type SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity, type CaptureBotSelection} from "./workspace-api";
 
-export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, onAccessLost, onSelect, selected=false}: {
+export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, onAccessLost, onSelect, selected=false, onBriefViewed}: {
   workspaceId: string; identity: AuthenticatedWorkspaceIdentity; bot: CaptureBotSelection;
   enabled: boolean; locked: boolean; onAccessLost?: (cause: WorkspaceApiError) => void;
-  onSelect?: (selection:SessionPrepAnalysis|null)=>void; selected?:boolean;
+  onSelect?: (selection:SessionPrepAnalysis|null)=>void; selected?:boolean; onBriefViewed?:(at:string|null)=>void;
 }) {
   const scope = useMemo(() => Symbol(), [workspaceId, identity, bot.address, bot.team_revision, enabled]);
   const currentScope = useRef(scope); currentScope.current = scope;
@@ -21,11 +21,11 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
   async function open() {
     if (!enabled || locked || current.busy) return;
     const controller = new AbortController(); active.current?.abort(); active.current = controller;
-    onSelect?.(null);
+    onSelect?.(null); onBriefViewed?.(null);
     setState({scope, busy: true});
     try {
       const value = await readSessionPrep(workspaceId, identity, bot, controller.signal);
-      if (!controller.signal.aborted && currentScope.current === scope) {setState({scope, busy: false, value});setExpanded(true);}
+      if (!controller.signal.aborted && currentScope.current === scope) {setState({scope, busy: false, value});setExpanded(true);onBriefViewed?.(value.prepared_brief?value.generated_at:null);}
     } catch (error) {
       if (controller.signal.aborted || currentScope.current !== scope) return;
       setState({scope, busy: false, error: "Session Prep could not be confirmed. Refresh the encounter and check your connection before trying again."});
@@ -49,6 +49,7 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
   const sources = value?.sources.filter(source => source.included) ?? [];
   function showSource(ref: string) {
     const target = document.getElementById(`${sourceId}-${ref}`);
+    const detail=target?.querySelector("details"); if(detail)detail.open=true;
     // Native requests are bound to the exact document URL, including its fragment.
     target?.scrollIntoView({block: "nearest"});
     target?.focus({preventScroll: true});
@@ -81,7 +82,9 @@ export function SessionPrepPanel({workspaceId, identity, bot, enabled, locked, o
       {items("Suggested visit outline", brief.suggested_outline)}
       {brief.patient_reported && <section><h4>Patient-reported preparation</h4><p>{brief.patient_reported.summary} {citations(brief.patient_reported.source_refs)}</p></section>}
       <section className="session-prep-sources"><h4>Sources</h4><ol>{sources.map(source => <li key={source.source_id} id={`${sourceId}-${source.source_id}`} tabIndex={-1}>
-        {source.source_class === "clinician_finalized_note" ? "Finalized clinician note" : "Patient-reported Visit Prep"} · {new Date(source.source_at!).toLocaleDateString()} · version {source.source_version}</li>)}</ol>
+        <strong>{source.source_class === "clinician_finalized_note" ? "Finalized clinician note" : "Patient-reported Visit Prep"}</strong> · {new Date(source.source_at!).toLocaleDateString()} · version {source.source_version}
+        <details><summary>Original text unavailable here</summary><p>This brief includes the source’s date and version, but the original text is not available in this view. Open the matching {source.source_class === "clinician_finalized_note" ? "finalized note" : "patient preparation"} in your clinical record to check the statement.</p></details>
+        </li>)}</ol>
         {value.sources.some(s => !s.included && s.reason_code === "selection_limit") && <p className="team-fine">Additional records fall outside this brief's source limit.</p>}
         {value.sources.some(s => !s.included && s.reason_code === "source_temporarily_unavailable") && <p className="team-fine">A source was temporarily unavailable.</p>}
       </section>

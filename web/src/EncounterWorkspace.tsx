@@ -2,7 +2,7 @@ import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {MembershipAnalysisPanel} from "./MembershipAnalysisPanel";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
 import type {PracticeAccessContext} from './PracticeAccessGate';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ReviewedTeamDraft } from "./TeamSetupPanel";
 import { TeamConfigurationFlow } from "./TeamConfigurationFlow";
 import {accountIdentityApi} from "./account-identity-api";
@@ -37,6 +37,7 @@ import { VendorSetupMount, VENDOR_SETUP_BUILD } from "./VendorSetupMount";
 import { MembershipWorkspaceMount, MEMBERSHIP_WORK_BUILD } from "./MembershipWorkMount";
 import { WorkRoutines } from "./WorkRoutines";
 import { ROUTINES_BUILD } from "./routine-api";
+import {EncounterWorkSummary} from "./EncounterWorkSummary";
 import { EncounterSources } from "./EncounterSources";
 import { CapturePanel } from "./CapturePanel";
 import {InboxAnalysisPanel} from "./InboxAnalysisPanel";
@@ -105,6 +106,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [savedResearchChat,setSavedResearchChat]=useState(false);
   const [stage, setStage] = useState("Before");
   const [panel, setPanel] = useState("Notebook");
+  const materialRef=useRef<HTMLDivElement>(null);
+  const materialScroll=useRef<Record<string,number>>({});
+  const [briefViewed,setBriefViewed]=useState<{workspace:string;owner:AuthenticatedWorkspaceIdentity;teamRevision:number;at:string}|null>(null);
   const [mobilePanel, setMobilePanel] = useState("Conversation");
   const [note, setNote] = useState("");
   const [thought, setThought] = useState("");
@@ -213,6 +217,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     }).catch(cause => { if (!cancelled && current === generation.current) failure(cause); });
     return () => { cancelled = true; };
   }, [practiceOpen, authenticated, team]);
+  useLayoutEffect(()=>{
+    const element=materialRef.current;if(!element||!workspace)return;
+    const key=`${workspace.id}:${panel}`;
+    element.scrollTop=materialScroll.current[key]??0;
+    return()=>{materialScroll.current[key]=element.scrollTop;};
+  },[workspace?.id,panel]);
   useEffect(() => { if (selectedSource) document.getElementById(`source-${selectedSource}`)?.focus(); }, [panel, selectedSource]);
   useEffect(() => {
     if (selectedResult && mobilePanel === "Conversation" && !settingsOpen) {
@@ -952,7 +962,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       {recoveryState === "failed" && <div className="team-recovery" role="alert"><p>This device's draft storage could not be checked. Existing drafts are retained. Recheck recovery before editing or saving.</p>
         <button disabled={busy} onClick={() => void recheckRecovery()}>Recheck draft recovery</button></div>}
       {recoveryState === "saving" && <p className="team-fine" role="status">Saving notebook and team drafts on this device…</p>}
-      {recoveryState === "saved" && <p className="team-fine">Drafts saved on this device.</p>}
+      {recoveryState === "saved" && <p className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
       {practiceOpen && error && <div className="team-banner error" role="alert">{error}</div>}
       {practiceOpened && (authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><fieldset disabled={recoveryBlocked} hidden={!practiceOpen} style={{border:0,padding:0,margin:0,minWidth:0}}><PracticeHub identity={(authenticated || identity)!} onDenied={failure} onBusyChange={reportInboxBusy} onDraftInbox={authenticated?selection=>{setInboxNavigation({selection,identity:authenticated,generation:generation.current});}:undefined}><PracticeWork identity={(authenticated || identity)!}
         onChanged={() => { if (workspace) setConflict(true); }} onAccessLost={failure} />
@@ -1081,6 +1091,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             <SessionPrepPanel key={prepEpoch} workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}}
               enabled={bot.enabled && bot.include_evidence && team.revision > 0} locked={locked} onAccessLost={failure}
+              onBriefViewed={at=>setBriefViewed(at?{workspace:workspace.id,owner:authenticated,teamRevision:team.revision,at}:null)}
               selected={!!selectedPrep} onSelect={team.llm.enabled&&!bot.blocked_capabilities?.includes("model_answer")?
                 selection=>setPrepSelection(selection?{scope:prepScope,selection}:null):undefined} />}
           {bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
@@ -1148,28 +1159,35 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               <textarea ref={questionRef} id="team-question" rows={2} maxLength={4000} disabled={locked || !bot?.enabled} value={thought} onChange={e => setThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? `Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`} />
               <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={locked || !thought.trim() || !bot?.enabled} aria-label="Send message">↑</button></div>
             </form>}
-            <p className="team-fine">{bot?.blocked_capabilities?.includes("model_answer") ? "AI answers are blocked for this bot. Available local source checks retain their existing scope." : team?.llm.enabled ? "GPT-4.1 requests require current scope checks. Review drafts and sources." : "Local tools can review saved context. AI conversation awaits its service connection."} {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled ? "Use the Scribe visit controls for consented recording." : "Recording awaits its service connection."}</p>
+            <p className="team-fine">{bot?.blocked_capabilities?.includes("model_answer") ? "AI answers are unavailable for this teammate. You can still check saved sources." : team?.llm.enabled ? "Ask about this visit. Check the answer and its sources before using it." : "Saved notes are available. AI chat needs a service connection."} {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled ? "Use the Scribe visit controls for consented recording." : "Recording is not connected."}</p>
           </div>
         </section><aside className="team-notebook-panel">
           <nav aria-label="Encounter materials" className="team-material-tabs">{["Notebook", "Sources", "Review", "Work"].map(value => <button key={value} aria-pressed={panel === value} onClick={() => setPanel(value)}>{value}</button>)}</nav>
-          <div className="team-material-content">
-            <div hidden={panel !== "Review"}><NoteReview key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
+          <div className="team-task-context" aria-label="Current task"><strong>{({Notebook:"Visit notebook",Sources:"Check saved sources",Review:"Review visit note",Work:"Drafts and human follow-up"} as Record<string,string>)[panel]}</strong>
+            <span>{panel==='Work'?'Confirm who owns the next action.':panel==='Sources'?'Read the material behind the note.':panel==='Review'?'Save the note, then record your review.':'Save your jottings, then review the visit note.'}</span></div>
+          <div className="team-material-content" ref={materialRef}>
+            {panel==='Work'&&<EncounterWorkSummary workspace={reviewWorkspace!} identity={authenticated||identity||undefined} locked={locked||connectionNavigationLocked}
+              onReview={()=>{setPanel('Review');setMobilePanel('Review');}} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}} onAccessLost={failure}/>}
+            <div hidden={panel !== "Review"}><NoteReview key={workspace.id} active={panel === "Review"} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
               onSave={operation => void save(operation)} onSources={() => { setPanel("Sources"); setMobilePanel("Sources"); }} /></div>
             <div hidden={panel !== "Work"}><FollowUpWork key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
-              onSave={operation => void save(operation)} onReview={() => setPanel("Review")} /></div>
+              onSave={operation => void save(operation)} onReview={() => {setPanel("Review");setMobilePanel("Review");}} /></div>
             {panel === "Notebook" && <>
-              <div className="team-notebook-title"><h2>Jotted notes</h2><span className="team-pill">{note === latestNote ? "Saved" : "Unsaved edits"}</span></div>
+              <div className="team-task-actions"><div className="team-notebook-title"><h2>Jotted notes</h2><span className="team-pill">{note === latestNote ? "Saved" : "Not saved to notebook"}</span></div>
+                <button className="team-primary" disabled={locked || !note.trim()} onClick={()=>append("scratchpad",note)}>Save notebook revision</button></div>
               {stage === "During" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && <div className="team-capture"><span>Recording awaits Scribe connection</span><button disabled>Start recording</button><button disabled>Voice instruction</button></div>}
               <p className="team-fine">Your working notebook. Shape the visit note in Review when you are ready.</p>
               <form onSubmit={event => { event.preventDefault(); append("scratchpad", note); }}><label className="team-sr-only" htmlFor="team-notebook">Jotted notes</label>
                 <textarea id="team-notebook" className="workspace-notepad team-notepad" rows={14} maxLength={20000} value={note} disabled={locked} onChange={e => setNote(e.target.value)} placeholder="An agenda, a thought, the details you want to keep…" />
-                <button className="team-primary" disabled={locked || !note.trim()}>Save notebook revision</button><p className="team-fine">Your team sees saved revisions. Edits save when you choose Save.</p></form>
+                <p className="team-fine">Your bots use saved notebook entries. Working copies on this device are separate from saved entries.</p></form>
               <details className="team-history"><summary>Saved notebook history</summary>{workspace.entries.filter(e => e.kind === "scratchpad").map(e => <article key={e.id}><small>Revision {e.revision}</small><p>{e.content}</p></article>)}</details>
             </>}
             {panel === "Sources" && <EncounterSources workspace={workspace} selectedSource={selectedSource} locked={locked}
+              briefViewedAt={briefViewed?.workspace===workspace.id&&briefViewed.owner===authenticated&&briefViewed.teamRevision===team?.revision?briefViewed.at:undefined}
+              onPrep={team?.configuration.bots.some(member=>member.role==='visit_prep'&&member.enabled)?()=>{const reader=team.configuration.bots.find(member=>member.role==='visit_prep'&&member.enabled)!;setSelected(botAddress(reader));setMobilePanel('Conversation');}:undefined}
               source={source} evidence={evidence} setSource={setSource} setEvidence={setEvidence}
               onSave={() => append("evidence", evidence, source)} onNotebook={() => { setPanel("Notebook"); setMobilePanel("Notebook"); }} />}
-            {panel === "Work" && <>{!!workspace.handoffs?.length && <><h2>Team drafts</h2><p className="team-fine">Private assignments and results from your bots. Most recent first.</p>{[...workspace.handoffs].reverse().map(handoffCard)}</>}
+            {panel === "Work" && <>{!!workspace.handoffs?.length && <><h2>Team drafts</h2><p className="team-fine">Bot drafts ready for your review. Human assignments are shown above. Most recent first.</p>{[...workspace.handoffs].reverse().map(handoffCard)}</>}
               <h2>Linked work</h2><p className="team-fine">Existing work and approvals stay together. Private notes are not copied.</p>
               {workspace.entries.filter(e => e.kind === "work_link").map(e => <article className="team-work-card" key={e.id}>{e.ticket ? <><span className="team-kicker">EXISTING WORK</span><h3>{e.ticket.lane.replaceAll("_", " ")}</h3><span className="team-pill">{e.ticket.state.replaceAll("_", " ")}</span></> : "Linked work is no longer available in this encounter."}</article>)}
               {workspace.work_candidates.filter(t => !workspace.follow_ups?.some(f => f.ticket_id === t.id) && !workspace.entries.some(e => e.ticket?.id === t.id)).map(t => <button className="team-link-work" key={t.id} disabled={locked} onClick={() => void save({ type: "link", body: { expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(), ticket_id: t.id } })}>Link existing {t.lane.replaceAll("_", " ")} work</button>)}

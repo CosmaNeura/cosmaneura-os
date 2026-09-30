@@ -68,3 +68,31 @@ it('checks only services actually present in this client',async()=>{
   expect(readConnectionSummary).toHaveBeenCalledOnce();
   expect(vi.mocked(readConnectionSummary).mock.calls[0][1]).toBe('core');
 });
+it('retains last confirmed status through both refresh phases and a failed new check',async()=>{
+  const connected={label:'Connected',reason:'invented@example.invalid',action:'View connection',tone:'ready' as const,checkedAt:Date.now()};
+  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true});vi.mocked(readConnectionSummary).mockResolvedValue(connected);
+  await mount(<p>Google</p>);
+  let catalogDone!:(v:typeof catalog)=>void,summaryDone!:(v:typeof connected)=>void;
+  vi.mocked(readConnectionCatalog).mockImplementationOnce(()=>new Promise(resolve=>{catalogDone=resolve;}));
+  await click('Refresh connections');
+  expect(host.textContent).toContain('Checking again');expect(host.textContent).toContain('Last confirmed: Connected');expect(host.querySelector('.connection-badge-ready')).toBeNull();
+  vi.mocked(readConnectionSummary).mockImplementation(()=>new Promise(resolve=>{summaryDone=resolve;}));
+  await act(async()=>catalogDone({...catalog,core:false,google:true}));
+  expect(host.textContent).toContain('Last confirmed: Connected');
+  expect(host.querySelector('.connection-directory-status')?.textContent).toContain('Checking again');
+  expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Refresh connections')?.disabled).toBe(true);
+  await act(async()=>summaryDone(connected));expect(host.querySelector('.connection-badge-ready')).not.toBeNull();
+  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true});vi.mocked(readConnectionSummary).mockRejectedValue(new Error('offline'));
+  await click('Refresh connections');expect(host.textContent).toContain('Current status is unknown');expect(host.textContent).toContain('Last confirmed: Connected');expect(host.querySelector('.connection-badge-ready')).toBeNull();
+});
+it('clears cached account results and rejects sibling responses after authorization is lost',async()=>{
+  const connected={label:'Connected',reason:'Invented private account',action:'View connection',tone:'ready' as const,checkedAt:Date.now()};
+  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true});vi.mocked(readConnectionSummary).mockResolvedValue(connected);await mount(<p>Google</p>);
+  let finish!:(v:typeof connected)=>void;
+  vi.mocked(readConnectionSummary).mockImplementation(async(_owner,id)=>{
+    if(id==='core')return new Promise(resolve=>{finish=resolve;});
+    throw new (await import('./workspace-api')).WorkspaceApiError(401);
+  });
+  await click('Refresh connections');await act(async()=>finish(connected));
+  expect(host.textContent).not.toContain('Invented private account');expect(host.querySelector('.connection-badge-ready')).toBeNull();expect(host.textContent).not.toContain('Last confirmed:');
+});

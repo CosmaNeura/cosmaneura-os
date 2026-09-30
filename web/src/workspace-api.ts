@@ -295,8 +295,8 @@ function legacyPracticeWork(value: PracticeWorkEntry): PracticeWorkItem {
 export const workspaceApi = {
   practiceWork: (identity: WorkspaceIdentity, cursor?: string) =>
     readVendorPracticeCatalog(identity, cursor, value => validatePracticeWorkPage(value, identity)),
-  practiceWorkItem: (identity: WorkspaceIdentity, id: string) =>
-    request<PracticeWorkEntry>(`/practice-work/${id}`, identity).then(legacyPracticeWork),
+  practiceWorkItem: (identity: WorkspaceIdentity, id: string, signal?:AbortSignal) =>
+    request<PracticeWorkEntry>(`/practice-work/${id}`, identity, undefined, signal).then(legacyPracticeWork),
   workHandoff: (identity: WorkspaceIdentity, id: string, body: WorkHandoffInput) =>
     request<PracticeWorkEntry>(`/practice-work/${id}/handoffs`, identity, body).then(legacyPracticeWork),
   completeWork: (identity: WorkspaceIdentity, id: string, body: FollowUpCompleteInput) =>

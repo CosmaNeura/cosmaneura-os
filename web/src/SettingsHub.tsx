@@ -24,44 +24,60 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [visited, setVisited] = useState<Editor[]>(initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
-  const [catalogState,setCatalogState]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog|null;error:boolean}|null>(null);
+  type Check = {value?:ConnectionSummary; last?:ConnectionSummary; busy:boolean};
+  const [directory,setDirectory]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog|null;error:boolean;busy:boolean;checks:Partial<Record<ConnectionId,Check>>}|null>(null);
   const [refreshCatalog,setRefreshCatalog]=useState(0);
-  const [summaryState,setSummaryState]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog;values:Partial<Record<ConnectionId,ConnectionSummary>>}|null>(null);
   const accessLost=useRef(onConnectionAccessLost);accessLost.current=onConnectionAccessLost;
-  const catalog=catalogState?.owner===connectionIdentity?catalogState?.catalog:null;
-  const catalogError=catalogState?.owner===connectionIdentity&&catalogState?.error;
-  const summaries=summaryState&&summaryState.owner===connectionIdentity&&summaryState.catalog===catalog?summaryState.values:{};
+  const current=directory?.owner===connectionIdentity?directory:null;
+  const catalog=current?.catalog;
+  const catalogError=current?.error;
+  const checking=!!current&&(current.busy||Object.values(current.checks).some(check=>check.busy));
+  const checkingAgain=!!current&&Object.values(current.checks).some(check=>check.last&&(current.busy||check.busy));
   const summaryIds=([['core',core],['google',google],['microsoft',microsoft],['scheduling',scheduling]] as const).filter(([,editor])=>editor!=null).map(([id])=>id).join(',');
   useEffect(()=>{
     if(!open||screen!=='connections'||!connectionIdentity)return;
-    const controller=new AbortController();let current=true;
-    setCatalogState({owner:connectionIdentity,catalog:null,error:false});
+    const controller=new AbortController();const controllers:AbortController[]=[controller];let active=true;
+    const catalogTimer=setTimeout(()=>controller.abort(),15000);
+    setDirectory(previous=>({owner:connectionIdentity,catalog:previous?.owner===connectionIdentity?previous.catalog:null,
+      error:false,busy:true,checks:previous?.owner===connectionIdentity?previous.checks:{}}));
     void readConnectionCatalog(connectionIdentity,controller.signal).then(value=>{
-      if(current)setCatalogState({owner:connectionIdentity,catalog:value,error:false});
+      if(!active)return;
+      clearTimeout(catalogTimer);
+      const ids=summaryIds.split(',').filter(Boolean) as ConnectionId[];
+      setDirectory(previous=>({owner:connectionIdentity,catalog:value,error:false,busy:false,
+        checks:Object.fromEntries(Object.keys(value).map(key=>{
+          const id=key as ConnectionId,last=previous?.owner===connectionIdentity?previous.checks[id]?.last:undefined;
+          const setup:ConnectionSummary={label:'Admin setup',reason:'Your practice administrator needs to finish setup.',action:'View requirements',tone:'attention',checkedAt:Date.now()};
+          return [id,!value[id]?{value:setup,last:setup,busy:false}:{last,busy:ids.includes(id)&&accountStatusSupported(id)}];
+        }))}));
+      for(const id of ids){
+        if(!value[id]||!accountStatusSupported(id))continue;
+        const checkController=new AbortController();controllers.push(checkController);
+        const timer=setTimeout(()=>checkController.abort(),15000);
+        void readConnectionSummary(connectionIdentity,id,checkController.signal).then(result=>{
+          if(active)setDirectory(previous=>previous?.owner===connectionIdentity?{...previous,checks:{...previous.checks,[id]:{value:result,last:result,busy:false}}}:previous);
+        }).catch(error=>{
+          if(!active)return;
+          const denied=error instanceof WorkspaceApiError&&(error.status===401||error.status===403&&id!=='core');
+          if(denied){
+            active=false;controllers.forEach(item=>item.abort());
+            setDirectory({owner:connectionIdentity,catalog:null,error:true,busy:false,checks:{}});
+            accessLost.current?.(error);return;
+          }
+          setDirectory(previous=>previous?.owner===connectionIdentity?{...previous,checks:{...previous.checks,[id]:{
+            last:previous.checks[id]?.last,busy:false,value:{label:'Couldn’t check',reason:error instanceof WorkspaceApiError&&error.status===403?'Ask your practice administrator to confirm access.':'Current status is unknown. Open the connection to try again.',action:'Review connection',tone:'attention'}
+          }}}:previous);
+        }).finally(()=>clearTimeout(timer));
+      }
     }).catch(error=>{
-      if(!current)return;
-      setCatalogState({owner:connectionIdentity,catalog:null,error:true});
-      if(error instanceof WorkspaceApiError&&[401,403].includes(error.status))accessLost.current?.(error);
+      if(!active)return;
+      clearTimeout(catalogTimer);
+      const denied=error instanceof WorkspaceApiError&&[401,403].includes(error.status);
+      setDirectory(previous=>({owner:connectionIdentity,catalog:null,error:true,busy:false,checks:!denied&&previous?.owner===connectionIdentity?previous.checks:{}}));
+      if(denied)accessLost.current?.(error);
     });
-    return()=>{current=false;controller.abort();};
-  },[open,screen,connectionIdentity,refreshCatalog]);
-  useEffect(()=>{
-    if(!open||screen!=='connections'||!connectionIdentity||!catalog)return;
-    let current=true;const controllers:AbortController[]=[];
-    setSummaryState({owner:connectionIdentity,catalog,values:{}});
-    for(const id of summaryIds.split(',').filter(Boolean) as ConnectionId[]){
-      if(!catalog[id]||!accountStatusSupported(id))continue;
-      const controller=new AbortController();controllers.push(controller);
-      const timer=setTimeout(()=>controller.abort(),15000);
-      void readConnectionSummary(connectionIdentity,id,controller.signal).catch(error=>{
-        if(current&&error instanceof WorkspaceApiError&&(error.status===401||error.status===403&&id!=='core'))accessLost.current?.(error);
-        return {label:error instanceof WorkspaceApiError&&error.status===403?'Needs review':'Couldn’t check',reason:error instanceof WorkspaceApiError&&error.status===403?'Ask your practice administrator to confirm access.':'Open the connection to check again.',action:'Review connection',tone:'attention'} as ConnectionSummary;
-      }).then(value=>{
-        if(current)setSummaryState(previous=>({owner:connectionIdentity,catalog,values:{...(previous?.owner===connectionIdentity&&previous.catalog===catalog?previous.values:{}),[id]:value}}));
-      }).finally(()=>clearTimeout(timer));
-    }
-    return()=>{current=false;controllers.forEach(controller=>controller.abort());};
-  },[open,screen,connectionIdentity,catalog,summaryIds]);
+    return()=>{active=false;clearTimeout(catalogTimer);controllers.forEach(item=>item.abort());};
+  },[open,screen,connectionIdentity,refreshCatalog,summaryIds]);
   useEffect(() => { if (!open) setScreen(initialScreen); }, [open,initialScreen]);
   useEffect(() => {
     if(open){setScreen(initialScreen);if(initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
@@ -85,9 +101,12 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
   const setupUnavailable=selectedGuide&&catalog?.[screen as ConnectionId]===false;
   function summary(id:ConnectionId):ConnectionSummary{
-    if(catalog?.[id]===false)return {label:'Admin setup',reason:'Your practice administrator needs to finish setup.',action:'View requirements',tone:'attention'};
-    if(catalog?.[id]===true&&accountStatusSupported(id))return summaries[id]??{label:'Checking…',reason:'Checking your account connection.',action:'View connection',tone:'neutral'};
-    return {label:catalogError?'Couldn’t check':catalog?.[id]===true?'Review setup':connectionIdentity?'Checking…':'Not checked',reason:catalog?.[id]===true?'Open to review configured accounts and permissions.':'Account status has not been verified.',action:'Review setup',tone:'neutral'};
+    if(current?.busy)return {label:current.checks[id]?.last?'Checking again…':'Checking…',reason:'Checking your account connection.',action:'View connection',tone:'neutral'};
+    if(catalogError)return {label:'Couldn’t check',reason:'Current status is unknown. Try again or open the connection.',action:'Review connection',tone:'attention'};
+    const check=current?.checks[id];
+    if(check?.busy)return {label:check.last?'Checking again…':'Checking…',reason:'Checking your account connection.',action:'View connection',tone:'neutral'};
+    if(check?.value)return check.value;
+    return {label:catalog?.[id]===true?'Review setup':connectionIdentity?'Checking…':'Not checked',reason:catalog?.[id]===true?'Open to review configured accounts and permissions.':'Account status has not been verified.',action:'Review setup',tone:'neutral'};
   }
   return <section className="settings-hub" hidden={!open} aria-label="Settings">
     <nav className="settings-hub-nav" aria-label="Settings navigation">
@@ -119,14 +138,15 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       </button>}
     </div>}
     {screen === 'connections' && <div className="connection-directory">
-      {connectionIdentity&&<div className="connection-directory-status"><p role="status">{catalog?'Account checks appear below. Open a connection for details.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
-        <button disabled={navigationLocked||!catalog&&!catalogError} onClick={()=>setRefreshCatalog(value=>value+1)}>Refresh connections</button></div>}
+      {connectionIdentity&&<div className="connection-directory-status"><p role="status">{checking?(checkingAgain?'Checking again. Last confirmed results remain below.':'Checking connections…'):catalog?'Account checks appear below. Open a connection for details.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
+        <button disabled={navigationLocked||checking||!catalog&&!catalogError} onClick={()=>setRefreshCatalog(value=>value+1)}>Refresh connections</button></div>}
       {['Your practice','Email & calendar','Practice services'].map(group=>{
         const cards=connectionCards.filter(item=>item.group===group);return cards.length>0&&<section className="connection-group" key={group} aria-label={group}>
           <h2>{group}</h2><div className="connection-cards">{cards.map(item=>{const state=summary(item.id);return <button disabled={navigationLocked||!!connectionIdentity&&!catalog&&!catalogError} className="settings-card connection-card" key={item.id} onClick={()=>visit(item.id)}>
             <span className="settings-card-icon" aria-hidden="true">{item.icon}</span>
             <span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{state.reason}</small></span>
             <span className="connection-card-state"><span role="status" aria-atomic="true" className={`connection-badge connection-badge-${state.tone}`}>{state.tone==='ready'&&<span aria-hidden="true">✓ </span>}{state.label}</span>
+              {!state.checkedAt&&current?.checks[item.id]?.last&&<small>Last confirmed: {current.checks[item.id]!.last!.label}{current.checks[item.id]!.last!.checkedAt?` · ${new Date(current.checks[item.id]!.last!.checkedAt!).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`:''}</small>}
               {state.checkedAt&&<small>Checked {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</small>}
               <span className="connection-card-action">{state.action} <span aria-hidden="true">›</span></span></span>
           </button>;})}</div>
@@ -140,8 +160,11 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     </div>}
     {setupUnavailable&&selectedGuide&&<section className="connection-setup-guide" aria-label="Connection setup steps">
       <span className="connection-badge connection-badge-attention">Admin setup</span><h2>{titles[screen]}</h2><p>{selectedGuide.setup}</p>
+      <h3>Your next step</h3><p>Ask your practice administrator to enable this service. No setup request has been sent from this screen.</p>
+      <p className="team-fine">Administrator contact: not listed here. Use your practice’s usual support contact.</p>
       <button disabled={navigationLocked} onClick={()=>{setRefreshCatalog(value=>value+1);visit('connections');}}>Check availability again</button>
-      <details><summary>Access and setup details</summary><ol>{selectedGuide.steps.map(step=><li key={step}>{step}</li>)}</ol><p className="connection-access-summary">{selectedGuide.access}</p></details>
+      <h3>Administrator steps</h3><p>{selectedGuide.setup}</p>
+      <details><summary>Your steps after setup</summary><ol>{selectedGuide.steps.filter(step=>!step.startsWith("Have an administrator")).map(step=><li key={step}>{step}</li>)}</ol><p className="connection-access-summary">{selectedGuide.access}</p></details>
     </section>}
     {visited.map(id => <div key={id} data-settings-screen={id} hidden={screen !== id||!!setupUnavailable}>{editors[id]}</div>)}
   </section>;

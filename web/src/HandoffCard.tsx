@@ -15,7 +15,7 @@ export function HandoffCard({ handoff, locked, onRetry, onShow }: {
     <header><BotAvatar role={handoff.recipient_role} active={handoff.status==='queued'||handoff.status==='running'} /><div><strong>Chief → {handoff.recipient_name}</strong>
       <small>{labels[handoff.status]}</small></div></header>
     <p>{handoff.brief}</p>
-    <small className="team-fine">Private draft · context through revision {handoff.context_revision}</small>
+    <small className="team-fine">Bot draft · human assignment is tracked in Work</small>
     {handoff.error_code && <p className="team-handoff-error">{reasons[handoff.error_code] ??
       "The saved access or team context is no longer available. Resolve it and ask Chief for a new assignment."}</p>}
     {handoff.status === "completed" && <button onClick={onShow}>View {handoff.recipient_name} draft</button>}
