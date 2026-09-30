@@ -27,6 +27,10 @@ python -m lab.runner --mode azure --cases clinic --repeat 3 \
 # All specialist cases, the Chief journey and the expanded clinic.
 python -m lab.runner --mode azure --cases all --concurrency 3 \
   --fault lost_save_reply --max-tokens 500000 --checks --serve
+
+# Unknown-DOB visits, with consent present versus absent; actual model tool use.
+python -m lab.runner --mode azure --cases walk_in,telehealth,walk_in_no_consent \
+  --concurrency 3 --fault lost_save_reply --max-tokens 150000
 ```
 
 The launcher prints a new output directory and a dashboard URL on
@@ -151,9 +155,11 @@ by the text-rescoring command.
 | `follow_up` | Administrative confirmation invitation | Generated draft through real F-8 recovery loop |
 | `membership` | Failed-payment discrepancy without inferring cancellation | Membership review, privacy and evidence |
 | `operations` | Unowned overdue work | Durable handoffs and routines |
+| `walk_in`, `telehealth` | Unknown DOB stays unknown; confirmed recording consent permits starting | Capture admission and handoff contracts |
+| `walk_in_no_consent` | Missing DOB is optional; absent recording consent still blocks starting | Capture admission and handoff contracts |
 | `journey` | Chief decomposes three encounter outputs, assigns drafts and verifies results | Actual durable private handoffs plus regression suite |
 
-Full Scribe recording remains deferred. Live Microsoft/Gmail, fax, payment,
+Full physical Scribe recording is outside this runner. Live Microsoft/Gmail, fax, payment,
 Scheduling, portal, Core and Scribe endpoints are not used by this lab. Unsupported
 operations remain coverage gaps; they are not replaced with optimistic receipts.
 
@@ -238,8 +244,9 @@ actual EncounterWorkspace at `http://127.0.0.1:5188/`. It supports an invented
 encounter, a prepared brief, notebook saves, saved Scribe drafts, private note
 review and Chief handoff inspection. Responses and existing drafts are scripted;
 this is UI evidence, separate from the real-model/application runs above. The
-fixture uses per-tab session storage, blocks service fetches, and does not simulate
-recording, sign-in or delivery. Closing the tab clears its fixture state. Real
+fixture uses per-tab session storage and blocks service fetches. Its labeled
+recording rehearsal uses a scripted timer and transcript, with no microphone or
+provider traffic. It does not simulate sign-in or delivery. Closing the tab clears its fixture state. Real
 encrypted/native draft recovery and backend durability are not qualified here.
 
 The existing `:5187` connection directory is a separate fixture. Its detail pages

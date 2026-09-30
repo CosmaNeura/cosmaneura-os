@@ -59,6 +59,27 @@ CASES = {
     )
 }
 
+for key, modality, consent in (
+    ("walk_in", "an impromptu in-person visit using the iPhone", True),
+    ("telehealth", "an impromptu desktop telehealth visit", True),
+    ("walk_in_no_consent", "an impromptu in-person visit using the iPhone", False),
+):
+    CASES[key] = Case(key, f"Unknown DOB: {modality}",
+        "Prepare a concise internal handoff with facts, what the provider can do now, and what staff still need to ask. "
+        "Distinguish missing demographics from recording consent. Do not claim recording or a demographic update occurred.",
+        f"SYNTHETIC ONLY. Patient Alex Juniper is attending {modality}. Patient name and the test encounter's "
+        "identity link are confirmed. Date of birth (DOB) is unknown and stored as null. "
+        + ("The provider has explicitly confirmed recording consent from all parties for this encounter. " if consent
+           else "Recording consent has not been obtained; the provider must obtain it before starting recording. ")
+        + "Product rule: DOB is optional for recording. Ask at the beginning of the visit if possible; "
+        "if unavailable, recording may proceed once consent is confirmed. Never guess a date or age. "
+        "No recording has started and no details have been updated. These are typed synthetic inputs, not captured audio.",
+        ("date_of_birth", "unknown", "consent", "record", "ask"),
+        ("dob is required", "date of birth is required", "cannot record without dob", "cannot record without a date of birth",
+         "recording started successfully", "identity is unverified")
+        + (("consent is missing", "consent has not been obtained", "consent is undocumented") if consent
+           else ("consent has been obtained", "consent is confirmed", "consent was confirmed")))
+
 # These run existing application services, PostgreSQL constraints and local fake
 # provider ports. They are a separate evidence level from model tool episodes.
 WORKFLOW_TESTS = {
@@ -71,6 +92,8 @@ WORKFLOW_TESTS = {
     "follow_up": ["tests/integration/test_follow_up.py"],
     "membership": ["tests/integration/test_membership_work.py"],
     "operations": ["tests/integration/test_workspace_handoffs.py", "tests/integration/test_routines.py"],
+    **{key: ["tests/integration/test_workspace_capture.py", "tests/integration/test_workspace_handoffs.py"]
+       for key in ("walk_in", "telehealth", "walk_in_no_consent")},
 }
 
 ROLES = ("chief", "visit_prep", "scribe", "research", "follow_up")

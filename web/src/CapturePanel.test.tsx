@@ -92,6 +92,27 @@ it("requires valid regions and a fresh combined consent/start click, then stops 
   expect(container.textContent).toContain("Audio uploaded");
 });
 
+it.each(["in_person", "virtual"] as const)("starts an admitted %s encounter without DOB while still requiring consent", async modality => {
+  vi.mocked(desktopMeetingCaptureAvailable).mockReturnValue(modality === "virtual");
+  vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
+  await click("Record visit");
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  expect(button("Confirm consent & record").disabled).toBe(true);
+  if (modality === "virtual") {
+    const source = container.querySelector<HTMLSelectElement>('[aria-label="Recording source"]')!;
+    await act(async () => { source.value = "desktop_meeting"; source.dispatchEvent(new Event("change", {bubbles: true})); });
+  }
+  await consent();
+  expect(container.querySelector('input[type="date"]')).toBeNull();
+  await click("Confirm consent & record");
+  const attestation = vi.mocked(prepareCapture).mock.calls.at(-1)?.[2];
+  expect(attestation).toMatchObject({modality, all_parties_consented: true});
+  expect(Object.keys(attestation!).sort()).toEqual(["all_parties_consented", "granted_at", "method", "modality", "participant_regions"]);
+  expect(runtime.controller.startRecording).toHaveBeenCalledOnce();
+  await click("Stop and upload");
+  expect(runtime.controller.stopRecording).toHaveBeenCalledOnce();
+});
+
 it("does not attest on form submission and consumes a double consent click once", async () => {
   vi.mocked(prepareCapture).mockRejectedValueOnce({code: "capture_consent_required"});
   await click("Record visit"); await consent();
