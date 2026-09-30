@@ -1,5 +1,5 @@
 import {CaptureFlowController} from "../../clients/capture/src/configured/flow/controller";
-import {EncryptedIndexedDbFlowStore} from "../../clients/capture/src/configured/flow/encrypted-store";
+import {EncryptedIndexedDbFlowStore,isEmptyProfilePreparation} from "../../clients/capture/src/configured/flow/encrypted-store";
 import {CaptureQueue} from "../../clients/capture/src/queue/capture-queue";
 import {BffCaptureQueueTransport} from "../../clients/capture/src/bff/queue-transport";
 import type {CiphertextUploadTarget} from "../../clients/capture/src/bff/contracts";
@@ -7,12 +7,13 @@ import type {CaptureSource} from "../../clients/capture/src/capture";
 import type {CaptureSource as ConfiguredSource} from "../../clients/capture/src/configured/capture";
 import type {EncryptedIndexedDbFlowStore as QueueProfileStore} from "../../clients/capture/src/flow/encrypted-store";
 import {BffResponseError} from "../../clients/capture/src/bff/http-client";
-import {workspaceCaptureBff,CAPTURE_LONG_VISITS_BUILD} from "./capture-api";
+import {workspaceCaptureBff,CAPTURE_LONG_VISITS_BUILD,CAPTURE_RECOVERY_BUILD} from "./capture-api";
 import {creatorReviewApi} from "./creator-review-api";
 import type {openCaptureQueueStorage} from "./capture-storage";
 import type {AuthenticatedWorkspaceIdentity} from "./workspace-api";
 import type {CaptureRuntime} from "./capture-runtime";
 import {releaseEmptyPreparationTransfer} from '../../clients/capture/src/flow/empty-preparation-transfer';
+import {checkEmptyProfilePreparation} from './empty-profile-preparation';
 
 /** The current Scribe recorder owns configured sessions; legacy recordings keep
  * their existing store/controller. Both use the same authenticated OS transport.
@@ -42,11 +43,23 @@ export async function openConfiguredWorkspaceRuntime(options:{workspaceId:string
       source=ownedWorkspaceSource(createCapacitorIosNativeMicrophoneCaptureSource(),flow,workspaceId,sessionId,identity.nativeSession);
     }
     const bff=workspaceCaptureBff(workspaceId,sessionId,identity,abort.signal);
-    controller=new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:new CaptureQueue(queue.storage),source,
+    const createController=()=>new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:new CaptureQueue(queue.storage),source,
       ...(CAPTURE_LONG_VISITS_BUILD?{standardContinuousCapture:true as const}:{}),
       queueTransport:new BffCaptureQueueTransport(bff,options.upload)});
-    let reviewOnly=false;
-    if(!await controller.restore()){
+    controller=createController();
+    let reviewOnly=false,recoverEmpty=false,restored=false;
+    const checkEmpty=()=>checkEmptyProfilePreparation({sessionId,flow,queue:queue.storage,bff,signal:abort.signal});
+    try {restored=await controller.restore();}
+    catch(error){
+      // Only a rejected optional-profile setup can offer this action. Network,
+      // permission, receipt and later key/lease errors keep their normal recovery.
+      if(options.native||!CAPTURE_LONG_VISITS_BUILD||!CAPTURE_RECOVERY_BUILD||view.status!=="created"||
+        !isEmptyProfilePreparation(preparing)||!(error instanceof BffResponseError)||
+        error.status!==409||error.code!=="capture_source_unavailable")throw error;
+      try {await checkEmpty();} catch {throw error;}
+      recoverEmpty=true;
+    }
+    if(!restored&&!recoverEmpty){
       if(!["created","capturing"].includes(view.status))reviewOnly=true;
       else{
         if(view.status==="capturing")throw new BffResponseError(409,"capture_saved_session_changed",null);
@@ -56,13 +69,30 @@ export async function openConfiguredWorkspaceRuntime(options:{workspaceId:string
         await controller.prepareConfigured(sessionId);
       }
     }
-    const current=controller;
     const unavailable=async()=>{throw new BffResponseError(409,"capture_source_unavailable",null);};
-    const reviewSnapshot={...current.snapshot,state:"processing" as const,statusCode:"capture_processing",sessionId};
     let closed=false,closing:Promise<void>|null=null;
-    return {sourceKind:source.kind,supportsContinuation:!reviewOnly&&options.native,
-      controller:reviewOnly?{
-        snapshot:reviewSnapshot,subscribe:listener=>{listener(reviewSnapshot);return()=>{};},
+    let transitioned=false,continuing:Promise<CaptureRuntime>|null=null;
+    const wrap=(emptyRecovery=false):CaptureRuntime=>{
+      const current=controller!;
+      const inertSnapshot={...current.snapshot,state:emptyRecovery?"ready" as const:"processing" as const,
+        statusCode:emptyRecovery?"capture_preparation_recovery":"capture_processing",sessionId};
+      return {sourceKind:source.kind,supportsContinuation:!reviewOnly&&!emptyRecovery&&options.native,
+      ...(emptyRecovery?{recoveryOnly:true,continuePreparation:()=>{
+        if(closed||closing)return unavailable() as Promise<CaptureRuntime>;
+        return continuing??=(async()=>{
+          if(!transitioned){
+            const expected=await checkEmpty();
+            await flow.continueEmptyProfilePreparation(expected);
+            transitioned=true;
+          }
+          await controller!.deactivate();
+          controller=createController();
+          if(!await controller.restore())throw new BffResponseError(409,"capture_saved_session_changed",null);
+          return wrap();
+        })().finally(()=>{continuing=null;});
+      }}:{}),
+      controller:reviewOnly||emptyRecovery?{
+        snapshot:inertSnapshot,subscribe:listener=>{listener(inertSnapshot);return()=>{};},
         startRecording:unavailable,stopRecording:unavailable,acknowledgeGap:unavailable,
         finishInterruptedCapture:unavailable,resumePendingWork:async()=>{},refreshTranscriptionStatus:async()=>{},
       }:{
@@ -78,7 +108,8 @@ export async function openConfiguredWorkspaceRuntime(options:{workspaceId:string
         return closing??=(async()=>{
           // The native source confirms physical stop and server retirement before
           // releasing storage or the shared recorder lock. Failure stays retryable.
-          if(!reviewOnly)await current.deactivate();
+          await continuing?.catch(()=>undefined);
+          if(!reviewOnly)await controller!.deactivate();
           abort.abort();
           if(await flow.getActiveCaptureState()===null&&await flow.getPreparationState()===null&&
             (await queue.storage.listMetadata()).every(record=>record.state==="purged")){
@@ -89,6 +120,7 @@ export async function openConfiguredWorkspaceRuntime(options:{workspaceId:string
           flow.close();profiles.close();queue.close();await options.unlock();closed=true;
         })().catch(error=>{closing=null;throw error;});
       },
-    };
+    };};
+    return wrap(recoverEmpty);
   }catch(error){flow.close();throw error;}
 }

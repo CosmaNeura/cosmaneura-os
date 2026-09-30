@@ -14,6 +14,7 @@ import {
   type ActiveCaptureState,
   type CaptureFlowStore,
   type CapturePreparationState,
+  type ConfiguredCapturePreparationState,
   type ReservationIntent,
   type SessionKeyBindingState,
 } from "./types";
@@ -37,6 +38,20 @@ interface SealedFlowRecord {
   readonly key: string;
   readonly nonce: Uint8Array<ArrayBuffer>;
   readonly ciphertext: ArrayBuffer;
+}
+
+function sameSealed(left: SealedFlowRecord | undefined, right: SealedFlowRecord | undefined): boolean {
+  if (!left || !right) return left === right;
+  return left.key === right.key && String(left.nonce) === String(right.nonce) &&
+    String(new Uint8Array(left.ciphertext)) === String(new Uint8Array(right.ciphertext));
+}
+
+export function isEmptyProfilePreparation(state: CapturePreparationState | null): state is ConfiguredCapturePreparationState {
+  return state?.mode === "configured_core" && state.schemaVersion === PROFILE_FLOW_RECORD_SCHEMA_VERSION &&
+    (state.channel === undefined || state.channel === "microphone") &&
+    state.profileSelection?.receipt === null && state.profileSelection.request.channels.length === 1 &&
+    state.profileSelection.request.channels[0] === "microphone" &&
+    state.leaseRequest === null && state.leaseIdempotencyKey === null;
 }
 
 export interface EncryptedFlowStoreOptions {
@@ -84,12 +99,59 @@ export class EncryptedIndexedDbFlowStore implements CaptureFlowStore {
     if (state.mode === "configured_core" && state.profileSelection) {
       await validateProfileSelection(state.profileSelection, state.sessionId, this.#crypto);
     }
-    const existing = await this.getPreparationState();
+    const before = await this.#sealedPreparation();
+    const existing = before ? await this.#open(before) as CapturePreparationState : null;
+    if (existing !== null) assertPreparationState(existing);
+    if (existing?.mode === "configured_core" && existing.profileSelection)
+      await validateProfileSelection(existing.profileSelection, existing.sessionId, this.#crypto);
     if (existing !== null) assertPreparationProgression(existing, state);
     const sealed = await this.#seal("preparation", state);
     const transaction = this.#database.transaction(FLOW_RECORD_STORE, "readwrite");
-    transaction.objectStore(FLOW_RECORD_STORE).put(sealed);
+    const records = transaction.objectStore(FLOW_RECORD_STORE);
+    const current = records.get("preparation");
+    current.onsuccess = () => {
+      if (!sameSealed(current.result, before)) { transaction.abort(); return; }
+      records.put(sealed);
+    };
     await transactionDone(transaction);
+  }
+
+  async #sealedPreparation(): Promise<SealedFlowRecord | undefined> {
+    const tx = this.#database.transaction(FLOW_RECORD_STORE, "readonly"), done = transactionDone(tx);
+    const value = await requestResult(tx.objectStore(FLOW_RECORD_STORE).get("preparation"));
+    await done;
+    if (value !== undefined) assertSealedRecord(value);
+    return value;
+  }
+
+  /** Explicit recovery only: caller holds the capture lock and has just checked
+   * an untouched server session and empty audio queue. Retain the original sealed
+   * intent and key; never reinterpret a receipt, key binding, lease or recording.
+   */
+  async continueEmptyProfilePreparation(expected: ConfiguredCapturePreparationState): Promise<void> {
+    expected = structuredClone(expected);
+    assertPreparationState(expected);
+    if (!isEmptyProfilePreparation(expected)) throw new QueueInvariantError("capture_preparation_transfer_conflict");
+    const before = await this.#sealedPreparation();
+    if (!before || JSON.stringify(await this.#open(before)) !== JSON.stringify(expected))
+      throw new QueueInvariantError("capture_preparation_transfer_conflict");
+    const {profileSelection: _, ...rest} = expected;
+    const replacement = {...rest, schemaVersion: STANDARD_NATIVE_FLOW_RECORD_SCHEMA_VERSION};
+    assertPreparationState(replacement);
+    const sealed = await this.#seal("preparation", replacement);
+    const tx = this.#database.transaction([FLOW_RECORD_STORE, SESSION_KEY_STORE, METADATA_STORE], "readwrite");
+    const done = transactionDone(tx), records = tx.objectStore(FLOW_RECORD_STORE);
+    const rows = records.getAll(), keys = tx.objectStore(SESSION_KEY_STORE).count();
+    let pending = 2;
+    const checked = () => {
+      if (--pending) return;
+      if (keys.result !== 0 || rows.result.length !== 1 || !sameSealed(rows.result[0], before)) { tx.abort(); return; }
+      tx.objectStore(METADATA_STORE).add({version: 1, original: before, localKey: this.#localKey},
+        `empty-profile-preparation:${expected.sessionId}`);
+      records.put(sealed);
+    };
+    rows.onsuccess = checked; keys.onsuccess = checked;
+    await done;
   }
 
   async getPreparationState(): Promise<CapturePreparationState | null> {

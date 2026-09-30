@@ -294,7 +294,7 @@ describe("CaptureFlowController", () => {
     }
   });
 
-  it("recovers configured preparation, uploads once, and restores review without legacy admission or transcript calls", async () => {
+  it.each([false,true])("recovers configured preparation (empty profile recovery: %s), uploads once, and restores review without legacy admission or transcript calls", async emptyProfile => {
     const server = createMockBffServer();
     const origin = await listenOnEphemeralLoopback(server);
     const indexedDB = new IDBFactory();
@@ -318,12 +318,20 @@ describe("CaptureFlowController", () => {
         if (lost) { lost = false; throw new Error("synthetic lost lease reply"); }
         return result;
       });
-      const first = createController(bff, flowStore, queueStorage, origin);
-      await expect(first.prepareConfigured(admitted.id)).rejects.toThrow("synthetic lost lease reply");
+      const first = createController(bff, flowStore, queueStorage, origin, emptyProfile);
+      if(emptyProfile){
+        const original={mode:'configured_core' as const,schemaVersion:5 as const,sessionId:admitted.id,
+          startedAt:new Date().toISOString(),completeIdempotencyKey:TEST_CRYPTO.randomUUID(),leaseRequest:null,leaseIdempotencyKey:null,
+          profileSelection:{request:{schema_version:'1.0' as const,profile_id:'visit-60m-v1' as const,channels:['microphone' as const]},
+            idempotencyKey:TEST_CRYPTO.randomUUID(),receipt:null}};
+        await flowStore.putPreparationState(original);
+        await flowStore.continueEmptyProfilePreparation(original);
+        await expect(first.restore()).rejects.toThrow('synthetic lost lease reply');
+      }else await expect(first.prepareConfigured(admitted.id)).rejects.toThrow("synthetic lost lease reply");
       const pending = await flowStore.getPreparationState();
       expect(pending).toMatchObject({ mode: "configured_core", sessionId: admitted.id });
       expect(pending).not.toHaveProperty("consentRequest");
-      const recovered = createController(bff, flowStore, queueStorage, origin);
+      const recovered = createController(bff, flowStore, queueStorage, origin, emptyProfile);
       expect(await recovered.restore()).toBe(true);
       expect(leaseSpy.mock.calls[1]).toEqual(leaseSpy.mock.calls[0]);
       expect(recovered.snapshot).toMatchObject({ state: "ready", recordedChunks: 0 });
@@ -331,7 +339,7 @@ describe("CaptureFlowController", () => {
       const active = (await flowStore.getActiveCaptureState())!;
       const { reviewAfterUpload: _mode, ...changed } = active;
       expect(_mode).toBe(true);
-      await expect(flowStore.putActiveCaptureState(changed)).rejects.toThrow("active_capture_conflict");
+      await expect(flowStore.putActiveCaptureState(changed)).rejects.toThrow(emptyProfile?"invalid_active_capture_state":"active_capture_conflict");
       const complete = vi.spyOn(bff, "completeCapture");
       await recovered.startRecording();
       await recovered.deactivate();
@@ -340,7 +348,7 @@ describe("CaptureFlowController", () => {
       await recovered.stopRecording();
       expect(recovered.snapshot.state).toBe("processing");
       vi.spyOn(bff, "getCapabilities").mockRejectedValue(new Error("expired capture must not be consulted"));
-      const review = createController(bff, flowStore, queueStorage, origin);
+      const review = createController(bff, flowStore, queueStorage, origin, emptyProfile);
       expect(await review.restore()).toBe(true);
       expect(review.snapshot.state).toBe("processing");
       await review.releaseUploadedCapture(); await review.releaseUploadedCapture();
@@ -1016,9 +1024,11 @@ function createController(
   flowStore: EncryptedIndexedDbFlowStore,
   queueStorage: EncryptedIndexedDbQueueStorage,
   origin: string,
+  standardContinuousCapture = false,
 ): CaptureFlowController {
   return new CaptureFlowController({
     bff,
+    standardContinuousCapture,
     flowStore,
     queue: new CaptureQueue(queueStorage, { crypto: TEST_CRYPTO }),
     queueTransport: new BffCaptureQueueTransport(
