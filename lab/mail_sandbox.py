@@ -6,6 +6,7 @@ fences and summary parsing execute in the product against the owned lab database
 
 import base64
 import json
+import time
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
@@ -20,6 +21,15 @@ from cosmas_os.adapters.microsoft_connection import MicrosoftPersonalConnection
 from cosmas_os.api.auth import RequestIdentity
 from cosmas_os.models import ExternalIdentity
 from lab.store import LabError
+
+RESPONSE_FAULTS = {
+    "long_retry_after_429": (429, "application/json"),
+    "non_json_429": (429, "text/html"),
+    "overloaded_503": (503, "application/json"),
+}
+MAIL_SCENARIOS = ("normal", "read_timeout", "throttled", "token_expiry", "oversized",
+                  "revoked_during_read", *RESPONSE_FAULTS)
+PROMPT_FAILURE_BUDGET_MS = 1000
 
 
 class MailSandbox:
@@ -60,6 +70,17 @@ class MailSandbox:
     def close(self):
         self.service.close()
 
+    def unconnected_identity(self):
+        """Another active identity for the same human must not inherit this grant."""
+        account = str(uuid4())
+        with self.factory() as session:
+            session.add(ExternalIdentity(id=account, box_id=self.app.box, principal_id=self.app.owner,
+                issuer="https://other-identity.example.invalid", subject="lab_" + account,
+                organization_id="synthetic_clinic", active=True, reviewed_by="synthetic_provider",
+                evidence_ref="lab:virtual-clinic"))
+            session.commit()
+        return RequestIdentity(self.app.box, self.app.owner, "clerk_jwt", "synthetic_clinic", account)
+
     def respond(self, request):
         path, host = request.url.path, request.url.host
         token = request.method == "POST" and str(request.url) == self.service.token_url
@@ -72,6 +93,13 @@ class MailSandbox:
             raise LabError("unexpected_provider_route")
         self.calls.append({"method": request.method, "path": path})
         is_data = "messages" in path or "calendarView" in path or path.endswith("/events")
+        if is_data and self.fault in RESPONSE_FAULTS:
+            status, content_type = RESPONSE_FAULTS[self.fault]
+            # Persistent until the simulated human explicitly retries: a hidden
+            # adapter retry must not turn a one-shot fault into apparent success.
+            body = '{"error":"synthetic_provider_fault_body"}' if content_type == "application/json" else "<h1>synthetic_provider_fault_body</h1>"
+            return httpx.Response(status, headers={"content-type": content_type, "retry-after": "3600"},
+                                  content=body.encode())
         if is_data and self.fault == "read_timeout":
             self.fault = None
             raise httpx.ReadTimeout("injected synthetic timeout")
@@ -116,6 +144,8 @@ class MailSandbox:
                 "start": {"dateTime": "2026-10-01T15:30:00", "timeZone": "UTC"},
                 "end": {"dateTime": "2026-10-01T16:00:00", "timeZone": "UTC"},
                 "isCancelled": False, "isAllDay": False}]}
+            if self.fault == "oversized":
+                payload["value"] *= 26
             if self.fault == "invalid_timezone":
                 payload["value"][0]["start"]["timeZone"] = "unrecognized-zone"
         elif path == "/v1.0/me/mailFolders/inbox/messages":
@@ -139,14 +169,48 @@ class MailSandbox:
         return httpx.Response(200, headers={"content-type": "application/json"},
             stream=httpx.ByteStream(json.dumps(payload).encode()))
 
-    def read(self, kind="mail"):
+    def read(self, kind="mail", *, identity=None):
         if kind not in {"mail", "calendar"}:
             raise LabError("calendar_not_supported_by_this_adapter")
-        return getattr(self.service, kind)(self.identity)
+        return getattr(self.service, kind)(self.identity if identity is None else identity)
+
+
+def _observe_read(box, kind, *, identity=None):
+    before, started = len(box.calls), time.monotonic()
+    value, failed = None, False
+    try:
+        value = box.read(kind, identity=identity)
+    except Exception:
+        failed = True
+    return value, failed, round((time.monotonic() - started) * 1000, 3), len(box.calls) - before
+
+
+def _exercise_recovery_fences(box, kind, checks, measurements):
+    other = box.unconnected_identity()
+    value, failed, _, calls = _observe_read(box, kind, identity=other)
+    measurements["other_account_provider_calls"] = calls
+    checks["different_account_cannot_retry"] = failed and value is None and calls == 0
+    checks["account_connection_retained"] = box.service.status(box.identity)["state"] == "connected"
+
+    box.fault = None  # Explicit retry of the read, with the original account.
+    value, failed, elapsed, calls = _observe_read(box, kind)
+    measurements.update(recovery_ms=elapsed, recovery_provider_calls=calls)
+    checks["explicit_retry_recovers"] = not failed and value is not None and len(value["items"]) == 1
+    checks["recovery_has_exact_request_count"] = calls == (2 if (box.provider, kind) == ("google", "mail") else 1)
+
+    box.fault = "revoked_during_read"
+    value, failed, _, calls = _observe_read(box, kind)
+    measurements["revoked_recovery_provider_calls"] = calls
+    checks["revoked_during_recovery_not_disclosed"] = failed and value is None and calls == 1
+    value, failed, _, calls = _observe_read(box, kind)
+    measurements["revoked_account_provider_calls"] = calls
+    checks["revoked_account_cannot_retry"] = failed and value is None and calls == 0
 
 
 def exercise_mail(app, provider, scenario, kind="mail"):
     """Independent episodes keep revoked accounts and faults out of later cases."""
+    if scenario not in (*MAIL_SCENARIOS, "invalid_timezone"):
+        raise LabError("unsupported_synthetic_mail_fault")
     box = MailSandbox(app, provider)
     checks = {}
     try:
@@ -158,15 +222,16 @@ def exercise_mail(app, provider, scenario, kind="mail"):
         elif scenario != "normal":
             box.fault = scenario
         before = len(box.calls)
-        value, failed = None, False
-        try:
-            value = box.read(kind)
-        except Exception:
-            failed = True
-        if scenario in {"read_timeout", "throttled", "oversized", "revoked_during_read", "invalid_timezone"}:
+        value, failed, elapsed, calls = _observe_read(box, kind)
+        measurements = {"read_ms": elapsed, "read_provider_calls": calls}
+        if scenario in {"read_timeout", "throttled", "oversized", "revoked_during_read", "invalid_timezone", *RESPONSE_FAULTS}:
             checks["failure_does_not_disclose_or_claim_success"] = failed and value is None
             checks["no_automatic_request_retry"] = len(box.calls) == before + 1
-            if scenario in {"read_timeout", "throttled"}:
+            if scenario in RESPONSE_FAULTS:
+                measurements["prompt_failure_budget_ms"] = PROMPT_FAILURE_BUDGET_MS
+                checks["prompt_failure_return"] = failed and elapsed <= PROMPT_FAILURE_BUDGET_MS
+                _exercise_recovery_fences(box, kind, checks, measurements)
+            elif scenario in {"read_timeout", "throttled"}:
                 checks["account_connection_retained"] = box.service.status(box.identity)["state"] == "connected"
                 checks["explicit_retry_recovers"] = len(box.read(kind)["items"]) == 1
         else:
@@ -177,6 +242,7 @@ def exercise_mail(app, provider, scenario, kind="mail"):
                 checks["one_refresh_exchange"] = sum(r["method"] == "POST" for r in box.calls[before:]) == 1
         checks["no_mail_or_calendar_writes"] = all(r["method"] == "GET" or "token" in r["path"] for r in box.calls)
         return {"provider": provider, "scenario": scenario, "kind": kind, "checks": checks, "passed": all(checks.values()),
-                "requests": box.calls, "evidence_level": "real adapter and PostgreSQL; synthetic HTTP responses"}
+                "requests": box.calls, "measurements": measurements,
+                "evidence_level": "real adapter and PostgreSQL; synthetic HTTP responses"}
     finally:
         box.close()

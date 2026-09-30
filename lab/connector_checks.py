@@ -5,7 +5,7 @@ import traceback
 
 from lab.application import Application
 from lab.fax_sandbox import FAX_SCENARIOS, exercise_fax
-from lab.mail_sandbox import exercise_mail
+from lab.mail_sandbox import MAIL_SCENARIOS, exercise_mail
 
 
 def failure_location(error):
@@ -16,9 +16,9 @@ def failure_location(error):
 def run_connectors(app, store, episode):
     started = time.monotonic()
     outcomes = []
-    for provider, kind in (("microsoft", "mail"), ("google", "mail"), ("google", "calendar")):
-        scenarios = ["normal", "read_timeout", "throttled", "token_expiry", "oversized", "revoked_during_read"]
-        if provider == "microsoft":
+    for provider, kind in (("microsoft", "mail"), ("microsoft", "calendar"), ("google", "mail"), ("google", "calendar")):
+        scenarios = list(MAIL_SCENARIOS)
+        if provider == "microsoft" and kind == "mail":
             scenarios.append("invalid_timezone")
         for scenario in scenarios:
             tick = time.monotonic()

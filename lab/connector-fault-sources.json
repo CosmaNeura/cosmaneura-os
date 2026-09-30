@@ -1,0 +1,31 @@
+{
+  "schema": "cosmabot-lab-pattern-source.v1",
+  "reviewed_on": "2026-09-30",
+  "discovered_via": "https://grokbot.dev/plugins/agentmail/",
+  "source_repository": "https://github.com/agentmail-to/agentmail-mcp",
+  "source_tree": "0c2167d8d850efbb209df769337d5878cec55508",
+  "source_license": "MIT",
+  "license_url": "https://github.com/agentmail-to/agentmail-mcp/blob/main/LICENSE",
+  "reviewed_files": [
+    "packages/server/src/index.ts",
+    "tests/server-admission.test.mjs",
+    "tests/server-upstream-429.test.mjs"
+  ],
+  "influence": [
+    "A long Retry-After must not become a hidden SDK sleep that exceeds the tool-call budget.",
+    "An upstream rate limit or overload must surface after the expected provider call count; one explicit caller owns retries.",
+    "Record actual elapsed time and retry counts, and test account boundaries during recovery."
+  ],
+  "implementation": "Original CosmaBot synthetic fixtures and assertions; no third-party source copied, no dependency, no vendor client or runtime changes.",
+  "scope": [
+    "Real Google and Microsoft adapters backed by owned local PostgreSQL and httpx.MockTransport.",
+    "Persistent JSON 429, non-JSON 429, and JSON 503 with Retry-After 3600 until explicit synthetic read retry.",
+    "One-second local failure-return assertion plus exact provider counts and account-revocation fences.",
+    "Existing uncertain fax write and no-resend qualification retained."
+  ],
+  "limits": [
+    "The timing assertion measures an immediate synthetic error response, not live-provider latency or a production SLA.",
+    "Inspected upstream tests informed scenarios; this file does not claim those upstream tests were executed.",
+    "The directory content is separately CC BY 4.0; no directory prompt or prose was copied."
+  ]
+}
