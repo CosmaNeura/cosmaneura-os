@@ -105,7 +105,7 @@ def worker(args):
               "limits": ["Tool runner is local lab code; the deployed chat adapter remains text-only.",
                          "Artifacts are evaluation records, not a second clinical record or approval queue.",
                          "Human-only steps use a separate scripted synthetic provider.",
-                         "Typed-note documentation only; full recording acceptance remains deferred.",
+                         "Agent episodes use typed notes; physical recording acceptance is tracked separately.",
                          "Vendor endpoints are synthetic. No real deliveries, bookings, payments or live account reads.",
                          "Outcome text checks are regression heuristics, not clinical quality certification."]}
     report["limits"].append("Journey uses three invented intake, Session Prep and Scribe output fixtures. "
@@ -216,6 +216,7 @@ def main():
     parser.add_argument("--fault", choices=("none", "read_timeout", "lost_save_reply"), default="none")
     parser.add_argument("--checks", action="store_true", help="Also execute existing application workflow regression suites")
     parser.add_argument("--capture-checks", action="store_true", help="Also qualify actual recorder, encrypted queue and Swift audio code with generated signals")
+    parser.add_argument("--capture-stress-checks", action="store_true", help="Include recorder checks plus full one-hour capture and three-hour native PCM endurance (about 15 minutes)")
     parser.add_argument("--output", type=Path, help="New output directory outside repository; default is a new temporary directory")
     parser.add_argument("--postgres-bin", type=Path, default=Path("/opt/homebrew/opt/postgresql@16/bin"))
     parser.add_argument("--max-calls", type=int, default=250)
@@ -271,7 +272,7 @@ def main():
              "temporary_password_file_removed": not (args.output / "temporary-postgres-password").exists()}))
     if args.checks and (args.output / "report.json").exists():
         code = contracts(args) or code
-    if args.capture_checks and (args.output / "report.json").exists():
+    if (args.capture_checks or args.capture_stress_checks) and (args.output / "report.json").exists():
         from lab.capture_checks import run_capture_checks
 
         code = run_capture_checks(args) or code

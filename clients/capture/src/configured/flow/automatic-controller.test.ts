@@ -9,6 +9,7 @@ import type { CaptureProfileBff, CaptureProfileReceipt } from "../../bff/profile
 import { encodePcm16MonoWav, pcm16WavProfile, type CaptureSource, type CaptureSourceExtension, type CaptureSourceStartOptions } from "../capture";
 import { MockCaptureService } from "../mock-bff/state";
 import { CaptureQueue } from "../../queue/capture-queue";
+import { QueueTransportError } from "../../queue/errors";
 import type { CaptureQueueTransport } from "../../queue/types";
 import { EncryptedIndexedDbQueueStorage } from "../../storage/encrypted-indexeddb";
 import { EncryptedIndexedDbFlowStore } from "./encrypted-store";
@@ -49,12 +50,14 @@ class ControlledSource implements CaptureSource {
   });
   readonly stop = vi.fn(async () => {});
   readonly extend = vi.fn(async (extension: CaptureSourceExtension) => { this.maximum = extension.maximumChunks; });
-  async emit(advance = 10_000) {
+  async emit(advance = 10_000, fullDuration = false) {
     expect(this.next).toBeLessThan(this.maximum);
     vi.setSystemTime(Date.now() + advance);
     const profile = pcm16WavProfile(this.options.capabilities);
-    await this.options.onChunk({ sequenceNumber: this.next++, durationMs: 1,
-      wavBytes: encodePcm16MonoWav(new Int16Array([1, 2, 3, 4]), profile) });
+    const samples = fullDuration ? new Int16Array(profile.sampleRateHz * advance / 1000).fill(1000 + this.next)
+      : new Int16Array([1, 2, 3, 4]);
+    await this.options.onChunk({ sequenceNumber: this.next++, durationMs: fullDuration ? advance : 1,
+      wavBytes: encodePcm16MonoWav(samples, profile) });
   }
 }
 
@@ -123,9 +126,10 @@ async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
   const indexedDB = new IDBFactory(), name = crypto.randomUUID();
   let flow = await EncryptedIndexedDbFlowStore.open({ indexedDB, databaseName: name, crypto });
   cleanup.push(() => flow.close());
-  const storage = await EncryptedIndexedDbQueueStorage.open({ indexedDB, databaseName: crypto.randomUUID(), crypto });
+  const queueName = crypto.randomUUID();
+  let storage = await EncryptedIndexedDbQueueStorage.open({ indexedDB, databaseName: queueName, crypto });
   cleanup.push(() => storage.close());
-  const queue = new CaptureQueue(storage, { crypto });
+  let queue = new CaptureQueue(storage, { crypto });
   const transport: CaptureQueueTransport = {
     getReceipt: vi.fn(async () => ({ state: "reserved" as const })),
     authorizeUpload: vi.fn(async (_id, objectId) => ({ objectId, uploadUrl: "https://synthetic.invalid/ciphertext",
@@ -144,9 +148,10 @@ async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
   };
   const controller = create();
   await controller.prepareConfigured(session.id, mode === "profile" ? profile.request : undefined);
-  return { controller, create, source, bff, renew, reserve, complete, queue, transport, timers, leaseState,
+  return { controller, create, source, bff, renew, reserve, complete, get queue() { return queue; }, transport, timers, leaseState,
     session, profiles, get flow() { return flow; },
     reopen: async () => { flow.close(); flow = await EncryptedIndexedDbFlowStore.open({ indexedDB, databaseName: name, crypto }); },
+    reopenQueue: async () => { storage.close(); storage = await EncryptedIndexedDbQueueStorage.open({ indexedDB, databaseName: queueName, crypto }); queue = new CaptureQueue(storage, { crypto }); },
     emitTo: async (count: number) => { while (source.next < count) { await source.emit();
       if (source.next >= source.maximum - 6 && source.maximum < 360) await until(() => source.maximum > source.next + 6); } },
   };
@@ -269,6 +274,87 @@ it.each(["stopRecording", "pauseRecording", "deactivate"] as const)(
   },
 );
 
+});
+
+it.each(["profile", "standard"] as const)("stress: preserves the full one-hour %s PCM limit through repeated lease windows and exact upload", async mode => {
+  // The waveform contains a distinct sequence marker in every chunk. Time is
+  // accelerated; every advertised audio frame is still encoded and encrypted.
+  const f = await fixture(mode);
+  await f.controller.startRecording();
+  while (f.source.next < 360) {
+    await f.source.emit(10_000, true);
+    if (f.source.next >= f.source.maximum - 6 && f.source.maximum < 360) {
+      await until(() => f.source.maximum > f.source.next + 6);
+    }
+  }
+  const saved = (await f.queue.listMetadata()).filter(row => row.state === "encrypted");
+  expect(saved).toHaveLength(360);
+  expect(saved.map(row => row.reservation.sequenceNumber).sort((a,b) => a-b)).toEqual(Array.from({length:360}, (_,i)=>i));
+  expect(new Set(saved.map(row=>row.sha256)).size).toBe(360);
+  expect(f.source.start).toHaveBeenCalledOnce();
+  expect(f.source.extend).toHaveBeenCalledTimes(4);
+  expect(f.source.maximum).toBe(360);
+  await f.controller.stopRecording();
+  expect(f.controller.snapshot.state).toBe("processing");
+  expect(f.complete).toHaveBeenCalledOnce();
+  const registered = vi.mocked(f.transport.register).mock.calls.map(([request])=>request);
+  expect(registered).toHaveLength(360);
+  for (const row of saved) {
+    expect(registered.find(request=>request.objectId===row.reservation.objectId)).toMatchObject({
+      sha256:row.sha256,byteLength:row.byteLength,sequenceNumber:row.reservation.sequenceNumber,
+      idempotencyKey:row.idempotencyKeys.registration,
+    });
+  }
+  expect((await f.queue.listMetadata()).filter(row=>row.state==="purged")).toHaveLength(360);
+}, 180_000);
+
+it("stress: recovers offline upload and a lost registration receipt after reopening both encrypted stores", async () => {
+  const f = await fixture("standard");
+  await f.controller.startRecording();
+  while (f.source.next < 120) {
+    await f.source.emit(10_000, true);
+    if (f.source.next >= f.source.maximum - 6) await until(()=>f.source.maximum > f.source.next + 6);
+  }
+  const before = (await f.queue.listMetadata()).filter(row=>row.state==="encrypted");
+  vi.mocked(f.transport.upload).mockRejectedValue(new QueueTransportError("retryable", "synthetic_offline"));
+  await expect(f.controller.stopRecording()).rejects.toThrow();
+  expect(f.complete).not.toHaveBeenCalled();
+  await f.controller.deactivate(); await f.reopen(); await f.reopenQueue();
+  const first = f.create(); await first.restore();
+  expect(f.source.start).toHaveBeenCalledOnce();
+  expect((await f.queue.listMetadata()).filter(row=>"sha256" in row).map(row=>[row.reservation.objectId,row.sha256]))
+    .toEqual(before.map(row=>[row.reservation.objectId,row.sha256]));
+  const receipts = new Map<string, Awaited<ReturnType<CaptureQueueTransport["register"]>>>();
+  const register = vi.mocked(f.transport.register).getMockImplementation()!;
+  vi.mocked(f.transport.upload).mockResolvedValue();
+  vi.mocked(f.transport.getReceipt).mockImplementation(async reservation => receipts.has(reservation.objectId)
+    ? {state:"registered",registration:receipts.get(reservation.objectId)!} : {state:"reserved"});
+  vi.mocked(f.transport.register).mockImplementation(async request => {
+    expect(receipts.has(request.objectId)).toBe(false);
+    const receipt = await register(request); receipts.set(request.objectId,receipt);
+    if (request.sequenceNumber === 47) throw new QueueTransportError("retryable", "synthetic_lost_receipt");
+    return receipt;
+  });
+  vi.setSystemTime(Date.now()+60_000);
+  await expect(first.resumePendingWork()).rejects.toThrow();
+  expect(f.complete).not.toHaveBeenCalled();
+  await first.deactivate(); await f.reopen(); await f.reopenQueue();
+  const second = f.create(); await second.restore(); vi.setSystemTime(Date.now()+60_000);
+  await second.resumePendingWork();
+  expect(second.snapshot.state).toBe("processing");
+  expect(receipts.size).toBe(120); expect(f.complete).toHaveBeenCalledOnce();
+  expect(vi.mocked(f.transport.register).mock.calls.filter(([r])=>r.sequenceNumber===47)).toHaveLength(1);
+  expect(f.source.start).toHaveBeenCalledOnce();
+}, 120_000);
+
+it.each(["missing", "duplicate"])("stress: rejects %s audio positions without marking an incomplete recording uploaded", async fault => {
+  const f=await fixture("standard"); await f.controller.startRecording(); await f.source.emit(10_000,true);
+  const original=(await f.queue.listMetadata()).filter(row=>row.state==="encrypted");
+  const profile=pcm16WavProfile(f.source.options.capabilities);
+  await expect(f.source.options.onChunk({sequenceNumber:fault==="missing"?2:0,durationMs:10_000,
+    wavBytes:encodePcm16MonoWav(new Int16Array(profile.sampleRateHz*10),profile)})).rejects.toThrow();
+  expect(f.complete).not.toHaveBeenCalled();
+  expect((await f.queue.listMetadata()).filter(row=>row.state==="encrypted")).toEqual(original);
 });
 
 it("standard capture uses no profile operation and cannot reopen under an unaware host", async () => {
