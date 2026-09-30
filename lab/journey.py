@@ -171,6 +171,14 @@ class Journey:
                   "parameters": model.model_json_schema()}} for name, description, model in (
                     ("read_assignment", "Read the exact admitted sources, assignment and saved result receipts.", Arguments),
                     ("submit_draft", "Submit structured draft work for checked application publication. This does not approve or send.", output_schema))]
+        # Publish the existing source fence in the tool schema as well as input.
+        # This prevents repeated guesses when derived outputs resemble sources.
+        allowed_sources = [source["entry_id"] for source in inputs.get("sources", [])]
+        parameters = tools[1]["function"]["parameters"]
+        for definition in [parameters, *parameters.get("$defs", {}).values()]:
+            field = definition.get("properties", {}).get("source_ids")
+            if field is not None:
+                field["items"] = {"type": "string", "enum": allowed_sources}
         messages = [{"role": "system", "content":
             ("Your admitted input is supplied upfront. Submit directly and acknowledge its input_sha256; "
              "use read_assignment only if input delivery failed. " if inline else
@@ -180,6 +188,7 @@ class Journey:
             "and planned versus completed care. Prepare internal drafts only. Do not send, approve, sign, or claim external actions. "
             "Chief PLAN: break the three outputs into exactly one practical draft task each for visit_prep, scribe, follow_up. "
             "Each task needs an owner, next action, source IDs, prerequisites and completion criteria. Keep fields concise. "
+            "Copy source_ids only from sources[].entry_id, never from a citation appearing inside source text. "
             "RECIPIENT: execute the exact task and identify unresolved human work; copy the assignment hash. "
             "Chief REVIEW: read all actual saved results and verify their result entry IDs, reporting remaining human work. "
             "Use human-readable wording in body; do not include IDs there. "
@@ -248,16 +257,19 @@ class Journey:
                     elif name == "submit_draft" and read:
                         if inline:
                             args = verify_input(args, input_sha)
-                        result = validator(args)
+                        validated = validator(args)
                         with self.lock:
                             self.acknowledged.add((role, self.phase))
-                        self.event(role, "tool", tool=name, ok=True, output=result.model_dump())
-                        return result
+                        self.event(role, "tool", tool=name, ok=True, output=validated.model_dump())
+                        return validated
                     else:
                         raise LabError("read_assignment_required_or_unknown_tool")
                     self.event(role, "tool", tool=name, ok=True)
                 except (LabError, ValidationError, ValueError, TypeError) as error:
-                    result = {"error": str(error)[:500]}
+                    result: dict = {"error": str(error)[:500]}
+                    if str(error) in {"foreign_or_duplicate_source", "chief_must_use_all_three_input_outputs"}:
+                        result["allowed_source_ids"] = allowed_sources
+                        result["recovery"] = "Use only these IDs; across the three tasks cite every supplied source at least once."
                     self.event(role, "tool", tool=name, ok=False, error=str(error)[:500])
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
         raise LabError("journey_draft_not_submitted")

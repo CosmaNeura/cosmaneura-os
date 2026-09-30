@@ -30,7 +30,7 @@ def rescore(path):
         raise ValueError("Wait for the run to finish before rescoring")
     before = json.loads(json.dumps(report))
     for episode in report["episodes"]:
-        if episode["case"] == "journey":
+        if episode["case"] in {"journey", "clinic", "connectors"}:
             continue  # Durable handoff receipts are not text-rescorable.
         follow = next((a for a in episode["artifacts"] if a["role"] == "follow_up"), None)
         previous = {key: episode["checks"][key] for key in ("required_concepts", "no_known_false_claim")}
@@ -40,7 +40,7 @@ def rescore(path):
     # Completion and application evidence are immutable inputs to rescoring.
     # A scorer cannot repair missing agents, an incomplete run or failed contracts.
     complete = len(report["episodes"]) == report.get("expected_episode_count", -1)
-    report["status"] = "passed" if complete and all(e["passed"] for e in report["episodes"]) and report.get("application_checks", {}).get("exit_code", 0) == 0 else "failed"
+    report["status"] = "passed" if complete and all(e["passed"] for e in report["episodes"]) and report.get("application_checks", {}).get("exit_code", 0) == 0 and all(s["passed"] for s in report.get("capture_checks", {}).get("suites", [])) else "failed"
     for row in report["coverage"]:
         row["agent_passes"] = sum(e["case"] == row["case"] and e["passed"] for e in report["episodes"])
     report["grading"] = {"version": VERSION, "source_sha256": hashlib.sha256(Path(__file__).read_bytes()).hexdigest()}
