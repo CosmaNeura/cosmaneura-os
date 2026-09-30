@@ -43,15 +43,17 @@ export async function openConfiguredWorkspaceRuntime(options:{workspaceId:string
     }
     const bff=workspaceCaptureBff(workspaceId,sessionId,identity,abort.signal);
     controller=new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:new CaptureQueue(queue.storage),source,
+      ...(CAPTURE_LONG_VISITS_BUILD?{standardContinuousCapture:true as const}:{}),
       queueTransport:new BffCaptureQueueTransport(bff,options.upload)});
     let reviewOnly=false;
     if(!await controller.restore()){
       if(!["created","capturing"].includes(view.status))reviewOnly=true;
       else{
         if(view.status==="capturing")throw new BffResponseError(409,"capture_saved_session_changed",null);
-        await controller.prepareConfigured(sessionId,CAPTURE_LONG_VISITS_BUILD?{
-          schema_version:"1.0",profile_id:"visit-60m-v1",channels:["microphone"],
-        }:undefined);
+        // Configured Scribe provides capacity through its standard capabilities
+        // and lease protocol. Fresh sessions must not require the optional
+        // profile endpoint; restore above preserves any existing profile intent.
+        await controller.prepareConfigured(sessionId);
       }
     }
     const current=controller;
