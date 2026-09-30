@@ -1,14 +1,17 @@
 """The reusable lab must prove real persistence and failure outcomes, not prose."""
 
+import asyncio
 import json
+import time
 
 import pytest
 from lab.application import Application
 from lab.cases import CLINIC
 from lab.clinic import ClinicWorld, run_clinic
+from lab.connector_checks import run_connectors
 from lab.fax_sandbox import FAX_SCENARIOS, RECOVERY_SCENARIOS, exercise_fax, synthetic_pdf
-from lab.mail_sandbox import MailSandbox, exercise_mail
-from lab.store import Store
+from lab.mail_sandbox import RESPONSE_FAULTS, MailSandbox, exercise_mail
+from lab.store import LabError, Store
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
@@ -38,6 +41,61 @@ def test_google_calendar_failure_and_recovery(clinic, fault):
     result = exercise_mail(clinic[0], "google", fault, kind="calendar")
     assert result["passed"], result
     assert result["requests"]
+
+
+@pytest.mark.parametrize("provider", ["microsoft", "google"])
+@pytest.mark.parametrize("kind", ["mail", "calendar"])
+@pytest.mark.parametrize("fault", ["long_retry_after_429", "non_json_429", "overloaded_503"])
+def test_provider_backpressure_returns_promptly_without_retry_or_account_leak(
+    clinic, monkeypatch, provider, kind, fault,
+):
+    sleeps = []
+
+    def sleeping(delay, *args, **kwargs):
+        sleeps.append(delay)
+        raise AssertionError("A provider fault must not sleep inside the adapter")
+
+    async def async_sleeping(delay, *args, **kwargs):
+        sleeping(delay)
+
+    monkeypatch.setattr(time, "sleep", sleeping)
+    monkeypatch.setattr(asyncio, "sleep", async_sleeping)
+    result = exercise_mail(clinic[0], provider, fault, kind=kind)
+    assert sleeps == []
+    assert result["passed"], result
+    assert result["checks"]["prompt_failure_return"]
+    assert result["checks"]["different_account_cannot_retry"]
+    assert result["checks"]["revoked_during_recovery_not_disclosed"]
+    assert result["checks"]["revoked_account_cannot_retry"]
+    measurements = result["measurements"]
+    assert measurements["read_ms"] <= measurements["prompt_failure_budget_ms"] == 1000
+    assert measurements["read_provider_calls"] == 1
+    assert measurements["other_account_provider_calls"] == 0
+    assert measurements["recovery_provider_calls"] == (2 if (provider, kind) == ("google", "mail") else 1)
+    assert measurements["revoked_recovery_provider_calls"] == 1
+    assert measurements["revoked_account_provider_calls"] == 0
+    assert "synthetic_provider_fault_body" not in json.dumps(result)
+
+
+def test_unknown_mail_fault_cannot_silently_run_as_success():
+    with pytest.raises(LabError, match="unsupported_synthetic_mail_fault"):
+        exercise_mail(None, "google", "misspelled_fault")
+
+
+def test_connector_matrix_reports_all_bounded_faults_and_preserves_one_fax_submit(clinic):
+    app, store = clinic
+    result = run_connectors(app, store, "fault-matrix")
+    assert result["passed"], result["failures"]
+    bounded = [row for row in result["connector_scenarios"]
+               if row["scenario"].removeprefix("calendar_") in RESPONSE_FAULTS]
+    assert len(bounded) == 12
+    assert {(row["provider"], row["kind"]) for row in bounded} == {
+        (provider, kind) for provider in ("google", "microsoft") for kind in ("mail", "calendar")}
+    assert all(row["measurements"]["read_provider_calls"] == 1 for row in bounded)
+    assert all(row["checks"]["prompt_failure_return"] for row in bounded)
+    for row in result["connector_scenarios"]:
+        if row["provider"] in FAX_SCENARIOS:
+            assert sum(call["action"] == "submit" for call in row["requests"]) == 1
 
 
 def test_calendar_rejects_unrecognized_timezone_without_disclosure(clinic):
