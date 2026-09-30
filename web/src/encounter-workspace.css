@@ -273,3 +273,15 @@
 .session-prep-sources li:focus { outline:2px solid #426b50; outline-offset:4px; }
 @media (max-width:880px) { .team-material-content { max-height:none; } }
 @media (max-width:600px) { .team-task-context { padding:12px; } .team-task-actions { position:static; } .team-content { min-height:0; } }
+
+/* Keep the three starting tasks visible together, including their phone descriptions. */
+.team-workspace .team-welcome-actions-research:not(.team-welcome-actions-compact) { grid-template-columns: repeat(3,minmax(0,1fr)); max-width: 920px; gap: 14px; }
+.team-workspace .team-welcome-actions-research:not(.team-welcome-actions-compact) .team-start-card { aspect-ratio: auto; min-height: 188px; padding: 20px; }
+@media (max-width: 800px) {
+  .team-workspace .team-welcome-actions-research:not(.team-welcome-actions-compact) { grid-template-columns: 1fr; gap: 10px; }
+  .team-workspace .team-welcome-actions-research:not(.team-welcome-actions-compact) .team-start-card { display: grid; grid-template-columns: 28px 1fr; align-content: center; min-height: 92px; padding: 14px; gap: 4px 12px; }
+  .team-welcome-actions-research:not(.team-welcome-actions-compact) .team-start-card strong { grid-column: 2; }
+  .team-welcome-actions-research:not(.team-welcome-actions-compact) .team-start-icon { grid-column: 1; grid-row: 1 / 3; }
+  .team-welcome-actions-research:not(.team-welcome-actions-compact) .team-start-card > span:not(.team-start-icon):not(.team-start-arrow) { display: block; grid-column: 2; }
+  .team-welcome-actions-research:not(.team-welcome-actions-compact) .team-start-arrow { display: none; }
+}

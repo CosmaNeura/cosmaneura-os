@@ -12,7 +12,7 @@ export function ExistingScribeSourcePanel({workspace,identity,locked,onSaved,onB
 }){
   const [preview,setPreview]=useState<{owner:AuthenticatedWorkspaceIdentity;workspaceId:string;value:ExistingScribeSource}|null>(null);
   const [pendingState,setPendingState]=useState<{owner:AuthenticatedWorkspaceIdentity;workspaceId:string;request:ScribeSourceRequest}|null>(null);
-  const [busy,setBusy]=useState(false),[reviewed,setReviewed]=useState(false);
+  const [busy,setBusy]=useState(false),[reviewed,setReviewed]=useState(false),[checking,setChecking]=useState(false);
   const [message,setMessage]=useState(''),[saved,setSaved]=useState(false);
   const generation=useRef(0),active=useRef<AbortController|null>(null),live=useRef({identity,workspaceId:workspace.id});
   live.current={identity,workspaceId:workspace.id};
@@ -51,7 +51,7 @@ export function ExistingScribeSourcePanel({workspace,identity,locked,onSaved,onB
     if(locked||busy||recovery.blocked||!pending&&(!reviewed||!value?.selection))return;
     const request=pending??{idempotency_key:crypto.randomUUID(),expected_revision:workspace.revision,selection:value!.selection!,reviewed:true,share_with_team:true};
     const retry=!!pending,controller=new AbortController(),version=++generation.current;active.current?.abort();active.current=controller;
-    setBusy(true);setMessage('');setPending(request);
+    setBusy(true);setChecking(retry);setMessage('');setPending(request);
     try{
       // Only immutable request metadata is journaled. The private transcript
       // stays in this authorized preview and the server's saved source packet.
@@ -99,8 +99,8 @@ export function ExistingScribeSourcePanel({workspace,identity,locked,onSaved,onB
         <div className="capture-actions"><button className="team-primary" disabled={disabled||!reviewed} onClick={()=>void submit()}>Use this version with my team</button></div>
       </>}
     </>}
-    {pending&&<div className="team-recovery"><p>Keep this request for checking. Checking it uses the same version and request.</p>
-      <button disabled={disabled} onClick={()=>void submit()}>{busy?'Checking saved result…':'Check saved result'}</button></div>}
+    {pending&&<div className="team-recovery">{!busy&&<p>Keep this request for checking. Checking it uses the same version and request.</p>}
+      <button disabled={disabled} onClick={()=>void submit()}>{busy?checking?'Checking saved result…':'Saving reviewed version…':'Check saved result'}</button></div>}
     {message&&<p role="status">{message}</p>}
   </section>;
 }

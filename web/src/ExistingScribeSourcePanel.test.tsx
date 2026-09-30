@@ -85,3 +85,13 @@ it('explains an already-shared transcript without inventing a second save',async
   expect(host.textContent).toContain('already shared with your team');expect(saveScribeSourcePacket).toHaveBeenCalledOnce();expect(onSaved).not.toHaveBeenCalled();
   expect(await access.journal.load(`editor:${wid}:scribe-source`)).toBeNull();
 });
+
+it('distinguishes the first save from checking an uncertain saved result',async()=>{
+  let finish!:(receipt:ScribeSourcePacket)=>void;
+  vi.mocked(saveScribeSourcePacket).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+  await mount();await click('Use a Scribe recording');await act(async()=>host.querySelector<HTMLInputElement>('input')!.click());
+  await click('Use this version with my team');
+  expect(host.textContent).toContain('Saving reviewed version…');expect(host.textContent).not.toContain('Keep this request for checking');
+  await act(async()=>finish({workspace:{...workspace,revision:2}} as ScribeSourcePacket));
+  expect(onSaved).toHaveBeenCalledOnce();
+});
