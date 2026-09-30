@@ -14,6 +14,11 @@ def render(root, report):
     cards = []
     for episode in episodes:
         failures = ", ".join(k.replace("_", " ") for k, ok in episode["checks"].items() if not ok)
+        receipts = episode.get("handoff_receipts", [])
+        handoffs = ("<p><strong>Assigned drafts</strong> · human review outstanding</p><ul>"
+            + "".join("<li>" + html.escape(r["recipient_name"]) + " · "
+                + ("Draft saved" if r["status"] == "completed" else html.escape(r["status"]))
+                + "</li>" for r in receipts) + "</ul>") if receipts else ""
         artifacts = "".join(
             f'<details><summary>{html.escape(a["role"].replace("_", " ").title())} · saved draft</summary>'
             f'<p class="draft">{html.escape(a["body"])}</p><p class="meta">Artifact {a["sha256"][:16]} · '
@@ -22,6 +27,7 @@ def render(root, report):
 <div class="episode-head"><div><p class="eyebrow">{html.escape(episode['id'])}</p><h2>{html.escape(episode['title'])}</h2></div>
 <span class="badge {'pass' if episode['passed'] else 'fail'}">{'Passed' if episode['passed'] else 'Needs work'}</span></div>
 <p>{episode['duration_ms'] / 1000:.1f}s · {episode['tool_calls']} tool calls · application: {html.escape(episode['application']['status'])}</p>
+{handoffs}
 {('<p class="error">'+html.escape(failures)+'</p>') if failures else ''}
 <details><summary>What was checked</summary><ul>{''.join('<li>'+('✓ ' if ok else '✕ ')+html.escape(k.replace('_',' '))+'</li>' for k,ok in episode['checks'].items())}</ul></details>
 {artifacts}</article>''')

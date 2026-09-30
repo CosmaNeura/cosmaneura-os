@@ -14,10 +14,22 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from lab.application import OwnedPostgres
-from lab.cases import CASES, WORKFLOW_TESTS
+from lab.cases import CASES, WORKFLOW_TESTS, Case
 from lab.store import Store
 
 REPO = Path(__file__).resolve().parents[1]
+
+
+def case_catalog():
+    from lab.journey import INPUTS
+
+    return {**CASES, "journey": Case("journey", "Chief prepares and verifies encounter handoffs",
+        "Decompose intake, Session Prep and Scribe outputs into accountable private draft handoffs.",
+        "Synthetic connected encounter", (), inputs=INPUTS)}
+
+
+def case_checks(key):
+    return ["tests/integration/test_workspace_handoffs.py"] if key == "journey" else WORKFLOW_TESTS[key]
 
 
 def run_owned_child(command, *, env, log, timeout):
@@ -88,53 +100,61 @@ def worker(args):
                          "Typed-note documentation only; full recording acceptance remains deferred.",
                          "Vendor endpoints are synthetic. No real deliveries, bookings, payments or live account reads.",
                          "Outcome text checks are regression heuristics, not clinical quality certification."]}
-    selected = list(CASES) if args.cases == "all" else args.cases.split(",")
+    report["limits"].append("Journey uses three invented intake, Session Prep and Scribe output fixtures. "
+        "Chief creates actual private draft assignments; saved drafts still require human review. "
+        "This does not generate those inputs through live intake or recording services.")
+    selected = list(case_catalog()) if args.cases == "all" else args.cases.split(",")
     report["expected_episode_count"] = len(selected) * args.repeat
     report["grading"] = {"version": VERSION}
     write_report(root, report)
     try:
         for repeat in range(args.repeat):
             for key in selected:
-                case = CASES[key]
+                case = case_catalog()[key]
                 episode = f"{key}-{repeat + 1}"
                 started = time.monotonic()
                 app = Application(engine, case, lambda role, kind, episode=episode, **v: store.event(episode, role, kind, **v))
-                world = World(store, episode, case, app, model, concurrency=args.concurrency, fault=args.fault)
-                world.run_agent("chief")
-                artifacts = []
-                for role in ("chief", "visit_prep", "scribe", "research", "follow_up"):
-                    try:
-                        artifacts.append(store.read(episode, role, role))
-                    except Exception:
-                        pass
-                final = next((a for a in artifacts if a["role"] == "follow_up"), None)
-                text = final["body"].lower() if final else ""
-                checks = {
-                    "five_attributed_artifacts": len(artifacts) == 5,
-                    "no_agent_failures": not world.failures,
-                    "follow_up_consumed_three_exact_artifacts": bool(final and len(final["dependencies"]) == 3),
-                    **grade(case, text),
-                }
-                application_result = {"status": "drafts_only", "external_effects": 0}
-                if case.deliver and all(checks.values()):
-                    try:
-                        application_result = app.exercise_follow_up(next(a for a in artifacts if a["role"] == "scribe"), final)
-                        checks["real_f8_loop"] = application_result["status"] == "closed"
-                    except Exception as error:
-                        checks["real_f8_loop"] = False
-                        application_result = {"status": "failed", "error": type(error).__name__}
-                        store.event(episode, "simulated_provider", "application_failure", error=type(error).__name__)
-                result = {"id": episode, "case": key, "title": case.title,
-                          "passed": all(checks.values()), "checks": checks,
-                          "duration_ms": round((time.monotonic() - started) * 1000),
-                          "tool_calls": world.tool_count, "failures": world.failures,
-                          "artifacts": artifacts, "application": application_result}
+                if key == "journey":
+                    from lab.journey import run_journey
+
+                    result = run_journey(app, store, episode, model, args.fault)
+                else:
+                    world = World(store, episode, case, app, model, concurrency=args.concurrency, fault=args.fault)
+                    world.run_agent("chief")
+                    artifacts = []
+                    for role in ("chief", "visit_prep", "scribe", "research", "follow_up"):
+                        try:
+                            artifacts.append(store.read(episode, role, role))
+                        except Exception:
+                            pass
+                    final = next((a for a in artifacts if a["role"] == "follow_up"), None)
+                    text = final["body"].lower() if final else ""
+                    checks = {
+                        "five_attributed_artifacts": len(artifacts) == 5,
+                        "no_agent_failures": not world.failures,
+                        "follow_up_consumed_three_exact_artifacts": bool(final and len(final["dependencies"]) == 3),
+                        **grade(case, text),
+                    }
+                    application_result = {"status": "drafts_only", "external_effects": 0}
+                    if case.deliver and all(checks.values()):
+                        try:
+                            application_result = app.exercise_follow_up(next(a for a in artifacts if a["role"] == "scribe"), final)
+                            checks["real_f8_loop"] = application_result["status"] == "closed"
+                        except Exception as error:
+                            checks["real_f8_loop"] = False
+                            application_result = {"status": "failed", "error": type(error).__name__}
+                            store.event(episode, "simulated_provider", "application_failure", error=type(error).__name__)
+                    result = {"id": episode, "case": key, "title": case.title,
+                              "passed": all(checks.values()), "checks": checks,
+                              "duration_ms": round((time.monotonic() - started) * 1000),
+                              "tool_calls": world.tool_count, "failures": world.failures,
+                              "artifacts": artifacts, "application": application_result}
                 report["episodes"].append(result)
                 report["usage"] = {"model_calls": budget.calls, "tokens": budget.tokens}
                 report["coverage"] = [{"case": k, "title": c.title,
                     "agent_episodes": sum(e["case"] == k for e in report["episodes"]),
                     "agent_passes": sum(e["case"] == k and e["passed"] for e in report["episodes"]),
-                    "application_contracts": "not_run", "selectors": WORKFLOW_TESTS[k]} for k, c in CASES.items()]
+                    "application_contracts": "not_run", "selectors": case_checks(k)} for k, c in case_catalog().items()]
                 write_report(root, report)
                 print(f"{episode}: {'PASS' if result['passed'] else 'FAIL'}; {result['tool_calls']} tools; {result['duration_ms']} ms", flush=True)
     finally:
@@ -148,8 +168,8 @@ def worker(args):
 
 
 def contracts(args):
-    selected = list(CASES) if args.cases == "all" else args.cases.split(",")
-    paths = list(dict.fromkeys(path for key in selected for path in WORKFLOW_TESTS[key]))
+    selected = list(case_catalog()) if args.cases == "all" else args.cases.split(",")
+    paths = list(dict.fromkeys(path for key in selected for path in case_checks(key)))
     evidence = args.output / "application-checks"
     command = [sys.executable, str(REPO / "scripts/check-backend-local.py"), "--profile", "workspace",
                "--postgres-bin", str(args.postgres_bin), "--evidence-dir", str(evidence), *paths]
@@ -171,7 +191,7 @@ def contracts(args):
 def main():
     parser = argparse.ArgumentParser(description="Local synthetic CosmaBot agent lab. Real model tools, saved handoffs, and application checks.")
     parser.add_argument("--mode", choices=("azure", "replay"), default="replay")
-    parser.add_argument("--cases", default="all", help="all, or comma-separated case keys: " + ",".join(CASES))
+    parser.add_argument("--cases", default="all", help="all, or comma-separated case keys: " + ",".join(case_catalog()))
     parser.add_argument("--repeat", type=int, choices=range(1, 6), default=1)
     parser.add_argument("--concurrency", type=int, choices=(1, 2, 3), default=3)
     parser.add_argument("--fault", choices=("none", "read_timeout", "lost_save_reply"), default="none")
@@ -185,7 +205,7 @@ def main():
     parser.add_argument("--port", type=int, default=5190)
     parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     args = parser.parse_args()
-    if any(k not in CASES for k in args.cases.split(",")) and args.cases != "all":
+    if any(k not in case_catalog() for k in args.cases.split(",")) and args.cases != "all":
         parser.error("Unknown case")
     if not 1 <= args.max_calls <= 500 or not 1 <= args.max_tokens <= 500000 or not 1 <= args.max_seconds <= 3600:
         parser.error("Budget out of bounds: calls<=500, tokens<=500000, seconds<=3600")
