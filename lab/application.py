@@ -213,7 +213,7 @@ class Application:
                 if actor is None or actor.principal_type != "human":
                     raise LabError("nonhuman_approval")
             self.workflow = {"status": final["workspace"]["follow_ups"][0]["state"], **counts,
-                             "ticket_id": item["ticket_id"], "external_effects": 0,
+                             "ticket_id": item["ticket_id"], "note_id": note["id"], "external_effects": 0,
                              "approval_actor": "simulated_human", "session_restart_recovered": True,
                              "duplicate_requests_reused_operation": True, "agent_approval_denied": True}
             human_event("workflow_verified", **self.workflow)

@@ -1,0 +1,52 @@
+"""Repeatable connector fault matrix reported alongside the agent episodes."""
+
+import time
+import traceback
+
+from lab.application import Application
+from lab.fax_sandbox import exercise_fax
+from lab.mail_sandbox import exercise_mail
+
+
+def failure_location(error):
+    frame = traceback.extract_tb(error.__traceback__)[-1]
+    return {"file": frame.filename, "line": frame.lineno, "function": frame.name}
+
+
+def run_connectors(app, store, episode):
+    started = time.monotonic()
+    outcomes = []
+    for provider in ("microsoft", "google"):
+        scenarios = ["normal", "read_timeout", "throttled", "token_expiry", "oversized", "revoked_during_read"]
+        if provider == "microsoft":
+            scenarios.append("invalid_timezone")
+        for scenario in scenarios:
+            tick = time.monotonic()
+            try:
+                isolated = Application(app.engine, app.case, app.event)
+                result = exercise_mail(isolated, provider, scenario)
+            except Exception as error:
+                result = {"provider": provider, "scenario": scenario, "passed": False,
+                          "checks": {"scenario_completed": False}, "error": type(error).__name__, "location": failure_location(error)}
+            result["duration_ms"] = round((time.monotonic() - tick) * 1000)
+            outcomes.append(result)
+            store.event(episode, "synthetic_provider", "connector_scenario", provider=provider,
+                        scenario=scenario, ok=result["passed"], duration_ms=result["duration_ms"])
+    for scenario in ("delivered", "failed", "partial", "lost_reply", "wrong_account"):
+        tick = time.monotonic()
+        try:
+            isolated = Application(app.engine, app.case, app.event)
+            result = exercise_fax(isolated, store.root / episode / scenario, scenario)
+        except Exception as error:
+            result = {"provider": "documo", "scenario": scenario, "passed": False,
+                      "checks": {"scenario_completed": False}, "error": type(error).__name__, "location": failure_location(error)}
+        result["duration_ms"] = round((time.monotonic() - tick) * 1000)
+        outcomes.append(result)
+        store.event(episode, "synthetic_provider", "connector_scenario", provider="documo",
+                    scenario=scenario, ok=result["passed"], duration_ms=result["duration_ms"])
+    checks = {r["provider"] + "_" + r["scenario"]: r["passed"] for r in outcomes}
+    return {"id": episode, "case": "connectors", "title": "Email, calendar and fax fault laboratory",
+            "passed": all(checks.values()), "checks": checks, "artifacts": [], "tool_calls": 0,
+            "duration_ms": round((time.monotonic() - started) * 1000), "connector_scenarios": outcomes,
+            "application": {"status": "connector_fault_matrix", "external_effects": 0},
+            "failures": [r for r in outcomes if not r["passed"]]}

@@ -135,7 +135,35 @@ class AzureModel:
                                   "output_tokens": usage.get("completion_tokens"), "total_tokens": used}
 
 
+def draft_reply(model, messages, tools, check_authority, event):
+    """Retry at most one text-generation request before executing any returned tool.
+
+An unknown request retains AzureModel's token reservation. No application or
+vendor operation is repeated here, and the next request rechecks authority.
+"""
+    for attempt in range(2):
+        check_authority()
+        try:
+            response, usage = model.reply(messages, tools)
+            return response, usage, attempt
+        except (httpx.TimeoutException, httpx.ConnectError, LabError) as error:
+            code = ("model_timeout" if isinstance(error, httpx.TimeoutException) else
+                    "model_connection_failed" if isinstance(error, httpx.ConnectError) else str(error))
+            retryable = code in {"model_timeout", "model_connection_failed", "model_http_500", "model_http_502", "model_http_503", "model_http_504"}
+            if attempt or not retryable:
+                raise LabError(code) from None
+            event("model_retry", error=code, delay_ms=250, previous_generation_outcome="unconfirmed")
+            time.sleep(0.25)
+    raise LabError("model_retry_exhausted")
+
+
 class World:
+    schemas = SCHEMAS
+    tool_scope = "No clinical decisions, approval, sending or account tools are available. "
+    extra_instructions = ""
+
+    def tool_visible(self, role, name):
+        return role == "chief" or name != "delegate_team"
     def __init__(self, store: Store, episode: str, case: Case, application, model=None, *, concurrency=3, fault="none"):
         self.store, self.episode, self.case = store, episode, case
         self.app, self.model = application, model
@@ -159,9 +187,9 @@ class World:
                 raise LabError("tool_budget_exhausted")
         try:
             self.app.check_agent(role)
-            if name not in SCHEMAS:
+            if name not in self.schemas:
                 raise LabError("unknown_tool")
-            parsed = SCHEMAS[name][0].model_validate(arguments)
+            parsed = self.schemas[name][0].model_validate(arguments)
             if name == "delegate_team" and role != "chief":
                 raise LabError("chief_only")
             if self.fault == "read_timeout" and role == "research" and name == "read_source" and name not in self.faults_seen:
@@ -262,12 +290,12 @@ class World:
             "General workflow rules are not facts about this case and cannot establish missing consent. "
             "Every agent, including Chief and Follow-up, must call read_source on the original source before writing; "
             "a teammate artifact is not a substitute for that read. Do not invent facts, source IDs, hashes, consent, receipts, completed care or tool results. "
-            "Every output is an unreviewed draft. No clinical decisions, approval, sending or account tools are available. "
+            "Every output is an unreviewed draft. " + self.tool_scope +
             "You must save_artifact before finishing. Cite the source IDs actually read. Read dependencies before citing their hashes. "
             "Tool errors are real; retry a failed read once, and recover a lost save reply using list/read or an identical retry. "
             "Keep body under 180 words, preserve uncertainty, and be concrete about the next action. "
             "Put source IDs and hashes in source_ids and dependencies, not in the human-readable body. "
-            "Share outputs with chief and follow_up."
+            "Share outputs with chief and follow_up." + self.extra_instructions
         )
         job = JOBS.get(role, "First read_source using the supplied source metadata. Then delegate_team to visit_prep, scribe and research in ONE call. "
                       "When their artifacts are saved, delegate_team to follow_up. Then read the saved follow_up result, "
@@ -276,14 +304,15 @@ class World:
                     json.dumps({"role": role, "job": job, "case": self.case.title, "task": self.case.task,
                                 "permitted_source_metadata": self.app.sources(metadata_only=True)})}]
         tools = [{"type": "function", "function": {"name": name, "description": description,
-                  "parameters": schema.model_json_schema()}} for name, (schema, description) in SCHEMAS.items()
-                 if role == "chief" or name != "delegate_team"]
+                  "parameters": schema.model_json_schema()}} for name, (schema, description) in self.schemas.items()
+                 if self.tool_visible(role, name)]
         acknowledged_artifact = False
         for turn in range(12):
             self.app.check_agent(role)
             start = time.monotonic()
-            message, usage = self.model.reply(messages, tools)
-            self.event(role, "model", turn=turn + 1, duration_ms=round((time.monotonic() - start) * 1000), **usage)
+            message, usage, retries = draft_reply(self.model, messages, tools, lambda: self.app.check_agent(role),
+                lambda kind, **values: self.event(role, kind, **values))
+            self.event(role, "model", turn=turn + 1, retries=retries, duration_ms=round((time.monotonic() - start) * 1000), **usage)
             calls = message.get("tool_calls") or []
             messages.append({k: v for k, v in message.items() if k in {"role", "content", "tool_calls"}})
             if not calls:

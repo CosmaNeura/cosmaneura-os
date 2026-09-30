@@ -16,7 +16,15 @@ PostgreSQL 16 tools. On the current development Mac the working Python is
 # Fast deterministic baseline; no model calls.
 python -m lab.runner --mode replay --cases all --fault lost_save_reply --serve
 
-# Real agents, nine specialist cases plus the connected Chief journey.
+# Joined encounter, connector failure matrix, and actual recorder qualification.
+python -m lab.runner --mode replay --cases clinic,connectors \
+  --fault read_timeout --checks --capture-checks --serve
+
+# Real agents use synthetic account tools and pass generated outputs to Chief.
+python -m lab.runner --mode azure --cases clinic --repeat 3 \
+  --fault lost_save_reply --max-tokens 500000 --serve
+
+# All specialist cases, the Chief journey and the expanded clinic.
 python -m lab.runner --mode azure --cases all --concurrency 3 \
   --fault lost_save_reply --max-tokens 500000 --checks --serve
 ```
@@ -32,7 +40,8 @@ Azure mode uses the existing Azure CLI login with the fixed CosmaBot endpoint
 `https://cosmascode.services.ai.azure.com/openai/v1/chat/completions` and deployment
 `gpt-4.1`. It sends only generated case data. Credentials stay in memory and are
 never included in artifacts. There is no arbitrary endpoint, shell, browser,
-email or vendor tool in the agent tool set. Defaults and CLI limits bound calls,
+send, approval or booking tool in the agent tool set. The clinic adds two bounded
+synthetic account-read tools for Visit Prep only. Defaults and CLI limits bound calls,
 tokens, elapsed time, agent turns, tool count and concurrent workers.
 
 The tool-enabled runner is an experiment alongside the product. The deployed
@@ -100,9 +109,12 @@ calls. Missing inline input must be recovered using the read tool.
 
 Each model response records elapsed time. The report separates Chief planning,
 recipient work and Chief verification, plus each recipient's persisted queue
-wait and execution time. Confirmed HTTP 500/502/503/504 responses get at most one
-250 ms retry; both requests consume the shared budget and authority is checked
-again before retrying. Other failures remain visible and are not retried here.
+wait and execution time. Draft-generation timeouts, connection failures and
+HTTP 500/502/503/504 responses get at most one 250 ms retry; both requests consume
+the shared budget, unknown calls retain their token reservation, and authority
+is checked again before retrying. No returned tool executes before a response is
+received. This does not retry any application or vendor delivery operation.
+Other failures remain visible and are not retried here.
 
 The lab supplies the model transport using Azure CLI authentication; a scoped
 synthetic marker satisfies the application's key-based availability gate and is
@@ -144,6 +156,60 @@ by the text-rescoring command.
 Full Scribe recording remains deferred. Live Microsoft/Gmail, fax, payment,
 Scheduling, portal, Core and Scribe endpoints are not used by this lab. Unsupported
 operations remain coverage gaps; they are not replaced with optimistic receipts.
+
+## Expanded virtual clinic
+
+`--cases clinic` keeps one application encounter throughout. Invented intake and
+typed clinician notes seed it. Real agents in Azure mode read those inputs,
+prepare individual drafts, share their exact saved outputs and combine a
+follow-up draft. Visit Prep must also execute actual Microsoft mail/calendar
+adapter reads against an offline provider twin. Only that role sees those tools;
+calls by another role or for another account are rejected.
+
+A scripted human-test actor imports the generated Visit Prep and Scribe outputs
+as explicitly derived evidence. Chief then uses the real durable handoff service
+to create three assignments, collect attributed recipient replies and verify
+the saved results. The original inputs are retained. This is a joined workflow,
+not a claim that Core Session Prep or speech recognition generated those outputs.
+
+After successful handoffs, a separate scripted human actor records resolution
+of the invented contact-consent/preference gap and edits the message to a minimal
+administrative confirmation request. It then reviews the exact note and exercises
+the existing F-8 follow-up loop. Arbitrary model prose is never treated as an
+approved message. Finally, the actual vendor-work service binds a valid generated
+PDF to the reviewed note, obtains the synthetic human's exact approval, dispatches
+through the real Documo adapter, reads delivery status and records separate human
+verification. A fresh database session reopens the same encounter. The PDF is a
+fixed synthetic administrative test document, not a model-generated clinical packet.
+
+`--cases connectors` runs 18 independent scenarios through the real adapters and
+owned PostgreSQL. Microsoft and Gmail each cover connection/read, timeout and
+explicit recovery, throttling, token refresh, oversized responses and account
+revocation during a read. Microsoft also rejects an invalid calendar timezone.
+Documo covers complete delivery, failure, partial pages, lost submission response
+and wrong-account status. Its five scenarios use real artifact custody, immutable
+F-8 approval/dispatch and duplicate-request recovery. Unknown delivery remains
+unresolved; it cannot cause an automatic resend or a successful closure.
+
+All provider HTTP is handled by strictly allowlisted `httpx.MockTransport`
+responders, so no provider network request is possible. These are not vendor-hosted
+sandboxes. Google Calendar, calendar writes, incoming-fax ingestion, live OAuth UI,
+physical audio and speech-to-text remain explicit gaps. There is no live-account
+mode in this runner.
+
+`--capture-checks` adds the existing generated-PCM, encrypted queue, continuous
+capture, interrupted upload/restoration, desktop recorder and selected Swift
+audio mixing/alignment tests. It saves commands' logs, test counts and source
+hashes under `capture-checks/`, and displays their separate qualification tier
+in the dashboard. It needs the pinned `clients/capture` dependencies, Node and
+Xcode. Desktop tests temporarily reuse the capture dependency directory when
+needed; that link is removed afterward. Swift outputs stay outside the checkout.
+These checks do not use a microphone, require an attached phone, or prove native
+OS permissions, meeting-app routing, speech accuracy, or real-time endurance.
+
+Every report distinguishes scripted replay, real model work, synthetic human
+decisions, adapter requests and recorder qualification. Fault results, including
+failed attempts, are retained rather than reclassified by text rescoring.
 
 ## Diagnose and improve
 

@@ -14,7 +14,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from lab.application import OwnedPostgres
-from lab.cases import CASES, WORKFLOW_TESTS, Case
+from lab.cases import CASES, CLINIC, WORKFLOW_TESTS, Case
 from lab.store import Store
 
 REPO = Path(__file__).resolve().parents[1]
@@ -23,18 +23,25 @@ REPO = Path(__file__).resolve().parents[1]
 def case_catalog():
     from lab.journey import INPUTS
 
-    return {**CASES, "journey": Case("journey", "Chief prepares and verifies encounter handoffs",
+    return {**CASES, "clinic": CLINIC, "connectors": Case("connectors", "Email, calendar and fax fault laboratory",
+        "Exercise actual adapters and durable OAuth against synthetic providers.", "SYNTHETIC connector clinic", ()),
+        "journey": Case("journey", "Chief prepares and verifies encounter handoffs",
         "Decompose intake, Session Prep and Scribe outputs into accountable private draft handoffs.",
         "Synthetic connected encounter", (), inputs=INPUTS)}
 
 
 def case_checks(key):
+    if key == "clinic":
+        return ["tests/integration/test_workspace_handoffs.py", "tests/integration/test_follow_up.py",
+                "tests/integration/test_vendor_work.py", "tests/integration/test_vendor_artifact_ledger.py"]
+    if key == "connectors":
+        return ["tests/unit/test_personal_connection_failure.py", "tests/unit/test_documo_delivery_status.py"]
     return ["tests/integration/test_workspace_handoffs.py"] if key == "journey" else WORKFLOW_TESTS[key]
 
 
-def run_owned_child(command, *, env, log, timeout):
+def run_owned_child(command, *, env, log, timeout, cwd=REPO):
     """Stop only our worker process group before closing its database on cancel."""
-    child = subprocess.Popen(command, cwd=REPO, env=env, stdout=log,
+    child = subprocess.Popen(command, cwd=cwd, env=env, stdout=log,
                              stderr=subprocess.STDOUT, start_new_session=True)
     try:
         return child.wait(timeout=timeout)
@@ -115,7 +122,15 @@ def worker(args):
                 episode = f"{key}-{repeat + 1}"
                 started = time.monotonic()
                 app = Application(engine, case, lambda role, kind, episode=episode, **v: store.event(episode, role, kind, **v))
-                if key == "journey":
+                if key == "clinic":
+                    from lab.clinic import run_clinic
+
+                    result = run_clinic(app, store, episode, model, args.fault, args.concurrency)
+                elif key == "connectors":
+                    from lab.connector_checks import run_connectors
+
+                    result = run_connectors(app, store, episode)
+                elif key == "journey":
                     from lab.journey import run_journey
 
                     result = run_journey(app, store, episode, model, args.fault,
@@ -200,6 +215,7 @@ def main():
                         help="Deliver admitted journey inputs upfront with exact acknowledgment, or fetch by tool for comparison")
     parser.add_argument("--fault", choices=("none", "read_timeout", "lost_save_reply"), default="none")
     parser.add_argument("--checks", action="store_true", help="Also execute existing application workflow regression suites")
+    parser.add_argument("--capture-checks", action="store_true", help="Also qualify actual recorder, encrypted queue and Swift audio code with generated signals")
     parser.add_argument("--output", type=Path, help="New output directory outside repository; default is a new temporary directory")
     parser.add_argument("--postgres-bin", type=Path, default=Path("/opt/homebrew/opt/postgresql@16/bin"))
     parser.add_argument("--max-calls", type=int, default=250)
@@ -255,6 +271,10 @@ def main():
              "temporary_password_file_removed": not (args.output / "temporary-postgres-password").exists()}))
     if args.checks and (args.output / "report.json").exists():
         code = contracts(args) or code
+    if args.capture_checks and (args.output / "report.json").exists():
+        from lab.capture_checks import run_capture_checks
+
+        code = run_capture_checks(args) or code
     print((args.output / "runner.log").read_text(), end="", flush=True)
     print(f"Dashboard: {args.output / 'report.html'}", flush=True)
     if args.serve:
