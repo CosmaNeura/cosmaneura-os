@@ -16,7 +16,7 @@ from typing import Literal
 
 from pydantic import Field, SecretStr, ValidationError
 
-from lab.engine import Arguments
+from lab.engine import Arguments, draft_reply
 from lab.store import LabError, digest
 
 OWNERS = ("visit_prep", "scribe", "follow_up")
@@ -215,16 +215,8 @@ class Journey:
             self.app.check_agent(role)
             if self.model:
                 model_started = time.monotonic()
-                for attempt in range(2):
-                    self.app.check_agent(role)
-                    try:
-                        response, usage = self.model.reply(messages, tools)
-                        break
-                    except LabError as error:
-                        if attempt or str(error) not in {"model_http_500", "model_http_502", "model_http_503", "model_http_504"}:
-                            raise
-                        self.event(role, "model_retry", error=str(error), delay_ms=250)
-                        time.sleep(0.25)
+                response, usage, attempt = draft_reply(self.model, messages, tools,
+                    lambda: self.app.check_agent(role), lambda kind, **values: self.event(role, kind, **values))
                 self.event(role, "model", phase=self.phase, http_retries=attempt,
                            duration_ms=round((time.monotonic() - model_started) * 1000), **usage)
                 calls = response.get("tool_calls") or []

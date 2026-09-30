@@ -135,6 +135,28 @@ class AzureModel:
                                   "output_tokens": usage.get("completion_tokens"), "total_tokens": used}
 
 
+def draft_reply(model, messages, tools, check_authority, event):
+    """Retry at most one text-generation request before executing any returned tool.
+
+An unknown request retains AzureModel's token reservation. No application or
+vendor operation is repeated here, and the next request rechecks authority.
+"""
+    for attempt in range(2):
+        check_authority()
+        try:
+            response, usage = model.reply(messages, tools)
+            return response, usage, attempt
+        except (httpx.TimeoutException, httpx.ConnectError, LabError) as error:
+            code = ("model_timeout" if isinstance(error, httpx.TimeoutException) else
+                    "model_connection_failed" if isinstance(error, httpx.ConnectError) else str(error))
+            retryable = code in {"model_timeout", "model_connection_failed", "model_http_500", "model_http_502", "model_http_503", "model_http_504"}
+            if attempt or not retryable:
+                raise LabError(code) from None
+            event("model_retry", error=code, delay_ms=250, previous_generation_outcome="unconfirmed")
+            time.sleep(0.25)
+    raise LabError("model_retry_exhausted")
+
+
 class World:
     schemas = SCHEMAS
     tool_scope = "No clinical decisions, approval, sending or account tools are available. "
@@ -288,8 +310,9 @@ class World:
         for turn in range(12):
             self.app.check_agent(role)
             start = time.monotonic()
-            message, usage = self.model.reply(messages, tools)
-            self.event(role, "model", turn=turn + 1, duration_ms=round((time.monotonic() - start) * 1000), **usage)
+            message, usage, retries = draft_reply(self.model, messages, tools, lambda: self.app.check_agent(role),
+                lambda kind, **values: self.event(role, kind, **values))
+            self.event(role, "model", turn=turn + 1, retries=retries, duration_ms=round((time.monotonic() - start) * 1000), **usage)
             calls = message.get("tool_calls") or []
             messages.append({k: v for k, v in message.items() if k in {"role", "content", "tool_calls"}})
             if not calls:

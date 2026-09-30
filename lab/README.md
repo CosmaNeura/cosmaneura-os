@@ -109,9 +109,12 @@ calls. Missing inline input must be recovered using the read tool.
 
 Each model response records elapsed time. The report separates Chief planning,
 recipient work and Chief verification, plus each recipient's persisted queue
-wait and execution time. Confirmed HTTP 500/502/503/504 responses get at most one
-250 ms retry; both requests consume the shared budget and authority is checked
-again before retrying. Other failures remain visible and are not retried here.
+wait and execution time. Draft-generation timeouts, connection failures and
+HTTP 500/502/503/504 responses get at most one 250 ms retry; both requests consume
+the shared budget, unknown calls retain their token reservation, and authority
+is checked again before retrying. No returned tool executes before a response is
+received. This does not retry any application or vendor delivery operation.
+Other failures remain visible and are not retried here.
 
 The lab supplies the model transport using Azure CLI authentication; a scoped
 synthetic marker satisfies the application's key-based availability gate and is
