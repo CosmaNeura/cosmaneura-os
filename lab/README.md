@@ -147,6 +147,32 @@ operations remain coverage gaps; they are not replaced with optimistic receipts.
 
 ## Diagnose and improve
 
+### Clinician usability agents
+
+`clinician-personas.json` defines two invented, clinically confident but technically
+inexperienced testers: a family physician and a family nurse practitioner. These
+are explicit behavioral settings, not validated psychometric scores or claims
+about either profession. Give each tester the saved protocol and its own fresh
+browser tab. Let it act through visible controls, state expectations before
+clicking, and stop for help after two plausible wrong choices. Do not coach the
+agent using source code or count model deliberation as human dwell time.
+
+Run `pnpm exec vite --config vite.clinician-lab.config.ts` from `web` to serve the
+actual EncounterWorkspace at `http://127.0.0.1:5188/`. It supports an invented
+encounter, a prepared brief, notebook saves, saved Scribe drafts, private note
+review and Chief handoff inspection. Responses and existing drafts are scripted;
+this is UI evidence, separate from the real-model/application runs above. The
+fixture uses per-tab session storage, blocks service fetches, and does not simulate
+recording, sign-in or delivery. Closing the tab clears its fixture state. Real
+encrypted/native draft recovery and backend durability are not qualified here.
+
+The existing `:5187` connection directory is a separate fixture. Its detail pages
+are placeholders and cannot prove account setup or sign-in success. Record such
+gaps separately from product defects. Run the fixture smoke checks with
+`LAB_CLINICIAN_URL=http://127.0.0.1:5188 pnpm exec playwright test clinician.spec.ts`
+from `lab/browser`; this checks actual save/review controls and tab isolation,
+not clinician adoption or clinical correctness.
+
 Each run saves:
 
 - `report.html` / `report.json`: outcomes, coverage, timings, token usage and source provenance.
