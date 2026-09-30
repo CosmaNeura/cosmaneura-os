@@ -190,6 +190,7 @@ def test_grounding_checks_reject_observed_invented_consent_and_deadline_claims()
 def test_unknown_dob_does_not_become_a_recording_or_consent_blocker(key):
     draft = "DOB is unknown. Consent was confirmed. Recording may begin; ask for date of birth at the start if possible."
     assert all(grade(CASES[key], draft).values())
+    assert all(grade(CASES[key], draft.replace("ask for", "obtain")).values())
     for false_claim in ("DOB is required", "Consent is missing", "Cannot record without DOB"):
         assert not grade(CASES[key], draft + " " + false_claim)["no_known_false_claim"]
 
