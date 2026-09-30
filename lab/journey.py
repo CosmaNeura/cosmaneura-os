@@ -5,6 +5,7 @@ identity, source fencing, publication and retry observations are application cod
 """
 
 import json
+import re
 import time
 from contextlib import contextmanager
 from dataclasses import asdict
@@ -57,6 +58,13 @@ class Review(Arguments):
     external_action: Literal["not_performed"]
 
 
+def readable_draft(text):
+    if re.search(r"\b(?:[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}|[a-f0-9]{64})\b", text, re.I):
+        raise LabError("remove_internal_ids_from_body_use_structured_fields")
+    if re.search(r"neither action (?:has been|is) completed|none of these tasks have been initiated or completed", text, re.I):
+        raise LabError("completion_is_not_documented_do_not_claim_the_actions_definitely_never_happened")
+
+
 def validate_plan(value, sources):
     plan = Plan.model_validate(value)
     if {t.owner for t in plan.tasks} != set(OWNERS):
@@ -78,6 +86,7 @@ def validate_draft(value, task):
     draft = Draft.model_validate(value)
     if draft.task_sha256 != digest(task) or set(draft.source_ids) != set(task["source_ids"]):
         raise LabError("assignment_or_source_mismatch")
+    readable_draft(draft.body + " ".join(draft.unresolved))
     return draft
 
 
@@ -86,6 +95,7 @@ def validate_review(value, receipts):
     expected = {r["result_entry_id"] for r in receipts if r["status"] == "completed"}
     if len(expected) != 3 or set(review.result_entry_ids) != expected or len(set(review.result_entry_ids)) != 3:
         raise LabError("chief_must_verify_three_distinct_completed_draft_receipts")
+    readable_draft(review.body + " ".join(review.unresolved))
     return review
 
 

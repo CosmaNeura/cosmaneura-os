@@ -3,7 +3,15 @@ from copy import deepcopy
 from types import SimpleNamespace
 
 import pytest
-from lab.journey import OWNERS, Journey, Review, validate_draft, validate_plan, validate_review
+from lab.journey import (
+    OWNERS,
+    Journey,
+    Review,
+    readable_draft,
+    validate_draft,
+    validate_plan,
+    validate_review,
+)
 from lab.store import LabError, Store, digest
 from pydantic import ValidationError
 
@@ -82,3 +90,14 @@ def test_new_journey_loop_rejects_unread_input_and_unavailable_actions(tmp_path,
     with pytest.raises(LabError, match="not_submitted"):
         journey.request("chief", {}, Review, lambda v: pytest.fail("Unadmitted output reached validator"), lambda: {})
     assert not journey.acknowledged and not journey.artifacts
+
+
+@pytest.mark.parametrize("text", [
+    "Assignment hash: 6f45732a-94a2-416e-b93b-3356aeb29cf2.",
+    "Source hash: " + "a" * 64,
+    "Neither action has been completed.",
+])
+def test_draft_review_regressions_reject_internal_ids_and_unsupported_certainty(text):
+    with pytest.raises(LabError):
+        readable_draft(text)
+    readable_draft("Staff actions remain planned; completion is not documented. Contact preference conflicts.")
