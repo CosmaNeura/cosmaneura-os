@@ -49,6 +49,10 @@ class CoreEncounterConnection:
         from cosmas_os.adapters.core_athena import read_athena
         return read_athena(self, request, bearer)
 
+    def scribe_workspace(self, discovery, bearer):
+        from cosmas_os.adapters.core_scribe_encounters import canonical_workspace
+        return canonical_workspace(self, discovery, bearer)
+
     def read(self, request: DiscoveryRequest, bearer: SecretStr) -> DiscoveryResponse:
         self.budget.check()
         token = bearer.get_secret_value()

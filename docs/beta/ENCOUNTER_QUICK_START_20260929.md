@@ -40,3 +40,20 @@ is covered by component tests; that earlier timing is not a measurement of this
 version. These checks prove the interaction path,
 not live device or service latency. Physical-device recording through reviewed
 SOAP acceptance remains a separate verification after Scribe stabilizes.
+
+## Existing Mac or iPhone Scribe recordings — September 30
+
+Use **Find another visit**, select the original appointment, and choose **Use a
+Scribe recording**. A new notebook uses the existing Scribe workspace identity;
+an already-created notebook is never silently rebound. This lookup does not
+admit or start recording. Review the transcript and any continuity warning, then
+choose **Use this version with my team**. The complete server-read transcript,
+source versions and continuity evidence are saved atomically as attributed
+passages for Chief and the other enabled teammates.
+
+This is an explicitly saved snapshot, not ongoing synchronization with Scribe.
+Changes or consent state in the remote system do not retroactively update this
+copy. Each new save checks the current creator and source. An unconfirmed save
+keeps its exact request in encrypted device recovery; checking it recovers the
+same receipt before attempting another source read. Content is never silently
+shortened: oversized packets or incomplete model context are rejected.

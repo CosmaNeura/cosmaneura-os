@@ -40,6 +40,8 @@ from cosmas_os.api.capture_schemas import (
     CaptureNoteRequest,
     CaptureOperationRequest,
     EncounterPrepRequest,
+    ExistingCaptureRequest,
+    ScribeSourcePacketRequest,
     read_capture_request,
 )
 from cosmas_os.api.core_connection_routes import (
@@ -522,9 +524,10 @@ app.include_router(core_record_router(settings=lambda: settings, session_factory
 
 async def _execute_workspace_capture(request: Request, workspace_id: UUID, session: Session,
     identity: RequestIdentity, port: CoreCaptureAdmissionPort | None,
-    body: CaptureAdmissionRequest | CaptureOperationRequest | CaptureNoteRequest | EncounterPrepRequest,
+    body: CaptureAdmissionRequest | CaptureOperationRequest | CaptureNoteRequest | EncounterPrepRequest | ExistingCaptureRequest,
     finalize_note: Callable[[BaseModel], Any] | None = None,
-    *, finalize_prep: Callable[[BaseModel], Any] | None = None):
+    *, finalize_prep: Callable[[BaseModel], Any] | None = None,
+    finalize_existing: Callable[[BaseModel], Any] | None = None):
     if port is None:
         raise ws.WorkspaceError("capture_connection_required", 409)
     if identity.auth_mode != "clerk_jwt" or identity.external_identity_id is None:
@@ -533,6 +536,8 @@ async def _execute_workspace_capture(request: Request, workspace_id: UUID, sessi
     bearer = SecretStr(raw_authorization.partition(" ")[2])
 
     def reauthenticate():
+        if isinstance(body, ExistingCaptureRequest):
+            _capture_gate()
         if isinstance(body, EncounterPrepRequest):
             _prep_gate()
             if finalize_prep is not None:
@@ -569,9 +574,54 @@ async def _execute_workspace_capture(request: Request, workspace_id: UUID, sessi
         scratchpad_entry_id=body.scratchpad_entry_id if isinstance(body, CaptureNoteRequest) else None,
         bot_selection=body.bot if isinstance(body, (CaptureAdmissionRequest, CaptureNoteRequest, EncounterPrepRequest)) else None,
         prep=isinstance(body, EncounterPrepRequest),
+        existing_recording=isinstance(body, ExistingCaptureRequest),
+        finalize_existing=finalize_existing,
         finalize_note=checked_finalize, finalize_prep=finalize_prep)
     require_qualified_source(result)
     return result
+
+
+@app.post("/workspaces/{workspace_id}/capture/existing", dependencies=[Depends(_workspace_gate), Depends(_capture_gate)])
+async def read_existing_scribe_recording(request: Request, workspace_id: UUID,
+    session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity),
+    port: CoreCaptureAdmissionPort | None = Depends(_capture_connection)):
+    from cosmas_os.application.scribe_source import selection
+    body = await read_capture_request(request, ExistingCaptureRequest)
+    result = await _execute_workspace_capture(request, workspace_id, session, identity, port, body)
+    selected = selection(result.review) if result.review is not None else None
+    return JSONResponse({"contract_version": 1, "workspace_id": str(workspace_id),
+        "status": result.status, "review": result.review.model_dump(mode="json") if result.review else None,
+        "selection": selected.model_dump(mode="json") if selected else None}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/workspaces/{workspace_id}/capture/source-packets", dependencies=[Depends(_workspace_gate), Depends(_capture_gate)])
+async def save_scribe_source_packet(request: Request, workspace_id: UUID,
+    session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity),
+    port: CoreCaptureAdmissionPort | None = Depends(_capture_connection)):
+    from cosmas_os.application.capture_deadline import run_in_threadpool
+    from cosmas_os.application.scribe_source import save_snapshot, saved_snapshot
+    body = await read_capture_request(request, ScribeSourcePacketRequest)
+
+    def recover():
+        if identity.auth_mode != "clerk_jwt" or identity.external_identity_id is None:
+            raise ws.WorkspaceError("capture_access_unavailable", 403)
+        _refresh_team_identity(request, session, identity)
+        return saved_snapshot(session, box=identity.box_id, owner=identity.principal_id,
+            workspace_id=str(workspace_id), expected=body.expected_revision, key=body.idempotency_key,
+            selected=body.selection)
+
+    prior = await run_in_threadpool(recover)
+    if prior is not None:
+        return JSONResponse(prior, headers={"Cache-Control": "no-store"})
+
+    def publish(checked):
+        return save_snapshot(session, box=identity.box_id, owner=identity.principal_id,
+            workspace_id=str(workspace_id), expected=body.expected_revision, key=body.idempotency_key,
+            selected=body.selection, checked=checked)
+
+    value = await _execute_workspace_capture(request, workspace_id, session, identity, port, body,
+                                              finalize_existing=publish)
+    return JSONResponse(value, headers={"Cache-Control": "no-store"})
 
 
 @app.post("/workspaces/{workspace_id}/capture/prep", dependencies=[Depends(_workspace_gate), Depends(_prep_gate)])

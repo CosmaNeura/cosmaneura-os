@@ -16,6 +16,8 @@ COPY clients/shared/ /build/clients/shared/
 COPY clients/scribe-review/ /build/clients/scribe-review/
 COPY clients/desktop/google-navigation.mjs /build/clients/desktop/google-navigation.mjs
 COPY clients/desktop/google-navigation.d.mts /build/clients/desktop/google-navigation.d.mts
+COPY clients/desktop/scribe-source-requests.mjs /build/clients/desktop/scribe-source-requests.mjs
+COPY clients/desktop/scribe-source-requests.d.mts /build/clients/desktop/scribe-source-requests.d.mts
 COPY tests/fixtures/ /build/tests/fixtures/
 ARG VITE_CLERK_PUBLISHABLE_KEY
 ARG VITE_WORKSPACE_HOSTED_API_ORIGIN

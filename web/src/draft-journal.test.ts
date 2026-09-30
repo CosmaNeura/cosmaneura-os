@@ -47,3 +47,14 @@ it('preserves prior exact model uncertainty after settlement, rejects altered bi
   await expect(reopened.persist(address,{...retained,previous_model_request:{...prior,workspace_id:ticketId}})).rejects.toMatchObject({code:'integrity'});reopened.close();
  }finally{if(descriptor)Object.defineProperty(globalThis,'crypto',descriptor);}
 });
+
+it('retains only the exact reviewed Scribe request metadata and rejects added transcript text or missing sharing authority',async()=>{
+ const data={idempotency_key:ticketId,expected_revision:4,selection:{version:1,session_id:revision_id,source_transcript_version:1,working_transcript_id:workspaceId,working_transcript_version:2,snapshot_sha256:'a'.repeat(64)},reviewed:true,share_with_team:true};
+ const retained={kind:'editor' as const,workspaceId,editor:'scribe-source' as const,data,pending:ticketId},where=`editor:${workspaceId}:scribe-source`;
+ const factory=memoryDraftStorage(),options={scope:'d'.repeat(64)},journal=new DraftJournal(await factory(options));await journal.load(where);
+ await journal.persist(where,retained);journal.close();const reopened=new DraftJournal(await factory(options));expect(await reopened.load(where)).toEqual(retained);
+ for(const changed of [{...data,transcript:'Must not be stored here'},{...data,reviewed:false},{...data,share_with_team:false},{...data,selection:{...data.selection,working_transcript_version:0}}])
+  await expect(reopened.persist(where,{...retained,data:changed})).rejects.toMatchObject({code:'integrity'});
+ await expect(reopened.persist(where,{...retained,pending:revision_id})).rejects.toMatchObject({code:'integrity'});
+ expect(await reopened.load(where)).toEqual(retained);reopened.close();
+});

@@ -80,6 +80,25 @@ describe("private encounter workspace", () => {
     });
   }
 
+  it("opens Research from the initial dashboard after choosing the encounter, without starting a lookup",async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    const {researchApi}=await import('./research-api'),{researchCatalog}=await import('./research-test-fixture');
+    const catalogSpy=vi.spyOn(researchApi,'catalog').mockResolvedValue(researchCatalog(false));
+    const configured=structuredClone(team),address=modelUuid(411);
+    configured.configuration.bots.push({role:'research',instance_id:address,name:'Research',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true});
+    configured.members.push({role:'research',instance_id:address,agent_id:modelUuid(412),name:'Research',initials:'Re',description:'Clinical trials and evidence',prompt:'Review public sources',capabilities:[]});
+    vi.mocked(workspaceApi.team).mockResolvedValue(configured);
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:configured});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    const launch=container.querySelector<HTMLButtonElement>('.team-welcome-actions button:nth-child(2)')!;
+    expect(launch.textContent).toContain('Research');await act(async()=>launch.click());
+    expect(container.textContent).toContain('Choose a visit for Research');expect(workspaceApi.open).not.toHaveBeenCalled();
+    await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+    expect(container.querySelector('.team-roster [aria-pressed="true"] strong')?.textContent,container.textContent??'').toBe('Research');
+    expect(container.querySelector('.research-workspace')).not.toBeNull();expect(workspaceApi.ask).not.toHaveBeenCalled();catalogSpy.mockRestore();
+  });
+
   it("includes only the chosen Session Prep in chat and drops selection when switching bots",async()=>{
     const access={mode:"clerk_jwt" as const,getToken:vi.fn()};
     const connected=structuredClone(team);connected.llm.enabled=true;connected.capture={enabled:false,prep_enabled:true};

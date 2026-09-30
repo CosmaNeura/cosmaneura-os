@@ -35,7 +35,9 @@ export function CoreConnectionPanel({identity,onBusyChange,onAuthenticationLost,
     }catch(cause){
       if(current!==epoch.current||currentIdentity.current!==identity)return;
       setConnection(null);setPage(null);
-      if(cause instanceof WorkspaceApiError&&cause.status===401){setError('Sign in again to check your connection.');onAuthenticationLost(cause);}
+      if(cause instanceof WorkspaceApiError&&cause.code==='core_existing_recording_conflict')setError('The Scribe recording does not match this visit’s notebook. Ask your practice administrator to review the match.');
+      else if(cause instanceof WorkspaceApiError&&cause.code==='core_scribe_encounter_unavailable')setError('Scribe encounters could not be loaded. Try again, or open your saved visit from the encounter list.');
+      else if(cause instanceof WorkspaceApiError&&cause.status===401){setError('Sign in again to check your connection.');onAuthenticationLost(cause);}
       else if(cause instanceof WorkspaceApiError&&cause.status===403)setError('Your practice connection needs review. Ask your practice administrator to confirm access for this account.');
       else if(cause instanceof WorkspaceApiError&&cause.status===404)setError('Cosmaneura connection setup is not enabled for this practice yet.');
       else if(cause instanceof WorkspaceApiError&&cause.status===409)setError('The connection changed or needs practice review. Check its current status before continuing.');

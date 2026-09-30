@@ -271,6 +271,96 @@ def test_duplicate_returned_identity_cannot_claim_two_complete_studies():
         lookup("clinical_trials", value)
 
 
+def test_trial_details_keep_registry_phase_intervention_and_individual_site_status():
+    value = trial()
+    protocol = value["studies"][0]["protocolSection"]
+    protocol.update({
+        "statusModule": {"overallStatus": "RECRUITING", "lastUpdatePostDateStruct": {"date": "2026-09-20"}},
+        "designModule": {"phases": ["PHASE1", "PHASE2"]},
+        "armsInterventionsModule": {"interventions": [{"type": "BIOLOGICAL", "name": "Invented cell therapy"}]},
+        "contactsLocationsModule": {"locations": [
+            {"facility": "Invented Trial Center", "city": "Example City", "state": "Example State",
+             "country": "United States", "status": "ACTIVE_NOT_RECRUITING"},
+            {"facility": "Invented Second Center", "country": "Canada"},
+        ]},
+        "eligibilityModule": {"minimumAge": "18 Years", "maximumAge": "75 Years", "sex": "ALL",
+                              "eligibilityCriteria": "Invented inclusion and exclusion criteria."},
+        "descriptionModule": {"briefSummary": "Invented study summary."},
+    })
+    requests = []
+
+    def respond(request):
+        requests.append(request)
+        return httpx.Response(200, json=value)
+
+    with adapter.PublicResearch(settings("clinical_trials"), transport=httpx.MockTransport(respond)) as port:
+        row = port.lookup("clinical_trials", "Invented cell therapy", check=lambda: 30)[0]
+    assert len(requests) == 1 and requests[0].method == "GET"
+    assert str(requests[0].url).startswith("https://clinicaltrials.gov/api/v2/studies?")
+    assert dict(requests[0].url.params) == {
+        "query.term": "Invented cell therapy", "pageSize": "5", "format": "json", "countTotal": "true"}
+    assert {field["label"]: field["text"] for field in row["fields"]} == {
+        "Recruitment status": "RECRUITING", "Phase": "PHASE1; PHASE2",
+        "Interventions": "Type: BIOLOGICAL; Name: Invented cell therapy",
+        "Locations": "Facility: Invented Trial Center; City: Example City; State: Example State; "
+                     "Country: United States; Site status: ACTIVE_NOT_RECRUITING | "
+                     "Facility: Invented Second Center; Country: Canada",
+        "Minimum age": "18 Years", "Maximum age": "75 Years", "Sex": "ALL",
+        "Study summary": "Invented study summary.",
+    }
+    assert row["excerpt"] == "Invented inclusion and exclusion criteria."
+    assert row["source_updated_at"] == "2026-09-20"
+    assert row["url"] == "https://clinicaltrials.gov/study/NCT12345678"
+    assert row["result_scope"] == "complete" and row["truncated"] is False
+    assert row["sha256"] == research_digest({key: item for key, item in row.items() if key != "sha256"})
+
+
+def test_trial_missing_optional_details_do_not_invent_site_recruitment_or_phase():
+    value = trial()
+    value["studies"][0]["protocolSection"]["contactsLocationsModule"] = {
+        "locations": [{"facility": "Invented Trial Center", "country": "United States"}]}
+    row = lookup("clinical_trials", value)[0]
+    assert row["fields"] == [{"label": "Locations", "text": "Facility: Invented Trial Center; Country: United States"}]
+    assert row["source_updated_at"] is None and row["truncated"] is False
+
+
+@pytest.mark.parametrize("module,details", [
+    ("designModule", {"phases": "PHASE1"}), ("designModule", {"phases": [1]}),
+    ("armsInterventionsModule", {"interventions": {"name": "Invented"}}),
+    ("armsInterventionsModule", {"interventions": [None]}),
+    ("armsInterventionsModule", {"interventions": [{"name": 17}]}),
+    ("contactsLocationsModule", {"locations": {"facility": "Invented"}}),
+    ("contactsLocationsModule", {"locations": [True]}),
+    ("contactsLocationsModule", {"locations": [{"status": []}]}),
+])
+def test_trial_malformed_optional_details_fail_without_claiming_complete_results(module, details):
+    value = trial()
+    value["studies"][0]["protocolSection"][module] = details
+    with pytest.raises(ResearchUnavailable, match="^invalid_source_response$"):
+        lookup("clinical_trials", value)
+
+
+def test_trial_long_site_and_intervention_lists_are_marked_shortened_within_existing_limits():
+    value = trial()
+    value["studies"][0]["protocolSection"].update({
+        "statusModule": {"overallStatus": "RECRUITING"},
+        "designModule": {"phases": ["PHASE2"]},
+        "armsInterventionsModule": {"interventions": [{"type": "BIOLOGICAL", "name": "Invented " * 200}]},
+        "contactsLocationsModule": {"locations": [
+            {"facility": "Invented Center " + str(index), "city": "Example City", "country": "United States"}
+            for index in range(60)]},
+        "eligibilityModule": {"minimumAge": "18 Years", "maximumAge": "75 Years", "sex": "ALL",
+                              "eligibilityCriteria": "Invented criteria " * 200},
+        "descriptionModule": {"briefSummary": "Invented summary " * 200},
+    })
+    row = lookup("clinical_trials", value)[0]
+    fields = {field["label"]: field["text"] for field in row["fields"]}
+    assert len(fields["Locations"]) == len(fields["Interventions"]) == 750
+    assert len(row["fields"]) <= 8 and sum(len(field["text"]) for field in row["fields"]) <= 3000
+    assert len(row["excerpt"]) == 2500 and row["truncated"] is True
+    assert row["sha256"] == research_digest({key: item for key, item in row.items() if key != "sha256"})
+
+
 def npi():
     return {"result_count": 1, "results": [{"number": NPI,
         "basic": {"first_name": "Invented", "last_name": "Provider"},

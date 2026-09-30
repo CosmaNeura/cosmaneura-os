@@ -129,6 +129,50 @@ function request(path = '/workspaces', options = {}) {
   return new Request('app://cosmas/api' + path, {...options,
     headers: {'Content-Type': 'application/json', 'X-Cosmas-Desktop-Session': id, ...options.headers}});
 }
+
+test('existing Scribe source routes admit only exact reviewed selections before credentials', async () => {
+  const packets={idempotency_key:'source-share-1',expected_revision:3,reviewed:true,share_with_team:true,
+    selection:{version:1,session_id:id,source_transcript_version:2,working_transcript_id:id,
+      working_transcript_version:3,snapshot_sha256:'a'.repeat(64)}};
+  for (const [action,body] of [['existing',{idempotency_key:'source-read-1'}],['source-packets',packets]]) {
+    const path=`/workspaces/${id}/capture/${action}`;
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,'POST'),path);
+    for(const method of ['GET','PUT','PATCH','DELETE','HEAD','OPTIONS','post'])
+      assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,method),null);
+    for(const suffix of ['?','?owner='+id,'/send','/','/resolve'])
+      assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path+suffix,'POST'),null);
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api/ignored/../'+path.slice(1),'POST'),null);
+    const auth=fixture();
+    const result=await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body:JSON.stringify(body)}),auth,
+      async (url,options)=>{
+        assert.equal(url,'http://127.0.0.1:8046'+path);
+        assert.deepEqual(JSON.parse(new TextDecoder().decode(options.body)),body);
+        assert.equal(options.headers.Authorization,'Bearer local.binding.fixture');
+        assert.equal(options.headers['X-Box-Id'],undefined);
+        assert.equal(options.headers['X-Actor-Principal-Id'],undefined);
+        assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');
+        return response({status:'available'});
+      });
+    assert.equal(result.status,200);assert.equal(auth.tokenCalls(),1);
+    for(const bad of [null,[],{}, {...body,url:'https://outside.invalid'}, {...body,idempotency_key:'short'},
+      ...(action==='source-packets'?[{...body,reviewed:false},{...body,share_with_team:1},
+        {...body,expected_revision:0},{...body,selection:{...packets.selection,snapshot_sha256:'bad'}},
+        {...body,selection:{...packets.selection,patient_id:id}}]:[])]) {
+      const auth=fixture();
+      const rejected=await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body:JSON.stringify(bad)}),auth,
+        ()=>assert.fail('No malformed Scribe source request dispatch'));
+      assert.equal(rejected.status,400);assert.equal(auth.tokenCalls(),0);
+    }
+    const encoded=JSON.stringify(body),exact=encoded+' '.repeat(2048-Buffer.byteLength(encoded));
+    assert.equal((await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body:exact}),fixture(),
+      async()=>response({status:'available'}))).status,200);
+    const oversizedAuth=fixture();
+    assert.equal((await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body:exact+' '}),oversizedAuth,
+      ()=>assert.fail('No oversized Scribe source request dispatch'))).status,503);
+    assert.equal(oversizedAuth.tokenCalls(),0);
+  }
+});
+
 test('allows exact private workspace/capture operations and denies demo/admin or generic effects', () => {
   for (const path of ['/workspaces', '/provider-team', `/workspaces/${id}`, '/practice-work', `/practice-work/${id}`, `/practice-work/pages/${id}`]) {
     assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path, 'GET'), path);

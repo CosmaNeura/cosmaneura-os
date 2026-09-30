@@ -1,12 +1,14 @@
 import {sameAuthState} from './auth-helper-client.mjs';
 import {exactHostedApiOrigin} from './hosted-auth-http.mjs';
 import {connectorApiRoute, CONNECTOR_HEADERS, isModelActivityPath} from './connector-api-routes.mjs';
+import {MAX_SCRIBE_SOURCE_REQUEST_BYTES, validScribeSourceRequest} from './scribe-source-requests.mjs';
 
 const API_ORIGIN = 'http://127.0.0.1:8046';
 const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const BOT = `(?:chief|scribe|visit_prep|follow_up|${ID})`;
 const READ = new RegExp(`^/(?:workspaces(?:/${ID}(?:/(?:appointments(?:/(?:pages/)?${ID})?|prep-work(?:/${ID})?))?)?|provider-team(?:/(?:identity|setup|resources|usage|routines/${BOT}(?:/runs/${ID})?))?|practice-work(?:/(?:pages/)?${ID})?)$`);
-const WRITE = new RegExp(`^/(?:provider-team(?:/(?:rehearsal|routines/${BOT}))?|practice-work/${ID}/(?:handoffs|complete)|workspaces(?:/${ID}/(?:entries|conversation(?:/resolve)?|work-links|handoffs/${ID}/retry(?:/resolve)?|notes(?:/${ID}/review)?|follow-ups(?:/${ID}/(?:decide|complete))?|appointments(?:/(?:current|${ID}/(?:decide|execute)))?|prep-work(?:/${ID}/(?:decide|verify))?|scheduling/availability|capture/(?:admission|operations|notes|note-links|prep)))?)$`);
+const WRITE = new RegExp(`^/(?:provider-team(?:/(?:rehearsal|routines/${BOT}))?|practice-work/${ID}/(?:handoffs|complete)|workspaces(?:/${ID}/(?:entries|conversation(?:/resolve)?|work-links|handoffs/${ID}/retry(?:/resolve)?|notes(?:/${ID}/review)?|follow-ups(?:/${ID}/(?:decide|complete))?|appointments(?:/(?:current|${ID}/(?:decide|execute)))?|prep-work(?:/${ID}/(?:decide|verify))?|scheduling/availability|capture/(?:admission|operations|notes|note-links|prep|existing|source-packets)))?)$`);
+const SCRIBE_SOURCE = new RegExp(`^/workspaces/${ID}/capture/(existing|source-packets)$`);
 const MODEL_COMMAND = new RegExp(`^/workspaces/${ID}/(?:conversation(?:/resolve)?|handoffs/${ID}/retry(?:/resolve)?)$`);
 const WORKSPACE_READ = new RegExp(`^/workspaces/${ID}$`);
 const ROUTINE_RUN_READ = new RegExp(`^/provider-team/routines/${BOT}/runs/${ID}$`);
@@ -19,7 +21,7 @@ export function permittedAuthenticatedApiPath(url, method) {
         parsed.password || parsed.hash || !parsed.pathname.startsWith('/api/')) return null;
     const path = parsed.pathname.slice(4) + parsed.search;
     const connector = connectorApiRoute(path,method);
-    if ((connector?.strictResponse || path === '/provider-team/identity' || isModelActivityPath(path)) &&
+    if ((connector?.strictResponse || path === '/provider-team/identity' || isModelActivityPath(path) || SCRIBE_SOURCE.test(path)) &&
         (url !== 'app://cosmas/api' + path || url.includes('?') && connector?.canonicalQuery !== true)) return null;
     if (connector) return path;
     return !parsed.search && (method === 'GET' && (READ.test(path) || isModelActivityPath(path)) || method === 'POST' && WRITE.test(path)) ? path : null;
@@ -123,6 +125,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   // only for its exact legacy/deterministic compatibility checks. It is never
   // upgraded here into authority for a new model admission.
   const modelReceipt = modelCommand && modelContract === '1';
+  const scribeSource = SCRIBE_SOURCE.exec(path)?.[1];
   const controller = new AbortController();
   const signal = AbortSignal.any([controller.signal, request.signal]);
   let expired = false, authorityStatus = null;
@@ -135,12 +138,13 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     const appointmentPath = path.endsWith('/appointments') || path.includes('/appointments/');
     const prepWorkPath = path.endsWith('/prep-work') || path.includes('/prep-work/');
     const routinePath = path.startsWith('/provider-team/routines/');
-    const maximumInput = identityPath || activityPath ? 0 : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
+    const maximumInput = identityPath || activityPath ? 0 : scribeSource ? MAX_SCRIBE_SOURCE_REQUEST_BYTES : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
       path.endsWith('/capture/operations') ? 4194304 : path.includes('/capture/') ? 1048576 : 128000;
     const body = await boundedBytes(request.body, maximumInput, signal);
     if (request.method === 'GET' && body.length) return unavailable(400);
     if (request.method === 'POST') {
       const parsed = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(body));
+      if (scribeSource && !validScribeSourceRequest(scribeSource, parsed)) return unavailable(400);
       if (modelReceipt && path.endsWith('/conversation') && parsed?.session_prep_analysis) {
         clearTimeout(timer);
         timer = setTimeout(() => { expired = true; controller.abort(); }, Math.max(0, 90000 - (Date.now() - startedAt)));

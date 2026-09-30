@@ -7,7 +7,17 @@ from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import AppointmentObservation, AuditEvent, EncounterWorkspace, PatientLink
 
 
-def open_selected(s, *, identity, account, discovery, budget):
+def existing_notebook(s, identity, appointment_ref):
+    return s.scalar(select(EncounterWorkspace).join(AppointmentObservation,
+        AppointmentObservation.id == EncounterWorkspace.appointment_id).where(
+        EncounterWorkspace.box_id == identity.box_id,
+        EncounterWorkspace.owner_id == identity.principal_id,
+        AppointmentObservation.source_owner_id == identity.principal_id,
+        AppointmentObservation.source == "cosmaneura_core",
+        AppointmentObservation.external_id == appointment_ref))
+
+
+def open_selected(s, *, identity, account, discovery, budget, canonical_workspace_id=None):
     # core_connection owns the active human write lock and has rechecked the
     # identity/account after the remote read. Never accept renderer identity IDs.
     if account is None or len(discovery.encounters) != 1:
@@ -48,9 +58,17 @@ def open_selected(s, *, identity, account, discovery, budget):
     s.flush()
     workspace = s.scalar(select(EncounterWorkspace).where(EncounterWorkspace.box_id == box,
         EncounterWorkspace.owner_id == owner, EncounterWorkspace.appointment_id == appointment.id))
+    if canonical_workspace_id is not None:
+        canonical_workspace_id = str(canonical_workspace_id)
+        occupied = s.get(EncounterWorkspace, canonical_workspace_id)
+        if ((workspace is not None and workspace.id != canonical_workspace_id)
+            or occupied is not None and occupied is not workspace):
+            # Never rekey an existing notebook or replace another creator's work.
+            raise ws.WorkspaceError("core_existing_recording_conflict", 409)
     if workspace is None:
         workspace = EncounterWorkspace(box_id=box, owner_id=owner, appointment_id=appointment.id,
-            patient_link_id=link.id, create_key="core:"+appointment.id, revision=1)
+            patient_link_id=link.id, create_key="core:"+appointment.id, revision=1,
+            **({"id": canonical_workspace_id} if canonical_workspace_id is not None else {}))
         s.add(workspace)
         s.flush()
         ws._audit(s, workspace, "created")

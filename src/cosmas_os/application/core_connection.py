@@ -103,6 +103,10 @@ def execute(session, *, identity, command, tenant_ref, bearer, port, reauthentic
                                        "source_sha256":command.source_sha256})
     else:
         request = ConnectionRequest(expected_tenant_ref=tenant_ref, request_nonce=command.request_nonce)
+    new_notebook = False
+    if not (athena_link or athena or setup) and command.action == "open":
+        from cosmas_os.application.core_workspace import existing_notebook
+        new_notebook = existing_notebook(session, identity, command.appointment_ref) is None
     # No local identity/account locks are held across the remote Core operation.
     session.commit()
     if athena_link:
@@ -111,6 +115,7 @@ def execute(session, *, identity, command, tenant_ref, bearer, port, reauthentic
         result = port.setup_appointments(request, bearer)
     else:
         result = port.read_athena(request, bearer) if athena else port.read(request, bearer)
+    canonical_workspace_id = port.scribe_workspace(result, bearer) if new_notebook else None
     after, account = current()
     if after != before:
         raise ws.WorkspaceError("core_connection_changed", 409)
@@ -156,5 +161,6 @@ def execute(session, *, identity, command, tenant_ref, bearer, port, reauthentic
     if command.action == "open":
         from cosmas_os.application.core_workspace import open_selected
         response["workspace"] = open_selected(session, identity=identity, account=account,
-                                              discovery=result, budget=budget)
+                                              discovery=result, budget=budget,
+                                              canonical_workspace_id=canonical_workspace_id)
     return response

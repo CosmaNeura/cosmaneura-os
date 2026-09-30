@@ -130,3 +130,13 @@ it('keeps a pending lookup exact while saved packets are read and refuses a dupl
  await click('Load saved packets');await workSettled();expect(button('Invented packet 7Saved packet · revision 7').disabled).toBe(true);await click('Load older packets');await workSettled();expect(element.textContent).toContain('Saved source packets could not be confirmed');
  expect(element.querySelectorAll('.research-history strong')).toHaveLength(5);expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:request.idempotency_key,data:{pending:{kind:'search',request}}});expect(port.search).toHaveBeenCalledOnce();expect(port.save).not.toHaveBeenCalled();
 });
+
+it('preselects the configured trial registry only after choosing trials and still requires query review',async()=>{
+ const catalog=researchCatalog();catalog.sources.find(source=>source.id==='clinical_trials')!.state='enabled';
+ vi.mocked(port.catalog).mockResolvedValue(catalog);await mount();await click('Clinical trials');
+ expect(element.querySelector<HTMLTextAreaElement>('textarea')!.placeholder).toContain('myocardial infarction');
+ expect([...element.querySelectorAll('label')].find(label=>label.textContent?.includes('ClinicalTrials.gov'))?.querySelector<HTMLInputElement>('input')?.checked).toBe(true);
+ expect(port.search).not.toHaveBeenCalled();await fill('myocardial infarction AND stem cell');await click('Review query');
+ expect(button('Search selected sources').disabled).toBe(true);expect(element.querySelector('.research-query-review')?.textContent).toContain('ClinicalTrials.gov');
+ expect(port.search).not.toHaveBeenCalled();
+});

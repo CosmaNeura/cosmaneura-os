@@ -40,6 +40,7 @@ import { ROUTINES_BUILD } from "./routine-api";
 import {EncounterWorkSummary} from "./EncounterWorkSummary";
 import { EncounterSources } from "./EncounterSources";
 import { CapturePanel } from "./CapturePanel";
+import { ExistingScribeSourcePanel } from './ExistingScribeSourcePanel';
 import {InboxAnalysisPanel} from "./InboxAnalysisPanel";
 import type {InboxDraftSelection} from "./inbox-analysis-contract";
 import {ResearchWorkspace} from "./ResearchWorkspace";
@@ -98,11 +99,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [activityContextError,setActivityContextError] = useState(''),[activityAttempt,setActivityAttempt] = useState(0);
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
   const [accessBusy,setAccessBusy]=useState(false);
-  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy;
+  const [scribeSourceBusy,setScribeSourceBusy]=useState(false);
+  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
   const [selected, setSelected] = useState<string>("visit_prep");
+  const [researchEntry,setResearchEntry]=useState(false);
   const [savedResearchChat,setSavedResearchChat]=useState(false);
   const [stage, setStage] = useState("Before");
   const [panel, setPanel] = useState("Notebook");
@@ -387,6 +390,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     modelBusy.current=false;
     setCaptureDraftLocked(false); setConfirmCaptureExit(false);
     setCaptureRequest(0); setObservedCaptureDraft(null);
+    setResearchEntry(false);
   }
   function failure(cause: unknown) {
     if (cause instanceof WorkspaceApiError && [401, 403, 404, 426].includes(cause.status)) {
@@ -442,13 +446,22 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         if (recorder) setSelected(botAddress(recorder));
         setMobilePanel("Notebook");
       }
+      if (researchEntry && !recordVisit && !incoming) {
+        const researcher=result.team.configuration.bots.find(item=>item.role==='research'&&!item.retired);
+        if(researcher){setSelected(botAddress(researcher));setMobilePanel('Conversation');setSavedResearchChat(false);}
+        else setMessage('Research is not on this team yet. Add it in Team settings.');
+      }
       if (!preserveTeamDraft) setTeamDraft(structuredClone(result.team.configuration));
       setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
       setSettingsOpen(result.team.revision === 0);
       await recoverAfterRead(result.team, result.workspace, current);
     } catch (cause) { if (current === generation.current) {
       failure(cause);
-      if (coreSelection && !(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status)))
+      if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
+        setError('The Scribe recording does not match this visit’s notebook. Ask your practice administrator to review the match.');
+      else if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_scribe_encounter_unavailable')
+        setError('Scribe encounters could not be loaded. Try again, or open your saved visit from the encounter list.');
+      else if (coreSelection && !(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status)))
         setError('The notebook could not be confirmed. View your appointments and select it again; an existing notebook will be reused.');
     } }
     finally { if (current === generation.current) setBusy(false); }
@@ -738,7 +751,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   }
   const recoveryBlocked = !!authenticated && (!validRecoveryScope(team?.recovery_scope) ||
     !journal.current || journal.current.serverScope !== team?.recovery_scope || recoveryState === "failed");
-  const locked = busy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
+  const baseLocked = busy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
+  const locked = baseLocked || scribeSourceBusy;
   const reviewWorkspace = workspace ? withObservedCaptureDraft(workspace, observedCaptureDraft) : null;
   const bot = team?.configuration.bots.find(b => botAddress(b) === selected);
   const template = team?.members.find(b => botAddress(b) === selected);
@@ -1043,11 +1057,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         </AccountRecoveryContext.Provider> : undefined}
       />}
       {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
-        <h1>{encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{encounters ? "Record a visit, or open its notes." : "Choose a visit. Record the conversation. Review your note."}</p>
+        <h1>{researchEntry ? "Choose a visit for Research" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : encounters ? "Record a visit, or open its notes." : "Choose a visit. Record the conversation. Review your note."}</p>
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
           encounterLabel={busy?'Loading…':encounters?'Refresh encounters':authenticated?'Choose an encounter':'Open synthetic encounter'}
-          onConnections={()=>void openSettings('connections')} onEncounter={()=>void (authenticated?loadEncounters():open())}/>
+          onConnections={()=>void openSettings('connections')} onEncounter={()=>{setResearchEntry(false);void (authenticated?loadEncounters():open());}}
+          onResearch={authenticated?()=>{setResearchEntry(true);void loadEncounters();}:undefined}/>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {authenticated && encounters && <section aria-label="Available encounters" className="team-encounter-picker">
           {CORE_CONNECTION_BUILD && <p><button className="team-subtle"
@@ -1080,6 +1095,15 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             openRequest={locked || settingsOpen || practiceOpen ? 0 : captureRequest} preferencesScope={team.recovery_scope}
             onNotebook={() => { setPanel("Notebook"); setMobilePanel("Notebook"); }}
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} reviewLocked={locked} />}
+        {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled && !settingsOpen && !practiceOpen &&
+          <ExistingScribeSourcePanel key={`scribe-source:${workspace.id}`} workspace={workspace} identity={authenticated}
+            locked={baseLocked || captureNavigationLocked || captureDraftLocked || note !== latestNote}
+            onBusyChange={setScribeSourceBusy} onAccessLost={failure} onSaved={latest=>{
+              setWorkspace(previous=>previous?.id===latest.id&&previous.revision<=latest.revision?latest:previous);
+              if(latest.id===workspace.id&&latest.revision>=workspace.revision&&note===latestNote)
+                setNote(latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'');
+              setPanel('Sources');setMobilePanel('Sources');
+            }}/>}
         {bot?.role === "scribe" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && !settingsOpen &&
           <section className="capture-panel" aria-label="Scribe recording"><header>
             <div className="capture-heading"><h2><span aria-hidden="true">🎙️</span> {bot.name} recording</h2>

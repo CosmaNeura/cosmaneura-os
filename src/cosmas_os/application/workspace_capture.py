@@ -73,6 +73,8 @@ def admit(
     bot_selection=None,
     prep: bool = False,
     binding_only: bool = False,
+    existing_recording: bool = False,
+    finalize_existing: Callable[[BaseModel], Any] | None = None,
     finalize_note: Callable[[BaseModel], Any] | None = None,
     finalize_prep: Callable[[BaseModel], Any] | None = None,
 ) -> Any:
@@ -137,6 +139,12 @@ def admit(
 
     try:
         using_admission = operation is not None or note_selection is not None
+        if existing_recording and (configured_capture is not None or using_admission or prep or binding_only
+            or attestation is not None or expected_session_id is not None or scratchpad_entry_id is not None
+            or bot_selection is not None or finalize_note is not None or finalize_prep is not None):
+            raise ws.WorkspaceError("invalid_capture_request", 422)
+        if finalize_existing is not None and not existing_recording:
+            raise ws.WorkspaceError("invalid_capture_request", 422)
         if configured_capture is not None and (using_admission or prep or binding_only):
             raise ws.WorkspaceError("invalid_capture_request", 422)
         if binding_only and (using_admission or prep or attestation is not None or expected_session_id is not None
@@ -166,7 +174,7 @@ def admit(
         binding = port.resolve_binding(expected[1], credential)
         if selection() != expected:
             raise ws.WorkspaceError("capture_context_changed", 409)
-        if binding_only:
+        if binding_only or existing_recording:
             # Stop before consent/session admission or any note/model operation.
             from cosmas_os.ports.core_capture import CoreCaptureBindingSnapshot
             if (not isinstance(binding, CoreCaptureBindingSnapshot)
@@ -175,7 +183,18 @@ def admit(
                 or binding.actor_ref != expected[1].expected_actor_ref
                 or binding.tenant_ref != expected[1].expected_tenant_ref):
                 raise ws.WorkspaceError("capture_context_changed", 409)
-            return binding
+            if binding_only:
+                return binding
+            from cosmas_os.ports.creator_review import ProviderEncounter
+            result = port.provider_encounter(binding, credential, idempotency_key)
+            if not isinstance(result, ProviderEncounter):
+                raise ws.WorkspaceError("capture_request_unconfirmed", 503)
+            if selection(finalizing=finalize_existing is not None) != expected:
+                raise ws.WorkspaceError("capture_context_changed", 409)
+            # The remote receiver has verified the original session and consent.
+            # Publication uses this same final local scope lock; no admission,
+            # key registration, capture lease or source-start call occurs here.
+            return core_phase(finalize_existing, result) if finalize_existing is not None else result
         if prep:
             result = port.encounter_context(binding, credential)
             if selection(finalizing=bot_selection is not None or finalize_prep is not None) != expected:

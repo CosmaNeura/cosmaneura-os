@@ -271,6 +271,9 @@ class DeadlineCorePort:
     def admit_capture(self, *args, **kwargs):
         return core_phase(self.port.admit_capture, *args, **kwargs)
 
+    def provider_encounter(self, *args, **kwargs):
+        return core_phase(self.port.provider_encounter, *args, **kwargs)
+
     def perform_capture_operation(self, *args, **kwargs):
         return core_phase(self.port.perform_capture_operation, *args, **kwargs)
 

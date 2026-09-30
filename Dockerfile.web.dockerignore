@@ -13,6 +13,8 @@
 !clients/desktop/
 !clients/desktop/google-navigation.mjs
 !clients/desktop/google-navigation.d.mts
+!clients/desktop/scribe-source-requests.mjs
+!clients/desktop/scribe-source-requests.d.mts
 !tests/
 !tests/fixtures/
 !tests/fixtures/**
