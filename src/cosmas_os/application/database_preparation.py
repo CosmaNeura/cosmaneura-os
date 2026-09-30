@@ -26,6 +26,18 @@ _ROLE_PATTERN = re.compile(r"^[a-z][a-z0-9_]{2,62}$")
 _RUNTIME_PASSWORD_PATTERN = re.compile(r"^[\x21-\x7e]{24,}$")
 _EXPECTED_DENIAL_SQLSTATE = "42501"
 _SCRAM_ITERATIONS = 4096
+# These migrated, immutable SECURITY INVOKER helpers inspect only their supplied
+# JSON/text. Research receipt triggers call them under the runtime role. Keep
+# every trigger entry point, data reader and mutation helper non-executable.
+_RUNTIME_VALIDATORS = (
+    "public.finance_settings_keys(jsonb,text[])",
+    "public.research_text(jsonb,integer,integer)",
+    "public.research_whitespace()",
+    "public.research_json_digest(jsonb)",
+    "public.vendor_public_canonical(jsonb,integer)",
+    "public.research_hash(jsonb)",
+    "public.research_source_valid(jsonb)",
+)
 
 
 class DatabasePreparationError(RuntimeError):
@@ -200,6 +212,21 @@ def _run_forward_migrations(connection: Connection, config_path: Path) -> None:
     command.upgrade(config, "head")
 
 
+def _runtime_validator_oids(connection: Connection) -> list[int] | None:
+    oids = []
+    for signature in _RUNTIME_VALIDATORS:
+        row = connection.execute(
+            text("SELECT oid, NOT prosecdef AND provolatile = 'i' AND prokind = 'f' "
+                 "AND NOT proretset AND prorettype IN ('boolean'::regtype, 'text'::regtype) AS safe "
+                 "FROM pg_proc WHERE oid = to_regprocedure(:signature)"),
+            {"signature": signature},
+        ).mappings().one_or_none()
+        if row is None or not row["safe"]:
+            return None
+        oids.append(row["oid"])
+    return oids
+
+
 def _apply_runtime_privileges(connection: Connection, runtime: URL) -> None:
     role = runtime.username
     database = runtime.database
@@ -241,6 +268,10 @@ def _apply_runtime_privileges(connection: Connection, runtime: URL) -> None:
     )
     for statement in statements:
         connection.execute(text(statement))
+    if _runtime_validator_oids(connection) is None:
+        raise DatabasePreparationError("required runtime validators are missing or unsafe")
+    for signature in _RUNTIME_VALIDATORS:
+        connection.execute(text(f"GRANT EXECUTE ON FUNCTION {signature} TO {quoted_role}"))
 
 
 def _sqlstate(error: DBAPIError) -> str | None:
@@ -315,6 +346,14 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
                     "), true) FROM pg_sequences WHERE schemaname = 'public'"
                 )
             ).scalar_one()
+            validator_oids = _runtime_validator_oids(connection)
+            runtime_functions = validator_oids is not None and connection.execute(
+                text("SELECT coalesce(bool_and(has_function_privilege(current_user,p.oid,'EXECUTE') "
+                     "= (p.oid = ANY(CAST(:allowed AS oid[])))), false) "
+                     "FROM pg_proc p JOIN pg_namespace n ON n.oid = p.pronamespace "
+                     "WHERE n.nspname = 'public'"),
+                {"allowed": validator_oids},
+            ).scalar_one()
             owned_objects = connection.execute(
                 text(
                     "SELECT count(*) FROM pg_class c "
@@ -352,7 +391,7 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
     )
     return {
         "revision": revision,
-        "non_admin": non_admin and privilege_contract and runtime_dml and runtime_sequences,
+        "non_admin": non_admin and privilege_contract and runtime_dml and runtime_sequences and runtime_functions,
         "ddl_denied": _operation_is_denied(
             runtime_url,
             "CREATE TABLE public.cosmas_runtime_ddl_probe (id integer)",
