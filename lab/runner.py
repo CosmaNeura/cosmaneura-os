@@ -92,6 +92,7 @@ def worker(args):
               "status": "running", "mode": args.mode, "synthetic_only": True,
               "model": model.name if model else "deterministic-replay-no-model",
               "concurrency": args.concurrency, "fault": args.fault,
+              "journey_input_mode": args.journey_inputs,
               "budget": {"max_calls": args.max_calls, "max_tokens": args.max_tokens, "max_seconds": args.max_seconds},
               "source": source_record(), "episodes": [], "coverage": [],
               "limits": ["Tool runner is local lab code; the deployed chat adapter remains text-only.",
@@ -117,7 +118,8 @@ def worker(args):
                 if key == "journey":
                     from lab.journey import run_journey
 
-                    result = run_journey(app, store, episode, model, args.fault)
+                    result = run_journey(app, store, episode, model, args.fault,
+                                         concurrency=args.concurrency, input_mode=args.journey_inputs)
                 else:
                     world = World(store, episode, case, app, model, concurrency=args.concurrency, fault=args.fault)
                     world.run_agent("chief")
@@ -194,6 +196,8 @@ def main():
     parser.add_argument("--cases", default="all", help="all, or comma-separated case keys: " + ",".join(case_catalog()))
     parser.add_argument("--repeat", type=int, choices=range(1, 6), default=1)
     parser.add_argument("--concurrency", type=int, choices=(1, 2, 3), default=3)
+    parser.add_argument("--journey-inputs", choices=("tool", "inline"), default="inline",
+                        help="Deliver admitted journey inputs upfront with exact acknowledgment, or fetch by tool for comparison")
     parser.add_argument("--fault", choices=("none", "read_timeout", "lost_save_reply"), default="none")
     parser.add_argument("--checks", action="store_true", help="Also execute existing application workflow regression suites")
     parser.add_argument("--output", type=Path, help="New output directory outside repository; default is a new temporary directory")
@@ -227,6 +231,7 @@ def main():
     print(f"Lab output: {args.output}", flush=True)
     command = [sys.executable, "-m", "lab.runner", "--worker", "--mode", args.mode, "--cases", args.cases,
                "--repeat", str(args.repeat), "--concurrency", str(args.concurrency), "--fault", args.fault,
+               "--journey-inputs", args.journey_inputs,
                "--output", str(args.output), "--max-calls", str(args.max_calls),
                "--max-tokens", str(args.max_tokens), "--max-seconds", str(args.max_seconds)]
     cleanup = False

@@ -15,6 +15,12 @@ def render(root, report):
     for episode in episodes:
         failures = ", ".join(k.replace("_", " ") for k, ok in episode["checks"].items() if not ok)
         receipts = episode.get("handoff_receipts", [])
+        timing = episode.get("timing", {})
+        phase_times = ("<details><summary>Time spent</summary><ul>" + "".join(
+            "<li>" + html.escape(name.replace("_", " ").title()) + f": {ms / 1000:.1f}s</li>"
+            for name, ms in timing.get("phase_ms", {}).items()) + "</ul><p>Longest wait for an agent to start: "
+            + f'{max(timing.get("recipient_queue_ms", {}).values(), default=0) / 1000:.2f}s'
+            + "</p></details>") if timing else ""
         handoffs = ("<p><strong>Assigned drafts</strong> · human review outstanding</p><ul>"
             + "".join("<li>" + html.escape(r["recipient_name"]) + " · "
                 + ("Draft saved" if r["status"] == "completed" else html.escape(r["status"]))
@@ -28,6 +34,7 @@ def render(root, report):
 <span class="badge {'pass' if episode['passed'] else 'fail'}">{'Passed' if episode['passed'] else 'Needs work'}</span></div>
 <p>{episode['duration_ms'] / 1000:.1f}s · {episode['tool_calls']} tool calls · application: {html.escape(episode['application']['status'])}</p>
 {handoffs}
+{phase_times}
 {('<p class="error">'+html.escape(failures)+'</p>') if failures else ''}
 <details><summary>What was checked</summary><ul>{''.join('<li>'+('✓ ' if ok else '✕ ')+html.escape(k.replace('_',' '))+'</li>' for k,ok in episode['checks'].items())}</ul></details>
 {artifacts}</article>''')
@@ -41,6 +48,14 @@ def render(root, report):
                        f'<td>{html.escape(e.get("error", "OK"))}</td></tr>' for e in events[-300:])
     usage = report.get("usage", {})
     limits = "".join(f"<li>{html.escape(item)}</li>" for item in report["limits"])
+    comparison = report.get("performance_comparison")
+    performance = (f'''<section class="panel"><h2>Waiting time comparison</h2>
+<p>{comparison['samples_each']} synthetic trials per configuration; same source, model and task.</p>
+<div class="table-scroll"><table><thead><tr><th>Measure</th><th>Previous flow</th><th>Optimized flow</th></tr></thead><tbody>
+<tr><th scope="row">Median completion</th><td>{comparison['baseline_median_ms']/1000:.1f}s</td><td>{comparison['candidate_median_ms']/1000:.1f}s</td></tr>
+<tr><th scope="row">Median longest queue wait</th><td>{(comparison.get('baseline_max_queue_median_ms') or 0)/1000:.2f}s</td><td>{(comparison.get('candidate_max_queue_median_ms') or 0)/1000:.2f}s</td></tr>
+<tr><th scope="row">Model calls across trials</th><td>{comparison['baseline_model_calls']}</td><td>{comparison['candidate_model_calls']}</td></tr>
+</tbody></table></div><p>{comparison['observed_reduction_percent']}% observed reduction in completion time. Small synthetic sample; production performance is unmeasured.</p></section>''') if comparison else ""
     page = f'''<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'none'">
 <title>CosmaBot · Agent laboratory</title><style>
@@ -56,7 +71,7 @@ details{{border-top:1px solid #e5ebe7;margin-top:10px}}summary{{cursor:pointer;p
 <p><span class="badge {'pass' if report['status']=='passed' else 'fail'}">{html.escape(report['status'].title())}</span> · {html.escape(report['model'])} · {report['concurrency']} workers · fault: {html.escape(report['fault'])}</p></header>
 <div class="stats"><div class="stat"><strong>{passed}/{len(episodes)}</strong><span>Episodes passed</span></div><div class="stat"><strong>{median:.1f}s</strong><span>Median episode · n={len(episodes)}</span></div><div class="stat"><strong>{sum(e['tool_calls'] for e in episodes)}</strong><span>Executed tool calls</span></div><div class="stat"><strong>{usage.get('tokens',0):,}</strong><span>Model tokens · {usage.get('model_calls',0)} calls</span></div></div>
 <div class="notice">{'Real GPT‑4.1 tool decisions with synthetic data.' if report['mode']=='azure' else 'Deterministic replay: tools execute, but no model is called.'} Human approvals are performed by a separate synthetic test actor. External effects: zero.</div>
-<div class="grid">{''.join(cards)}</div><section class="panel"><h2>Workflow coverage</h2><p class="meta">Agent episodes and existing application contract suites are separate evidence levels. An unrun workflow stays visible.</p><div class="table-scroll"><table><thead><tr><th>Workflow</th><th>Agent passes / runs</th><th>Application contracts</th></tr></thead><tbody>{coverage}</tbody></table></div></section>
+{performance}<div class="grid">{''.join(cards)}</div><section class="panel"><h2>Workflow coverage</h2><p class="meta">Agent episodes and existing application contract suites are separate evidence levels. An unrun workflow stays visible.</p><div class="table-scroll"><table><thead><tr><th>Workflow</th><th>Agent passes / runs</th><th>Application contracts</th></tr></thead><tbody>{coverage}</tbody></table></div></section>
 <section class="panel"><details><summary>Execution timeline · {len(events)} events (latest 300 shown)</summary><div class="table-scroll"><table><thead><tr><th>Time</th><th>Episode</th><th>Actor</th><th>Step</th><th>Result</th></tr></thead><tbody>{timeline}</tbody></table></div></details><details><summary>Scope and evidence limits</summary><ul>{limits}</ul></details></section>
 <footer>Started {html.escape(report['started_at'])}<br>Source commit {html.escape(report['source']['commit'])}<br>Checked file-set SHA-256 {report['source']['source_sha256']}<br>Reload this page to see newly saved results. Full data: report.json and events.jsonl in the run directory.</footer></main></body></html>'''
     temporary = root / "report.next.html"
