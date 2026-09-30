@@ -1,0 +1,37 @@
+import {test,expect} from '@playwright/test';
+const address=process.env.LAB_CLINICIAN_URL;
+test('clinician fixture supports actual note UI and isolates each browser tab',async({page,context},info)=>{
+  test.skip(!address,'Set LAB_CLINICIAN_URL to the isolated clinician fixture.');
+  const url=new URL(address!);expect(url.hostname).toBe('127.0.0.1');expect(url.port).toBe('5188');
+  const external:string[]=[];const errors:string[]=[];
+  page.on('pageerror',error=>errors.push(error.message));
+  await context.route('**/*',route=>{if(new URL(route.request().url()).origin!==url.origin){external.push(route.request().url());return route.abort();}return route.continue();});
+  const open=async()=>{await page.getByRole('button',{name:/^Choose an encounter/}).click();await page.getByRole('button',{name:'Jordan Cypress · synthetic visit Open saved notes',exact:true}).click();};
+  await page.goto(url.href);await open();
+  // The component has separate phone tabs; select the visible notebook control.
+  if(info.project.name==='phone')await page.getByRole('button',{name:'Notebook',exact:true}).click();
+  await page.getByLabel('Jotted notes',{exact:true}).fill('Synthetic tester: ask Jordan about the medication list.');
+  await page.getByRole('button',{name:'Save notebook revision',exact:true}).click();
+  await expect(page.getByText('Saved revision 6.',{exact:true})).toBeVisible();
+  await page.reload();await open();
+  if(info.project.name==='phone')await page.getByRole('button',{name:'Notebook',exact:true}).click();
+  await expect(page.getByLabel('Jotted notes',{exact:true})).toHaveValue('Synthetic tester: ask Jordan about the medication list.');
+  if(info.project.name==='phone')await page.getByRole('button',{name:'Conversation',exact:true}).click();
+  await page.getByRole('button',{name:'Open Session Prep',exact:true}).click();
+  await expect(page.getByRole('listitem').filter({hasText:'Contact consent is undocumented. Confirm before outreach.'})).toBeVisible();
+  await page.getByRole('button',{name:'Review',exact:true}).click();
+  await page.getByRole('button',{name:'Use latest Scribe draft',exact:true}).click();
+  await page.getByRole('button',{name:'Save note version',exact:true}).click();
+  await page.getByRole('checkbox',{name:'I reviewed this saved note and its sources.',exact:true}).check();
+  await page.getByRole('button',{name:'Record private review',exact:true}).click();
+  await expect(page.getByText('Reviewed privately',{exact:true})).toBeVisible();
+  await page.getByRole('button',{name:'Work',exact:true}).click();
+  await expect(page.getByRole('button',{name:'View Follow-up draft',exact:true})).toBeVisible();
+  await page.screenshot({path:info.outputPath('clinician-workspace.png')});
+  const other=await context.newPage();await other.goto(url.href);
+  await other.getByRole('button',{name:/^Choose an encounter/}).click();
+  await other.getByRole('button',{name:'Jordan Cypress · synthetic visit Open saved notes',exact:true}).click();
+  if(info.project.name==='phone')await other.getByRole('button',{name:'Notebook',exact:true}).click();
+  await expect(other.getByLabel('Jotted notes',{exact:true})).toHaveValue('');
+  expect(errors).toEqual([]);expect(external).toEqual([]);
+});
