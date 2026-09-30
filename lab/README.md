@@ -207,6 +207,16 @@ needed; that link is removed afterward. Swift outputs stay outside the checkout.
 These checks do not use a microphone, require an attached phone, or prove native
 OS permissions, meeting-app routing, speech accuracy, or real-time endurance.
 
+`--capture-stress-checks` includes the normal recorder tier and adds full one-hour
+generated PCM in both configured modes, twenty-minute offline recovery after
+reopening encrypted storage, a lost upload receipt, and missing/duplicate chunks.
+It also runs the native engine's three-hour generated PCM/encryption/lease tests,
+with route, background and storage interruptions. Allow about 15 minutes.
+The configured bridge remains bounded to one hour; the owned native engine is
+tested separately to three hours. These use accelerated clocks, not three hours
+of physical recording. Reports count executed tests separately from skipped tests,
+and include both XCTest and Swift Testing results.
+
 Every report distinguishes scripted replay, real model work, synthetic human
 decisions, adapter requests and recorder qualification. Fault results, including
 failed attempts, are retained rather than reclassified by text rescoring.
