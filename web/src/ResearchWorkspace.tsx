@@ -8,7 +8,7 @@ import {ResearchAnalysisPanel,type ResearchAnalysisAccess} from './ResearchAnaly
 import {validConversation} from './model-work-request';
 import {teamStrip} from './team-setup-request';
 import type {EditorDraft} from './draft-journal';
-import {validateResearchSavedHistory,type ResearchSavedPacket} from './research-contract';
+import {validateResearchSavedHistory,type ResearchSaved,type ResearchSavedPacket} from './research-contract';
 import './research-workspace.css';
 
 const blank=(bot:string):ResearchDraft=>({version:1,bot,topic:'literature',query:'',sources:[],pending:null});
@@ -22,6 +22,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const [review,setReview]=useState<ResearchSearch|null>(null),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
  const [observation,setObservation]=useState<ResearchObservation|null>(null),[selected,setSelected]=useState<string[]>([]),[history,setHistory]=useState<ResearchObservation[]>([]);
  const [historyMore,setHistoryMore]=useState(false),[packets,setPackets]=useState<ResearchSavedPacket[]>([]),[packetsMore,setPacketsMore]=useState(false);
+ const [savedReceipt,setSavedReceipt]=useState<ResearchSaved|null>(null);
  const [replacement,setReplacement]=useState<ResearchPrevious|null>(null),[replaceAcknowledged,setReplaceAcknowledged]=useState(false),[previousResult,setPreviousResult]=useState<ResearchObservation|null>(null);
  const [showSavedChat,setShowSavedChat]=useState(false); // Reserved only for the focused view's explanation; no query forwarding.
  const catalogRequest=useRef<AbortController|null>(null);
@@ -33,6 +34,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const blocked=locked||busy||recovery.blocked,canSearch=enabled&&!blocked&&!draft.pending;
  useUnsavedWork(!!draft.pending||!!draft.query||!!draft.analysis_draft?.question||busy);
  useEffect(()=>{generation.current++;return()=>{generation.current++;operation.current?.abort();};},[identity,workspaceId,bot.address]);
+ useEffect(()=>{setSavedReceipt(null);setObservation(null);setHistory([]);setPackets([]);setHistoryMore(false);setPacketsMore(false);},[identity,workspaceId,bot.address]);
  useEffect(()=>{setReview(null);setConfirmed(false);},[workspaceRevision,bot.team_revision,enabled,locked]);
  function current(n:number,controller:AbortController){return n===generation.current&&!controller.signal.aborted&&live.current.identity===identity&&live.current.workspaceId===workspaceId&&live.current.bot.address===bot.address;}
  function denied(cause:unknown){if(cause instanceof WorkspaceApiError&&[401,403].includes(cause.status))onDenied?.(cause);}
@@ -64,7 +66,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
    }else{
     const raw=await (resolve?port.resolveSave:port.save)(identity,workspaceId,pending.run_id,pending.request,controller.signal);
     const result=await validateResearchSaved(raw,workspaceId,pending.run_id,pending.request);if(!current(n,controller))return;
-    const next={...retained,pending:null,saved_packet:{entry_id:result.entry_id,entry_revision:result.entry_revision,run_id:result.run_id,save_request_sha256:result.request_sha256},analysis_draft:{question:retained.analysis_draft?.question??'',selected:false}};await recovery.commit(snapshot(next));if(!current(n,controller))return;setDraft(next);setSelected([]);setMessage(`Selected excerpts saved as encounter evidence · revision ${result.entry_revision}. Clinical review and any follow-up remain separate.`);onChanged?.(result.entry_revision);
+    const next={...retained,pending:null,saved_packet:{entry_id:result.entry_id,entry_revision:result.entry_revision,run_id:result.run_id,save_request_sha256:result.request_sha256},analysis_draft:{question:retained.analysis_draft?.question??'',selected:false}};await recovery.commit(snapshot(next));if(!current(n,controller))return;setDraft(next);setSavedReceipt(result);setSelected([]);setMessage(`Selected excerpts saved as encounter evidence · revision ${result.entry_revision}. Clinical review and any follow-up remain separate.`);onChanged?.(result.entry_revision);
    }
   }catch(cause){if(current(n,controller)){setDraft(retained);if(resolve&&pending.kind==='search'&&cause instanceof WorkspaceApiError&&cause.code==='research_not_found'){setReplacement({request:pending.request,outcome:'not_found',observed_at:new Date().toISOString()});setReplaceAcknowledged(false);}setMessage(resolve?'A saved result could not be confirmed. The exact request remains on this device; checking does not resend it.':'The result could not be confirmed. The exact request is retained; check its saved result before continuing.');denied(cause);}}
   finally{if(current(n,controller)){inFlight.current=false;setBusy(false);}if(operation.current===controller)operation.current=null;}
@@ -110,8 +112,28 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  function selectPacket(packet:ResearchSavedPacket){
   if(blocked||draft.pending)return;
   const saved=packet.saved;
+  setSavedReceipt(saved);
   setDraft(value=>({...value,saved_packet:{entry_id:saved.entry_id,entry_revision:saved.entry_revision,run_id:saved.run_id,save_request_sha256:saved.request_sha256},analysis_draft:{question:value.analysis_draft?.question??'',selected:false}}));
-  setMessage('Saved packet selected. Review the exact packet and confirm it before requesting analysis.');
+  setMessage('Saved packet selected. Review all retained source details before requesting analysis.');
+ }
+ const analysisSaved=savedReceipt?.entry_id===draft.saved_packet?.entry_id?savedReceipt:packets.find(packet=>packet.saved.entry_id===draft.saved_packet?.entry_id)?.saved??null;
+ const analysisRun=observation?.run_id===draft.saved_packet?.run_id?observation:history.find(run=>run.run_id===draft.saved_packet?.run_id)??null;
+ async function loadAnalysisSources(){
+  if(blocked||inFlight.current||!draft.saved_packet)return;
+  const anchor=draft.saved_packet,controller=new AbortController(),n=generation.current;operation.current=controller;inFlight.current=true;setBusy(true);setMessage('');
+  try{
+   // Two bounded reads of retained history, never a new public lookup or save.
+   const [savedPage,runPage]=await Promise.all([
+    port.savedHistory(identity,workspaceId,bot.address,controller.signal).then(value=>validateResearchSavedHistory(value,workspaceId,bot.address)),
+    port.history(identity,workspaceId,bot.address,controller.signal).then(value=>validateResearchHistory(value,workspaceId,bot.address)),
+   ]);
+   if(!current(n,controller))return;
+   setPackets(savedPage.packets);setPacketsMore(savedPage.packets.length===5);setHistory(runPage.runs);setHistoryMore(runPage.runs.length===5);
+   const receipt=savedPage.packets.find(packet=>packet.saved.entry_id===anchor.entry_id)?.saved??null;
+   setSavedReceipt(receipt);
+   if(!receipt||!runPage.runs.some(run=>run.run_id===anchor.run_id))setMessage('This packet is older. Load older packets or lookups in saved research history below to find its retained details.');
+  }catch(cause){if(current(n,controller)){setMessage('Saved source details could not be verified. Your question and saved packet remain available.');denied(cause);}}
+  finally{if(current(n,controller)){inFlight.current=false;setBusy(false);}if(operation.current===controller)operation.current=null;}
  }
  function saveSelected(){if(!canSearch||!observation||!selected.length||selected.length>5)return;void execute({kind:'save',run_id:observation.run_id,request:{contract_version:1,idempotency_key:crypto.randomUUID(),expected_revision:workspaceRevision,source_hashes:[...selected]}});}
  async function submitAnalysis(body:ConversationInput){
@@ -161,6 +183,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
   {draft.previous_request&&<details className="research-history"><summary>Previous request retained</summary><p>{draft.previous_request.request.query}</p><p className="team-fine">Its outcome was {draft.previous_request.outcome==='not_found'?'not found when checked':'interrupted when checked'}. This does not confirm that a prior upstream request stopped.</p><button disabled={blocked} onClick={()=>void checkPrevious()}>Check previous result</button>{previousResult&&<><p>{stateLabel[previousResult.state]}</p><ul>{previousResult.results.map(result=><li key={result.sha256}>{result.title}</li>)}</ul></>}</details>}
   {busy&&<p role="status">Checking research…</p>}{message&&<p role="status" className="research-status">{message}</p>}
   {analysis&&draft.saved_packet&&<ResearchAnalysisPanel access={analysis} packet={draft.saved_packet} draft={draft.analysis_draft??{question:'',selected:false}}
+   run={analysisRun} saved={analysisSaved} onLoadSources={()=>void loadAnalysisSources()}
    bot={bot.address} teamRevision={bot.team_revision} enabled={enabled} locked={blocked||!!draft.pending}
    onEdit={next=>{if(!blocked&&!draft.pending)setDraft(value=>({...value,analysis_draft:next}));}} onSubmit={submitAnalysis}
    onSmaller={()=>{setSelected([]);setMessage('Choose fewer excerpts from the lookup below, or open saved research history first. Save the smaller selection as a new packet before requesting analysis.');}}/>}

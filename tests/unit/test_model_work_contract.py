@@ -319,7 +319,9 @@ def test_chief_recipient_inventory_and_output_limit_are_independent():
     from cosmas_os.ports.bot_capabilities import ModelCallFailure
 
     recipients = tuple(f"10000000-0000-4000-8000-{n:012d}" for n in range(11))
-    value = context(role="chief", handoff_roles=recipients, handoff_limit=1)
+    value = context(role="chief", handoff_roles=recipients, handoff_limit=1,
+        handoff_targets=tuple({"address": address, "role": "custom", "name": "Draft partner", "job_focus": "Prepare drafts"}
+                              for address in recipients))
     calls = []
 
     def respond(request):
@@ -329,7 +331,7 @@ def test_chief_recipient_inventory_and_output_limit_are_independent():
             200,
             json=completion(
                 source_ids=[],
-                handoffs=[{"role": recipients[-1], "brief": "Review the saved preparation."}],
+                handoffs=[{"role": recipients[-1], "intended_role": "custom", "brief": "Review the saved preparation."}],
             ),
         )
 
@@ -346,7 +348,7 @@ def test_chief_recipient_inventory_and_output_limit_are_independent():
             json=completion(
                 source_ids=[],
                 handoffs=[
-                    {"role": address, "brief": "Review the saved preparation."}
+                    {"role": address, "intended_role": "custom", "brief": "Review the saved preparation."}
                     for address in recipients[:2]
                 ],
             ),

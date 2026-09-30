@@ -72,6 +72,13 @@ def plain(value, *, limit=3001):
     return " ".join(cleaned.split())[:limit]
 
 
+def trial_plain(value, *, limit=3001):
+    """Registry Markdown is quoted text; angle comparisons are not HTML tags."""
+    cleaned = _ENTITY.sub(lambda match: html.unescape(match[0]), text(value))
+    cleaned = re.sub(r"\\([<>])", r"\1", cleaned)
+    return " ".join(cleaned.split())[:limit]
+
+
 def count(value, *, decimal_string=False):
     """Publisher counts must not coerce booleans, fractions or missing values."""
     if decimal_string:
@@ -94,12 +101,13 @@ def result_scope(total, rows, *, more=False):
 
 def record(source, query, response_hash, *, identity, title, url, excerpt="", version=None,
            updated=None, fields=(), scope="unknown", attribution=None):
-    raw_title, raw_excerpt = plain(title, limit=501), plain(excerpt, limit=2501)
+    normalize = trial_plain if source == "clinical_trials" else plain
+    raw_title, raw_excerpt = normalize(title, limit=501), normalize(excerpt, limit=2501)
     if not raw_title or not str(identity):
         raise ResearchUnavailable("invalid_source_response")
     selected, remaining, shortened = [], 3000, len(raw_title) > 500 or len(raw_excerpt) > 2500
     for label, value in fields:
-        cleaned = plain(value, limit=751)
+        cleaned = normalize(value, limit=751)
         if not cleaned:
             continue
         cap = min(750, remaining)

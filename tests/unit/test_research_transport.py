@@ -240,6 +240,51 @@ def trial():
         "statusModule": {}}}], "totalCount": 1}
 
 
+@pytest.mark.parametrize("criteria,expected", [
+    ("Inclusion criteria:\n* LVEF <40%\n* Age >75 by time of infusion",
+     "Inclusion criteria: * LVEF <40% * Age >75 by time of infusion"),
+    (r"LVEF \< 40%; screening \< 2 weeks; age \>75; Hgb A1c \> 8.5%",
+     "LVEF < 40%; screening < 2 weeks; age >75; Hgb A1c > 8.5%"),
+    (r"LVEF \<=40%; age \>=75", "LVEF <=40%; age >=75"),
+    ("LVEF &lt;40%; age &gt;75; measurement ≤40 or ≥75",
+     "LVEF <40%; age >75; measurement ≤40 or ≥75"),
+    (r"Invented marker <reference> and age >75; literal \* symbol",
+     r"Invented marker <reference> and age >75; literal \* symbol"),
+])
+def test_trial_markdown_comparisons_preserve_complete_eligibility(criteria, expected):
+    value = trial()
+    value["studies"][0]["protocolSection"]["eligibilityModule"] = {"eligibilityCriteria": criteria}
+    row = lookup("clinical_trials", value)[0]
+    assert row["excerpt"] == expected and row["truncated"] is False
+    assert row["raw_response_sha256"] == hashlib.sha256(httpx.Response(200, json=value).content).hexdigest()
+    assert row["sha256"] == research_digest({key: item for key, item in row.items() if key != "sha256"})
+
+
+def test_trial_plaintext_comparisons_also_survive_titles_and_summary_fields():
+    value = trial()
+    protocol = value["studies"][0]["protocolSection"]
+    protocol["identificationModule"]["briefTitle"] = r"Invented LVEF \<40% and age \>75 study"
+    protocol["descriptionModule"] = {"briefSummary": r"Compare LVEF \<40% with LVEF \>50%."}
+    row = lookup("clinical_trials", value)[0]
+    assert row["title"] == "Invented LVEF <40% and age >75 study"
+    assert row["fields"] == [{"label": "Study summary", "text": "Compare LVEF <40% with LVEF >50%."}]
+
+
+def test_trial_comparison_normalization_keeps_existing_excerpt_and_field_limits():
+    value = trial()
+    criteria = r"LVEF \<40%; age \>75. " * 200
+    plain = " ".join(("LVEF <40%; age >75. " * 200).split())
+    value["studies"][0]["protocolSection"].update({
+        "eligibilityModule": {"eligibilityCriteria": criteria},
+        "descriptionModule": {"briefSummary": criteria},
+    })
+    row = lookup("clinical_trials", value)[0]
+    assert row["excerpt"] == plain[:2500]
+    assert row["fields"] == [{"label": "Study summary", "text": plain[:750]}]
+    assert row["truncated"] is True
+    assert row["sha256"] == research_digest({key: item for key, item in row.items() if key != "sha256"})
+
+
 @pytest.mark.parametrize("total", [True, False, 1.0, 1.5, "1", -1, 0])
 @pytest.mark.parametrize("source", ["clinical_trials", "openfda"])
 def test_boolean_fractional_or_inconsistent_counts_cannot_claim_completeness(source, total):
