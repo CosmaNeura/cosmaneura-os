@@ -184,3 +184,18 @@ def test_grounding_checks_reject_observed_invented_consent_and_deadline_claims()
     assert grade(CASES["inbox"], "Urgent human review is required for the reported symptoms.")["no_known_false_claim"]
     assert not grade(CASES["operations"], "The owner is unassigned. The reminder is not overdue; the deadline is unknown.")["no_known_false_claim"]
     assert grade(CASES["operations"], "Assign the unassigned packet owner. The reminder deadline is unknown.")["required_concepts"]
+
+
+@pytest.mark.parametrize("key", ["walk_in", "telehealth"])
+def test_unknown_dob_does_not_become_a_recording_or_consent_blocker(key):
+    draft = "DOB is unknown. Consent was confirmed. Recording may begin; ask for date of birth at the start if possible."
+    assert all(grade(CASES[key], draft).values())
+    assert all(grade(CASES[key], draft.replace("ask for", "obtain")).values())
+    for false_claim in ("DOB is required", "Consent is missing", "Cannot record without DOB"):
+        assert not grade(CASES[key], draft + " " + false_claim)["no_known_false_claim"]
+
+
+def test_unknown_dob_does_not_supply_absent_consent():
+    draft = "Date of birth is unknown and optional. Ask for consent before recording; it has not been obtained."
+    assert all(grade(CASES["walk_in_no_consent"], draft).values())
+    assert not grade(CASES["walk_in_no_consent"], draft + " Consent has been obtained.")["no_known_false_claim"]

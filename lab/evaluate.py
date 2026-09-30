@@ -8,8 +8,10 @@ from pathlib import Path
 
 from lab.cases import CASES, Case
 
-VERSION = "synthetic-outcome-heuristics.v3"
+VERSION = "synthetic-outcome-heuristics.v5"
 ALIASES = {
+    "ask": r"\bask\b|\bobtain\b|\brequest\b",
+    "date_of_birth": r"\bDOB\b|date[ _]of[ _]birth|birth date",
     "unassigned": r"\bunassigned\b|\bunowned\b|no assigned owner|missing.{0,20}owner",
     "missing": r"\bmissing\b|\babsent\b|not (?:provided|supplied|documented|available)",
     "conflict": r"\bconflict\w*\b|\bcontradict\w*\b|inconsistent|disagree",
