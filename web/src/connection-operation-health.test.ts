@@ -34,6 +34,16 @@ it('rejects mismatched accounts, pre-connection timestamps and ungranted reads w
  for(const result of [{...read,account:{email:'other@example.invalid'}},{...read,observed_at:'2026-09-30T09:59:00Z'},{...read,kind:'calendar' as const}])expect(observeConnectionRead(identity,'google',scope,result)).toBe(false);
  expect(connectionHealth(identity,'google').mail.lastSuccessAt).toBeNull();
 });
+it.each([
+ ['mail','Add email access to read recent email.'],
+ ['calendar','Add calendar access to view your week.'],
+] as const)('names the missing %s permission and rejects read proof without that grant',(kind,detail)=>{
+ const identity=owner();observeConnectionStatus(identity,'google',{...status,capabilities:{mail:kind!=='mail',calendar:kind!=='calendar'}});
+ expect(observeConnectionRead(identity,'google',connectionReadScope(identity,'google'),{...read,kind})).toBe(false);
+ const services=connectionServices('google',connectionHealth(identity,'google'));
+ expect(services.find(row=>row.kind===kind)).toMatchObject({label:'Permission needed',detail,tone:'attention',lastSuccessAt:null});
+ expect(services.find(row=>row.kind!==kind)).toMatchObject({label:'Not verified',detail:'Permission granted; a read has not been verified.',tone:'neutral'});
+});
 it('does not grant calendar readiness to legacy Google status or Outlook readiness to Microsoft sign-in',()=>{
  const identity=owner();const {capabilities:_,...legacy}=status;observeConnectionStatus(identity,'google',legacy);observeConnectionStatus(identity,'microsoft',status);
  expect(connectionServices('google',connectionHealth(identity,'google'))[1]).toMatchObject({label:'Not verified',tone:'neutral'});

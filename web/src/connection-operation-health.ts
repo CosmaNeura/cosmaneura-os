@@ -67,7 +67,7 @@ export function connectionServices(provider:PersonalConnection,health:Connection
     let label='Not verified',detail=provider==='microsoft'?'A Microsoft sign-in does not confirm an Outlook mailbox.':'Read once to check this account.',tone:ConnectionService['tone']='neutral';
     if(!health.accountCurrent){label='Needs account check';detail='Check the connected account before reading.';}
     else if(!health.connected){label='Not connected';detail='Connect an account to continue.';}
-    else if(permission===false){label='Permission needed';detail='Add calendar access to view your week.';tone='attention';}
+    else if(permission===false){label='Permission needed';detail=kind==='mail'?'Add email access to read recent email.':'Add calendar access to view your week.';tone='attention';}
     else if(read.latest==='failed'){label='Last read failed';detail=provider==='microsoft'?'Check that this account has Outlook or Exchange. Google-hosted email uses Google Workspace.':'Check Google access, then try this read again.';tone='attention';}
     else if(read.latest==='cancelled'){label='Read cancelled';detail='No result was accepted. Read again when ready.';}
     else if(read.latest==='succeeded'){label='Verified in this session';detail='A bounded read succeeded for this account.';tone='ready';}
