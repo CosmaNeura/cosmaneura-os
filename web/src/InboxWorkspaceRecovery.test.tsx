@@ -92,6 +92,7 @@ it('opens a reviewed Inbox draft in its encounter and retains an interrupted AI 
   await wait(()=>expect(button('Draft a reply')?.matches(':disabled')).toBe(false));await click('Draft a reply');
   await wait(()=>expect(host.querySelector('[aria-label="Reviewed Inbox draft"]'),host.textContent??'').not.toBeNull());
   expect(workspaceApi.ask).not.toHaveBeenCalled();expect(button('Create private draft')?.matches(':disabled')).toBe(true);
+  await wait(()=>expect(host.querySelector<HTMLInputElement>('[aria-label="Reviewed Inbox draft"] input')?.matches(':disabled')).toBe(false));
   const consent=host.querySelector('[aria-label="Reviewed Inbox draft"] input') as HTMLInputElement;
   await act(async()=>consent.click());await click('Create private draft');
   await wait(()=>expect(workspaceApi.ask).toHaveBeenCalledTimes(1));
