@@ -27,6 +27,11 @@ it('preserves status-read failure instead of returning an optimistic badge',asyn
   vi.mocked(googleConnectionRequest).mockRejectedValue(new Error('offline'));
   await expect(readConnectionSummary(identity,'google',new AbortController().signal)).rejects.toThrow('offline');
 });
+it('marks a Gmail-only account as partly connected without reading calendar contents',async()=>{
+ vi.mocked(googleConnectionRequest).mockResolvedValue({state:'connected',account:{label:'Invented',email:'provider@example.invalid'},connected_at:null,capabilities:{mail:true,calendar:false}});
+ expect(await readConnectionSummary(identity,'google',new AbortController().signal)).toMatchObject({label:'Partly connected',tone:'attention',reason:'Email connected. Calendar needs permission.',action:'Add calendar access'});
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status']);
+});
 it('does not mark a practice review as connected or read encounter contents',async()=>{
   vi.mocked(coreConnectionApi.read).mockResolvedValue({connection_status:'review_required'} as never);
   expect(await readConnectionSummary(identity,'core',new AbortController().signal)).toMatchObject({label:'Needs review',tone:'attention'});

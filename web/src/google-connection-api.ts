@@ -7,7 +7,7 @@ import {parseVendorJson} from './vendor-contract';
 export const GOOGLE_CONNECTION_BUILD=WORKSPACE_BUILD&&WORKSPACE_AUTHENTICATED_BUILD&&import.meta.env.VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED==='true';
 export type GoogleAction='status'|'start'|'disconnect'|'mail'|'calendar';
 export type GoogleAccount={label:string;email:string};
-export type GoogleStatus={state:'connected'|'sign_in_required'|'sign_in_pending'|'completing_sign_in';account:GoogleAccount|null;connected_at:string|null};
+export type GoogleStatus={state:'connected'|'sign_in_required'|'sign_in_pending'|'completing_sign_in';account:GoogleAccount|null;connected_at:string|null;capabilities?:{mail:boolean;calendar:boolean}};
 export type GoogleStart={authorization_url:string;expires_at:string};
 export type GoogleMail={id:string;subject:string;sender:string;received_at:string;is_read:boolean};
 export type GoogleEvent={id:string;subject:string;starts_at:string;ends_at:string;all_day:boolean;cancelled:boolean};
@@ -25,8 +25,10 @@ export function validateGoogleResponse(value:unknown,action:GoogleAction):Google
   if(action==='start'&&closed(value,'authorization_url,expires_at')&&validGoogleAuthorizationUrl(value.authorization_url)&&instant(value.expires_at)&&
     Date.parse(value.expires_at)>Date.now()&&Date.parse(value.expires_at)<=Date.now()+610000)return value as GoogleStart;
   if(action==='disconnect'&&closed(value,'state')&&value.state==='disconnected')return {state:'disconnected'};
-  if(action==='status'&&closed(value,'state,account,connected_at')&&['connected','sign_in_required','sign_in_pending','completing_sign_in'].includes(String(value.state))&&
+  if(action==='status'&&(closed(value,'state,account,connected_at')||closed(value,'state,account,connected_at,capabilities'))&&['connected','sign_in_required','sign_in_pending','completing_sign_in'].includes(String(value.state))&&
     (value.account===null||account(value.account))&&(value.connected_at===null||instant(value.connected_at))&&
+    (!('capabilities' in value)||closed(value.capabilities,'mail,calendar')&&typeof value.capabilities.calendar==='boolean'&&
+      (value.state==='connected'?value.capabilities.mail===true:value.capabilities.mail===false&&value.capabilities.calendar===false))&&
     (value.state==='connected'?account(value.account)&&instant(value.connected_at):value.account===null))return value as GoogleStatus;
   if(action==='mail'&&closed(value,'kind,account,items,more,observed_at')&&value.kind==='mail'&&account(value.account)&&
     typeof value.more==='boolean'&&instant(value.observed_at)&&Array.isArray(value.items)&&value.items.length<=10&&
@@ -61,10 +63,14 @@ export async function googleConnectionRequest(identity:AuthenticatedWorkspaceIde
     if(signal?.aborted)abort();check();
     const headers=await wait(workspaceAuthHeaders(identity,base));check();
     headers.set('X-Cosmas-Google-Connection','1');headers.set('Accept','application/json');
-    response=await wait(workspaceFetch(identity,base+'/connections/google/session',{method:'POST',headers,body:JSON.stringify({action}),
+    const send=(includeCapabilities:boolean)=>wait(workspaceFetch(identity,base+'/connections/google/session',{method:'POST',headers,body:JSON.stringify({action,...(includeCapabilities?{include_capabilities:true}:{})}),
       signal:controller.signal,cache:'no-store',credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'}).then(value=>{
       if(controller.signal.aborted){cancel(value.body);throw new WorkspaceApiError(503);}return value;
-    }));check();
+    }));
+    response=await send(action==='status');check();
+    // Older servers reject the opt-in field. Retry only this read, once, within
+    // the original deadline; never replay consent or a provider-content read.
+    if(action==='status'&&response.status===422){cancel(response.body);response=await send(false);check();}
     if(!response)throw new WorkspaceApiError(503);
     if([401,403,404].includes(response.status))throw new WorkspaceApiError(response.status);
     if(![200,409].includes(response.status)||response.redirected||response.headers.has('content-encoding')||

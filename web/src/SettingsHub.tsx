@@ -18,11 +18,11 @@ const titles: Record<Screen, string> = {
 export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost}: {
   open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   teamSummary: string; teamDirty: boolean; onClose: () => void; navigationLocked?: boolean;
-  initialScreen?:'home'|'connections'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
+  initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
-  const [visited, setVisited] = useState<Editor[]>(initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'?[initialScreen]:[]);
+  const [visited, setVisited] = useState<Editor[]>(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
   type Check = {value?:ConnectionSummary; last?:ConnectionSummary; busy:boolean};
   const [directory,setDirectory]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog|null;error:boolean;busy:boolean;checks:Partial<Record<ConnectionId,Check>>}|null>(null);
@@ -80,7 +80,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   },[open,screen,connectionIdentity,refreshCatalog,summaryIds]);
   useEffect(() => { if (!open) setScreen(initialScreen); }, [open,initialScreen]);
   useEffect(() => {
-    if(open){setScreen(initialScreen);if(initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
+    if(open){setScreen(initialScreen);if(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
   }, [initialScreen]);
   useEffect(() => {
     if (!open) return;

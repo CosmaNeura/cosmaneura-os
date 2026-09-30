@@ -43,6 +43,13 @@ membership and exact sealed custody are checked before/after provider I/O and
 again before the content-free calendar-read audit and result disclosure.
 
 Existing Gmail-only credentials remain valid without changing their binding.
+Updated clients opt into status capability flags derived from the existing sealed
+grant, without refreshing tokens or reading provider contents. The connection
+directory identifies Gmail-only accounts as partly connected; the detail screen
+offers Add calendar access while email remains usable. These flags describe
+granted access, not a successful live-read check. Legacy clients receive the
+unchanged status contract. New clients fall back once to legacy status on older
+servers, within the same request deadline, and label Calendar access as unchecked.
 They can still read mail; calendar requests return a specific reconnect instruction
 before any Calendar request is sent. An explicit new Google consent grants calendar
 access. Exact legacy and expanded scope sets are accepted; broader scope sets are

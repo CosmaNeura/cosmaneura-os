@@ -250,10 +250,14 @@ class MicrosoftPersonalConnection:
         )
 
     def status(self, identity):
+        return self._read_status(identity)
+
+    def _read_status(self, identity, *, capabilities=None):
         with self._session() as session:
             account, selected, binding = self._account(session, identity=identity)
             credential = session.get(self.Credential, account.id)
             state = "sign_in_required"
+            private = {}
             if credential and credential.binding_digest == binding and credential.sealed:
                 if credential.status == "ready":
                     private = self._open(credential.sealed, "credential", account.id, binding)
@@ -269,7 +273,7 @@ class MicrosoftPersonalConnection:
             )
             if pending and pending.binding_digest == binding:
                 state = "sign_in_pending" if pending.status == "pending" else "completing_sign_in"
-            return {
+            result = {
                 "state": state,
                 "account": {"label": private["label"], "email": private["email"]}
                 if state == "connected"
@@ -278,6 +282,9 @@ class MicrosoftPersonalConnection:
                 if credential and state == "connected"
                 else None,
             }
+            if capabilities is not None:
+                result["capabilities"] = capabilities(state, private)
+            return result
 
     def start(self, identity):
         with self._session() as session:

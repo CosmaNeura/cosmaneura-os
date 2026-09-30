@@ -4,7 +4,7 @@ import time
 import traceback
 
 from lab.application import Application
-from lab.fax_sandbox import exercise_fax
+from lab.fax_sandbox import FAX_SCENARIOS, exercise_fax
 from lab.mail_sandbox import exercise_mail
 
 
@@ -33,18 +33,19 @@ def run_connectors(app, store, episode):
             outcomes.append(result)
             store.event(episode, "synthetic_provider", "connector_scenario", provider=provider,
                         scenario=result["scenario"], ok=result["passed"], duration_ms=result["duration_ms"])
-    for scenario in ("delivered", "failed", "partial", "lost_reply", "wrong_account"):
-        tick = time.monotonic()
-        try:
-            isolated = Application(app.engine, app.case, app.event)
-            result = exercise_fax(isolated, store.root / episode / scenario, scenario)
-        except Exception as error:
-            result = {"provider": "documo", "scenario": scenario, "passed": False,
-                      "checks": {"scenario_completed": False}, "error": type(error).__name__, "location": failure_location(error)}
-        result["duration_ms"] = round((time.monotonic() - tick) * 1000)
-        outcomes.append(result)
-        store.event(episode, "synthetic_provider", "connector_scenario", provider="documo",
-                    scenario=scenario, ok=result["passed"], duration_ms=result["duration_ms"])
+    for provider, scenarios in FAX_SCENARIOS.items():
+        for scenario in scenarios:
+            tick = time.monotonic()
+            try:
+                isolated = Application(app.engine, app.case, app.event)
+                result = exercise_fax(isolated, store.root / episode / provider / scenario, scenario, provider=provider)
+            except Exception as error:
+                result = {"provider": provider, "scenario": scenario, "passed": False,
+                          "checks": {"scenario_completed": False}, "error": type(error).__name__, "location": failure_location(error)}
+            result["duration_ms"] = round((time.monotonic() - tick) * 1000)
+            outcomes.append(result)
+            store.event(episode, "synthetic_provider", "connector_scenario", provider=provider,
+                        scenario=scenario, ok=result["passed"], duration_ms=result["duration_ms"])
     checks = {r["provider"] + "_" + r["scenario"]: r["passed"] for r in outcomes}
     return {"id": episode, "case": "connectors", "title": "Email, calendar and fax fault laboratory",
             "passed": all(checks.values()), "checks": checks, "artifacts": [], "tool_calls": 0,

@@ -26,6 +26,7 @@ HEADERS = {
 
 class GoogleCommand(ProtectedModel):
     action: Literal["status", "start", "disconnect", "mail", "calendar"]
+    include_capabilities: bool = False
 
 
 class GoogleConnectionBoundary:
@@ -70,11 +71,16 @@ def router(*, runtime, identity_dependency, workspace_gate):
         ):
             raise ws.WorkspaceError("invalid_google_connection_request", 422)
         command = await read_capture_request(request, GoogleCommand, maximum_bytes=1024)
+        if command.action != "status" and "include_capabilities" in command.model_fields_set:
+            raise ws.WorkspaceError("invalid_google_connection_request", 422)
         service = runtime()
         if service is None:
             raise ws.WorkspaceError("google_connection_unavailable", 404)
         try:
-            result = await run_in_threadpool(getattr(service, command.action), identity)
+            if command.action == "status" and command.include_capabilities:
+                result = await run_in_threadpool(service.status, identity, include_capabilities=True)
+            else:
+                result = await run_in_threadpool(getattr(service, command.action), identity)
         except ws.WorkspaceError:
             raise
         except Exception:

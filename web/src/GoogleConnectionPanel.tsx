@@ -54,8 +54,9 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
           const checked=await googleConnectionRequest(identity,'status',controller.signal);
           if(epoch.current!==current||owner.current!==identity)return;
           if('state' in checked&&checked.state!=='disconnected'){
-            setData({owner:identity,status:checked,start:null,view:null});
-            setMessage(checked.state==='connected'?(needsCalendar?'Your Google account is connected. Choose Reconnect Google and allow calendar access to view your week.':
+            const calendarMissing=needsCalendar&&checked.state==='connected'&&checked.capabilities?.calendar!==true;
+            setData({owner:identity,status:calendarMissing&&!checked.capabilities?{...checked,capabilities:{mail:true,calendar:false}}:checked,start:null,view:null});
+            setMessage(checked.state==='connected'?(calendarMissing?'Email is connected. Choose Add calendar access to view your week.':
               content+' could not be loaded. Your account is still connected. Try again.'):
               checked.state==='sign_in_required'?'Connect your Google account again to continue.':'Finish Google sign-in, then try again.');
             return;
@@ -101,6 +102,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     if(native){navigationPending.current=requestId;setOpening(true);}
   };
   const blocked=busy||opening;
+  const calendarNeedsPermission=status?.state==='connected'&&status.capabilities?.calendar===false;
   return <section className="core-connection-setup microsoft-connection" aria-label="Google email and calendar">
     <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>Connect Google Workspace</h2><p>Email and the week ahead.</p></div></header>
     <p>Connect your Google account to see Gmail inbox summaries and your primary calendar here. Google will ask you to approve access.</p>
@@ -110,14 +112,15 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     {status&&<div className="connection-practice">
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Google connected.':status.state==='completing_sign_in'?'Completing Google sign-in…':status.state==='sign_in_pending'?'Google sign-in is ready to continue.':'Connect your Google account to continue.'}</p>
+      {status.state==='connected'&&<p aria-label="Google access">Email access ready. Calendar: {status.capabilities?.calendar===true?'access ready':calendarNeedsPermission?'needs permission':'access not checked'}.</p>}
     </div>}
-    {(!status||status.state!=='completing_sign_in')&&!start&&<button className="team-primary" disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>manual('start')}>{status?.state==='connected'?'Reconnect Google':'Connect with Google'}</button>}
+    {(!status||status.state!=='completing_sign_in')&&!start&&<button className="team-primary" disabled={blocked||!nativeReady||unavailableFor===identity} onClick={()=>manual('start')}>{calendarNeedsPermission?'Add calendar access':status?.state==='connected'?'Reconnect Google':'Connect with Google'}</button>}
     {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||!nativeReady}
       data-google-connection={blocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
       onClick={begin}>{opening?'Opening Google…':'Continue with Google'}</button>:
       <a className="team-primary microsoft-continue" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Google</a>}</p>}
     {!nativeReady&&<p>Google connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
-    {status?.state==='connected'&&<div className="microsoft-actions"><button disabled={blocked} onClick={()=>manual('mail')}>Read recent email</button><button disabled={blocked} onClick={()=>manual('calendar')}>View next 7 days</button></div>}
+    {status?.state==='connected'&&<div className="microsoft-actions"><button disabled={blocked} onClick={()=>manual('mail')}>Read recent email</button>{!calendarNeedsPermission&&<button disabled={blocked} onClick={()=>manual('calendar')}>View next 7 days</button>}</div>}
     {(start||status&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>manual('disconnect')}>{status?.state==='connected'?'Disconnect Google':'Cancel Google connection'}</button>}
     {view?.kind==='mail'&&<section aria-label="Gmail inbox summaries">
       <h3>Inbox summaries</h3><p>{view.account.email} · Checked {when(view.observed_at)}</p>

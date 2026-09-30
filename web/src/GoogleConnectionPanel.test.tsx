@@ -17,14 +17,33 @@ const mount=(identity:AuthenticatedWorkspaceIdentity=browser,onAuthenticationLos
 const click=(label:string)=>act(async()=>{const button=[...host.querySelectorAll('button')].find(b=>b.textContent===label);expect(button).toBeDefined();button!.click();});
 it('shows calendar dates and explains missing consent without replaying the read',async()=>{
  vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected)
-  .mockRejectedValueOnce(new WorkspaceApiError(409,'google_calendar_consent_required')).mockResolvedValueOnce(connected)
+  .mockRejectedValueOnce(new WorkspaceApiError(409,'google_calendar_consent_required')).mockResolvedValueOnce(connected);
+ const denied=vi.fn();await mount(browser,denied);await click('View next 7 days');
+ expect(host.textContent).toContain('Choose Add calendar access');expect(denied).not.toHaveBeenCalled();
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','calendar','status']);
+ expect(host.textContent).not.toContain('View next 7 days');
+ vi.mocked(googleConnectionRequest).mockReset().mockResolvedValueOnce({...connected,capabilities:{mail:true,calendar:true}})
   .mockResolvedValueOnce({kind:'calendar',account:connected.account,more:false,observed_at:new Date().toISOString(),items:[
    {id:'invented',subject:'Invented all-day visit',starts_at:'2026-11-01',ends_at:'2026-11-03',all_day:true,cancelled:false}]});
- const denied=vi.fn();await mount(browser,denied);await click('View next 7 days');
- expect(host.textContent).toContain('Choose Reconnect Google and allow calendar access');expect(denied).not.toHaveBeenCalled();
- expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','calendar','status']);
+ await click('Check Google connection');
  await click('View next 7 days');expect(host.textContent).toContain('Invented all-day visit');expect(host.textContent).toContain('Nov 1, 2026');
  expect(host.textContent).toContain('All day');
+});
+it('uses the latest capability check if Calendar permission changed during recovery',async()=>{
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected)
+  .mockRejectedValueOnce(new WorkspaceApiError(409,'google_calendar_consent_required'))
+  .mockResolvedValueOnce({...connected,capabilities:{mail:true,calendar:true}});
+ await mount();await click('View next 7 days');
+ expect(host.textContent).toContain('Calendar: access ready');expect(host.textContent).toContain('View next 7 days');
+ expect(host.textContent).not.toContain('Add calendar access');
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','calendar','status']);
+});
+it('shows missing Calendar permission before a failed read and preserves email access',async()=>{
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce({...connected,capabilities:{mail:true,calendar:false}}).mockResolvedValueOnce(inbox).mockResolvedValueOnce(link);
+ await mount();expect(host.textContent).toContain('Calendar: needs permission');expect(host.textContent).not.toContain('View next 7 days');
+ await click('Read recent email');expect(host.textContent).toContain('Invented message subject');
+ await click('Add calendar access');expect(host.querySelector('a')?.textContent).toBe('Continue with Google');
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','mail','start']);
 });
 it('connects, checks on browser return, reads inbox and disconnects without browser persistence',async()=>{
  vi.mocked(googleConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link).mockResolvedValueOnce(connected).mockResolvedValueOnce(inbox).mockResolvedValueOnce({state:'disconnected'}).mockResolvedValueOnce(link);

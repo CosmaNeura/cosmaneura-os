@@ -6,7 +6,7 @@ import pytest
 from lab.application import Application
 from lab.cases import CLINIC
 from lab.clinic import ClinicWorld, run_clinic
-from lab.fax_sandbox import exercise_fax, synthetic_pdf
+from lab.fax_sandbox import FAX_SCENARIOS, RECOVERY_SCENARIOS, exercise_fax, synthetic_pdf
 from lab.mail_sandbox import MailSandbox, exercise_mail
 from lab.store import Store
 from sqlalchemy import func, select
@@ -46,12 +46,18 @@ def test_calendar_rejects_unrecognized_timezone_without_disclosure(clinic):
     assert result["checks"]["no_automatic_request_retry"]
 
 
-@pytest.mark.parametrize("scenario", ["delivered", "failed", "partial", "lost_reply", "wrong_account"])
-def test_real_f8_fax_receipts_survive_repeat_and_remain_honest(clinic, tmp_path, scenario):
-    result = exercise_fax(clinic[0], tmp_path / "fax", scenario)
+@pytest.mark.parametrize("provider,scenario", [(provider, scenario)
+    for provider, scenarios in FAX_SCENARIOS.items() for scenario in scenarios])
+def test_real_f8_fax_receipts_survive_repeat_and_remain_honest(clinic, tmp_path, provider, scenario):
+    result = exercise_fax(clinic[0], tmp_path / "fax", scenario, provider=provider)
     assert result["passed"], result
-    assert sum(call["method"] == "POST" for call in result["requests"]) == 1
+    assert sum(call["action"] == "submit" for call in result["requests"]) == 1
     assert result["ticket"]["state"] == ("closed" if scenario == "delivered" else "approved")
+    assert result["checks"]["delivery_evidence_survives_database_reopen"]
+    if scenario in RECOVERY_SCENARIOS:
+        assert [call["action"] for call in result["requests"]] == ["submit", "read", "read"]
+        assert result["ticket"]["transport"] == "delivered"
+        assert result["checks"]["no_automatic_status_retry"]
     assert "invented-lab-secret" not in json.dumps(result)
 
 

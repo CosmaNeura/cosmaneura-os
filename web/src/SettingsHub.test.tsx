@@ -11,6 +11,17 @@ async function click(text: string) {
   const button = visibleButtons().find(button => button.textContent?.includes(text));
   expect(button, `Visible button: ${text}`).toBeDefined(); await act(async () => button!.click());
 }
+it('opens appointment discovery directly and retains it after returning from connections', async () => {
+  const mounted = vi.fn();
+  function Core() { useEffect(() => { mounted(); }, []); return <button>View appointments</button>; }
+  await act(async () => root.render(<SettingsHub open initialScreen="core" core={<Core/>} team={<p>Team</p>}
+    teamSummary="5 coworkers" teamDirty={false} onClose={() => {}}/>));
+  expect(visibleButtons().some(button => button.textContent === 'View appointments')).toBe(true);
+  await click('All connections'); await click('Cosmaneura account');
+  expect(visibleButtons().some(button => button.textContent === 'View appointments')).toBe(true);
+  expect(mounted).toHaveBeenCalledOnce();
+});
+
 it('starts with two choices and loads only the selected editor', async () => {
   const mounted = vi.fn();
   function Editor({name}: {name:string}) { useEffect(() => { mounted(name); }, [name]); return <label>{name}<input /></label>; }

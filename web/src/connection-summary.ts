@@ -1,5 +1,5 @@
 import {coreConnectionApi} from './core-connection-api';
-import {googleConnectionRequest} from './google-connection-api';
+import {googleConnectionRequest,type GoogleStatus} from './google-connection-api';
 import {microsoftConnectionRequest} from './microsoft-connection-api';
 import {schedulingLoginRequest} from './scheduling-login-api';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
@@ -23,6 +23,8 @@ export async function readConnectionSummary(identity:AuthenticatedWorkspaceIdent
     :id==='scheduling'?await schedulingLoginRequest(identity,'status',signal):null;
   if(!result||!('state'in result)||result.state==='disconnected')throw new WorkspaceApiError(502);
   const checkedAt=Date.now();
+  if(id==='google'&&result.state==='connected'&&(result as GoogleStatus).capabilities?.calendar===false)
+    return {label:'Partly connected',reason:'Email connected. Calendar needs permission.',action:'Add calendar access',tone:'attention',checkedAt};
   if(result.state==='connected')return {label:'Connected',reason:'account'in result?result.account?.email||'Account connected.':'label'in result?result.label:'Account connected.',action:'View connection',tone:'ready',checkedAt};
   if(result.state==='completing_sign_in')return {label:'Finishing sign-in',reason:'The account connection is being verified.',action:'Check sign-in',tone:'neutral',checkedAt};
   if(result.state==='sign_in_pending')return {label:'Sign-in pending',reason:'Continue sign-in, then return to check the result.',action:'Continue setup',tone:'attention',checkedAt};
