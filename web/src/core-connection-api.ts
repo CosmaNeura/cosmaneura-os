@@ -13,8 +13,8 @@ const invalid=():never=>{throw new WorkspaceApiError(502);};
 const closed=(v:unknown,keys:string):v is Record<string,unknown>=>vendorObject(v)&&Object.keys(v).sort().join(',')===keys;
 const errorCodes:Readonly<Record<number,readonly string[]>>={
   401:['core_connection_unavailable','core_connection_access_denied'],403:['core_connection_unavailable','core_connection_access_denied'],404:['core_connection_unavailable'],405:['core_connection_unavailable'],
-  409:['core_connection_required','core_connection_review_required','core_connection_changed'],422:['invalid_core_connection_request'],
-  426:['core_connection_contract_required','workspace_client_update_required','core_connection_unavailable'],503:['core_connection_unavailable'],504:['core_connection_unavailable'],
+  409:['core_connection_required','core_connection_review_required','core_connection_changed','core_existing_recording_conflict'],422:['invalid_core_connection_request'],
+  426:['core_connection_contract_required','workspace_client_update_required','core_connection_unavailable'],503:['core_connection_unavailable','core_scribe_encounter_unavailable'],504:['core_connection_unavailable'],
 };
 function serverError(status:number,value:unknown):WorkspaceApiError{
   if(!closed(value,'detail')||typeof value.detail!=='string'||!errorCodes[status]?.includes(value.detail))return invalid();

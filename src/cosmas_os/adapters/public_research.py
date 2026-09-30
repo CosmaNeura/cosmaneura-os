@@ -121,6 +121,28 @@ def record(source, query, response_hash, *, identity, title, url, excerpt="", ve
     return SourceRecord.model_validate(result).model_dump(mode="json")
 
 
+def trial_items(rows, fields):
+    """Keep registry-supplied item boundaries; missing details make no availability claim."""
+    if type(rows) is not list:
+        raise ValueError("invalid trial detail list")
+    output = []
+    for row in rows:
+        if type(row) is not dict:
+            raise ValueError("invalid trial detail")
+        parts = []
+        for key, label in fields:
+            value = row.get(key)
+            if value is None:
+                continue
+            if not isinstance(value, str):
+                raise ValueError("invalid trial detail text")
+            if value.strip():
+                parts.append(label + ": " + value)
+        if parts:
+            output.append("; ".join(parts))
+    return " | ".join(output)
+
+
 def _unique(pairs):
     result = {}
     for key, value in pairs:
@@ -392,11 +414,21 @@ class PublicResearch:
                 raise ValueError()
             status = protocol["statusModule"]
             eligibility = protocol.get("eligibilityModule", {})
+            phases = protocol.get("designModule", {}).get("phases", [])
+            if type(phases) is not list or any(not isinstance(phase, str) for phase in phases):
+                raise ValueError("invalid trial phases")
+            interventions = trial_items(protocol.get("armsInterventionsModule", {}).get("interventions", []),
+                                        (("type", "Type"), ("name", "Name")))
+            locations = trial_items(protocol.get("contactsLocationsModule", {}).get("locations", []),
+                                    (("facility", "Facility"), ("city", "City"), ("state", "State"),
+                                     ("country", "Country"), ("status", "Site status")))
             output.append(record("clinical_trials", query, digest, identity=identity,
                 title=protocol["identificationModule"]["briefTitle"], url="https://clinicaltrials.gov/study/" + identity,
                 excerpt=eligibility.get("eligibilityCriteria", ""),
                 updated=status.get("lastUpdatePostDateStruct", {}).get("date"),
-                fields=[("Recruitment status", status.get("overallStatus")), ("Minimum age", eligibility.get("minimumAge")),
+                fields=[("Recruitment status", status.get("overallStatus")), ("Phase", "; ".join(phases)),
+                        ("Interventions", interventions), ("Locations", locations),
+                        ("Minimum age", eligibility.get("minimumAge")),
                         ("Maximum age", eligibility.get("maximumAge")), ("Sex", eligibility.get("sex")),
                         ("Study summary", protocol.get("descriptionModule", {}).get("briefSummary"))],
                 scope=scope))

@@ -6,7 +6,7 @@ export const RESEARCH_SOURCES=['pubmed','clinical_trials','dailymed','rxnorm','o
 export const RESEARCH_TOPICS=['literature','drug_safety','trials','coverage','provider_data'] as const;
 export type ResearchSource=typeof RESEARCH_SOURCES[number];
 export type ResearchTopic=typeof RESEARCH_TOPICS[number];
-export const TOPIC_LABELS:Record<ResearchTopic,string>={literature:'Literature',drug_safety:'Drug warnings',trials:'Trial criteria',coverage:'Coverage versions',provider_data:'Provider data'};
+export const TOPIC_LABELS:Record<ResearchTopic,string>={literature:'Literature',drug_safety:'Drug warnings',trials:'Clinical trials',coverage:'Coverage versions',provider_data:'Provider data'};
 export const RESEARCH_REQUEST_BYTES=8192,RESEARCH_RESPONSE_BYTES=131072,RESEARCH_HISTORY_BYTES=1048576,RESEARCH_DEADLINE_MS=35000;
 export type ResearchCatalog={contract:'research.catalog.v1';enabled:boolean;sources:{id:ResearchSource;label:string;topics:ResearchTopic[];state:'enabled'|'not_configured';description:string;documentation_url:string}[];topics:{id:ResearchTopic;label:string}[]};
 export type ResearchSearch={contract_version:1;idempotency_key:string;expected_revision:number;team_revision:number;bot:string;topic:ResearchTopic;sources:ResearchSource[];query:string;public_query_confirmed:true};

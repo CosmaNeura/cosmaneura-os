@@ -341,3 +341,17 @@ class CreatorReviewView(ProtectedContract):
             ):
                 raise ValueError("invalid_creator_progress_lineage")
         return self
+
+
+class ProviderEncounter(ProtectedContract):
+    """Core's existing creator-only read, without admission or recording."""
+
+    schema_version: Literal["1.0"] = "1.0"
+    status: Literal["not_prepared", "available"]
+    review: CreatorReviewView | None
+
+    @model_validator(mode="after")
+    def consistent_review(self):
+        if (self.status == "available") != (self.review is not None):
+            raise ValueError("invalid_provider_encounter")
+        return self

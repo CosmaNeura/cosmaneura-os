@@ -48,6 +48,7 @@ from cosmas_os.ports.creator_review import (
     MAX_CREATOR_REVIEW_BYTES,
     CreatorDecisionReceipt,
     CreatorReviewView,
+    ProviderEncounter,
 )
 from cosmas_os.ports.encounter_prep import CorePrepReceipt
 from cosmas_os.ports.scribe_capture import ProtectedModel, ScribeSessionReceipt
@@ -95,6 +96,34 @@ class _PrepEnvelope(ProtectedModel):
 
 
 class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
+    def provider_encounter(self, binding, credential, idempotency_key):
+        """Read the original session without using the capture-admission route."""
+        try:
+            binding = CoreCaptureBindingSnapshot.model_validate(binding.model_dump())
+            credential = CoreInteractionCredential.model_validate(credential.model_dump())
+            if not 8 <= len(idempotency_key) <= 100 or not all(33 <= ord(c) <= 126 for c in idempotency_key):
+                raise ValueError
+            nonce = uuid4()
+            data, _ = self._request("/service/v1/agent/scribe/capture-operations", {
+                "binding_ref": binding.binding_ref, "workspace_id": str(binding.workspace_id),
+                "request_nonce": str(nonce), "operation": {"kind": "provider_encounter"},
+            }, {**self._workload_headers(), "X-Cosmaneura-Capture-Version": "1",
+                "Idempotency-Key": idempotency_key,
+                "X-Cosmaneura-Mount-Context": credential.mount_context_token.get_secret_value(),
+                "X-Cosmaneura-Interaction-Ref": credential.interaction_ref,
+                "X-Cosmaneura-Client-Turn-ID": str(credential.client_turn_id)},
+                200, ("X-Cosmaneura-Capture-Version", "1"), max_bytes=MAX_CREATOR_REVIEW_BYTES + 4096)
+            envelope = _OperationEnvelope.model_validate(data)
+            if (envelope.binding_ref != binding.binding_ref or envelope.workspace_id != binding.workspace_id
+                or envelope.request_nonce != nonce or envelope.operation != "provider_encounter"
+                or not self._now() - timedelta(seconds=30) <= envelope.checked_at <= self._now() + timedelta(seconds=5)):
+                raise ValueError
+            return ProviderEncounter.model_validate(envelope.receipt)
+        except ConnectorUnavailable:
+            raise
+        except (ValueError, TypeError, AttributeError):
+            raise CoreAdmissionUnavailable("core_capture_receipt_invalid") from None
+
     def encounter_context(self, binding, credential):
         try:
             binding = CoreCaptureBindingSnapshot.model_validate(binding.model_dump())

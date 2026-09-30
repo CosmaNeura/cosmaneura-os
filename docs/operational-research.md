@@ -42,3 +42,17 @@ selection and explicit consent remain necessary for AI analysis. Source/license,
 quota and real publisher acceptance remain release work; configuration validation
 does not assert that an invented or reviewed dataset currently exists. Current
 CMS Coverage reads exact NCD IDs; full LCD licensing is separate.
+
+The initial dashboard includes **Research**. Choose the encounter that should
+retain the work, then select **Clinical trials**. A configured ClinicalTrials.gov
+connection is selected for that topic; the general query still requires review
+before dispatch. For example, `myocardial infarction AND stem cell` contains no
+patient identifiers. It is a discovery query, not an eligibility determination.
+
+Trial records include the registry's overall recruitment status, phase,
+interventions, study locations and supplied site recruitment status, alongside
+eligibility excerpts, update dates and the NCT source URL. These details are
+expanded initially for trial results. Missing location or site status makes no
+availability claim. Existing five-result and excerpt limits remain visible;
+consult the original registry for complete, current criteria. A registry listing
+does not establish treatment benefit or confirm individual eligibility.

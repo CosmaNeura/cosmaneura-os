@@ -53,6 +53,8 @@ def build_context(
     )
     latest_source_revision = max((source.revision for source in sources), default=0)
     sources += tuple(additional_sources)
+    from cosmas_os.application.scribe_source import require_complete_context
+    require_complete_context(sources)
     source_ids = {source.entry_id for source in sources}
     follow_ups = tuple(
         FollowUpStatus(

@@ -5,11 +5,12 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import Request
-from pydantic import ConfigDict, Field, model_validator
+from pydantic import ConfigDict, Field, field_validator, model_validator
 
 from cosmas_os.api.note_schemas import CoreNoteLink
 from cosmas_os.api.team_schemas import BotAddress
 from cosmas_os.api.workspace_schemas import IdempotencyKey
+from cosmas_os.application.scribe_source import ScribeSourceSelection
 from cosmas_os.application.workspace import WorkspaceError
 from cosmas_os.ports.capture_protocol import CaptureOperation
 from cosmas_os.ports.core_capture import ConfiguredCaptureSelection, CoreConsentAttestation
@@ -34,6 +35,24 @@ class CaptureOperationRequest(ProtectedModel):
     idempotency_key: IdempotencyKey
     session_id: UUID
     operation: CaptureOperation
+
+
+class ExistingCaptureRequest(ProtectedModel):
+    idempotency_key: IdempotencyKey
+
+
+class ScribeSourcePacketRequest(ExistingCaptureRequest):
+    expected_revision: int = Field(strict=True, ge=1)
+    selection: ScribeSourceSelection
+    reviewed: Literal[True]
+    share_with_team: Literal[True]
+
+    @field_validator("reviewed", "share_with_team", mode="before")
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError("explicit_confirmation_required")
+        return value
 
 
 class EncounterPrepRequest(ProtectedModel):

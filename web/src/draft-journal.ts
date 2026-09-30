@@ -1,4 +1,5 @@
 import {parsePendingReviewDecision} from "../../clients/scribe-review/creator-review-journal";
+import {validScribeSourceRequest} from './scribe-source-api';
 import {validateResearchDraft} from './research-contract';
 import { DraftStoreError, type DraftRecord, type DraftStore, type DraftValue } from "./draft-store";
 import type { PendingSave } from "./EncounterWorkspace";
@@ -21,7 +22,7 @@ import { validInboxHandoffActor, validateInboxHandoffRecovery } from "./inbox-ha
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
   note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest };
-export type EditorKind = "private-note" | "core-note" | "transcript" | `creator-review:${string}` | "follow-up-proposal" | "appointments" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
+export type EditorKind = "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | "follow-up-proposal" | "appointments" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
 export type AccountEditorKind = "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | `practice-result:${string}` | `vendor-work:${string}`;
@@ -33,7 +34,7 @@ export const editorAddress = (workspaceId: string, editor: EditorKind) => `edito
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const validEditor = (kind: unknown) => typeof kind === "string" &&
-  (["private-note", "core-note", "transcript", "follow-up-proposal", "appointments", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
+  (["private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
     kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) ||
     kind.startsWith("follow-up-result:") && UUID.test(kind.slice("follow-up-result:".length)) || kind.startsWith("research:") && UUID.test(kind.slice("research:".length)));
 const operations = ["entry", "ask", "retry", "note", "coreNoteLink", "review", "followUpPropose", "followUpDecision", "followUpComplete", "link"];
@@ -118,6 +119,10 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if(draft?.kind==='editor'&&draft.editor==='scribe-source'){
+    if(!validScribeSourceRequest(draft.data)||draft.pending!==draft.data.idempotency_key)throw new DraftStoreError('integrity');
+    return;
+  }
   if (draft?.kind === "editor" && draft.editor.startsWith("creator-review:")) {
     try {
       const operation = parsePendingReviewDecision(draft.data);

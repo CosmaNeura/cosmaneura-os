@@ -13,6 +13,10 @@ beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});host=d
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();});
 async function click(label:string){const button=[...host.querySelectorAll('button')].find(b=>b.textContent===label);expect(button).toBeTruthy();await act(async()=>button!.click());}
 async function mount(){await act(async()=>root.render(<CoreConnectionPanel identity={identity} onAuthenticationLost={()=>{}}/>));}
+it.each([[409,'core_existing_recording_conflict','does not match this visit’s notebook'],[503,'core_scribe_encounter_unavailable','Scribe encounters could not be loaded']] as const)('explains the Scribe encounter lookup failure %s',async(status,code,message)=>{
+  vi.mocked(coreConnectionApi.read).mockRejectedValueOnce(new WorkspaceApiError(status,code));
+  await mount();await click('Check connection status');expect(host.textContent).toContain(message);expect(coreConnectionApi.read).toHaveBeenCalledOnce();
+});
 it('requires practice confirmation and never sends internal account identifiers',async()=>{
   vi.mocked(coreConnectionApi.read).mockResolvedValueOnce(fixture.connection.response as never).mockResolvedValueOnce(fixture.connect.response as never);
   await mount();expect(coreConnectionApi.read).not.toHaveBeenCalled();await click('Check connection status');

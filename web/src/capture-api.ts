@@ -1,4 +1,5 @@
 import {workspaceFetch} from './workspace-protocol';
+import {validScribeSourceRequest,MAX_SCRIBE_SOURCE_REQUEST_BYTES} from '../../clients/desktop/scribe-source-requests.mjs';
 import { WorkspaceCaptureBff } from "../../clients/capture/src/bff/workspace-client";
 import { MAX_CAPTURE_SOURCE_BYTES } from "../../clients/capture/src/bff/transcript-limits";
 import { BffResponseError } from "../../clients/capture/src/bff/http-client";
@@ -38,15 +39,19 @@ const SAFE_CODES = new Set(["capture_consent_required", "capture_consent_unavail
   "capture_request_conflict", "capture_in_progress", "capture_session_changed",
   "capture_context_changed", "capture_connection_required", "core_capture_access_unavailable",
   "capture_note_conflict", "capture_source_unavailable", "capture_notes_unavailable", "capture_notebook_changed",
-  "bot_paused", "team_revision_conflict", "bot_source_unavailable"]);
+  "bot_paused", "team_revision_conflict", "bot_source_unavailable", "scribe_source_changed",
+  "scribe_source_packet_too_large", "scribe_source_already_saved", "workspace_revision_conflict", "workspace_history_limit", "idempotency_conflict"]);
 
-export async function request(workspaceId: string, action: "admission" | "operations" | "notes" | "prep",
+export async function request(workspaceId: string, action: "admission" | "operations" | "notes" | "prep" | "existing" | "source-packets",
   identity: AuthenticatedWorkspaceIdentity, body: unknown, signal?: AbortSignal,
   maxBytes = 131072, timeoutMs = 30000): Promise<unknown> {
   const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
   if (!UUID.test(workspaceId)) {
     throw new BffResponseError(401, "capture_access_unavailable", null);
   }
+  if ((action === 'existing' || action === 'source-packets') &&
+      (!validScribeSourceRequest(action,body) || new TextEncoder().encode(JSON.stringify(body)).length > MAX_SCRIBE_SOURCE_REQUEST_BYTES))
+    throw new BffResponseError(422,'capture_request_invalid',null);
   const controller = new AbortController();
   const abort = () => controller.abort();
   const timer = setTimeout(abort, timeoutMs);
