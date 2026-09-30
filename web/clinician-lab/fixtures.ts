@@ -6,7 +6,7 @@ const names=['Visit Prep','Scribe','Follow-up','Chief of Staff'];
 const stamp='2026-09-30T13:00:00Z';
 const storageKey='cosmabot-clinician-ui-fixture-v1';
 const team:ProviderTeam={revision:1,recovery_scope:'a'.repeat(64),template_version:'provider-team-v1',
-  llm:{enabled:true,model:'Synthetic scripted replies'},capture:{enabled:false,prep_enabled:true},
+  llm:{enabled:true,model:'Synthetic scripted replies'},capture:{enabled:true,prep_enabled:true},
   configuration:{practice_context:'Synthetic family practice',bots:roles.map((role,i)=>({role,name:names[i],enabled:true,
     response_style:'brief',include_notebook:true,include_evidence:true}))},
   members:roles.map((role,i)=>({role,agent_id:modelUuid(100+i),name:names[i],initials:names[i].slice(0,2),

@@ -184,16 +184,27 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
   const validRegions = participantRegions !== null;
   const savingUnconfirmed = !!snapshot.native && snapshot.statusCode === "capture_recovery_pending";
   const status = busy === "prepare" ? "Preparing…" : busy === "start" ? "Starting…" :
-    snapshot.state === "recording" ? "Recording" : snapshot.state === "ready" ? "Ready to start" :
+    snapshot.state === "recording" ? "Recording" : error || snapshot.state === "error" ? "Needs attention" : snapshot.state === "ready" ? "Ready to start" :
     snapshot.state === "paused" ? "Recording paused" : snapshot.state === "processing" ? "Audio uploaded" :
-    snapshot.state === "complete" ? "Transcript available" : snapshot.state === "uploading" ? "Uploading audio" : "Scribe capture";
+    snapshot.state === "complete" ? "Transcript available" : snapshot.state === "uploading" ? "Uploading audio" :
+    busy === "stop" ? "Saving audio…" :
+    taskBot && !taskBot.enabled ? "Scribe paused" : consentRequired ? "Confirm consent" : "Not recording";
+  const elapsed = `${Math.floor(snapshot.elapsedSeconds / 60)}:${String(Math.floor(snapshot.elapsedSeconds % 60)).padStart(2, "0")}`;
 
   return <section className="capture-panel" aria-label="Scribe recording">
-    <header><span className={`capture-indicator ${snapshot.state === "recording" ? "recording" : ""}`} aria-hidden="true" />
-      <div><strong>{encounterLabel ?? (taskBot ? `${taskBot.name} · ${status}` : status)}</strong><small>{encounterLabel && `${status} · `}{runtime.current ? sourceKind === "synthetic" ? "Synthetic audio · microphone off" : runtime.current.captureMode==='desktop_meeting' ? "Meeting audio and microphone" : "Microphone capture" : "Consent first. Recording starts when you choose."}</small></div>
-      {!expanded && <button className="team-subtle" disabled={taskBot && !taskBot.enabled} onClick={() => void prepare(pending ?? { attestation: null, key: crypto.randomUUID(), bot: taskBot?.selection })}>Open recording</button>}
-      {expanded && !busy && snapshot.state === "idle" && <button className="team-subtle" onClick={() => setExpanded(false)}>Collapse</button>}
+    <header>
+      <div className="capture-heading"><h2><span aria-hidden="true">🎙️</span> {taskBot?.name ?? "Scribe"} recording</h2>
+        {encounterLabel && <p className="capture-encounter">{encounterLabel}</p>}
+        <p className="capture-description">{taskBot && !taskBot.enabled ? "Enable Scribe in Team settings to record this visit." : runtime.current
+          ? sourceKind === "synthetic" ? "Synthetic audio · microphone off" : runtime.current.captureMode==='desktop_meeting' ? "Meeting audio and microphone" : "Microphone selected"
+          : "Record here. Scribe turns the conversation into a draft for you to review."}</p>
+        <div className="capture-state"><span className={`capture-indicator ${snapshot.state === "recording" ? "recording" : ""}`} aria-hidden="true" />
+          <span role="status">{status}</span>{(snapshot.state === "recording" || snapshot.elapsedSeconds > 0) && <time aria-label={`Recording duration ${elapsed}`}>{elapsed}</time>}</div>
+      </div>
+      {!expanded && <button className="team-primary capture-record" aria-label="Record visit" disabled={taskBot && !taskBot.enabled} onClick={() => void prepare(pending ?? { attestation: null, key: crypto.randomUUID(), bot: taskBot?.selection })}>Record visit</button>}
+      {expanded && !busy && !pending && snapshot.state === "idle" && <button className="team-subtle" onClick={() => setExpanded(false)}>Close setup</button>}
     </header>
+    {!expanded && !(taskBot && !taskBot.enabled) && <p className="capture-consent-hint">Consent first. Recording starts when you choose.</p>}
     {expanded && <div className="capture-details">
       {consentRequired && <form onSubmit={event => event.preventDefault()} aria-label="Recording consent">
         <h3>Ready to record this visit?</h3>
