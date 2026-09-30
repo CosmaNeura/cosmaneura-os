@@ -3,7 +3,6 @@ import {EncryptedIndexedDbFlowStore,isEmptyProfilePreparation} from '../../clien
 import type {ConfiguredCapturePreparationState} from '../../clients/capture/src/configured/flow/types';
 import type {CaptureQueueStorage} from '../../clients/capture/src/queue/types';
 import type {WorkspaceCaptureBff} from '../../clients/capture/src/bff/workspace-client';
-import {validateRecoveryState} from '../../clients/capture/src/bff/recovery-contracts';
 import {validateProfileCapabilities} from '../../clients/capture/src/bff/profile-contracts';
 import {BffResponseError} from '../../clients/capture/src/bff/http-client';
 
@@ -22,13 +21,15 @@ export async function checkEmptyProfilePreparation(options:{sessionId:string;flo
   const conflict=()=>new BffResponseError(409,'capture_saved_session_changed',null);
   if(!isEmptyProfilePreparation(preparation)||preparation.sessionId!==sessionId||active||key||keyState||
     intents.length||rows.some(row=>row.state!=='purged'))throw conflict();
-  const [rawState,rawCapabilities]=await Promise.all([
-    options.bff.getCaptureRecoveryState(sessionId),options.bff.getCapabilities(sessionId),
-  ]);
-  const state=await validateRecoveryState(rawState,sessionId,new Date());
-  const capabilities=validateProfileCapabilities(rawCapabilities,null);
-  if(state.session_status!=='created'||state.current_lease!==null||state.lease_closed||state.history.recoveries.length||
-    capabilities.remaining_aggregate_plaintext_bytes!==(capabilities.max_chunks===1000?67108864:MAX_AGGREGATE_PLAINTEXT_BYTES))
+  // The standard lease-state receipt retains even expired/closed leases. A
+  // created session with no issued lease cannot have acquired protocol audio.
+  // Recovery history is optional and is not needed for this untouched setup.
+  const state=await options.bff.getCaptureLeaseState(sessionId);
+  if(Object.keys(state).sort().join(',')!=='current_lease,lease_closed,session_id,session_status'||
+    state.session_id!==sessionId||state.session_status!=='created'||state.current_lease!==null||state.lease_closed!==false)
+    throw conflict();
+  const capabilities=validateProfileCapabilities(await options.bff.getCapabilities(sessionId),null);
+  if(capabilities.remaining_aggregate_plaintext_bytes!==(capabilities.max_chunks===1000?67108864:MAX_AGGREGATE_PLAINTEXT_BYTES))
     throw conflict();
   signal.throwIfAborted();
   return preparation;

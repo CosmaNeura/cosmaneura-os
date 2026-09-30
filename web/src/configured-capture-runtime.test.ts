@@ -19,8 +19,7 @@ afterEach(()=>{vi.restoreAllMocks();vi.unstubAllGlobals();});
 function fixture(){
   const bff={getAudioEncryptionKey:vi.fn().mockRejectedValue(new Error('key service unavailable')),
     selectCaptureProfile:vi.fn().mockRejectedValue(new Error('profile endpoint absent')),
-    getCaptureRecoveryState:vi.fn().mockResolvedValue({session_status:'created',current_lease:null,lease_closed:false,
-      history:{session_id:sessionId,recoveries:[]}}),
+    getCaptureLeaseState:vi.fn().mockResolvedValue({session_id:sessionId,session_status:'created',current_lease:null,lease_closed:false}),
     getCapabilities:vi.fn().mockResolvedValue({protocol_version:'1.0',media:{media_type:'audio/wav',encoding:'pcm_s16le',channels:1,sample_rate_hz:16000},
       target_chunk_duration_ms:10000,max_envelope_bytes:327680,max_chunks:1000,remaining_aggregate_plaintext_bytes:67108864,
       capture_lease_ttl_seconds:900,reservation_window_seconds:900,max_reservations_per_batch:90,upload_concurrency:2})};
@@ -62,7 +61,7 @@ it('offers an explicit empty recovery, retains the original intent and retries s
   await expect(runtime.controller.startRecording()).rejects.toThrow();
   await expect(runtime.continuePreparation!()).rejects.toThrow('key service unavailable');
   await expect(runtime.continuePreparation!()).rejects.toThrow('key service unavailable');
-  expect(f.bff.getCaptureRecoveryState).toHaveBeenCalledTimes(2);
+  expect(f.bff.getCaptureLeaseState).toHaveBeenCalledTimes(2);
   expect(f.bff.selectCaptureProfile).toHaveBeenCalledOnce();expect(f.bff.getAudioEncryptionKey).toHaveBeenCalledTimes(2);
   const after=await flow(),actual=await after.getPreparationState();after.close();
   const {profileSelection:_,...rest}=saved;expect(actual).toEqual({...rest,schemaVersion:7});
@@ -71,18 +70,20 @@ it('offers an explicit empty recovery, retains the original intent and retries s
   await expect(runtime.continuePreparation!()).rejects.toThrow();
 });
 
-it.each(['audio','lease','status','budget','profile-capacity','authority','uncertain'])(
+it.each(['audio','lease','closed lease','wrong session','status','budget','profile-capacity','authority','uncertain'])(
   'preserves the exact preparation when recovery proof fails: %s',async reason=>{
     const saved=await saveProfile(),f=fixture();
     f.bff.selectCaptureProfile.mockRejectedValue(new BffResponseError(409,'capture_source_unavailable',null));
     if(reason==='audio')f.rows.mockResolvedValue([{state:'encrypted'}]);
-    if(reason==='lease')f.bff.getCaptureRecoveryState.mockResolvedValue({current_lease:{}});
-    if(reason==='status')f.bff.getCaptureRecoveryState.mockResolvedValue({session_status:'uploaded',current_lease:null,lease_closed:false,history:{session_id:sessionId,recoveries:[]}});
+    if(reason==='lease')f.bff.getCaptureLeaseState.mockResolvedValue({current_lease:{}});
+    if(reason==='closed lease')f.bff.getCaptureLeaseState.mockResolvedValue({session_id:sessionId,session_status:'created',current_lease:null,lease_closed:true});
+    if(reason==='wrong session')f.bff.getCaptureLeaseState.mockResolvedValue({session_id:workspaceId,session_status:'created',current_lease:null,lease_closed:false});
+    if(reason==='status')f.bff.getCaptureLeaseState.mockResolvedValue({session_id:sessionId,session_status:'uploaded',current_lease:null,lease_closed:false});
     if(reason==='budget'||reason==='profile-capacity'){
       const caps=await f.bff.getCapabilities();f.bff.getCapabilities.mockResolvedValue({...caps,
         ...(reason==='budget'?{remaining_aggregate_plaintext_bytes:1}:{max_chunks:720})});
     }
-    if(reason==='authority')f.bff.getCaptureRecoveryState.mockRejectedValue(new BffResponseError(403,'capture_access_unavailable',null));
+    if(reason==='authority')f.bff.getCaptureLeaseState.mockRejectedValue(new BffResponseError(403,'capture_access_unavailable',null));
     if(reason==='uncertain')f.bff.selectCaptureProfile.mockRejectedValue(new BffResponseError(503,'capture_request_unconfirmed',null));
     await expect(f.open()).rejects.toThrow();
     const store=await flow();expect(await store.getPreparationState()).toEqual(saved);store.close();

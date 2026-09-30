@@ -47,6 +47,9 @@ preparation**. This explicitly retains the original encrypted intent and switche
 the empty local setup to standard capture only after checking an untouched server
 session, full standard capacity, no local key/lease, and an empty audio queue.
 The checks repeat on the click; Start recording remains a separate action.
+The standard lease-state endpoint retains issued leases, including closed and
+expired leases. Recovery uses that endpoint to prove no lease was ever issued;
+it does not require the optional recording-history endpoint.
 Unknown replies, confirmed profiles, native journals and existing audio keep their
 original recovery path.
 
