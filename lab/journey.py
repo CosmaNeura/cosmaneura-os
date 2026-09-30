@@ -198,6 +198,10 @@ class Journey:
     def dispatch(self, claim):
         from cosmas_os.ports.bot_capabilities import ModelCallFailure
 
+        if (claim.box, claim.owner, claim.workspace_id) != (self.app.box, self.app.owner, self.app.workspace):
+            # The application worker discovers queued work across the owned lab
+            # database. Never expose an earlier episode's claim to this model.
+            raise ModelCallFailure(dispatch="not_dispatched", outcome="connector_failure")
         try:
             return self.draft(claim)
         except (LabError, ValidationError) as error:

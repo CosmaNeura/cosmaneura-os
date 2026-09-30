@@ -103,3 +103,14 @@ def test_draft_review_regressions_reject_internal_ids_and_unsupported_certainty(
     with pytest.raises(LabError):
         readable_draft(text)
     readable_draft("Staff actions remain planned; completion is not documented. Contact preference conflicts.")
+
+
+def test_shared_worker_cannot_expose_another_episode_claim_to_the_model(tmp_path):
+    from cosmas_os.ports.bot_capabilities import ModelCallFailure
+
+    app = SimpleNamespace(box="current-box", owner="current-owner", workspace="current-encounter")
+    journey = Journey(app, Store(tmp_path), "current", None, "none")
+    claim = SimpleNamespace(box="other-box", owner="other-owner", workspace_id="other-encounter")
+    with pytest.raises(ModelCallFailure):
+        journey.dispatch(claim)
+    assert not journey.acknowledged and not journey.artifacts
