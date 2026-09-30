@@ -24,8 +24,26 @@ it('projects only the known calendar-consent error from a no-store bounded respo
 it('sends the closed no-store command and validates the private account response',async()=>{
  const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify(status),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));vi.stubGlobal('fetch',fetcher);
  expect(await googleConnectionRequest(identity,'status')).toMatchObject({state:'connected'});
- expect(fetcher.mock.calls[0][1]).toMatchObject({method:'POST',body:'{"action":"status"}',credentials:'omit',redirect:'error'});
+ expect(fetcher.mock.calls[0][1]).toMatchObject({method:'POST',body:'{"action":"status","include_capabilities":true}',credentials:'omit',redirect:'error'});
  expect(fetcher.mock.calls[0][1].headers.get('X-Cosmas-Google-Connection')).toBe('1');
+});
+
+it('accepts only coherent permission flags and keeps the legacy status shape',()=>{
+ expect(validateGoogleResponse(status,'status')).toEqual(status);
+ for(const calendar of [false,true])expect(validateGoogleResponse({...status,capabilities:{mail:true,calendar}},'status')).toMatchObject({capabilities:{calendar}});
+ for(const capabilities of [{mail:false,calendar:true},{mail:true,calendar:'true'},{mail:true,calendar:true,token:'private'},null])
+  expect(()=>validateGoogleResponse({...status,capabilities},'status')).toThrow();
+ expect(()=>validateGoogleResponse({state:'sign_in_pending',account:null,connected_at:null,capabilities:{mail:true,calendar:false}},'status')).toThrow();
+});
+it('falls back once to legacy status without retrying content reads or consent',async()=>{
+ const unavailable=()=>new Response('{}',{status:422});
+ const fetcher=vi.fn().mockResolvedValueOnce(unavailable()).mockResolvedValueOnce(new Response(JSON.stringify(status),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));
+ vi.stubGlobal('fetch',fetcher);
+ expect(await googleConnectionRequest(identity,'status')).toEqual(status);
+ expect(fetcher.mock.calls.map(call=>JSON.parse(call[1].body))).toEqual([{action:'status',include_capabilities:true},{action:'status'}]);
+ fetcher.mockReset().mockImplementation(async()=>unavailable());
+ await expect(googleConnectionRequest(identity,'status')).rejects.toThrow();expect(fetcher).toHaveBeenCalledTimes(2);
+ for(const action of ['mail','calendar','start'] as const){fetcher.mockClear();await expect(googleConnectionRequest(identity,action)).rejects.toThrow();expect(fetcher).toHaveBeenCalledTimes(1);}
 });
 it('rejects stale native identity before dispatch and after a late response',async()=>{
  let current=false;const native={...identity,nativeSession:{revision:'invented',isCurrent:()=>current}};

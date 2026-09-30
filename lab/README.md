@@ -188,14 +188,20 @@ through the real Documo adapter, reads delivery status and records separate huma
 verification. A fresh database session reopens the same encounter. The PDF is a
 fixed synthetic administrative test document, not a model-generated clinical packet.
 
-`--cases connectors` runs 24 independent scenarios through the real adapters and
+`--cases connectors` runs 36 independent scenarios through the real adapters and
 owned PostgreSQL. Microsoft, Gmail and Google Calendar each cover connection/read, timeout and
 explicit recovery, throttling, token refresh, oversized responses and account
 revocation during a read. Microsoft also rejects an invalid calendar timezone.
-Documo covers complete delivery, failure, partial pages, lost submission response
-and wrong-account status. Its five scenarios use real artifact custody, immutable
-F-8 approval/dispatch and duplicate-request recovery. Unknown delivery remains
-unresolved; it cannot cause an automatic resend or a successful closure.
+Documo and SRFax cover complete delivery, failure, incomplete delivery evidence,
+lost submission response, wrong-destination status, delayed delivery, status-read
+timeout and throttling. Documo also rejects wrong-account status. These 17 fax
+scenarios use real artifact custody, immutable F-8 approval/dispatch and duplicate
+request recovery. Status recovery requires an explicit second read and exactly
+one submission; lost submission replies cannot cause a resend. Each scenario
+reopens a fresh database connection and verifies the same durable delivery evidence.
+Unknown delivery remains unresolved; it cannot cause a successful closure. SRFax
+uses its documented production wire contract only inside the offline HTTP twin;
+neither provider is contacted.
 
 All provider HTTP is handled by strictly allowlisted `httpx.MockTransport`
 responders, so no provider network request is possible. These are not vendor-hosted

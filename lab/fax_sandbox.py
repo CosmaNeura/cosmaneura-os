@@ -1,9 +1,11 @@
-"""Real F-8 fax approval, file custody and dispatch against an offline Documo twin."""
+"""Real F-8 fax approval, custody and recovery against offline fax provider twins."""
 
 import asyncio
+import base64
 import hashlib
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from urllib.parse import parse_qs
 from uuid import UUID, uuid4
 
 import httpx
@@ -25,6 +27,12 @@ from cosmas_os.models import EncounterWorkspace
 from cosmas_os.ports import vendor_connectors as private
 from cosmas_os.vendor_models import VendorConnectionVersion, VendorCorrespondenceVersion
 from lab.store import LabError
+
+RECOVERY_SCENARIOS = ("pending_recovery", "read_timeout", "throttled")
+FAX_SCENARIOS = {
+    "documo": ("delivered", "failed", "partial", "lost_reply", "wrong_account", "wrong_destination", *RECOVERY_SCENARIOS),
+    "srfax": ("delivered", "failed", "partial", "lost_reply", "wrong_destination", *RECOVERY_SCENARIOS),
+}
 
 
 @contextmanager
@@ -62,17 +70,19 @@ def bound(detail, key, **extra):
         "idempotency_key": key, **extra}
 
 
-def install_fax(session, app, snapshot):
+def install_fax(session, app, snapshot, provider):
     cid, coid = str(uuid4()), str(uuid4())
-    selection = private.ConnectionSelection(vendor="documo", connection_id=UUID(cid), box_id=app.box,
-        owner_id=app.owner, environment="sandbox", remote_account_id=str(uuid4()), credential_ref=uuid4(),
+    selection = private.ConnectionSelection(vendor=provider, connection_id=UUID(cid), box_id=app.box,
+        owner_id=app.owner, environment="sandbox" if provider == "documo" else "production",
+        remote_account_id=str(uuid4()) if provider == "documo" else "12345", credential_ref=uuid4(),
         configuration_sha256="a" * 64)
-    cv = {"id": cid, "revision": 1, "vendor": "documo", "environment": "sandbox",
-          "label": "Synthetic Documo twin", "actions": ["documo_fax"], "availability": "enabled"}
+    cv = {"id": cid, "revision": 1, "vendor": provider, "environment": selection.environment,
+          "label": "Synthetic " + provider + " twin", "actions": [provider + "_fax"], "availability": "enabled"}
     cv["public_sha256"] = p.public_digest("cosmas-vendor-public-selection.v1", cv)
     session.add(VendorConnectionVersion(id=cid, family_id=str(uuid4()), revision=1, box_id=app.box,
-        owner_id=app.owner, vendor="documo", environment="sandbox", private_selection=selection.model_dump(mode="json"),
-        routing={"caller_id": "2125550100", "event_route_id": str(uuid4())}, private_sha256=selection.commitment(),
+        owner_id=app.owner, vendor=provider, environment=selection.environment, private_selection=selection.model_dump(mode="json"),
+        routing={"caller_id": "2125550100", "event_route_id": str(uuid4()),
+                 **({"sender_email": "fax@example.invalid"} if provider == "srfax" else {})}, private_sha256=selection.commitment(),
         public_view=cv, public_sha256=cv["public_sha256"], reviewed_by=app.owner,
         reviewed_at=datetime.now(UTC), write_enabled=True, read_enabled=True))
     session.flush()
@@ -91,13 +101,13 @@ def install_fax(session, app, snapshot):
     return selection, cv, co
 
 
-def exercise_fax(app, root, scenario="delivered"):
+def exercise_fax(app, root, scenario="delivered", *, provider="documo"):
     with vendor_gates():
-        return _exercise(app, root, scenario)
+        return _exercise(app, root, scenario, provider)
 
 
-def _exercise(app, root, scenario):
-    if scenario not in {"delivered", "failed", "partial", "lost_reply", "wrong_account"}:
+def _exercise(app, root, scenario, provider):
+    if scenario not in FAX_SCENARIOS.get(provider, ()):
         raise LabError("unknown_fax_scenario")
     calls, checks = [], {}
     factory = sessionmaker(app.engine, expire_on_commit=False)
@@ -117,7 +127,7 @@ def _exercise(app, root, scenario):
         n = snapshot["note"]["latest"]
         source = {"kind": "reviewed_note", "note_id": n["id"], "content_sha256": n["content_hash"],
                   "source_fingerprint": n["source_fingerprint"]}
-        selection, cv, co = install_fax(s, app, snapshot)
+        selection, cv, co = install_fax(s, app, snapshot, provider)
         vendor_artifacts.intent(s, *scope, p.VendorArtifactIntent.model_validate({**artifact,
             "source": source, "idempotency_key": "fax-file-intent"}))
         admission = vendor_artifacts.begin_content(s, *scope, artifact["artifact_id"], "fax-file-write")
@@ -129,7 +139,7 @@ def _exercise(app, root, scenario):
         checks["verified_pdf_custody"] = outcome == "ready"
         snapshot = workspace.read(s, *scope)
         proposal = p.VendorProposal.model_validate({"expected_workspace_revision": snapshot["revision"],
-            "idempotency_key": "fax-proposal", "proposed_operation_id": str(uuid4()), "action": "documo_fax",
+            "idempotency_key": "fax-proposal", "proposed_operation_id": str(uuid4()), "action": provider + "_fax",
             "connection": {k: cv[k] for k in ("id", "revision", "public_sha256")},
             "correspondence": {k: co[k] for k in ("id", "revision", "public_sha256")}, "document": artifact,
             "source": source, "due_date": (datetime.now(UTC) + timedelta(days=2)).date().isoformat(),
@@ -152,7 +162,7 @@ def _exercise(app, root, scenario):
         _, invocation = vendor_execution.claim_submit(s, *scope, tid, request)
         if invocation is None:
             raise LabError("fax_not_admitted")
-    ref = str(uuid4())
+    ref = str(uuid4()) if provider == "documo" else "123456"
 
     async def credentials(chosen):
         if chosen != selection:
@@ -165,22 +175,50 @@ def _exercise(app, root, scenario):
         return True
 
     async def respond(request):
-        if request.url.host != "api.sandbox.documo.com":
+        origin = "api.sandbox.documo.com" if provider == "documo" else "secure.srfax.com"
+        if request.url.host != origin:
             raise LabError("unexpected_fax_origin")
-        calls.append({"method": request.method, "path": request.url.path})
-        if request.method == "POST" and request.url.path == "/v1/faxes":
-            if pdf not in request.content:
+        if provider == "documo":
+            submitting = request.method == "POST" and request.url.path == "/v1/faxes"
+            reading = request.method == "GET" and request.url.path == "/v1/fax/" + ref + "/info"
+            valid_document = pdf in request.content
+        else:
+            if request.method != "POST" or request.url.path != "/SRF_SecWebSvc.php":
+                raise LabError("unexpected_fax_route")
+            fields = parse_qs(request.content.decode("ascii"))
+            if fields.get("access_id") != [selection.remote_account_id]:
+                raise LabError("foreign_fax_selection")
+            submitting = fields.get("action") == ["Queue_Fax"]
+            reading = fields.get("action") == ["Get_FaxStatus"] and fields.get("sFaxDetailsID") == [ref]
+            valid_document = (fields.get("sRetries") == ["0"]
+                and base64.b64decode(fields.get("sFileContent_1", [""])[0]) == pdf)
+        if not submitting and not reading:
+            raise LabError("unexpected_fax_route")
+        calls.append({"method": request.method, "path": request.url.path, "action": "submit" if submitting else "read"})
+        if submitting:
+            if not valid_document:
                 raise LabError("fax_document_changed")
             if scenario == "lost_reply":
                 raise httpx.ReadTimeout("synthetic acceptance response lost")
-            return httpx.Response(200, json={"messageId": ref})
-        if request.method != "GET" or request.url.path != "/v1/fax/" + ref + "/info":
-            raise LabError("unexpected_fax_route")
+            return httpx.Response(200, json={"messageId": ref} if provider == "documo"
+                                  else {"Status": "Success", "Result": ref})
+        first_read = sum(call["action"] == "read" for call in calls) == 1
+        if first_read and scenario == "read_timeout":
+            raise httpx.ReadTimeout("synthetic status response lost")
+        if first_read and scenario == "throttled":
+            return httpx.Response(429, json={"error": "synthetic rate limit"})
+        pending = first_read and scenario == "pending_recovery"
+        destination = "12125550102" if scenario == "wrong_destination" else "12125550101"
+        if provider == "srfax":
+            return httpx.Response(200, json={"Status": "Success", "Result": {
+                "ToFaxNumber": destination, "SentStatus": "In Progress" if pending else "Failed" if scenario == "failed" else "Sent",
+                "Pages": 0 if scenario == "partial" else 1}})
         return httpx.Response(200, json={"messageId": ref,
             "accountId": str(uuid4()) if scenario == "wrong_account" else selection.remote_account_id,
-            "direction": "outbound", "faxNumber": "+12125550101", "pagesCount": 1,
+            "direction": "outbound", "faxNumber": "+" + destination, "pagesCount": 1,
             "pagesComplete": 0 if scenario in {"failed", "partial"} else 1,
-            "status": "failed" if scenario == "failed" else "success", "resultCode": "6100" if scenario == "failed" else "0"})
+            "status": "processing" if pending else "failed" if scenario == "failed" else "success",
+            "resultCode": "6100" if scenario == "failed" else "0"})
 
     executor = vendor_execution.VendorExecution(factory, credentials, artifact_store=store,
         transport=httpx.MockTransport(respond), identity_current=current)
@@ -190,19 +228,38 @@ def _exercise(app, root, scenario):
         checks["lost_submit_reply_cannot_dispatch_twice"] = duplicate is None
         detail = vendor_work.detail(s, *scope, tid)
         if scenario != "lost_reply":
-            _, read = vendor_execution.claim_read(s, *scope, tid,
-                p.BoundCommand.model_validate(bound(detail, "fax-observe")))
+            read_request = p.BoundCommand.model_validate(bound(detail, "fax-observe"))
+            _, read = vendor_execution.claim_read(s, *scope, tid, read_request)
         else:
             read = None
     if read:
         asyncio.run(executor.invoke(read))
+    if scenario in RECOVERY_SCENARIOS:
+        with factory() as s:
+            first = vendor_work.detail(s, *scope, tid)["summary"]
+            checks["uncertain_status_keeps_task_open"] = (first["state"] == "approved"
+                and first["acceptance"] == "accepted"
+                and first["transport"] == ("pending" if scenario == "pending_recovery" else "unknown"))
+            _, duplicate_read = vendor_execution.claim_read(s, *scope, tid, read_request)
+            checks["duplicate_status_request_does_not_read_again"] = duplicate_read is None
+            checks["no_automatic_status_retry"] = len(calls) == 2
+            detail = vendor_work.detail(s, *scope, tid)
+            _, recovery = vendor_execution.claim_read(s, *scope, tid,
+                p.BoundCommand.model_validate(bound(detail, "fax-observe-recovery")))
+        if recovery is None:
+            raise LabError("fax_recovery_not_admitted")
+        asyncio.run(executor.invoke(recovery))
     with factory() as s:
         detail = vendor_work.detail(s, *scope, tid)
         summary = detail["summary"]
-        checks["one_fax_submission"] = sum(c["method"] == "POST" for c in calls) == 1
+        checks["one_fax_submission"] = sum(c["action"] == "submit" for c in calls) == 1
         checks["delivery_is_not_automatic_task_completion"] = summary["state"] == "approved"
-        expected = {"delivered": "delivered", "failed": "failed", "partial": "unknown", "wrong_account": "unknown", "lost_reply": "not_observed"}[scenario]
+        expected = {"delivered": "delivered", "failed": "failed", "partial": "unknown", "wrong_account": "unknown",
+                    "wrong_destination": "unknown", "lost_reply": "not_observed",
+                    **dict.fromkeys(RECOVERY_SCENARIOS, "delivered")}[scenario]
         checks["honest_delivery_outcome"] = summary["transport"] == expected
+        if scenario in RECOVERY_SCENARIOS:
+            checks["explicit_status_recovery_without_resend"] = summary["transport"] == "delivered" and len(calls) == 3
         if scenario == "lost_reply":
             checks["uncertain_acceptance_stays_uncertain"] = summary["acceptance"] == "unconfirmed" and len(calls) == 1
         if scenario == "delivered" and all(checks.values()):
@@ -217,6 +274,11 @@ def _exercise(app, root, scenario):
                 reviewed_result=True, reviewed_observations=True, outcome_confirmed=True, reviewed_conflicting_evidence=False)))
             checks["separate_synthetic_human_verification_closes_task"] = vendor_work.detail(s, *scope, tid)["summary"]["state"] == "closed"
         final = vendor_work.detail(s, *scope, tid)["summary"]
-    return {"provider": "documo", "scenario": scenario, "passed": all(checks.values()), "checks": checks,
-        "requests": calls, "ticket": final, "document_sha256": artifact["sha256"],
+    app.engine.dispose()
+    with factory() as s:
+        reopened = vendor_work.detail(s, *scope, tid)["summary"]
+    checks["delivery_evidence_survives_database_reopen"] = all(reopened[key] == final[key]
+        for key in ("operation_id", "state", "acceptance", "transport", "observation_head", "evidence_sha256"))
+    return {"provider": provider, "scenario": scenario, "passed": all(checks.values()), "checks": checks,
+        "requests": calls, "ticket": reopened, "document_sha256": artifact["sha256"],
         "evidence_level": "real F-8, file custody and connector; scripted human, synthetic HTTP; no real fax"}

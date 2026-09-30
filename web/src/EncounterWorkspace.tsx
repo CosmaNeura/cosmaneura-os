@@ -89,7 +89,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
-  const [settingsEntry,setSettingsEntry]=useState<'home'|'connections'|'scheduling'|'microsoft'|'google'>('home');
+  const [settingsEntry,setSettingsEntry]=useState<'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'>('home');
   const [connectionLocks, setConnectionLocks] = useState({google:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const [activityProof,setActivityProof] = useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number;context:AiActivityContext}|null>(null);
@@ -673,7 +673,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     } }
     finally { if (current === generation.current) setBusy(false); }
   }
-  async function openSettings(entry:'home'|'connections'='home') {
+  async function openSettings(entry:'home'|'connections'|'core'='home') {
     if (connectionNavigationLocked || busy || pending && pending.type !== "team") return;
     setSettingsEntry(entry); setPracticeOpen(false); setSettingsOpen(true);
     if (team && teamDraft) return;
@@ -1050,6 +1050,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           onConnections={()=>void openSettings('connections')} onEncounter={()=>void (authenticated?loadEncounters():open())}/>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {authenticated && encounters && <section aria-label="Available encounters" className="team-encounter-picker">
+          {CORE_CONNECTION_BUILD && <p><button className="team-subtle"
+            disabled={busy || !!pending || connectionNavigationLocked} onClick={() => void openSettings('core')}><span aria-hidden="true">🗓️ </span>Find another visit</button></p>}
           {encounters.length ? encounters.map(encounter => <article className="team-encounter-row" key={encounter.appointment_id}>
             <button className="team-encounter-option" disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id)}>
               <strong>{encounter.label}</strong><span>{encounter.workspace_id ? "Open saved notes" : "Open visit"}</span>

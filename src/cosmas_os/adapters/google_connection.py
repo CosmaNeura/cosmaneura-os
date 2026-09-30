@@ -98,6 +98,19 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             else "",
         ]
 
+    def status(self, identity, *, include_capabilities=False):
+        return self._read_status(
+            identity, capabilities=self._status_capabilities if include_capabilities else None
+        )
+
+    @staticmethod
+    def _status_capabilities(state, private):
+        connected = state == "connected"
+        return {
+            "mail": connected,
+            "calendar": connected and private.get("calendar_read") is True,
+        }
+
     def _enabled(self):
         from cosmas_os.application.capture_deadline import check_capture_deadline
         from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
