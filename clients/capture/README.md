@@ -34,6 +34,14 @@ preparations retain their original policy. The workspace's
 turning them off does not discard pending profiles or queues. Core and Scribe
 have independent default-off selection gates.
 
+Configured workspace sessions use standard server capabilities and renewable
+leases for fresh recordings. With the long-visit client feature enabled, the
+existing standard continuous controller applies its one-hour local limit without
+calling the optional profile-selection endpoint. Saved profile intentions and
+receipts retain their original recovery protocol; a failed or unknown profile
+request is never silently replaced. This path was qualified with generated PCM,
+including one hour across four lease renewals and encrypted offline restoration.
+
 The shared recorder currently selects only the microphone track and enforces
 360 ten-second chunks for the longer profile. The backend supports two tracks,
 but continuous lease/reservation renewal and dual-track native recording remain
