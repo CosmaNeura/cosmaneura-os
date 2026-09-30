@@ -12,6 +12,7 @@ class Case:
     required: tuple[str, ...]
     forbidden: tuple[str, ...] = ()
     deliver: bool = False
+    inputs: tuple[tuple[str, str], ...] = ()
 
 
 CASES = {

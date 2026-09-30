@@ -30,6 +30,8 @@ def rescore(path):
         raise ValueError("Wait for the run to finish before rescoring")
     before = json.loads(json.dumps(report))
     for episode in report["episodes"]:
+        if episode["case"] == "journey":
+            continue  # Durable handoff receipts are not text-rescorable.
         follow = next((a for a in episode["artifacts"] if a["role"] == "follow_up"), None)
         previous = {key: episode["checks"][key] for key in ("required_concepts", "no_known_false_claim")}
         episode["checks"].update(grade(CASES[episode["case"]], follow["body"] if follow else ""))

@@ -100,9 +100,10 @@ class Application:
             session.commit()
             snapshot = workspace.create(session, self.box, self.owner, appointment.id, "lab-create", initial_synthetic_source=False)
             self.workspace = snapshot["id"]
-            workspace.append(session, self.box, self.owner, self.workspace, expected=snapshot["revision"],
-                             key="lab-fixture-source", kind="evidence", content=case.source,
-                             source_label="Invented laboratory fixture — " + case.title)
+            inputs = case.inputs or (("Invented laboratory fixture — " + case.title, case.source),)
+            for index, (label, content) in enumerate(inputs):
+                snapshot = workspace.append(session, self.box, self.owner, self.workspace, expected=snapshot["revision"],
+                    key=f"lab-fixture-source-{index}", kind="evidence", content=content, source_label=label)["workspace"]
             configuration = provider_team.default_configuration()
             research_address = str(uuid4())
             configuration["bots"].append({"role": "research", "instance_id": research_address,
