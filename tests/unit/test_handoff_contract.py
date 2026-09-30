@@ -29,6 +29,7 @@ def test_chief_receives_a_closed_draft_handoff_contract():
                                     "handoffs": [
                                         {
                                             "role": "scribe",
+                                            "intended_role": "scribe",
                                             "brief": "Organize the saved notes; flag missing information.",
                                         }
                                     ],
@@ -82,7 +83,7 @@ def test_invalid_or_recursive_handoffs_are_rejected_without_retry(role, briefs):
                                 {
                                     "answer": "Draft",
                                     "source_ids": [],
-                                    "handoffs": briefs,
+                                    "handoffs": [{**brief, "intended_role": "scribe"} for brief in briefs],
                                 }
                             )
                         },

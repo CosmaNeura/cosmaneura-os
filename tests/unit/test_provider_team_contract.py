@@ -148,7 +148,7 @@ def test_named_instance_and_preferences_reach_only_the_closed_model_contract():
     calls = []
     def respond(request):
         calls.append(json.loads(request.content))
-        return httpx.Response(200, json=completion(source_ids=[], handoffs=[{"role": address, "brief": "Review saved notes"}]))
+        return httpx.Response(200, json=completion(source_ids=[], handoffs=[{"role": address, "intended_role": "scribe", "brief": "Review saved notes"}]))
     target = {"address": address, "role": "scribe", "name": "Visit partner", "job_focus": "Documentation"}
     result = GPT41Connector(lambda: "invented", transport=httpx.MockTransport(respond)).review(
         context(role="chief", handoff_roles=(address,), handoff_targets=(target,),
@@ -238,7 +238,7 @@ def test_chief_status_intent_cannot_smuggle_a_draft_assignment():
     item = FollowUpStatus("invented-ticket", "sent", "2026-09-25", False, True, False)
     with pytest.raises(ConnectorUnavailable):
         GPT41Connector(lambda: "invented-key", transport=httpx.MockTransport(lambda _: httpx.Response(200,
-            json=completion(intent="work_status", handoffs=[{"role": "scribe", "brief": "Unrequested draft"}])
+            json=completion(intent="work_status", handoffs=[{"role": "scribe", "intended_role": "scribe", "brief": "Unrequested draft"}])
         ))).review(context(role="chief", follow_ups=(item,), handoff_roles=("scribe",)))
 
 
