@@ -46,6 +46,19 @@ GRAPH_ORIGIN = "https://graph.microsoft.com"
 GRAPH_PATHS = {"/v1.0/me", "/v1.0/me/mailFolders/inbox/messages", "/v1.0/me/calendarView"}
 
 
+class MicrosoftConnectionFailure(ValueError):
+    """Fixed diagnostic category, never provider content or credential material."""
+
+    REASONS = frozenset({
+        "token_http", "profile_http", "response_format", "response_limit",
+        "permissions", "credential_format",
+    })
+
+    def __init__(self, reason):
+        self.reason = reason if reason in self.REASONS else "response_format"
+        super().__init__("Microsoft connection unavailable")
+
+
 @dataclass(frozen=True)
 class MicrosoftOwner:
     box_id: str
@@ -369,35 +382,36 @@ class MicrosoftPersonalConnection:
         with self._client.stream(
             method, url, data=fields, params=params, headers=headers
         ) as response:
+            if response.status_code != 200:
+                raise MicrosoftConnectionFailure("token_http" if method == "POST" else "profile_http")
             if (
-                response.status_code != 200
-                or response.headers.get("content-type", "").split(";", 1)[0] != "application/json"
+                response.headers.get("content-type", "").split(";", 1)[0] != "application/json"
                 or response.headers.get("content-encoding") not in {None, "identity"}
             ):
-                raise ValueError("Microsoft read unavailable")
+                raise MicrosoftConnectionFailure("response_format")
             raw = bytearray()
             for chunk in response.iter_raw():
                 self._enabled()
                 if monotonic() >= deadline or len(raw) + len(chunk) > (
                     32768 if method == "POST" else 262144
                 ):
-                    raise ValueError("Microsoft response unavailable")
+                    raise MicrosoftConnectionFailure("response_limit")
                 raw.extend(chunk)
         self._enabled()
         if monotonic() >= deadline:
-            raise ValueError("Microsoft response unavailable")
+            raise MicrosoftConnectionFailure("response_limit")
 
         def unique(pairs):
             result = {}
             for key, value in pairs:
                 if key in result:
-                    raise ValueError("Invalid Microsoft response")
+                    raise MicrosoftConnectionFailure("response_format")
                 result[key] = value
             return result
 
         value = json.loads(raw, object_pairs_hook=unique)
         if not isinstance(value, dict):
-            raise ValueError("Invalid Microsoft response")
+            raise MicrosoftConnectionFailure("response_format")
         return value
 
     def _exchange(self, fields):
@@ -418,12 +432,12 @@ class MicrosoftPersonalConnection:
         expires = value.get("expires_in")
         scopes = value.get("scope")
         if not isinstance(scopes, str) or len(scopes) > 2048:
-            raise ValueError("Microsoft permissions unavailable")
+            raise MicrosoftConnectionFailure("permissions")
         granted = {scope.removeprefix(GRAPH_ORIGIN + "/") for scope in scopes.split()}
         if not {"User.Read", "Mail.Read", "Calendars.Read"} <= granted or granted - set(
             SCOPES.split()
         ):
-            raise ValueError("Microsoft permissions unavailable")
+            raise MicrosoftConnectionFailure("permissions")
         if (
             value.get("token_type", "").lower() != "bearer"
             or not isinstance(token, str)
@@ -434,7 +448,7 @@ class MicrosoftPersonalConnection:
             or type(expires) is not int
             or not 61 <= expires <= 86400
         ):
-            raise ValueError("Microsoft credential unavailable")
+            raise MicrosoftConnectionFailure("credential_format")
         me = self._request(
             "GET",
             GRAPH_ORIGIN + "/v1.0/me",
@@ -494,6 +508,7 @@ class MicrosoftPersonalConnection:
 
     def callback(self, state, code=None, denied=False):
         attempt_id = None
+        failure_stage = "callback_validation"
         try:
             if not isinstance(state, str) or re.fullmatch(r"[A-Za-z0-9_-]{43}", state) is None:
                 raise ValueError
@@ -534,6 +549,7 @@ class MicrosoftPersonalConnection:
                     raise ValueError
                 attempt.status = "exchanging"
                 session.commit()
+            failure_stage = "token_exchange"
             value = self._exchange(
                 {
                     "grant_type": "authorization_code",
@@ -542,8 +558,11 @@ class MicrosoftPersonalConnection:
                     "code_verifier": private["verifier"],
                 }
             )
+            failure_stage = "authority_check"
             self._claim_current(account_id, selected, binding, attempt_id=attempt_id)
+            failure_stage = "account_verification"
             private_credential, expiry = self._verified(value, selected)
+            failure_stage = "credential_save"
             with self._session() as session:
                 account, current, current_binding = self._account(session, account_id=account_id)
                 attempt = session.get(self.Attempt, attempt_id)
@@ -572,12 +591,13 @@ class MicrosoftPersonalConnection:
                 self._audit(session, current, account.id, "sign_in_finished", "connected")
                 session.commit()
             return True
-        except Exception:
+        except Exception as error:
             if attempt_id:
-                self._fail_attempt(attempt_id)
+                reason = error.reason if isinstance(error, MicrosoftConnectionFailure) else failure_stage
+                self._fail_attempt(attempt_id, reason)
             return False
 
-    def _fail_attempt(self, attempt_id):
+    def _fail_attempt(self, attempt_id, reason):
         try:
             with self._session() as session:
                 attempt = session.scalar(
@@ -585,6 +605,12 @@ class MicrosoftPersonalConnection:
                 )
                 if attempt and attempt.status in {"pending", "exchanging"}:
                     attempt.status, attempt.sealed = "failed", None
+                    account = session.get(ExternalIdentity, attempt.account_id)
+                    if account is not None:
+                        self._audit(
+                            session, MicrosoftOwner(account.box_id, account.principal_id),
+                            account.id, "sign_in_finished", "failed_" + reason,
+                        )
                     session.commit()
         except Exception:
             pass  # A retained exchanging row blocks reuse and requires a new sign-in.
