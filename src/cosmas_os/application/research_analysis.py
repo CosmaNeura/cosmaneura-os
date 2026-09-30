@@ -55,17 +55,22 @@ def build_context(s, workspace, settings, command):
                     or proof["run_id"] != anchor["run_id"]
                     or proof["request_sha256"] != anchor["save_request_sha256"]):
                 raise ValueError("research selection proof")
+            records = {record["sha256"]: record for record in run.results}
+            selected_records = [records[digest] for digest in receipt.request["source_hashes"]]
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError, ws.WorkspaceError):
             raise ws.WorkspaceError("source_changed") from None
-        characters += len(entry.content)
-        byte_count += len(entry.content.encode("utf-8"))
+        # The immutable save receipt selects full retained source records, even
+        # though the historical entry format contains only their quoted excerpts.
+        content = research.analysis_excerpt(selected_records)
+        characters += len(content)
+        byte_count += len(content.encode("utf-8"))
         # The retained prepared-v1 adapter bounds each passage to 5,000 chars.
         # Refuse an oversized selection rather than silently omit consented text.
-        if (len(entry.content) > MAX_ENTRY_CHARACTERS
+        if (len(content) > MAX_ENTRY_CHARACTERS
                 or characters > MAX_TOTAL_CHARACTERS or byte_count > MAX_TOTAL_BYTES):
             raise ws.WorkspaceError("research_analysis_too_large", 422)
         passages.append(SourcePassage(entry.id, entry.revision, entry.source_label,
-                                      "evidence", entry.content))
+                                      "evidence", content))
     return BotContext(
         workspace_id=workspace.id, context_revision=workspace.revision,
         role="research", question=command["content"],

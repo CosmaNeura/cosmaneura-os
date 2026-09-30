@@ -225,6 +225,31 @@ def source_excerpt(records):
     return content
 
 
+def analysis_excerpt(records):
+    """Hydrate only receipt-selected records; preserve every retained field.
+
+    Saved entry text has an immutable database-enforced format. Keep it intact,
+    and derive the model passage from the exact verified source record. The
+    analysis boundary admits this complete passage or refuses it; never shorten.
+    """
+    legacy = source_excerpt(records)
+    if not any(record["fields"] or record["result_scope"] != "unknown" for record in records):
+        return legacy
+    prefixes, excerpts = [], []
+    for record in records:
+        prefix = source_excerpt([record])
+        excerpt = record["excerpt"]
+        if excerpt:
+            prefix = prefix[:-len(excerpt)]
+        fields = "\n".join(field["label"] + ": " + field["text"] for field in record["fields"])
+        prefixes.append(prefix + "\nRetained source details:\n"
+                        + "Reported result scope: " + record["result_scope"] + "\n"
+                        + fields + "\nRetained source excerpt:\n")
+        excerpts.append(excerpt)
+    separator = "\n\n---\n\n"
+    return separator.join(prefix + excerpt for prefix, excerpt in zip(prefixes, excerpts, strict=True))
+
+
 def _saved(s, row):
     request = Save.model_validate_json(json.dumps(row.request)).model_dump(mode="json")
     if (request != row.request or research_digest(request) != row.request_sha256
