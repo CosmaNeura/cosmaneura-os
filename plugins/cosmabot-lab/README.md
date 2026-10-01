@@ -125,3 +125,33 @@ the prepared interpreter, use a new report directory outside the repository:
 This check starts owned local PostgreSQL instances, calls the seven tools through
 the official SDK, checks exact fault recovery and verifies worker/database cleanup.
 It uses no provider login or public search.
+
+## Connector tools in the virtual clinic
+
+Add `--connector-tools` when generating a configuration with `lab.mcp_config`
+(or starting `lab.mcp_server`) to offer the extra offline tools. This is an
+explicit local test profile. It does not install tools in the Mac/iPhone engine
+or activate a real account.
+
+Chief, Visit Prep and Follow-up can check Google/Microsoft account health, read
+bounded email headers/calendar summaries, and explicitly save selected items as
+workspace evidence. Chief and Follow-up can read fax readiness, discover saved
+proposals, prepare an exact private proposal, and inspect its receipt. Research
+can run the fixture's pre-reviewed cardiac-trial lookup, recover its saved result
+and save selected source hashes. Scribe retains saved-source/draft tools.
+
+Each MCP process owns one separate episode. Fax sources are reviewed by the
+synthetic provider during startup. New evidence invalidates that source review;
+no agent tool can renew it. For a combined encounter use:
+
+```sh
+python -m lab.runner --cases connector_tools --repeat 2 --mode replay \
+  --postgres-bin /path/to/postgresql/bin --output /new/output/directory
+```
+
+That scenario runs upstream observations first, then a separate scripted
+provider source review, Follow-up's private fax proposal, and Chief's receipt
+verification. `--mode azure` uses the already-configured optional model and its
+bounded budget; replay is deterministic and does not call a model. Both use
+actual application records and offline provider responses. Neither approves or
+sends the fax. The existing first-party HTTP catalog remains discovery only.

@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 
 import anyio
 import pytest
+from anyio import to_thread
 from lab.mcp_runtime import _checked_arguments, _definitions
 from lab.mcp_server import RESOURCES, StdinLines, create_server, resource_value, run_blocking, serve
 from lab.store import LabError
@@ -41,7 +42,9 @@ def test_resources_distinguish_synthetic_tools_from_http_connector_reference():
     assert "source" not in case and "body" not in case
     capabilities = resource_value(runtime, "cosmabot://lab/capabilities")
     assert capabilities["discovery_only"] and not capabilities["callable_over_this_server"]
-    assert len(capabilities["tools"]) == 10
+    from cosmas_os.api.plugin_catalog import definitions
+
+    assert len(capabilities["tools"]) == len(definitions())
     assert all(not tool["_meta"]["ai.cosmas/operation"]["feature_enabled"] for tool in capabilities["tools"])
     with pytest.raises(LabError, match="unknown_resource"):
         resource_value(runtime, "file:///tmp/arbitrary-source")
@@ -53,6 +56,7 @@ async def test_official_memory_client_gets_scoped_tools_resources_and_safe_error
     from mcp import ClientSession
     from mcp.shared.exceptions import MCPError
     from mcp.shared.memory import create_client_server_memory_streams
+    from mcp.types import TextResourceContents
 
     runtime = RuntimeFixture()
     server = create_server(runtime)
@@ -67,6 +71,7 @@ async def test_official_memory_client_gets_scoped_tools_resources_and_safe_error
                 assert all(t.input_schema["additionalProperties"] is False for t in listed.tools)
                 result = await session.call_tool("list_sources", {})
                 assert not result.is_error and result.structured_content == {"result": []}
+                assert result.content[0].type == "text"
                 assert json.loads(result.content[0].text) == result.structured_content
                 for name, args, code in (
                     ("delegate_team", {"roles": ["chief"]}, "unknown_tool"),
@@ -81,6 +86,7 @@ async def test_official_memory_client_gets_scoped_tools_resources_and_safe_error
                 for uri in RESOURCES:
                     response = await session.read_resource(uri)
                     assert len(response.contents) == 1
+                    assert isinstance(response.contents[0], TextResourceContents)
                     assert json.loads(response.contents[0].text) == resource_value(runtime, uri)
                 with pytest.raises(MCPError, match="Unknown laboratory resource"):
                     await session.read_resource("file:///tmp/arbitrary-source")
@@ -104,9 +110,9 @@ async def test_cancelled_operation_closes_runtime_and_releases_blocked_work():
     runtime = BlockingRuntime()
     async with anyio.create_task_group() as tasks:
         tasks.start_soon(run_blocking, runtime, runtime.call)
-        assert await anyio.to_thread.run_sync(started.wait, 2)
+        assert await to_thread.run_sync(started.wait, 2)
         tasks.cancel_scope.cancel()
-    assert runtime.closed and await anyio.to_thread.run_sync(stopped.wait, 2)
+    assert runtime.closed and await to_thread.run_sync(stopped.wait, 2)
 
 
 def test_termination_during_startup_unwinds_runtime(monkeypatch):
@@ -174,6 +180,7 @@ async def test_pipe_input_preserves_partial_frames_and_cancels_idle_read():
         async with anyio.create_task_group() as tasks:
             async def finish():
                 await anyio.sleep(0)
+                assert writer is not None
                 os.write(writer, b'1}\n{"second":2}\n')
             tasks.start_soon(finish)
             assert await anext(lines) == '{"first":1}\n'

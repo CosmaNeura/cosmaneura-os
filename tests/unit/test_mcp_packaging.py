@@ -4,6 +4,7 @@ import runpy
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
 
 import pytest
 from lab import mcp_config, mcp_doctor
@@ -131,7 +132,7 @@ def test_package_copy_is_explicit_and_does_not_change_source_or_existing_config(
     source = REPO / "plugins/cosmabot-lab/.mcp.json"
     original = source.read_bytes()
     destination = tmp_path / "cosmabot-lab"
-    kwargs = dict(repo=REPO, python=Path(sys.executable), postgres_bin=tmp_path,
+    kwargs: dict[str, Any] = dict(repo=REPO, python=Path(sys.executable), postgres_bin=tmp_path,
                   output_parent=tmp_path, destination=destination, package=True,
                   case="walk_in", role="chief", fault="none")
     result = mcp_config.generate(**kwargs)
@@ -202,3 +203,10 @@ def test_launcher_rejects_azure_before_dispatch(monkeypatch, capsys):
         runpy.run_path(str(REPO / "plugins/cosmabot-lab/scripts/launch.py"), run_name="__main__")
     assert error.value.code == 2
     assert "invalid choice" in capsys.readouterr().err
+
+
+def test_connector_profile_is_explicit_and_forwarded_by_generated_config():
+    value = mcp_config.configuration(python=Path('/venv/bin/python'), repo=REPO,
+        postgres_bin=Path('/postgres/bin'), output_parent=Path('/tmp'),
+        launcher=Path('/package/scripts/launch.py'), connector_tools=True)
+    assert value['mcpServers']['cosmabot-lab']['args'][-1] == '--connector-tools'

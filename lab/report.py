@@ -199,7 +199,7 @@ def render(root, report):
         events = [json.loads(line) for line in (root / "events.jsonl").read_text().splitlines() if line]
     timeline = "".join(f'<tr><td>{e["elapsed_ms"]/1000:.1f}s</td><td>{html.escape(e["episode"])}</td>'
                        f'<td>{html.escape(e["role"])}</td><td>{html.escape(e.get("tool", e["kind"]))}</td>'
-                       f'<td>{html.escape(e.get("error", "OK"))}</td></tr>' for e in events[-300:])
+                       f'<td>{html.escape(e.get("error") or "OK")}</td></tr>' for e in events[-300:])
     usage = report.get("usage", {})
     limits = "".join(f"<li>{html.escape(item)}</li>" for item in report["limits"])
     capture = report.get("capture_checks", {})

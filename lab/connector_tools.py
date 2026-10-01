@@ -1,0 +1,166 @@
+"""Fixed-role connector tools shared by the model lab and optional MCP profile.
+
+This executes adapter boundaries, not entire qualifications. Fixtures are set
+up by a synthetic provider before exposing tools. No tool can grant access,
+review a note, approve a proposal or submit an external action.
+"""
+
+from contextlib import ExitStack
+
+from pydantic import ValidationError
+
+from cosmas_os.application.workspace import WorkspaceError
+from cosmas_os.ports.vendor_artifacts import ArtifactStoreError
+from lab import account_tools
+from lab.engine import SCHEMAS, World
+from lab.fax_tools import FAX_SCHEMAS, FAX_TOOL_ROLES, FaxTools
+from lab.research_tools import RESEARCH_SCHEMAS, RESEARCH_TOOL_ROLES, ResearchTools
+from lab.store import LabError
+
+CONNECTOR_SCHEMAS = {**account_tools.ACCOUNT_SCHEMAS, **FAX_SCHEMAS, **RESEARCH_SCHEMAS}
+CONNECTOR_ROLES = {**account_tools.ACCOUNT_TOOL_ROLES, **FAX_TOOL_ROLES, **RESEARCH_TOOL_ROLES}
+ALL_SCHEMAS = {**SCHEMAS, **CONNECTOR_SCHEMAS}
+WRITES = {"save_artifact", "delegate_team", "account_save_selected_observations", "fax_prepare",
+          "account_select_observed_items", "research_lookup_trials", "research_save_selection"}
+
+
+def visible(role, name):
+    if name in CONNECTOR_ROLES:
+        return role in CONNECTOR_ROLES[name]
+    return name in SCHEMAS and (role == "chief" or name != "delegate_team")
+
+
+class ConnectorWorld(World):
+    schemas = ALL_SCHEMAS
+    tool_scope = ("Only offline, invented-data account/research observations and private fax proposals are available. "
+                  "There are no recording, permission, approval, sending, booking or payment tools. ")
+    extra_instructions = (
+        "Use application_status.workspace_revision before a save. On workspace_revision_conflict read current status and "
+        "retry the same selected content with a new key/current revision. Account read receipts alone are not shared evidence: "
+        "use account_select_observed_items with the original read_key and selected item IDs, then read_source the saved entry before citing it. "
+        "Every connector source is invented. Fax pending_approval/acceptance not_observed is a proposal, not delivery. "
+        "Use only IDs/hashes returned by tools. Read list_artifacts before any read_artifact; role names are not returned hashes. "
+        "Use proposal_ids from fax_readiness rather than inventing operation UUIDs. "
+        "A failed source read is unavailable, not an empty result or evidence of absence. ")
+    jobs = {
+        "chief": "Read original sources, delegate visit_prep, scribe and research together in ONE call, then delegate follow_up. "
+            "Read all shared artifacts and the saved connector evidence before saving a concise synthesis. Verify the Documo "
+            "proposal remains unsubmitted by fax_list_proposals then fax_receipt, selected Google observations reached Prep, "
+            "and selected trial evidence reached Research. Do not create a second fax proposal. "
+            "Include follow_up as an exact dependency. Report human review and missing DOB explicitly.",
+        "visit_prep": "Read the original synthetic encounter. Read Google mail headers and next-seven-day calendar using separate "
+            "stable retry keys. Use account_select_observed_items with the ORIGINAL read_key to save one selected mail item, then "
+            "read current application_status before saving one calendar item with its own original read_key. Read both saved sources before citing them. "
+            "Save your private preparation draft "
+            "with all read source IDs. Header metadata is not a message body and calendar data does not establish patient matching or consent.",
+        "research": "Read the original encounter. Use research_lookup_trials for the synthetic provider's fixed reviewed cardiac-trial "
+            "query; use current workspace revision. Select the FIRST returned source hash only and save it with research_save_selection. "
+            "Read that exact workspace evidence before saving your research draft. Retain conditions, recruiting/site conflict and "
+            "uncertainty: trial staff must assess eligibility; cell therapy benefit is unestablished. Do not recommend treatment.",
+        "scribe": "Read the supplied typed encounter and draft a concise source-faithful summary. DOB is missing and remains optional; "
+            "do not invent it or claim audio was recorded. Share the saved draft with Chief and Follow-up.",
+        "follow_up": "Read all three saved upstream artifacts by exact ID/hash and original sources. Call fax_readiness for documo. "
+            "Use returned source/document/connection/correspondence, proposal_ids.fax and current revision to fax_prepare an exact "
+            "private administrative proposal. Read fax_receipt using summary ticket/id/version/revision/hash and a new read key. "
+            "Do NOT request refresh on an unsubmitted proposal. Save your draft with all three dependencies and exact source IDs; "
+            "state pending human review, dispatch not_started, acceptance not_observed and no delivery. Do not ask for human approval inside the agent tools.",
+    }
+
+    def __init__(self, *args, prepare_fax=True, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fixtures = ExitStack()
+        try:
+            self.fixtures.enter_context(account_tools.prepared_account_sandboxes(self.app))
+            self.fax = None
+            if prepare_fax:
+                self.prepare_fax_fixture()
+            self.research = ResearchTools(self.app)
+        except BaseException:
+            self.fixtures.close()
+            raise
+
+    def close(self):
+        self.fixtures.close()
+
+    def prepare_fax_fixture(self):
+        """Scripted provider setup only; never a registered/model-callable tool."""
+        if self.fax is not None:
+            raise LabError("fax_fixture_already_prepared")
+        self.fax = FaxTools(self.app, self.store.root / (self.episode + "-fax-artifacts"))
+        self.fixtures.callback(self.fax.close)
+        self.event("simulated_provider", "fax_fixture_reviewed", authority="scripted_synthetic_source_review_only")
+
+    def tool_visible(self, role, name):
+        return visible(role, name)
+
+    def model_tools(self, role):
+        """Offer exact allowed choices; authority still rechecks at execution.
+
+        Schema choices avoid transcription mistakes in long hashes and IDs.
+        They never read accounts, save selections or perform implicit retries.
+        """
+        tools = super().model_tools(role)
+        sources = [source["id"] for source in self.app.sources(metadata_only=True)]
+        reads = [self.store.read(self.episode + ":accounts", item["id"], role, item["sha256"])
+                 for item in self.store.visible(self.episode + ":accounts", role)]
+        artifacts = self.store.visible(self.episode, role)
+        for tool in tools:
+            function = tool["function"]
+            schema = function["parameters"]
+            fields = schema["properties"]
+            if function["name"] == "read_source" and sources:
+                fields["source_id"]["enum"] = sources
+            elif function["name"] == "save_artifact":
+                if sources:
+                    fields["source_ids"]["items"]["enum"] = sources
+                if artifacts:
+                    definition = schema["$defs"]["ArtifactArgs"]["properties"]
+                    definition["artifact_id"]["enum"] = [item["id"] for item in artifacts]
+                    definition["sha256"]["enum"] = [item["sha256"] for item in artifacts]
+            elif function["name"] == "read_artifact" and artifacts:
+                fields["artifact_id"]["enum"] = [item["id"] for item in artifacts]
+                fields["sha256"]["enum"] = [item["sha256"] for item in artifacts]
+            elif function["name"] == "account_select_observed_items" and reads:
+                fields["read_key"]["enum"] = [item["request"]["idempotency_key"] for item in reads]
+                identifiers = sorted({v["id"] for item in reads for v in item["observation"]["items"]})
+                if identifiers:
+                    fields["item_ids"]["items"]["enum"] = identifiers
+            elif function["name"] == "account_save_selected_observations" and reads:
+                fields["observation_id"]["enum"] = [item["id"] for item in reads]
+                fields["observation_sha256"]["enum"] = [item["sha256"] for item in reads]
+                identifiers = sorted({v["id"] for item in reads for v in item["observation"]["items"]})
+                if identifiers:
+                    fields["item_ids"]["items"]["enum"] = identifiers
+        return tools
+
+    def _execute(self, role, name, args):
+        if not visible(role, name):
+            raise LabError("tool_not_available_for_role")
+        values = args.model_dump(mode="json", exclude_none=True)
+        try:
+            if name in account_tools.ACCOUNT_SCHEMAS:
+                result = account_tools.execute(self.app, self.store, self.episode, role, name, values)
+                if "error" in result:
+                    raise LabError(result["error"])
+                return result
+            if name in FAX_SCHEMAS:
+                if self.fax is None:
+                    raise LabError("fax_fixture_provider_review_required")
+                return self.fax.call(role, name, values)
+            if name in RESEARCH_SCHEMAS:
+                return self.research.call(role, name, values)
+            result = super()._execute(role, name, args)
+            if name == "application_status" and isinstance(result, dict):
+                from sqlalchemy.orm import Session
+
+                from cosmas_os.application import workspace
+
+                with Session(self.app.engine) as session:
+                    snapshot = workspace.read(session, self.app.box, self.app.owner, self.app.workspace)
+                result = {**result, "workspace_revision": snapshot["revision"],
+                          "connector_transport": "offline_http_twin", "human_review_available_as_tool": False}
+            return result
+        except WorkspaceError as error:
+            raise LabError(error.code) from None
+        except (ArtifactStoreError, ValidationError):
+            raise LabError("connector_source_or_arguments_unavailable") from None

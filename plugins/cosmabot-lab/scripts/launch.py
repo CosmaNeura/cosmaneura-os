@@ -15,6 +15,7 @@ def main():
     parser.add_argument("--role", default="chief")
     parser.add_argument("--mode", choices=("replay",), default="replay")
     parser.add_argument("--fault", choices=("none", "read_timeout", "lost_save_reply"), default="none")
+    parser.add_argument("--connector-tools", action="store_true")
     args = parser.parse_args()
     repo = args.repo.expanduser().resolve()
     sys.path[:0] = [str(repo), str(repo / "src")]
@@ -35,7 +36,8 @@ def main():
         os.chdir(repo)
         os.execve(sys.executable, [sys.executable, "-B", "-m", "lab.mcp_server",
                                   "--postgres-bin", str(pg), "--case", args.case,
-                                  "--role", args.role, "--mode", "replay", "--fault", args.fault],
+                                  "--role", args.role, "--mode", "replay", "--fault", args.fault,
+                                  *(["--connector-tools"] if args.connector_tools else [])],
                   local_environment(repo, parent))
     except (ValueError, OSError):
         print("CosmaBot lab launch prerequisites changed; run python -m lab.mcp_doctor.", file=sys.stderr)

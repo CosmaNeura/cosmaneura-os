@@ -41,6 +41,7 @@ class RuntimeConfig(TypedDict):
     max_tokens: int
     max_seconds: int
     concurrency: int
+    connector_tools: bool
 
 
 def _write(path, value):
@@ -49,25 +50,46 @@ def _write(path, value):
     temporary.replace(path)
 
 
-def _definitions(role):
+def _schemas(connector_tools):
+    if connector_tools:
+        from lab.connector_tools import ALL_SCHEMAS
+
+        return ALL_SCHEMAS
+    return SCHEMAS
+
+
+def _visible(role, name, connector_tools):
+    if connector_tools:
+        from lab.connector_tools import visible
+
+        return visible(role, name)
+    return name in SCHEMAS and (role == "chief" or name != "delegate_team")
+
+
+def _definitions(role, connector_tools=False):
+    writes = {"save_artifact", "delegate_team"}
+    if connector_tools:
+        from lab.connector_tools import WRITES
+
+        writes = WRITES
     return [{"name": name, "description": description,
              "inputSchema": schema.model_json_schema(),
-             "annotations": {"readOnlyHint": name not in {"save_artifact", "delegate_team"},
+             "annotations": {"readOnlyHint": name not in writes,
                              "destructiveHint": False, "idempotentHint": True,
                              "openWorldHint": False}}
-            for name, (schema, description) in SCHEMAS.items()
-            if role == "chief" or name != "delegate_team"]
+            for name, (schema, description) in _schemas(connector_tools).items()
+            if _visible(role, name, connector_tools)]
 
 
-def _checked_arguments(role, name, arguments):
-    if not isinstance(name, str) or name not in SCHEMAS or name == "delegate_team" and role != "chief":
+def _checked_arguments(role, name, arguments, connector_tools=False):
+    if not isinstance(name, str) or not _visible(role, name, connector_tools):
         raise LabError("unknown_tool")
     try:
         if not isinstance(arguments, dict):
             raise ValueError
         if len(json.dumps(arguments, allow_nan=False).encode()) > MAX_MESSAGE_BYTES:
             raise ValueError
-        return SCHEMAS[name][0].model_validate(arguments).model_dump(mode="json")
+        return _schemas(connector_tools)[name][0].model_validate(arguments).model_dump(mode="json", exclude_none=True)
     except (ValueError, TypeError, ValidationError, RecursionError):
         raise LabError("invalid_tool_arguments") from None
 
@@ -77,10 +99,11 @@ class MCPRuntime:
 
     def __init__(self, output: Path | None, postgres_bin: Path, *, case="walk_in", role="chief",
                  mode="replay", allow_azure=False, max_calls=60, max_tokens=100000,
-                 max_seconds=900, concurrency=3, fault="none"):
+                 max_seconds=900, concurrency=3, fault="none", connector_tools=False):
         if (type(case) is not str or case not in CASES or type(role) is not str or role not in ROLES
                 or type(mode) is not str or mode not in {"replay", "azure"} or type(allow_azure) is not bool
-                or mode == "azure" and not allow_azure or type(fault) is not str or fault not in FAULTS):
+                or mode == "azure" and not allow_azure or type(fault) is not str or fault not in FAULTS
+                or type(connector_tools) is not bool):
             raise LabError("invalid_runtime_configuration")
         for value, lower, upper in ((max_calls, 1, 250), (max_tokens, 1000, 500000),
                                     (max_seconds, 1, 1800), (concurrency, 1, 3)):
@@ -91,7 +114,8 @@ class MCPRuntime:
         if any(not os.access(self._binary / tool, os.X_OK) for tool in ("initdb", "pg_ctl", "createdb")):
             raise LabError("postgres_tools_unavailable")
         self.config = RuntimeConfig(case=case, role=role, mode=mode, fault=fault, max_calls=max_calls,
-                                    max_tokens=max_tokens, max_seconds=max_seconds, concurrency=concurrency)
+                                    max_tokens=max_tokens, max_seconds=max_seconds, concurrency=concurrency,
+                                    connector_tools=connector_tools)
         self.output = None
         self._pg = self._worker = self._stderr = None
         self._buffer = bytearray()
@@ -221,11 +245,11 @@ class MCPRuntime:
             return answer["result"]
 
     def tool_definitions(self):
-        return _definitions(self.config["role"])
+        return _definitions(self.config["role"], self.config["connector_tools"])
 
     def call(self, name, arguments) -> Any:
         try:
-            parsed = _checked_arguments(self.config["role"], name, arguments)
+            parsed = _checked_arguments(self.config["role"], name, arguments, self.config["connector_tools"])
             return self._request("call", name=name, arguments=parsed)
         except LabError as error:
             if str(error) in {"runtime_call_timeout", "runtime_worker_unavailable", "run_budget_exhausted",
@@ -325,7 +349,6 @@ def _worker(root):
     from sqlalchemy import create_engine
     from sqlalchemy.engine import make_url
 
-    from cosmas_os.model_registry import metadata
     from lab.application import Application
     from lab.engine import AzureModel, Budget, World
     from lab.runner import source_record
@@ -341,8 +364,12 @@ def _worker(root):
         raise LabError("owned_database_required")
     engine = create_engine(database, pool_size=6, max_overflow=0, hide_parameters=True)
     model = None
+    world = None
     try:
-        metadata.create_all(engine)
+        from alembic import command
+        from alembic.config import Config
+
+        command.upgrade(Config(str(REPO / "alembic.ini")), "head")
         source = source_record()
         _write(root / "source.json", source)
         store = Store(root)
@@ -351,10 +378,16 @@ def _worker(root):
         episode = "mcp-" + config["case"]
         app = Application(engine, CASES[config["case"]],
                           lambda role, kind, **values: store.event(episode, role, kind, **values))
-        world = World(store, episode, CASES[config["case"]], app, model,
+        world_type = World
+        if config["connector_tools"]:
+            from lab.connector_tools import ConnectorWorld
+
+            world_type = ConnectorWorld
+        world = world_type(store, episode, CASES[config["case"]], app, model,
                       concurrency=config["concurrency"], fault=config["fault"])
 
         def status():
+            assert world is not None
             artifacts = store.visible(episode, config["role"])
             return {"schema": SCHEMA, "state": "ready", "synthetic": True,
                     **{k: config[k] for k in ("case", "role", "mode", "fault")}, "roles": list(ROLES),
@@ -362,7 +395,8 @@ def _worker(root):
                     "faults_seen": sorted(world.faults_seen), "failures": world.failures,
                     "external_effects": 0, "source": {k: source[k] for k in ("commit", "source_sha256")},
                     "usage": {"model_calls": budget.calls, "tokens": budget.tokens},
-                    "limits": {k: config[k] for k in ("max_calls", "max_tokens", "max_seconds", "concurrency")}}
+                    "limits": {k: config[k] for k in ("max_calls", "max_tokens", "max_seconds", "concurrency")},
+                    "connector_tools": config["connector_tools"], "schema_setup": "alembic-upgrade-head"}
 
         def answer(request_id, result):
             raw = json.dumps({"id": request_id, "result": result}, allow_nan=False).encode()
@@ -380,7 +414,7 @@ def _worker(root):
                 if request["action"] == "status":
                     result = status()
                 elif request["action"] == "call":
-                    arguments = _checked_arguments(config["role"], request["name"], request["arguments"])
+                    arguments = _checked_arguments(config["role"], request["name"], request["arguments"], config["connector_tools"])
                     result = world.execute(config["role"], request["name"], arguments)
                 else:
                     result = {"error": "unknown_runtime_action"}
@@ -393,6 +427,9 @@ def _worker(root):
         _write(root / "status.json", {**status(), "state": "closed"})
     finally:
         try:
+            close_world = getattr(world, "close", None)
+            if callable(close_world):
+                close_world()
             if model is not None:
                 model.close()
         finally:

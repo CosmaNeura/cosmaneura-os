@@ -22,15 +22,16 @@ PACKAGE_FILES = (".codex-plugin/plugin.json", ".mcp.json", "README.md", "scripts
 
 def configuration(*, python: Path, repo: Path, postgres_bin: Path, output_parent: Path,
                   launcher: Path, case: str = "walk_in", role: str = "chief",
-                  fault: str = "none") -> dict:
+                  fault: str = "none", connector_tools: bool = False) -> dict:
     from lab.cases import CASES, ROLES
 
-    if case not in CASES or role not in ROLES or fault not in {"none", "read_timeout", "lost_save_reply"}:
+    if (case not in CASES or role not in ROLES or fault not in {"none", "read_timeout", "lost_save_reply"}
+            or type(connector_tools) is not bool):
         raise ValueError("unsupported_synthetic_startup")
     return {"mcpServers": {"cosmabot-lab": {"command": str(python), "args": [
         "-B", str(launcher), "--repo", str(repo), "--postgres-bin", str(postgres_bin),
         "--temp-parent", str(output_parent), "--case", case, "--role", role,
-        "--mode", "replay", "--fault", fault]}}}
+        "--mode", "replay", "--fault", fault, *(["--connector-tools"] if connector_tools else [])]}}}
 
 
 def destination_path(value: Path) -> Path:
@@ -54,7 +55,7 @@ def write_config(path: Path, value: dict) -> None:
 
 
 def generate(*, repo: Path, python: Path, postgres_bin: Path, output_parent: Path,
-             destination: Path, package: bool, case: str, role: str, fault: str) -> dict:
+             destination: Path, package: bool, case: str, role: str, fault: str, connector_tools: bool = False) -> dict:
     result = doctor(repo=repo, python=python, postgres_bin=postgres_bin, output_parent=output_parent)
     if not result["ready"]:
         raise ValueError("doctor_not_ready_run_lab_mcp_doctor")
@@ -65,7 +66,7 @@ def generate(*, repo: Path, python: Path, postgres_bin: Path, output_parent: Pat
     launcher = (destination if package else template) / "scripts/launch.py"
     value = configuration(python=python, repo=repo, postgres_bin=postgres_bin,
                           output_parent=output_parent, launcher=launcher,
-                          case=case, role=role, fault=fault)
+                          case=case, role=role, fault=fault, connector_tools=connector_tools)
     if package:
         with tempfile.TemporaryDirectory(prefix=".cosmabot-package-", dir=destination.parent) as staging:
             staged = Path(staging) / "cosmabot-lab"
@@ -96,7 +97,7 @@ def generate(*, repo: Path, python: Path, postgres_bin: Path, output_parent: Pat
         write_config(destination, value)
     return {"schema": "cosmabot.lab.config.v1", "destination": str(destination),
             "configured": True, "installed": False, "activated": False,
-            "mode": "replay", "role": role, "case": case,
+            "mode": "replay", "role": role, "case": case, "connector_tools": connector_tools,
             "episode_output": "fresh_temporary_directory_per_launch", "credentials_stored": False}
 
 
@@ -112,6 +113,7 @@ def main(argv=None) -> int:
     parser.add_argument("--case", default="walk_in")
     parser.add_argument("--role", default="chief")
     parser.add_argument("--fault", choices=("none", "read_timeout", "lost_save_reply"), default="none")
+    parser.add_argument("--connector-tools", action="store_true")
     args = parser.parse_args(argv)
     try:
         repo = repository_path(args.repo)
@@ -120,7 +122,7 @@ def main(argv=None) -> int:
                           output_parent=output_parent_path(args.output_parent, repo),
                           destination=args.package_output or args.config_output,
                           package=args.package_output is not None, case=args.case,
-                          role=args.role, fault=args.fault)
+                          role=args.role, fault=args.fault, connector_tools=args.connector_tools)
     except (ValueError, OSError) as error:
         code = str(error) if isinstance(error, ValueError) else "local_configuration_write_failed"
         print(json.dumps({"configured": False, "error": code}), file=sys.stderr)
