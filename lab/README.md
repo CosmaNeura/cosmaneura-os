@@ -271,6 +271,74 @@ failed attempts, are retained rather than reclassified by text rescoring.
 
 ### Clinician usability agents
 
+For a clinician-driven handoff with actual saved application results, start the
+connected rehearsal bridge in a checkout without `.env`:
+
+```sh
+python -m lab.clinician_session --mode azure --optimized --output /tmp/new-clinician-run
+cd web
+pnpm exec vite --config vite.clinician-live-lab.config.ts
+```
+
+The bridge owns a temporary PostgreSQL database and listens on loopback port
+5195. The real EncounterWorkspace UI listens on port 5194. Fixed links select
+`?persona=provider&round=1`, `nurse`, or `pa`, with round 1 or 2. Every combination
+gets an isolated synthetic Box and encounter. The supplied `scribe-packet.txt`
+contains invented dialogue and an actual Scribe-agent-generated summary. It does
+not claim microphone capture or speech recognition. The tester pastes the packet
+through visible controls and gives Chief a natural-language request.
+
+Chief selects three enabled recipients from Visit Prep, Scribe, Research, and
+Follow-up according to the clinician's request, then creates actual durable private
+assignments. Recipients save attributed drafts with readable briefs; Follow-up
+includes proposed human role owners, with individual staff members still unassigned.
+Chief checks their exact saved results in a separately labeled laboratory artifact,
+without impersonating a new human conversation. This verification is not a production
+background-worker feature. Lost publication replies are deliberately recovered without
+duplicate assignments. Research prepares an investigation draft from the saved material;
+public lookup, clinical trial eligibility, and external actions are unavailable.
+Use `--mode replay` for deterministic bridge checks without model calls.
+`--baseline` retains the historical fixed three-recipient/test-conversation profile
+for comparison; the current optimized profile is the default.
+The model receives role-specific tasks and exact allowed source/hash fields. Known
+machine references in display prose can be rendered as their admitted source labels;
+unknown references and changed structured bindings remain rejected. The trace records
+these display corrections. Follow-up keeps a short introduction, a separate list of
+missing facts, and proposed human tasks instead of repeating the same checklist.
+
+`lab/browser/clinician-live-driver.mjs` gives each persona an isolated browser
+controlled by JSON lines of visible clicks, fields, snapshots, and screenshots.
+It accepts only port 5194 and a fixed persona/round; it exposes no page evaluation
+or direct API command. Its output directory must be under `output/`. Transcript
+input uses raw PTY mode to avoid the macOS canonical-line length limit. Action
+latencies are measured automation time, never claimed as human dwell time.
+
+Run `python -m lab.clinician_report /tmp/new-clinician-run` for the six-run saved-work
+matrix and phase timings. Persona assistance, wrong turns, and usability failures
+must be reported alongside it: a successful backend workflow does not establish
+unassisted clinician success. Stop the owned bridge with Ctrl-C after the runs;
+its cleanup receipt records the temporary database shutdown.
+
+After all six UI runs, capture their exact saved packet and clinician requests
+while the bridge is still running, then stop it before starting the comparison:
+
+```sh
+python -m lab.clinician_benchmark /tmp/completed-clinician-run
+python -m lab.clinician_session --mode azure --optimized \
+  --benchmark-input /tmp/completed-clinician-run/benchmark-input.json \
+  --output /tmp/new-clinician-comparison --serve-after-benchmark
+```
+
+The comparison uses six new owned workspaces with the same packet and requests.
+It requires exact completed receipts and the targeted regressions found by these
+personas (requested Visit Prep, Research, missing DOB/medications, contact conflict,
+and proposed human owners). Failed checks suppress a speedup claim. These narrow
+text/structure checks do not establish clinical quality. The six service repeats
+are not additional clinician UI runs or human timing measurements. The optional
+server stays available for inspecting the improved saved work after the repeat.
+The comparison covers the whole change bundle, including routing and the review
+channel; it does not isolate one optimization's effect or prove production latency.
+
 `clinician-personas.json` defines two invented, clinically confident but technically
 inexperienced testers: a family physician and a family nurse practitioner. These
 are explicit behavioral settings, not validated psychometric scores or claims

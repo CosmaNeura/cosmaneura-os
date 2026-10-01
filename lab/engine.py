@@ -86,11 +86,12 @@ class Budget:
 class AzureModel:
     name = "azure-gpt-4.1-real-tools"
 
-    def __init__(self, budget):
+    def __init__(self, budget, *, require_tools=False):
         from azure.identity import AzureCliCredential
 
         self.credential = AzureCliCredential(process_timeout=15)
         self.budget = budget
+        self.require_tools = require_tools
         self.token_lock = threading.Lock()
         self.token = None
         self.client = httpx.Client(timeout=httpx.Timeout(45, connect=10), follow_redirects=False, trust_env=False)
@@ -110,8 +111,9 @@ class AzureModel:
             token = self.token.token
         with self.client.stream("POST", ENDPOINT, headers={"Authorization": "Bearer " + token},
                                json={"model": MODEL, "store": False, "temperature": 0,
-                                     "max_completion_tokens": 1200, "messages": messages,
-                                     "tools": tools, "parallel_tool_calls": True}) as response:
+                                     "max_completion_tokens": 1800 if self.require_tools else 1200, "messages": messages,
+                                     "tools": tools, "parallel_tool_calls": True,
+                                     **({"tool_choice": "required"} if self.require_tools else {})}) as response:
                 if response.status_code != 200:
                     raise LabError(f"model_http_{response.status_code}")
                 raw = bytearray()
@@ -121,16 +123,21 @@ class AzureModel:
                         raise LabError("model_response_limit")
                     raw.extend(chunk)
         data = json.loads(raw)
-        if data.get("model") not in {MODEL, "gpt-4.1-2025-04-14"}:
-            raise LabError("unexpected_model")
-        choice = data["choices"][0]
-        if choice.get("finish_reason") not in {"stop", "tool_calls"} or choice["message"].get("refusal"):
-            raise LabError("incomplete_model_response")
-        usage = data.get("usage", {})
-        used = usage.get("total_tokens", 0)
+        # A complete provider response can consume tokens even when its output
+        # is unusable. Settle only known valid usage; unknown calls keep their
+        # conservative reservation, including missing or malformed usage.
+        usage = data.get("usage")
+        used = usage.get("total_tokens") if isinstance(usage, dict) else None
         if type(used) is not int or not 0 <= used <= 100000:
             raise LabError("invalid_model_usage")
         self.budget.used(used, reservation)
+        if data.get("model") not in {MODEL, "gpt-4.1-2025-04-14"}:
+            raise LabError("unexpected_model")
+        choice = data["choices"][0]
+        if choice.get("finish_reason") == "length":
+            raise LabError("model_output_limit")
+        if choice.get("finish_reason") not in {"stop", "tool_calls"} or choice["message"].get("refusal"):
+            raise LabError("incomplete_model_response")
         return choice["message"], {"model": data["model"], "input_tokens": usage.get("prompt_tokens"),
                                   "output_tokens": usage.get("completion_tokens"), "total_tokens": used}
 

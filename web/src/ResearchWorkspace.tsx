@@ -14,7 +14,14 @@ import './research-workspace.css';
 const blank=(bot:string):ResearchDraft=>({version:1,bot,topic:'literature',query:'',sources:[],pending:null});
 const stateLabel:Record<ResearchObservation['state'],string>={running:'Lookup in progress',completed:'Sources retrieved',partial:'Some sources unavailable',unavailable:'Sources unavailable',interrupted:'Lookup interrupted — outcome unconfirmed'};
 const sourceLabel=(source:ResearchSource,catalog:ResearchCatalog|null)=>catalog?.sources.find(s=>s.id===source)?.label??source.replaceAll('_',' ');
-export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,enabled,locked,onDenied,onChanged,analysis,port=researchApi}: {
+export function ResearchWorkspace({visible=true,...props}:Parameters<typeof ResearchWorkspaceEditor>[0]&{visible?:boolean}){
+ const [opened,setOpened]=useState(visible);
+ useEffect(()=>{if(visible)setOpened(true);},[visible]);
+ // A saved draft needs no public connection. Once opened, retain selections,
+ // in-flight work and recovery guards while the saved conversation is shown.
+ return opened?<div hidden={!visible}><ResearchWorkspaceEditor {...props}/></div>:null;
+}
+function ResearchWorkspaceEditor({identity,workspaceId,workspaceRevision,bot,enabled,locked,onDenied,onChanged,analysis,port=researchApi}: {
  identity:AuthenticatedWorkspaceIdentity;workspaceId:string;workspaceRevision:number;bot:{address:string;team_revision:number};enabled:boolean;locked:boolean;
  onDenied?:(cause:WorkspaceApiError)=>void;onChanged?:(revision:number)=>void;analysis?:ResearchAnalysisAccess;port?:ResearchPort;
 }){

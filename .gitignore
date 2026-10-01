@@ -78,5 +78,7 @@ web/tsconfig.tsbuildinfo
 # Local synthetic UX fixture build
 /web/ux-lab-dist/
 /web/clinician-lab-dist/
+/web/clinician-live-lab-dist/
+/output/clinician-runs/
 /lab/browser/test-results/
 /lab/browser/playwright-report/

@@ -528,12 +528,19 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           operation.type === "followUpComplete" ? await workspaceApi.completeFollowUp(identity, workspace.id, operation.ticketId, operation.body) :
           await workspaceApi.link(identity, workspace.id, operation.body);
         if (current !== generation.current) return;
-        if (active && workspace) await active.persist(`workspace:${workspace.id}`, notebookDraft(result.workspace, note,
+        const savedNotebook=operation.type==='entry'&&operation.body.kind==='scratchpad'
+          ? result.workspace.entries.find(entry=>entry.kind==='scratchpad'&&entry.revision===result.entry_revision):undefined;
+        // The API trims surrounding whitespace. A confirmed save must reconcile
+        // that normalization without replacing a separately recovered edit.
+        const nextNote=savedNotebook&&operation.type==='entry'&&note===operation.body.content&&
+          savedNotebook.content===operation.body.content.trim()?savedNotebook.content:note;
+        if (active && workspace) await active.persist(`workspace:${workspace.id}`, notebookDraft(result.workspace, nextNote,
           operation.type === "entry" && operation.body.kind === "conversation" ? "" : thought,
           operation.type === "entry" && operation.body.kind === "evidence" ? "" : evidence,
           operation.type === "entry" && operation.body.kind === "evidence" ? "" : source, null));
         if (current !== generation.current) return;
         setWorkspace(result.workspace);
+        if(nextNote!==note)setNote(nextNote);
         if (operation.type === "coreNoteLink") { setPanel("Review"); setMobilePanel("Review"); }
         if (operation.type === "entry" && operation.body.kind === "conversation") setThought("");
         if (operation.type === "entry" && operation.body.kind === "evidence") { setEvidence(""); setSource(""); }
@@ -1099,7 +1106,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         </AccountRecoveryContext.Provider> : undefined}
       />}
       {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
-        <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
+        <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='chief' ? "Paste a Scribe transcript and summary, or type notes to prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
           encounterLabel={busy?'Loading…':encounters?'Refresh encounters':authenticated?'Choose an encounter':'Open synthetic encounter'}
@@ -1208,7 +1215,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onSelect={setSelected} onClose={()=>setInboxSelection(null)} onSetup={()=>void openSettings()}
             onSubmit={async body=>{if(locked||captureNavigationLocked||captureDraftLocked||!body.inbox_analysis||body.expected_revision!==workspace.revision||body.team_revision!==team.revision)return;
               await saveModel({type:'ask',model_contract:1,origin:'durable_admission_v1',body},'submit');}}/>}
-          {bot?.role === "research" && <>{authenticated && team ? <ResearchWorkspace key={`${workspace.id}:${botAddress(bot)}`}
+          {bot?.role === "research" && <>
+            <button className="team-subtle" onClick={()=>setSavedResearchChat(value=>!value)}>{savedResearchChat ? "Search public sources" : "Saved encounter conversation"}</button>
+            {authenticated && team ? <ResearchWorkspace key={`${workspace.id}:${botAddress(bot)}`} visible={!savedResearchChat}
             identity={authenticated} workspaceId={workspace.id} workspaceRevision={workspace.revision} bot={{address:botAddress(bot),team_revision:team.revision}}
             enabled={bot.enabled&&!bot.retired&&team.revision>0} locked={locked||captureNavigationLocked||captureDraftLocked}
             analysis={{workspace,model:team.llm,modelBlocked:bot.blocked_capabilities?.includes('model_answer'),onSubmit:async body=>{
@@ -1216,8 +1225,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               setSavedResearchChat(true);await saveModel({type:'ask',model_contract:1,origin:'durable_admission_v1',body},'submit');
             }}}
             onDenied={failure} onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}}/>
-            : <p className="research-status">Sign in to use private Research settings and check public source connections.</p>}
-            <button className="team-subtle" aria-expanded={savedResearchChat} onClick={()=>setSavedResearchChat(value=>!value)}>Saved encounter conversation</button></>}
+            : !savedResearchChat && <p className="research-status">Sign in to use private Research settings and check public source connections.</p>}</>}
           <div hidden={bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
             {!turns.length && !visitPrepReader && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
@@ -1271,9 +1279,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               <div className="team-task-actions"><div className="team-notebook-title"><h2>Jotted notes</h2><span className="team-pill">{note === latestNote ? "Saved" : "Not saved to notebook"}</span></div>
                 <button className="team-primary" disabled={locked || !note.trim()} onClick={()=>append("scratchpad",note)}>Save notebook revision</button></div>
               {stage === "During" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && <div className="team-capture"><span>Recording awaits Scribe connection</span><button disabled>Start recording</button><button disabled>Voice instruction</button></div>}
-              <p className="team-fine">Your working notebook. Shape the visit note in Review when you are ready.</p>
+              <p className="team-fine">Paste your Scribe transcript and summary here, or type visit notes. Save them before asking Chief for team drafts.</p>
               <form onSubmit={event => { event.preventDefault(); append("scratchpad", note); }}><label className="team-sr-only" htmlFor="team-notebook">Jotted notes</label>
-                <textarea ref={notebookRef} id="team-notebook" className="workspace-notepad team-notepad" rows={14} maxLength={20000} value={note} disabled={locked} onChange={e => setNote(e.target.value)} placeholder="Type or paste intake details, visit notes, or questions…" />
+                <textarea ref={notebookRef} id="team-notebook" className="workspace-notepad team-notepad" rows={14} maxLength={20000} value={note} disabled={locked} onChange={e => setNote(e.target.value)} placeholder="Paste a Scribe transcript and summary, or type visit notes…" />
                 <p className="team-fine">Your bots use saved notebook entries. Working copies on this device are separate from saved entries.</p></form>
               <details className="team-history"><summary>Saved notebook history</summary>{workspace.entries.filter(e => e.kind === "scratchpad").map(e => <article key={e.id}><small>Revision {e.revision}</small><p>{e.content}</p></article>)}</details>
             </>}

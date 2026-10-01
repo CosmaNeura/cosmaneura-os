@@ -2,6 +2,7 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import {ResearchWorkspace} from './ResearchWorkspace';
+import {hasUnsavedWork} from './unsaved-work';
 import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
 import {DraftJournal,editorAddress} from './draft-journal';
 import {memoryDraftStorage} from './draft-test-fixture';
@@ -32,6 +33,16 @@ it('keeps four primary topic choices, an explicit reviewed public input and sepa
  expect(port.search).toHaveBeenCalledTimes(1);const request=vi.mocked(port.search).mock.calls[0][2];expect(Object.keys(request).sort()).toEqual(['bot','contract_version','expected_revision','idempotency_key','public_query_confirmed','query','sources','team_revision','topic']);expect(request).toMatchObject({query:'Invented general public question',sources:['pubmed'],bot:researchBotId,public_query_confirmed:true});
  expect(element.textContent).toContain('No AI synthesis or clinical inference');expect(element.textContent).toContain('Source dateNot supplied');expect(element.textContent).toContain('VersionNot supplied');expect(element.textContent).toContain('Excerpt shortened');expect(element.textContent).toContain('Limited result set');expect(port.save).not.toHaveBeenCalled();
  await check('Select excerpt to save');await click('Save selected excerpts');await workSettled();expect(port.save).toHaveBeenCalledTimes(1);const save=vi.mocked(port.save).mock.calls[0][3];expect(Object.keys(save).sort()).toEqual(['contract_version','expected_revision','idempotency_key','source_hashes']);expect(changed).toHaveBeenCalledWith(3);expect(element.textContent).toContain('Clinical review and any follow-up remain separate');
+});
+it('defers public setup until opened, then preserves selected excerpts and the unsaved-work guard between views',async()=>{
+ await mount({visible:false});expect(element.querySelector('.research-workspace')).toBeNull();expect(port.catalog).not.toHaveBeenCalled();
+ await mount({visible:true});await prepare();await click('Search selected sources');await workSettled();await check('Select excerpt to save');
+ const question=element.querySelector('textarea')!,selection=element.querySelector<HTMLInputElement>('.research-select input')!;
+ expect(selection.checked).toBe(true);expect(hasUnsavedWork()).toBe(true);
+ await mount({visible:false});expect(question.closest('[hidden]')).not.toBeNull();expect(selection.checked).toBe(true);expect(hasUnsavedWork()).toBe(true);
+ await mount({visible:true});expect(element.querySelector('textarea')).toBe(question);expect(question.value).toBe('Invented general public question');
+ expect(question.closest('[hidden]')).toBeNull();expect(element.querySelector('.research-select input')).toBe(selection);expect(selection.checked).toBe(true);
+ expect(port.catalog).toHaveBeenCalledOnce();expect(port.search).toHaveBeenCalledOnce();expect(port.save).not.toHaveBeenCalled();
 });
 it('reports not connected honestly while preserving a question without public dispatch',async()=>{
  vi.mocked(port.catalog).mockResolvedValue(researchCatalog(false));await mount();await fill('Retain this general question');expect(element.textContent).toContain('Public research is not connected');expect(button('Review query').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();expect(port.history).not.toHaveBeenCalled();

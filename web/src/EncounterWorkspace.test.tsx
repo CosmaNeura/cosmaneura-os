@@ -110,6 +110,7 @@ describe("private encounter workspace", () => {
     try{
       await act(async()=>root.render(<EncounterWorkspace draftStorage={delayed} authenticated={access}/>));
       expect(container.querySelectorAll('.team-welcome-first-tasks button')).toHaveLength(3);
+      expect(container.querySelector('.team-welcome-first-tasks button')?.textContent).toContain('Paste a Scribe transcript and summary');
       expect(container.textContent).toContain('🌱 Try a sample');
       await click('🌱 Try a sample');expect(container.querySelector('[role="dialog"]')).not.toBeNull();
       await click('Close sample visit');expect(container.querySelector('[role="dialog"]')).toBeNull();
@@ -117,6 +118,7 @@ describe("private encounter workspace", () => {
       expect(workspaceApi.open).not.toHaveBeenCalled();
       await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
       const notebook=container.querySelector<HTMLTextAreaElement>('#team-notebook')!;
+      expect(notebook.placeholder).toContain('Paste a Scribe transcript and summary');
       expect(notebook.disabled).toBe(true);expect(focus.mock.contexts.filter(item=>item===notebook)).toHaveLength(0);
       await act(async()=>release());
       expect(container.querySelector('.team-roster [aria-pressed="true"] strong')?.textContent).toBe('Chief');
@@ -187,6 +189,24 @@ describe("private encounter workspace", () => {
     await click('Save notebook revision');await click('Organize saved notes');
     expect(container.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(CHIEF_STARTERS[0].prompt);
     expect(workspaceApi.ask).not.toHaveBeenCalled();
+  });
+
+  it('acknowledges the API-trimmed pasted packet and unlocks Chief without a second save',async()=>{
+    const configured=structuredClone(team);configured.llm.enabled=true;
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:configured});
+    await click('Open synthetic encounter');await chooseBot('Chief');
+    const pasted='  Invented transcript\n\nScribe summary retains missing DOB.\n';
+    await input('Jotted notes',pasted);
+    const saved={...structuredClone(fixture),revision:2,entries:[...structuredClone(fixture.entries),
+      {...fixture.entries[0],id:'saved-packet',revision:2,kind:'scratchpad' as const,content:pasted.trim()}]};
+    vi.mocked(workspaceApi.append).mockResolvedValue({entry_id:'saved-packet',entry_revision:2,workspace:saved});
+    await click('Save notebook revision');
+    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(pasted.trim());
+    expect(container.textContent).not.toContain('Not saved to notebook');
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Chief task starters"] button')!.disabled).toBe(false);
+    await click('Prepare team drafts');
+    expect(container.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(CHIEF_STARTERS[2].prompt);
+    expect(workspaceApi.append).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
   });
 
   it.each([['Record a visit','Choose the visit to record'],['Use an existing recording','Choose the recorded visit']])('keeps the %s home action tied to the chosen visit',async(action,title)=>{
@@ -765,6 +785,36 @@ describe("private encounter workspace", () => {
     expect(document.activeElement?.id).toBe("turn-draft-result");
     expect(container.querySelector("#turn-draft-result .team-pill")?.textContent).toBe("GPT-4.1");
     expect(workspaceApi.ask).not.toHaveBeenCalled();
+  });
+
+  it("opens a saved Research draft without checking public connections until search is chosen",async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    const {researchApi}=await import('./research-api'),{researchCatalog}=await import('./research-test-fixture');
+    const catalogSpy=vi.spyOn(researchApi,'catalog').mockResolvedValue(researchCatalog(false));
+    const configured=structuredClone(team),address=modelUuid(820),agent=modelUuid(821),resultId=modelUuid(822);
+    configured.configuration.bots.push({role:'research',instance_id:address,name:'Research',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true});
+    configured.members.push({role:'research',instance_id:address,agent_id:agent,name:'Research',initials:'Re',description:'Evidence review',prompt:'Review sources',capabilities:[]});
+    const value=assignedWorkspace();value.revision=3;
+    value.handoffs!.push({...value.handoffs![0],id:modelUuid(823),recipient_key:address,recipient_agent_id:agent,recipient_role:'research',recipient_name:'Research',status:'completed',result_entry_id:resultId});
+    value.entries.push({...value.entries[1],id:resultId,revision:3,kind:'handoff_result',content:'Review the invented cardiac evidence',
+      reply:{role:'research',agent_id:agent,agent_name:'Research',backend:'azure_gpt41',content:'Cardiac history and eligibility remain unconfirmed.',context_revision:1,citations:[]}});
+    vi.mocked(workspaceApi.team).mockResolvedValue(configured);
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:value,team:configured});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    try{
+      await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+      await click('Start with Chief');await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+      await click('Review Research result');
+      expect(container.querySelector('.research-workspace')).toBeNull();expect(catalogSpy).not.toHaveBeenCalled();
+      expect(container.textContent).not.toContain('Public research is not connected');
+      expect(container.textContent).not.toContain('Research connection could not be checked');
+      const result=container.querySelector(`#turn-${resultId}`)!;
+      expect(result.closest('[hidden]')).toBeNull();expect(result.textContent).toContain('Cardiac history and eligibility remain unconfirmed.');
+      await click('Search public sources');
+      expect(container.querySelector('.research-workspace')?.closest('[hidden]')).toBeNull();expect(catalogSpy).toHaveBeenCalledOnce();
+      expect(container.textContent).toContain('Public research is not connected');
+      expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.retryHandoff).not.toHaveBeenCalled();
+    }finally{catalogSpy.mockRestore();}
   });
 
   it("reveals a Research result and focuses it once without stealing focus on later polling",async()=>{

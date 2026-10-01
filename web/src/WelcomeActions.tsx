@@ -8,7 +8,7 @@ export function WelcomeActions({showConnections,connectionsDisabled,encounterDis
   const [sample,setSample]=useState(false);
   if(!compact&&onRecord&&onRecording)return <>
     <div className="team-welcome-first-tasks" aria-label="Start with a task">
-      {onChief&&<button disabled={encounterDisabled} onClick={onChief}><span className="welcome-task-emoji" aria-hidden="true">🧭</span><strong>Start with Chief</strong><span>Type or paste notes. Prepare your next step.</span></button>}
+      {onChief&&<button disabled={encounterDisabled} onClick={onChief}><span className="welcome-task-emoji" aria-hidden="true">🧭</span><strong>Start with Chief</strong><span>Paste a Scribe transcript and summary, or type notes.</span></button>}
       <button disabled={encounterDisabled} onClick={onRecord}><span className="welcome-task-emoji" aria-hidden="true">🎙️</span><strong>Record a visit</strong><span>Choose a visit, confirm consent, then start.</span></button>
       <button disabled={encounterDisabled} onClick={onRecording}><span className="welcome-task-emoji" aria-hidden="true">📄</span><strong>Use an existing recording</strong><span>Review a Scribe conversation with your team.</span></button>
       {!onChief&&<button onClick={()=>setSample(true)}><span className="welcome-task-emoji" aria-hidden="true">🌱</span><strong>Try a sample</strong><span>Practice reviewing a note and team handoffs.</span></button>}
