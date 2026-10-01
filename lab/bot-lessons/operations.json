@@ -1,0 +1,114 @@
+{
+  "version": 1,
+  "team": "operations",
+  "roles": [
+    "inbox",
+    "follow_up",
+    "scheduling",
+    "membership_billing"
+  ],
+  "lessons": [
+    {
+      "id": "approval-is-not-execution",
+      "finding": "Saved approval, attempted execution, provider receipt and human outcome are separate states. Chief and specialist bots need an explicit next step for each state.",
+      "applies_to": [
+        "chief",
+        "inbox",
+        "follow_up",
+        "scheduling",
+        "membership_billing"
+      ],
+      "evidence": [
+        "src/cosmas_os/application/operations_status.py",
+        "lab/operations_capability.py"
+      ],
+      "applied_scenarios": [
+        "follow_up_review",
+        "scheduling_recovery",
+        "membership_review",
+        "payment_lost_reply"
+      ]
+    },
+    {
+      "id": "preserve-service-specific-evidence",
+      "finding": "An appointment can be saved while calendar synchronization is pending; a payment cannot establish membership; local inbox or membership review completion is not an external action. Preserve those distinctions through handoffs and reopened work.",
+      "applies_to": [
+        "chief",
+        "inbox",
+        "follow_up",
+        "scheduling",
+        "membership_billing",
+        "research",
+        "scribe"
+      ],
+      "evidence": [
+        "src/cosmas_os/application/operations_status.py",
+        "tests/unit/test_operations_status.py"
+      ],
+      "applied_scenarios": [
+        "inbox_review",
+        "scheduling_recovery",
+        "membership_review",
+        "payment_lost_reply"
+      ]
+    },
+    {
+      "id": "changed-input-needs-new-review",
+      "finding": "Shared with the Scribe and Research teams: current source evidence and exact saved downstream evidence must remain linked. A changed note or expired scheduling proposal must prompt review instead of preserving an apparently actionable old approval.",
+      "applies_to": [
+        "chief",
+        "scribe",
+        "research",
+        "follow_up",
+        "membership_billing",
+        "scheduling"
+      ],
+      "evidence": [
+        "src/cosmas_os/application/operations_status.py",
+        "lab/operations_capability.py"
+      ],
+      "applied_scenarios": [
+        "follow_up_source_change",
+        "membership_source_change",
+        "scheduling_expired"
+      ]
+    },
+    {
+      "id": "lost-reply-reuses-existing-operation",
+      "finding": "A lost scheduling or payment response is not proof of failure. Recover the existing operation or seek its receipt; never recommend creating another booking or payment because the first response was lost.",
+      "applies_to": [
+        "chief",
+        "follow_up",
+        "scheduling",
+        "membership_billing"
+      ],
+      "evidence": [
+        "lab/operations_capability.py"
+      ],
+      "applied_scenarios": [
+        "scheduling_recovery",
+        "payment_lost_reply"
+      ]
+    },
+    {
+      "id": "unavailable-linked-work-remains-visible",
+      "finding": "Native Chief resolves only saved work links and follow-up receipts. A withdrawn link remains visibly unavailable rather than disappearing or exposing cached private details; status reads never approve or repeat an operation.",
+      "applies_to": [
+        "chief",
+        "inbox",
+        "follow_up",
+        "scheduling",
+        "membership_billing"
+      ],
+      "evidence": [
+        "src/cosmas_os/application/operations_status.py",
+        "tests/unit/test_operations_status.py",
+        "tests/integration/test_chief_operations.py"
+      ],
+      "applied_scenarios": [
+        "follow_up_review",
+        "follow_up_source_change"
+      ]
+    }
+  ]
+}

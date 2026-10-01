@@ -230,10 +230,11 @@ def trial_fixture(*, excerpt="Invented eligibility criteria.", fields=(), count=
 
 def test_realistic_trial_hydrates_all_selected_fields_and_full_retained_eligibility():
     excerpt = ("Invented eligibility criterion; " * 90)[:2400]
-    fields = (("Recruitment status", "RECRUITING"), ("Phase", "PHASE2"),
+    fields = (("Recruitment status", "RECRUITING"), ("Conditions", "Myocardial Infarction"), ("Phase", "PHASE2"),
               ("Interventions", "Invented biological cell intervention; " * 8),
               ("Locations", "Invented academic center; Site status: RECRUITING; " * 8),
-              ("Minimum age", "18 Years"), ("Maximum age", "75 Years"), ("Sex", "ALL"))
+              ("Minimum age", "18 Years"), ("Maximum age", "75 Years"), ("Sex", "ALL"),
+              ("Study summary", "Invented trial summary, not an eligibility or treatment recommendation."))
     s, w, _, _, settings, command = trial_fixture(excerpt=excerpt, fields=fields)
     anchor = command["research_analysis"]["entries"][0]
     run = s.rows[(ResearchRun, anchor["run_id"])]

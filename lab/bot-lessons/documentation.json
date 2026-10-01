@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "team": "documentation",
+  "roles": ["visit_prep", "scribe"],
+  "lessons": [
+    {
+      "id": "saved-sources-must-reach-the-reviewer",
+      "finding": "Native Scribe previously discarded transcript and preparation sources when it selected only the notebook. Keep every admitted source eligible for citation, show source revisions, and explicitly identify excerpts or omitted passages. A missing supplied source is not evidence that its service is disconnected.",
+      "applies_to": ["scribe", "visit_prep", "chief", "research", "inbox"],
+      "evidence": ["src/cosmas_os/adapters/documentation_review.py", "tests/unit/test_documentation_review.py", "lab/documentation_capability.py"],
+      "applied_scenarios": ["transcript_without_notebook", "prep_sources"]
+    },
+    {
+      "id": "source-correction-keeps-segment-lineage",
+      "finding": "A shared transcript needs exact source segment/version/language and accepted translation/review lineage. Corrected transcripts are new source snapshots; old draft source fingerprints must become stale and cannot acquire a new review without reconciliation.",
+      "applies_to": ["scribe", "visit_prep", "chief", "research", "follow_up"],
+      "evidence": ["src/cosmas_os/application/scribe_source.py", "lab/documentation_capability.py"],
+      "applied_scenarios": ["source_revision_change", "stale_snapshot", "translation_lineage"]
+    },
+    {
+      "id": "review-states-are-distinct",
+      "finding": "Shared with Operations and Research: saved evidence, a source lookup, a draft and exact private human review are distinct results. Neither a transcript review nor a plan proves completed work. Agents cannot approve clinical notes, and an edited draft requires its own exact review receipt.",
+      "applies_to": ["scribe", "visit_prep", "chief", "research", "follow_up", "scheduling", "membership_billing"],
+      "evidence": ["src/cosmas_os/application/note_review.py", "lab/documentation_capability.py"],
+      "applied_scenarios": ["draft_revision_review", "transcript_without_notebook"]
+    },
+    {
+      "id": "missing-dob-is-not-missing-consent",
+      "finding": "An impromptu encounter can retain an explicitly unavailable DOB without fabricating one or blocking saved documentation. Explicit recording consent remains a separate strict contract. This virtual check covers typed saved documentation and consent validation, not microphone capture or audio transcription.",
+      "applies_to": ["scribe", "visit_prep", "chief"],
+      "evidence": ["src/cosmas_os/ports/core_encounters.py", "src/cosmas_os/ports/core_capture.py", "lab/documentation_capability.py"],
+      "applied_scenarios": ["missing_dob_consent"]
+    }
+  ]
+}

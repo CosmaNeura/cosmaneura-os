@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 from pydantic import SecretStr
@@ -23,9 +23,9 @@ from cosmas_os.vendor_models import VendorConnectionVersion, VendorCorrespondenc
 from lab.store import LabError
 
 
-def exercise_inbox(app):
+def exercise_inbox(app, *, observe=None):
     now, cid, coid = datetime.now(UTC), str(uuid4()), str(uuid4())
-    selection = ConnectionSelection(vendor="spruce", connection_id=cid, box_id=app.box, owner_id=app.owner,
+    selection = ConnectionSelection(vendor="spruce", connection_id=UUID(cid), box_id=app.box, owner_id=app.owner,
         environment="production", remote_account_id="synthetic-practice", credential_ref=uuid4(), configuration_sha256="a" * 64)
     cv = dict(id=cid, revision=1, vendor="spruce", environment="production", label="Synthetic secure inbox",
         actions=["spruce_secure_message"], availability="enabled")
@@ -38,7 +38,9 @@ def exercise_inbox(app):
         patient_mapping_sha256="c" * 64, practice_mapping_sha256="d" * 64, recipient_mapping_sha256="e" * 64)
     proof_hash = digest("cosmas-vendor-correspondence.v1", proof)
     with Session(app.engine) as s:
-        patient = s.get(EncounterWorkspace, app.workspace).patient_link_id
+        current_workspace = s.get(EncounterWorkspace, app.workspace)
+        assert current_workspace is not None
+        patient = current_workspace.patient_link_id
         s.add(VendorConnectionVersion(id=cid, family_id=str(uuid4()), revision=1, box_id=app.box, owner_id=app.owner,
             vendor="spruce", environment="production", private_selection=selection.model_dump(mode="json"),
             routing={"internal_endpoint_id": "synthetic-endpoint", "event_route_id": str(uuid4())}, private_sha256=selection.commitment(),
@@ -49,7 +51,7 @@ def exercise_inbox(app):
             patient_link_id=patient, connection_version_id=cid, private_proof=proof, private_sha256=proof_hash,
             public_view=co, public_sha256=co["public_sha256"], reviewed_by=app.owner, reviewed_at=now, expires_at=expiry))
         s.commit()
-    binding = SpruceInboxReadBinding(selection=selection, patient_link_id=patient, correspondence_version_id=coid,
+    binding = SpruceInboxReadBinding(selection=selection, patient_link_id=UUID(patient), correspondence_version_id=UUID(coid),
         correspondence_sha256=proof_hash, contact_id="synthetic-contact", conversation_id="synthetic-thread",
         item_id="synthetic-message", secure_endpoint_raw_value="spruce://synthetic-reviewed",
         permitted_participants=(SpruceInboxParticipant(contact_id="synthetic-contact", relationship="patient"),))
@@ -115,6 +117,8 @@ def exercise_inbox(app):
     with Session(app.engine) as s:
         first, value = arrive(s, "lab-first")
         iid = first["item_id"]
+        if observe:
+            observe(s, iid, registry, policy, "needs_review")
         checks = {"same_read_receipt_replayed": inbox.ingest(s, grant, value, "lab-first", registry=registry, policy=policy) == first}
         fixture["offset"] = -10
         older, _ = arrive(s, "lab-older")
@@ -122,6 +126,8 @@ def exercise_inbox(app):
         fixture.update(offset=10, attachments=True)
         arrive(s, "lab-attachment")
         checks["attachment_requires_human"] = detail(s, iid)["summary"]["state"] == "needs_human" and detail(s, iid)["source"]["attachments"]
+        if observe:
+            observe(s, iid, registry, policy, "needs_human")
         fixture.update(offset=20, attachments=False)
         latest, _ = arrive(s, "lab-readable")
         revision = workspace.read(s, app.box, app.owner, app.workspace)["revision"]
@@ -135,12 +141,16 @@ def exercise_inbox(app):
             reviewed_patient=True, reviewed_exact_source=True, reviewed_human_result=True, confirm_local_review_only=True)
         checks["exact_review_chain_recorded"] = all(r["outcome"] == "recorded" for r in (reviewed, triage, result, verified))
         checks["local_review_closed"] = detail(s, iid)["summary"]["state"] == "closed_local_review"
+        if observe:
+            observe(s, iid, registry, policy, "closed_local_review")
         checks["no_external_operation"] = s.scalar(select(func.count()).select_from(Operation).where(Operation.box_id == app.box)) == 0
         source_count = s.scalar(select(func.count()).select_from(InboxSource).where(InboxSource.item_id == iid))
     app.engine.dispose()
     with Session(app.engine) as s:
         current = detail(s, iid)["summary"]
         checks["reopened_exact_source"] = current["source_id"] == latest["source_id"] and current["state"] == "closed_local_review"
+        if observe:
+            observe(s, iid, registry, policy, "reopened")
     return {"scenario": "inbound.spruce_source_review", "provider": "spruce", "passed": all(checks.values()),
         "checks": checks, "source_versions": source_count, "provider_reads": len(calls), "external_actions": 0,
         "coverage": "actual inbox adapter/service; synthetic human review; attachments flagged, never fetched"}

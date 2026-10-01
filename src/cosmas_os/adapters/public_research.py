@@ -106,12 +106,13 @@ def record(source, query, response_hash, *, identity, title, url, excerpt="", ve
     if not raw_title or not str(identity):
         raise ResearchUnavailable("invalid_source_response")
     selected, remaining, shortened = [], 3000, len(raw_title) > 500 or len(raw_excerpt) > 2500
+    max_fields = 9 if source == "clinical_trials" else 8
     for label, value in fields:
         cleaned = normalize(value, limit=751)
         if not cleaned:
             continue
         cap = min(750, remaining)
-        if cap <= 0 or len(selected) >= 8:
+        if cap <= 0 or len(selected) >= max_fields:
             shortened = True
             break
         selected.append({"label": plain(label, limit=80), "text": cleaned[:cap]})
@@ -422,6 +423,9 @@ class PublicResearch:
                 raise ValueError()
             status = protocol["statusModule"]
             eligibility = protocol.get("eligibilityModule", {})
+            conditions = protocol.get("conditionsModule", {}).get("conditions", [])
+            if type(conditions) is not list or any(type(condition) is not str for condition in conditions):
+                raise ValueError("invalid trial conditions")
             phases = protocol.get("designModule", {}).get("phases", [])
             if type(phases) is not list or any(not isinstance(phase, str) for phase in phases):
                 raise ValueError("invalid trial phases")
@@ -434,7 +438,8 @@ class PublicResearch:
                 title=protocol["identificationModule"]["briefTitle"], url="https://clinicaltrials.gov/study/" + identity,
                 excerpt=eligibility.get("eligibilityCriteria", ""),
                 updated=status.get("lastUpdatePostDateStruct", {}).get("date"),
-                fields=[("Recruitment status", status.get("overallStatus")), ("Phase", "; ".join(phases)),
+                fields=[("Recruitment status", status.get("overallStatus")), ("Conditions", "; ".join(conditions)),
+                        ("Phase", "; ".join(phases)),
                         ("Interventions", interventions), ("Locations", locations),
                         ("Minimum age", eligibility.get("minimumAge")),
                         ("Maximum age", eligibility.get("maximumAge")), ("Sex", eligibility.get("sex")),

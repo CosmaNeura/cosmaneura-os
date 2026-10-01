@@ -21,11 +21,17 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def case_catalog():
+    from lab.bot_capabilities import CASES as BOT_CASES
     from lab.fax_teams import CASES as FAX_CASES
     from lab.inbound_workflow import INBOUND
     from lab.journey import INPUTS
+    from lab.review_process import INPUTS as REVIEW_INPUTS
 
-    return {**CASES, **FAX_CASES, "clinic": CLINIC, "inbound": INBOUND, "connectors": Case("connectors", "Email, calendar and fax fault laboratory",
+    return {**CASES, **FAX_CASES, **BOT_CASES,
+        "review_loops": Case("review_loops", "Provider, nurse and PA review and revision loops",
+        "Review exact saved materials, request changes, and verify revised material with traceable test sign-off.",
+        "SYNTHETIC clinical review workflow", (), inputs=REVIEW_INPUTS),
+        "clinic": CLINIC, "inbound": INBOUND, "connectors": Case("connectors", "Email, calendar and fax fault laboratory",
         "Exercise actual adapters and durable OAuth against synthetic providers.", "SYNTHETIC connector clinic", ()),
         "journey": Case("journey", "Chief prepares and verifies encounter handoffs",
         "Decompose intake, Session Prep and Scribe outputs into accountable private draft handoffs.",
@@ -33,6 +39,19 @@ def case_catalog():
 
 
 def case_checks(key):
+    if key == "bot_research":
+        return ["tests/unit/test_research.py", "tests/unit/test_research_transport.py", "tests/unit/test_research_analysis.py",
+                "tests/integration/test_research_runtime_privileges.py"]
+    if key == "bot_documentation":
+        return ["tests/unit/test_documentation_review.py", "tests/integration/test_scribe_source_bridge.py",
+                "tests/integration/test_note_review.py"]
+    if key == "bot_operations":
+        return ["tests/unit/test_operations_status.py", "tests/integration/test_follow_up.py",
+                "tests/integration/test_appointment_execution.py", "tests/integration/test_membership_work.py",
+                "tests/integration/test_finance_work.py", "tests/integration/test_inbox_work.py"]
+    if key == "review_loops":
+        return ["tests/integration/test_workspace_handoffs.py", "tests/integration/test_note_review.py",
+                "tests/unit/test_research_analysis.py"]
     if key.startswith("fax_"):
         return ["tests/integration/test_fax_provider_teams.py", "tests/integration/test_vendor_settings.py",
                 "tests/unit/test_vendor_installation_routing.py"]
@@ -75,6 +94,7 @@ def write_report(root, report):
 
 def source_record():
     files = (sorted((REPO / "lab").rglob("*.py")) + sorted((REPO / "lab/provider-lessons").glob("*.json"))
+             + sorted((REPO / "lab/bot-lessons").glob("*.json"))
              + sorted((REPO / "docs/validation").glob("*-api-reference.json"))
              + sorted((REPO / "src/cosmas_os").rglob("*.py")))
     hashes = {str(path.relative_to(REPO)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
@@ -146,6 +166,14 @@ def worker(args):
                     from lab.fax_teams import run_provider
 
                     result = run_provider(app, store, episode, key.removeprefix("fax_"))
+                elif key.startswith("bot_"):
+                    from lab.bot_capabilities import run_capabilities
+
+                    result = run_capabilities(app, store, episode, key.removeprefix("bot_"))
+                elif key == "review_loops":
+                    from lab.review_process import run_reviews
+
+                    result = run_reviews(app, store, episode, model, concurrency=args.concurrency)
                 elif key == "inbound":
                     from lab.inbound_workflow import run_inbound
 
@@ -187,6 +215,9 @@ def worker(args):
                               "tool_calls": world.tool_count, "failures": world.failures,
                               "artifacts": artifacts, "application": application_result}
                 report["episodes"].append(result)
+                from lab.bot_capabilities import aggregate_lessons
+
+                report["bot_lessons"] = aggregate_lessons(report["episodes"])
                 report["usage"] = {"model_calls": budget.calls, "tokens": budget.tokens}
                 report["coverage"] = [{"case": k, "title": c.title,
                     "agent_episodes": sum(e["case"] == k for e in report["episodes"]),

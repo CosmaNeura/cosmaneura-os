@@ -29,16 +29,14 @@ class WorkspaceReviewConnector:
                 (),
             )
         if context.role == "chief":
-            return BotReply(
-                f"This encounter has {len(context.sources)} source item(s) available to me and {len(context.linked_work) + len(context.follow_ups)} work record(s).\n\n"
-                + "\n".join(f"• Follow-up due {item.due_date}: {item.label}" for item in context.follow_ups)
-                + "\n\n"
-                "I can review this saved context. Background routines and staff handoffs are awaiting their backend connections; no background work has been started.",
-                (),
-            )
+            from cosmas_os.adapters.chief_review import review
+
+            return review(context)
         sources = list(context.sources)
         if context.role == "scribe":
-            sources = [s for s in sources if s.kind == "scratchpad"][-1:]
+            from cosmas_os.adapters.documentation_review import review_documentation
+
+            return review_documentation(context)
         else:
             words = set(re.findall(r"[a-z]{4,}", context.question.lower())) - {
                 "this",
@@ -60,7 +58,9 @@ class WorkspaceReviewConnector:
         sources = sources[: 2 if context.response_style == "brief" else 4]
         if not sources:
             return BotReply(
-                "I don't have any saved sources available for this review. Add a notebook entry or evidence, and check this bot's source settings. Live chart retrieval and AI answers are awaiting connection.",
+                "No saved sources were supplied for this review. Add a notebook entry or evidence, "
+                "and check this bot's source settings. Missing context here does not establish "
+                "whether a service is connected.",
                 (),
             )
         return BotReply(
