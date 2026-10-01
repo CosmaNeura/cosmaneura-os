@@ -4,3 +4,4 @@ body {margin:0;}button,select,input {font:inherit;}button {cursor:pointer;border
 .lab-preview.team-workspace {display:block;min-height:0;max-width:1100px;margin:24px auto;background:#fcfdfb;border:1px solid #dce2dc;border-radius:14px;}
 .lab-preview.lab-phone {width:390px;max-width:calc(100vw - 20px);container-type:inline-size;}
 .lab-phone .settings-hub {padding:18px 16px;}.lab-phone .connection-directory-status {display:block;}.lab-phone .connection-card {grid-template-columns:32px minmax(0,1fr);min-height:0;padding:14px 12px;gap:8px 12px;}.lab-phone .connection-card > .connection-card-state {grid-column:2;align-items:flex-start;flex-direction:row;flex-wrap:wrap;gap:7px 10px;}.lab-phone .connection-card-action {width:100%;}
+.lab-controls label {max-width:100%;min-width:0;}.lab-controls select {box-sizing:border-box;max-width:100%;}
