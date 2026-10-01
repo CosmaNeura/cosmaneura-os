@@ -1,18 +1,19 @@
 import {useState} from 'react';
 import {SampleVisit} from './SampleVisit';
 
-export function WelcomeActions({showConnections,connectionsDisabled,encounterDisabled,encounterLabel,onConnections,onEncounter,onResearch,onRecord,onRecording,compact=false}:{
+export function WelcomeActions({showConnections,connectionsDisabled,encounterDisabled,encounterLabel,onConnections,onEncounter,onResearch,onRecord,onRecording,onChief,compact=false}:{
   showConnections:boolean;connectionsDisabled:boolean;encounterDisabled:boolean;encounterLabel:string;
-  onConnections:()=>void;onEncounter:()=>void;onResearch?:()=>void;onRecord?:()=>void;onRecording?:()=>void;compact?:boolean;
+  onConnections:()=>void;onEncounter:()=>void;onResearch?:()=>void;onRecord?:()=>void;onRecording?:()=>void;onChief?:()=>void;compact?:boolean;
 }) {
   const [sample,setSample]=useState(false);
   if(!compact&&onRecord&&onRecording)return <>
     <div className="team-welcome-first-tasks" aria-label="Start with a task">
+      {onChief&&<button disabled={encounterDisabled} onClick={onChief}><span className="welcome-task-emoji" aria-hidden="true">🧭</span><strong>Start with Chief</strong><span>Type or paste notes. Prepare your next step.</span></button>}
       <button disabled={encounterDisabled} onClick={onRecord}><span className="welcome-task-emoji" aria-hidden="true">🎙️</span><strong>Record a visit</strong><span>Choose a visit, confirm consent, then start.</span></button>
       <button disabled={encounterDisabled} onClick={onRecording}><span className="welcome-task-emoji" aria-hidden="true">📄</span><strong>Use an existing recording</strong><span>Review a Scribe conversation with your team.</span></button>
-      <button onClick={()=>setSample(true)}><span className="welcome-task-emoji" aria-hidden="true">🌱</span><strong>Try a sample</strong><span>Practice reviewing a note and team handoffs.</span></button>
+      {!onChief&&<button onClick={()=>setSample(true)}><span className="welcome-task-emoji" aria-hidden="true">🌱</span><strong>Try a sample</strong><span>Practice reviewing a note and team handoffs.</span></button>}
     </div>
-    <div className="team-welcome-shortcuts"><button disabled={encounterDisabled} onClick={onEncounter}>Choose an encounter</button>{onResearch&&<button disabled={encounterDisabled} onClick={onResearch}>🔎 Research</button>}{showConnections&&<button disabled={connectionsDisabled} onClick={onConnections}>Connect your practice</button>}</div>
+    <div className="team-welcome-shortcuts"><button disabled={encounterDisabled} onClick={onEncounter}>Choose an encounter</button>{onChief&&<button onClick={()=>setSample(true)}>🌱 Try a sample</button>}{onResearch&&<button disabled={encounterDisabled} onClick={onResearch}>🔎 Research</button>}{showConnections&&<button disabled={connectionsDisabled} onClick={onConnections}>Connect your practice</button>}</div>
     {sample&&<SampleVisit onClose={()=>setSample(false)}/>}
   </>;
   return <><div className={`team-welcome-actions${onResearch?' team-welcome-actions-research':''}${compact?' team-welcome-actions-compact':''}`}>

@@ -9,6 +9,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { EncounterWorkspace } from "./EncounterWorkspace";
+import {CHIEF_STARTERS} from './ChiefStartActions';
 import {modelWorkApi} from './model-work-api';
 import {modelReceipt,modelUuid,retryReceipt} from './model-work-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
@@ -97,6 +98,95 @@ describe("private encounter workspace", () => {
     await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
     expect(container.querySelector('.team-roster [aria-pressed="true"] strong')?.textContent,container.textContent??'').toBe('Research');
     expect(container.querySelector('.research-workspace')).not.toBeNull();expect(workspaceApi.ask).not.toHaveBeenCalled();catalogSpy.mockRestore();
+  });
+
+  it('opens Chief and focuses the notebook once, only after private recovery is ready',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    let release!:()=>void;const barrier=new Promise<void>(resolve=>{release=resolve;});
+    const delayed:typeof draftStorage=async options=>{await barrier;return draftStorage(options);};
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    const focus=vi.spyOn(HTMLTextAreaElement.prototype,'focus');
+    try{
+      await act(async()=>root.render(<EncounterWorkspace draftStorage={delayed} authenticated={access}/>));
+      expect(container.querySelectorAll('.team-welcome-first-tasks button')).toHaveLength(3);
+      expect(container.textContent).toContain('🌱 Try a sample');
+      await click('🌱 Try a sample');expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+      await click('Close sample visit');expect(container.querySelector('[role="dialog"]')).toBeNull();
+      await click('Start with Chief');expect(container.querySelector('.team-welcome h1')?.textContent).toBe('Choose a visit for Chief');
+      expect(workspaceApi.open).not.toHaveBeenCalled();
+      await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+      const notebook=container.querySelector<HTMLTextAreaElement>('#team-notebook')!;
+      expect(notebook.disabled).toBe(true);expect(focus.mock.contexts.filter(item=>item===notebook)).toHaveLength(0);
+      await act(async()=>release());
+      expect(container.querySelector('.team-roster [aria-pressed="true"] strong')?.textContent).toBe('Chief');
+      expect(container.querySelector('.team-content')?.getAttribute('data-mobile-panel')).toBe('Notebook');
+      expect(document.activeElement).toBe(notebook);expect(focus.mock.contexts.filter(item=>item===notebook)).toHaveLength(1);
+      await chooseBot('Scribe');await chooseBot('Chief');
+      expect(focus.mock.contexts.filter(item=>item===notebook)).toHaveLength(1);
+      expect(workspaceApi.append).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.saveTeam).not.toHaveBeenCalled();
+    }finally{release();focus.mockRestore();}
+  });
+
+  it('keeps a new team inline and recovers its exact explicit activation without losing typed notes',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()},initial={...structuredClone(team),revision:0};
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:initial});
+    vi.mocked(workspaceApi.team).mockResolvedValue(initial);
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    await click('Start with Chief');await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+    expect(container.querySelector('.team-workspace')?.getAttribute('data-settings-open')).toBe('false');
+    expect(container.querySelector('[aria-label="Start your team"]')).not.toBeNull();expect(workspaceApi.saveTeam).not.toHaveBeenCalled();
+    await input('Jotted notes','Keep this invented typed intake');
+    vi.mocked(workspaceApi.saveTeam).mockRejectedValueOnce(new WorkspaceApiError(503));
+    await click('Use this team');const exact=vi.mocked(workspaceApi.saveTeam).mock.calls[0][1];
+    expect(exact.expected_revision).toBe(0);expect(exact.configuration.bots.map(bot=>bot.name)).toEqual(names);
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Start your team"] button')!.disabled).toBe(true);
+    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Keep this invented typed intake');
+    vi.mocked(workspaceApi.saveTeam).mockResolvedValue(structuredClone(team));vi.mocked(workspaceApi.team).mockResolvedValue(structuredClone(team));
+    await click('Retry same save');expect(vi.mocked(workspaceApi.saveTeam).mock.calls[1]).toEqual([access,exact]);
+    expect(container.querySelector('[aria-label="Start your team"]')).toBeNull();
+    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Keep this invented typed intake');
+    expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
+  });
+
+  it('prepares an editable Chief question and uses ordinary admission only when Send is chosen',async()=>{
+    const configured=structuredClone(team);configured.llm.enabled=true;
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:configured});
+    vi.mocked(workspaceApi.team).mockResolvedValue(configured);
+    vi.mocked(workspaceApi.ask).mockImplementation(async(_,id,body)=>modelReceipt(body,id));
+    await click('Open synthetic encounter');await chooseBot('Chief');await click('Prepare visit questions');
+    const question=container.querySelector<HTMLTextAreaElement>('#team-question')!;
+    expect(question.value).toBe(CHIEF_STARTERS[1].prompt);expect(document.activeElement).toBe(question);
+    expect(workspaceApi.ask).not.toHaveBeenCalled();
+    await click('Organize saved notes');expect(question.value).toBe(CHIEF_STARTERS[1].prompt);
+    await click('Send message');expect(workspaceApi.ask).toHaveBeenCalledOnce();
+    expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({role:'chief',content:CHIEF_STARTERS[1].prompt,expected_revision:1,team_revision:1});
+  });
+
+  it('routes an edited first-use team back to review rather than accepting it as the default',async()=>{
+    const initial={...structuredClone(team),revision:0};
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:initial});
+    vi.mocked(workspaceApi.team).mockResolvedValue(initial);
+    await click('Open synthetic encounter');await settings().practice();
+    await input('Practice context','Retain this personalized practice context');await settings().click('Done');
+    const panel=container.querySelector('[aria-label="Start your team"]')!;
+    expect(panel.textContent).toContain('Review team changes');expect(panel.textContent).not.toContain('Use this team');
+    await click('Review team changes');expect(workspaceApi.saveTeam).not.toHaveBeenCalled();
+    await settings().practice();
+    expect(container.querySelector<HTMLTextAreaElement>('.team-practice-editor textarea')?.value).toBe('Retain this personalized practice context');
+  });
+
+  it('requires notebook changes to be saved before a Chief task can use them',async()=>{
+    const configured=structuredClone(team);configured.llm.enabled=true;
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:configured});
+    await click('Open synthetic encounter');await chooseBot('Chief');await input('Jotted notes','Invented intake, not yet saved');
+    expect([...container.querySelectorAll<HTMLButtonElement>('[aria-label="Chief task starters"] button')].every(button=>button.disabled)).toBe(true);
+    const saved={...structuredClone(fixture),revision:2,entries:[...structuredClone(fixture.entries),{...fixture.entries[0],id:'typed-intake',revision:2,kind:'scratchpad' as const,content:'Invented intake, not yet saved'}]};
+    vi.mocked(workspaceApi.append).mockResolvedValue({entry_id:'typed-intake',entry_revision:2,workspace:saved});
+    await click('Save notebook revision');await click('Organize saved notes');
+    expect(container.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(CHIEF_STARTERS[0].prompt);
+    expect(workspaceApi.ask).not.toHaveBeenCalled();
   });
 
   it.each([['Record a visit','Choose the visit to record'],['Use an existing recording','Choose the recorded visit']])('keeps the %s home action tied to the chosen visit',async(action,title)=>{
@@ -411,10 +501,10 @@ describe("private encounter workspace", () => {
     expect(workspaceApi.open).toHaveBeenCalledWith(authenticated, fixture.appointment_id);
   });
 
-  it("shows an empty signed-in catalog without falling back to demo seeding", async () => {
+  it.each(['Choose an encounter','Start with Chief'])("shows an empty signed-in catalog from %s without falling back to demo seeding", async action => {
     vi.mocked(workspaceApi.catalog).mockResolvedValue([]);
     await act(async () => root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={{ mode: "clerk_jwt", getToken: vi.fn() }} />));
-    await click("Choose an encounter");
+    await click(action);
     expect(container.textContent).toContain("No confirmed encounters are available for this account.");
     expect(workspaceApi.open).not.toHaveBeenCalled();
   });

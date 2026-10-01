@@ -62,6 +62,22 @@ def default_configuration():
     )
 
 
+def starter_configuration(box: str, owner: str):
+    """Offer a stable private Research identity without installing any agents."""
+    configuration = default_configuration()
+    # This deterministic UUID-shaped address is not a credential or an access
+    # grant. Its separate domain and owner scope keep repeated unsaved reads
+    # stable while the ordinary explicit save creates the actual principals.
+    instance_id = str(UUID(hex=payload_hash({
+        "contract": "provider-team-starter-research.v1", "box": box, "owner": owner,
+    })[:32], version=4))
+    configuration["bots"].append({
+        "role": "research", "name": ROLE_TEMPLATES["research"]["name"],
+        "instance_id": instance_id, "enabled": True,
+    })
+    return configuration_value(configuration)
+
+
 def current(s: Session, box: str, owner: str):
     return s.scalar(
         select(ProviderTeamRevision)
@@ -77,7 +93,7 @@ def current(s: Session, box: str, owner: str):
 def read(s: Session, box: str, owner: str, *, version: ProviderTeamRevision | None = None):
     _human(s, box, owner)
     version = version or current(s, box, owner)
-    config = version.configuration if version else default_configuration()
+    config = version.configuration if version else starter_configuration(box, owner)
     members = {
         bot.instance_id or bot.role: bot.agent_id
         for bot in s.scalars(

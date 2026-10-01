@@ -6,7 +6,7 @@ from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import func, select, text
+from sqlalchemy import event, func, select, text
 from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -21,6 +21,7 @@ from cosmas_os.models import (
     PatientLink,
     Principal,
     ProviderBot,
+    ProviderTeamRevision,
     WorkspaceReply,
 )
 from cosmas_os.ports.bot_capabilities import BotReply
@@ -123,6 +124,81 @@ def test_private_team_install_replay_and_config_revisions(session, case):
         team.save(session, box, owner, expected=1, key="stale-team", configuration=changed)
     with pytest.raises(ws.WorkspaceError, match="idempotency_conflict"):
         team.save(session, box, owner, expected=0, key="team-install", configuration=changed)
+
+
+def test_unsaved_starter_read_has_stable_research_and_no_writes(session, seeded):
+    box, owner = seeded["box_id"], seeded["owner_id"]
+    other = Principal(box_id=box, principal_type="human", display_name="Other invented owner",
+                      state="active", is_owner=True)
+    session.add(other)
+    session.flush()
+    models = (Principal, ProviderBot, ProviderTeamRevision, AuditEvent)
+    before = [session.scalar(select(func.count()).select_from(model)) for model in models]
+    statements = []
+
+    def observe(_connection, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    connection = session.connection()
+    event.listen(connection, "before_cursor_execute", observe)
+    try:
+        first = team.read(session, box, owner)
+        again = team.read(session, box, owner)
+        other_team = team.read(session, box, other.id)
+    finally:
+        event.remove(connection, "before_cursor_execute", observe)
+    assert first == again
+    assert first["revision"] == 0 and len(first["members"]) == 5
+    assert all(member["agent_id"] is None for member in first["members"])
+    assert first["configuration"] == team.starter_configuration(box, owner)
+    assert first["members"][-1]["instance_id"] != other_team["members"][-1]["instance_id"]
+    assert statements and all(statement.lstrip().upper().startswith("SELECT ") for statement in statements)
+    assert not session.new and not session.dirty and not session.deleted
+    assert before == [session.scalar(select(func.count()).select_from(model)) for model in models]
+    with pytest.raises(ws.WorkspaceError, match="team_revision_conflict"):
+        team.active_bot(session, box, owner, first["members"][-1]["instance_id"], 0)
+
+
+def test_explicit_starter_save_activates_five_agents_and_recovers_without_reinstall(session, seeded, monkeypatch):
+    box, owner = seeded["box_id"], seeded["owner_id"]
+    # The first-party team works without provider connectors or the extended
+    # account/resource setup workflow. Public I/O remains separately gated.
+    for flag in ("workspace_team_setup_enabled", "workspace_google_connection_enabled",
+                 "workspace_microsoft_connection_enabled", "workspace_core_connection_enabled",
+                 "workspace_scheduling_enabled", "workspace_research_io_enabled"):
+        monkeypatch.setattr(team.runtime_settings, flag, False)
+    offered = team.read(session, box, owner)
+    saved = team.save(session, box, owner, expected=0, key="starter-install",
+                      configuration=offered["configuration"])
+    agents = {team.bot_address(member): member["agent_id"] for member in saved["members"]}
+    assert saved["revision"] == 1 and len(set(agents.values())) == 5
+    assert saved["configuration"] == offered["configuration"]
+    research = next(member for member in saved["members"] if member["role"] == "research")
+    assert next(capability for capability in research["capabilities"]
+                if capability["key"] == "research.public.read")["state"] == "awaiting_connection"
+    for address, agent_id in agents.items():
+        version, bot, settings = team.active_bot(session, box, owner, address, 1)
+        assert version.revision == 1 and bot.agent_id == agent_id and settings["enabled"]
+        assert session.get(Principal, agent_id).state == "active"
+    assert team.save(session, box, owner, expected=0, key="starter-install",
+                     configuration=offered["configuration"]) == saved
+    assert session.scalar(select(func.count()).select_from(ProviderBot).where(
+        ProviderBot.box_id == box, ProviderBot.owner_id == owner)) == 5
+    assert session.scalar(select(func.count()).select_from(ProviderTeamRevision).where(
+        ProviderTeamRevision.box_id == box, ProviderTeamRevision.owner_id == owner)) == 1
+    assert team.read(session, box, owner) == saved
+
+
+def test_saved_four_member_team_keeps_its_settings_without_adding_research(session, case):
+    box, owner, _, original = case
+    changed = deepcopy(original["configuration"])
+    changed["bots"][0].update(enabled=False, include_evidence=False)
+    saved = team.save(session, box, owner, expected=1, key="keep-personal-settings", configuration=changed)
+    observed = team.read(session, box, owner)
+    assert observed == saved
+    assert observed["configuration"] == changed
+    assert [member["agent_id"] for member in observed["members"]] == [member["agent_id"] for member in original["members"]]
+    assert len(observed["members"]) == 4 and all(member["role"] != "research" for member in observed["members"])
 
 
 def test_second_owner_has_separate_bots_and_cannot_read_private_reply(session, case):
@@ -351,10 +427,13 @@ def test_api_feature_gate_and_validation_do_not_echo_content(session, case, monk
         api_module.app.dependency_overrides.clear()
 
 
-def test_concurrent_team_install_has_one_set_of_agents_and_reopens(engine):
+@pytest.mark.parametrize("starter", [False, True], ids=["legacy", "starter"])
+def test_concurrent_team_install_has_one_set_of_agents_and_reopens(engine, starter):
     with Session(engine) as s:
         seed = svc.provision_box(svc.Container(s), "Invented team concurrency")
     barrier = Barrier(2)
+    configuration = (team.starter_configuration(seed["box_id"], seed["owner_id"])
+                     if starter else team.default_configuration())
 
     def install(_):
         with Session(engine) as s:
@@ -365,7 +444,7 @@ def test_concurrent_team_install_has_one_set_of_agents_and_reopens(engine):
                 seed["owner_id"],
                 expected=0,
                 key="same-install",
-                configuration=team.default_configuration(),
+                configuration=configuration,
             )
 
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -379,7 +458,7 @@ def test_concurrent_team_install_has_one_set_of_agents_and_reopens(engine):
                 .select_from(ProviderBot)
                 .where(ProviderBot.owner_id == seed["owner_id"])
             )
-            == 4
+            == (5 if starter else 4)
         )
 
 
