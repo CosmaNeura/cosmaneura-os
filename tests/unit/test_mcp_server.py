@@ -7,7 +7,7 @@ from contextlib import asynccontextmanager
 import anyio
 import pytest
 from lab.mcp_runtime import _checked_arguments, _definitions
-from lab.mcp_server import RESOURCES, create_server, resource_value, run_blocking, serve
+from lab.mcp_server import RESOURCES, StdinLines, create_server, resource_value, run_blocking, serve
 from lab.store import LabError
 
 
@@ -146,10 +146,11 @@ async def test_idle_transport_exits_at_session_deadline(monkeypatch):
     done = anyio.Event()
     async with create_client_server_memory_streams() as (client_streams, server_streams):
         @asynccontextmanager
-        async def memory_stdio():
+        async def memory_stdio(**_):
             yield server_streams
 
         monkeypatch.setattr(stdio, "stdio_server", memory_stdio)
+        monkeypatch.setattr("sys.stdin", type("Input", (), {"fileno": lambda _: 0})())
 
         async def run():
             await serve(runtime)
@@ -162,3 +163,29 @@ async def test_idle_transport_exits_at_session_deadline(monkeypatch):
                     await session.initialize()
                     await done.wait()
                 tasks.cancel_scope.cancel()
+
+
+@pytest.mark.asyncio
+async def test_pipe_input_preserves_partial_frames_and_cancels_idle_read():
+    reader, writer = os.pipe()
+    try:
+        lines = StdinLines(reader)
+        os.write(writer, b'{"first":')
+        async with anyio.create_task_group() as tasks:
+            async def finish():
+                await anyio.sleep(0)
+                os.write(writer, b'1}\n{"second":2}\n')
+            tasks.start_soon(finish)
+            assert await anext(lines) == '{"first":1}\n'
+            assert await anext(lines) == '{"second":2}\n'
+        with anyio.move_on_after(0.02) as cancellation:
+            await anext(lines)
+        assert cancellation.cancel_called
+        os.close(writer)
+        writer = None
+        with pytest.raises(StopAsyncIteration):
+            await anext(lines)
+    finally:
+        os.close(reader)
+        if writer is not None:
+            os.close(writer)

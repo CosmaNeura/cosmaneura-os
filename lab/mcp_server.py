@@ -3,9 +3,11 @@
 import argparse
 import json
 import logging
+import os
 import signal
 import sys
 from pathlib import Path
+from typing import cast
 
 from lab.cases import CASES, ROLES
 from lab.mcp_runtime import FAULTS, MCPRuntime
@@ -35,6 +37,39 @@ booking or live connector operation is exposed. The capabilities resource is
 discovery only. Each server process has its own episode; separate clients do not
 share a workspace. Report drafts as drafts and preserve missing information.
 """
+
+
+class StdinLines:
+    """Bounded cancellable POSIX pipe input for the official SDK transport.
+
+    AsyncFile.readline shields a blocking stdin read, which can hold an idle
+    server open past its deadline. Read readiness avoids a lingering IO thread.
+    The SDK still owns JSON-RPC parsing, validation and protocol dispatch.
+    """
+
+    def __init__(self, fd):
+        self.fd = fd
+        self.buffer = b""
+
+    def __aiter__(self):
+        return self
+
+    async def __anext__(self):
+        import anyio
+
+        while b"\n" not in self.buffer:
+            await anyio.wait_readable(self.fd)
+            data = os.read(self.fd, 8192)
+            if not data:
+                if not self.buffer:
+                    raise StopAsyncIteration
+                line, self.buffer = self.buffer, b""
+                return line.decode("utf-8", errors="replace")
+            self.buffer += data
+            if len(self.buffer) > 131072:
+                raise LabError("protocol_message_too_large")
+        line, _, self.buffer = self.buffer.partition(b"\n")
+        return line.decode("utf-8", errors="replace") + "\n"
 
 
 def resource_value(runtime, uri):
@@ -140,7 +175,8 @@ async def serve(runtime):
         tasks.start_soon(stop_on_signal)
         tasks.start_soon(stop_at_deadline)
         try:
-            async with stdio_server() as (reader, writer):
+            stdin = cast(anyio.AsyncFile[str], StdinLines(sys.stdin.fileno()))
+            async with stdio_server(stdin=stdin) as (reader, writer):
                 await server.run(reader, writer, server.create_initialization_options())
         finally:
             tasks.cancel_scope.cancel()
