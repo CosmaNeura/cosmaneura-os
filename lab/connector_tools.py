@@ -6,22 +6,45 @@ review a note, approve a proposal or submit an external action.
 """
 
 from contextlib import ExitStack
+from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import Field, ValidationError
 
 from cosmas_os.application.workspace import WorkspaceError
 from cosmas_os.ports.vendor_artifacts import ArtifactStoreError
 from lab import account_tools
-from lab.engine import SCHEMAS, World
+from lab.engine import SCHEMAS, Arguments, SaveArgs, World
 from lab.fax_tools import FAX_SCHEMAS, FAX_TOOL_ROLES, FaxTools
 from lab.research_tools import RESEARCH_SCHEMAS, RESEARCH_TOOL_ROLES, ResearchTools
 from lab.store import LabError
 
-CONNECTOR_SCHEMAS = {**account_tools.ACCOUNT_SCHEMAS, **FAX_SCHEMAS, **RESEARCH_SCHEMAS}
-CONNECTOR_ROLES = {**account_tools.ACCOUNT_TOOL_ROLES, **FAX_TOOL_ROLES, **RESEARCH_TOOL_ROLES}
+
+class SourceReference(Arguments):
+    source_ref: str = Field(pattern=r"^source-[1-9][0-9]*$")
+
+
+class DraftReference(Arguments):
+    role: Literal["chief", "scribe", "visit_prep", "research", "follow_up"]
+
+
+class CompactDraft(Arguments):
+    body: str = Field(min_length=10, max_length=4000)
+    source_refs: list[str] = Field(min_length=1, max_length=8)
+    dependency_roles: list[Literal["chief", "scribe", "visit_prep", "research", "follow_up"]] = Field(max_length=5)
+
+
+TEAM_SCHEMAS = {
+    "read_selected_source": (SourceReference, "Read an exact saved source using the short source_ref returned by list_sources. Actual immutable IDs remain in the receipt."),
+    "read_shared_draft": (DraftReference, "Read a currently shared draft by its role. The server verifies and records its exact hash; no draft may be cited without this read."),
+    "save_connector_draft": (CompactDraft, "Save your private draft using short source_refs you actually read and dependency_roles whose exact shared drafts you read. The server binds the original IDs/hashes; no implicit read, review or send occurs."),
+}
+TEAM_ROLES = frozenset({"chief", "scribe", "visit_prep", "research", "follow_up"})
+CONNECTOR_SCHEMAS = {**account_tools.ACCOUNT_SCHEMAS, **FAX_SCHEMAS, **RESEARCH_SCHEMAS, **TEAM_SCHEMAS}
+CONNECTOR_ROLES = {**account_tools.ACCOUNT_TOOL_ROLES, **FAX_TOOL_ROLES, **RESEARCH_TOOL_ROLES,
+                   **{name: TEAM_ROLES for name in TEAM_SCHEMAS}}
 ALL_SCHEMAS = {**SCHEMAS, **CONNECTOR_SCHEMAS}
 WRITES = {"save_artifact", "delegate_team", "account_save_selected_observations", "fax_prepare",
-          "account_select_observed_items", "research_lookup_trials", "research_save_selection"}
+          "fax_prepare_ready", "account_select_observed_items", "research_lookup_trials", "research_save_selection", "save_connector_draft"}
 
 
 def visible(role, name):
@@ -39,7 +62,9 @@ class ConnectorWorld(World):
         "retry the same selected content with a new key/current revision. Account read receipts alone are not shared evidence: "
         "use account_select_observed_items with the original read_key and selected item IDs, then read_source the saved entry before citing it. "
         "Every connector source is invented. Fax pending_approval/acceptance not_observed is a proposal, not delivery. "
-        "Use only IDs/hashes returned by tools. Read list_artifacts before any read_artifact; role names are not returned hashes. "
+        "Prefer read_selected_source using list_sources.source_ref and read_shared_draft using its role. "
+        "Prefer save_connector_draft with source_refs and dependency_roles. The server binds exact hashes, so do not copy UUIDs/hashes. "
+        "These compact tools satisfy read_source/read_artifact/save_artifact requirements. "
         "Use proposal_ids from fax_readiness rather than inventing operation UUIDs. "
         "A failed source read is unavailable, not an empty result or evidence of absence. ")
     jobs = {
@@ -93,14 +118,28 @@ class ConnectorWorld(World):
     def tool_visible(self, role, name):
         return visible(role, name)
 
+    def source_references(self):
+        if not hasattr(self, "source_refs"):
+            self.source_refs = {}
+        for source in self.app.sources(metadata_only=True):
+            if source["id"] not in self.source_refs.values():
+                self.source_refs["source-" + str(len(self.source_refs) + 1)] = source["id"]
+        return self.source_refs
+
+    def source_reference(self, identifier):
+        return next(key for key, value in self.source_references().items() if value == identifier)
+
     def model_tools(self, role):
         """Offer exact allowed choices; authority still rechecks at execution.
 
         Schema choices avoid transcription mistakes in long hashes and IDs.
         They never read accounts, save selections or perform implicit retries.
         """
-        tools = super().model_tools(role)
+        tools = [tool for tool in super().model_tools(role) if tool["function"]["name"] not in {
+            "read_source", "read_artifact", "save_artifact", "account_save_selected_observations",
+            "fax_prepare", "fax_receipt"}]
         sources = [source["id"] for source in self.app.sources(metadata_only=True)]
+        references = self.source_references()
         reads = [self.store.read(self.episode + ":accounts", item["id"], role, item["sha256"])
                  for item in self.store.visible(self.episode + ":accounts", role)]
         artifacts = self.store.visible(self.episode, role)
@@ -110,6 +149,10 @@ class ConnectorWorld(World):
             fields = schema["properties"]
             if function["name"] == "read_source" and sources:
                 fields["source_id"]["enum"] = sources
+            elif function["name"] == "read_selected_source":
+                fields["source_ref"]["enum"] = list(references)
+            elif function["name"] == "save_connector_draft":
+                fields["source_refs"]["items"]["enum"] = list(references)
             elif function["name"] == "save_artifact":
                 if sources:
                     fields["source_ids"]["items"]["enum"] = sources
@@ -138,18 +181,50 @@ class ConnectorWorld(World):
             raise LabError("tool_not_available_for_role")
         values = args.model_dump(mode="json", exclude_none=True)
         try:
+            if name == "read_selected_source":
+                source_id = self.source_references().get(args.source_ref)
+                if source_id is None:
+                    raise LabError("source_outside_selected_encounter")
+                source = self._execute(role, "read_source", SCHEMAS["read_source"][0](source_id=source_id))
+                return {**source, "source_ref": args.source_ref}
+            if name == "read_shared_draft":
+                artifact = next((a for a in self.store.visible(self.episode, role) if a["role"] == args.role), None)
+                if artifact is None:
+                    raise LabError("artifact_not_shared_with_this_agent")
+                return self._execute(role, "read_artifact", SCHEMAS["read_artifact"][0](artifact_id=artifact["id"], sha256=artifact["sha256"]))
+            if name == "save_connector_draft":
+                references = self.source_references()
+                if any(ref not in references for ref in args.source_refs):
+                    raise LabError("source_outside_selected_encounter")
+                dependencies = []
+                for recipient in args.dependency_roles:
+                    sha = self.artifact_reads[role].get(recipient)
+                    if sha is None:
+                        raise LabError("unread_or_stale_dependency")
+                    dependencies.append({"artifact_id": recipient, "sha256": sha})
+                return self._execute(role, "save_artifact", SaveArgs(body=args.body,
+                    source_ids=[references[ref] for ref in args.source_refs], dependencies=dependencies,
+                    share_with=["chief", "follow_up"]))
             if name in account_tools.ACCOUNT_SCHEMAS:
                 result = account_tools.execute(self.app, self.store, self.episode, role, name, values)
                 if "error" in result:
                     raise LabError(result["error"])
+                if result.get("entry_id"):
+                    result["source_ref"] = self.source_reference(result["entry_id"])
                 return result
             if name in FAX_SCHEMAS:
                 if self.fax is None:
                     raise LabError("fax_fixture_provider_review_required")
                 return self.fax.call(role, name, values)
             if name in RESEARCH_SCHEMAS:
-                return self.research.call(role, name, values)
+                result = self.research.call(role, name, values)
+                if result["result"].get("entry_id"):
+                    result["source_ref"] = self.source_reference(result["result"]["entry_id"])
+                return result
             result = super()._execute(role, name, args)
+            if name == "list_sources" and isinstance(result, list):
+                refs = {value: key for key, value in self.source_references().items()}
+                result = [{**source, "source_ref": refs[source["id"]]} for source in result]
             if name == "application_status" and isinstance(result, dict):
                 from sqlalchemy.orm import Session
 

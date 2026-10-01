@@ -50,3 +50,28 @@ def test_research_saved_lookup_is_not_disclosed_after_role_revocation(clinic, mo
     with pytest.raises(LabError, match='agent_authority_unavailable'):
         tools.call('research', 'research_resolve_lookup', {'idempotency_key': 'research-role-revoke-test'})
     assert tools.calls == 1
+
+
+def test_compact_source_and_draft_handles_preserve_exact_read_dependencies(clinic):
+    from lab.connector_tools import ConnectorWorld
+    from lab.store import digest
+
+    app, store = clinic
+    world = ConnectorWorld(store, 'compact-handles', CASE, app, prepare_fax=False)
+    try:
+        sources = world.execute('scribe', 'list_sources', {})
+        command = {'body': 'Invented source faithful draft for human review.',
+                   'source_refs': [sources[0]['source_ref']], 'dependency_roles': []}
+        assert world.execute('scribe', 'save_connector_draft', command)['error'] == 'unread_or_foreign_citation'
+        read = world.execute('scribe', 'read_selected_source', {'source_ref': sources[0]['source_ref']})
+        assert read['id'] == sources[0]['id']
+        saved = world.execute('scribe', 'save_connector_draft', command)
+        assert saved['source_ids'] == [read['id']]
+        assert world.execute('visit_prep', 'read_shared_draft', {'role': 'scribe'})['error'] == 'artifact_not_shared_with_this_agent'
+        consumed = world.execute('chief', 'read_shared_draft', {'role': 'scribe'})
+        assert consumed == saved
+        assert world.artifact_reads['chief']['scribe'] == saved['sha256']
+        assert saved['sha256'] == digest({k: v for k, v in saved.items() if k not in {'id', 'role', 'sha256'}})
+        assert world.execute('chief', 'read_selected_source', {'source_ref': 'source-999'})['error'] == 'source_outside_selected_encounter'
+    finally:
+        world.close()

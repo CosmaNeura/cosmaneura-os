@@ -335,7 +335,7 @@ class World:
                     arguments = None
                 result = self.execute(role, call["function"]["name"], arguments)
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
-                if (call["function"]["name"] in {"save_artifact", "read_artifact"}
+                if (call["function"]["name"] in {"save_artifact", "read_artifact", "save_connector_draft", "read_shared_draft"}
                         and isinstance(result, dict) and result.get("id") == role and result.get("sha256")):
                     acknowledged_artifact = True
             # The saved tool receipt is the deliverable. A final model paraphrase

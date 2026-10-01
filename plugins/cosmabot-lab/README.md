@@ -155,3 +155,10 @@ verification. `--mode azure` uses the already-configured optional model and its
 bounded budget; replay is deterministic and does not call a model. Both use
 actual application records and offline provider responses. Neither approves or
 sends the fax. The existing first-party HTTP catalog remains discovery only.
+
+The connector profile also offers short saved-source references and role-based
+shared-draft reads. Saving a compact draft still binds the exact source IDs and
+previously read dependency hashes. Compact fax preparation uses only a readiness
+snapshot that the same agent already read; compact receipt inspection uses only
+a proposal that the same agent already listed. No implicit review or send is
+performed. These paths reduce copying mistakes without removing source checks.

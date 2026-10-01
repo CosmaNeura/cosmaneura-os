@@ -12,6 +12,7 @@ import base64
 import hashlib
 import hmac
 import json
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from email import policy
 from email.parser import BytesParser
@@ -70,11 +71,24 @@ class FaxReceiptArgs(p.BoundCommand):
     refresh: bool = False
 
 
+class FaxPrepareReadyArgs(FaxReadinessArgs):
+    idempotency_key: p.Key
+    expected_workspace_revision: p.Positive
+    action: Literal["fax", "media_upload"] = "fax"
+    uploaded_media_operation_id: p.ID | None = None
+
+
+class FaxInspectPreparedArgs(FaxReadinessArgs):
+    action: Literal["fax", "media_upload"] = "fax"
+
+
 FAX_SCHEMAS = {
     "fax_readiness": (FaxReadinessArgs, "Read synthetic fax readiness and exact reviewed source, PDF and recipient bindings. Spruce requires a separately reviewed media upload before its fax proposal."),
     "fax_list_proposals": (FaxReadinessArgs, "List up to 25 existing proposals for the selected synthetic fax provider in this fixed workspace. Use their exact ticket, operation, revision and payload hash to inspect a receipt instead of preparing duplicate work. No approval, send or provider I/O occurs."),
     "fax_prepare": (FaxPrepareArgs, "Prepare one exact private F-8 fax or Spruce media-upload proposal. Reuse identical IDs, hashes and request key to recover a lost response. This tool cannot approve or submit."),
     "fax_receipt": (FaxReceiptArgs, "Inspect the exact saved operation and receipt. An explicit refresh can read provider status after a separate scripted human submission; it cannot send or resend. Spruce posting is not verified fax delivery."),
+    "fax_prepare_ready": (FaxPrepareReadyArgs, "Prepare the exact private proposal from readiness already read by your active role. Supply its workspace revision and a stable key. Saved source, PDF, connection, recipient and operation bindings are copied internally; changed readiness is refused. No approval or send occurs."),
+    "fax_inspect_prepared": (FaxInspectPreparedArgs, "Inspect the exact fixture operation already seen by your role through fax_list_proposals. Select provider and action; ticket and hash bindings are retained internally. This only reads saved receipts and never refreshes provider status or submits."),
 }
 FAX_TOOL_ROLES = {name: frozenset({"chief", "follow_up"}) for name in FAX_SCHEMAS}
 
@@ -88,6 +102,7 @@ class FaxTools:
         self.scope = app.box, app.owner, app.workspace
         self.store = LocalVendorArtifactStore(self.root)
         self.providers, self.tickets, self.submissions = {}, {}, {}
+        self.readiness_reads, self.catalog_reads, self.compact_preparations = {}, {}, {}
         self.calls = []
         self.due_date = (datetime.now(UTC) + timedelta(days=2)).date().isoformat()
         self.source = self.document = self.artifact_scope = None
@@ -123,8 +138,18 @@ class FaxTools:
         except (ValidationError, ValueError, TypeError):
             raise LabError("invalid_tool_arguments") from None
         with vendor_gates():
-            result = getattr(self, name)(request)
+            if name in {"fax_prepare_ready", "fax_inspect_prepared"}:
+                result = getattr(self, name)(role, request)
+            else:
+                result = getattr(self, name)(request)
         result["broker"] = self._provenance(role)
+        if name == "fax_readiness":
+            if result["ready_for_proposal"]:
+                self.readiness_reads[(role, request.provider)] = deepcopy(result)
+            else:
+                self.readiness_reads.pop((role, request.provider), None)
+        elif name == "fax_list_proposals":
+            self.catalog_reads[(role, request.provider)] = deepcopy(result["catalog"]["items"])
         return result
 
     def _fixture(self, provider):
@@ -232,6 +257,70 @@ class FaxTools:
         self.tickets[receipt["effect"]["ticket_id"]] = request.provider
         return {"provider": request.provider, "receipt": receipt, "detail": detail,
                 "delivery_limit": self._limit(request.provider)}
+
+    @staticmethod
+    def _readiness_binding(readiness):
+        options = readiness["options"]
+        return {"revision": options["entry_revision"], "source": options["source"],
+            "connections": options["connections"], "correspondences": options["correspondences"],
+            "document": readiness["document"], "custody": readiness["document_custody"],
+            "ready": readiness["ready_for_proposal"], "proposal_ids": readiness["proposal_ids"]}
+
+    def fax_prepare_ready(self, role, request):
+        saved = self.readiness_reads.get((role, request.provider))
+        if saved is None:
+            raise LabError("fax_readiness_not_read")
+        key = (role, request.idempotency_key)
+        previous = self.compact_preparations.get(key)
+        if previous is not None:
+            if previous["compact"] != request.public():
+                raise LabError("fax_idempotency_conflict")
+            # Exact lost-response recovery uses the saved request, even when
+            # later source edits would refuse new proposal preparation.
+            return self.fax_prepare(previous["exact"])
+        current = self.fax_readiness(FaxReadinessArgs(provider=request.provider))
+        if (request.expected_workspace_revision != saved["options"]["entry_revision"]
+                or self._readiness_binding(current) != self._readiness_binding(saved)):
+            raise LabError("fax_readiness_changed")
+        fixture = self.providers[request.provider]
+        if request.action not in fixture["proposal_ids"]:
+            raise LabError("fax_action_unavailable")
+        options = saved["options"]
+        body = {"provider": request.provider, "expected_workspace_revision": request.expected_workspace_revision,
+            "idempotency_key": request.idempotency_key, "proposed_operation_id": fixture["proposal_ids"][request.action],
+            "source": options["source"], "connection": {k: options["connections"][0][k]
+                for k in ("id", "revision", "public_sha256")}, "action": request.action}
+        if request.action == "media_upload" or request.provider != "spruce":
+            body["document"] = saved["document"]
+        if request.action == "fax":
+            body["correspondence"] = {k: options["correspondences"][0][k]
+                for k in ("id", "revision", "public_sha256")}
+        if request.uploaded_media_operation_id is not None:
+            if request.uploaded_media_operation_id != fixture["proposal_ids"].get("media_upload"):
+                raise LabError("fax_upload_binding_changed")
+            body["uploaded_media_operation_id"] = request.uploaded_media_operation_id
+        exact = FaxPrepareArgs.model_validate(body)
+        result = self.fax_prepare(exact)
+        self.compact_preparations[key] = {"compact": request.public(), "exact": exact}
+        return result
+
+    def fax_inspect_prepared(self, role, request):
+        items = self.catalog_reads.get((role, request.provider))
+        if items is None:
+            raise LabError("fax_proposals_not_read")
+        operation = self.providers[request.provider]["proposal_ids"].get(request.action)
+        selected = next((item for item in items if item["operation_id"] == operation), None)
+        if selected is None:
+            raise LabError("fax_prepared_operation_not_seen")
+        with self.sessions() as s:
+            detail = self._ticket(s, request.provider, selected["ticket_id"])
+            if any(detail["summary"][key] != selected[key] for key in
+                    ("operation_id", "revision_id", "payload_hash")):
+                raise LabError("fax_operation_binding_changed")
+        exact = FaxReceiptArgs.model_validate({"provider": request.provider,
+            "ticket_id": selected["ticket_id"], **bound(detail, "fax-inspect-" + selected["operation_id"]),
+            "refresh": False})
+        return self.fax_receipt(exact)
 
     def fax_list_proposals(self, request):
         fixture = self.providers[request.provider]

@@ -28,6 +28,32 @@ CASE = Case("connector_tools", "Bots use connector tools and verify a shared enc
 
 
 class JourneyWorld(ConnectorWorld):
+    jobs = {
+        **ConnectorWorld.jobs,
+        "visit_prep": "List_sources and read_selected_source for the original invented encounter. Read Google mail headers "
+            "and calendar with separate original read keys. Save one selected item from each with account_select_observed_items, "
+            "reading current application_status before each save. Each saved receipt returns source_ref: immediately "
+            "read_selected_source with THAT reference. Then save_connector_draft with the source_refs actually read and "
+            "dependency_roles=[]; no teammate dependency is needed. Missing DOB and unverified diagnosis remain explicit.",
+        "research": "List_sources and read_selected_source for the original encounter. Read current application_status, "
+            "research_lookup_trials for the fixed reviewed invented cardiac query, and research_save_selection for the "
+            "FIRST returned trial hash only with current revision. The SAVE receipt returns source_ref: immediately "
+            "read_selected_source with THAT source_ref; a lookup is not saved-source evidence. Then save_connector_draft "
+            "with source_refs actually read and dependency_roles=[]. No teammate read is required. Preserve recruiting/site "
+            "conflict and uncertainty; eligibility is undetermined and benefit is unestablished.",
+        "scribe": "List_sources and read_selected_source for the three invented encounter inputs. Save_connector_draft "
+            "with those source_refs and dependency_roles=[]. No teammate read is required. Keep missing DOB, unverified "
+            "heart history and planned versus documented work; this is typed-source rehearsal, not recorded audio.",
+        "chief": "All teammates have already finished. List_sources and read_selected_source for every saved source. "
+            "Read_shared_draft for scribe, visit_prep, research and follow_up. List the Documo proposals and inspect the "
+            "existing proposal with fax_inspect_prepared(provider=documo); do not prepare another one. Save_connector_draft with all read source_refs "
+            "and dependency_roles including follow_up. Preserve unknown DOB/diagnosis and unsubmitted fax status.",
+        "follow_up": "Read_shared_draft for scribe, visit_prep, research and list_sources/read_selected_source for the "
+            "original encounter sources. Read Documo fax readiness, prepare its exact ready private proposal using the "
+            "compact fax_prepare_ready tool, then list and inspect that prepared proposal using fax_inspect_prepared. "
+            "Save_connector_draft with all three dependency_roles and read source_refs. No approval or send is available.",
+    }
+
     def validate_saved_artifact(self, role):
         if role in {"visit_prep", "research"}:
             sources = [s for s in self.app.sources() if s["id"] in self.source_reads[role]]
@@ -46,12 +72,12 @@ class JourneyWorld(ConnectorWorld):
                 raise LabError("save_and_read_the_selected_trial_evidence_before_finishing")
         if role in {"chief", "follow_up"}:
             rows = [json.loads(line) for line in self.store.events.read_text().splitlines()]
-            if not any(r["episode"] == self.episode and r["role"] == role and r.get("tool") == "fax_receipt"
+            if not any(r["episode"] == self.episode and r["role"] == role and r.get("tool") in {"fax_receipt", "fax_inspect_prepared"}
                        and r.get("ok") for r in rows):
                 raise LabError("inspect_the_existing_documo_proposal_with_fax_receipt_before_finishing")
 
     def _execute(self, role, name, args):
-        if name == "save_artifact":
+        if name in {"save_artifact", "save_connector_draft"}:
             self.validate_saved_artifact(role)
         if name == "delegate_team" and "follow_up" in args.roles:
             # The model cannot create a human review; it can only see the
@@ -149,7 +175,7 @@ def run_connectors(app, store, episode, model, *, concurrency=3):
         saved = [row["result"] for row in calls if row.get("tool") in {"account_save_selected_observations", "account_select_observed_items"}
                  and row["result"].get("status") == "saved"]
         trial = [row["result"]["result"] for row in calls if row.get("tool") == "research_save_selection"]
-        details = [row["result"]["detail"]["summary"] for row in calls if row.get("tool") == "fax_receipt"]
+        details = [row["result"]["detail"]["summary"] for row in calls if row.get("tool") in {"fax_receipt", "fax_inspect_prepared"}]
         by_role = {a["role"]: a for a in artifacts}
         account_ids, trial_ids = {r["entry_id"] for r in saved}, {r["entry_id"] for r in trial}
         with Session(app.engine) as session:

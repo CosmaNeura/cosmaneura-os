@@ -14,6 +14,7 @@ from cosmas_os.application import vendor_work, workspace
 from cosmas_os.config import settings
 from cosmas_os.models import Decision
 from cosmas_os.ports.vendor_artifacts import ArtifactStoreError
+from cosmas_os.vendor_models import VendorConnectionVersion, VendorCorrespondenceVersion
 
 PROVIDERS = ("spruce", "srfax", "documo", "efax")
 
@@ -252,7 +253,8 @@ def test_proposal_listing_is_bounded_and_reports_more_existing_work(clinic, tmp_
 
 def test_fax_role_scope_fixed_arguments_and_agent_approval_denial(clinic, tmp_path, monkeypatch):
     tools = FaxTools(clinic[0], tmp_path / "role-scope")
-    assert set(FAX_SCHEMAS) == {"fax_readiness", "fax_list_proposals", "fax_prepare", "fax_receipt"}
+    assert set(FAX_SCHEMAS) == {"fax_readiness", "fax_list_proposals", "fax_prepare", "fax_receipt",
+                               "fax_prepare_ready", "fax_inspect_prepared"}
     assert all(roles == {"chief", "follow_up"} for roles in FAX_TOOL_ROLES.values())
     for role in ("scribe", "research", "visit_prep", "followup"):
         with pytest.raises(LabError, match="fax_tool_role_denied"):
@@ -269,4 +271,75 @@ def test_fax_role_scope_fixed_arguments_and_agent_approval_denial(clinic, tmp_pa
     monkeypatch.setattr(tools.app, "check_agent", lambda role: (_ for _ in ()).throw(LabError("agent_authority_unavailable")))
     with pytest.raises(LabError, match="agent_authority_unavailable"):
         tools.call("chief", "fax_readiness", {"provider": "documo"})
+    assert tools.calls == []
+
+
+@pytest.mark.parametrize("provider", PROVIDERS)
+def test_compact_tools_keep_exact_bindings_and_recover_lost_preparation(clinic, tmp_path, provider):
+    tools = FaxTools(clinic[0], tmp_path / "compact-tools")
+    readiness = tools.call("follow_up", "fax_readiness", {"provider": provider})
+    action = "media_upload" if provider == "spruce" else "fax"
+    request = {"provider": provider, "idempotency_key": "compact-proposal",
+        "expected_workspace_revision": readiness["options"]["entry_revision"], "action": action}
+    result = tools.call("follow_up", "fax_prepare_ready", request)
+    assert result["detail"]["summary"]["operation_id"] == readiness["proposal_ids"][action]
+    tools.change_source()
+    repeated = tools.call("follow_up", "fax_prepare_ready", request)
+    assert repeated["receipt"]["effect"] == result["receipt"]["effect"]
+    tools.call("chief", "fax_list_proposals", {"provider": provider})
+    inspected = tools.call("chief", "fax_inspect_prepared", {"provider": provider, "action": action})
+    assert inspected["detail"]["summary"] == repeated["detail"]["summary"]
+    assert inspected["broker"]["authority"] == BROKER_AUTHORITY
+    assert tools.calls == []
+    with pytest.raises(LabError, match="fax_idempotency_conflict"):
+        tools.call("follow_up", "fax_prepare_ready", {**request, "expected_workspace_revision": request["expected_workspace_revision"] + 1})
+
+
+@pytest.mark.parametrize("fault", ["source", "pdf", "connection", "recipient"])
+def test_compact_prepare_refuses_changed_readiness_without_picking_fresh_bindings(clinic, tmp_path, fault):
+    tools = FaxTools(clinic[0], tmp_path / fault)
+    readiness = tools.call("follow_up", "fax_readiness", {"provider": "documo"})
+    if fault == "source":
+        tools.change_source()
+    elif fault == "pdf":
+        tools.change_pdf()
+    else:
+        with tools.sessions() as s:
+            fixture = tools.providers["documo"]
+            if fault == "connection":
+                row = s.get(VendorConnectionVersion, fixture["connection"]["id"])
+                assert row is not None
+                row.write_enabled = False
+            else:
+                row = s.get(VendorCorrespondenceVersion, fixture["correspondence"]["id"])
+                assert row is not None
+                row.is_current = False
+            s.commit()
+    with pytest.raises(LabError, match="fax_readiness_changed"):
+        tools.call("follow_up", "fax_prepare_ready", {"provider": "documo", "idempotency_key": "compact-denied",
+            "expected_workspace_revision": readiness["options"]["entry_revision"]})
+    assert tools.call("chief", "fax_list_proposals", {"provider": "documo"})["catalog"]["items"] == []
+    assert tools.calls == []
+
+
+def test_compact_tools_require_each_roles_own_read_and_exact_fixture_operation(clinic, tmp_path):
+    tools = FaxTools(clinic[0], tmp_path / "compact-scope")
+    request = {"provider": "documo", "idempotency_key": "compact-scope", "expected_workspace_revision": 1}
+    with pytest.raises(LabError, match="fax_readiness_not_read"):
+        tools.call("follow_up", "fax_prepare_ready", request)
+    with pytest.raises(LabError, match="fax_proposals_not_read"):
+        tools.call("chief", "fax_inspect_prepared", {"provider": "documo"})
+    readiness = tools.call("chief", "fax_readiness", {"provider": "documo"})
+    request["expected_workspace_revision"] = readiness["options"]["entry_revision"]
+    with pytest.raises(LabError, match="fax_readiness_not_read"):
+        tools.call("follow_up", "fax_prepare_ready", request)
+    arbitrary = prepare_args(readiness, "documo")
+    arbitrary["proposed_operation_id"] = str(uuid4())
+    tools.call("chief", "fax_prepare", arbitrary)
+    tools.call("chief", "fax_list_proposals", {"provider": "documo"})
+    with pytest.raises(LabError, match="fax_prepared_operation_not_seen"):
+        tools.call("chief", "fax_inspect_prepared", {"provider": "documo"})
+    for name, args in (("fax_prepare_ready", request), ("fax_inspect_prepared", {"provider": "documo"})):
+        with pytest.raises(LabError, match="fax_tool_role_denied"):
+            tools.call("research", name, args)
     assert tools.calls == []

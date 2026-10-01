@@ -3,7 +3,7 @@
 import pytest
 from lab.account_tools import ACCOUNT_SCHEMAS
 from lab.cases import ROLES
-from lab.connector_tools import ALL_SCHEMAS, CONNECTOR_SCHEMAS, visible
+from lab.connector_tools import ALL_SCHEMAS, CONNECTOR_SCHEMAS, TEAM_SCHEMAS, visible
 from lab.fax_tools import FAX_SCHEMAS
 from lab.mcp_runtime import MCPRuntime, _checked_arguments, _definitions
 from lab.research_tools import RESEARCH_SCHEMAS
@@ -27,7 +27,7 @@ def synthetic_binary(tmp_path):
 
 
 def expected_connectors(role):
-    return (set(ACCOUNT_SCHEMAS) if role in {"chief", "visit_prep", "follow_up"} else set()) | (
+    return set(TEAM_SCHEMAS) | (set(ACCOUNT_SCHEMAS) if role in {"chief", "visit_prep", "follow_up"} else set()) | (
         set(FAX_SCHEMAS) if role in {"chief", "follow_up"} else set()) | (
         set(RESEARCH_SCHEMAS) if role == "research" else set())
 
@@ -43,7 +43,7 @@ def test_each_fixed_role_sees_only_its_real_connector_boundaries(synthetic_binar
     for item in tools:
         schema = item["inputSchema"]
         assert schema["type"] == "object" and schema["additionalProperties"] is False
-        assert not set(schema["properties"]) & FORBIDDEN_FIELDS
+        assert not set(schema["properties"]) & (FORBIDDEN_FIELDS - {"role"} if item["name"] == "read_shared_draft" else FORBIDDEN_FIELDS)
         for nested in schema.get("$defs", {}).values():
             if nested.get("type") == "object":
                 assert nested["additionalProperties"] is False
