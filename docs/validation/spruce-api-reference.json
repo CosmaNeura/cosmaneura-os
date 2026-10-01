@@ -1,0 +1,41 @@
+{
+  "reviewed_on": "2026-10-01",
+  "provider": "Spruce Health Public API v1",
+  "method": "Read official public API reference, OpenAPI schema and webhook guide through the browser and its read-only documentation tools. No account, registration, provider API or fax request was made.",
+  "sources": {
+    "send": "https://developer.sprucehealth.com/reference/postmessagefromendpoint",
+    "current_item": "https://developer.sprucehealth.com/reference/conversationitem",
+    "webhooks": "https://developer.sprucehealth.com/docs/webhooks-overview",
+    "internal_endpoints": "https://developer.sprucehealth.com/reference/internalendpoints"
+  },
+  "origin": "https://api.sprucehealth.com",
+  "authentication": "Bearer token issued for an API-enabled Spruce organization. Outgoing fax requires the reviewed internal endpoint of channel fax. The token and internal endpoint remain host-managed configuration, not a completed in-app account connection.",
+  "send": {
+    "request": "POST /v1/internalendpoints/{internalEndpointId}/conversations with destination.faxEndpoint and a message containing uploaded attachmentId.",
+    "acceptance": "The returned requestId can match the requestId on conversationItem.created to identify when the message is posted. This is not fax transmission completion.",
+    "conversation_behavior": "The official send guide says each outbound fax message from an internal endpoint creates a new fax conversation.",
+    "idempotency": "s-idempotency-key is documented, up to 255 characters. HTTP 422 is documented as duplicate request. CosmaBot retains one operation and does not replay an ambiguous upload or fax mutation."
+  },
+  "events": {
+    "types": ["conversationItem.created", "conversationItem.updated", "conversationItem.deleted", "conversationItem.restored"],
+    "scope": "All endpoint events belong to the owning organization. Bind the configured route, exact connection and accepted async request before creating a current-read reference.",
+    "signature": "X-Spruce-Signature is Base64(HMAC-SHA256(exact raw body, endpoint secret)). The endpoint secret is returned only when an endpoint is created.",
+    "delivery": "HTTPS endpoint must respond 2xx within five seconds. Events can arrive out of order. Spruce retries non-2xx delivery every two minutes for at most ten attempts.",
+    "implementation": "Retain signed candidates with bounded correlation metadata. Duplicate exact bodies do not add another observation. Explicit inbound/internal signals cannot correlate to outgoing fax. Callback handling does not send, retry or perform automatic status reads."
+  },
+  "current_item": {
+    "request": "GET /v1/conversationItems/{conversationItemId}",
+    "checks": "Exact item id and saved requestId, outbound direction, isInternalNote false, and no contradictory supplied object type.",
+    "pages": "conversationItem.pages contains teammate paging entries (memberId, resolved, resolvedAt); it is not fax transmission page-count evidence.",
+    "events": "conversationItem.event documents voice/video events; an answered outbound call does not prove a fax arrived.",
+    "limit": "The current public schema contains no documented terminal fax transmission status. A validated item yields pending posting evidence only. No delivered/failed parser can be safely derived from this reference."
+  },
+  "implementation_scope": "Reviewed PDF custody, separate media-upload and fax-send approvals, accepted request, signed callback correlation, explicit current-item read, failure recovery and persistent receipts. Final fax delivery requires manual verification in Spruce. No receiving/downloading fax documents, cancellation, registration, account creation or live qualification.",
+  "qualification_still_required": [
+    "API-enabled practice account and securely supplied bearer token",
+    "Reviewed sending fax internal endpoint",
+    "HTTPS callback route registered with Spruce and its signing secret securely installed",
+    "Controlled live approved upload and fax to an agreed test recipient",
+    "Documented terminal-delivery API evidence or manual confirmation in Spruce"
+  ]
+}

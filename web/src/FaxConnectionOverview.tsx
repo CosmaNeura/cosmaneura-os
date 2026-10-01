@@ -1,11 +1,19 @@
 import type {FaxProvider,FaxReadiness} from './fax-readiness-api';
 import './fax-connection.css';
 
-const providers:Record<FaxProvider,{name:string;description:string}>= {
-  spruce:{name:'Spruce',description:'Fax alongside your practice’s Spruce messaging account.'},
-  srfax:{name:'SRFax',description:'Outgoing fax using a practice SRFax account.'},
-  documo:{name:'Documo',description:'Outgoing fax using a practice Documo account.'},
-  efax:{name:'eFax Corporate',description:'Outgoing fax using an eFax Corporate or Enterprise API account. A regular eFax subscription may not include API access.'},
+const providers:Record<FaxProvider,{name:string;setup:string;workflow:string}>= {
+  spruce:{name:'Spruce',
+    setup:'A Spruce account with API access and a sending fax line. Your practice administrator also connects Spruce’s status updates.',
+    workflow:'Review and approve the PDF upload first, then review and approve the fax separately. Check final delivery in Spruce; CosmaBot cannot yet confirm Spruce fax delivery.'},
+  srfax:{name:'SRFax',
+    setup:'Your SRFax account number and password, sending fax number, and sender email. Your practice administrator connects these securely.',
+    workflow:'Review the PDF and recipient, approve sending, then check delivery in Fax work.'},
+  documo:{name:'Documo',
+    setup:'A Documo account with API access, your account ID and a sending fax number. Ask your practice administrator to allow both sending and checking delivery; a send-only key is not enough.',
+    workflow:'Review the PDF and recipient, approve sending, then check delivery in Fax work. Accepted means Documo has received the request; it does not mean the fax was delivered.'},
+  efax:{name:'eFax Corporate',
+    setup:'An eFax Corporate or Enterprise API account. A regular eFax subscription may not include API access. Your practice administrator connects the account securely.',
+    workflow:'Review the PDF and recipient, approve sending, then check delivery in Fax work.'},
 };
 
 export function FaxConnectionOverview({value,loading,unavailable,locked,onRefresh,onSetup,onOpenWork,workLabel,workBlocked}:{
@@ -32,12 +40,12 @@ export function FaxConnectionOverview({value,loading,unavailable,locked,onRefres
       const label=!status?'Not checked':!status.installed_accounts?'Needs practice connection':status.prepare_enabled_accounts?
         'Account configured':status.review_required_accounts?'Account needs review':'No enabled fax account';
       return <details key={id} className="fax-provider-option"><summary><strong>{provider.name}</strong><span>{label}</span></summary>
-        <p>{provider.description}</p>
         <p>{!status?'Check setup to see whether this practice has an account.':!status.installed_accounts?
           'Your practice administrator needs to connect this provider’s account securely.':status.prepare_enabled_accounts?
           `${status.prepare_enabled_accounts} account${status.prepare_enabled_accounts===1?' is':'s are'} configured for draft preparation. Review the current account and recipient before use.`:
           'Open provider accounts to review permissions and activate an eligible fax account.'}</p>
-        <p className="team-fine">Account configuration does not confirm provider access or delivery.</p>
+        <p><strong>What you need: </strong>{provider.setup}</p>
+        <p><strong>How it works: </strong>{provider.workflow}</p>
       </details>;
     })}</div>
     <details className="fax-other-provider"><summary>Another fax provider</summary>
@@ -50,6 +58,6 @@ export function FaxConnectionOverview({value,loading,unavailable,locked,onRefres
       {onOpenWork&&<button className="team-primary" disabled={locked||workBlocked||!current||!ready} onClick={onOpenWork}>{workLabel}</button>}
     </div>
     <p>Fax work keeps the document, recipient, review and delivery status with the selected visit. Each send needs a separate approval.</p>
-    <p className="team-fine">Incoming faxes are not available in CosmaBot yet. Check each outgoing fax’s delivery status in Fax work.</p>
+    <p className="team-fine">Checking setup does not verify the provider login or fax delivery. Incoming faxes are not available in CosmaBot yet.</p>
   </section>;
 }

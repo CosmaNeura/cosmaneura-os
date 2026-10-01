@@ -17,6 +17,11 @@ it('shows provider choices and routes only after an explicit work click',async()
   const work=vi.fn(),setup=vi.fn();await act(async()=>root.render(<FaxConnectionOverview value={ready} loading={false} unavailable={false} locked={false} onRefresh={vi.fn()} onSetup={setup} onOpenWork={work} workLabel="Open fax work" workBlocked={false}/>));
   expect(work).not.toHaveBeenCalled();expect(host.textContent).toContain('Spruce');expect(host.textContent).toContain('SRFax');expect(host.textContent).toContain('Documo');expect(host.textContent).toContain('Account needs review');
   expect(host.textContent).toContain('eFax Corporate');expect(host.textContent).toContain('may not include API access');expect(host.textContent).not.toContain('Delivery verified');
+  const option=(name:string)=>[...host.querySelectorAll('.fax-provider-option')].find(item=>item.querySelector('strong')?.textContent===name)!;
+  expect(option('Spruce').textContent).toContain('approve the PDF upload first');expect(option('Spruce').textContent).toContain('Check final delivery in Spruce');expect(option('Spruce').textContent).not.toContain('check delivery in Fax work');
+  expect(option('SRFax').textContent).toContain('account number and password');expect(option('SRFax').textContent).toContain('sender email');
+  expect(option('Documo').textContent).toContain('both sending and checking delivery');expect(host.textContent).toContain('does not verify the provider login');
+  expect(host.querySelector('h2')?.textContent).toContain('📠');expect(host.querySelectorAll('input')).toHaveLength(0);
   await act(async()=>button('Open fax work').click());expect(work).toHaveBeenCalledOnce();expect(setup).not.toHaveBeenCalled();
   await act(async()=>button('Review provider accounts').click());expect(setup).toHaveBeenCalledOnce();
 });

@@ -43,6 +43,29 @@ listens only on loopback, uses a random password, and stops when the run ends.
 The finished database files remain in the run directory for inspection; the
 temporary password file is removed. `cleanup.json` records shutdown.
 
+### Three fax provider workstreams
+
+Use `--cases fax_spruce`, `--cases fax_srfax`, or `--cases fax_documo` with
+`--mode replay --repeat 2 --concurrency 1`. Launch them as three separate
+processes with distinct `--output` directories to qualify providers in parallel.
+Each process owns its database and runs the actual migrations and SQL guards;
+scenarios within a process are sequential because feature settings are global.
+`--checks` also qualifies the shared account setup and persistent application
+contracts. No real credentials, provider APIs or fax deliveries are used.
+
+These cases exercise actual PDF custody, separate human approvals, durable
+submission claims, wrong-account/recipient protection, lost responses, malformed
+status and database reopen. Spruce has a separate upload approval and signed
+callback correlation. Its published API establishes posting, not terminal fax
+delivery; recovering a pending observation cannot erase previous uncertainty.
+
+The three implementation agents share findings in `lab/provider-lessons/`.
+Reports link those lessons to executed scenarios and fail if a listed scenario
+is missing or fails. Provider references are recorded under `docs/validation/`.
+These are repeatable application tests written and reviewed by the agent team,
+not model-selected fax actions or evidence of live account qualification. Local
+replay durations do not measure provider delivery time.
+
 Azure mode uses the existing Azure CLI login with the fixed CosmaBot endpoint
 `https://cosmascode.services.ai.azure.com/openai/v1/chat/completions` and deployment
 `gpt-4.1`. It sends only generated case data. Credentials stay in memory and are

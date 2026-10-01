@@ -38,7 +38,7 @@ def setup_case(vendor_case):
             {"internal_endpoint_id": "invented_endpoint"},
             ["spruce_secure_message", "spruce_media_upload", "spruce_fax"],
         ),
-        ("srfax", "123456", {"caller_id": "2125550199"}, ["srfax_fax"]),
+        ("srfax", "123456", {"caller_id": "2125550199", "sender_email": "fax@example.invalid"}, ["srfax_fax"]),
         ("documo", str(uuid4()), {"caller_id": "2125550188"}, ["documo_fax"]),
     ]:
         selection = ConnectionSelection.model_validate(

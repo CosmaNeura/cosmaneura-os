@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "provider": "documo",
+  "lessons": [
+    {
+      "id": "documo-immediate-acceptance",
+      "finding": "The documented async=true option returns messageId immediately. Request it to avoid conversion dwell and unrelated submission metadata, while requiring a separate authenticated status read before delivery can be displayed.",
+      "applies_to": ["documo", "srfax", "spruce"],
+      "evidence": ["https://docs.documo.com/#4c501802-7d0b-4e70-98ef-64249d3606fb", "tests/unit/test_documo_delivery_status.py"],
+      "applied_scenarios": ["delivered", "pending_recovery", "lost_reply"]
+    },
+    {
+      "id": "documo-terminal-evidence",
+      "finding": "A terminal result requires the exact account, fax, outbound direction and destination. Positive complete page counts and the documented result code are needed together; contradictory legacy error codes do not establish delivery or failure.",
+      "applies_to": ["documo", "srfax", "spruce"],
+      "evidence": ["https://docs.documo.com/#c2dc1026-15d7-42ae-ac90-05c3757635f8", "src/cosmas_os/adapters/vendor_connectors/documo.py", "tests/unit/test_documo_delivery_status.py"],
+      "applied_scenarios": ["wrong_account", "wrong_destination", "wrong_reference", "partial", "malformed_status", "contradictory_result"]
+    },
+    {
+      "id": "srfax-setup-admission",
+      "finding": "Shared by the SRFax team: provider setup must reject missing required or forbidden routing before an account can look ready. SRFax needs sender_email; Documo must not accept it. Documo additionally needs base or admin key access because print_driver cannot read delivery status.",
+      "applies_to": ["srfax", "documo", "spruce"],
+      "evidence": ["src/cosmas_os/application/vendor_settings.py", "src/cosmas_os/ports/vendor_connectors.py", "https://docs.documo.com/#c2dc1026-15d7-42ae-ac90-05c3757635f8"],
+      "applied_scenarios": ["expired_access"]
+    },
+    {
+      "id": "spruce-page-semantics",
+      "finding": "Shared by the Spruce team: Spruce conversationItem.pages describes teammate paging, not fax pages. Keep provider-specific response interpretation; Documo pagesCount/pagesComplete cannot be generalized to every field named pages.",
+      "applies_to": ["spruce", "documo", "srfax"],
+      "evidence": ["src/cosmas_os/adapters/vendor_connectors/documo.py", "src/cosmas_os/adapters/vendor_connectors/spruce.py", "tests/unit/test_documo_delivery_status.py"],
+      "applied_scenarios": ["partial", "malformed_status"]
+    },
+    {
+      "id": "shared-uncertain-write-recovery",
+      "finding": "A lost submission response may follow provider acceptance. Retain the same durable operation and never send again automatically. Recover status with explicit bounded reads; retain failure evidence and verify it after reopening the database.",
+      "applies_to": ["documo", "srfax", "spruce"],
+      "evidence": ["lab/fax_sandbox.py", "src/cosmas_os/application/vendor_execution.py", "tests/unit/test_documo_delivery_status.py"],
+      "applied_scenarios": ["lost_reply", "read_timeout", "throttled", "expired_access", "pending_recovery"]
+    }
+  ]
+}

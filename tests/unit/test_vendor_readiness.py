@@ -38,7 +38,7 @@ def installation(vendor, number=10, *, box=BOX, actor=OWNER, fax=True):
             credential_ref=uid(number + 2), configuration_sha256="a" * 64,
         ), "Invented account", "Invented sender",
         {"internal_endpoint_id": "invented_endpoint"} if vendor == "spruce"
-        else {"caller_id": "2125550100"}, capabilities,
+        else {"caller_id": "2125550100", **({"sender_email": "fax@example.invalid"} if vendor == "srfax" else {})}, capabilities,
     )
 
 

@@ -39,7 +39,8 @@ class DocumoConnector:
             raise VendorError("capability_unavailable")
         command.intent.document.require_bytes(document)
         body, content_type = multipart(command.operation_id, document, "attachments", [
-            ("faxNumber", command.intent.destination), ("callerId", command.intent.caller_id), ("coverPage", "false")])
+            ("faxNumber", command.intent.destination), ("callerId", command.intent.caller_id),
+            ("coverPage", "false"), ("async", "true")])
         return WireRequest("POST", "/v1/faxes", body, content_type)
 
     async def submit(self, command, approval, document):
@@ -80,14 +81,22 @@ class DocumoConnector:
             if result.status != 200 or data["messageId"] != ref.value:
                 raise ValueError
             self._scope(command, data)
+            status = data.get("status")
+            if type(status) is not str:
+                raise ValueError
             total, complete = data.get("pagesCount"), data.get("pagesComplete")
             if any(type(n) is not int or not 0 <= n <= 1_000_000 for n in (total, complete)) or complete > total:
                 raise ValueError
-            state = "pending" if data["status"] in {"processing", "transmitting"} else "unknown"
-            if data["status"] == "success" and data.get("resultCode") == "0" and total == complete and total > 0:
+            code = data.get("resultCode")
+            # The deprecated errorCode is not a second source of success. If
+            # supplied, it must not contradict the current resultCode. Missing
+            # legacy fields remain valid for current v1 responses.
+            legacy_code = data.get("errorCode")
+            codes_agree = legacy_code is None or legacy_code == "" or legacy_code == code
+            state = "pending" if status in {"processing", "transmitting"} else "unknown"
+            if status == "success" and code == "0" and codes_agree and total == complete and total > 0:
                 state = "transport_delivered"
-            elif (data["status"] == "failed" and type(data.get("resultCode")) is str
-                    and data["resultCode"] in FAILURE_CODES):
+            elif status == "failed" and type(code) is str and code in FAILURE_CODES and codes_agree:
                 state = "transport_failed"
             return DeliveryObservation(reference=ref, observed_at=result.observed_at, state=state,
                 pages_total=total, pages_delivered=complete, response_sha256=result.sha256)

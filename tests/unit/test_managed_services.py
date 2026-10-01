@@ -33,6 +33,8 @@ def profile(provider=None):
     for name, capability in [('spruce', 'spruce_secure_message'), ('srfax', 'srfax_fax'), ('documo', 'documo_fax')]:
         selected = selection(name).model_copy(update={"connection_id": uuid4()})
         routing = {"internal_endpoint_id": "invented_endpoint"} if name == 'spruce' else {"caller_id": "2125550199"}
+        if name == "srfax":
+            routing["sender_email"] = "fax@example.invalid"
         vendor.append(vendor_settings.Installation(selected, "Invented " + name, "Invented sender", routing, (capability,)))
     finance = finance_settings.Installation(selection('stripe').model_copy(update={"connection_id": uuid4()}), "Invented Stripe")
     return ManagedServiceProfile(vendor_settings.Catalog(vendor), finance_settings.Catalog((finance,)), provider)

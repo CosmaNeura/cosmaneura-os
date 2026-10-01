@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "provider": "srfax",
+  "lessons": [
+    {
+      "id": "srfax-sender-admission",
+      "finding": "SRFax needs a reviewed sender email in addition to caller ID. Validate account setup before offering fax work; a connected credential alone does not make an account operational.",
+      "applies_to": ["srfax", "documo", "spruce", "efax"],
+      "evidence": ["src/cosmas_os/ports/vendor_connectors.py", "src/cosmas_os/application/vendor_settings.py", "tests/unit/test_srfax_qualification.py"],
+      "applied_scenarios": []
+    },
+    {
+      "id": "srfax-uncertain-send",
+      "finding": "A missing Queue_Fax response is unconfirmed acceptance. Reopening or repeating the same local submission must not send the PDF again. Retry-disabled provider settings do not create provider idempotency.",
+      "applies_to": ["srfax", "documo", "spruce", "efax"],
+      "evidence": ["src/cosmas_os/adapters/vendor_connectors/srfax.py", "lab/fax_sandbox.py", "tests/unit/test_srfax_qualification.py"],
+      "applied_scenarios": ["lost_reply"]
+    },
+    {
+      "id": "srfax-explicit-status-recovery",
+      "finding": "Queue acceptance, transport delivery and human confirmation of task completion are separate records. A temporary status failure permits a fresh explicit status read, never another send. Persist the same evidence across database reopen.",
+      "applies_to": ["srfax", "documo", "spruce", "efax"],
+      "evidence": ["lab/fax_sandbox.py", "lab/srfax_qualification.py"],
+      "applied_scenarios": ["delivered", "pending_recovery", "read_timeout", "throttled", "expired_access"]
+    },
+    {
+      "id": "peer-provider-field-semantics",
+      "finding": "Spruce's team established that conversationItem.pages is teammate paging data, not fax pages. Documo's team confirmed that send-only credentials cannot establish status-read readiness and that optional error fields must not contradict delivery. For SRFax, retain exact response meaning, reject malformed status types, and verify delivery separately using the bound fax reference and destination. Sent with supplied nonempty ErrorCode remains unknown.",
+      "applies_to": ["srfax", "documo", "spruce", "efax"],
+      "evidence": ["lab/provider-lessons/spruce.json", "lab/provider-lessons/documo.json", "src/cosmas_os/adapters/vendor_connectors/srfax.py", "tests/unit/test_srfax_qualification.py"],
+      "applied_scenarios": ["partial", "wrong_destination", "malformed_status", "expired_credentials", "contradictory_error"]
+    }
+  ]
+}

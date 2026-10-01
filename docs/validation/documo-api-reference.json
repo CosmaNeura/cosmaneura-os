@@ -1,0 +1,52 @@
+{
+  "version": 1,
+  "provider": "documo",
+  "reviewed_on": "2026-10-01",
+  "evidence_method": "Read-only inspection of official public API documentation; no account sign-in or provider API requests.",
+  "sources": {
+    "overview": "https://docs.documo.com/",
+    "send": "https://docs.documo.com/#4c501802-7d0b-4e70-98ef-64249d3606fb",
+    "status": "https://docs.documo.com/#c2dc1026-15d7-42ae-ac90-05c3757635f8",
+    "sandbox": "https://docs.documo.com/#sandbox-environment-beta",
+    "result_codes": "https://docs.documo.com/#result-codes",
+    "enable_api": "https://help.documo.com/hc/en-us/articles/7789630698011-How-to-Enable-and-Retrieve-API-Keys"
+  },
+  "account_setup": {
+    "api_access": "Enable API access in Documo Settings > API and supply the key through the host's protected credential store.",
+    "key_access": "Use base or admin access for both send and status. The documented print_driver access can send, but View Fax Info permits only base or admin.",
+    "binding": "Review the exact Documo account UUID and ten-digit sending caller ID. Documo does not use SRFax's sender_email field.",
+    "authorization": "Authorization: Basic <API_KEY>",
+    "production_origin": "https://api.documo.com",
+    "sandbox_origin": "https://api.sandbox.documo.com",
+    "sandbox_limit": "The vendor describes its beta sandbox as non-delivering. These qualification runs use a local offline HTTP twin and have not exercised the vendor sandbox.",
+    "notifications": "The async send documentation says failure notifications are emailed to the Documo user; account notification policy must be reviewed before live use. CosmaBot does not rely on those notifications as delivery evidence."
+  },
+  "submission": {
+    "method": "POST",
+    "path": "/v1/faxes",
+    "content_type": "multipart/form-data",
+    "implemented_fields": ["faxNumber", "callerId", "coverPage=false", "async=true", "attachments"],
+    "document_policy": "One reviewed, byte-bound PDF from private artifact custody; no attachment URLs, schedules, extra cover page or multiple recipients.",
+    "async_contract": "When true, server immediately responds with an object that contains only messageId. This avoids waiting for conversion and avoids the full submission response's unrelated user/account fields.",
+    "meaning": "A returned messageId records acceptance only. It does not close the task or confirm fax delivery.",
+    "recovery": "CosmaBot does not repeat an uncertain submission. The existing durable operation claim prevents a second dispatch after a lost reply. No new provider-side retry guarantee is inferred."
+  },
+  "observation": {
+    "method": "GET",
+    "path": "/v1/fax/:messageId/info",
+    "required_binding": ["messageId", "accountId", "direction=outbound", "faxNumber"],
+    "delivery": "status=success, resultCode string 0, positive equal integer pagesCount and pagesComplete, and no contradictory nonempty deprecated errorCode.",
+    "failure": "status=failed with a documented string failure code and no contradictory nonempty deprecated errorCode.",
+    "legacy_error_code": "The official reference deprecates errorCode in favor of resultCode. Missing/null/empty legacy data is allowed; a conflicting supplied value does not establish a terminal result.",
+    "bounds": "Malformed, foreign, contradictory, partial and unknown observations remain unconfirmed; no raw provider response or account/user metadata is projected into public receipts.",
+    "polling": "Status recovery is an explicit new bounded read, never a resend or an automatic polling loop.",
+    "rate_limits": "The public reference lists 60 requests/minute/token by default, 180/minute for sending faxes, 4/minute for detailed reports, and HTTP 429 until reset."
+  },
+  "not_qualified": [
+    "A real API-enabled account and its key access level",
+    "Vendor-hosted sandbox acceptance",
+    "Controlled live delivery and account notification behavior",
+    "Incoming fax import or inbox",
+    "Cancel, resend, delete, account creation and credential rotation"
+  ]
+}

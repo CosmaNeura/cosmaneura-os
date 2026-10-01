@@ -21,10 +21,11 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def case_catalog():
+    from lab.fax_teams import CASES as FAX_CASES
     from lab.inbound_workflow import INBOUND
     from lab.journey import INPUTS
 
-    return {**CASES, "clinic": CLINIC, "inbound": INBOUND, "connectors": Case("connectors", "Email, calendar and fax fault laboratory",
+    return {**CASES, **FAX_CASES, "clinic": CLINIC, "inbound": INBOUND, "connectors": Case("connectors", "Email, calendar and fax fault laboratory",
         "Exercise actual adapters and durable OAuth against synthetic providers.", "SYNTHETIC connector clinic", ()),
         "journey": Case("journey", "Chief prepares and verifies encounter handoffs",
         "Decompose intake, Session Prep and Scribe outputs into accountable private draft handoffs.",
@@ -32,6 +33,9 @@ def case_catalog():
 
 
 def case_checks(key):
+    if key.startswith("fax_"):
+        return ["tests/integration/test_fax_provider_teams.py", "tests/integration/test_vendor_settings.py",
+                "tests/unit/test_vendor_installation_routing.py"]
     if key == "inbound":
         return ["tests/integration/test_lab_inbound.py"]
     if key == "clinic":
@@ -70,7 +74,9 @@ def write_report(root, report):
 
 
 def source_record():
-    files = sorted((REPO / "lab").glob("*.py")) + sorted((REPO / "src/cosmas_os").rglob("*.py"))
+    files = (sorted((REPO / "lab").rglob("*.py")) + sorted((REPO / "lab/provider-lessons").glob("*.json"))
+             + sorted((REPO / "docs/validation").glob("*-api-reference.json"))
+             + sorted((REPO / "src/cosmas_os").rglob("*.py")))
     hashes = {str(path.relative_to(REPO)): hashlib.sha256(path.read_bytes()).hexdigest() for path in files}
     return {"commit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=REPO, text=True).strip(),
             "source_sha256": hashlib.sha256(json.dumps(hashes, sort_keys=True).encode()).hexdigest(), "files": hashes}
@@ -80,7 +86,6 @@ def worker(args):
     from sqlalchemy import create_engine
     from sqlalchemy.engine import make_url
 
-    from cosmas_os.model_registry import metadata
     from lab.application import Application
     from lab.engine import AzureModel, Budget, World
     from lab.evaluate import VERSION, grade
@@ -97,11 +102,15 @@ def worker(args):
             or str(database.port) != pid_file.read_text().splitlines()[3]):
         raise ValueError("Lab requires the exact owned loopback PostgreSQL cluster")
     engine = create_engine(database, pool_size=6, max_overflow=0)
-    metadata.create_all(engine)
+    # Run the actual schema and SQL guards against the verified owned cluster.
+    from alembic import command
+    from alembic.config import Config
+
+    command.upgrade(Config(str(REPO / "alembic.ini")), "head")
     report = {"schema": "cosmabot-agent-lab.v1", "started_at": datetime.now(UTC).isoformat(),
               "status": "running", "mode": args.mode, "synthetic_only": True,
               "model": model.name if model else "deterministic-replay-no-model",
-              "concurrency": args.concurrency, "fault": args.fault,
+              "concurrency": args.concurrency, "fault": args.fault, "schema_setup": "alembic-upgrade-head",
               "journey_input_mode": args.journey_inputs,
               "budget": {"max_calls": args.max_calls, "max_tokens": args.max_tokens, "max_seconds": args.max_seconds},
               "source": source_record(), "episodes": [], "coverage": [],
@@ -133,6 +142,10 @@ def worker(args):
                     from lab.connector_checks import run_connectors
 
                     result = run_connectors(app, store, episode)
+                elif key.startswith("fax_"):
+                    from lab.fax_teams import run_provider
+
+                    result = run_provider(app, store, episode, key.removeprefix("fax_"))
                 elif key == "inbound":
                     from lab.inbound_workflow import run_inbound
 
