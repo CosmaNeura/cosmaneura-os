@@ -22,7 +22,7 @@ from pydantic import (
 
 from cosmas_os.ports.scribe_capture import ProtectedModel
 
-Vendor = Literal["spruce", "srfax", "documo", "stripe", "portal"]
+Vendor = Literal["spruce", "srfax", "documo", "efax", "stripe", "portal"]
 Environment = Literal["sandbox", "production"]
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
 OpaqueID = Annotated[str, Field(strict=True, min_length=1, max_length=255, pattern=r"^[A-Za-z0-9_-]+$")]
@@ -150,7 +150,7 @@ class ProviderReference(ProtectedModel):
             if self.vendor == "srfax":
                 if not self.value.isascii() or not self.value.isdigit() or int(self.value) <= 0:
                     raise ValueError("Invalid fax reference")
-            elif self.vendor == "documo":
+            elif self.vendor in {"documo", "efax"}:
                 if str(UUID(self.value)) != self.value:
                     raise ValueError("Invalid fax identifier")
             else:
@@ -308,7 +308,7 @@ class VendorCommand(ProtectedModel):
     def adapter_scope(self):
         vendor = self.selection.vendor
         if (isinstance(self.intent, (MediaUploadIntent, SpruceMessageIntent)) and vendor != "spruce"
-                or isinstance(self.intent, FaxIntent) and vendor not in {"srfax", "documo"}
+                or isinstance(self.intent, FaxIntent) and vendor not in {"srfax", "documo", "efax"}
                 or isinstance(self.intent, StripePaymentIntentIntent) and vendor != "stripe"
                 or isinstance(self.intent, PortalIntent) and vendor != "portal"):
             raise ValueError("Intent vendor differs")

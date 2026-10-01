@@ -1,0 +1,7 @@
+.fax-connection-overview{max-width:48rem;margin:0 auto 1.5rem;padding:1rem;border:1px solid var(--line,#dce5df);border-radius:14px;background:var(--surface,#fff)}
+.fax-connection-overview h2{margin:0 0 .5rem;font-size:1.15rem}.fax-connection-overview p{line-height:1.5}
+.fax-provider-options{display:grid;gap:.5rem;margin:1rem 0}.fax-provider-option{border:1px solid var(--line,#dce5df);border-radius:10px;padding:.65rem .8rem}
+.fax-provider-option summary{cursor:pointer;min-height:32px;align-content:center}.fax-provider-option summary span{margin-left:.75rem;font-size:.85rem;color:var(--muted,#586860)}
+.fax-provider-option p{margin:.6rem 0}.fax-other-provider{margin:.75rem 0}.fax-other-provider summary{cursor:pointer;min-height:36px;align-content:center}
+.fax-connection-actions{display:flex;flex-wrap:wrap;gap:.6rem;margin:1rem 0}.fax-connection-actions button{min-height:44px}
+@media(max-width:600px){.fax-connection-overview{padding:.8rem}.fax-provider-option summary span{display:block;margin:.2rem 0 0}.fax-connection-actions{display:grid}.fax-connection-actions button{width:100%;white-space:normal}}

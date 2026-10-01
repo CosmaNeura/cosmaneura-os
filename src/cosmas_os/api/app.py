@@ -1672,6 +1672,18 @@ def _vendor_artifact_store(request: Request):
     return runtime.artifact_store if runtime is not None else None
 
 
+def _vendor_readiness_configuration(request: Request):
+    from cosmas_os.application.vendor_readiness import FaxReadinessConfiguration
+
+    runtime = managed_services(request.app)
+    return FaxReadinessConfiguration(
+        work_enabled=settings.workspace_available and settings.vendor_work_enabled,
+        delivery_enabled=settings.workspace_available and settings.vendor_io_enabled,
+        credential_access_configured=runtime is not None and runtime.has_credentials,
+        document_storage_configured=runtime is not None and runtime.artifact_store is not None,
+    )
+
+
 def _vendor_event_routes(request: Request):
     """Explicit server-only lookup; renderer input cannot select an account."""
     runtime = managed_services(request.app)
@@ -1697,7 +1709,8 @@ install_vendor_routes(app, get_session=get_session, identity_dependency=_identit
 from cosmas_os.api.vendor_setup_routes import register as register_vendor_setup  # noqa: E402
 
 register_vendor_setup(app, get_session, _identity, reauthenticate=_vendor_reauthenticate,
-    policy_dependency=_vendor_setup_policy, catalog_dependency=_vendor_installed_catalog)
+    policy_dependency=_vendor_setup_policy, catalog_dependency=_vendor_installed_catalog,
+    readiness_dependency=_vendor_readiness_configuration)
 
 from cosmas_os.api.portal_setup_routes import register as register_portal_setup  # noqa: E402
 

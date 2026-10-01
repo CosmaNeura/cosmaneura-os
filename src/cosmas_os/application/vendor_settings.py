@@ -81,7 +81,7 @@ class Catalog:
             optional = (
                 {"event_route_id"}
                 if selection.vendor == "spruce"
-                else {"sender_email", "event_route_id"}
+                else set() if selection.vendor == "efax" else {"sender_email", "event_route_id"}
             )
             if not expected <= routing.keys() or routing.keys() - expected - optional:
                 raise ValueError("Closed installed routing required")

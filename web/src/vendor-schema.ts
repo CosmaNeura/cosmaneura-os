@@ -1,6 +1,6 @@
 // Generated from the existing public Python contract. Do not hand-edit shapes.
 // Relational checks and exact commitments are in vendor-contract.ts.
-// Source SHA-256: 91aba898d9bb1c257b4c5c2632527c648e8d8e61bf21903b1e82154983bf297b
+// Source SHA-256: 473a7f3388fbd468aae48cb9b554f981006e97e09e5e4401d697000c8df63f94
 // Retirement source SHA-256: 3e3aeb1b9071fc0360db852c4562ac6710ed5560c9f551de37062c2c83763df7
 export const VENDOR_SCHEMAS = {
   "Closed": {
@@ -182,7 +182,8 @@ export const VENDOR_SCHEMAS = {
           "spruce_fax",
           "spruce_media_upload",
           "srfax_fax",
-          "documo_fax"
+          "documo_fax",
+          "efax_fax"
         ],
         "title": "Action",
         "type": "string"
@@ -1097,7 +1098,8 @@ export const VENDOR_SCHEMAS = {
         "enum": [
           "spruce",
           "srfax",
-          "documo"
+          "documo",
+          "efax"
         ],
         "title": "Vendor",
         "type": "string"
@@ -1125,7 +1127,8 @@ export const VENDOR_SCHEMAS = {
             "spruce_fax",
             "spruce_media_upload",
             "srfax_fax",
-            "documo_fax"
+            "documo_fax",
+            "efax_fax"
           ],
           "type": "string"
         },
@@ -1289,7 +1292,8 @@ export const VENDOR_SCHEMAS = {
           "spruce_fax",
           "spruce_media_upload",
           "srfax_fax",
-          "documo_fax"
+          "documo_fax",
+          "efax_fax"
         ],
         "title": "Action",
         "type": "string"
@@ -1554,7 +1558,8 @@ export const VENDOR_SCHEMAS = {
           "spruce_fax",
           "spruce_media_upload",
           "srfax_fax",
-          "documo_fax"
+          "documo_fax",
+          "efax_fax"
         ],
         "title": "Action",
         "type": "string"
@@ -1643,7 +1648,8 @@ export const VENDOR_SCHEMAS = {
           "spruce_fax",
           "spruce_media_upload",
           "srfax_fax",
-          "documo_fax"
+          "documo_fax",
+          "efax_fax"
         ],
         "title": "Action",
         "type": "string"
@@ -2741,7 +2747,8 @@ export const VENDOR_SCHEMAS = {
           "spruce_fax",
           "spruce_media_upload",
           "srfax_fax",
-          "documo_fax"
+          "documo_fax",
+          "efax_fax"
         ],
         "title": "Action",
         "type": "string"
@@ -3618,7 +3625,7 @@ export type Selection = { "id": string; "revision": number; "public_sha256": str
 export type ReviewedSource = { "kind": "reviewed_note"; "note_id": string; "content_sha256": string; "source_fingerprint": string };
 export type Document = { "artifact_id": string; "sha256": string; "byte_length": number; "media_type": "application/pdf" };
 export type Revision = { "ticket_id": string; "expected_version": number; "revision_id": string; "payload_hash": string };
-export type VendorProposal = { "expected_workspace_revision": number; "idempotency_key": string; "proposed_operation_id": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax"; "connection": Selection; "source": ReviewedSource; "due_date": string; "expected_outcome": string; "share_to_practice": boolean; "correspondence"?: Selection; "document"?: Document; "message"?: string; "uploaded_media_operation_id"?: string; "supersedes_operation_id"?: string; "acknowledge_prior_uncertainty"?: true; "revises"?: Revision };
+export type VendorProposal = { "expected_workspace_revision": number; "idempotency_key": string; "proposed_operation_id": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"; "connection": Selection; "source": ReviewedSource; "due_date": string; "expected_outcome": string; "share_to_practice": boolean; "correspondence"?: Selection; "document"?: Document; "message"?: string; "uploaded_media_operation_id"?: string; "supersedes_operation_id"?: string; "acknowledge_prior_uncertainty"?: true; "revises"?: Revision };
 export type BoundCommand = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string };
 export type VendorDecision = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string; "review_sha256": string; "choice": "approve" | "reject" };
 export type VendorPublication = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string; "review_sha256": string; "share_to_practice": true };
@@ -3633,14 +3640,14 @@ export type VendorArtifactIntent = { "artifact_id": string; "idempotency_key": s
 export type VendorArtifactResolve = { "command_kind": "artifact_intent" | "artifact_content"; "idempotency_key": string; "request_sha256": string; "artifact_id": string };
 export type VendorArtifactContent = { "artifact_id": string; "intent_sha256": string; "idempotency_key": string; "sha256": string; "byte_length": number; "media_type": "application/pdf" };
 export type Output = {  };
-export type ConnectionView = { "id": string; "revision": number; "vendor": "spruce" | "srfax" | "documo"; "environment": "production" | "sandbox"; "label": string; "actions": Array<"spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax">; "availability": "enabled" | "disabled" | "read_only" | "revoked"; "public_sha256": string };
+export type ConnectionView = { "id": string; "revision": number; "vendor": "spruce" | "srfax" | "documo" | "efax"; "environment": "production" | "sandbox"; "label": string; "actions": Array<"spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax">; "availability": "enabled" | "disabled" | "read_only" | "revoked"; "public_sha256": string };
 export type CorrespondenceView = { "id": string; "revision": number; "connection_id": string; "channel": "secure" | "fax"; "recipient_label": string; "destination_display": string; "permission": "reviewed" | "expired" | "revoked"; "expires_at": string; "public_sha256": string };
-export type Summary = { "ticket_id": string; "version": number; "revision_id": string; "operation_id": string; "payload_hash": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax"; "state": "pending_approval" | "approved" | "rejected" | "withdrawn" | "superseded" | "closed"; "published": boolean; "submit_claimed": boolean; "dispatch": "not_started" | "invocation_started" | "proved_not_dispatched" | "unconfirmed" | "response_observed"; "acceptance": "not_observed" | "accepted" | "rejected" | "unconfirmed"; "transport": "not_observed" | "pending" | "delivered" | "failed" | "unknown"; "conflicting_evidence": boolean; "result": "none" | "recorded_success" | "recorded_exception"; "verification": "pending" | "verified" | "exception_unresolved"; "due_date": string; "outcome_excerpt": string; "responsible_id": string; "observation_head": ObservationHead; "evidence_sha256": string };
+export type Summary = { "ticket_id": string; "version": number; "revision_id": string; "operation_id": string; "payload_hash": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"; "state": "pending_approval" | "approved" | "rejected" | "withdrawn" | "superseded" | "closed"; "published": boolean; "submit_claimed": boolean; "dispatch": "not_started" | "invocation_started" | "proved_not_dispatched" | "unconfirmed" | "response_observed"; "acceptance": "not_observed" | "accepted" | "rejected" | "unconfirmed"; "transport": "not_observed" | "pending" | "delivered" | "failed" | "unknown"; "conflicting_evidence": boolean; "result": "none" | "recorded_success" | "recorded_exception"; "verification": "pending" | "verified" | "exception_unresolved"; "due_date": string; "outcome_excerpt": string; "responsible_id": string; "observation_head": ObservationHead; "evidence_sha256": string };
 export type Availability = { "allowed": boolean; "reason": "available" | "feature_disabled" | "owner_only" | "not_current" | "not_approved" | "expired" | "source_changed" | "selection_changed" | "permission_unavailable" | "artifact_unavailable" | "submit_already_claimed" | "reference_unavailable" | "original_account_unavailable" | "read_in_progress" | "history_limit" | "result_required" | "manual_verification_required" | "exception_unresolved" | "already_published" | "closed" };
 export type ActionAvailability = { "approve": Availability; "reject": Availability; "withdraw": Availability; "publish": Availability; "submit": Availability; "reconcile": Availability; "result": Availability; "verify": Availability };
 export type UploadedMedia = { "operation_id": string; "document": Document };
-export type SupersedesView = { "ticket_id": string; "operation_id": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax"; "prior_dispatch": "not_started" | "invocation_started" | "proved_not_dispatched" | "unconfirmed" | "response_observed"; "prior_acceptance": "not_observed" | "accepted" | "rejected" | "unconfirmed"; "prior_transport": "not_observed" | "pending" | "delivered" | "failed" | "unknown"; "uncertainty_acknowledged": true };
-export type Review = { "ticket_id": string; "revision_id": string; "operation_id": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax"; "connection": ConnectionView; "source": ReviewedSource; "correspondence"?: CorrespondenceView; "document"?: Document; "uploaded_media"?: UploadedMedia; "message"?: string; "due_date": string; "expected_outcome": string; "share_to_practice": boolean; "expires_at": string; "supersedes"?: SupersedesView };
+export type SupersedesView = { "ticket_id": string; "operation_id": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"; "prior_dispatch": "not_started" | "invocation_started" | "proved_not_dispatched" | "unconfirmed" | "response_observed"; "prior_acceptance": "not_observed" | "accepted" | "rejected" | "unconfirmed"; "prior_transport": "not_observed" | "pending" | "delivered" | "failed" | "unknown"; "uncertainty_acknowledged": true };
+export type Review = { "ticket_id": string; "revision_id": string; "operation_id": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"; "connection": ConnectionView; "source": ReviewedSource; "correspondence"?: CorrespondenceView; "document"?: Document; "uploaded_media"?: UploadedMedia; "message"?: string; "due_date": string; "expected_outcome": string; "share_to_practice": boolean; "expires_at": string; "supersedes"?: SupersedesView };
 export type Person = { "id": string; "name": string; "available": boolean };
 export type HumanResult = { "receipt_id": string; "receipt_sha256": string; "actor": Person; "disposition": "reported_success" | "reported_exception" | "verified_in_vendor" | "unable_to_establish"; "evidence": string; "recorded_at": string; "observation_head": ObservationHead };
 export type Detail = { "contract_version": 1; "workspace_id": string; "view_version": number; "observed_at": string; "summary": Summary; "review": Review; "review_sha256": string; "latest_result": HumanResult | null; "availability": ActionAvailability };
@@ -3655,7 +3662,7 @@ export type CommandResponse = { "contract_version": 1; "scope": Scope; "command_
 export type ArtifactMetadata = { "artifact_id": string; "version": number; "source": ReviewedSource; "document": Document; "intent_sha256": string; "state": "empty" | "receiving" | "ready" | "quarantined"; "generation": number; "lease_until": string | null };
 export type ArtifactEffect = { "artifact_id": string; "receipt_id": string; "effect_version": number; "recorded_at": string; "receipt_sha256": string };
 export type ArtifactResponse = { "contract_version": 1; "scope": Scope; "command_kind": "artifact_intent" | "artifact_content"; "idempotency_key": string; "request_sha256": string; "outcome": "recorded" | "unconfirmed" | "not_found"; "effect": ArtifactEffect | null; "artifact": ArtifactMetadata | null; "observed_at": string };
-export type SharedVendorStatus = { "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax"; "operation_id": string; "submit_claimed": boolean; "acceptance": "not_observed" | "accepted" | "rejected" | "unconfirmed"; "transport": "not_observed" | "pending" | "delivered" | "failed" | "unknown"; "conflicting_evidence": boolean; "result": "none" | "recorded_success" | "recorded_exception"; "verification": "pending" | "verified" | "exception_unresolved"; "observation_head": ObservationHead; "evidence_sha256": string };
+export type SharedVendorStatus = { "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"; "operation_id": string; "submit_claimed": boolean; "acceptance": "not_observed" | "accepted" | "rejected" | "unconfirmed"; "transport": "not_observed" | "pending" | "delivered" | "failed" | "unknown"; "conflicting_evidence": boolean; "result": "none" | "recorded_success" | "recorded_exception"; "verification": "pending" | "verified" | "exception_unresolved"; "observation_head": ObservationHead; "evidence_sha256": string };
 export type SharedVendorWork = { "work_kind": "vendor_delivery"; "ticket_id": string; "version": number; "revision_id": string; "payload_hash": string; "state": "pending_approval" | "approved" | "rejected" | "withdrawn" | "superseded" | "closed"; "ready_for_review": boolean; "historical": boolean; "publication_receipt_id": string; "body": string; "due_date": string; "expected_outcome": string; "viewer_id": string; "originator": Person; "responsible": Person; "vendor_work": SharedVendorStatus };
 export type SharedOffer = { "id": string; "from": Person; "to": Person };
 export type SharedHandoff = { "id": string; "kind": "offer" | "accept" | "decline" | "recall" | "reclaim"; "actor": Person; "from": Person; "to": Person; "offer_id": string | null; "created_at": string };

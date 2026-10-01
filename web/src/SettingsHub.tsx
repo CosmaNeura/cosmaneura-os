@@ -5,6 +5,7 @@ import {readConnectionCatalog, type ConnectionCatalog, type ConnectionId} from '
 import {CONNECTION_GUIDES} from './connection-guides';
 import {accountStatusSupported,readConnectionSummary,personalConnectionSummary,type ConnectionSummary} from './connection-summary';
 import {useConnectionHealth} from './connection-operation-health';
+import {FaxConnectionOverview} from './FaxConnectionOverview';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
 type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google';
@@ -16,15 +17,17 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost}: {
+export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false}: {
   open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   teamSummary: string; teamDirty: boolean; onClose: () => void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
+  onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [visited, setVisited] = useState<Editor[]>(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
+  const messagingEditor=useRef<HTMLDivElement|null>(null);
   const googleHealth=useConnectionHealth(connectionIdentity,'google'),microsoftHealth=useConnectionHealth(connectionIdentity,'microsoft');
   type Check = {value?:ConnectionSummary; last?:ConnectionSummary; busy:boolean};
   const [directory,setDirectory]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog|null;error:boolean;busy:boolean;checks:Partial<Record<ConnectionId,Check>>}|null>(null);
@@ -35,17 +38,17 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   const catalogError=current?.error;
   const checking=!!current&&(current.busy||Object.values(current.checks).some(check=>check.busy));
   const checkingAgain=!!current&&Object.values(current.checks).some(check=>check.last&&(current.busy||check.busy));
-  const summaryIds=([['core',core],['google',google],['microsoft',microsoft],['scheduling',scheduling]] as const).filter(([,editor])=>editor!=null).map(([id])=>id).join(',');
+  const summaryIds=([['core',core],['google',google],['microsoft',microsoft],['scheduling',scheduling],['messaging',messaging]] as const).filter(([,editor])=>editor!=null).map(([id])=>id).join(',');
   useEffect(()=>{
-    if(!open||screen!=='connections'||!connectionIdentity)return;
+    if(!open||!['connections','messaging'].includes(screen)||!connectionIdentity)return;
     const controller=new AbortController();const controllers:AbortController[]=[controller];let active=true;
     const catalogTimer=setTimeout(()=>controller.abort(),15000);
     setDirectory(previous=>({owner:connectionIdentity,catalog:previous?.owner===connectionIdentity?previous.catalog:null,
-      error:false,busy:true,checks:previous?.owner===connectionIdentity?previous.checks:{}}));
+      error:false,busy:true,checks:previous?.owner===connectionIdentity?Object.fromEntries(Object.entries(previous.checks).map(([id,check])=>[id,{last:check.last,busy:false}])):{}}));
     void readConnectionCatalog(connectionIdentity,controller.signal).then(value=>{
       if(!active)return;
       clearTimeout(catalogTimer);
-      const ids=summaryIds.split(',').filter(Boolean) as ConnectionId[];
+      const ids=summaryIds.split(',').filter(id=>!!id&&(screen!=='messaging'||id==='messaging')) as ConnectionId[];
       setDirectory(previous=>({owner:connectionIdentity,catalog:value,error:false,busy:false,
         checks:Object.fromEntries(Object.keys(value).map(key=>{
           const id=key as ConnectionId,last=previous?.owner===connectionIdentity?previous.checks[id]?.last:undefined;
@@ -75,7 +78,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       if(!active)return;
       clearTimeout(catalogTimer);
       const denied=error instanceof WorkspaceApiError&&[401,403].includes(error.status);
-      setDirectory(previous=>({owner:connectionIdentity,catalog:null,error:true,busy:false,checks:!denied&&previous?.owner===connectionIdentity?previous.checks:{}}));
+      setDirectory(previous=>({owner:connectionIdentity,catalog:null,error:true,busy:false,checks:!denied&&previous?.owner===connectionIdentity?Object.fromEntries(Object.entries(previous.checks).map(([id,check])=>[id,{last:check.last,busy:false}])):{}}));
       if(denied)accessLost.current?.(error);
     });
     return()=>{active=false;clearTimeout(catalogTimer);controllers.forEach(item=>item.abort());};
@@ -169,6 +172,10 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
         <p>Connecting an account does not automatically import its contents into a visit or give a bot permission to act.</p>
       </aside>}
     </div>}
+    {screen==='messaging'&&connectionIdentity&&<FaxConnectionOverview value={!catalogError&&catalog?.messaging?current?.checks.messaging?.value?.faxReadiness:undefined}
+      loading={checking} unavailable={!!setupUnavailable} locked={navigationLocked}
+      onRefresh={()=>setRefreshCatalog(value=>value+1)} onSetup={()=>{messagingEditor.current?.focus();messagingEditor.current?.scrollIntoView?.({block:'start'});}}
+      onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/>}
     {setupUnavailable&&selectedGuide&&<section className="connection-setup-guide" aria-label="Connection setup steps">
       <span className="connection-badge connection-badge-attention">Admin setup</span><h2>{titles[screen]}</h2><p>{selectedGuide.setup}</p>
       <h3>Your next step</h3><p>Ask your practice administrator to enable this service. No setup request has been sent from this screen.</p>
@@ -177,6 +184,6 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       <h3>Administrator steps</h3><p>{selectedGuide.setup}</p>
       <details><summary>Your steps after setup</summary><ol>{selectedGuide.steps.filter(step=>!step.startsWith("Have an administrator")).map(step=><li key={step}>{step}</li>)}</ol><p className="connection-access-summary">{selectedGuide.access}</p></details>
     </section>}
-    {visited.map(id => <div key={id} data-settings-screen={id} hidden={screen !== id||!!setupUnavailable}>{editors[id]}</div>)}
+    {visited.map(id => <div key={id} ref={id==='messaging'?messagingEditor:undefined} tabIndex={id==='messaging'?-1:undefined} data-settings-screen={id} hidden={screen !== id||!!setupUnavailable}>{editors[id]}</div>)}
   </section>;
 }

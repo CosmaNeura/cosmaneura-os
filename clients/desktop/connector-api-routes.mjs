@@ -27,6 +27,8 @@ export function connectorApiRoute(target, method) {
   const incoming = (header,input,output) => plan(header,input,output,{seconds:15,strictResponse:true,errorOutput:2048});
   if(path === '/connections/catalog') return method === 'GET' && !query
     ? incoming(CONNECTOR_HEADERS[11],0,4096) : null;
+  if(path === '/vendor-settings/readiness') return method === 'GET' && !query
+    ? plan(CONNECTOR_HEADERS[6],0,4096,{seconds:15}) : null;
   if(vendorPreparation.test(path)) return method==='POST'&&!query ? plan(CONNECTOR_HEADERS[0],33792,16384) : null;
   if(path==='/practice-access/compatibility')
     return method==='GET' && !query ? incoming(CONNECTOR_HEADERS[15],0,4096) : null;

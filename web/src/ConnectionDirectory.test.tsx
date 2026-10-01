@@ -6,10 +6,12 @@ import {readConnectionCatalog} from './connection-catalog-api';
 import {readConnectionSummary,personalConnectionSummary} from './connection-summary';
 import {observeConnectionStatus,observeConnectionRead,connectionReadScope,connectionHealth,invalidateConnectionHealth} from './connection-operation-health';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
+import type {FaxReadiness} from './fax-readiness-api';
 vi.mock('./connection-catalog-api',()=>({readConnectionCatalog:vi.fn()}));
 vi.mock('./connection-summary',async original=>({...await original<typeof import('./connection-summary')>(),readConnectionSummary:vi.fn()}));
 const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null};
 const catalog={core:true,google:false,microsoft:false,scheduling:false,messaging:false,payments:false,portals:false};
+const faxReady:FaxReadiness={contract_version:1,scope:{box_id:'00000000-0000-4000-8000-000000000001',owner_id:'00000000-0000-4000-8000-000000000002'},enabled:true,work_enabled:true,delivery_enabled:true,credential_access_configured:true,document_storage_configured:true,providers:['spruce','srfax','documo','efax'].map(id=>({id:id as FaxReadiness['providers'][number]['id'],installed_accounts:1,active_accounts:1,review_required_accounts:0,unavailable_accounts:0,prepare_enabled_accounts:1}))};
 let host:HTMLDivElement,root:Root;
 beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.resetAllMocks();vi.mocked(readConnectionSummary).mockResolvedValue({label:'Not connected',reason:'Sign in to connect your account.',action:'Connect account',tone:'attention'});host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();});
@@ -119,4 +121,34 @@ it('drops a cached account label and proof when a background check changes or re
   await act(async()=>observeConnectionStatus(identity,'google',{state:'sign_in_required',account:null,connected_at:null}));
   const row=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
   expect(row.textContent).toContain('Not connected');expect(row.textContent).not.toContain('Account connected');expect(row.textContent).toContain('Connect account');
+});
+it('connects fax setup to work and withdraws stale readiness when rechecking fails',async()=>{
+  const work=vi.fn();vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,messaging:true});
+  vi.mocked(readConnectionSummary).mockResolvedValue({label:'Ready to prepare',reason:'One account configured.',action:'Review accounts',tone:'neutral',faxReadiness:faxReady});
+  await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} messaging={<p>Account editor</p>} teamSummary="Five bots" teamDirty={false} onClose={()=>{}} connectionIdentity={identity} onOpenMessagingWork={work}/>));
+  expect(vi.mocked(readConnectionSummary).mock.calls.every(call=>call[1]==='messaging')).toBe(true);
+  await click('Messaging & fax');await click('Open fax work');expect(work).toHaveBeenCalledOnce();
+  vi.mocked(readConnectionCatalog).mockRejectedValue(new Error('offline'));await click('Check fax setup');
+  const overview=host.querySelector('[aria-label="Fax providers and next steps"]')!;
+  expect(overview.textContent).toContain('could not be confirmed');
+  const action=[...overview.querySelectorAll('button')].find(item=>item.textContent==='Open fax work')!;
+  expect(action.disabled).toBe(true);await act(async()=>action.click());expect(work).toHaveBeenCalledOnce();
+});
+it('clears abandoned loading flags when entering fax setup interrupts another account check',async()=>{
+  let pendingSignal!:AbortSignal,finish!:(value:Awaited<ReturnType<typeof readConnectionSummary>>)=>void;
+  vi.mocked(readConnectionCatalog).mockResolvedValueOnce({...catalog,core:true,messaging:true}).mockRejectedValueOnce(new Error('offline'));
+  vi.mocked(readConnectionSummary).mockImplementation(async(_owner,id,signal)=>{
+    if(id==='core'){pendingSignal=signal;return new Promise(resolve=>{finish=resolve;});}
+    return {label:'Ready to prepare',reason:'Configured account.',action:'Review accounts',tone:'neutral',faxReadiness:faxReady};
+  });
+  await mount(<p>Google</p>);await click('Messaging & fax');
+  expect(pendingSignal.aborted).toBe(true);
+  const overview=host.querySelector('[aria-label="Fax providers and next steps"]')!;
+  expect(overview.textContent).toContain('could not be confirmed');expect(overview.textContent).not.toContain('Checking fax setup');
+  const retry=[...overview.querySelectorAll('button')].find(item=>item.textContent==='Check fax setup')!;
+  expect(retry.disabled).toBe(false);
+  await act(async()=>finish({label:'Connected',reason:'Stale account response',action:'View',tone:'ready'}));
+  expect(host.textContent).not.toContain('Stale account response');
+  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:true,messaging:true});
+  await act(async()=>retry.click());expect(overview.textContent).toContain('available for preparing a fax draft');
 });

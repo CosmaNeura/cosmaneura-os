@@ -17,7 +17,7 @@ document is limited to 256 KiB and duplicate/unknown keys are rejected. The
 manifest's Box must match `BETA_BOX_ID`. See `managed-services-config.example.json`
 for invented structure; its zero credential hashes are intentional placeholders.
 
-The manifest supplies delivery accounts (Spruce, SRFax, Documo), Stripe sandbox
+The manifest supplies delivery accounts (Spruce, SRFax, Documo, eFax Corporate), Stripe sandbox
 accounts, optional exact account-version callback routes and optional private
 document storage. Production Stripe remains unavailable in the existing catalog.
 Portal contracts are configured separately. These are the existing installed
@@ -63,7 +63,7 @@ Explicit host composition remains supported when no manifest settings are
 supplied. Supplying both forms is rejected instead of merging account authority.
 
 The ordinary API lifespan accepts an explicit host profile for existing managed
-Spruce, SRFax, Documo and Stripe application flows. Install it once, before the
+Spruce, SRFax, Documo, eFax Corporate and Stripe application flows. Install it once, before the
 first startup, using `configure_managed_services(app, ManagedServiceProfile(...))`.
 The profile supplies delivery/finance installation catalogs, an optional private
 artifact store and an asynchronous credential provider. Omitting credentials
@@ -99,3 +99,41 @@ outcomes and private late observations remain available to existing recovery.
 This profile does not register webhook routes or portal transports. Those require
 their own explicit service configuration and current authority. Account review,
 local activation and action submission remain separate user decisions.
+
+## eFax Corporate outbound adapter
+
+eFax requires a Corporate or Enterprise account with access to its Fax Services
+API; an ordinary eFax subscription does not establish API access. Configure an
+installation with vendor `efax`, environment `production`, capability `efax_fax`,
+the provider's API `user-id` as `remote_account_id`, and a reviewed North American
+`caller_id` consisting of ten digits. The transport uses only
+`https://api.securedocex.com`; it does not accept a renderer-supplied origin or an
+unverified sandbox endpoint. These installation values contain no credential.
+
+The credential provider must supply a **current bearer token**, bound to that
+exact account selection. An eFax API key is not a bearer token. The official
+documentation describes 24-hour tokens and says requesting a new token expires
+the previous one. CosmaBot therefore does not mint or rotate a shared token per
+fax. The host must coordinate token renewal and update its protected credential
+binding through the existing managed-secret process. Automatic token lifecycle
+and self-service account provisioning are not part of this adapter.
+
+The adapter submits one reviewed PDF to one reviewed destination through the
+existing account, recipient, document and action approval workflow. It records a
+successful submission as **accepted**, then checks the returned fax identifier's
+metadata for delivery. Image storage is not delivery proof. A completed
+transmission requires the matching outbound fax and destination, a positive page
+count, a completion timestamp and no reported transmission error. An uncertain
+submission is not automatically sent again; its durable submission claim remains
+in place. Both documented legacy retry counts are set to zero in the request.
+
+This implementation covers outbound submission and delivery status. It does not
+receive faxes, register callbacks, cancel or delete transmissions, or create
+provider accounts. Local tests use invented documents and mocked API responses;
+they do not establish live credential validity or successful provider delivery.
+Before enabling a real account, qualify token renewal, caller ID, recipient
+format and a reviewed test transmission with that account. Nothing in this
+configuration activates vendor I/O or deploys a release.
+
+The official protocol references and interpretation are recorded in
+[`validation/efax-api-reference.json`](validation/efax-api-reference.json).

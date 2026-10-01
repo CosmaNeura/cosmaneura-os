@@ -5,7 +5,7 @@ import {permittedAuthenticatedApiPath,proxyAuthenticatedWorkspaceRequest as prox
 
 const id='00000000-0000-4000-8000-000000000001',header='X-Cosmas-Vendor-Setup-Contract';
 const commands=['propose_account','propose_recipient','activate','disable','revoke','resolve'];
-const routes=[['/vendor-settings','GET',0,131072],[`/vendor-settings/${id}`,'GET',0,32768],[`/vendor-settings/${id}/history`,'GET',0,1048576],...commands.map(kind=>['/vendor-settings/'+kind,'POST',8192,8192])];
+const routes=[['/vendor-settings','GET',0,131072],['/vendor-settings/readiness','GET',0,4096],[`/vendor-settings/${id}`,'GET',0,32768],[`/vendor-settings/${id}/history`,'GET',0,1048576],...commands.map(kind=>['/vendor-settings/'+kind,'POST',8192,8192])];
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 function auth(){let state={phase:'ready',revision:id,identity:{userId:'invented',sessionId:'invented',organizationId:'invented'}};const listeners=new Set();let tokens=0,states=0;return {getState:async()=>{states++;return state;},snapshot:()=>state,getToken:async()=>{tokens++;return 'invented.local.token';},counts:()=>({tokens,states}),subscribe:fn=>{listeners.add(fn);return()=>listeners.delete(fn);},revoke(){state={phase:'signedOut',revision:id,identity:null};for(const fn of listeners)fn(state);}};}
 const request=(path,method='GET',extra={},body)=>new Request('app://cosmas/api'+path,{method,headers:{'Content-Type':'application/json','X-Cosmas-Desktop-Session':id,[header]:'1',...extra},...(body===undefined?{}:{body,duplex:'half'})});
@@ -18,6 +18,7 @@ test('vendor settings routes match the exact backend methods, family, byte caps 
 });
 
 test('rejects unsupported settings methods, identifiers, queries, suffixes and external destinations',()=>{
+  for(const path of ['/vendor-settings/readiness?','/vendor-settings/readiness?owner='+id,'/vendor-settings/readiness/','/vendor-settings/readiness/send','/vendor-settings/%72eadiness'])assert.equal(connectorApiRoute(path,'GET'),null,path);
   for(const [path,allowed] of routes)for(const method of ['GET','POST','PUT','DELETE','PATCH','HEAD','OPTIONS','get'])if(method!==allowed)assert.equal(connectorApiRoute(path,method),null,method+' '+path);
   for(const path of ['/vendor-settings/','/vendor-settings/propose','/vendor-settings/options','/vendor-settings/propose_customer','/vendor-settings/send','/vendor-settings/submit','/vendor-settings/credentials','/vendor-settings/charge','/vendor-settings/'+id+'/activate','/vendor-settings/'+id+'/history/extra','/vendor-settings/not-a-uuid','/vendor-settings/'+id.toUpperCase().replace('000000000001','ABCDEF000001'),'/vendor-settings?cursor=x','/vendor-settings?owner='+id,'/vendor-settings?endpoint=https%3A%2F%2Foutside.invalid','/vendor-settings?','/vendor-settings/activate?x=1','/vendor-settings/activate?x=1&x=2','/vendor-settings/%61ctivate','/vendor-settings//activate','https://outside.invalid/vendor-settings'])for(const method of ['GET','POST'])assert.equal(connectorApiRoute(path,method),null,path);
   for(const url of ['https://outside.invalid/vendor-settings','app://outside/api/vendor-settings','app://name:secret@cosmas/api/vendor-settings','app://cosmas:8000/api/vendor-settings','app://cosmas/api/vendor-settings#fragment'])assert.equal(permittedAuthenticatedApiPath(url,'GET'),null,url);

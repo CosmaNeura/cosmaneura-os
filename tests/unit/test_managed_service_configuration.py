@@ -50,7 +50,7 @@ def document(settings, vendor="documo", *, credential=True):
         item.update(
             sender_label="Invented sender",
             capabilities=[
-                {"spruce": "spruce_secure_message", "srfax": "srfax_fax", "documo": "documo_fax"}[
+                {"spruce": "spruce_secure_message", "srfax": "srfax_fax", "documo": "documo_fax", "efax": "efax_fax"}[
                     vendor
                 ]
             ],
@@ -85,7 +85,7 @@ def active(profile, vendor):
     )
 
 
-@pytest.mark.parametrize("vendor", ["spruce", "srfax", "documo", "stripe"])
+@pytest.mark.parametrize("vendor", ["spruce", "srfax", "documo", "efax", "stripe"])
 def test_deployment_catalog_and_fresh_exact_secret(tmp_path, configuration, monkeypatch, vendor):
     install(tmp_path, configuration, document(configuration, vendor))
     profile = configured.load_managed_profile(configuration)

@@ -47,6 +47,7 @@ def delivery_schema(action: str) -> dict[str, Any]:
         "spruce_secure_message": ({"correspondence", "message"}, {"uploaded_media_operation_id"}),
         "srfax_fax": ({"correspondence", "document"}, set()),
         "documo_fax": ({"correspondence", "document"}, set()),
+        "efax_fax": ({"correspondence", "document"}, set()),
     }[action]
     schema["required"].extend(sorted(required))
     for field in {"correspondence", "document", "message", "uploaded_media_operation_id"} - required - optional:
@@ -128,10 +129,11 @@ def definitions() -> tuple[Operation, ...]:
         ),
     ))
     for provider, action in (("spruce", "spruce_secure_message"),
-                             ("srfax", "srfax_fax"), ("documo", "documo_fax")):
+                             ("srfax", "srfax_fax"), ("documo", "documo_fax"), ("efax", "efax_fax")):
         operations.append(Operation(
             id=f"{provider}.prepare_delivery", plugin=provider,
-            title=f"Prepare {'a secure message' if provider == 'spruce' else 'a fax'} with {provider.title()}",
+            title=f"Prepare {'a secure message' if provider == 'spruce' else 'a fax'} with "
+                  f"{ {'srfax': 'SRFax', 'efax': 'eFax Corporate'}.get(provider, provider.title())}",
             description="Create a private reviewed-source proposal. Human approval and publication are separate.",
             path="/workspaces/{workspace_id}/vendor-work", header="X-Cosmas-Vendor-Contract",
             request=delivery_schema(action),
@@ -202,7 +204,7 @@ def plugin_catalog(settings, runtime) -> dict[str, Any]:
         "scribe": bool(getattr(settings, "workspace_capture_available", False)),
         "research": bool(getattr(settings, "workspace_research_available", False)),
     }
-    for vendor in ("spruce", "srfax", "documo"):
+    for vendor in ("spruce", "srfax", "documo", "efax"):
         enabled[vendor] = bool(getattr(settings, "vendor_work_enabled", False))
     return {
         "tools": [tool(operation, enabled[operation.plugin]) for operation in definitions()],
