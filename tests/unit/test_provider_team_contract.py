@@ -1,6 +1,6 @@
 import json
 from copy import deepcopy
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import httpx
 import pytest
@@ -10,7 +10,12 @@ from tests.helpers.task_brief import REQUIREMENTS
 from cosmas_os.adapters.gpt41 import ENDPOINT, GPT41Connector
 from cosmas_os.adapters.workspace_review import WorkspaceReviewConnector
 from cosmas_os.api.team_schemas import ConversationRequest, TeamConfiguration
-from cosmas_os.application.provider_team import configuration_value, default_configuration
+from cosmas_os.application import team_setup
+from cosmas_os.application.provider_team import (
+    configuration_value,
+    default_configuration,
+    starter_configuration,
+)
 from cosmas_os.config import Settings
 from cosmas_os.ports.bot_capabilities import (
     ROLE_TEMPLATES,
@@ -92,6 +97,34 @@ def test_default_fields_preserve_legacy_team_retry_digest():
     expanded = TeamConfiguration.model_validate(legacy).model_dump(mode="json")
     assert expanded != legacy
     assert configuration_value(expanded) == legacy
+
+
+def test_starter_research_identity_is_stable_and_scoped_without_changing_legacy_defaults():
+    box, owner = str(uuid4()), str(uuid4())
+    starter = starter_configuration(box, owner)
+    assert starter == starter_configuration(box, owner)
+    assert starter["bots"][:4] == default_configuration()["bots"]
+    assert len(default_configuration()["bots"]) == 4
+    research = starter["bots"][4]
+    assert research["role"] == "research" and research["enabled"] is True
+    assert UUID(research["instance_id"]).version == 4
+    other_owner = starter_configuration(box, str(uuid4()))["bots"][4]
+    other_box = starter_configuration(str(uuid4()), owner)["bots"][4]
+    assert len({research["instance_id"], other_owner["instance_id"], other_box["instance_id"]}) == 3
+    research["enabled"] = False
+    assert starter_configuration(box, owner)["bots"][4]["enabled"] is True
+
+
+def test_starter_needs_no_extended_setup_review_or_external_resource_grants():
+    starter = starter_configuration(str(uuid4()), str(uuid4()))
+    assert team_setup.review_required(None, starter) is False
+    team_setup.require_compatible(0, None, starter)
+    assert len(TeamConfiguration.model_validate(starter).bots) == 5
+    assert all(bot["enabled"] and bot["include_notebook"] and bot["include_evidence"]
+               for bot in starter["bots"])
+    assert all("resources" not in bot and not bot.get("skills")
+               and not bot.get("blocked_capabilities") for bot in starter["bots"])
+    assert not starter.get("presets") and "model_work" not in starter
 
 
 @pytest.mark.parametrize("fault", ["enabled", "baseline", "coerced", "history_limit"])
