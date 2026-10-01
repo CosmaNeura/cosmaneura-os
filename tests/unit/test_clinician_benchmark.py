@@ -74,6 +74,24 @@ def test_saved_drafts_alone_do_not_pass_the_observed_clinician_regressions():
         assert checks[key] is False
 
 
+@pytest.mark.parametrize("text,expected", [
+    ("No external actions or requests have been completed.", False),
+    ("No requests were completed.", False),
+    ("No requests are documented as completed.", True),
+    ("No external actions or requests are confirmed as completed.", True),
+    ("No tasks are documented to have been completed.", True),
+    ("Completion of planned requests is not documented.", True),
+])
+@pytest.mark.parametrize("location", ["receipt", "source_draft"])
+def test_benchmark_independently_checks_saved_draft_negative_completion_claims(text, expected, location):
+    from lab.clinician_benchmark import quality_checks
+
+    result = {"handoff_receipts": [{"recipient_role": "follow_up", "draft_text": text if location == "receipt" else "Draft saved."}],
+              "artifacts": [{"role": "follow_up", "body": "Draft saved.", "structured_draft": {
+                  "body": text if location == "source_draft" else "Draft saved.", "human_tasks": []}}]}
+    assert quality_checks(result, "Prepare drafts.")["no_unsupported_negative_completion_claim"] is expected
+
+
 @pytest.mark.parametrize("explicit_conflict_word", [False, True])
 def test_clinician_case_check_preserves_both_contact_preferences_before_publication(explicit_conflict_word):
     from types import SimpleNamespace

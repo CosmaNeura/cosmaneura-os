@@ -106,6 +106,9 @@ def test_new_journey_loop_rejects_unread_input_and_unavailable_actions(tmp_path,
     "Assignment hash: 6f45732a-94a2-416e-b93b-3356aeb29cf2.",
     "Source hash: " + "a" * 64,
     "Neither action has been completed.",
+    "No external actions or requests have been completed.",
+    "No requests were completed.",
+    "No staff task has been completed.",
     "Medication list and cardiology records have not been requested or obtained.",
     "Cardiology records not requested.",
     "Do not mark these requests as completed until explicit permission is documented.",
@@ -114,6 +117,16 @@ def test_draft_review_regressions_reject_internal_ids_and_unsupported_certainty(
     with pytest.raises(LabError):
         readable_draft(text)
     readable_draft("Staff actions remain planned; completion is not documented. Contact preference conflicts.")
+
+
+@pytest.mark.parametrize("text", [
+    "No external actions or requests are confirmed as completed.",
+    "No requests are documented as completed.",
+    "No tasks are documented to have been completed.",
+    "Completion of the planned requests is not documented.",
+])
+def test_documentation_and_confirmation_gaps_do_not_assert_noncompletion(text):
+    readable_draft(text)
 
 
 def test_shared_worker_cannot_expose_another_episode_claim_to_the_model(tmp_path):

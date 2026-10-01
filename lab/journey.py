@@ -172,6 +172,8 @@ def readable_draft(text):
         raise LabError("remove_internal_ids_from_body_use_structured_fields")
     if re.search(r"neither action (?:has been|is) completed|none of these tasks have been initiated or completed"
                  r"|actions? (?:are|have) (?:not|never) (?:been )?completed"
+                 r"|\bno\s+(?:(?!(?:documented|confirmed|reported|known)\b)[\w-]+\s+){1,16}"
+                 r"(?:(?:have|has)\s+been|were|was|are|is)\s+completed\b"
                  r"|records? (?:have |has |were |was |are |is )?(?:not |never )(?:been )?requested", text, re.I):
         raise LabError("Use the exact wording 'completion is not documented' for planned staff actions. "
                        "Remove claims that they definitely have not happened.")

@@ -75,6 +75,9 @@ def quality_checks(result, request):
     follow = next((row for row in result.get("artifacts", []) if row["role"] == "follow_up"), {})
     text = follow.get("body", "")
     tasks = follow.get("structured_draft", {}).get("human_tasks", [])
+    draft_texts = [row.get("draft_text", "") for row in result.get("handoff_receipts", [])]
+    draft_texts.extend(row.get("structured_draft", {}).get("body", row.get("body", ""))
+                      for row in result.get("artifacts", []) if row.get("role") != "chief_plan")
     return {
         "requested_visit_prep_honored": not re.search(r"\bvisit prep\b", request, re.I) or "visit_prep" in roles,
         "research_and_follow_up_saved": {"research", "follow_up"} <= roles,
@@ -83,6 +86,9 @@ def quality_checks(result, request):
         "contact_permission_retained": bool(re.search(r"consent|permission", text, re.I)),
         "contact_time_conflict_retained": bool(re.search(r"morning", text, re.I))
             and bool(re.search(r"15:00|afternoon|after.?3|after three", text, re.I)),
+        "no_unsupported_negative_completion_claim": not any(re.search(
+            r"\bno\s+[^.!?\n]{0,100}\b(?:actions?|requests?|tasks?)\s+"
+            r"(?:(?:have|has)\s+been|were|was)\s+completed\b", draft_text, re.I) for draft_text in draft_texts),
         "human_role_and_review_for_each_suggested_task": bool(tasks) and all(
             task.get("proposed_human_role") in {"RN", "provider", "PA", "practice staff"}
             and task.get("review_needed") is True for task in tasks),
