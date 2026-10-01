@@ -19,7 +19,7 @@ from cosmas_os.api.vendor_work_schemas import (
     public_digest,
 )
 
-Vendor = Literal["spruce", "srfax", "documo"]
+Vendor = Literal["spruce", "srfax", "documo", "efax"]
 Kind = Literal["account", "recipient"]
 CommandKind = Literal["propose_account", "propose_recipient", "activate", "disable", "revoke"]
 State = Literal["pending_review", "active", "disabled", "revoked"]
@@ -33,6 +33,7 @@ ACTIONS = {
     "spruce": {"spruce_secure_message", "spruce_fax", "spruce_media_upload"},
     "srfax": {"srfax_fax"},
     "documo": {"documo_fax"},
+    "efax": {"efax_fax"},
 }
 
 

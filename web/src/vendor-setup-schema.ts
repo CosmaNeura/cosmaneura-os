@@ -1,6 +1,6 @@
 // Generated from the existing public Python contract. Do not hand-edit shapes.
 // Relational checks and exact commitments are in vendor-setup-contract.ts.
-// Source SHA-256: ce177200da8eb06c937d825d866eef2f4dc9c9f5ba64e37c3a56d7ae5bc90f8c
+// Source SHA-256: 9388fa0eca4d51db98b0767d828d68381441928731eb29f86f5e6c4aea400daa
 export const VENDOR_SETUP_SCHEMAS = {
   "AccountProposal": {
     "additionalProperties": false,
@@ -734,7 +734,8 @@ export const VENDOR_SETUP_SCHEMAS = {
         "enum": [
           "spruce",
           "srfax",
-          "documo"
+          "documo",
+          "efax"
         ],
         "title": "Vendor",
         "type": "string"
@@ -769,7 +770,8 @@ export const VENDOR_SETUP_SCHEMAS = {
             "spruce_fax",
             "spruce_media_upload",
             "srfax_fax",
-            "documo_fax"
+            "documo_fax",
+            "efax_fax"
           ],
           "type": "string"
         },
@@ -890,7 +892,8 @@ export const VENDOR_SETUP_SCHEMAS = {
             "spruce_fax",
             "spruce_media_upload",
             "srfax_fax",
-            "documo_fax"
+            "documo_fax",
+            "efax_fax"
           ],
           "type": "string"
         },
@@ -1496,10 +1499,10 @@ export type Effect = { "setup_id": string; "kind": "account" | "recipient"; "ver
 export type FaxRecipient = { "channel": "fax"; "number": string };
 export type History = { "contract_version": 1; "scope": Scope; "setup_id": string; "items": Array<HistoryItem>; "reviews": Array<AccountReview | RecipientReview> };
 export type HistoryItem = { "request": AccountProposal | RecipientProposal | Activation | Disable | Revoke; "receipt": Receipt };
-export type InstalledAccount = { "installation_id": string; "installation_sha256": string; "label": string; "vendor": "spruce" | "srfax" | "documo"; "environment": "sandbox" | "production"; "account_reference": string; "sender_label": string; "capabilities": Array<"spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax"> };
+export type InstalledAccount = { "installation_id": string; "installation_sha256": string; "label": string; "vendor": "spruce" | "srfax" | "documo" | "efax"; "environment": "sandbox" | "production"; "account_reference": string; "sender_label": string; "capabilities": Array<"spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"> };
 export type NotFound = { "contract_version": 1; "outcome": "not_found"; "scope": Scope; "command_kind": "propose_account" | "propose_recipient" | "activate" | "disable" | "revoke"; "idempotency_key": string; "request_sha256": string };
 export type Patient = { "patient_link_id": string; "label": string };
-export type Permissions = { "read_status": boolean; "prepare_and_submit": boolean; "actions": Array<"spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax"> };
+export type Permissions = { "read_status": boolean; "prepare_and_submit": boolean; "actions": Array<"spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"> };
 export type Receipt = { "contract_version": 1; "outcome": "recorded"; "scope": Scope; "command_kind": "propose_account" | "propose_recipient" | "activate" | "disable" | "revoke"; "idempotency_key": string; "request_sha256": string; "receipt_id": string; "recorded_at": string; "effect": Effect; "receipt_sha256": string };
 export type RecipientProposal = { "setup_id": string; "expected_version": number; "idempotency_key": string; "account": Binding; "patient_link_id": string; "destination": SecureRecipient | FaxRecipient; "label": string; "permission_reference": string; "expires_at": string };
 export type RecipientReview = { "kind": "recipient"; "setup_id": string; "revision_id": string; "revision": number; "installed": InstalledAccount; "label": string; "account": Binding; "account_label": string; "connection_version_id": string; "correspondence_version_id": string; "patient": Patient; "destination": SecureRecipient | FaxRecipient; "permission_reference": string; "expires_at": string };

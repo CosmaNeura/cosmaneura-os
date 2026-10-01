@@ -7,6 +7,7 @@ import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal, overload
 from urllib.parse import parse_qsl, quote, urlencode
 
 import httpx
@@ -34,6 +35,7 @@ ORIGINS = {
     ("srfax", "production"): "https://secure.srfax.com",
     ("documo", "production"): "https://api.documo.com",
     ("documo", "sandbox"): "https://api.sandbox.documo.com",
+    ("efax", "production"): "https://api.securedocex.com",
     ("stripe", "production"): "https://api.stripe.com",
     ("stripe", "sandbox"): "https://api.stripe.com",
 }
@@ -57,7 +59,7 @@ class WireRequest:
 @dataclass(frozen=True, repr=False)
 class WireResponse:
     status: int
-    data: dict
+    data: dict | list
     sha256: str
     observed_at: datetime
 
@@ -94,7 +96,15 @@ def multipart(operation_id, document: bytes, field: str, values=()) -> tuple[byt
     return body, "multipart/form-data; boundary=" + boundary
 
 
-def parse_json(raw: bytes) -> dict:
+@overload
+def parse_json(raw: bytes, *, allow_array: Literal[False] = False) -> dict: ...
+
+
+@overload
+def parse_json(raw: bytes, *, allow_array: bool) -> dict | list: ...
+
+
+def parse_json(raw: bytes, *, allow_array: bool = False) -> dict | list:
     def unique(pairs):
         result = {}
         for key, value in pairs:
@@ -110,7 +120,7 @@ def parse_json(raw: bytes) -> dict:
         if type(raw) is not bytes or len(raw) > MAX_RESPONSE_BYTES:
             raise ValueError
         result = json.loads(raw.decode("utf-8"), object_pairs_hook=unique, parse_constant=invalid_constant)
-        if type(result) is not dict:
+        if type(result) is not dict and not (allow_array and type(result) is list):
             raise ValueError
         return result
     except (ValueError, UnicodeError, TypeError, RecursionError):
@@ -208,6 +218,8 @@ class VendorRuntime:
             ("srfax", False): ("POST", r"/SRF_SecWebSvc\.php"),
             ("documo", True): ("POST", r"/v1/faxes"),
             ("documo", False): ("GET", r"/v1/fax/[0-9a-f-]{36}/info"),
+            ("efax", True): ("POST", r"/faxes"),
+            ("efax", False): ("GET", r"/faxes/[0-9a-f-]{36}/metadata"),
             ("stripe", True): ("POST", r"/v1/payment_intents"),
             ("stripe", False): ("GET", r"/v1/payment_intents/pi_[A-Za-z0-9]+"),
         }
@@ -227,12 +239,13 @@ class VendorRuntime:
     def _adapter(self):
         # Closed dispatch, never a caller-provided encoder or receipt parser.
         from .documo import DocumoConnector
+        from .efax import EFaxConnector
         from .spruce import SpruceConnector
         from .srfax import SRFaxConnector
         from .stripe import StripeConnector
 
         adapter = {"spruce": SpruceConnector, "srfax": SRFaxConnector,
-            "documo": DocumoConnector, "stripe": StripeConnector}.get(self.selection.vendor)
+            "documo": DocumoConnector, "efax": EFaxConnector, "stripe": StripeConnector}.get(self.selection.vendor)
         if adapter is None:
             raise VendorError("capability_unavailable")
         return adapter(self)
@@ -270,6 +283,8 @@ class VendorRuntime:
             expected_headers = {"s-idempotency-key": str(command.operation_id)}
         elif self.selection.vendor == "stripe":
             expected_headers = {"Stripe-Version": STRIPE_VERSION, **({"Idempotency-Key": str(command.operation_id)} if mutating else {})}
+        elif self.selection.vendor == "efax":
+            expected_headers = {"user-id": self.selection.remote_account_id}
         if dict(wire.headers) != expected_headers or len(wire.headers) != len(expected_headers):
             raise VendorError("request_invalid")
         if self.selection.vendor == "srfax":
@@ -339,7 +354,7 @@ class VendorRuntime:
                                 if len(raw) > MAX_RESPONSE_BYTES:
                                     raise VendorError("response_too_large", attempted=True)
                         payload = bytes(raw)
-                        data = parse_json(payload)
+                        data = parse_json(payload, allow_array=vendor == "efax" and mutating and response.status_code == 201)
                         completed = WireResponse(response.status_code, data, hashlib.sha256(payload).hexdigest(), self.now())
                 return completed
         except VendorError as error:

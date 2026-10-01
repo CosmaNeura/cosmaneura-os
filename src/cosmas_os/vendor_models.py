@@ -64,7 +64,7 @@ class VendorConnectionVersion(OwnerScope, Base):
         ),
         CheckConstraint("revision > 0 AND reviewed_by = owner_id"),
         CheckConstraint(
-            "vendor IN ('spruce','srfax','documo') AND (environment = 'production' OR (vendor = 'documo' AND environment = 'sandbox'))"
+            "vendor IN ('spruce','srfax','documo','efax') AND (environment = 'production' OR (vendor = 'documo' AND environment = 'sandbox'))"
         ),
         digest_check("private_sha256", "public_sha256"),
         json_check("private_selection", 32768),
@@ -364,10 +364,10 @@ class VendorWorkRevision(NoteScope, Base):
         ),
         CheckConstraint("revision_number BETWEEN 1 AND 20 AND source_workspace_revision >= 1"),
         CheckConstraint(
-            "action IN ('spruce_secure_message','spruce_fax','spruce_media_upload','srfax_fax','documo_fax')"
+            "action IN ('spruce_secure_message','spruce_fax','spruce_media_upload','srfax_fax','documo_fax','efax_fax')"
         ),
         CheckConstraint(
-            "(action = 'spruce_media_upload' AND artifact_id IS NOT NULL AND correspondence_version_id IS NULL AND uploaded_media_operation_id IS NULL) OR (action IN ('srfax_fax','documo_fax') AND artifact_id IS NOT NULL AND correspondence_version_id IS NOT NULL AND uploaded_media_operation_id IS NULL) OR (action = 'spruce_secure_message' AND artifact_id IS NULL AND correspondence_version_id IS NOT NULL) OR (action = 'spruce_fax' AND artifact_id IS NULL AND correspondence_version_id IS NOT NULL AND uploaded_media_operation_id IS NOT NULL)"
+            "(action = 'spruce_media_upload' AND artifact_id IS NOT NULL AND correspondence_version_id IS NULL AND uploaded_media_operation_id IS NULL) OR (action IN ('srfax_fax','documo_fax','efax_fax') AND artifact_id IS NOT NULL AND correspondence_version_id IS NOT NULL AND uploaded_media_operation_id IS NULL) OR (action = 'spruce_secure_message' AND artifact_id IS NULL AND correspondence_version_id IS NOT NULL) OR (action = 'spruce_fax' AND artifact_id IS NULL AND correspondence_version_id IS NOT NULL AND uploaded_media_operation_id IS NOT NULL)"
         ),
         digest_check(
             "payload_hash",

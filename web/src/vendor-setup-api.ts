@@ -33,6 +33,12 @@ async function exchange<T>(identity:WorkspaceIdentity,maximum:number,prepare:()=
 }
 const id=(value:string)=>{if(!vendorUuid(value))throw new VendorSetupContractError();return value;};
 const scope=(identity:WorkspaceIdentity,value:VendorSetupScope,expected?:VendorSetupScope)=>{validateVendorSetup('Scope',value);if(expected&&vendorCanonical(value)!==vendorCanonical(expected)||!('mode'in identity)&&(value.box_id!==identity.boxId||value.owner_id!==identity.actorId))throw new VendorSetupContractError();};
+export async function readVendorSetupReadiness<T extends {scope:VendorSetupScope}>(identity:WorkspaceIdentity,verify:(value:unknown)=>T,signal:AbortSignal):Promise<T>{
+  const current=()=>{if('mode'in identity&&identity.mode!=='desktop_native'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);};
+  current();
+  const result=await exchange(identity,4096,async()=>({path:'/vendor-settings/readiness',method:'GET'}),async value=>{current();const parsed=verify(value);scope(identity,parsed.scope);return parsed;},signal);
+  current();return result;
+}
 export const vendorSetupApi={
   catalog:(identity:WorkspaceIdentity,signal?:AbortSignal)=>exchange(identity,131072,async()=>({path:'/vendor-settings',method:'GET'}),async value=>{const c=await verifyVendorSetupView('Catalog',value);scope(identity,c.scope);return c;},signal),
   detail:(identity:WorkspaceIdentity,expected:VendorSetupScope,setupId:string,signal?:AbortSignal)=>exchange(identity,32768,async()=>{scope(identity,expected);return {path:'/vendor-settings/'+id(setupId),method:'GET'};},async value=>{const d=await verifyVendorSetupView('Detail',value);scope(identity,d.scope,expected);if(d.summary.setup_id!==setupId)throw new VendorSetupContractError();return d;},signal),

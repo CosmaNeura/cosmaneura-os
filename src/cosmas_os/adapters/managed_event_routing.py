@@ -49,6 +49,8 @@ class ManagedEventRoutes:
         for route in profile.vendor:
             if type(route) is not EventRoute:
                 raise ValueError('Exact delivery event route required')
+            if route.vendor not in {'spruce', 'srfax', 'documo'}:
+                raise ValueError('Unsupported delivery event provider')
             selected, installed = installed_selection(route.expected_selection, vendor)
             rid = route_id(route.route_id)
             if (route.vendor != selected.vendor or route.connection_version_id != str(selected.connection_id)

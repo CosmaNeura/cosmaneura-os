@@ -1,0 +1,35 @@
+{
+  "reviewed_on": "2026-10-01",
+  "provider": "eFax Corporate / Enterprise Fax Services API",
+  "method": "Read the official vendor site and the linked public API reference through the browser. No API requests, sign-ins, contact forms or account creation were submitted.",
+  "sources": {
+    "official_product": "https://www.efax.com/integrations/fax-api",
+    "official_documentation": "https://docs.efaxcorporate.com/API/content/index.htm",
+    "api_root": "https://consensus.stoplight.io/docs/fax-services/5983f2c75d8e6-e-fax-corporate-fax-services-api",
+    "authentication": "https://consensus.stoplight.io/docs/fax-services/c8579c16c2851-generate-a-new-o-auth2-bearer-token",
+    "send": "https://consensus.stoplight.io/docs/fax-services/7931576e60a00-send-a-fax",
+    "status": "https://consensus.stoplight.io/docs/fax-services/29f303372fff1-retrieve-a-fax-s-metadata"
+  },
+  "origin": "https://api.securedocex.com",
+  "authentication": {
+    "token_request": "POST /tokens, Basic authentication using app_id:API Key; application/x-www-form-urlencoded;charset=UTF-8; grant_type=client_credentials",
+    "response": "200 with access_token, token_type bearer, expires_in (examples show number and string 86399), scope and jti",
+    "lifetime": "Documentation states tokens expire after 24 hours and generating a new token immediately expires the current key.",
+    "adapter_boundary": "Use an existing host-managed current bearer credential bound to the exact configured account. Do not mint a token for each fax or automatically rotate a shared application token. API-key-only setup is insufficient. Self-service token lifecycle is not established by the outbound adapter."
+  },
+  "send": {
+    "request": "POST /faxes with Bearer Authorization, application/json, required user-id, optional transaction-id",
+    "body": "destinations:[{fax_number}], documents:[{document_type:PDF,document_content:base64}], optional fax_options and client_data",
+    "acceptance": "201 array containing fax_id UUID and destination_fax_number per destination; accepted request is not successful transmission",
+    "number_evidence": "Documentation recommends country-code format. The North American response example omits the leading 1; only exact validated +1 normalization is appropriate.",
+    "retry_boundary": "transaction-id is documented as request tracking, not an idempotency key. No automatic replay of an unconfirmed send."
+  },
+  "status": {
+    "request": "GET /faxes/{fax_id}/metadata with Bearer Authorization and the same required user-id",
+    "response": "200 object containing fax_id, direction, originating_fax_number, destination_fax_number, pages, completed_timestamp, fax_status, transmission_data and optional client_tracking_data",
+    "transmission_states": ["NEW", "INPROGRESS", "COMPLETE", "ERROR", "CANCELED"],
+    "storage_states_not_delivery": ["NOT_STORED", "STORED"],
+    "checks": "Match the saved fax reference, outbound direction and destination; preserve unconfirmed status on malformed or conflicting evidence. An image storage state is not delivery proof."
+  },
+  "implementation_scope": "One reviewed PDF to one reviewed destination through the existing approval and vendor-work services. Outbound submission and status only; no inbox, receiving, deletion, cancellation, account provisioning or live verification."
+}

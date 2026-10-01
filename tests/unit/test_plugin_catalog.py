@@ -16,6 +16,7 @@ DELIVERY_FIELDS = {
     "spruce": ({"correspondence", "message"}, {"document"}),
     "srfax": ({"correspondence", "document"}, {"message", "uploaded_media_operation_id"}),
     "documo": ({"correspondence", "document"}, {"message", "uploaded_media_operation_id"}),
+    "efax": ({"correspondence", "document"}, {"message", "uploaded_media_operation_id"}),
 }
 
 

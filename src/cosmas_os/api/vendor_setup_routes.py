@@ -12,6 +12,7 @@ from starlette.requests import Request
 
 from cosmas_os.api import vendor_setup_schemas as schema
 from cosmas_os.api.vendor_work_schemas import read_json
+from cosmas_os.application import vendor_readiness
 from cosmas_os.application import vendor_settings as flow
 from cosmas_os.application.workspace import WorkspaceError
 
@@ -44,6 +45,10 @@ def setup_policy():
     return flow.DEFAULT_POLICY
 
 
+def readiness_configuration():
+    return vendor_readiness.FaxReadinessConfiguration()
+
+
 def register(
     app,
     get_session,
@@ -52,6 +57,7 @@ def register(
     reauthenticate=None,
     policy_dependency=setup_policy,
     catalog_dependency=installed_catalog,
+    readiness_dependency=readiness_configuration,
 ):
     @app.middleware("http")
     async def boundary(request, call_next):
@@ -157,6 +163,23 @@ def register(
             identity,
             lambda: flow.catalog(
                 session, identity.box_id, identity.principal_id, installed, policy=policy
+            ),
+        )
+
+    @app.get("/vendor-settings/readiness")
+    async def readiness(
+        request: Request,
+        session=Depends(get_session),
+        identity=Depends(identity_dependency),
+        installed=Depends(catalog_dependency),
+        policy=Depends(policy_dependency),
+        configuration=Depends(readiness_dependency),
+    ):
+        return await execute(
+            request, session, identity,
+            lambda: vendor_readiness.readiness(
+                session, identity.box_id, identity.principal_id, installed,
+                policy=policy, configuration=configuration,
             ),
         )
 

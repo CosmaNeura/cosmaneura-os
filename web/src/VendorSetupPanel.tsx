@@ -8,7 +8,7 @@ import {useVendorSetupRecovery} from './vendor-setup-recovery-ui';
 import type {AccountReview,History} from './vendor-setup-schema';
 import './vendor-setup.css';
 import {SetupPageHeader,useSetupNavigationBusy,type SetupPage,type SetupPresentation} from './connection-setup-flow';
-const labels={spruce_secure_message:'Secure messaging',spruce_media_upload:'Private media upload',spruce_fax:'Fax through Spruce',srfax_fax:'Fax through SRFax',documo_fax:'Fax through Documo'};
+const labels={spruce_secure_message:'Secure messaging',spruce_media_upload:'Private media upload',spruce_fax:'Fax through Spruce',srfax_fax:'Fax through SRFax',documo_fax:'Fax through Documo',efax_fax:'Fax through eFax'};
 const stateLabel={pending_review:'Awaiting review',active:'Active for local work',disabled:'Disabled · new review required',revoked:'Permanently revoked'};
 const commandLabel={propose_account:'Account proposal',propose_recipient:'Recipient proposal',activate:'Activation',disable:'Disable',revoke:'Permanent revocation'};
 const key=()=>`vendor-settings-${crypto.randomUUID()}`;
@@ -21,7 +21,7 @@ const recipientChannels=(account:AccountReview|null):VendorSetupDraft['channel']
  if(!account?.permissions.prepare_and_submit)return [];
  const channels:VendorSetupDraft['channel'][]=[];
  if(account.installed.vendor==='spruce'&&account.permissions.actions.includes('spruce_secure_message'))channels.push('secure');
- const fax={spruce:'spruce_fax',srfax:'srfax_fax',documo:'documo_fax'} as const;
+ const fax={spruce:'spruce_fax',srfax:'srfax_fax',documo:'documo_fax',efax:'efax_fax'} as const;
  if(account.permissions.actions.includes(fax[account.installed.vendor]))channels.push('fax');
  return channels;
 };

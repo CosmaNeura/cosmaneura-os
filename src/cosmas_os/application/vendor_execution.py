@@ -13,6 +13,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 
 from cosmas_os.adapters.vendor_connectors.documo import DocumoConnector
+from cosmas_os.adapters.vendor_connectors.efax import EFaxConnector
 from cosmas_os.adapters.vendor_connectors.spruce import SpruceConnector
 from cosmas_os.adapters.vendor_connectors.srfax import SRFaxConnector
 from cosmas_os.adapters.vendor_connectors.transport import VendorRuntime, require_reference
@@ -681,6 +682,7 @@ class VendorExecution:
                 "spruce": SpruceConnector,
                 "srfax": SRFaxConnector,
                 "documo": DocumoConnector,
+                "efax": EFaxConnector,
             }[invocation.command.selection.vendor](runtime)
             if invocation.mode == "submit":
                 observation = await connector.submit(

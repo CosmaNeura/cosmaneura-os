@@ -66,8 +66,8 @@ function shape(s:Schema,v:unknown,depth=0):unknown {
     default:return fail();
   }
 }
-const allowedActions:Record<string,string[]>={spruce:['spruce_secure_message','spruce_fax','spruce_media_upload'],srfax:['srfax_fax'],documo:['documo_fax']};
-function actionUnion(v:Obj,media:string){const permitted:Record<string,[string[],string[]]>={spruce_secure_message:[['correspondence','message'],[media]],spruce_fax:[['correspondence',media],[]],spruce_media_upload:[['document'],[]],srfax_fax:[['correspondence','document'],[]],documo_fax:[['correspondence','document'],[]]};const [required,optional]=permitted[v.action as string]??fail();if(required.some(k=>v[k]===undefined)||['correspondence','document','message',media].some(k=>v[k]!==undefined&&!required.includes(k)&&!optional.includes(k)))fail();}
+const allowedActions:Record<string,string[]>={spruce:['spruce_secure_message','spruce_fax','spruce_media_upload'],srfax:['srfax_fax'],documo:['documo_fax'],efax:['efax_fax']};
+function actionUnion(v:Obj,media:string){const permitted:Record<string,[string[],string[]]>={spruce_secure_message:[['correspondence','message'],[media]],spruce_fax:[['correspondence',media],[]],spruce_media_upload:[['document'],[]],srfax_fax:[['correspondence','document'],[]],documo_fax:[['correspondence','document'],[]],efax_fax:[['correspondence','document'],[]]};const [required,optional]=permitted[v.action as string]??fail();if(required.some(k=>v[k]===undefined)||['correspondence','document','message',media].some(k=>v[k]!==undefined&&!required.includes(k)&&!optional.includes(k)))fail();}
 function model(name:string,value:unknown,depth=0):unknown {
   const v=shape(schemas[name],value,depth) as Obj;
   if(name==='VendorRetire')model(({decide:'VendorDecision',submit:'BoundCommand',verify:'VendorVerify'} as Record<string,string>)[v.command_kind as string],v.request,depth+1);

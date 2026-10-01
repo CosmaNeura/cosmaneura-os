@@ -37,7 +37,7 @@ export type VendorSetupOperation<K extends VendorSetupKind=VendorSetupKind>={ver
 export const VENDOR_SETUP_RECOVERY_BYTES=131072;
 const models={propose_account:'AccountProposal',propose_recipient:'RecipientProposal',activate:'Activation',disable:'Disable',revoke:'Revoke'} as const;
 const states={propose_account:'pending_review',propose_recipient:'pending_review',activate:'active',disable:'disabled',revoke:'revoked'} as const;
-export const VENDOR_SETUP_ACTIONS={spruce:['spruce_secure_message','spruce_media_upload','spruce_fax'],srfax:['srfax_fax'],documo:['documo_fax']} as const;
+export const VENDOR_SETUP_ACTIONS={spruce:['spruce_secure_message','spruce_media_upload','spruce_fax'],srfax:['srfax_fax'],documo:['documo_fax'],efax:['efax_fax']} as const;
 function model(name:string,value:unknown,depth=0):unknown{
   const v=shape(schemas[name],value,depth) as Obj;
   if('expected_version'in v&&(v.expected_version as number)>100||['Effect','Summary'].includes(name)&&(v.version as number)>100||['AccountReview','RecipientReview'].includes(name)&&(v.revision as number)>20)fail();

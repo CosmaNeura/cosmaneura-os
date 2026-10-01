@@ -68,7 +68,7 @@ Goal = Annotated[str, BeforeValidator(_text), Field(max_length=500)]
 Evidence = Annotated[str, BeforeValidator(_text), Field(max_length=2000)]
 Day = Annotated[str, BeforeValidator(_day)]
 Action = Literal[
-    "spruce_secure_message", "spruce_fax", "spruce_media_upload", "srfax_fax", "documo_fax"
+    "spruce_secure_message", "spruce_fax", "spruce_media_upload", "srfax_fax", "documo_fax", "efax_fax"
 ]
 CommandKind = Literal[
     "propose",
@@ -162,6 +162,7 @@ class VendorProposal(Closed):
             "spruce_media_upload": ({"document"}, set()),
             "srfax_fax": ({"correspondence", "document"}, set()),
             "documo_fax": ({"correspondence", "document"}, set()),
+            "efax_fax": ({"correspondence", "document"}, set()),
         }[self.action]
         present = {k for k, v in fields.items() if v is not None}
         if not required <= present or present - required - optional:
@@ -451,7 +452,7 @@ class Output(ProtectedModel):
 class ConnectionView(Closed):
     id: ID
     revision: Positive
-    vendor: Literal["spruce", "srfax", "documo"]
+    vendor: Literal["spruce", "srfax", "documo", "efax"]
     environment: Literal["production", "sandbox"]
     label: Label
     actions: Annotated[list[Action], Field(min_length=1, max_length=3)]
@@ -464,6 +465,7 @@ class ConnectionView(Closed):
             "spruce": {"spruce_secure_message", "spruce_fax", "spruce_media_upload"},
             "srfax": {"srfax_fax"},
             "documo": {"documo_fax"},
+            "efax": {"efax_fax"},
         }[self.vendor]
         if (
             len(set(self.actions)) != len(self.actions)
@@ -589,6 +591,7 @@ class Review(Closed):
             "spruce_media_upload": ({"document"}, set()),
             "srfax_fax": ({"correspondence", "document"}, set()),
             "documo_fax": ({"correspondence", "document"}, set()),
+            "efax_fax": ({"correspondence", "document"}, set()),
         }[self.action]
         present = {k for k, v in fields.items() if v is not None}
         if (
