@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "provider": "spruce",
+  "lessons": [
+    {
+      "id": "provider_specific_status_meaning",
+      "finding": "Spruce item pages are teammate paging records and voice/video event success is not fax success. Public v1 proves posting, not terminal fax transmission. Shared directly with SRFax and Documo teams; both applied explicit provider-specific status/page validation.",
+      "applies_to": ["spruce", "srfax", "documo", "efax"],
+      "evidence": ["docs/validation/spruce-api-reference.json", "https://developer.sprucehealth.com/reference/conversationitem", "tests/unit/test_spruce_fax_delivery.py"],
+      "applied_scenarios": ["posted", "misleading_delivery_fields"]
+    },
+    {
+      "id": "acceptance_does_not_authorize_another_action",
+      "finding": "An accepted PDF upload is one approved operation. A fax using that PDF requires a separate exact approval, unchanged reviewed source and the same account. Imported the SRFax team's early required-routing validation lesson and applied it to the documented Spruce setup prerequisites.",
+      "applies_to": ["spruce", "srfax", "documo", "efax"],
+      "evidence": ["lab/spruce_fax_sandbox.py", "src/cosmas_os/application/vendor_work.py", "docs/validation/spruce-api-reference.json"],
+      "applied_scenarios": ["posted", "altered_source", "upload_reply_lost"]
+    },
+    {
+      "id": "lost_response_requires_read_recovery_not_resend",
+      "finding": "Each mutation is claimed once. A lost upload or send response remains unconfirmed, and an unrelated or contradictory signed event cannot manufacture acceptance. A lost status response can recover via a fresh explicit read without repeating the fax. Spruce's recovered pending item does not erase prior aggregate unknown transport evidence; unlike a terminal fax receipt, it proves only posting. This recovery pattern was exchanged with SRFax and Documo.",
+      "applies_to": ["spruce", "srfax", "documo", "efax"],
+      "evidence": ["lab/spruce_fax_sandbox.py", "src/cosmas_os/application/vendor_execution.py", "src/cosmas_os/adapters/vendor_connectors/spruce.py"],
+      "applied_scenarios": ["upload_reply_lost", "send_reply_lost", "status_reply_lost", "wrong_callback_request", "wrong_callback_account", "contradictory_callback", "invalid_signature"]
+    },
+    {
+      "id": "qualify_both_send_and_status_before_ready",
+      "finding": "The Documo team identified that a sending key may lack status-read authority. Spruce similarly needs more than API access: the reviewed fax endpoint and signed callback setup must exist before its accepted request can be reconciled to a posted item. Neither configuration nor synthetic acceptance proves live delivery.",
+      "applies_to": ["spruce", "documo", "srfax", "efax"],
+      "evidence": ["docs/validation/spruce-api-reference.json", "https://developer.sprucehealth.com/docs/webhooks-overview"],
+      "applied_scenarios": ["posted", "wrong_callback_account", "invalid_signature"]
+    }
+  ]
+}

@@ -77,12 +77,9 @@ class Catalog:
             if selection.vendor not in schema.ACTIONS:
                 raise ValueError("Only explicit delivery installations are supported")
             routing = dict(supplied.routing)
-            expected = {"internal_endpoint_id"} if selection.vendor == "spruce" else {"caller_id"}
-            optional = (
-                {"event_route_id"}
-                if selection.vendor == "spruce"
-                else set() if selection.vendor == "efax" else {"sender_email", "event_route_id"}
-            )
+            expected = ({"internal_endpoint_id"} if selection.vendor == "spruce" else
+                        {"caller_id", "sender_email"} if selection.vendor == "srfax" else {"caller_id"})
+            optional = set() if selection.vendor == "efax" else {"event_route_id"}
             if not expected <= routing.keys() or routing.keys() - expected - optional:
                 raise ValueError("Closed installed routing required")
             if selection.vendor == "spruce":

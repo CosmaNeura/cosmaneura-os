@@ -33,6 +33,14 @@ def render(root, report):
         matrix = ("<details open><summary>Connector scenarios</summary><ul>" + "".join(
             "<li>" + ("✓ " if r["passed"] else "✕ ") + html.escape(r["provider"].title() + " · " + r["scenario"].replace("_", " "))
             + f' · {r["duration_ms"]} ms</li>' for r in scenarios) + "</ul></details>") if scenarios else ""
+        lessons = episode.get("shared_lessons", [])
+        shared = ("<details><summary>Lessons shared between provider teams</summary><ul>" + "".join(
+            "<li>" + html.escape(lesson["finding"]) + "<p class=meta>Scenario checks: "
+            + html.escape(", ".join(("Passed: " if s["passed"] else "Needs work: ") + s["scenario"].replace("_", " ") for s in lesson["tested_scenarios"]) or
+                          "Setup validation is covered by the separate application tests.")
+            + "</p></li>" for lesson in lessons) + "</ul></details>"
+            + "<p class=meta>" + html.escape(episode["evidence_level"])
+            + " Timings measure local replay, not provider delivery speed.</p>") if lessons else ""
         phases = episode.get("phases", [])
         stages = ("<details open><summary>Encounter stages</summary><ul>" + "".join(
             "<li>" + ("✓ " if r["passed"] else "✕ ") + html.escape(r["name"]) + "</li>" for r in phases)
@@ -64,7 +72,7 @@ def render(root, report):
 <p>{episode['duration_ms'] / 1000:.1f}s · {episode['tool_calls']} tool calls · application: {html.escape(episode['application']['status'])}</p>
 {handoffs}
 {phase_times}
-{matrix}{stages}{incoming}
+{matrix}{shared}{stages}{incoming}
 {('<p class="error">'+html.escape(failures)+'</p>') if failures else ''}
 <details><summary>What was checked</summary><ul>{''.join('<li>'+('✓ ' if ok else '✕ ')+html.escape(k.replace('_',' '))+'</li>' for k,ok in episode['checks'].items())}</ul></details>
 {artifacts}</article>''')

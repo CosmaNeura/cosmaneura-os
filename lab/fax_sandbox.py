@@ -5,7 +5,9 @@ import base64
 import hashlib
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from urllib.parse import parse_qs
+from email import policy
+from email.parser import BytesParser
+from urllib.parse import parse_qsl
 from uuid import UUID, uuid4
 
 import httpx
@@ -28,10 +30,12 @@ from cosmas_os.ports import vendor_connectors as private
 from cosmas_os.vendor_models import VendorConnectionVersion, VendorCorrespondenceVersion
 from lab.store import LabError
 
-RECOVERY_SCENARIOS = ("pending_recovery", "read_timeout", "throttled")
+RECOVERY_SCENARIOS = ("pending_recovery", "read_timeout", "throttled", "expired_access")
 FAX_SCENARIOS = {
-    "documo": ("delivered", "failed", "partial", "lost_reply", "wrong_account", "wrong_destination", *RECOVERY_SCENARIOS),
-    "srfax": ("delivered", "failed", "partial", "lost_reply", "wrong_destination", *RECOVERY_SCENARIOS),
+    "documo": ("delivered", "failed", "partial", "lost_reply", "wrong_account", "wrong_destination",
+               "malformed_status", "contradictory_result", "wrong_reference", *RECOVERY_SCENARIOS),
+    "srfax": ("delivered", "failed", "partial", "lost_reply", "wrong_destination", "expired_credentials",
+              "malformed_status", "contradictory_error", *RECOVERY_SCENARIOS),
 }
 
 
@@ -175,31 +179,69 @@ def _exercise(app, root, scenario, provider):
         return True
 
     async def respond(request):
+        checks.setdefault("exact_approved_request", False)
         origin = "api.sandbox.documo.com" if provider == "documo" else "secure.srfax.com"
-        if request.url.host != origin:
+        if request.url.scheme != "https" or request.url.host != origin or request.url.query:
             raise LabError("unexpected_fax_origin")
         if provider == "documo":
             submitting = request.method == "POST" and request.url.path == "/v1/faxes"
             reading = request.method == "GET" and request.url.path == "/v1/fax/" + ref + "/info"
-            valid_document = pdf in request.content
+            if request.headers.get("Authorization") != "Basic invented-lab-secret":
+                raise LabError("foreign_fax_credential")
+            if submitting:
+                mime = BytesParser(policy=policy.default).parsebytes(
+                    b"Content-Type: " + request.headers.get("Content-Type", "").encode("ascii")
+                    + b"\r\nMIME-Version: 1.0\r\n\r\n" + request.content)
+                if mime.get_content_type() != "multipart/form-data" or not mime.is_multipart() or mime.defects:
+                    raise LabError("fax_request_changed")
+                expected = {"faxNumber": b"12125550101", "callerId": b"2125550100",
+                            "coverPage": b"false", "async": b"true", "attachments": pdf}
+                parts = list(mime.iter_parts())
+                observed = {}
+                for part in parts:
+                    name = part.get_param("name", header="Content-Disposition")
+                    if (part.is_multipart() or part.defects or part.get_content_disposition() != "form-data"
+                            or name not in expected or name in observed):
+                        raise LabError("fax_request_changed")
+                    if name == "attachments":
+                        if part.get_filename() != "document.pdf" or part.get_content_type() != "application/pdf":
+                            raise LabError("fax_document_changed")
+                    elif part.get_filename() is not None:
+                        raise LabError("fax_request_changed")
+                    observed[name] = part.get_payload(decode=True)
+                if len(parts) != len(expected) or observed != expected:
+                    raise LabError("fax_request_changed")
+            elif request.content:
+                raise LabError("fax_status_request_changed")
         else:
             if request.method != "POST" or request.url.path != "/SRF_SecWebSvc.php":
                 raise LabError("unexpected_fax_route")
-            fields = parse_qs(request.content.decode("ascii"))
-            if fields.get("access_id") != [selection.remote_account_id]:
-                raise LabError("foreign_fax_selection")
-            submitting = fields.get("action") == ["Queue_Fax"]
-            reading = fields.get("action") == ["Get_FaxStatus"] and fields.get("sFaxDetailsID") == [ref]
-            valid_document = (fields.get("sRetries") == ["0"]
-                and base64.b64decode(fields.get("sFileContent_1", [""])[0]) == pdf)
+            if (request.headers.get("Content-Type") != "application/x-www-form-urlencoded"
+                    or "Authorization" in request.headers):
+                raise LabError("fax_request_changed")
+            pairs = parse_qsl(request.content.decode("ascii"), strict_parsing=True,
+                              keep_blank_values=True, max_num_fields=12)
+            fields = dict(pairs)
+            if len(pairs) != len(fields):
+                raise LabError("fax_request_changed")
+            submitting = fields.get("action") == "Queue_Fax"
+            reading = fields.get("action") == "Get_FaxStatus"
+            expected = {"action": "Queue_Fax" if submitting else "Get_FaxStatus", "sResponseFormat": "JSON",
+                        "access_id": selection.remote_account_id, "access_pwd": "invented-lab-secret"}
+            expected.update({"sCallerID": "2125550100", "sSenderEmail": "fax@example.invalid", "sFaxType": "SINGLE",
+                "sToFaxNumber": "12125550101", "sRetries": "0", "sFileName_1": "document.pdf",
+                "sFileContent_1": base64.b64encode(pdf).decode("ascii")} if submitting else {"sFaxDetailsID": ref})
+            if fields != expected:
+                raise LabError("fax_request_changed")
         if not submitting and not reading:
             raise LabError("unexpected_fax_route")
         calls.append({"method": request.method, "path": request.url.path, "action": "submit" if submitting else "read"})
         if submitting:
-            if not valid_document:
-                raise LabError("fax_document_changed")
+            checks["exact_approved_request"] = True
             if scenario == "lost_reply":
                 raise httpx.ReadTimeout("synthetic acceptance response lost")
+            if scenario == "expired_credentials":
+                return httpx.Response(200, json={"Status": "Failed", "Result": "Synthetic access denied"})
             return httpx.Response(200, json={"messageId": ref} if provider == "documo"
                                   else {"Status": "Success", "Result": ref})
         first_read = sum(call["action"] == "read" for call in calls) == 1
@@ -207,18 +249,23 @@ def _exercise(app, root, scenario, provider):
             raise httpx.ReadTimeout("synthetic status response lost")
         if first_read and scenario == "throttled":
             return httpx.Response(429, json={"error": "synthetic rate limit"})
+        if first_read and scenario == "expired_access":
+            return httpx.Response(401, json={"error": "synthetic expired access"})
         pending = first_read and scenario == "pending_recovery"
         destination = "12125550102" if scenario == "wrong_destination" else "12125550101"
         if provider == "srfax":
             return httpx.Response(200, json={"Status": "Success", "Result": {
-                "ToFaxNumber": destination, "SentStatus": "In Progress" if pending else "Failed" if scenario == "failed" else "Sent",
-                "Pages": 0 if scenario == "partial" else 1}})
-        return httpx.Response(200, json={"messageId": ref,
+                "ToFaxNumber": destination, "SentStatus": None if scenario == "malformed_status" else
+                "In Progress" if pending else "Failed" if scenario == "failed" else "Sent",
+                "Pages": 0 if scenario == "partial" else 1,
+                **({"ErrorCode": "Busy"} if scenario == "contradictory_error" else {})}})
+        return httpx.Response(200, json={"messageId": str(uuid4()) if scenario == "wrong_reference" else ref,
             "accountId": str(uuid4()) if scenario == "wrong_account" else selection.remote_account_id,
             "direction": "outbound", "faxNumber": "+" + destination, "pagesCount": 1,
-            "pagesComplete": 0 if scenario in {"failed", "partial"} else 1,
+            "pagesComplete": True if scenario == "malformed_status" else 0 if scenario in {"failed", "partial"} else 1,
             "status": "processing" if pending else "failed" if scenario == "failed" else "success",
-            "resultCode": "6100" if scenario == "failed" else "0"})
+            "resultCode": "6100" if scenario == "failed" else "0",
+            **({"errorCode": "6100"} if scenario == "contradictory_result" else {})})
 
     executor = vendor_execution.VendorExecution(factory, credentials, artifact_store=store,
         transport=httpx.MockTransport(respond), identity_current=current)
@@ -227,9 +274,17 @@ def _exercise(app, root, scenario, provider):
         _, duplicate = vendor_execution.claim_submit(s, *scope, tid, request)
         checks["lost_submit_reply_cannot_dispatch_twice"] = duplicate is None
         detail = vendor_work.detail(s, *scope, tid)
+        try:
+            _, fresh_duplicate = vendor_execution.claim_submit(s, *scope, tid,
+                p.BoundCommand.model_validate(bound(detail, "fax-submit-new-key")))
+        except workspace.WorkspaceError as error:
+            s.rollback()
+            checks["new_request_key_cannot_resend"] = str(error) == "vendor_submit_already_claimed"
+        else:
+            checks["new_request_key_cannot_resend"] = fresh_duplicate is None
         receipt_stages.append({"stage": "submission_response", "submit_calls": len(calls),
             **{key: detail["summary"][key] for key in ("acceptance", "transport", "state")}})
-        if scenario != "lost_reply":
+        if scenario not in {"lost_reply", "expired_credentials"}:
             read_request = p.BoundCommand.model_validate(bound(detail, "fax-observe"))
             _, read = vendor_execution.claim_read(s, *scope, tid, read_request)
         else:
@@ -262,8 +317,14 @@ def _exercise(app, root, scenario, provider):
         checks["delivery_is_not_automatic_task_completion"] = summary["state"] == "approved"
         expected = {"delivered": "delivered", "failed": "failed", "partial": "unknown", "wrong_account": "unknown",
                     "wrong_destination": "unknown", "lost_reply": "not_observed",
+                    "expired_credentials": "not_observed", "malformed_status": "unknown", "contradictory_error": "unknown",
+                    "contradictory_result": "unknown", "wrong_reference": "unknown",
                     **dict.fromkeys(RECOVERY_SCENARIOS, "delivered")}[scenario]
         checks["honest_delivery_outcome"] = summary["transport"] == expected
+        checks["honest_acceptance_outcome"] = summary["acceptance"] == (
+            "unconfirmed" if scenario == "lost_reply" else "rejected" if scenario == "expired_credentials" else "accepted")
+        if scenario == "expired_credentials":
+            checks["rejected_send_has_no_status_read_or_retry"] = len(calls) == 1
         if scenario in RECOVERY_SCENARIOS:
             checks["explicit_status_recovery_without_resend"] = summary["transport"] == "delivered" and len(calls) == 3
         if scenario == "lost_reply":

@@ -100,9 +100,12 @@ class SpruceConnector:
             item = result.data["conversationItem"]
             if (result.status != 200 or type(item) is not dict or item["id"] != ref.value
                     or item.get("requestId") != ref.request_id or item["direction"] != "outbound"
-                    or item["isInternalNote"] is not False):
+                    or item["isInternalNote"] is not False
+                    or "object" in item and item["object"] != "conversationItem"):
                 raise ValueError
-            # Item-posted/read status does not establish fax transport delivery.
+            # Public v1 documents posting, not fax transmission. In particular,
+            # `pages` means teammate paging and `event` describes voice/video
+            # calls. Neither can promote a fax to delivered or failed.
             return DeliveryObservation(reference=ref, observed_at=result.observed_at,
                 state="pending", response_sha256=result.sha256)
         except (ValueError, TypeError, KeyError):
@@ -122,10 +125,19 @@ def verify_webhook(raw: bytes, signature: str, secret: bytes, selection, now):
         item = data["data"]["object"]
         event_time = datetime.fromisoformat(data["eventTime"].replace("Z", "+00:00"))
         if (data["object"] != "event" or data["type"] not in {"conversationItem.created", "conversationItem.updated",
-                "conversationItem.deleted", "conversationItem.restored"} or event_time.utcoffset() is None):
+                "conversationItem.deleted", "conversationItem.restored"} or event_time.utcoffset() is None
+                or type(item) is not dict
+                or "object" in item and item["object"] != "conversationItem"
+                or "direction" in item and item["direction"] not in {"inbound", "outbound", "none"}
+                or "isInternalNote" in item and type(item["isInternalNote"]) is not bool):
             raise ValueError
+        # Keep an authentic inbound/internal event as a candidate, but never
+        # correlate it to an outgoing send just because requestId matches.
+        request_id = item.get("requestId")
+        if item.get("direction", "outbound") != "outbound" or item.get("isInternalNote", False):
+            request_id = None
         return EventCandidate(vendor="spruce", connection_id=selection.connection_id, observed_at=now,
             authenticity="signature_verified", body_sha256=hashlib.sha256(raw).hexdigest(),
-            event_type=data["type"], object_id=item["id"], request_id=item.get("requestId"))
+            event_type=data["type"], object_id=item["id"], request_id=request_id)
     except (ValueError, TypeError, KeyError, AttributeError, VendorError):
         raise VendorError("signature_invalid") from None

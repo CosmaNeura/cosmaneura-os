@@ -1,0 +1,33 @@
+{
+  "reviewed_on": "2026-10-01",
+  "provider": "SRFax Internet Fax API",
+  "method": "The root coordinator read the official public SRFax reference through the browser and shared the observed contract with this provider team. No API account sign-in, credential submission or fax request was made.",
+  "sources": {
+    "official_api": "https://www.srfax.com/developers/internet-fax-api/",
+    "send": "https://www.srfax.com/developers/internet-fax-api/queue_fax/",
+    "status": "https://www.srfax.com/developers/internet-fax-api/get_faxstatus/"
+  },
+  "origin": "https://secure.srfax.com",
+  "path": "/SRF_SecWebSvc.php",
+  "authentication": {
+    "fields": "access_id is the integer SRFax account number; access_pwd is the user's account password.",
+    "adapter_boundary": "Credentials are resolved privately after current authority and immutable approval checks, bound to the reviewed account selection. Account number, caller ID and sender email are separate values; no credential is exposed in public status or evidence."
+  },
+  "send": {
+    "request": "POST form Queue_Fax with the account credentials, required sCallerID (10 digits), sSenderEmail, sFaxType=SINGLE and sToFaxNumber (11 digits). The adapter transmits one reviewed PDF as sFileName_1=document.pdf and base64 sFileContent_1.",
+    "acceptance": "Status Success with Result containing the queued FaxDetailsID string; queue acceptance is not transport delivery.",
+    "retry_setting": "The documented sRetries range is 0 through 6. The adapter requests 0 and never automatically replays an unconfirmed Queue_Fax request. This setting is not provider idempotency.",
+    "notifications": "Status notifications are optional. The documented callback ErrorCode is a message in the event of a failed fax; the page does not document a signature. Callbacks remain untrusted hints and cannot replace the authenticated status read."
+  },
+  "status": {
+    "request": "POST form action=Get_FaxStatus, access_id, access_pwd and sFaxDetailsID (the Queue_Fax reference); JSON is the documented default response format.",
+    "response": "Status Success with structured Result; Status Failed carries a Result error string, including FaxDetailsID Not Found.",
+    "result_fields": ["FileName", "SentStatus", "DateQueued", "DateSent", "EpochTime", "ToFaxNumber", "Pages", "Duration", "RemoteID", "ErrorCode", "Size", "AccountCode"],
+    "sent_status_values": ["In Progress", "Sent", "Failed", "Sending Email"],
+    "pages": "Pages is documented INTEGER; non-integer counts are not accepted as evidence.",
+    "error_code": "ErrorCode is a string with examples Busy, No Answer and No Remote Fax. No nonempty success sentinel is assumed. A supplied error that conflicts with Sent preserves unknown delivery.",
+    "binding": "The authenticated request carries the saved sFaxDetailsID and the response destination must exactly match the reviewed destination. The public response fields do not document a FaxDetailsID echo; the adapter does not invent that requirement.",
+    "time": "Date fields use the account timezone; EpochTime is Unix time. The adapter does not invent a timezone-qualified delivery timestamp from those local dates."
+  },
+  "qualification_boundary": "All execution qualification uses the existing local synthetic fax laboratory, real saved approval/document/receipt services and an offline HTTP twin. There is no live SRFax delivery claim and no configured SRFax sandbox origin."
+}

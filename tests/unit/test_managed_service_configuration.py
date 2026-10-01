@@ -56,7 +56,7 @@ def document(settings, vendor="documo", *, credential=True):
             ],
             routing={"internal_endpoint_id": "invented_endpoint"}
             if vendor == "spruce"
-            else {"caller_id": "2125550199"},
+            else {"caller_id": "2125550199", **({"sender_email": "fax@example.invalid"} if vendor == "srfax" else {})},
         )
     return {
         "version": 1,

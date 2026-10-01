@@ -78,14 +78,20 @@ class SRFaxConnector:
         try:
             data = result.data["Result"]
             if (result.status != 200 or result.data["Status"] != "Success" or type(data) is not dict
-                    or data["ToFaxNumber"] != command.intent.destination):
+                    or data["ToFaxNumber"] != command.intent.destination
+                    or type(data["SentStatus"]) is not str):
                 raise ValueError
             statuses: dict[str, Literal["pending", "transport_delivered", "transport_failed", "unknown"]] = {"In Progress": "pending", "Sending Email": "pending", "Sent": "transport_delivered", "Failed": "transport_failed"}
             state = statuses.get(data["SentStatus"], "unknown")
             pages = data.get("Pages")
             if pages is not None and (type(pages) is not int or not 0 <= pages <= 1_000_000):
                 raise ValueError
-            if state == "transport_delivered" and (pages is None or pages < 1):
+            error_code = data.get("ErrorCode")
+            if "ErrorCode" in data and type(error_code) is not str:
+                raise ValueError
+            # SRFax documents ErrorCode as text such as Busy/No Answer, not a
+            # numeric success sentinel. Conflicting evidence is not delivery.
+            if state == "transport_delivered" and (pages is None or pages < 1 or error_code):
                 state = "unknown"
             return DeliveryObservation(reference=ref, observed_at=result.observed_at, state=state,
                 pages_total=pages, pages_delivered=pages if state == "transport_delivered" else None, response_sha256=result.sha256)
