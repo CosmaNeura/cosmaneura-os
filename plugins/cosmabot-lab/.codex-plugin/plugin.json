@@ -1,0 +1,33 @@
+{
+  "name": "cosmabot-lab",
+  "version": "0.1.0",
+  "description": "Project-local synthetic CosmaBot MCP lab; configure before use.",
+  "author": {
+    "name": "CosmaNeura"
+  },
+  "interface": {
+    "displayName": "CosmaBot Lab",
+    "shortDescription": "Synthetic local agent workflows; configure before use.",
+    "longDescription": "Unconfigured project scaffold. Generate a local copy to let Chief use bounded lab tools and internal coworkers on invented data. No provider login, human approvals or external sends.",
+    "developerName": "CosmaNeura",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Interactive"
+    ],
+    "defaultPrompt": [
+      "Inspect the synthetic lab and its available tools.",
+      "Have Chief prepare a source-cited team draft.",
+      "Test recovery without sending anything externally."
+    ]
+  },
+  "mcpServers": "./.mcp.json",
+  "repository": "https://github.com/CosmaNeura/cosmaneura-os",
+  "keywords": [
+    "cosmabot",
+    "synthetic",
+    "mcp",
+    "testing"
+  ]
+}
