@@ -77,10 +77,16 @@ def test_saved_drafts_alone_do_not_pass_the_observed_clinician_regressions():
 @pytest.mark.parametrize("text,expected", [
     ("No external actions or requests have been completed.", False),
     ("No requests were completed.", False),
+    ("All uncertainties and planned actions remain uncompleted and require human review before proceeding.", False),
+    ("Tasks are incomplete.", False),
+    ("A request is undone.", False),
+    ("Work remains uncompleted.", False),
     ("No requests are documented as completed.", True),
     ("No external actions or requests are confirmed as completed.", True),
     ("No tasks are documented to have been completed.", True),
     ("Completion of planned requests is not documented.", True),
+    ("Medication information remains incomplete.", True),
+    ("Information needed for planned work is incomplete; action completion is not documented.", True),
 ])
 @pytest.mark.parametrize("location", ["receipt", "source_draft"])
 def test_benchmark_independently_checks_saved_draft_negative_completion_claims(text, expected, location):

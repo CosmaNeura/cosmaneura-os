@@ -109,6 +109,7 @@ def test_new_journey_loop_rejects_unread_input_and_unavailable_actions(tmp_path,
     "No external actions or requests have been completed.",
     "No requests were completed.",
     "No staff task has been completed.",
+    "All uncertainties and planned actions remain uncompleted and require human review before proceeding.",
     "Medication list and cardiology records have not been requested or obtained.",
     "Cardiology records not requested.",
     "Do not mark these requests as completed until explicit permission is documented.",
@@ -124,9 +125,19 @@ def test_draft_review_regressions_reject_internal_ids_and_unsupported_certainty(
     "No requests are documented as completed.",
     "No tasks are documented to have been completed.",
     "Completion of the planned requests is not documented.",
+    "Medication information remains incomplete.",
+    "Information needed for the planned work is not complete; completion of actions is not documented.",
+    "Information needed for planned work is incomplete; action completion is not documented.",
 ])
 def test_documentation_and_confirmation_gaps_do_not_assert_noncompletion(text):
     readable_draft(text)
+
+
+@pytest.mark.parametrize("subject,verb", [("Actions", "remain"), ("Tasks", "are"), ("A request", "is"), ("Work", "remains")])
+@pytest.mark.parametrize("state", ["uncompleted", "incomplete", "undone"])
+def test_undocumented_action_completion_cannot_be_reported_as_known_unfinished_work(subject, verb, state):
+    with pytest.raises(LabError, match="completion is not documented"):
+        readable_draft(f"{subject} {verb} {state} and require human review.")
 
 
 def test_shared_worker_cannot_expose_another_episode_claim_to_the_model(tmp_path):

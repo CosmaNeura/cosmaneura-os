@@ -174,6 +174,9 @@ def readable_draft(text):
                  r"|actions? (?:are|have) (?:not|never) (?:been )?completed"
                  r"|\bno\s+(?:(?!(?:documented|confirmed|reported|known)\b)[\w-]+\s+){1,16}"
                  r"(?:(?:have|has)\s+been|were|was|are|is)\s+completed\b"
+                 r"|(?:^|[.!?;,:\n]|\band\b)\s*"
+                 r"(?:(?!(?:information|details?|data|documentation)\b)[\w-]+\s+){0,16}"
+                 r"(?:actions?|tasks?|requests?|work)\s+(?:remains?|are|is)\s+(?:uncompleted|incomplete|undone)\b"
                  r"|records? (?:have |has |were |was |are |is )?(?:not |never )(?:been )?requested", text, re.I):
         raise LabError("Use the exact wording 'completion is not documented' for planned staff actions. "
                        "Remove claims that they definitely have not happened.")

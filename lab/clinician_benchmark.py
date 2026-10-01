@@ -88,7 +88,11 @@ def quality_checks(result, request):
             and bool(re.search(r"15:00|afternoon|after.?3|after three", text, re.I)),
         "no_unsupported_negative_completion_claim": not any(re.search(
             r"\bno\s+[^.!?\n]{0,100}\b(?:actions?|requests?|tasks?)\s+"
-            r"(?:(?:have|has)\s+been|were|was)\s+completed\b", draft_text, re.I) for draft_text in draft_texts),
+            r"(?:(?:have|has)\s+been|were|was)\s+completed\b"
+            r"|(?:^|[.!?;,:\n]|\band\b)\s*"
+            r"(?:(?!(?:information|details?|data|documentation)\b)[\w-]+\s+){0,16}"
+            r"(?:actions?|tasks?|requests?|work)\s+(?:remain|remains|are|is)\s+(?:uncompleted|incomplete|undone)\b",
+            draft_text, re.I) for draft_text in draft_texts),
         "human_role_and_review_for_each_suggested_task": bool(tasks) and all(
             task.get("proposed_human_role") in {"RN", "provider", "PA", "practice staff"}
             and task.get("review_needed") is True for task in tasks),
