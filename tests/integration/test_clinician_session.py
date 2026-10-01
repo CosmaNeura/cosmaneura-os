@@ -71,3 +71,8 @@ def test_no_arbitrary_clinical_context_or_actor_command(rehearsal):
     assert client.post("/lab-api/provider/1/ask", json=command).status_code == 422
     assert client.post("/lab-api/provider/1/entries", json={"expected_revision": 2,
         "idempotency_key": "invalid-transcript-entry", "kind": "conversation", "content": "Invented"}).status_code == 422
+    for raw in ("null", "[]", "[1]", "1", '"invalid"'):
+        rejected = client.post("/lab-api/provider/1/ask", content=raw,
+                               headers={"Content-Type": "application/json"})
+        assert rejected.status_code == 422
+        assert rejected.json() == {"detail": "invalid_workspace_request"}

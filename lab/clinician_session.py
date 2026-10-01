@@ -217,6 +217,8 @@ def build_api(lab):
             raw.extend(chunk)
         try:
             value = json.loads(raw, object_pairs_hook=_unique)
+            if not isinstance(value, dict):
+                raise ValueError("clinician request must be an object")
             json.dumps(value, ensure_ascii=False, allow_nan=False).encode()
             if schema is ConversationRequest and set(value) != {
                     "expected_revision", "team_revision", "idempotency_key", "role", "content"}:
