@@ -91,3 +91,14 @@ def test_legacy_episode_and_model_mode_remain_supported(tmp_path):
     assert "Review and revision workflow" not in page
     assert "Scribe · saved draft" in page
     assert "Real GPT‑4.1 tool decisions with synthetic data." in page
+
+
+def test_connector_success_receipt_with_no_error_renders_timeline(tmp_path):
+    import json
+
+    report = fixture(tmp_path)
+    (tmp_path / 'events.jsonl').write_text(json.dumps({'episode': 'synthetic-review', 'role': 'visit_prep',
+        'kind': 'account_connector_tool', 'elapsed_ms': 10, 'error': None}) + '\n')
+    render(tmp_path, report)
+    page = (tmp_path / 'report.html').read_text()
+    assert 'account_connector_tool' in page and '<td>OK</td>' in page

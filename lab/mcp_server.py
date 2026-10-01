@@ -14,6 +14,20 @@ from lab.mcp_runtime import FAULTS, MCPRuntime
 from lab.store import LabError
 
 VERSION = "0.1.0"
+CONNECTOR_INSTRUCTIONS = """The connector-tools startup profile additionally exposes role-scoped
+Google/Microsoft metadata reads and explicit evidence selection, private fax
+proposal/status tools, and a Research-only fixed pre-reviewed invented trial
+lookup/save. All provider transports are offline twins. Fixtures are prepared
+by a separate synthetic human before tools are offered. No account grants,
+human reviews, approvals, sends, bookings or payments are callable. A prepared
+proposal is not delivery. Live HTTP capabilities remain discovery only. Read
+application_status for the current workspace revision before selecting evidence.
+Each MCP process is a separate fixed-purpose episode. Startup fax evidence is
+already reviewed by the synthetic fixture; adding any new encounter evidence
+makes that review stale. It cannot be renewed through MCP tools. Use a new fax
+episode or the explicit phased connector_tools scenario in lab.runner to test
+the provider-review handoff. Never pretend a stale source remains reviewed.
+"""
 OUTPUT_SCHEMA = {"type": "object", "properties": {"result": {}},
                  "required": ["result"], "additionalProperties": False}
 RESOURCES = {
@@ -80,7 +94,9 @@ def resource_value(runtime, uri):
         return {"synthetic": True, "case": case.key, "title": case.title, "task": case.task,
                 "role": runtime.config["role"], "mode": runtime.config["mode"],
                 "recording_available": False, "public_research_available": False,
-                "external_effects": 0, "human_review_required": True}
+                "external_effects": 0, "human_review_required": True,
+                "connector_tools": bool(runtime.config.get("connector_tools")),
+                "connector_transport": "offline_http_twin" if runtime.config.get("connector_tools") else "unavailable"}
     if uri == "cosmabot://lab/capabilities":
         # Pure schema imports: no settings, provider clients or credentials.
         from cosmas_os.api.plugin_catalog import CONTRACT, definitions, tool
@@ -148,7 +164,7 @@ def create_server(runtime):
 
     server = Server("cosmabot-lab", version=VERSION, title="CosmaBot virtual clinic",
                     description="Scoped agent tools for one local synthetic encounter",
-                    instructions=INSTRUCTIONS, on_list_tools=list_tools, on_call_tool=call_tool,
+                    instructions=INSTRUCTIONS + (CONNECTOR_INSTRUCTIONS if runtime.config.get("connector_tools") else ""), on_list_tools=list_tools, on_call_tool=call_tool,
                     on_list_resources=list_resources, on_read_resource=read_resource)
     # No implicit tracing exporter or client telemetry in this local package.
     server.middleware.clear()
@@ -199,6 +215,7 @@ def main(argv=None):
     parser.add_argument("--max-tokens", type=int, default=100000)
     parser.add_argument("--max-seconds", type=int, default=900)
     parser.add_argument("--concurrency", type=int, default=3)
+    parser.add_argument("--connector-tools", action="store_true", help="Expose offline role-scoped account, fax and Research tools; no live account or sending access")
     args = parser.parse_args(argv)
     try:
         import anyio

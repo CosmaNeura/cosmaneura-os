@@ -159,11 +159,18 @@ vendor operation is repeated here, and the next request rechecks authority.
 
 class World:
     schemas = SCHEMAS
+    jobs = JOBS
+    max_tool_calls_per_turn = 8
     tool_scope = "No clinical decisions, approval, sending or account tools are available. "
     extra_instructions = ""
 
     def tool_visible(self, role, name):
         return role == "chief" or name != "delegate_team"
+
+    def model_tools(self, role):
+        return [{"type": "function", "function": {"name": name, "description": description,
+                  "parameters": schema.model_json_schema()}} for name, (schema, description) in self.schemas.items()
+                 if self.tool_visible(role, name)]
     def __init__(self, store: Store, episode: str, case: Case, application, model=None, *, concurrency=3, fault="none"):
         self.store, self.episode, self.case = store, episode, case
         self.app, self.model = application, model
@@ -297,20 +304,17 @@ class World:
             "Put source IDs and hashes in source_ids and dependencies, not in the human-readable body. "
             "Share outputs with chief and follow_up." + self.extra_instructions
         )
-        job = JOBS.get(role, "First read_source using the supplied source metadata. Then delegate_team to visit_prep, scribe and research in ONE call. "
+        job = self.jobs.get(role, "First read_source using the supplied source metadata. Then delegate_team to visit_prep, scribe and research in ONE call. "
                       "When their artifacts are saved, delegate_team to follow_up. Then read the saved follow_up result, "
                       "read application_status, and save your concise summary with follow_up as a dependency.")
         messages = [{"role": "system", "content": instructions}, {"role": "user", "content":
                     json.dumps({"role": role, "job": job, "case": self.case.title, "task": self.case.task,
                                 "permitted_source_metadata": self.app.sources(metadata_only=True)})}]
-        tools = [{"type": "function", "function": {"name": name, "description": description,
-                  "parameters": schema.model_json_schema()}} for name, (schema, description) in self.schemas.items()
-                 if self.tool_visible(role, name)]
         acknowledged_artifact = False
         for turn in range(12):
             self.app.check_agent(role)
             start = time.monotonic()
-            message, usage, retries = draft_reply(self.model, messages, tools, lambda: self.app.check_agent(role),
+            message, usage, retries = draft_reply(self.model, messages, self.model_tools(role), lambda: self.app.check_agent(role),
                 lambda kind, **values: self.event(role, kind, **values))
             self.event(role, "model", turn=turn + 1, retries=retries, duration_ms=round((time.monotonic() - start) * 1000), **usage)
             calls = message.get("tool_calls") or []
@@ -323,7 +327,7 @@ class World:
                                      "If a teammate failed, report the blocker; do not invent a dependency."})
                     continue
                 return
-            if len(calls) > 8:
+            if len(calls) > self.max_tool_calls_per_turn:
                 raise LabError("too_many_tool_calls_in_turn")
             for call in calls:
                 try:
@@ -332,7 +336,7 @@ class World:
                     arguments = None
                 result = self.execute(role, call["function"]["name"], arguments)
                 messages.append({"role": "tool", "tool_call_id": call["id"], "content": json.dumps(result)})
-                if (call["function"]["name"] in {"save_artifact", "read_artifact"}
+                if (call["function"]["name"] in {"save_artifact", "read_artifact", "save_connector_draft", "read_shared_draft"}
                         and isinstance(result, dict) and result.get("id") == role and result.get("sha256")):
                     acknowledged_artifact = True
             # The saved tool receipt is the deliverable. A final model paraphrase

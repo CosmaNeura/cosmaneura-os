@@ -7,8 +7,14 @@ from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
-from cosmas_os.api.capture_schemas import CaptureAdmissionRequest
+from cosmas_os.api.capture_schemas import (
+    CaptureAdmissionRequest,
+    EncounterPrepRequest,
+    ExistingCaptureRequest,
+    ScribeSourcePacketRequest,
+)
 from cosmas_os.api.research_schemas import Save, Search
+from cosmas_os.api.team_schemas import ConversationRequest
 from cosmas_os.api.vendor_work_schemas import VendorProposal
 
 META = "ai.cosmas/operation"
@@ -67,6 +73,17 @@ def delivery_schema(action: str) -> dict[str, Any]:
     return schema
 
 
+def prep_brief_schema() -> dict[str, Any]:
+    """Select the prepared-brief branch, never the route's default source view."""
+    schema = EncounterPrepRequest.model_json_schema()
+    schema["properties"]["view"] = {"type": "string", "const": "brief"}
+    bot = schema["properties"]["bot"]
+    bot.update(next(value for value in bot.pop("anyOf") if value.get("type") != "null"))
+    bot.pop("default", None)
+    schema["required"] = ["idempotency_key", "bot", "view"]
+    return schema
+
+
 def definitions() -> tuple[Operation, ...]:
     operations = []
     for provider in ("google", "microsoft"):
@@ -93,6 +110,24 @@ def definitions() -> tuple[Operation, ...]:
             ))
     operations.extend((
         Operation(
+            id="workspace.review", plugin="workspace", title="Review saved encounter work with a bot",
+            description="Ask an enabled bot to review its permitted saved sources. Chief can report saved work status "
+                        "without external connectors when the model is disabled. Each bot keeps its own existing skills; "
+                        "model answers and private handoffs depend on its current settings.",
+            path="/workspaces/{workspace_id}/conversation", header="X-Cosmas-Model-Contract",
+            request=ConversationRequest.model_json_schema(),
+            permission=("authenticated encounter owner", "enabled bot address and current team revision",
+                        "current bot source settings and existing skills; no new grants",
+                        "selected private analysis requires its existing consent and source permissions"),
+            health_check="workspace availability does not establish bot, model or connector readiness; inspect the exact outcome",
+            completion="saved conversation entry and request hash; running, unknown and failed are not saved answers; "
+                       "a draft or work-status reply is not approval, delivery or completion of that work",
+            recovery="/workspaces/{workspace_id}/conversation/resolve with the exact original request and model contract; "
+                     "observe the retained outcome before considering another request",
+            tests=("tests/integration/test_chief_operations.py", "tests/integration/test_model_work_admission.py"),
+            deadline_seconds=120,
+        ),
+        Operation(
             id="scribe.prepare_recording", plugin="scribe", title="Prepare a visit recording",
             description="Prepare the consent-bound Scribe session. This does not start the microphone.",
             path="/workspaces/{workspace_id}/capture/admission", header=None,
@@ -103,6 +138,50 @@ def definitions() -> tuple[Operation, ...]:
             recovery="retain idempotency key; check the existing session before another admission",
             tests=("tests/unit/test_core_capture_contract.py",
                    "tests/integration/test_scribe_source_bridge.py"), deadline_seconds=120,
+        ),
+        Operation(
+            id="scribe.read_existing", plugin="scribe", title="Read the encounter's existing Scribe recording",
+            description="Read the encounter-bound transcript review and exact source selection when available. "
+                        "This does not admit a new recording, start a microphone or share the transcript with the team.",
+            path="/workspaces/{workspace_id}/capture/existing", header=None,
+            request=ExistingCaptureRequest.model_json_schema(),
+            permission=("authenticated encounter owner", "current connected Core account and canonical encounter",
+                        "receiver-verified original session and consent"),
+            health_check="connection configuration is not an available transcript; inspect the returned status and review",
+            completion="current encounter review and exact selection when available; missing or pending review remains explicit",
+            recovery="repeat the same existing-recording read with its retained idempotency key; never create a recording to recover a read",
+            tests=("tests/unit/test_core_scribe_bridge.py", "tests/integration/test_scribe_source_bridge.py"),
+            read_only=True, deadline_seconds=120,
+        ),
+        Operation(
+            id="scribe.share_transcript", plugin="scribe", title="Share a reviewed Scribe transcript with the encounter team",
+            description="After the human reviews and explicitly chooses to share the exact transcript selection, save "
+                        "that source snapshot to this encounter. A shared source is not a generated draft or clinical sign-off.",
+            path="/workspaces/{workspace_id}/capture/source-packets", header=None,
+            request=ScribeSourcePacketRequest.model_json_schema(),
+            permission=("authenticated encounter owner", "explicit human transcript review and team-sharing confirmation",
+                        "exact source selection and current encounter revision", "current receiver-verified session and consent for a new save"),
+            health_check="verify the saved source entry IDs and revisions; a configured connection does not establish sharing",
+            completion="persisted transcript source entries bound to the selected snapshot hash; no clinical note or external delivery",
+            recovery="repeat this exact request and idempotency key; the handler returns the committed save before another source read; "
+                     "a changed selection or revision requires a new review",
+            tests=("tests/integration/test_scribe_source_bridge.py", "tests/integration/test_documentation_capability.py"),
+            deadline_seconds=120,
+        ),
+        Operation(
+            id="visit_prep.read_brief", plugin="visit_prep", title="Read the prepared visit brief",
+            description="Read the current prepared brief, its source evidence and freshness for an authorized preparation bot. "
+                        "Pending, refreshing, partial and unavailable results remain visible; this does not record a visit or generate a chat answer.",
+            path="/workspaces/{workspace_id}/capture/prep", header=None, request=prep_brief_schema(),
+            permission=("authenticated encounter owner", "enabled bot with encounter_prep skill and evidence access",
+                        "current team revision and exact core_preparation resource grant", "current connected Core account and canonical encounter"),
+            health_check="both capture and Session Prep must be configured; only a ready receipt establishes an available brief",
+            completion="current prepared-brief receipt with state, freshness, completeness and source provenance; "
+                       "the service action receipt does not mean the clinician reviewed the brief",
+            recovery="retain the idempotency key for the same read; a deliberate refresh uses a new key; "
+                     "do not present pending or refreshing as ready",
+            tests=("tests/integration/test_session_prep.py", "tests/unit/test_core_session_prep_flow.py"),
+            deadline_seconds=120,
         ),
         Operation(
             id="research.search", plugin="research", title="Look up reviewed public sources",
@@ -197,11 +276,15 @@ def tool(operation: Operation, configured: bool) -> dict[str, Any]:
 
 def plugin_catalog(settings, runtime) -> dict[str, Any]:
     enabled = {
+        "workspace": bool(getattr(settings, "workspace_available", False)),
         "google": bool(getattr(settings, "workspace_google_connection_enabled", False)
                        and getattr(runtime, "google_connection", None) is not None),
         "microsoft": bool(getattr(settings, "workspace_microsoft_connection_enabled", False)
                           and getattr(runtime, "microsoft_connection", None) is not None),
         "scribe": bool(getattr(settings, "workspace_capture_available", False)),
+        "visit_prep": bool(getattr(settings, "workspace_capture_available", False)
+                           and getattr(settings, "workspace_prep_enabled", False)
+                           and getattr(settings, "workspace_session_prep_available", False)),
         "research": bool(getattr(settings, "workspace_research_available", False)),
     }
     for vendor in ("spruce", "srfax", "documo", "efax"):
