@@ -47,7 +47,9 @@ The provider, nurse and PA reviewers inspect exact material hashes. Initial
 facts-only drafts deliberately omit responsibility and completion detail.
 Reviewers request edits; Chief reads their feedback and returns concise
 instructions. The application attaches the exact saved feedback to new
-assignments, without asking the model to repeat it. Only rejected materials
+assignments, without asking the model to repeat it or copy internal source
+IDs. The application attaches the exact admitted source set and citations;
+the model acknowledges the input hash. Only rejected materials
 are reassigned; accepted materials retain their exact review. Recipients
 publish distinct revisions and reviewers review again. Revised submissions
 require structured owner, next-action and done-when fields, rendered into the

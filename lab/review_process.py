@@ -55,7 +55,6 @@ class Assignment(Arguments):
 class Directive(Arguments):
     owner: Literal["visit_prep", "scribe", "research"]
     action: str = Field(min_length=15, max_length=350)
-    source_ids: list[str] = Field(min_length=1, max_length=12)
 
 
 class Plan(Arguments):
@@ -66,7 +65,6 @@ class Plan(Arguments):
 class Material(Arguments):
     input_sha256: str
     body: str = Field(min_length=30, max_length=3500)
-    source_ids: list[str] = Field(min_length=1, max_length=12)
 
 
 class RevisedMaterial(Material):
@@ -159,16 +157,14 @@ class ReviewJourney(Journey):
             def validate_plan(value):
                 if {t.owner for t in value.tasks} != set(targets) or len(value.tasks) != len(targets):
                     raise LabError("Return exactly one task per listed recipient; accepted drafts need no rework.")
-                if any(set(t.source_ids) != set(ids) for t in value.tasks):
-                    raise LabError("Every task must copy ALL sources[].entry_id.")
             value = invoke(self.model, self.app, self.store, self.episode, "chief",
                 "Act as Chief of Staff. Submit exactly one independent private-draft assignment for each listed recipient only. "
-                "Use all supplied source IDs and concise actions addressing the reviewer feedback. "
-                "Do not repeat feedback text in your output; the application will attach it exactly to each saved assignment.",
+                "Return concise actions addressing reviewer feedback. The application binds the full admitted source set and exact "
+                "feedback to each saved assignment; do not repeat source IDs or feedback text in your output.",
                 {"sources": sources, "recipients": list(targets), "actions": {t: actions[t] for t in targets}, "feedback": feedback}, Plan,
-                lambda: {"tasks": [{"owner": owner, "action": actions[owner], "source_ids": ids}
+                lambda: {"tasks": [{"owner": owner, "action": actions[owner]}
                     for owner in targets]}, validate=validate_plan)
-            assignments = [Assignment(**task.model_dump(), reviewer_feedback=feedback[task.owner]) for task in value.tasks]
+            assignments = [Assignment(**task.model_dump(), source_ids=ids, reviewer_feedback=feedback[task.owner]) for task in value.tasks]
             requirements = {"missing_facts": ["History, medication list and individual trial eligibility remain unverified."],
                 "expected_output": "Private initial facts draft." if self.round == 1 else "Revised private draft addressing exact reviewer feedback.",
                 "completion_criteria": ["Preserve uncertainty and cite supplied sources."] +
@@ -183,8 +179,6 @@ class ReviewJourney(Journey):
             if task.owner != role or set(task.source_ids) != set(ids):
                 raise LabError("recipient_assignment_binding_changed")
             def validate_material(value):
-                if set(value.source_ids) != set(ids):
-                    raise LabError("Copy every exact source ID into source_ids.")
                 readable_draft(value.body)
             value = invoke(self.model, self.app, self.store, self.episode, role,
                 "Execute the supplied private assignment. " +
@@ -194,17 +188,15 @@ class ReviewJourney(Journey):
                  "Name invented staff Maya for gathering missing information and invented clinician Dr Lee for reviewing it. "
                  "Unknown facts can remain explicitly unavailable with an assigned next step; don't require inventing facts to finish. "
                  "This case uses typed sources, so do not introduce audio recording instructions. ") +
-                "Copy the exact source IDs in source_ids only; do not put internal IDs or hashes into the readable body. "
+                "The application attaches the exact admitted sources; do not put internal IDs or hashes into the readable body. "
                 "Explain the source limitations without adding facts.",
                 {"sources": sources, "task": task.model_dump(), "round": self.round},
                 RevisedMaterial if self.round > 1 else Material,
-                lambda: {"body": replay_material(role, 1), "source_ids": ids, **({
+                lambda: {"body": replay_material(role, 1), **({
                     "owner": "Invented staff Maya collects history, dates and medication list; invented clinician Dr Lee reviews the answers and draft.",
                     "next_action": "Maya asks the listed questions, marks each answered or unavailable, then hands the answers to Dr Lee.",
                     "done_when": "Dr Lee has reviewed the draft based on listed sources; unanswered items remain unknown with an assigned next step. Any referral is separately authorized."
                 } if self.round > 1 else {})}, validate=validate_material)
-            if set(value.source_ids) != set(ids):
-                raise LabError("material_sources_changed")
             referenced_trials = set(re.findall(r"NCT\d{8}", value.body))
             allowed_trials = set(re.findall(r"NCT\d{8}", "\n".join(s["content"] for s in sources)))
             if not referenced_trials <= allowed_trials:
