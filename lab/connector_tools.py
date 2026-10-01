@@ -55,6 +55,7 @@ def visible(role, name):
 
 class ConnectorWorld(World):
     schemas = ALL_SCHEMAS
+    max_tool_calls_per_turn = 12
     tool_scope = ("Only offline, invented-data account/research observations and private fax proposals are available. "
                   "There are no recording, permission, approval, sending, booking or payment tools. ")
     extra_instructions = (

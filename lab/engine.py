@@ -160,6 +160,7 @@ vendor operation is repeated here, and the next request rechecks authority.
 class World:
     schemas = SCHEMAS
     jobs = JOBS
+    max_tool_calls_per_turn = 8
     tool_scope = "No clinical decisions, approval, sending or account tools are available. "
     extra_instructions = ""
 
@@ -326,7 +327,7 @@ class World:
                                      "If a teammate failed, report the blocker; do not invent a dependency."})
                     continue
                 return
-            if len(calls) > 8:
+            if len(calls) > self.max_tool_calls_per_turn:
                 raise LabError("too_many_tool_calls_in_turn")
             for call in calls:
                 try:
