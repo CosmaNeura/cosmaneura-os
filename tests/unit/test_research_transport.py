@@ -321,6 +321,7 @@ def test_trial_details_keep_registry_phase_intervention_and_individual_site_stat
     protocol = value["studies"][0]["protocolSection"]
     protocol.update({
         "statusModule": {"overallStatus": "RECRUITING", "lastUpdatePostDateStruct": {"date": "2026-09-20"}},
+        "conditionsModule": {"conditions": ["Myocardial Infarction", "Heart Failure"]},
         "designModule": {"phases": ["PHASE1", "PHASE2"]},
         "armsInterventionsModule": {"interventions": [{"type": "BIOLOGICAL", "name": "Invented cell therapy"}]},
         "contactsLocationsModule": {"locations": [
@@ -345,7 +346,8 @@ def test_trial_details_keep_registry_phase_intervention_and_individual_site_stat
     assert dict(requests[0].url.params) == {
         "query.term": "Invented cell therapy", "pageSize": "5", "format": "json", "countTotal": "true"}
     assert {field["label"]: field["text"] for field in row["fields"]} == {
-        "Recruitment status": "RECRUITING", "Phase": "PHASE1; PHASE2",
+        "Recruitment status": "RECRUITING", "Conditions": "Myocardial Infarction; Heart Failure",
+        "Phase": "PHASE1; PHASE2",
         "Interventions": "Type: BIOLOGICAL; Name: Invented cell therapy",
         "Locations": "Facility: Invented Trial Center; City: Example City; State: Example State; "
                      "Country: United States; Site status: ACTIVE_NOT_RECRUITING | "
@@ -370,6 +372,12 @@ def test_trial_missing_optional_details_do_not_invent_site_recruitment_or_phase(
 
 
 @pytest.mark.parametrize("module,details", [
+    ("conditionsModule", {"conditions": "Myocardial Infarction"}),
+    ("conditionsModule", {"conditions": {"name": "Myocardial Infarction"}}),
+    ("conditionsModule", {"conditions": [1]}),
+    ("conditionsModule", {"conditions": [True]}),
+    ("conditionsModule", {"conditions": [None]}),
+    ("conditionsModule", None),
     ("designModule", {"phases": "PHASE1"}), ("designModule", {"phases": [1]}),
     ("armsInterventionsModule", {"interventions": {"name": "Invented"}}),
     ("armsInterventionsModule", {"interventions": [None]}),
@@ -404,6 +412,22 @@ def test_trial_long_site_and_intervention_lists_are_marked_shortened_within_exis
     assert len(row["fields"]) <= 8 and sum(len(field["text"]) for field in row["fields"]) <= 3000
     assert len(row["excerpt"]) == 2500 and row["truncated"] is True
     assert row["sha256"] == research_digest({key: item for key, item in row.items() if key != "sha256"})
+
+
+def test_trial_conditions_keep_source_terms_and_limits_without_inference_from_query():
+    value = trial()
+    value["studies"][0]["protocolSection"]["conditionsModule"] = {
+        "conditions": [r"Invented LVEF \<40% cohort", "Invented registry condition"]}
+    row = lookup("clinical_trials", value, "heart attack stem cell treatment")[0]
+    assert row["fields"] == [{"label": "Conditions",
+        "text": "Invented LVEF <40% cohort; Invented registry condition"}]
+    assert "heart attack" not in row["fields"][0]["text"]
+    assert row["truncated"] is False
+    adapter._NEXT_READ.clear()
+    value["studies"][0]["protocolSection"]["conditionsModule"]["conditions"] *= 100
+    row = lookup("clinical_trials", value)[0]
+    assert len(row["fields"][0]["text"]) == 750 and row["truncated"] is True
+    assert sum(len(field["text"]) for field in row["fields"]) <= 3000
 
 
 def npi():

@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "role": "research",
+  "lessons": [
+    {
+      "id": "research-population-evidence",
+      "finding": "A clinical-trial keyword hit does not establish the population studied or individual eligibility. Preserve registry conditions, exact source identity, recruitment status, site status and eligibility together; never derive conditions from the query.",
+      "applies_to": ["research", "chief", "visit_prep"],
+      "evidence": ["src/cosmas_os/adapters/public_research.py", "tests/unit/test_research_transport.py"],
+      "applied_scenarios": ["condition_handoff", "missing_conditions", "malformed_conditions", "limited_search"]
+    },
+    {
+      "id": "scribe-downstream-source-lineage",
+      "finding": "Shared with the Prep/Scribe team: retrieving or saving a source is insufficient if downstream context drops it. Compare every selected field and exact citation/hash with the real prepared analysis passage and with the same passage after database reopen.",
+      "applies_to": ["research", "scribe", "visit_prep", "chief"],
+      "evidence": ["src/cosmas_os/application/research_analysis.py", "lab/research_capability.py"],
+      "applied_scenarios": ["condition_handoff", "limited_search", "altered_selection"]
+    },
+    {
+      "id": "operations-receipt-semantics",
+      "finding": "Shared by Operations: a saved receipt is a specific local result, not proof of downstream completion. A research lookup is not clinician review, study enrollment, confirmed eligibility or established treatment benefit. Failed or empty lookups create no invented source packet.",
+      "applies_to": ["research", "chief", "follow_up"],
+      "evidence": ["lab/research_capability.py", "src/cosmas_os/application/research.py"],
+      "applied_scenarios": ["condition_handoff", "source_unavailable", "empty_search"]
+    },
+    {
+      "id": "shared-review-binding",
+      "finding": "Review is tied to exact durable source and save hashes. A source not returned by the lookup cannot be saved, and an altered analysis anchor cannot hydrate the selected packet. Duplicate requests reuse the same saved entry and do not repeat source I/O.",
+      "applies_to": ["research", "scribe", "chief", "follow_up"],
+      "evidence": ["lab/research_capability.py", "tests/unit/test_research_analysis.py"],
+      "applied_scenarios": ["altered_selection", "condition_handoff"]
+    }
+  ]
+}

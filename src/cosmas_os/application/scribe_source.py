@@ -80,7 +80,16 @@ def packet_content(view, selected):
         )
     for segment in view.working.segments:
         lines.append(
-            f"\n[{segment.start_ms}–{segment.end_ms} ms · {segment.speaker_role}] {segment.content}"
+            f"\nSource segment: {segment.source_segment_id}; version {segment.source_segment_version}; "
+            f"source language: {segment.source_locale}; resolution: {segment.resolution}"
+        )
+        if segment.resolution == "spanish_translation":
+            lines.append(
+                f"Reviewed translation: {segment.translation_id}; version {segment.translation_version}; "
+                f"review: {segment.translation_review_id}"
+            )
+        lines.append(
+            f"[{segment.start_ms}–{segment.end_ms} ms · {segment.speaker_role}] {segment.content}"
         )
     content = "\n".join(lines)
     if len(content) > 28000:

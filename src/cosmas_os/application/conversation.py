@@ -224,15 +224,22 @@ def ask(
         raise ws.WorkspaceError("workspace_history_limit")
     if not content or len(content) > 4000:
         raise ws.WorkspaceError("invalid_entry", 400)
+    snapshot = model_work.project_workspace(s, ws.read(s, box, owner, wid))
     context = build_context(
-        model_work.project_workspace(s, ws.read(s, box, owner, wid)),
+        snapshot,
         version,
         settings,
         settings["role"],
         content,
         agent_id=bot.agent_id,
     )
-    reply = generate_reply(context)
+    if settings["role"] == "chief":
+        from cosmas_os.adapters.chief_review import review
+        from cosmas_os.application.operations_status import linked
+
+        reply = review(context, operational_rows=linked(s, box, owner, wid, snapshot, settings))
+    else:
+        reply = generate_reply(context)
     w.revision += 1
     entry = WorkspaceEntry(
         workspace_id=wid,
