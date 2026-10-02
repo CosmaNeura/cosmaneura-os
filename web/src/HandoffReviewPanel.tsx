@@ -56,10 +56,10 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
   const confirmedWithheld=withheldReceipt?.workspaceId===workspace.id&&withheldReceipt.handoffId===handoff.id?withheldReceipt:null;
   const sourceWithheld=identityChanged||journalChanged||recovery.access===null||!!confirmedWithheld||workspace.entries.some(entry=>(entry.id===handoff.result_entry_id||entry.id===pending?.result.entryId||entry.id===recoveryRecord?.result.result_entry_id)&&
     (entry.google_source_state==='unavailable'||entry.calendar_source_state==='unavailable'));
-  const stale=handoff.review_status==='stale'||refusal?.freshAssignment===true||sourceWithheld;
+  const restoredChanged=!!recoveryRecord&&!handoffRecoveryMatches(recoveryRecord,workspace,handoff);
+  const stale=handoff.review_status==='stale'||refusal?.freshAssignment===true||sourceWithheld||restoredChanged;
   const receipt=proof&&!stale?[saved,retained].find(value=>validHandoffReviewReceipt(value)&&value.attempt_id===proof.attemptId&&
     value.result_entry_id===proof.entryId&&value.result_sha256===proof.sha256):undefined;
-  const restoredChanged=!!recoveryRecord&&!handoffRecoveryMatches(recoveryRecord,workspace,handoff);
   const result=sourceWithheld?null:pending?.result.content?pending.result:restoredChanged?null:proof;
   const revision=receipt?.decision==='changes_requested'?(workspace.handoffs?.find(value=>value.id===receipt.revision_handoff_id)||
     workspace.handoffs?.find(value=>(value as ReviewableHandoff).revision_request?.parent_handoff_id===handoff.id&&
@@ -148,6 +148,13 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
       setError('Current access and saved history could not be confirmed. The private request is retained.');}}
     finally{if(mounted.current)setBusy(false);}
   }
+  async function discardRetainedFeedback(){
+    if(pending||busy||!restoredChanged||sourceWithheld||(recoveryLocked??locked)||recovery.blocked)return;
+    setBusy(true);setError('');
+    try{await recovery.commit(null);if(!mounted.current)return;setRecoveryRecord(null);setFeedback('');setAskingChanges(false);}
+    catch{if(mounted.current)setError('The retained feedback could not be cleared from private storage. It remains available for recovery.');}
+    finally{if(mounted.current)setBusy(false);}
+  }
   if(accessLost||identityChanged||journalChanged)return <section className="handoff-review" aria-label="Review completed draft"><p role="alert">Workspace access is unavailable. The draft is withheld from this view.</p></section>;
   return <section className="handoff-review" aria-label="Review completed draft" aria-busy={checking||busy||recovery.phase==='checking'}>
     <h3 tabIndex={-1}>{pending?.recipientName??handoff.recipient_name} draft</h3>
@@ -166,6 +173,7 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
     }}/>
     <p>Read the saved draft, then accept it for next work or request changes.</p>
     {restoredChanged&&!sourceWithheld&&<p role="alert">This retained change request belongs to an earlier draft. Keep its text for fresh work; it cannot approve the current result.</p>}
+    {restoredChanged&&!sourceWithheld&&!pending&&<button type="button" disabled={busy||(recoveryLocked??locked)||recoveryUnresolved} onClick={()=>void discardRetainedFeedback()}>Discard retained feedback</button>}
     {checking&&!pending&&<p role="status">Checking the saved draft…</p>}
     {handoff.status!=='completed'&&!pending&&<p role="status">{handoff.status==='queued'?'Draft queued':handoff.status==='running'?'Preparing draft…':'Draft needs attention. Check the assignment before trying again.'}</p>}
     {handoff.status==='completed'&&!checking&&!proof&&!pending&&<p role="alert">The complete saved draft could not be verified. Refresh the encounter before reviewing it.</p>}

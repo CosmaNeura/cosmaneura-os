@@ -93,6 +93,17 @@ it('does not authorize retained text against a different result or guessed encou
  await wait(()=>expect(host.textContent).toContain('belongs to an earlier draft'));expect(button('Accept draft for next work').disabled).toBe(true);expect((host.querySelector('textarea') as HTMLTextAreaElement).value).toBe(record.feedback);
  await reopen({...workspace,appointment_id:reviewUuid(92)});await click('Restore handoff review draft');await wait(()=>expect(denied).toHaveBeenCalled());expect(host.textContent).toContain('local record is retained');
 });
+it('clears only nonpending historical feedback from encrypted storage before accepting the verified current draft',async()=>{
+ const record=await reviewRecord(initial,'feedback'),old=initial.handoffs![0],editor=`handoff-review:${old.id}` as const;
+ await journal.load(address());await journal.persist(address(),{kind:'editor',workspaceId:initial.id,editor,data:record,pending:null});
+ initial={...initial,handoffs:[{...old,attempt_id:reviewUuid(81),attempts:[{id:reviewUuid(81),number:2,status:'completed',error_code:null}]}]};workspace=initial;
+ const fetcher=vi.fn(async(_u:string,init:RequestInit)=>json(await reviewReply(initial,JSON.parse(String(init.body)))));vi.stubGlobal('fetch',fetcher);
+ await mount();await click('Restore handoff review draft');await wait(()=>expect(button('Discard retained feedback').disabled).toBe(false));
+ expect(button('Accept draft for next work').disabled).toBe(true);expect(button('Ask Chief for fresh work').disabled).toBe(false);
+ await click('Discard retained feedback');await wait(async()=>expect(await journal.load(address())).toBeNull());
+ expect(fetcher).not.toHaveBeenCalled();await click('Accept draft for next work');await wait(()=>expect(host.textContent).toContain('Draft accepted'));
+ expect(fetcher).toHaveBeenCalledOnce();expect(JSON.parse(String(fetcher.mock.calls[0][1].body)).attempt_id).toBe(reviewUuid(81));
+});
 it.each([401,403,404,426])('keeps encrypted pending work but hides plaintext when fresh recovery access is denied %s',async status=>{
  vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new TypeError('lost')));await mount();await createChange();await pendingReady();await reopen();
  if(!access)throw new Error('No fixture access');access.authorize=vi.fn().mockRejectedValue(new WorkspaceApiError(status));await mount();await click('Restore handoff review draft');
