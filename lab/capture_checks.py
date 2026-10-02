@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import subprocess
+import tempfile
 from contextlib import contextmanager
 
 CAPTURE_TESTS = [
@@ -14,6 +15,7 @@ CAPTURE_TESTS = [
     "src/flow/encrypted-store.test.ts", "src/configured/flow/controller.integration.test.ts",
     "src/configured/flow/automatic-controller.test.ts", "src/configured/native/continuous-source.test.ts",
     "src/storage/encrypted-indexeddb.test.ts", "src/queue/capture-queue.test.ts",
+    "src/configured/native/nurse-operational-recording.test.ts",
 ]
 
 
@@ -34,24 +36,51 @@ def dependencies(cwd, shared):
 
 
 def run_capture_checks(args):
-    from lab.runner import REPO, run_owned_child, write_report
+    from lab.runner import write_report
 
-    root = args.output / "capture-checks"
-    root.mkdir()
     report = json.loads((args.output / "report.json").read_text())
     episodes_passed = report["status"] == "passed"
     report["status"] = "running"
     write_report(args.output, report)
+    evidence = run_capture_suites(args.output / "capture-checks",
+        stress=getattr(args, "capture_stress_checks", False))
+    report = json.loads((args.output / "report.json").read_text())
+    report["capture_checks"] = {"suites": evidence["suites"], "limits": evidence["limits"]}
+    passed = evidence["passed"]
+    report["status"] = "passed" if passed and episodes_passed else "failed"
+    write_report(args.output, report)
+    return 0 if passed else 1
+
+
+def source_files():
+    from lab.runner import REPO
+
+    paths = subprocess.check_output(["git", "ls-files", "--cached", "--others", "--exclude-standard",
+        "clients/capture", "clients/desktop", "web", "lab/capture_checks.py", "lab/recording.py"],
+        cwd=REPO, text=True).splitlines()
+    return {path: hashlib.sha256((REPO / path).read_bytes()).hexdigest()
+        for path in sorted(set(paths)) if (REPO / path).is_file()}
+
+
+def run_capture_suites(root, *, stress=False):
+    """Qualify recording separately, without a typed-note encounter or model call."""
+    from lab.runner import REPO, run_owned_child
+
+    root.mkdir(parents=True, exist_ok=False)
+    before = source_files()
     node = shutil.which("node")
     env = {name: os.environ[name] for name in ("HOME", "USER", "LOGNAME", "TMPDIR", "PATH", "DEVELOPER_DIR") if name in os.environ}
-    env.update(CI="true", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8")
+    env.update(CI="true", LANG="en_US.UTF-8", LC_ALL="en_US.UTF-8", NSUnbufferedIO="YES")
+    env["COSMABOT_RECORDING_EVIDENCE_DIR"] = str(root / "operational")
     suites = [
         ("capture_pipeline", REPO / "clients/capture", CAPTURE_TESTS,
          "Generated PCM, encrypted queue, interrupted upload, renewal and restoration; synthetic receiver."),
         ("desktop_recorder", REPO / "clients/desktop", ["recorder"],
-         "Actual desktop recorder lifecycle with synthetic native bridge and storage."),
+         "Actual mounted React recording buttons and desktop recorder lifecycle; synthetic native input, admission and custody protector."),
+        ("recording_ui", REPO / "web", ["src/CapturePanel.test.tsx", "src/native-capture-runtime.test.ts",
+         "src/EncounterCaptureLifecycle.test.tsx", "src/CaptureTranscriptEditor.test.tsx"],
+         "Mounted product recording controls, optional DOB, consent, recovery, and transcript review; synthetic service/runtime boundaries."),
     ]
-    stress = getattr(args, "capture_stress_checks", False)
     if stress:
         suites.append(("capture_endurance", REPO / "clients/capture",
                        ["src/configured/flow/automatic-controller.test.ts"],
@@ -70,10 +99,12 @@ def run_capture_checks(args):
                 count = data.get("numPassedTests", 0) + data.get("numFailedTests", 0)
                 passed = code == 0 and data.get("success") is True and count > 0 and data.get("numFailedTests") == 0
                 row = {"name": name, "passed": passed, "tests": count,
-                       "skipped": data.get("numPendingTests", 0), "exit_code": code, "scope": scope}
+                       "skipped": data.get("numPendingTests", 0), "exit_code": code, "scope": scope,
+                       "command": command, "cwd": str(cwd)}
             except (OSError, subprocess.TimeoutExpired, ValueError) as error:
                 row = {"name": name, "passed": False, "error": type(error).__name__, "scope": scope}
         results.append(row)
+        print(f"{name}: {'passed' if row['passed'] else 'FAILED'} ({row.get('tests', 0)} tests)", flush=True)
     native = [("native_audio", "clients/desktop/native-audio",
                "AlignedMeetingPCMTests|ContinuousCaptureWindowTests|AudioDeliveryTests", 240,
                "Real Swift PCM alignment/mixing and buffer boundaries using generated signals; no OS microphone or meeting capture.")]
@@ -81,29 +112,48 @@ def run_capture_checks(args):
         native.append(("native_endurance", "clients/capture/native-recording-pcm",
                        "LongSourceWindowTests|NativeInputFrameLimitTests|NativeRecordingPCMSinkTests|NativeRecordingContinuationTests", 900,
                        "Three-hour generated PCM through native encryption and fourteen leases; accelerated-clock input, route/background interruption and storage failures."))
-    for name, package, selector, timeout, scope in native:
-        command = ["/usr/bin/swift", "test", "--package-path", str(REPO / package),
-                   "--scratch-path", str(root / (name + "-build")), "--filter", selector]
-        with (root / (name + ".log")).open("w") as log:
-            try:
-                code = run_owned_child(command, env=env, log=log, timeout=timeout)
-                count, failures = swift_counts((root / (name + ".log")).read_text())
-                results.append({"name": name, "passed": code == 0 and count > 0 and failures == 0,
-                                "tests": count, "exit_code": code, "scope": scope})
-            except (OSError, subprocess.TimeoutExpired) as error:
-                results.append({"name": name, "passed": False, "error": type(error).__name__, "scope": scope})
-    paths = subprocess.check_output(["git", "ls-files", "clients/capture", "clients/desktop"], cwd=REPO, text=True).splitlines()
-    hashes = {path: hashlib.sha256((REPO / path).read_bytes()).hexdigest() for path in paths if (REPO / path).is_file()}
-    evidence = {"suites": results, "source_files": hashes,
+    # File-provider metadata in Desktop build products can prevent ad-hoc signing.
+    # Use owned temporary build storage; keep all logs and results in the evidence.
+    scratch = tempfile.TemporaryDirectory(prefix="cosmabot-recording-swift-")
+    try:
+        for name, package, selector, timeout, scope in native:
+            results.append(run_native_suite(root, scratch.name, name, package, selector, timeout, scope, env))
+    finally:
+        scratch.cleanup()
+    after = source_files()
+    operational = []
+    for path in sorted((root / "operational").rglob("*.json")):
+        operational.append({"path": str(path.relative_to(root)), "scenario": json.loads(path.read_text())})
+    evidence = {"suites": results, "source_files": before, "source_unchanged": before == after,
+        "operational_scenarios": operational,
+        "passed": before == after and all(row["passed"] for row in results),
         "limits": ["No physical microphone, real-time endurance, OS audio routing or speech-recognition accuracy is proven.",
+                   "Service admission, native audio input and upload receivers are synthetic; product controllers, encryption and queues execute.",
                    "These recorder checks are separate from the typed-note agent encounter."]}
+    if before != after:
+        evidence["source_after"] = after
     (root / "summary.json").write_text(json.dumps(evidence, indent=2) + "\n")
-    report = json.loads((args.output / "report.json").read_text())
-    report["capture_checks"] = {"suites": results, "limits": evidence["limits"]}
-    passed = all(row["passed"] for row in results)
-    report["status"] = "passed" if passed and episodes_passed else "failed"
-    write_report(args.output, report)
-    return 0 if passed else 1
+    return evidence
+
+
+def run_native_suite(root, scratch, name, package, selector, timeout, scope, env):
+    from pathlib import Path
+
+    from lab.runner import REPO, run_owned_child
+
+    command = ["/usr/bin/swift", "test", "--package-path", str(REPO / package),
+               "--scratch-path", str(Path(scratch) / (name + "-build")), "--filter", selector]
+    with (root / (name + ".log")).open("w") as log:
+        try:
+            code = run_owned_child(command, env=env, log=log, timeout=timeout)
+            count, failures = swift_counts((root / (name + ".log")).read_text())
+            row = {"name": name, "passed": code == 0 and count > 0 and failures == 0,
+                   "tests": count, "exit_code": code, "scope": scope, "command": command}
+        except (OSError, subprocess.TimeoutExpired) as error:
+            row = {"name": name, "passed": False, "error": type(error).__name__, "scope": scope,
+                   "command": command}
+    print(f"{name}: {'passed' if row['passed'] else 'FAILED'} ({row.get('tests', 0)} tests)", flush=True)
+    return row
 
 
 def swift_counts(output):

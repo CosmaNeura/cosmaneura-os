@@ -304,6 +304,15 @@ tested separately to three hours. These use accelerated clocks, not three hours
 of physical recording. Reports count executed tests separately from skipped tests,
 and include both XCTest and Swift Testing results.
 
+For recording alone, run `python -m lab.recording --output /private/tmp/new-recording-evidence`
+from this repository, with the bundled Node 24 runtime first in `PATH`. Add
+`--stress` for the one-hour and three-hour generated-PCM tests. This requires no
+model calls, account sign-in, microphone or attached phone. It includes the
+clinician control scenarios, mounted recording UI tests and native interruption
+recovery, retains exact commands and before/after source hashes, and fails if
+source changes during qualification. Native builds use owned temporary storage
+to avoid Desktop file-provider metadata interfering with test-bundle signing.
+
 Every report distinguishes scripted replay, real model work, synthetic human
 decisions, adapter requests and recorder qualification. Fault results, including
 failed attempts, are retained rather than reclassified by text rescoring.
