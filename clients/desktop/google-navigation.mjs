@@ -15,7 +15,7 @@ export function validGoogleNavigationUrl(href,config) {
     const required=['access_type','client_id','code_challenge','code_challenge_method','include_granted_scopes','prompt','redirect_uri','response_type','scope','state'];
     return [...q.keys()].sort().join(',')===required.join(',')&&required.every(k=>q.getAll(k).length===1)&&
       q.get('client_id')===config.clientId&&q.get('redirect_uri')===config.callbackUri&&q.get('response_type')==='code'&&
-      ['openid email https://www.googleapis.com/auth/gmail.metadata','openid email https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/calendar.events.readonly'].includes(q.get('scope'))&&q.get('access_type')==='offline'&&q.get('prompt')==='consent select_account'&&
+      ['openid email https://www.googleapis.com/auth/gmail.metadata','openid email https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/calendar.events.readonly','openid email https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/gmail.readonly'].includes(q.get('scope'))&&q.get('access_type')==='offline'&&q.get('prompt')==='consent select_account'&&
       q.get('include_granted_scopes')==='false'&&q.get('code_challenge_method')==='S256'&&['state','code_challenge'].every(k=>/^[A-Za-z0-9_-]{43}$/.test(q.get(k)||''));
   }catch{return false;}
 }

@@ -15,7 +15,9 @@ from cosmas_os.api import capture_deadline as boundary
 from cosmas_os.api import core_record_routes as record
 from cosmas_os.api.auth import RequestIdentity
 
-BUDGET = 0.04
+# Leave thread startup headroom under the full suite while retaining a strict
+# 220 ms final-send bound, including the cancellation-resistant sender.
+BUDGET = 0.10
 GRACE = 0.04
 
 

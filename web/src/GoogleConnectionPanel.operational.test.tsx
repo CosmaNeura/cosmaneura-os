@@ -19,7 +19,7 @@ beforeEach(()=>{
   vi.resetAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
   identity={mode:'clerk_jwt',getToken:vi.fn()};host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 const mount=(owner=identity)=>act(async()=>root.render(<GoogleConnectionPanel identity={owner} onAuthenticationLost={vi.fn()}/>));
 const button=(label:string)=>[...host.querySelectorAll('button')].find(item=>item.textContent===label);
 const click=(label:string)=>act(async()=>{expect(button(label)).toBeDefined();expect(button(label)!.disabled).toBe(false);button(label)!.click();});
@@ -128,4 +128,33 @@ it('keeps the dated snapshot after cancelling a refresh and rejects its late res
   expect(host.textContent).not.toContain('Late replacement');expect(host.textContent).toContain('Read cancelled');
   await click('Email');expect(host.textContent).toContain('Invented message subject');
   expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status','mail','calendar','calendar']);
+});
+
+it('opens email work without reading a body or requesting more permission',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');
+ const opened=vi.fn();vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected);
+ await act(async()=>root.render(<GoogleConnectionPanel identity={identity} onAuthenticationLost={vi.fn()} onOpenMessageWork={opened}
+  messageWork={<p>Selected email work area</p>}/>));
+ expect(host.textContent).toContain('Full email work asks for separate access');
+ await click('Work with email');expect(opened).toHaveBeenCalledTimes(1);
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status']);
+});
+
+it('routes deliberate full-read permission through the existing connection handoff and clears older headers',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected).mockResolvedValueOnce(inbox).mockResolvedValueOnce(link);
+ await act(async()=>root.render(<GoogleConnectionPanel identity={identity} onAuthenticationLost={vi.fn()}
+  messageWork={controls=><button disabled={controls.fullMailAccessBusy} onClick={controls.requestFullMailAccess}>Add full email access</button>}/>));
+ await click('Read recent email');expect(host.textContent).toContain('Invented message subject');
+ await click('Add full email access');expect(host.textContent).not.toContain('Invented message subject');
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(call=>call[1])).toEqual(['status','mail','start_full_mail']);
+ expect(host.querySelector('a')?.textContent).toBe('Continue with Google');
+});
+
+it('keeps full email work dark without its explicit build flag',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','false');
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected);
+ await act(async()=>root.render(<GoogleConnectionPanel identity={identity} onAuthenticationLost={vi.fn()} onOpenMessageWork={vi.fn()}
+  messageWork={<p>Full message contents must remain absent</p>}/>));
+ expect(button('Work with email')).toBeUndefined();expect(host.textContent).not.toContain('Full message contents must remain absent');
 });

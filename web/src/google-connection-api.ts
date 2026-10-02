@@ -6,7 +6,7 @@ import {assertCurrentDesktopSession, workspaceAuthHeaders} from './workspace-aut
 import {parseVendorJson} from './vendor-contract';
 
 export const GOOGLE_CONNECTION_BUILD=WORKSPACE_BUILD&&WORKSPACE_AUTHENTICATED_BUILD&&import.meta.env.VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED==='true';
-export type GoogleAction='status'|'start'|'disconnect'|'mail'|'calendar';
+export type GoogleAction='status'|'start'|'start_full_mail'|'disconnect'|'mail'|'calendar';
 export type GoogleAccount={label:string;email:string};
 export type GoogleStatus={state:'connected'|'sign_in_required'|'sign_in_pending'|'completing_sign_in';account:GoogleAccount|null;connected_at:string|null;capabilities?:{mail:boolean;calendar:boolean}};
 export type GoogleStart={authorization_url:string;expires_at:string};
@@ -23,7 +23,8 @@ export function validGoogleAuthorizationUrl(value:unknown):value is string {
     googleNavigationConfig(params.get('client_id')??'',params.get('redirect_uri')??''));}catch{return false;}
 }
 export function validateGoogleResponse(value:unknown,action:GoogleAction):GoogleStatus|GoogleStart|GoogleView|{state:'disconnected'} {
-  if(action==='start'&&closed(value,'authorization_url,expires_at')&&validGoogleAuthorizationUrl(value.authorization_url)&&instant(value.expires_at)&&
+  if((action==='start'||action==='start_full_mail')&&closed(value,'authorization_url,expires_at')&&validGoogleAuthorizationUrl(value.authorization_url)&&
+    (action!=='start_full_mail'||new URL(value.authorization_url).searchParams.get('scope')?.split(' ').includes('https://www.googleapis.com/auth/gmail.readonly'))&&instant(value.expires_at)&&
     Date.parse(value.expires_at)>Date.now()&&Date.parse(value.expires_at)<=Date.now()+610000)return value as GoogleStart;
   if(action==='disconnect'&&closed(value,'state')&&value.state==='disconnected')return {state:'disconnected'};
   if(action==='status'&&(closed(value,'state,account,connected_at')||closed(value,'state,account,connected_at,capabilities'))&&['connected','sign_in_required','sign_in_pending','completing_sign_in'].includes(String(value.state))&&

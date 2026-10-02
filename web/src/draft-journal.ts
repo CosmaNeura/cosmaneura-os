@@ -18,6 +18,7 @@ import { validateVendorSetupRecovery } from "./vendor-setup-recovery";
 import { validateInbox } from "./inbox-contract";
 import { validateInboxRecovery } from "./inbox-recovery";
 import { validInboxHandoffActor, validateInboxHandoffRecovery } from "./inbox-handoff-recovery";
+import { validGoogleMessageScope, validateGoogleMessageRecovery } from "./google-message-recovery";
 
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
@@ -25,7 +26,7 @@ export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevisi
 export type EditorKind = "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | "follow-up-proposal" | "appointments" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
-export type AccountEditorKind = "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | `practice-result:${string}` | `vendor-work:${string}`;
+export type AccountEditorKind = "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | `practice-result:${string}` | `vendor-work:${string}`;
 export type AccountEditorDraft = {kind:"account-editor";editor:AccountEditorKind;data:unknown;pending:string|null};
 export const accountEditorAddress = (editor: AccountEditorKind) => `account-editor:${editor}`;
 export type RecoveredDraft = TeamDraft | NotebookDraft | EditorDraft | AccountOperationDraft | AccountEditorDraft;
@@ -84,7 +85,7 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   const draft = value.body as RecoveredDraft;
   if (draft && draft.kind === "account-editor") {
     if (Object.keys(draft).sort().join(",")!=="data,editor,kind,pending" ||
-        typeof draft.editor!=="string" || !(draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" ||
+        typeof draft.editor!=="string" || !(draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" ||
           draft.editor.startsWith("practice-result:") && UUID.test(draft.editor.slice("practice-result:".length)) ||
           draft.editor.startsWith("vendor-work:") && UUID.test(draft.editor.slice("vendor-work:".length))) ||
         address!==accountEditorAddress(draft.editor) || draft.pending!==null && !UUID.test(draft.pending) ||
@@ -119,6 +120,15 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if (draft?.kind === "account-editor" && draft.editor === "google-messages") {
+    if (draft.pending !== null) throw new DraftStoreError("integrity");
+    try {
+      const scope = (draft.data as {scope?:unknown}).scope;
+      if (!validGoogleMessageScope(scope)) throw new DraftStoreError("integrity");
+      await validateGoogleMessageRecovery(draft.data, scope);
+    } catch { throw new DraftStoreError("integrity"); }
+    return;
+  }
   if(draft?.kind==='editor'&&draft.editor==='scribe-source'){
     if(!validScribeSourceRequest(draft.data)||draft.pending!==draft.data.idempotency_key)throw new DraftStoreError('integrity');
     return;

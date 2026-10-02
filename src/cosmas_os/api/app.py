@@ -1969,7 +1969,7 @@ register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_
                         session_factory=lambda: new_capture_session(SessionLocal))
 
 allowed_headers = ["X-Cosmas-Handoff-Review", "X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
-allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection"])
+allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection", "X-Cosmas-Google-Messages"])
 allowed_headers.extend(["X-Cosmas-Record-Contract", "X-Cosmas-Connection-Contract", "X-Cosmas-Activity-Contract"])
 if settings.cosmas_env == "synth_os" and settings.auth_mode == "synth_headers":
     allowed_headers.extend(["X-Box-Id", "X-Actor-Principal-Id"])
@@ -2008,6 +2008,15 @@ app.include_router(microsoft_connection_router(
     identity_dependency=_identity, workspace_gate=_workspace_gate))
 app.add_middleware(GoogleConnectionBoundary)
 app.add_middleware(MicrosoftConnectionBoundary)
+
+from cosmas_os.api.google_message_routes import GoogleMessageBoundary  # noqa: E402
+from cosmas_os.api.google_message_routes import router as google_message_router  # noqa: E402
+
+app.include_router(google_message_router(
+    runtime=lambda: getattr(app.state, "google_connection", None), configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(GoogleMessageBoundary)
 
 
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402

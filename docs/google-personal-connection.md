@@ -1,5 +1,52 @@
 # Personal Google Workspace connection
 
+## Reviewed email work
+
+The separate, default-off `WORKSPACE_GOOGLE_MESSAGE_ENABLED` service enables
+explicit full-message consent and reviewed email work. Its matching renderer flag
+is `VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED`; the operational beta feature profile
+includes that flag, while the limited first-owner profile leaves it off. Existing
+metadata-only accounts remain usable and must deliberately add full-message access
+before this workflow can read message bodies. Sign-in alone does not qualify it.
+
+**Work with email** lists bounded Inbox headers, reads one server-observed message,
+and asks the clinician to confirm the current patient/visit and exact untrusted
+source. DOB remains optional. Saving creates a separate `google_message` source;
+it does not overwrite the clinical note. **Ask Chief** prepares an editable request
+referencing that saved source. Chief and its specialists use the same verified
+source and human review/revision loop as other permitted encounter evidence.
+
+Supported bodies are complete, bounded plain text, including an explicitly paired
+plain alternative to HTML. Independent HTML parts, attachments, ambiguous MIME,
+invalid encoding or content exceeding 5,000 characters require human attention;
+they are never silently shortened into a complete source. There is no attachment
+fetch, HTML rendering, sending, label mutation or automatic model ingestion.
+
+Snapshots bind the exact observed message, account, semantic OAuth grant and read
+ordinal. Revocation, changed consent or a later read of that message withholds old
+source and derived draft contents at admission, tool reads, settlement and workspace
+projection. Token refresh alone preserves a semantically unchanged grant. The
+ordinary clinical note remains independent; a Google-derived Scribe draft cannot
+be imported into the clinical-note workflow without a future qualified lineage
+contract.
+
+The encrypted account editor retains uncertain list/read/source-review commands
+before dispatch. Recovery checks the original key rather than automatically
+repeating a provider read. Source and handoff review replies carry exact public
+command hashes. A saved historical review can be confirmed after email access
+changes while its source, derived result and quoted feedback remain withheld.
+That receipt confers no current authority to continue work. Handoff revision
+commands still require visible verified prior draft/feedback; recovery of a lost
+revision reply after access changes remains fail-closed.
+
+Required schema: `g39a7e1b6c82`. Matching workspace contracts include
+`google_messages:1` and `handoff_review:2`. Install a matching native/web release
+and deliberately configure the backend before rollout. The new tests use invented
+mail and injected upstream model responses; they do not establish live full-body
+consent, installed native acceptance or Google/model latency.
+
+## Existing connection and bounded previews
+
 The shared Connections screen supports a separate personal Google grant. Existing
 Scheduling Google/Calendar credentials are not reused. Delegated consent requests
 openid, email, gmail.metadata and calendar.events.readonly with PKCE, offline refresh and explicit account
@@ -65,5 +112,5 @@ its broad send/compose/modify scopes, raw-MIME attachment expansion, service-acc
 impersonation and arbitrary API action are not enabled. Official Google contract
 sources are hash-recorded in W59/research. Actual Google consent verification,
 real-account operation and physical-device/native-sign-in acceptance remain open.
-Normal API/worker readiness now expects e5917a2c64bd. No actual provider account,
+Normal API/worker readiness now expects g39a7e1b6c82. No actual provider account,
 credential, recording, native installation or deployment was used during development.

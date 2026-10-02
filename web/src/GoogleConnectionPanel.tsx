@@ -1,4 +1,4 @@
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useRef,useState,type ReactNode} from 'react';
 import {googleConnectionRequest,type GoogleAction,type GoogleStatus,type GoogleStart,type GoogleView} from './google-connection-api';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {useSetupNavigationBusy} from './connection-setup-flow';
@@ -20,7 +20,9 @@ function checkedState(identity:AuthenticatedWorkspaceIdentity,previous:PrivateSt
   return {owner:identity,status,start:null,scope,views:scope&&previous?.owner===identity&&previous.scope===scope?previous.views:{}};
 }
 
-export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLost}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void}){
+export type GoogleMessageWorkControls={requestFullMailAccess:()=>void;fullMailAccessBusy:boolean};
+export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLost,messageWork,onOpenMessageWork,messageWorkLocked=false}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void;
+  messageWork?:ReactNode|((controls:GoogleMessageWorkControls)=>ReactNode);onOpenMessageWork?:()=>void;messageWorkLocked?:boolean}){
   const [data,setData]=useState<PrivateState|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[opening,setOpening]=useState(false);
   const [service,setService]=useState<GoogleService>('mail');
   const latest=useRef(data);latest.current=data;
@@ -39,7 +41,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   const native=identity.mode==='desktop_native'?{revision:identity.revision,isCurrent:identity.isCurrent}:identity.nativeSession;
   const capability=window.cosmasGoogleNavigation;
   const nativeReady=!native||capability?.version===1&&capability.available&&capability.mode==='trusted-click';
-  useSetupNavigationBusy(opening||busy&&(action==='start'||action==='disconnect'),onBusyChange);
+  useSetupNavigationBusy(opening||busy&&(action==='start'||action==='start_full_mail'||action==='disconnect'),onBusyChange);
   useEffect(()=>{
     epoch.current++;pending.current?.abort();pending.current=null;navigationPending.current=null;
     setData(null);setService('mail');setMessage('');setBusy(false);setAction(null);operation.current=null;setOpening(false);setUnavailableFor(null);
@@ -54,8 +56,8 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     const previous=latest.current?.owner===identity?latest.current:null;
     const current=++epoch.current,controller=new AbortController();pending.current=controller;setBusy(true);setAction(action);setMessage('');
     const scope=connectionReadScope(identity,'google');operation.current={action,scope};
-    if(action==='start'||action==='disconnect')invalidateConnectionHealth(identity,'google');
-    setData(previous=>action==='start'||action==='disconnect'?null:previous?.owner===identity?{...previous,start:null}:null);
+    if(action==='start'||action==='start_full_mail'||action==='disconnect')invalidateConnectionHealth(identity,'google');
+    setData(previous=>action==='start'||action==='start_full_mail'||action==='disconnect'?null:previous?.owner===identity?{...previous,start:null}:null);
     try{
       const result=await googleConnectionRequest(identity,action,controller.signal);
       if(epoch.current!==current||owner.current!==identity)return;
@@ -110,7 +112,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     :'CosmaBot has not confirmed the Google connection. Check the connection again to see the latest result.'));
   const manual=(action:GoogleAction)=>{returnCheck.cancel();if(action==='mail'||action==='calendar')setService(action);void run(action);};
   const cancelRead=()=>{
-    const active=operation.current;if(!active||active.action==='start'||active.action==='disconnect')return;
+    const active=operation.current;if(!active||active.action==='start'||active.action==='start_full_mail'||active.action==='disconnect')return;
     returnCheck.cancel();epoch.current++;pending.current?.abort();pending.current=null;operation.current=null;
     if(active.action==='mail'||active.action==='calendar')connectionReadFailed(identity,'google',active.scope,active.action,true);
     else {connectionCheckFailed(identity,'google');setData(null);}
@@ -142,15 +144,16 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   };
   const blocked=busy||opening;
   const calendarNeedsPermission=status?.state==='connected'&&status.capabilities?.calendar===false;
+  const messageWorkEnabled=import.meta.env.VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED==='true';
   return <section className="core-connection-setup microsoft-connection google-connection" aria-label="Google email and calendar">
     <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>{status?.state==='connected'?'Google Workspace':'Connect Google Workspace'}</h2><p>Email and the week ahead.</p></div></header>
     <p>{status?.state==='connected'?'Your account is connected. Check email and calendar access below.':'Connect your Google account to see recent Gmail headers and your primary calendar here. Google will ask you to approve access.'}</p>
-    <p className="connection-access-summary">CosmaBot reads email headers and event titles and times. Message bodies and attachments stay in Gmail. It cannot send email or change calendar events.</p>
+    <p className="connection-access-summary">These connection checks read email headers and event titles and times. {messageWorkEnabled?'Full email work asks for separate access below.':'Message bodies and attachments stay in Gmail.'} CosmaBot cannot send email or change calendar events.</p>
     {!status?.account&&!start&&unavailableFor!==identity&&<details><summary>How to connect</summary><ol className="personal-connection-steps"><li>Choose your Google account.</li><li>Review access on Google’s secure sign-in page.</li><li>Return here to read recent email.</li></ol></details>}
     <button disabled={blocked} onClick={()=>manual('status')}>Check Google connection</button>
-    {busy&&action&&<div className="connection-progress" role="status"><p>{personalConnectionProgress('google',action)}</p>
+    {busy&&action&&<div className="connection-progress" role="status"><p>{action==='start_full_mail'?'Preparing full email permission…':personalConnectionProgress('google',action)}</p>
       <small>{action==='recovery'?'Account recovery has a 10-second limit. The read will not repeat.':'This request has a 50-second limit.'} {action==='status'||action==='mail'||action==='calendar'||action==='recovery'?'You can keep working elsewhere.':''}</small>
-      {action!=='start'&&action!=='disconnect'&&<button onClick={cancelRead}>Stop waiting</button>}</div>}
+      {action!=='start'&&action!=='start_full_mail'&&action!=='disconnect'&&<button onClick={cancelRead}>Stop waiting</button>}</div>}
     {status&&<div className="connection-practice">
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Google connected.':status.state==='completing_sign_in'?'Completing Google sign-in…':status.state==='sign_in_pending'?'Google sign-in is ready to continue.':'Connect your Google account to continue.'}</p>
@@ -162,6 +165,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       <a className="team-primary microsoft-continue" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Google</a>}</p>}
     {!nativeReady&&<p>Google connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
     {status?.state==='connected'&&<>
+      {messageWorkEnabled&&onOpenMessageWork&&<button className="team-primary" disabled={blocked||messageWorkLocked} onClick={onOpenMessageWork}>Work with email</button>}
       <div className="google-service-tabs" role="group" aria-label="Choose Google service">
         <button aria-pressed={service==='mail'} onClick={()=>setService('mail')}>Email</button>
         <button aria-pressed={service==='calendar'} onClick={()=>setService('calendar')}>Calendar</button>
@@ -172,6 +176,8 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
           <button className={service==='calendar'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('calendar')}>{visible?.views.calendar?'Refresh calendar':'View next 7 days'}</button>}/>
       {!view&&<p className="google-results-hint">{service==='mail'?'Read recent email to see up to 10 inbox headers.':calendarNeedsPermission?'Choose Add calendar access to view your week.':'View the next 7 days to see event titles and times.'}</p>}
     </>}
+    {messageWorkEnabled&&messageWork&&<div className="google-message-work">{typeof messageWork==='function'?messageWork({
+      requestFullMailAccess:()=>{if(!blocked&&!messageWorkLocked&&nativeReady)manual('start_full_mail');},fullMailAccessBusy:blocked}):messageWork}</div>}
     {(start||status&&status.state!=='connected'&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>manual('disconnect')}>Cancel Google connection</button>}
     {view?.kind==='mail'&&<section aria-label="Recent Gmail headers">
       <h3>Recent email</h3><p>Email headers · Last loaded {when(view.observed_at)}</p>

@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {saveHandoffReview,prepareHandoffRevision,verifiedHandoffResult,HandoffReviewRefusal,refusalProvesNoCommit,type HandoffReviewInput,type HandoffReviewReceipt,type HandoffRevisionInput,type ReviewableHandoff} from './handoff-review-api';
+import {saveHandoffReview,handoffReviewHash,prepareHandoffRevision,verifiedHandoffResult,HandoffReviewRefusal,refusalProvesNoCommit,type HandoffReviewInput,type HandoffReviewReceipt,type HandoffRevisionInput,type ReviewableHandoff} from './handoff-review-api';
 import type {Workspace} from './workspace-api';
 import {MODEL_WORKSPACE_BYTES} from './model-work-request';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
@@ -18,7 +18,7 @@ async function fixture() {
     result_entry_id:handoff.result_entry_id!,result_sha256:hash,decision:'changes_requested',feedback:'Add an owner and due date.'};
   const review:HandoffReviewReceipt={id:uuid(800),attempt_id:body.attempt_id,result_entry_id:body.result_entry_id,result_sha256:hash,
     decision:body.decision,feedback:body.feedback,created_at:time};
-  return {workspace,handoff,body,response:{entry_revision:4,workspace:{...workspace,revision:4,handoffs:[{...handoff,review}]}}};
+  return {workspace,handoff,body,response:{entry_revision:4,request_sha256:await handoffReviewHash(wid,hid,body),feedback_withheld:false,workspace:{...workspace,revision:4,handoffs:[{...handoff,review}]}}};
 }
 const json=(value:unknown,status=200,headers:Record<string,string>={})=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store',...headers}});
 beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);vi.stubEnv('VITE_API_BASE','http://127.0.0.1:8018');});
@@ -35,6 +35,17 @@ it('posts the exact review on the restricted path with fresh credentials and bot
 it('accepts an idempotent receipt with a later current workspace revision and the exact historical draft',async()=>{
   const f=await fixture();f.response.workspace.revision=9;vi.stubGlobal('fetch',vi.fn().mockResolvedValue(json(f.response)));
   await expect(saveHandoffReview(access,wid,hid,f.body)).resolves.toMatchObject({entry_revision:4,workspace:{revision:9}});
+});
+it('confirms a masked historical review using the exact immutable request commitment without requiring inaccessible feedback or draft bytes',async()=>{
+ const f=await fixture(),review=f.response.workspace.handoffs[0].review;
+ const value={...f.response,feedback_withheld:true,workspace:{...f.response.workspace,entries:f.response.workspace.entries.map(e=>({...e,content:'',reply:null,google_source_state:'unavailable'})),
+  handoffs:[{...f.handoff,review_status:'stale',review:{...review,feedback:'Email access must be checked before viewing this feedback.'}}]}};
+ const fetcher=vi.fn().mockResolvedValueOnce(json(value));vi.stubGlobal('fetch',fetcher);
+ await expect(saveHandoffReview(access,wid,hid,f.body)).resolves.toMatchObject({feedback_withheld:true,request_sha256:f.response.request_sha256});
+ for(const bad of [{...value,request_sha256:'a'.repeat(64)},{...value,feedback_withheld:false},{...value,workspace:{...value.workspace,entries:f.response.workspace.entries}},
+  {...value,workspace:{...value.workspace,handoffs:[{...value.workspace.handoffs[0],review_status:'current'}]}}]){
+  fetcher.mockResolvedValueOnce(json(bad));await expect(saveHandoffReview(access,wid,hid,f.body)).rejects.toMatchObject({status:503});
+ }
 });
 it.each(['workspace_revision_conflict','handoff_result_already_reviewed','handoff_revision_already_requested','handoff_sources_changed'])('recognizes only a closed no-store service refusal: %s',async code=>{
   const f=await fixture();vi.stubGlobal('fetch',vi.fn().mockResolvedValue(json({detail:code},409)));
@@ -102,7 +113,7 @@ it.each([401,403,404,426])('withholds private error content on authority refusal
 });
 
 async function revisionFixture() {
-  const f=await fixture(),review=f.response.workspace.handoffs[0].review;
+  const f=await fixture();f.body.feedback='Private café follow-up 😀.';f.response.request_sha256=await handoffReviewHash(wid,hid,f.body);const review={...f.response.workspace.handoffs[0].review,feedback:f.body.feedback};
   const body:HandoffRevisionInput={expected_revision:4,idempotency_key:'retained-revision-key',review_id:review.id};
   const next:ReviewableHandoff={...f.handoff,id:uuid(901),origin_entry_id:uuid(902),status:'queued',attempt_id:uuid(903),attempt_count:1,
     result_entry_id:null,result_sha256:null,review:null,attempts:[{id:uuid(903),number:1,status:'queued',error_code:null}],

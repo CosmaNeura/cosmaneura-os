@@ -43,7 +43,7 @@ it('falls back once to legacy status without retrying content reads or consent',
  expect(fetcher.mock.calls.map(call=>JSON.parse(call[1].body))).toEqual([{action:'status',include_capabilities:true},{action:'status'}]);
  fetcher.mockReset().mockImplementation(async()=>unavailable());
  await expect(googleConnectionRequest(identity,'status')).rejects.toThrow();expect(fetcher).toHaveBeenCalledTimes(2);
- for(const action of ['mail','calendar','start'] as const){fetcher.mockClear();await expect(googleConnectionRequest(identity,action)).rejects.toThrow();expect(fetcher).toHaveBeenCalledTimes(1);}
+ for(const action of ['mail','calendar','start','start_full_mail'] as const){fetcher.mockClear();await expect(googleConnectionRequest(identity,action)).rejects.toThrow();expect(fetcher).toHaveBeenCalledTimes(1);}
 });
 it('rejects stale native identity before dispatch and after a late response',async()=>{
  let current=false;const native={...identity,nativeSession:{revision:'invented',isCurrent:()=>current}};
@@ -65,4 +65,16 @@ it('rejects duplicate and excess Gmail summaries',()=>{
  expect(validateGoogleResponse(view,'mail')).toEqual(view);
  expect(()=>validateGoogleResponse({...view,items:[row,row]},'mail')).toThrow();
  expect(()=>validateGoogleResponse({...view,items:Array.from({length:11},(_,i)=>({...row,id:'m'+i}))},'mail')).toThrow();
+});
+
+it('requests full email access only through the explicit closed action and validates the full-read grant',async()=>{
+ const q=new URLSearchParams({client_id:'invented.apps.googleusercontent.com',redirect_uri:'https://api.example.invalid/connections/google/callback',response_type:'code',access_type:'offline',include_granted_scopes:'false',scope:'openid email https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/gmail.readonly',state:'s'.repeat(43),prompt:'consent select_account',code_challenge_method:'S256',code_challenge:'c'.repeat(43)});
+ const full={authorization_url:`https://accounts.google.com/o/oauth2/v2/auth?${q}`,expires_at:new Date(Date.now()+600000).toISOString()};
+ const fetcher=vi.fn().mockResolvedValue(new Response(JSON.stringify(full),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));vi.stubGlobal('fetch',fetcher);
+ expect(await googleConnectionRequest(identity,'start_full_mail')).toEqual(full);
+ expect(fetcher.mock.calls[0][1]).toMatchObject({body:'{"action":"start_full_mail"}',credentials:'omit',redirect:'error'});
+ q.set('scope','openid email https://www.googleapis.com/auth/gmail.metadata');
+ expect(()=>validateGoogleResponse({...full,authorization_url:`https://accounts.google.com/o/oauth2/v2/auth?${q}`},'start_full_mail')).toThrow();
+ q.set('scope','openid email https://www.googleapis.com/auth/gmail.metadata https://www.googleapis.com/auth/gmail.send');
+ expect(()=>validateGoogleResponse({...full,authorization_url:`https://accounts.google.com/o/oauth2/v2/auth?${q}`},'start_full_mail')).toThrow();
 });
