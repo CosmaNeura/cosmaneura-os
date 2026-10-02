@@ -28,6 +28,8 @@ export function connectorApiRoute(target, method) {
   const incoming = (header,input,output) => plan(header,input,output,{seconds:15,strictResponse:true,errorOutput:2048});
   if(path === '/provider-team/visit-prep/read') return method === 'POST' && !query
     ? plan('X-Cosmas-Visit-Prep-Contract',2048,262144,{seconds:35,strictResponse:true,errorOutput:2048}) : null;
+  if(path === '/provider-team/visit-prep/preparations') return method === 'POST' && !query
+    ? plan('X-Cosmas-Visit-Prep-Contract',2048,32768,{seconds:35,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/catalog') return method === 'GET' && !query
     ? incoming(CONNECTOR_HEADERS[11],0,4096) : null;
   if(path === '/vendor-settings/readiness') return method === 'GET' && !query

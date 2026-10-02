@@ -2,11 +2,12 @@
 
 import json
 from contextvars import Context
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response
 from fastapi.routing import APIRoute
-from pydantic import SecretStr
+from pydantic import Field, SecretStr
 from starlette.requests import Request
 from starlette.responses import Response as WireResponse
 
@@ -22,6 +23,7 @@ from cosmas_os.ports.core_encounters import Closed, Digest
 from cosmas_os.ports.core_visit_prep import PrepRef
 
 PATH = "/provider-team/visit-prep/read"
+LIST_PATH = "/provider-team/visit-prep/preparations"
 
 
 class Command(Closed):
@@ -30,6 +32,15 @@ class Command(Closed):
     workspace_id: UUID
     request_nonce: UUID
     bot: CaptureBotSelection
+
+
+class ListCommand(Closed):
+    connection_sha256: Digest
+    workspace_id: UUID
+    request_nonce: UUID
+    bot: CaptureBotSelection
+    before_ref: PrepRef | None
+    limit: Annotated[int, Field(ge=1, le=20, strict=True)]
 
 
 def problem(status, *args):
@@ -56,8 +67,8 @@ class VisitPrepRoute(APIRoute):
 class VisitPrepMiddleware(RecordMiddleware):
     async def __call__(self, scope, receive, send):
         # No slash redirect or query-selected preparation credentials.
-        if scope["type"] == "http" and scope["path"].rstrip("/") == PATH:
-            if scope["path"] != PATH or scope["method"] not in {"POST", "OPTIONS"}:
+        if scope["type"] == "http" and scope["path"].rstrip("/") in {PATH, LIST_PATH}:
+            if scope["path"] not in {PATH, LIST_PATH} or scope["method"] not in {"POST", "OPTIONS"}:
                 await problem(422)(scope, receive, send)
                 return
         await super().__call__(scope, receive, send)
@@ -67,7 +78,7 @@ def install(app, **dependencies):
     routes = router(**dependencies)
     app.include_router(routes)
     installed = [r for r in routes.routes if isinstance(r, VisitPrepRoute)]
-    if len(installed) != 1:
+    if len(installed) != 2:
         raise ValueError("visit_prep_route_inventory")
     app.add_middleware(
         VisitPrepMiddleware,
@@ -89,6 +100,7 @@ def router(
     routes = APIRouter(route_class=VisitPrepRoute)
 
     @routes.post(PATH)
+    @routes.post(LIST_PATH)
     async def read(request: Request):
         budget = request.state.core_record_deadline
         headers = request.headers
@@ -120,7 +132,9 @@ def router(
                 or int(length) != len(raw)
             ):
                 raise ValueError
-            command = Command.model_validate(
+            command = (
+                ListCommand if request.scope["path"] == LIST_PATH else Command
+            ).model_validate(
                 json.loads(
                     raw.decode("utf-8"),
                     object_pairs_hook=_pairs,

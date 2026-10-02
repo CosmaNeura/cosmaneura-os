@@ -8,7 +8,11 @@ from pydantic import SecretStr
 
 from cosmas_os.adapters.core_visit_prep import HttpCoreVisitPrep
 from cosmas_os.application.core_record_deadline import RecordDeadline
-from cosmas_os.ports.core_visit_prep import CoreVisitPrepRead, CoreVisitPrepReceipt
+from cosmas_os.ports.core_visit_prep import (
+    CoreVisitPrepList,
+    CoreVisitPrepRead,
+    CoreVisitPrepReceipt,
+)
 
 
 def wire():
@@ -58,6 +62,73 @@ def test_exact_chart_free_receipt_uses_only_dual_auth_endpoint():
         assert receipt.model_dump(mode="json")["package"] == value["package"]
         assert receipt.package.sources.preparation.patient_id is None
         assert len(calls) == 1
+    finally:
+        port.close()
+
+
+def test_preparation_picker_uses_the_separate_bounded_dual_auth_list():
+    value = wire()
+    command = CoreVisitPrepList(
+        **{
+            key: item
+            for key, item in request(value).model_dump().items()
+            if key not in {"action", "preparation_ref"}
+        },
+        before_ref=None,
+        limit=20,
+    )
+    reply = {
+        key: value[key]
+        for key in (
+            "contract_version",
+            "workspace_id",
+            "request_nonce",
+            "connection_sha256",
+            "checked_at",
+        )
+    }
+    reply.update(
+        preparations=[
+            {
+                "preparation_ref": value["preparation_ref"],
+                "recipient_first_name": "Invented Rowan",
+                "recipient_role": "patient",
+                "scheduled_at": value["package"]["sources"]["preparation"]["scheduled_at"],
+                "timezone_name": "UTC",
+                "lifecycle_state": "completed",
+                "chart_linked": False,
+                "available_to_open": True,
+                "created_at": None,
+            }
+        ],
+        next_before_ref=None,
+    )
+
+    def respond(req):
+        assert req.url.path == "/service/v1/companion/visit-prep/preparations"
+        assert req.headers["X-Cosmaneura-Provider-Authorization"] == "Bearer invented-physician"
+        assert json.loads(req.content)["action"] == "visit-prep.list"
+        return httpx.Response(
+            200,
+            json=reply,
+            headers={
+                "Cache-Control": "no-store",
+                "Referrer-Policy": "no-referrer",
+                "X-Cosmaneura-Visit-Prep-Version": "1",
+            },
+        )
+
+    port = HttpCoreVisitPrep(
+        "https://core.example.invalid",
+        lambda: "invented-workload",
+        RecordDeadline(15),
+        transport_factory=lambda: httpx.MockTransport(respond),
+    )
+    try:
+        assert (
+            port.list(command, SecretStr("invented-physician")).preparations[0].recipient_first_name
+            == "Invented Rowan"
+        )
     finally:
         port.close()
 

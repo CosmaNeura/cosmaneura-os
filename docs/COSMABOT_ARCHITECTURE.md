@@ -75,9 +75,14 @@ provider correspondence, bot source restrictions, bounded credential/HTTP
 transport, request ownership and native desktop dispatch. It does not import
 Core server source or connect to Core's database.
 
-The first view opens a preparation reference selected in Core; an in-app
-preparation picker is still required for finished usability. The panel is
-available before selecting an encounter and within the Visit Prep coworker.
+The view now has an explicit Core preparation picker. It lists the invitation
+first name and role, appointment timezone, lifecycle and chart-link status,
+with pagination. No email, phone or patient response is in the list. Core
+reuses its dashboard owner-list domain; selecting a row confers no authority,
+and opening rechecks the connection and current package access. The additive
+list wire contract is recorded in the Core feature branch and still requires
+canonical architecture reconciliation before release. The panel is available
+before selecting an encounter and within the Visit Prep coworker.
 Content clears on scope changes, focus loss and offline/denied reads. The
 transport verifies closed receipts, current citations and echoed scope.
 
@@ -90,6 +95,12 @@ qualification is not live web/Mac/iPhone acceptance. No release, deployment,
 messages, model analysis or broader agent action is authorized by this reader.
 
 Recovery is flag-off and revert of the additive increment. Remaining work
-includes the preparation picker, complete native acceptance, independently
+includes live cross-service and complete native acceptance, independently
 governed AI context/actions, patient clarification integration and qualified
 delivery. The source branch remains a draft until those release gates are met.
+
+A localhost-only provider preview uses the real panel and invented wire replies:
+`node node_modules/vite/bin/vite.js --config vite.visit-prep-lab.config.ts`
+from `web/`, at `http://127.0.0.1:5197/`. Its separate aliases replace only the
+remote ports; normal builds and release flags are unchanged. The preview is
+not connected patient-to-provider or native/service acceptance.

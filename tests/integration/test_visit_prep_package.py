@@ -13,13 +13,16 @@ from cosmas_os.api import app as api
 from cosmas_os.api.visit_prep_routes import install
 from cosmas_os.application import provider_team
 from cosmas_os.models import CoreCaptureAccount, ExternalIdentity
-from cosmas_os.ports.core_visit_prep import CoreVisitPrepReceipt
+from cosmas_os.ports.core_visit_prep import CoreVisitPrepReceipt, CoreVisitPrepSelections
 
 capture_case = _capture_case
 
 
 @pytest.mark.parametrize("revoke", [None, "identity", "account", "flag"])
-def test_signed_cosmabot_route_reads_without_an_encounter_grant(capture_case, monkeypatch, revoke):
+@pytest.mark.parametrize("selection", [False, True])
+def test_signed_cosmabot_route_reads_without_an_encounter_grant(
+    capture_case, monkeypatch, revoke, selection
+):
     f = capture_case
     f.configuration.workspace_core_connection_enabled = True
     f.configuration.core_connection_tenant_ref = "authority_tenant_" + "0" * 25 + "1"
@@ -33,10 +36,46 @@ def test_signed_cosmabot_route_reads_without_an_encounter_grant(capture_case, mo
     calls = []
 
     class Port:
+        def list(self, request, bearer):
+            result = self.read(request, bearer)
+            return CoreVisitPrepSelections.model_validate_json(
+                json.dumps(
+                    {
+                        **{
+                            key: result.model_dump(mode="json")[key]
+                            for key in (
+                                "contract_version",
+                                "workspace_id",
+                                "request_nonce",
+                                "connection_sha256",
+                                "checked_at",
+                            )
+                        },
+                        "next_before_ref": None,
+                        "preparations": [
+                            {
+                                "preparation_ref": value["preparation_ref"],
+                                "recipient_first_name": "Invented Rowan",
+                                "recipient_role": "patient",
+                                "scheduled_at": value["package"]["sources"]["preparation"][
+                                    "scheduled_at"
+                                ],
+                                "timezone_name": "UTC",
+                                "lifecycle_state": "completed",
+                                "chart_linked": False,
+                                "available_to_open": True,
+                                "created_at": None,
+                            }
+                        ],
+                    }
+                ),
+                strict=True,
+            )
+
         def read(self, request, bearer):
             calls.append(request)
             value.update(
-                preparation_ref=request.preparation_ref,
+                preparation_ref=getattr(request, "preparation_ref", value["preparation_ref"]),
                 workspace_id=str(request.workspace_id),
                 request_nonce=str(request.request_nonce),
                 connection_sha256=request.connection_sha256,
@@ -73,9 +112,13 @@ def test_signed_cosmabot_route_reads_without_an_encounter_grant(capture_case, mo
         connection_factory=connection,
     )
     response = TestClient(app).post(
-        "/provider-team/visit-prep/read",
+        "/provider-team/visit-prep/" + ("preparations" if selection else "read"),
         json={
-            "preparation_ref": value["preparation_ref"],
+            **(
+                {"before_ref": None, "limit": 20}
+                if selection
+                else {"preparation_ref": value["preparation_ref"]}
+            ),
             "connection_sha256": value["connection_sha256"],
             "workspace_id": str(uuid4()),
             "request_nonce": str(uuid4()),
@@ -85,9 +128,14 @@ def test_signed_cosmabot_route_reads_without_an_encounter_grant(capture_case, mo
     )
     if revoke:
         assert response.status_code in {401, 403, 503}
+        assert "Invented Rowan" not in response.text
         assert "Invented report" not in response.text
     else:
         assert response.status_code == 200, response.text
-        assert response.json()["package"] == value["package"]
+        if selection:
+            assert response.json()["preparations"][0]["recipient_first_name"] == "Invented Rowan"
+            assert "package" not in response.json()
+        else:
+            assert response.json()["package"] == value["package"]
         assert response.headers["cache-control"] == "no-store"
     assert len(calls) == 1

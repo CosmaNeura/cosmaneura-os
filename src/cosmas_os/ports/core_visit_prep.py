@@ -30,6 +30,56 @@ class CoreVisitPrepRead(Closed):
     request_nonce: UUID
 
 
+class CoreVisitPrepList(Closed):
+    contract_version: Literal["1"] = "1"
+    action: Literal["visit-prep.list"] = "visit-prep.list"
+    purpose: Literal["provider_previsit_review"] = "provider_previsit_review"
+    expected_actor_ref: ActorRef
+    expected_tenant_ref: TenantRef
+    connection_sha256: Digest
+    workspace_id: UUID
+    request_nonce: UUID
+    before_ref: PrepRef | None
+    limit: Annotated[int, Field(ge=1, le=20, strict=True)]
+
+
+class PreparationSelection(Closed):
+    preparation_ref: PrepRef
+    recipient_first_name: Annotated[str, Field(min_length=1, max_length=120, strict=True)] = Field(
+        repr=False
+    )
+    recipient_role: Literal["patient", "caregiver"]
+    scheduled_at: AwareDatetime
+    timezone_name: Annotated[str, Field(min_length=1, max_length=64, strict=True)]
+    lifecycle_state: Literal["invited", "confirmed", "in_progress", "completed", "misdirected"]
+    chart_linked: Annotated[bool, Field(strict=True)]
+    available_to_open: Annotated[bool, Field(strict=True)]
+    created_at: AwareDatetime | None
+
+
+class CoreVisitPrepSelections(Closed):
+    contract_version: Literal["1"]
+    connection_sha256: Digest
+    workspace_id: UUID
+    request_nonce: UUID
+    checked_at: AwareDatetime
+    preparations: Annotated[tuple[PreparationSelection, ...], Field(max_length=20)] = Field(
+        repr=False
+    )
+    next_before_ref: PrepRef | None
+
+    @model_validator(mode="after")
+    def unique_selections(self):
+        refs = [p.preparation_ref for p in self.preparations]
+        if (
+            len(set(refs)) != len(refs)
+            or self.next_before_ref is not None
+            and (not refs or self.next_before_ref != refs[-1])
+        ):
+            raise ValueError("invalid_visit_prep_selections")
+        return self
+
+
 class Choice(Closed):
     value: Key
     label: Annotated[str, Field(min_length=1, max_length=120, strict=True)]
