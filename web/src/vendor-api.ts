@@ -54,6 +54,10 @@ export async function requirePdf(document:Document,bytes:Uint8Array):Promise<voi
 const id=(value:string)=>{if(!vendorUuid(value))throw new VendorContractError();return value;};
 const cursor=(value?:string)=>{if(value===undefined)return '';if(!/^[\x21-\x7e]{1,512}$/.test(value))throw new VendorContractError();return '?cursor='+encodeURIComponent(value);};
 const root=(wid:string)=>`/workspaces/${id(wid)}/vendor-work`;
+/** Saved database facts only; never calls the fax provider. */
+export function readVendorSavedFaxStatus<T>(identity:WorkspaceIdentity,wid:string,tid:string,verify:(value:unknown)=>Promise<T>,signal?:AbortSignal):Promise<T>{
+  return exchange(identity,30,8192,async()=>({path:root(wid)+'/'+id(tid)+'/status',method:'GET'}),verify,signal);
+}
 export function readVendorPracticeCatalog<T>(identity:WorkspaceIdentity,page:string|undefined,verify:(value:unknown)=>Promise<T>,signal?:AbortSignal):Promise<T>{
   return exchange(identity,30,1048576,async()=>({path:page===undefined?'/practice-work':`/practice-work/pages/${id(page)}`,method:'GET'}),verify,signal);
 }
