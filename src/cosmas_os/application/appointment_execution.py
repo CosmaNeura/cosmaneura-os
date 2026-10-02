@@ -127,7 +127,7 @@ def claim(s, box, owner, workspace_id, ticket_id, *, external_identity_id, reaut
         if op.id != operation_id or revision.id != revision_id or revision.payload_hash != digest:
             raise ws.WorkspaceError("appointment_approval_changed")
         _approved(s, w, ticket, revision)
-        account, patient, selected = work._current(s, w, external_identity_id)
+        account, patient, selected = work._current(s, w, external_identity_id, configuration=configuration)
         if account.id != source.account_id or patient.id != source.patient_mapping_id or selected != intent.selection:
             raise ws.WorkspaceError("scheduling_context_changed")
         now = _now(s, clock)
@@ -280,5 +280,5 @@ def run(s, box, owner, workspace_id, ticket_id, *, external_identity_id, reauthe
             uncertain(s, attempt)
     # Recording an already-proven effect must not return data to a revoked caller.
     reauthenticate()
-    work._current(s, ws._workspace(s, box, owner, workspace_id), external_identity_id)
-    return work.read(s, box, owner, workspace_id, ticket_id)
+    work._current(s, ws._workspace(s, box, owner, workspace_id), external_identity_id, configuration=configuration)
+    return work.read(s, box, owner, workspace_id, ticket_id, configuration=configuration)

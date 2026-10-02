@@ -59,7 +59,7 @@ def test_expired_authority_after_body_read_does_not_create_approval(session, sig
     assert not session.scalar(select(Operation.id).where(Operation.ticket_id == item["ticket_id"]))
 
 
-def prepare(s, seeded, *, existing=None):
+def prepare(s, seeded, *, existing=None, patient_mapping=True):
     box, owner = seeded["box_id"], seeded["owner_id"]
     if existing is None:
         visit = encounter(s, box, owner)
@@ -79,13 +79,14 @@ def prepare(s, seeded, *, existing=None):
     patient = SchedulingPatientAccount(box_id=box, patient_link_id=visit.patient_link_id,
         practice_id=account.practice_id, patient_id=str(uuid4()), reviewed_by="Invented reviewer",
         evidence_ref="synthetic:w15-patient", reviewed_at=NOW)
-    s.add(patient)
+    if patient_mapping:
+        s.add(patient)
     s.commit()
-    selected = AppointmentSelection(box_id=box, owner_id=owner, patient_link_id=patient.patient_link_id,
+    selected = AppointmentSelection.model_validate(dict(box_id=box, owner_id=owner, patient_link_id=patient.patient_link_id,
         practice_id=account.practice_id, expected_actor_id=account.actor_id, practitioner_id=account.practitioner_id,
-        location_id=account.location_id, appointment_type_id=account.appointment_type_id, patient_id=patient.patient_id)
+        location_id=account.location_id, appointment_type_id=account.appointment_type_id, patient_id=patient.patient_id))
     return SimpleNamespace(box=box, owner=owner, wid=workspace["id"], selection=selected,
-                           identity=identity.id, account=account.id, patient=patient.id, link=patient.patient_link_id)
+                           identity=identity.id, account=account.id, patient=patient.id if patient_mapping else None, link=patient.patient_link_id)
 
 
 @pytest.fixture
@@ -292,8 +293,8 @@ def test_concurrent_human_decisions_produce_one_durable_operation(engine, compet
         outcomes = list(pool.map(run, [0, 1]))
     with Session(engine) as s:
         current = work.read(s, case.box, case.owner, case.wid, item["ticket_id"])
-        assert s.scalar(select(func.count()).select_from(Operation).where(Operation.ticket_id == item["ticket_id"])) <= 1
-        assert s.scalar(select(func.count()).select_from(Decision).where(Decision.ticket_id == item["ticket_id"], Decision.kind == "approve")) <= 1
+        assert (s.scalar(select(func.count()).select_from(Operation).where(Operation.ticket_id == item["ticket_id"])) or 0) <= 1
+        assert (s.scalar(select(func.count()).select_from(Decision).where(Decision.ticket_id == item["ticket_id"], Decision.kind == "approve")) or 0) <= 1
         if competing == "approve":
             assert outcomes == ["approved", "approved"] and current["state"] == "approved"
         else:
@@ -306,25 +307,35 @@ def test_signed_native_origins_review_reopen_and_withdraw_same_operation(session
     signed.configuration.workspace_scheduling_enabled = True
     signed.configuration.workspace_appointments_enabled = True
     monkeypatch.setattr(work, "_clock", lambda value=None: NOW)
-    case = prepare(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed)
-    item = propose(session, case)
-    path = f"/workspaces/{case.wid}/appointments/{item['ticket_id']}"
-    headers = {"Authorization": "Bearer " + signed.token()}
-    readback = signed.client.get(path, headers=headers)
-    assert readback.status_code == 200 and readback.json() == item
-    body = {"revision_id": item["revision_id"], "payload_hash": item["payload_hash"], "choice": "approve"}
-    approved = signed.client.post(path + "/decide", headers=headers, json=body)
-    assert approved.status_code == 200, approved.text
-    assert approved.json()["operation_status"] == "pending" and approved.json()["appointment_saved"] is False
-    assert approved.headers["cache-control"] == "no-store"
-    second = {"Authorization": "Bearer " + signed.token(sid="session_reopened")}
-    assert signed.client.get(path, headers=second).json() == approved.json()
-    malformed = signed.client.post(path + "/decide", headers=second, json={**body, "patient_id": "PRIVATE"})
-    assert malformed.status_code == 422 and "PRIVATE" not in malformed.text
-    rejected = signed.client.post(path + "/decide", headers=second, json={**body, "choice": "reject"})
-    assert rejected.status_code == 200 and rejected.json()["state"] == "rejected"
-    assert signed.client.get(path).status_code == 401
-    assert signed.client.get(path, headers={"Authorization": "Bearer " + signed.token(sub="user_foreign")}).status_code == 403
+    signed.configuration.workspace_scheduling_login_enabled = True
+    signed.configuration.workspace_scheduling_patient_setup_enabled = True
+    case = prepare(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed, patient_mapping=False)
+    from tests.integration.test_scheduling_patient_setup import install_personal_fixture
+
+    account = session.get(SchedulingAccount, case.account)
+    assert account is not None
+    with install_personal_fixture(session, box=case.box, owner=case.owner, wid=case.wid,
+            identity_id=case.identity, account=account, configuration=signed.configuration,
+            patient_id=str(case.selection.patient_id)) as mapping_receipt:
+        case.patient = mapping_receipt["mapping"]["mapping_id"]
+        item = propose(session, case)
+        path = f"/workspaces/{case.wid}/appointments/{item['ticket_id']}"
+        headers = {"Authorization": "Bearer " + signed.token()}
+        readback = signed.client.get(path, headers=headers)
+        assert readback.status_code == 200 and readback.json() == item
+        body = {"revision_id": item["revision_id"], "payload_hash": item["payload_hash"], "choice": "approve"}
+        approved = signed.client.post(path + "/decide", headers=headers, json=body)
+        assert approved.status_code == 200, approved.text
+        assert approved.json()["operation_status"] == "pending" and approved.json()["appointment_saved"] is False
+        assert approved.headers["cache-control"] == "no-store"
+        second = {"Authorization": "Bearer " + signed.token(sid="session_reopened")}
+        assert signed.client.get(path, headers=second).json() == approved.json()
+        malformed = signed.client.post(path + "/decide", headers=second, json={**body, "patient_id": "PRIVATE"})
+        assert malformed.status_code == 422 and "PRIVATE" not in malformed.text
+        rejected = signed.client.post(path + "/decide", headers=second, json={**body, "choice": "reject"})
+        assert rejected.status_code == 200 and rejected.json()["state"] == "rejected"
+        assert signed.client.get(path).status_code == 401
+        assert signed.client.get(path, headers={"Authorization": "Bearer " + signed.token(sub="user_foreign")}).status_code == 403
 
 
 def test_signed_route_is_default_off_and_rechecks_identity_revocation(session, signed_workspace, monkeypatch):

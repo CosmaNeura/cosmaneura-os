@@ -14,6 +14,24 @@ beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.cle
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();delete window.cosmasSchedulingNavigation;});
 const mount=(identity:AuthenticatedWorkspaceIdentity=browser)=>act(async()=>root.render(<SchedulingConnectionPanel identity={identity} onAuthenticationLost={()=>{}}/>));
 const click=(label:string)=>act(async()=>{const button=[...host.querySelectorAll('button')].find(b=>b.textContent===label);expect(button).toBeDefined();button!.click();});
+it('withdraws patient disclosure before connection I/O and does not refetch when the observer changes',async()=>{
+ const observed=vi.fn(),replacement=vi.fn();
+ let finish!:(value:typeof connected)=>void;
+ vi.mocked(schedulingLoginRequest).mockImplementationOnce(()=>{
+  expect(observed).toHaveBeenCalledTimes(1);
+  return new Promise(resolve=>{finish=resolve;});
+ }).mockImplementationOnce(async()=>{
+  expect(replacement).toHaveBeenCalledTimes(1);
+  return disconnected;
+ });
+ await act(async()=>root.render(<SchedulingConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onObserved={observed}/>));
+ await act(async()=>root.render(<SchedulingConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onObserved={replacement}/>));
+ expect(schedulingLoginRequest).toHaveBeenCalledTimes(1);
+ await click('Working…');expect(replacement).not.toHaveBeenCalled();
+ await act(async()=>finish(connected));
+ await click('Check Scheduling connection');
+ expect(schedulingLoginRequest).toHaveBeenCalledTimes(2);expect(observed).toHaveBeenCalledTimes(1);
+});
 it('connects through Google, refreshes status on return, and disconnects from the app',async()=>{
  vi.mocked(schedulingLoginRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link).mockResolvedValueOnce(connected).mockResolvedValueOnce({state:'disconnected'});
  const storage=vi.spyOn(Storage.prototype,'setItem');await mount();expect(schedulingLoginRequest).toHaveBeenCalledTimes(1);

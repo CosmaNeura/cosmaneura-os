@@ -58,7 +58,7 @@ def _clock(value=None):
     return value.astimezone(UTC)
 
 
-def _current(s, w, identity_id):
+def _current(s, w, identity_id, *, configuration: Settings | None = None):
     identity = s.scalar(select(ExternalIdentity).where(
         ExternalIdentity.id == identity_id, ExternalIdentity.box_id == w.box_id,
         ExternalIdentity.principal_id == w.owner_id, ExternalIdentity.active.is_(True),
@@ -68,12 +68,18 @@ def _current(s, w, identity_id):
     ).with_for_update(read=True))
     if identity is None or account is None:
         raise ws.WorkspaceError("scheduling_connection_required")
-    patient = s.scalar(select(SchedulingPatientAccount).where(
-        SchedulingPatientAccount.box_id == w.box_id,
-        SchedulingPatientAccount.patient_link_id == w.patient_link_id,
-        SchedulingPatientAccount.practice_id == account.practice_id,
-        SchedulingPatientAccount.revoked_at.is_(None),
-    ).with_for_update(read=True))
+    if configuration is None:
+        follow_up._local(s)
+        patient = s.scalar(select(SchedulingPatientAccount).where(
+            SchedulingPatientAccount.box_id == w.box_id,
+            SchedulingPatientAccount.patient_link_id == w.patient_link_id,
+            SchedulingPatientAccount.practice_id == account.practice_id,
+            SchedulingPatientAccount.revoked_at.is_(None),
+        ).with_for_update(read=True))
+    else:
+        from cosmas_os.application.scheduling_patient_setup import personal_mapping_for
+
+        patient = personal_mapping_for(s, w, identity_id, account, configuration=configuration)
     if patient is None:
         raise ws.WorkspaceError("scheduling_patient_correspondence_required")
     return account, patient, AppointmentSelection(
@@ -206,7 +212,7 @@ def propose(s, box, actor, workspace_id, *, external_identity_id, intent, key, s
         if prior.request_hash != request_hash:
             raise ws.WorkspaceError("idempotency_conflict")
         return _read_bound(s, *_bound(s, w, prior.ticket_id))
-    account, patient, selection = _current(s, w, external_identity_id)
+    account, patient, selection = _current(s, w, external_identity_id, configuration=configuration)
     current = _clock(now)
     if checked.selection != selection:
         raise ws.WorkspaceError("scheduling_context_changed")
@@ -266,7 +272,7 @@ def decide(s, box, actor, workspace_id, ticket_id, *, external_identity_id,
         return read(s, box, actor, workspace_id, ticket_id, configuration=configuration)
     if choice != "approve":
         raise ws.WorkspaceError("appointment_decision_invalid", 400)
-    account, patient, selection = _current(s, w, external_identity_id)
+    account, patient, selection = _current(s, w, external_identity_id, configuration=configuration)
     if (account.id != source.account_id or patient.id != source.patient_mapping_id
         or selection != intent.selection):
         raise ws.WorkspaceError("scheduling_context_changed")

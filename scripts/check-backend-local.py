@@ -24,6 +24,7 @@ DEPLOYMENT_TESTS = (
     "tests/integration/test_database_preparation.py",
     "tests/integration/test_google_calendar_runtime_privileges.py",
     "tests/integration/test_hosted_appointment_runtime_privileges.py",
+    "tests/integration/test_scheduling_patient_runtime_privileges.py",
 )
 COMPACT_TEST = "tests/integration/test_compact_execution.py"
 

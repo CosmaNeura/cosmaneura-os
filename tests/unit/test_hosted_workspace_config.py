@@ -17,7 +17,7 @@ def hosted(**changes):
         database_url="postgresql+psycopg://invented:invented@db.example.invalid/cosmas_os?sslmode=verify-full&sslrootcert=system",
         redis_url="rediss://:invented@redis.example.invalid/0?ssl_cert_reqs=required")
     values.update(changes)
-    return Settings(_env_file=None, **values)
+    return Settings(_env_file=None, **values)  # pyright: ignore[reportCallIssue] -- BaseSettings accepts _env_file at runtime.
 
 
 def test_hosted_workspace_and_existing_feature_gates():
@@ -26,6 +26,20 @@ def test_hosted_workspace_and_existing_feature_gates():
     assert config.workspace_available and config.workspace_scheduling_available
     assert not config.vendor_io_enabled and not config.finance_io_enabled
     assert not config.workspace_capture_available and not config.workspace_llm_available
+
+
+def test_patient_setup_requires_sign_in_and_proposals_with_its_own_default_closed_gate():
+    config = hosted(workspace_scheduling_enabled=True, workspace_appointments_enabled=True,
+        workspace_scheduling_login_enabled=True)
+    assert not config.workspace_scheduling_patient_setup_available
+    config.workspace_scheduling_patient_setup_enabled = True
+    config.validate_runtime_configuration()
+    assert config.workspace_scheduling_patient_setup_available
+    for gate in ("workspace_scheduling_enabled", "workspace_appointments_enabled", "workspace_scheduling_login_enabled"):
+        changed = config.model_copy(update={gate: False})
+        assert not changed.workspace_scheduling_patient_setup_available
+        with pytest.raises(RuntimeError, match="Scheduling patient setup"):
+            changed.validate_runtime_configuration()
 
 
 @pytest.mark.parametrize("changes", [

@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     workspace_scheduling_enabled: bool = False
     workspace_scheduling_login_enabled: bool = False
     workspace_scheduling_enrollment_enabled: bool = False
+    # Explicit patient correspondence only; never grants appointment execution.
+    workspace_scheduling_patient_setup_enabled: bool = False
     scheduling_enrollment_practice_id: str = ""
     scheduling_origin: str = ""
     scheduling_google_client_id: str = ""
@@ -190,6 +192,13 @@ class Settings(BaseSettings):
         """Existing synthetic execution only; hosted proposals cannot dispatch."""
         return bool(self.workspace_scheduling_available and self.workspace_appointments_enabled
                     and not self.workspace_hosted_enabled)
+
+    @property
+    def workspace_scheduling_patient_setup_available(self) -> bool:
+        return bool(self.workspace_scheduling_patient_setup_enabled
+                    and self.workspace_scheduling_available
+                    and self.workspace_scheduling_login_enabled
+                    and self.workspace_appointments_enabled)
 
     @property
     def workspace_capture_available(self) -> bool:
@@ -415,6 +424,9 @@ class Settings(BaseSettings):
                 practice = ""
             if not self.workspace_scheduling_available or not self.workspace_scheduling_login_enabled or not practice or practice != self.scheduling_enrollment_practice_id:
                 errors.append("Scheduling enrollment requires configured sign-in and one reviewed practice")
+
+        if self.workspace_scheduling_patient_setup_enabled and not self.workspace_scheduling_patient_setup_available:
+            errors.append("Scheduling patient setup requires authenticated scheduling sign-in and appointment proposals")
 
         if self.workspace_core_appointment_setup_enabled and not self.workspace_core_appointment_setup_available:
             errors.append("Appointment setup requires an authenticated, configured Core connection")

@@ -72,6 +72,17 @@ class SchedulingRuntime:
                 transport=transport_factory() if transport_factory else None, now=now,
                 execution_allowed=lambda: not self._closed and self._settings.workspace_appointment_execution_available,
             )
+            try:
+                from cosmas_os.adapters.scheduling_patient_setup import HttpSchedulingPatientSetup
+
+                self.patient_setup = HttpSchedulingPatientSetup(
+                    profile.origin, lambda selection: self._credential(selection, appointments=True),
+                    enabled=lambda: not self._closed and self._settings.workspace_scheduling_patient_setup_available,
+                    transport=transport_factory() if transport_factory else None, now=now,
+                )
+            except BaseException:
+                self.appointments.close()
+                raise
         except BaseException:
             self._closed = True
             self.availability.close()
@@ -109,9 +120,12 @@ class SchedulingRuntime:
             return
         self._closed = True
         try:
-            self.appointments.close()
+            self.patient_setup.close()
         finally:
-            self.availability.close()
+            try:
+                self.appointments.close()
+            finally:
+                self.availability.close()
 
 
 def configure_scheduling(app: FastAPI, profile: SchedulingServiceProfile) -> None:

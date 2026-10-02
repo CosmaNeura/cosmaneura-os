@@ -23,12 +23,12 @@ from cosmas_os.ports.scheduling_actions import AppointmentIntent, ObservedAppoin
 SCHEDULING_SOURCE = "cosmas_scheduling"
 
 
-def _current(s, box, owner, wid, identity_id, bot, reauthenticate, *, keep_locks=False):
+def _current(s, box, owner, wid, identity_id, bot, reauthenticate, *, keep_locks=False, configuration=None):
     from cosmas_os.application import team_resources
     s.rollback()
     reauthenticate()
     w = ws._workspace(s, box, owner, wid, writing=True)
-    account, patient, selection = work._current(s, w, identity_id)
+    account, patient, selection = work._current(s, w, identity_id, configuration=configuration)
     _, installed, configuration = team.active_bot(s, box, owner, bot.address, bot.team_revision)
     if not supports_skill(configuration, "calendar_availability") or not configuration["include_evidence"]:
         raise ws.WorkspaceError("bot_source_unavailable")
@@ -67,11 +67,11 @@ def _receipt(port, context):
         raise ConnectorUnavailable("scheduling_receipt_invalid") from None
 
 
-def read_current(s, *, box, owner, workspace_id, external_identity_id, bot, port, reauthenticate):
+def read_current(s, *, box, owner, workspace_id, external_identity_id, bot, port, reauthenticate, configuration=None):
     try:
-        initial = _current(s, box, owner, workspace_id, external_identity_id, bot, reauthenticate)
+        initial = _current(s, box, owner, workspace_id, external_identity_id, bot, reauthenticate, configuration=configuration)
         result = _receipt(port, initial) if initial[5] is not None else None
-        if _current(s, box, owner, workspace_id, external_identity_id, bot, reauthenticate, keep_locks=True) != initial:
+        if _current(s, box, owner, workspace_id, external_identity_id, bot, reauthenticate, keep_locks=True, configuration=configuration) != initial:
             raise ws.WorkspaceError("scheduling_context_changed")
         s.commit()
         return {"workspace_id": workspace_id, "label": initial[6],
@@ -104,7 +104,7 @@ def prepare(s, *, box, owner, workspace_id, external_identity_id, body,
             s.commit()
             return result
         s.commit()
-        initial = _current(s, box, owner, workspace_id, external_identity_id, body.bot, reauthenticate)
+        initial = _current(s, box, owner, workspace_id, external_identity_id, body.bot, reauthenticate, configuration=configuration)
         before = _receipt(appointment_port, initial).appointment if body.action != "book" else None
         google = None
         if body.action != "cancel":
@@ -126,7 +126,7 @@ def prepare(s, *, box, owner, workspace_id, external_identity_id, body,
             except (ValueError, TypeError, AttributeError):
                 raise ConnectorUnavailable("scheduling_receipt_invalid") from None
             google = result.google
-        if _current(s, box, owner, workspace_id, external_identity_id, body.bot, reauthenticate, keep_locks=True) != initial:
+        if _current(s, box, owner, workspace_id, external_identity_id, body.bot, reauthenticate, keep_locks=True, configuration=configuration) != initial:
             raise ws.WorkspaceError("scheduling_context_changed")
         now = datetime.now(UTC)
         expiry = min(now + timedelta(minutes=3), google.checked_at + timedelta(minutes=5)) if google else now + timedelta(minutes=3)
