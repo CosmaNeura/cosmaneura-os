@@ -10,6 +10,7 @@ from pydantic import SecretStr
 from sqlalchemy import event, func, select
 from sqlalchemy.orm import Session
 from tests.integration.test_appointment_work import prepare as setup_mapping
+from tests.integration.test_scheduling_patient_setup import install_personal_fixture
 from tests.integration.test_workspace_capture import capture_case as _capture_case
 from tests.unit.test_hosted_workspace_config import hosted
 
@@ -105,13 +106,14 @@ def proposal_case(capture_case, monkeypatch):
     configuration = hosted(beta_box_id=f.box, clerk_issuer=f.configuration.clerk_issuer,
         clerk_jwks_url=f.configuration.clerk_jwks_url,
         clerk_audience=f.configuration.clerk_audience, workspace_scheduling_enabled=True,
-        workspace_appointments_enabled=True, workspace_team_setup_enabled=True)
+        workspace_appointments_enabled=True, workspace_team_setup_enabled=True,
+        workspace_scheduling_login_enabled=True, workspace_scheduling_patient_setup_enabled=True)
     for name, value in configuration.model_dump().items():
         setattr(f.configuration, name, value)
     assert f.configuration.workspace_scheduling_available and f.configuration.workspace_hosted_enabled
     assert "db.example.invalid" in f.configuration.database_url
     monkeypatch.setattr(team, "runtime_settings", f.configuration)
-    case = setup_mapping(f.session, {"box_id": f.box, "owner_id": f.actor}, existing=f)
+    case = setup_mapping(f.session, {"box_id": f.box, "owner_id": f.actor}, existing=f, patient_mapping=False)
     f.mapping, f.owner, f.wid = case, f.actor, case.wid
     f.remote_appointment = str(uuid4())
     f.appointment.source, f.appointment.external_id = "cosmas_scheduling", f.remote_appointment
@@ -150,7 +152,12 @@ def proposal_case(capture_case, monkeypatch):
     api.app.dependency_overrides[api._scheduling_connection] = lambda: f.receiver.availability
     api.app.dependency_overrides[api._appointment_connection] = lambda: f.receiver.appointments
     try:
-        yield f
+        with install_personal_fixture(f.session, box=f.box, owner=f.owner, wid=f.wid,
+                identity_id=case.identity, account=account, configuration=f.configuration,
+                patient_id=str(case.selection.patient_id)) as mapping_receipt:
+            case.patient = mapping_receipt["mapping"]["mapping_id"]
+            f.session.commit()
+            yield f
     finally:
         api.app.dependency_overrides.pop(api._scheduling_connection, None)
         api.app.dependency_overrides.pop(api._appointment_connection, None)

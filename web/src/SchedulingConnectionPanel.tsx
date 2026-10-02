@@ -8,7 +8,7 @@ import {parseRecordNavigationResult,RECORD_NAVIGATION_EVENT} from './core-record
 
 declare global {interface Window {cosmasSchedulingNavigation?:{version:1;available:boolean;mode:'trusted-click'}}}
 
-export function SchedulingConnectionPanel({identity,onBusyChange,onAuthenticationLost}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void}){
+export function SchedulingConnectionPanel({identity,onBusyChange,onAuthenticationLost,onObserved}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void;onObserved?:()=>void}){
   const [storedStatus,storeStatus]=useState<{identity:AuthenticatedWorkspaceIdentity;value:SchedulingLoginStatus}|null>(null),[storedStart,storeStart]=useState<{identity:AuthenticatedWorkspaceIdentity;value:SchedulingLoginStart}|null>(null);
   const status=storedStatus?.identity===identity?storedStatus.value:null,start=storedStart?.identity===identity?storedStart.value:null;
   const setStatus=(value:SchedulingLoginStatus|null)=>storeStatus(value?{identity,value}:null),setStart=(value:SchedulingLoginStart|null)=>storeStart(value?{identity,value}:null);
@@ -18,6 +18,7 @@ export function SchedulingConnectionPanel({identity,onBusyChange,onAuthenticatio
   const [requestId,setRequestId]=useState(()=>crypto.randomUUID());
   const epoch=useRef(0),pending=useRef<AbortController|null>(null),navigationPending=useRef<string|null>(null),awaitingReturn=useRef(false);
   const denied=useRef(onAuthenticationLost);denied.current=onAuthenticationLost;
+  const observed=useRef(onObserved);observed.current=onObserved;
   const native=identity.mode==='desktop_native'?{revision:identity.revision,isCurrent:identity.isCurrent}:identity.nativeSession;
   const capability=window.cosmasSchedulingNavigation;
   const nativeReady=!native||capability?.version===1&&capability.available&&capability.mode==='trusted-click';
@@ -29,7 +30,7 @@ export function SchedulingConnectionPanel({identity,onBusyChange,onAuthenticatio
   },[identity]);
   const run=useCallback(async(action:'status'|'start'|'disconnect')=>{
     if(pending.current)return;
-    const current=++epoch.current,controller=new AbortController();pending.current=controller;setBusy(true);setMessage('');setStart(null);
+    const current=++epoch.current,controller=new AbortController();pending.current=controller;setBusy(true);setMessage('');setStart(null);observed.current?.();
     try{
       const result=await schedulingLoginRequest(identity,action,controller.signal);
       if(epoch.current!==current||currentIdentity.current!==identity)return;

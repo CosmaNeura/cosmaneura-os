@@ -198,11 +198,21 @@ class SchedulingGoogleLogin:
                 SchedulingAccount.location_id == str(selection.location_id),
                 SchedulingAccount.appointment_type_id == str(selection.appointment_type_id),
             )
-        rows = session.execute(query.with_for_update()).all()
+        # Observe only the owner first, then acquire the same human-first order
+        # used by patient setup before locking the account and identity.
+        owners = session.execute(query.with_only_columns(
+            ExternalIdentity.box_id, ExternalIdentity.principal_id,
+        )).all()
+        if len(owners) != 1:
+            raise ws.WorkspaceError("scheduling_account_review_required", 409)
+        box, owner = owners[0]
+        ws._human(session, box, owner, creating=True)
+        rows = session.execute(query.with_for_update().execution_options(populate_existing=True)).all()
         if len(rows) != 1:
             raise ws.WorkspaceError("scheduling_account_review_required", 409)
         account, external = rows[0]
-        ws._human(session, external.box_id, external.principal_id, creating=True)
+        if external.box_id != box or external.principal_id != owner:
+            raise ws.WorkspaceError("scheduling_account_review_required", 409)
         selected = SchedulingSelection(
             box_id=external.box_id,
             owner_id=external.principal_id,
@@ -539,6 +549,60 @@ class SchedulingGoogleLogin:
                     session.commit()
         except Exception:
             pass  # A retained exchanging row blocks reuse and requires a new sign-in.
+
+    def patient_setup_binding(self, session, identity_id, account):
+        """Read the current sealed staff grant in the caller's transaction.
+
+        No refresh, network, second Session or lock upgrade. Token/ciphertext
+        rotation does not change this semantic grant; reconnect does.
+        """
+        from cosmas_os.application.scheduling_patient_setup import PatientSetupBinding
+
+        self._enabled()
+        external = session.scalar(select(ExternalIdentity).where(
+            ExternalIdentity.id == identity_id, ExternalIdentity.active.is_(True),
+        ).with_for_update(read=True).execution_options(populate_existing=True))
+        current = session.scalar(select(SchedulingAccount).where(
+            SchedulingAccount.id == account.id,
+            SchedulingAccount.external_identity_id == identity_id,
+            SchedulingAccount.revoked_at.is_(None),
+        ).with_for_update(read=True).execution_options(populate_existing=True))
+        if external is None or current is None:
+            raise ConnectorUnavailable("scheduling_patient_grant_unavailable")
+        selected = SchedulingSelection(
+            box_id=external.box_id, owner_id=external.principal_id,
+            practice_id=current.practice_id, expected_actor_id=current.actor_id,
+            practitioner_id=current.practitioner_id, location_id=current.location_id,
+            appointment_type_id=current.appointment_type_id,
+        )
+        binding = digest(canonical([
+            self.config_digest, current.id, external.id, selected.model_dump(mode="json"),
+        ]))
+        credential = session.scalar(select(SchedulingLoginCredential).where(
+            SchedulingLoginCredential.account_id == current.id,
+        ).with_for_update(read=True).execution_options(populate_existing=True))
+        if (credential is None or credential.status != "ready"
+            or credential.binding_digest != binding or credential.expires_at <= self.now()):
+            raise ConnectorUnavailable("scheduling_patient_grant_unavailable")
+        try:
+            private = self._open(credential.sealed, "credential", current.id, binding)
+            subject = private.get("subject")
+            if (set(private) != {"token", "refresh", "subject"}
+                or not isinstance(subject, str) or not 1 <= len(subject) <= 255
+                or any(ord(c) < 32 or ord(c) == 127 for c in subject)):
+                raise ValueError
+            grant = digest(canonical([
+                "cosmas-scheduling-patient-grant.v1", self.config_digest,
+                "https://accounts.google.com", subject, self.client_id,
+                "google_staff_identity", selected.model_dump(mode="json"),
+                external.issuer, external.subject, external.organization_id,
+            ]))
+            self._enabled()
+            return PatientSetupBinding(account_id=current.id, selection=selected,
+                binding_sha256=binding, connected_at=credential.connected_at,
+                grant_sha256=grant)
+        except Exception:
+            raise ConnectorUnavailable("scheduling_patient_grant_unavailable") from None
 
     def credential(self, selection):
         refresh_id = None

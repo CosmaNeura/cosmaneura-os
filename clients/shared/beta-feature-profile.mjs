@@ -22,7 +22,8 @@ export const BETA_FEATURE_FLAGS = Object.freeze([
 const foundations = ['VITE_WORKSPACE_ENABLED', 'VITE_WORKSPACE_AUTHENTICATED_ENABLED', 'VITE_WORKSPACE_HOSTED_ENABLED'];
 const forbidden = ['VITE_DESKTOP_SYNTHETIC_ENABLED', 'VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED', 'VITE_COMPACT_LOCAL'];
 const captureFlags = ['VITE_CAPTURE_E2E_MICROPHONE_ENABLED', 'VITE_CAPTURE_IOS_NATIVE_PCM_ENABLED'];
-const knownGates = new Set([...BETA_FEATURE_FLAGS, ...foundations, ...forbidden, ...captureFlags,
+const patientSetupFlag = 'VITE_WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED';
+const knownGates = new Set([patientSetupFlag, ...BETA_FEATURE_FLAGS, ...foundations, ...forbidden, ...captureFlags,
   'VITE_WORKSPACE_NATIVE_AUTH_ENABLED', 'VITE_WORKSPACE_DESKTOP_AUTH_ENABLED']);
 const fail = message => { throw new Error(`Beta feature profile refused: ${message}`); };
 function set(env, name, value) {
@@ -53,6 +54,8 @@ function resolveProfile(input, checkPublishableKey) {
   for (const key of foundations) set(env, key, 'true');
   for (const key of BETA_FEATURE_FLAGS) set(env, key, !staging || stagingFlags.includes(key) ? 'true' : 'false');
   for (const key of forbidden) set(env, key, 'false');
+  // Receiver remains unqualified; ship the correspondence capability dark.
+  set(env, patientSetupFlag, 'false');
   const client = env.VITE_WORKSPACE_HOSTED_CLIENT;
   if (!['web', 'desktop', 'apple'].includes(client)) fail('select the web, desktop or apple client');
   if (staging && (client === 'web' || env.VITE_WORKSPACE_DATA_MODE !== 'synthetic')) fail('first-owner staging requires a native client and synthetic data');

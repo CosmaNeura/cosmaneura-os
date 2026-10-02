@@ -367,6 +367,12 @@ def _appointment_connection(request: Request):
     return runtime.appointments if runtime is not None else build_scheduling_appointments()
 
 
+def _scheduling_patient_connection(request: Request):
+    from cosmas_os.ports.scheduling_patient_setup import build_scheduling_patient_setup
+    runtime = scheduling_runtime(request.app)
+    return runtime.patient_setup if runtime is not None else build_scheduling_patient_setup()
+
+
 def _appointment_execution_gate() -> None:
     _appointment_gate()
     if not settings.workspace_appointment_execution_available:
@@ -400,7 +406,7 @@ async def _prepare_workspace_appointment(request, workspace_id, session, identit
                    external_identity_id=identity.external_identity_id, reauthenticate=reauthenticate)
     if current:
         return await run_in_threadpool(workspace_appointments.read_current, session,
-                                       **context, bot=body.bot, port=appointment_port)
+                                       **context, bot=body.bot, port=appointment_port, configuration=settings)
     return await run_in_threadpool(workspace_appointments.prepare, session,
                                   **context, body=body, availability_port=availability_port,
                                   appointment_port=appointment_port, configuration=settings)
@@ -2004,6 +2010,18 @@ from cosmas_os.api.conversation_deadline import install_conversation_boundary  #
 
 install_conversation_boundary(app)
 
+
+from cosmas_os.api.scheduling_patient_routes import SchedulingPatientBoundary  # noqa: E402
+from cosmas_os.api.scheduling_patient_routes import (  # noqa: E402
+    router as scheduling_patient_router,  # noqa: E402
+)
+
+app.include_router(scheduling_patient_router(
+    configuration=lambda: settings, connection=_scheduling_patient_connection,
+    identity_dependency=_identity, session_dependency=get_session,
+    workspace_gate=_workspace_gate, fence=_refresh_model_identity))
+app.add_middleware(SchedulingPatientBoundary)
+allowed_headers.append("X-Cosmas-Scheduling-Patient")
 
 app.include_router(scheduling_login_router(
     runtime=lambda: getattr(app.state, "scheduling_google_login", None),

@@ -24,6 +24,8 @@ run "configured_account_connections" {
       WORKSPACE_SCHEDULING_ENABLED            = true
       WORKSPACE_SCHEDULING_LOGIN_ENABLED      = true
       WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED = true
+      WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED = true
+      WORKSPACE_APPOINTMENTS_ENABLED = true
       WORKSPACE_GOOGLE_CONNECTION_ENABLED     = true
       WORKSPACE_GOOGLE_MESSAGE_ENABLED        = true
       WORKSPACE_GOOGLE_CALENDAR_ENABLED       = true
@@ -70,6 +72,10 @@ run "configured_account_connections" {
     error_message = "Calendar review must remain an explicit classified service feature."
   }
   assert {
+    condition     = output.public_env.WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED == "true" && output.public_env.WORKSPACE_APPOINTMENTS_ENABLED == "true"
+    error_message = "Patient setup must remain explicit and require appointment proposals."
+  }
+  assert {
     condition     = length(output.secret_definitions) == 8 && length(output.secret_env) == 8 && output.secret_definitions[output.secret_env.MANAGED_SERVICES_CONFIG_JSON] == "https://invented-beta.vault.azure.net/secrets/managed-accounts/00000000000000000000000000000008"
     error_message = "Manifest and account credentials must resolve to exact versions in the dedicated vault."
   }
@@ -94,6 +100,15 @@ run "calendar_work_requires_underlying_google_connection" {
   variables {
     hosted_enabled = true
     features       = { WORKSPACE_GOOGLE_CALENDAR_ENABLED = true }
+  }
+  expect_failures = [terraform_data.configuration_guard]
+}
+
+run "patient_setup_requires_sign_in_and_proposals" {
+  command = plan
+  variables {
+    hosted_enabled = true
+    features = { WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED = true }
   }
   expect_failures = [terraform_data.configuration_guard]
 }

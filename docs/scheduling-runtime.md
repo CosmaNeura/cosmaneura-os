@@ -45,7 +45,8 @@ Without a profile the existing unavailable response remains. The normal request
 identity, current database authorization, immutable approval, receiver conflict
 and once-ever operation boundaries are unchanged.
 
-The ordinary application lifespan owns both HTTP clients and settles its
+The ordinary application lifespan owns the availability, appointment and patient
+correspondence HTTP clients and settles its
 background workers before closing them. Failed startup and sibling cleanup
 failures also release the owned clients. A stopped or disabled runtime cannot
 acquire another credential. Host-owned credential storage and refresh remain the
@@ -59,11 +60,15 @@ credential acquisition. The existing synthetic execution path retains its
 separate local database gate. Chief's saved status distinguishes proposal
 approval from a verified appointment receipt.
 
-Patient correspondence remains an additional setup prerequisite. There is no
-product writer for the reviewed Scheduling patient mapping yet, and the pinned
-receiver has no verified patient-selection endpoint. Names, DOB, Core patient
-references and browser-entered Scheduling UUIDs do not establish correspondence.
-DOB remains optional for encounter recording.
+Patient correspondence remains an additional setup prerequisite. The gated
+product writer now requires a current verified lookup, exact opaque choice and
+explicit human comparison with the visit. Hosted proposals use this durable
+personal review rather than an arbitrarily seeded mapping. The pinned receiver
+still has no qualified patient-selection endpoint, so the feature remains
+disabled in release profiles. Names, DOB, Core patient references and
+browser-entered Scheduling UUIDs do not establish correspondence. DOB remains
+optional for encounter recording and patient search. See
+`scheduling-patient-correspondence.md` for flags, custody and recovery behavior.
 
 Source qualification uses signed synthetic sessions, PostgreSQL, mounted product
 controls and bounded invented receiver reads. Real staff login/token acquisition,

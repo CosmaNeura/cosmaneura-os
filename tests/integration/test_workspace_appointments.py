@@ -69,8 +69,8 @@ class LocalReader:
                 checked_at=now-timedelta(minutes=2) if self.fault == "google" else now))
 
 
-def setup(s, seed, existing=None):
-    case = setup_approval(s, seed, existing=existing)
+def setup(s, seed, existing=None, *, patient_mapping=True):
+    case = setup_approval(s, seed, existing=existing, patient_mapping=patient_mapping)
     team.save(s, case.box, case.owner, expected=0, key="appointment-team", configuration=team.default_configuration())
     case.bot = CaptureBotSelection(address="follow_up", team_revision=1)
     case.connection_id = uuid4()
@@ -207,27 +207,37 @@ def test_signed_api_preparation_catalog_current_review_and_withdrawal(session, s
     signed = signed_workspace
     signed.configuration.workspace_scheduling_enabled = True
     signed.configuration.workspace_appointments_enabled = True
-    case = setup(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed)
+    signed.configuration.workspace_scheduling_login_enabled = True
+    signed.configuration.workspace_scheduling_patient_setup_enabled = True
+    case = setup(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed, patient_mapping=False)
+    from tests.integration.test_scheduling_patient_setup import install_personal_fixture
+
+    account = session.get(SchedulingAccount, case.account)
+    assert account is not None
     api.app.dependency_overrides[api._scheduling_connection] = lambda: case.port
     api.app.dependency_overrides[api._appointment_connection] = lambda: case.port
     try:
-        path = f"/workspaces/{case.wid}/appointments"
-        headers = {"Authorization": "Bearer " + signed.token()}
-        current = signed.client.post(path + "/current", headers=headers, json={"bot": case.bot.model_dump()})
-        assert current.status_code == 200, current.text
-        body = command(case, "reschedule").model_dump(mode="json")
-        proposed = signed.client.post(path, headers=headers, json=body)
-        assert proposed.status_code == 200, proposed.text
-        item = proposed.json()
-        assert signed.client.post(path, headers=headers, json=body).json() == item
-        assert signed.client.get(path, headers=headers).json()["items"][0]["ticket_id"] == item["ticket_id"]
-        chosen = {"revision_id": item["revision_id"], "payload_hash": item["payload_hash"], "choice": "approve"}
-        assert signed.client.post(path + "/" + item["ticket_id"] + "/decide", headers=headers, json=chosen).json()["state"] == "approved"
-        chosen["choice"] = "reject"
-        assert signed.client.post(path + "/" + item["ticket_id"] + "/decide", headers=headers, json=chosen).json()["state"] == "rejected"
-        for bad in ({"patient_id": str(uuid4())}, {"appointment_id": str(uuid4())}, {"intent": {"private": "PRIVATE"}}):
-            response = signed.client.post(path, headers=headers, json={**body, **bad})
-            assert response.status_code == 422 and "PRIVATE" not in response.text
+        with install_personal_fixture(session, box=case.box, owner=case.owner, wid=case.wid,
+                identity_id=case.identity, account=account, configuration=signed.configuration,
+                patient_id=str(case.selection.patient_id)) as mapping_receipt:
+            case.patient = mapping_receipt["mapping"]["mapping_id"]
+            path = f"/workspaces/{case.wid}/appointments"
+            headers = {"Authorization": "Bearer " + signed.token()}
+            current = signed.client.post(path + "/current", headers=headers, json={"bot": case.bot.model_dump()})
+            assert current.status_code == 200, current.text
+            body = command(case, "reschedule").model_dump(mode="json")
+            proposed = signed.client.post(path, headers=headers, json=body)
+            assert proposed.status_code == 200, proposed.text
+            item = proposed.json()
+            assert signed.client.post(path, headers=headers, json=body).json() == item
+            assert signed.client.get(path, headers=headers).json()["items"][0]["ticket_id"] == item["ticket_id"]
+            chosen = {"revision_id": item["revision_id"], "payload_hash": item["payload_hash"], "choice": "approve"}
+            assert signed.client.post(path + "/" + item["ticket_id"] + "/decide", headers=headers, json=chosen).json()["state"] == "approved"
+            chosen["choice"] = "reject"
+            assert signed.client.post(path + "/" + item["ticket_id"] + "/decide", headers=headers, json=chosen).json()["state"] == "rejected"
+            for bad in ({"patient_id": str(uuid4())}, {"appointment_id": str(uuid4())}, {"intent": {"private": "PRIVATE"}}):
+                response = signed.client.post(path, headers=headers, json={**body, **bad})
+                assert response.status_code == 422 and "PRIVATE" not in response.text
     finally:
         api.app.dependency_overrides.pop(api._scheduling_connection, None)
         api.app.dependency_overrides.pop(api._appointment_connection, None)
@@ -238,17 +248,27 @@ def test_disabling_appointments_during_source_read_discards_result(session, sign
     signed = signed_workspace
     signed.configuration.workspace_scheduling_enabled = True
     signed.configuration.workspace_appointments_enabled = True
-    case = setup(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed)
+    signed.configuration.workspace_scheduling_login_enabled = True
+    signed.configuration.workspace_scheduling_patient_setup_enabled = True
+    case = setup(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed, patient_mapping=False)
+    from tests.integration.test_scheduling_patient_setup import install_personal_fixture
+
+    account = session.get(SchedulingAccount, case.account)
+    assert account is not None
     case.port.after = lambda: setattr(signed.configuration, "workspace_appointments_enabled", False)
     api.app.dependency_overrides[api._scheduling_connection] = lambda: case.port
     api.app.dependency_overrides[api._appointment_connection] = lambda: case.port
     try:
-        path = f"/workspaces/{case.wid}/appointments" + ("/current" if current else "")
-        body = {"bot": case.bot.model_dump()} if current else command(case).model_dump(mode="json")
-        result = signed.client.post(path, headers={"Authorization": "Bearer " + signed.token()}, json=body)
-        assert result.status_code == 404
-        assert "patient_id" not in result.text and "appointment" not in result.text
-        assert not session.scalar(select(AppointmentWork.ticket_id).where(AppointmentWork.workspace_id == case.wid))
+        with install_personal_fixture(session, box=case.box, owner=case.owner, wid=case.wid,
+                identity_id=case.identity, account=account, configuration=signed.configuration,
+                patient_id=str(case.selection.patient_id)) as mapping_receipt:
+            case.patient = mapping_receipt["mapping"]["mapping_id"]
+            path = f"/workspaces/{case.wid}/appointments" + ("/current" if current else "")
+            body = {"bot": case.bot.model_dump()} if current else command(case).model_dump(mode="json")
+            result = signed.client.post(path, headers={"Authorization": "Bearer " + signed.token()}, json=body)
+            assert result.status_code == 404
+            assert "patient_id" not in result.text and "appointment" not in result.text
+            assert not session.scalar(select(AppointmentWork.ticket_id).where(AppointmentWork.workspace_id == case.wid))
     finally:
         api.app.dependency_overrides.pop(api._scheduling_connection, None)
         api.app.dependency_overrides.pop(api._appointment_connection, None)

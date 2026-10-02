@@ -55,10 +55,14 @@ class SchedulingEnrollmentService:
         hint = session.get(ExternalIdentity, external_id)
         if hint is None:
             raise ws.WorkspaceError("scheduling_sign_in_unavailable", 403)
+        hinted_box, hinted_owner = hint.box_id, hint.principal_id
         # Serialize enrollment with existing owner administration within this Box.
         box = session.scalar(
             select(BoxContext).where(BoxContext.id == hint.box_id).with_for_update()
         )
+        # Patient setup and staff login lock the human before identity/account.
+        # Preserve Box serialization while avoiding the reverse identity order.
+        ws._human(session, hinted_box, hinted_owner, creating=True)
         session.expire(hint)
         external = session.scalar(
             select(ExternalIdentity)
@@ -69,13 +73,14 @@ class SchedulingEnrollmentService:
         if (
             box is None
             or external is None
+            or external.box_id != hinted_box
+            or external.principal_id != hinted_owner
             or identity is not None
             and (
                 external.box_id != identity.box_id or external.principal_id != identity.principal_id
             )
         ):
             raise ws.WorkspaceError("scheduling_sign_in_unavailable", 403)
-        ws._human(session, external.box_id, external.principal_id, creating=True)
         binding = catalog_digest(
             [
                 self.config_digest,

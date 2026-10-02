@@ -50,6 +50,8 @@ import {ResearchPanelLoader} from "./ResearchPanelLoader";
 import { CoreRecordLink } from "./CoreRecordLink";
 import { SchedulingPanel } from "./SchedulingPanel";
 import { SCHEDULING_BUILD } from "./scheduling-api";
+import {SchedulingPatientPanel} from './SchedulingPatientPanel';
+import {SCHEDULING_PATIENT_BUILD} from './scheduling-patient-api';
 import { SCHEDULING_LOGIN_BUILD } from "./scheduling-login-api";
 import { GoogleConnectionPanel } from './GoogleConnectionPanel';
 import { GoogleMessageMount } from './GoogleMessageMount';
@@ -114,8 +116,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [accessBusy,setAccessBusy]=useState(false);
   const [scribeSourceBusy,setScribeSourceBusy]=useState(false);
   const [handoffReviewPending,setHandoffReviewPending]=useState(false);
+  const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
   const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
-  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending;
+  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
@@ -148,6 +151,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
+  const [schedulingObservation,setSchedulingObservation]=useState(0);
   const [pending, setPending] = useState<PendingSave | null>(null);
   const [modelObservation,setModelObservation]=useState<{receipt:ModelRequestObservation|HandoffRetryObservation;observedAt:string}|null>(null);
   const [replacementDraft,setReplacementDraft]=useState<{content:string;role:string;acknowledged:boolean}|null>(null);
@@ -182,6 +186,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[connectionGeneration]);
   const reportSchedulingBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.scheduling===blocked?previous:{...previous,scheduling:blocked});
+  },[connectionGeneration]);
+  const reportSchedulingObservation=useCallback(()=>{
+    if(generation.current===connectionGeneration)setSchedulingObservation(value=>value+1);
+  },[connectionGeneration]);
+  const reportSchedulingPatientBusy=useCallback((blocked:boolean)=>{
+    if(generation.current===connectionGeneration)setSchedulingPatientBusy(blocked);
   },[connectionGeneration]);
   const reportCoreBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.core===blocked?previous:{...previous,core:blocked});
@@ -441,6 +451,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
+    setSchedulingPatientBusy(false);
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
@@ -614,7 +625,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const noteChanged=savedNote(latest)!==savedNote(workspace)&&note!==savedNote(latest);
     const editedTeam=!!team&&!!teamDraft&&JSON.stringify(teamDraft)!==JSON.stringify(team.configuration);
     const teamChanged=!!team&&latestTeam.revision!==team.revision&&editedTeam;
-    setWorkspace(latest);setTeam(latestTeam);
+    setWorkspace(latest);setTeam(latestTeam);setSchedulingObservation(value=>value+1);
     if(!editedTeam)setTeamDraft(structuredClone(latestTeam.configuration));
     if(noteChanged||teamChanged){setConflict(true);setError('The saved notebook or team changed. Your unsaved text and settings are retained; load the latest version and compare before saving.');}
   }
@@ -743,7 +754,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       const [latest, latestTeam] = await Promise.all([workspace ? workspaceApi.read(access, workspace.id) : Promise.resolve(null), workspaceApi.team(access)]);
       if (current !== generation.current) return;
       checkRecoveryOwner(latestTeam);
-      setWorkspace(latest); setTeam(latestTeam); setConflict(false);setPrepEpoch(value=>value+1);
+      setWorkspace(latest); setTeam(latestTeam); setConflict(false);setPrepEpoch(value=>value+1);setSchedulingObservation(value=>value+1);
       setMessage("Latest saved history and team loaded. Your unsaved text and settings are preserved; compare them before saving.");
       // Keep the account editor controller and its retained input alive while rechecking parent addresses.
       await recoverAfterRead(latestTeam, latest, current, recoveryState === "failed");
@@ -862,7 +873,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     !journal.current || journal.current.serverScope !== team?.recovery_scope || recoveryState === "failed");
   const baseLocked = busy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
   const actionLocked = baseLocked || scribeSourceBusy;
-  const locked = actionLocked || handoffReviewPending;
+  const locked = actionLocked || handoffReviewPending || schedulingPatientBusy;
   const reviewWorkspace = workspace ? withObservedCaptureDraft(workspace, observedCaptureDraft) : null;
   const bot = team?.configuration.bots.find(b => botAddress(b) === selected);
   const template = team?.members.find(b => botAddress(b) === selected);
@@ -1232,7 +1243,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current='calendar';setSettingsOpen(false);void loadEncounters();}}/>:undefined}/>
         </AccountRecoveryContext.Provider>:undefined}
         microsoft={MICROSOFT_CONNECTION_BUILD&&authenticated?<MicrosoftConnectionPanel identity={authenticated} onBusyChange={reportMicrosoftBusy} onAuthenticationLost={failure}/>:undefined}
-        scheduling={SCHEDULING_LOGIN_BUILD&&authenticated?<SchedulingConnectionPanel identity={authenticated} onBusyChange={reportSchedulingBusy} onAuthenticationLost={failure}/>:undefined}
+        scheduling={SCHEDULING_LOGIN_BUILD&&authenticated?<SchedulingConnectionPanel identity={authenticated} onBusyChange={reportSchedulingBusy} onAuthenticationLost={failure} onObserved={reportSchedulingObservation}/>:undefined}
         core={CORE_CONNECTION_BUILD&&authenticated?<CoreConnectionPanel identity={authenticated} onBusyChange={reportCoreBusy} onAuthenticationLost={failure} openBlocked={locked||captureNavigationLocked||captureDraftLocked} onOpenNotebook={command=>open(undefined,command)}/>:undefined}
         teamSummary={team?.revision ? `${team.configuration.bots.filter(bot => !bot.retired).length} coworkers · Names, instructions & preferences` : 'Choose your coworkers and make them yours'}
         teamDirty={!!team && !!teamDraft && JSON.stringify(teamDraft) !== JSON.stringify(team.configuration)} onClose={closeSettings}
@@ -1364,6 +1375,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               enabled={bot.enabled && bot.include_evidence && team.revision > 0} locked={locked}
               entryRevision={workspace.revision} workEnabled={team.capture.prep_work_enabled===true} onAccessLost={failure}
               onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}} /></details>}
+          {bot && supportsSkill(bot,"calendar_availability") && SCHEDULING_PATIENT_BUILD && authenticated && team &&
+            <SchedulingPatientPanel key={`${workspace.id}:${connectionGeneration}`} workspace={workspace} identity={authenticated} observationStamp={schedulingObservation}
+              enabled={!!team.scheduling?.enabled && bot.enabled && team.revision>0}
+              locked={actionLocked||handoffReviewPending||connectionEditorsLocked||captureNavigationLocked||captureDraftLocked}
+              recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||handoffReviewPending||connectionEditorsLocked||captureNavigationLocked||captureDraftLocked}
+              onBusyChange={reportSchedulingPatientBusy} onAccessLost={failure}/>}
           {bot && supportsSkill(bot, "calendar_availability") && SCHEDULING_BUILD && authenticated && team && (team.scheduling?.enabled || APPOINTMENTS_BUILD) &&
             <SchedulingPanel workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}} name={bot.name}

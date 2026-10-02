@@ -103,9 +103,13 @@ test('ordinary Vite config emits the expanded profile in both direct flags and w
     const module=await import('data:text/javascript;base64,'+Buffer.from(entry.code).toString('base64'));
     assert.equal(module.capture,'true');
     for(const key of BETA_FEATURE_FLAGS)assert.equal(module.default[key],'true',key);
+    assert.equal(module.default.VITE_WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED,'false');
     const manifest=JSON.parse(chunks.find(item=>item.fileName==='cosmas-beta-features.json').source);
     assert.deepEqual(manifest,resolveBetaFeatureProfile(base).manifest);
     process.env.VITE_WORKSPACE_CAPTURE_ENABLED='false';
+    await assert.rejects(()=>build({root:join(root,'web'),logLevel:'silent',build:{write:false}}),/conflicts/);
+    delete process.env.VITE_WORKSPACE_CAPTURE_ENABLED;
+    process.env.VITE_WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED='true';
     await assert.rejects(()=>build({root:join(root,'web'),logLevel:'silent',build:{write:false}}),/conflicts/);
   }finally{for(const key of Object.keys(process.env))if(key.startsWith('VITE_'))delete process.env[key];Object.assign(process.env,saved);}
 });

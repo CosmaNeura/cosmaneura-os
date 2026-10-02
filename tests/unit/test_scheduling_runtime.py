@@ -172,9 +172,46 @@ def test_closed_runtime_cannot_acquire_or_dispatch(configuration, selection):
     managed.close()
     managed.close()
     assert managed.availability._client.is_closed and managed.appointments._client.is_closed
+    assert managed.patient_setup._client.is_closed
     with pytest.raises(ConnectorUnavailable, match="scheduling_identity_unavailable"):
         managed.availability.availability(selection, WINDOW)
     assert calls == requests == []
+
+
+def test_patient_setup_stays_closed_without_explicit_feature_gate(configuration, selection):
+    from cosmas_os.ports.scheduling_patient_setup import PatientPreviewRequest
+
+    calls, requests = [], []
+    managed = runtime(configuration, lambda value: calls.append(value) or credential(value), requests)
+    request = PatientPreviewRequest(request_nonce=uuid4(), expected_actor_id=selection.expected_actor_id,
+        selector={"kind": "search", "query": "Invented patient", "birth_date": None}, limit=5)
+    try:
+        with pytest.raises(ConnectorUnavailable):
+            managed.patient_setup.preview(selection, request)
+        assert calls == requests == []
+    finally:
+        managed.close()
+
+
+def test_patient_setup_disabled_during_credential_acquisition_never_dispatches(configuration, selection):
+    from cosmas_os.ports.scheduling_patient_setup import PatientPreviewRequest
+
+    configuration.workspace_scheduling_login_enabled = True
+    configuration.workspace_scheduling_patient_setup_enabled = True
+    calls, requests = [], []
+    def provider(value):
+        calls.append(value)
+        configuration.workspace_scheduling_patient_setup_enabled = False
+        return credential(value)
+    managed = runtime(configuration, provider, requests)
+    request = PatientPreviewRequest(request_nonce=uuid4(), expected_actor_id=selection.expected_actor_id,
+        selector={"kind": "search", "query": "Invented patient", "birth_date": None}, limit=5)
+    try:
+        with pytest.raises(ConnectorUnavailable):
+            managed.patient_setup.preview(selection, request)
+        assert calls == [selection] and requests == []
+    finally:
+        managed.close()
 
 
 @pytest.mark.parametrize("mode", ["submit", "reconcile"])

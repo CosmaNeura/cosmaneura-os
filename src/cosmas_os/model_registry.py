@@ -22,6 +22,7 @@ from cosmas_os import (  # noqa: F401 -- imports register declarative models
     research_models,
     scheduling_enrollment_models,
     scheduling_login_models,
+    scheduling_patient_models,
     vendor_models,
     vendor_retirement_models,
     vendor_setup_models,
