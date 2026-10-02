@@ -171,8 +171,8 @@ class AgentToolExecutor:
             or row.prepared_envelope != claimed.envelope
             or work.effective_state(row, work.now(s, self.clock)) != "running"
             or row.agent_id == row.owner_id
-            or row.envelope_contract != "cosmas-gpt41-prepared.v5"
-            or row.prepared_envelope.get("contract") != "cosmas-gpt41-prepared.v5"
+            or row.envelope_contract not in work.TOOL_PREPARED_CONTRACTS
+            or row.prepared_envelope.get("contract") != row.envelope_contract
         ):
             raise ws.WorkspaceError("agent_tool_admission_invalid", 403)
         work.read_workspace(s, claimed.box, claimed.owner, claimed.workspace_id, row.external_identity_id)

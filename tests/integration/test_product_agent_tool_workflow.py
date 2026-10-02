@@ -85,7 +85,7 @@ def reserve(engine, case, content, key):
         admission_id, _ = work.reserve_conversation(s, box, owner, wid, expected=revision,
             team_revision=1, key=key, role="chief", content=content)
         claimed = work.claim(s, box, owner, admission_id)
-        assert claimed is not None and claimed.envelope["contract"] == "cosmas-gpt41-prepared.v5"
+        assert claimed is not None and claimed.envelope["contract"] == "cosmas-gpt41-prepared.v6"
         return claimed
 
 

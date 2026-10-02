@@ -42,7 +42,7 @@ def admitted(engine):
         selection = tools.prepare_tool_selection(s, box=box, owner=owner,
             workspace_id=wid, agent_id=bot.agent_id, team_revision_id=version.id,
             context_revision=context.context_revision, settings=settings, context=context)
-        assert envelope["contract"] == "cosmas-gpt41-prepared.v5" and envelope["tool_selection"] == selection
+        assert envelope["contract"] == "cosmas-gpt41-prepared.v6" and envelope["tool_selection"] == selection
         return claimed
 
 

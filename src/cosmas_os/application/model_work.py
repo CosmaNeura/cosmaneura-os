@@ -15,6 +15,11 @@ from cosmas_os.adapters.gpt41 import GPT41Connector, _context
 from cosmas_os.adapters.gpt41_tools import CURRENT_PREPARED_CONTRACT as TOOL_PREPARED_CONTRACT
 from cosmas_os.adapters.gpt41_tools import GPT41ToolsConnector
 from cosmas_os.adapters.gpt41_tools import validate_prepared as validate_tools
+from cosmas_os.adapters.gpt41_tools_v6 import (
+    CURRENT_PREPARED_CONTRACT as COMPACT_TOOL_PREPARED_CONTRACT,
+)
+from cosmas_os.adapters.gpt41_tools_v6 import GPT41CompactToolsConnector
+from cosmas_os.adapters.gpt41_tools_v6 import validate_prepared as validate_compact_tools
 from cosmas_os.api.model_work_schemas import (
     ENTRY_MODEL_BYTES,
     EntryModelRequest,
@@ -46,7 +51,8 @@ from cosmas_os.ports.task_brief import TaskRequirements
 
 ACTIVE = {"reserved", "running"}
 TERMINAL = {"completed", "failed", "unknown", "abandoned"}
-SUPPORTED_PREPARED_CONTRACTS = TEXT_PREPARED_CONTRACTS | {TOOL_PREPARED_CONTRACT}
+TOOL_PREPARED_CONTRACTS = {TOOL_PREPARED_CONTRACT, COMPACT_TOOL_PREPARED_CONTRACT}
+SUPPORTED_PREPARED_CONTRACTS = TEXT_PREPARED_CONTRACTS | TOOL_PREPARED_CONTRACTS
 
 
 def canonical(value):
@@ -665,7 +671,7 @@ def _new_admission(
             selection = prepare_tool_selection(s, box=workspace.box_id, owner=workspace.owner_id,
                 workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
                 context_revision=context.context_revision, settings=settings, context=context)
-            envelope = GPT41ToolsConnector(lambda: "").prepare(context, selection)
+            envelope = GPT41CompactToolsConnector(lambda: "").prepare(context, selection)
         else:
             envelope = GPT41Connector(lambda: "").prepare(context)
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
@@ -972,9 +978,10 @@ def claim(s, box, owner, admission_id, *, reauthenticate=None, clock=None):
             or digest(row.prepared_envelope) != row.envelope_sha256
         ):
             raise ws.WorkspaceError("source_changed")
-        if row.envelope_contract == TOOL_PREPARED_CONTRACT:
+        if row.envelope_contract in TOOL_PREPARED_CONTRACTS:
             try:
-                validate_tools(row.prepared_envelope)
+                validator = validate_compact_tools if row.envelope_contract == COMPACT_TOOL_PREPARED_CONTRACT else validate_tools
+                validator(row.prepared_envelope)
             except (ValueError, TypeError, KeyError):
                 raise ws.WorkspaceError("source_changed") from None
     except ws.WorkspaceError as error:
@@ -1018,7 +1025,7 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None):
     if digest(claimed.envelope) != claimed.envelope_sha256:
         raise ModelCallFailure()
     key = team.runtime_settings.workspace_llm_api_key
-    if claimed.envelope.get("contract") == TOOL_PREPARED_CONTRACT:
+    if claimed.envelope.get("contract") in TOOL_PREPARED_CONTRACTS:
         from cosmas_os.application.agent_tools import AgentToolExecutor
         from cosmas_os.db import make_session_factory
         from cosmas_os.models import AuditEvent
@@ -1035,7 +1042,9 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None):
                     detail=receipt))
                 tool_session.commit()
                 return value
-        return GPT41ToolsConnector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
+        connector = (GPT41CompactToolsConnector if claimed.envelope["contract"] == COMPACT_TOOL_PREPARED_CONTRACT
+            else GPT41ToolsConnector)
+        return connector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
             claimed.envelope, execute=execute)
     return GPT41Connector(lambda: key.get_secret_value() if key else "").review_prepared(
         claimed.envelope
@@ -1117,7 +1126,7 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
     try:
         workspace, version, bot, settings = _current_input(s, row, reauthenticate=reauthenticate, session_prep_phase="after")
         frozen = _context(row.prepared_envelope["context"])
-        if row.envelope_contract in {"cosmas-gpt41-prepared.v4", TOOL_PREPARED_CONTRACT}:
+        if row.envelope_contract in {"cosmas-gpt41-prepared.v4", *TOOL_PREPARED_CONTRACTS}:
             try:
                 for brief in result.handoffs:
                     TaskRequirements.model_validate(brief.requirements)
@@ -1723,7 +1732,7 @@ def reserve_retry(
         WorkspaceHandoffAttempt, WorkspaceHandoffAttempt.id == ModelWorkAdmission.handoff_attempt_id
     ).where(WorkspaceHandoffAttempt.handoff_id == hid).order_by(WorkspaceHandoffAttempt.number).limit(1))
     parent = s.scalar(select(ModelWorkAdmission).where(ModelWorkAdmission.request_entry_id == assignment.origin_entry_id))
-    if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", TOOL_PREPARED_CONTRACT} and (original is None or "task_brief" not in original.request_body):
+    if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", *TOOL_PREPARED_CONTRACTS} and (original is None or "task_brief" not in original.request_body):
         raise ws.WorkspaceError("handoff_context_changed")
     _allowance(s, box, owner, now(s, clock), version.configuration)
     if old and old.state in ACTIVE:
