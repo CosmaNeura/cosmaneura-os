@@ -4,6 +4,7 @@ import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace
 import {useSetupNavigationBusy} from './connection-setup-flow';
 import {parseRecordNavigationResult,RECORD_NAVIGATION_EVENT} from './core-record-location';
 import {useConnectionReturnCheck} from './use-connection-return-check';
+import {useGoogleNativeForeground} from './use-google-native-foreground';
 import {PersonalConnectionHealth} from './PersonalConnectionHealth';
 import {useConnectionHealth,observeConnectionStatus,observeConnectionRead,connectionReadScope,connectionReadFailed,connectionCheckFailed,invalidateConnectionHealth,personalConnectionProgress,type ConnectionReadScope} from './connection-operation-health';
 import './microsoft-connection.css';
@@ -35,8 +36,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   const health=useConnectionHealth(identity,'google');
   // The directory can change this scope while this editor remains mounted and hidden.
   // Withhold old account details and snapshots before the clearing effect runs.
-  const visible=data?.owner===identity&&data.scope===connectionReadScope(identity,'google')?data:null,
-    status=visible?.status,start=visible?.start,view=visible?.views[service];
+  const [needsCheck,setNeedsCheck]=useState(false);
   const epoch=useRef(0),pending=useRef<AbortController|null>(null),navigationPending=useRef<string|null>(null);
   const denied=useRef(onAuthenticationLost);denied.current=onAuthenticationLost;
   const native=identity.mode==='desktop_native'?{revision:identity.revision,isCurrent:identity.isCurrent}:identity.nativeSession;
@@ -52,7 +52,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     setData(previous=>previous?.owner===identity&&previous.scope!==connectionReadScope(identity,'google')?null:previous);
   },[identity,health.accountVersion,health.accountCurrent]);
   const run=useCallback(async(action:GoogleAction)=>{
-    if(owner.current!==identity)return;
+    if(owner.current!==identity||!nativeForeground.foreground.current)return;
     if(pending.current)return 'busy' as const;
     const previous=latest.current?.owner===identity?latest.current:null;
     const current=++epoch.current,controller=new AbortController();pending.current=controller;setBusy(true);setAction(action);setMessage('');
@@ -62,7 +62,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     try{
       const result=await googleConnectionRequest(identity,action,controller.signal);
       if(epoch.current!==current||owner.current!==identity)return;
-      setUnavailableFor(null);
+      setUnavailableFor(null);setNeedsCheck(false);
       if('authorization_url' in result){setData({owner:identity,status:null,start:result,views:{},scope:null});setRequestId(crypto.randomUUID());setMessage('Continue with Google, then return here. Your connection will be checked when you return.');}
       else if('kind' in result){
         if(!observeConnectionRead(identity,'google',scope,result)){invalidateConnectionHealth(identity,'google');setData(null);setMessage('The connected account or its permissions changed. Check your connection before reading again.');return;}
@@ -110,7 +110,21 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   useEffect(()=>{void run('status');},[run]);
   const returnCheck=useConnectionReturnCheck(identity,()=>run('status'),last=>setMessage(last==='sign_in_pending'
     ?'CosmaBot has not received the Google sign-in result. Finish in your browser, then check the connection here.'
-    :'CosmaBot has not confirmed the Google connection. Check the connection again to see the latest result.'));
+    :'CosmaBot has not confirmed the Google connection. Check the connection again to see the latest result.'),
+    identity.mode==='clerk_jwt'&&!!identity.nativeSession);
+  const nativeForeground=useGoogleNativeForeground(identity,{
+    suspended:()=>{
+      returnCheck.suspend();epoch.current++;pending.current?.abort();pending.current=null;operation.current=null;
+      setBusy(false);setAction(null);setNeedsCheck(true);setData(previous=>previous?{...previous,views:{}}:null);
+    },
+    resumed:()=>{
+      navigationPending.current=null;setOpening(false);
+      const checkingOAuth=returnCheck.hasActive();returnCheck.resume();
+      if(!checkingOAuth)void run('status');
+    },
+  });
+  const visible=!nativeForeground.suspended&&!needsCheck&&data?.owner===identity&&data.scope===connectionReadScope(identity,'google')?data:null,
+    status=visible?.status,start=visible?.start,view=visible?.views[service];
   const manual=(action:GoogleAction)=>{returnCheck.cancel();if(action==='mail'||action==='calendar')setService(action);void run(action);};
   const cancelRead=()=>{
     const active=operation.current;if(!active||active.action==='start'||active.action==='start_full_mail'||active.action==='disconnect')return;
@@ -143,7 +157,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     returnCheck.begin();
     if(native){navigationPending.current=requestId;setOpening(true);}
   };
-  const blocked=busy||opening;
+  const blocked=busy||opening||nativeForeground.suspended;
   const calendarNeedsPermission=status?.state==='connected'&&status.capabilities?.calendar===false;
   const messageWorkEnabled=import.meta.env.VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED==='true';
   const calendarWorkEnabled=import.meta.env.VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED==='true';
@@ -151,6 +165,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>{status?.state==='connected'?'Google Workspace':'Connect Google Workspace'}</h2><p>Email and the week ahead.</p></div></header>
     <p>{status?.state==='connected'?'Your account is connected. Check email and calendar access below.':'Connect your Google account to see recent Gmail headers and your primary calendar here. Google will ask you to approve access.'}</p>
     <p className="connection-access-summary">These connection checks read email headers and event titles and times. {messageWorkEnabled?'Full email work asks for separate access below.':'Message bodies and attachments stay in Gmail.'} CosmaBot cannot send email or change calendar events.</p>
+    {nativeForeground.suspended&&<p role="status">Google details are hidden while the app is inactive. Your saved work is retained.</p>}
     {!status?.account&&!start&&unavailableFor!==identity&&<details><summary>How to connect</summary><ol className="personal-connection-steps"><li>Choose your Google account.</li><li>Review access on Google’s secure sign-in page.</li><li>Return here to read recent email.</li></ol></details>}
     <button disabled={blocked} onClick={()=>manual('status')}>Check Google connection</button>
     {busy&&action&&<div className="connection-progress" role="status"><p>{action==='start_full_mail'?'Preparing full email permission…':personalConnectionProgress('google',action)}</p>

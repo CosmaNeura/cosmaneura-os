@@ -3,14 +3,17 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.mock('./google-calendar-api',async()=>{const actual=await vi.importActual<Record<string,unknown>>('./google-calendar-api');return {...actual,googleCalendarApi:{status:vi.fn(),observe:vi.fn(),resolve:vi.fn(),inspect:vi.fn(),review:vi.fn()}};});
 import {GoogleCalendarPanel,type GoogleCalendarPanelProps} from './GoogleCalendarPanel';
-import {googleCalendarApi,GoogleCalendarRefusal,googleCalendarSourceContent,type GoogleCalendarReceipt} from './google-calendar-api';
+import {googleCalendarApi,GoogleCalendarRefusal,googleCalendarSourceContent,type GoogleCalendarReceipt,type GoogleCalendarReviewResponse} from './google-calendar-api';
 import {validateGoogleCalendarRecovery,type GoogleCalendarRecoveryAccess,type GoogleCalendarRecoveryRecord} from './google-calendar-recovery';
 import {calendarReceipt,calendarReview,calendarScope,calendarVisit,calendarUuid} from './google-calendar-fixtures.test-support';
 import {WorkspaceApiError} from './workspace-api';
 import {invalidateConnectionHealth,observeConnectionStatus} from './connection-operation-health';
+import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement,props:GoogleCalendarPanelProps,access:GoogleCalendarRecoveryAccess,saved:GoogleCalendarRecoveryRecord|null,receipt:GoogleCalendarReceipt;
 const button=(s:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===s);
+const useNative=()=>{props={...props,identity:{mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:calendarUuid(901),isCurrent:()=>true}}};};
+const nativeHint=(active:boolean)=>act(async()=>notifyNativeWorkspaceForeground(props.identity,active));
 async function wait(check:()=>void){for(let i=0;i<250;i++){let ok=false;await act(async()=>{await new Promise(r=>setTimeout(r,1));try{check();ok=true;}catch{}});if(ok)return;}check();}
 async function idle(){await wait(()=>expect(host.textContent).not.toContain('Waiting for the current calendar operation'));}
 async function mount(){await act(async()=>root.render(<GoogleCalendarPanel {...props}/>));await wait(()=>expect(host.textContent).not.toContain('Checking private saved-work storage'));}
@@ -19,6 +22,45 @@ async function choose(id='invented-timed'){await wait(()=>expect(host.querySelec
 async function load(id='invented-timed'){await mount();await click('Check calendar access');await click('Load next 7 days');await choose(id);}
 async function ack(){for(const input of host.querySelectorAll<HTMLInputElement>('.google-calendar-checks input'))await act(async()=>input.click());}
 async function prepare(id='invented-timed'){await load(id);await click('Use current visit');await ack();}
+it('opens private calendar storage only after an initially suspended native scene is revalidated',async()=>{
+ useNative();await nativeHint(false);await act(async()=>root.render(<GoogleCalendarPanel {...props}/>));
+ expect(access.load).not.toHaveBeenCalled();expect(googleCalendarApi.status).not.toHaveBeenCalled();expect(host.querySelector('pre')).toBeNull();
+ await nativeHint(true);await wait(()=>expect(button('Check calendar access')).toBeDefined());await click('Check calendar access');
+ expect(access.load).toHaveBeenCalledOnce();expect(googleCalendarApi.status).toHaveBeenCalledOnce();expect(googleCalendarApi.observe).not.toHaveBeenCalled();
+});
+it('masks idle native calendar and clears confirmations until an explicit saved-summary check',async()=>{
+ useNative();await prepare();const prior=structuredClone(saved);await nativeHint(false);expect(host.querySelector('pre')).toBeNull();expect(host.textContent).not.toContain('Invented café follow-up');
+ expect(button('Check calendar access')!.disabled).toBe(true);expect(props.identity.mode==='clerk_jwt'&&props.identity.nativeSession!.isCurrent()).toBe(true);
+ await nativeHint(true);await nativeHint(true);expect(host.querySelector('pre')).toBeNull();expect(googleCalendarApi.status).toHaveBeenCalledOnce();expect(googleCalendarApi.observe).toHaveBeenCalledOnce();
+ await click('Check calendar access');expect(googleCalendarApi.inspect).toHaveBeenCalledOnce();expect(host.querySelector('pre')).toBeTruthy();expect([...host.querySelectorAll<HTMLInputElement>('input')].every(i=>!i.checked)).toBe(true);
+ expect(button('Save calendar summary to visit')!.disabled).toBe(true);expect(saved).toEqual(prior);expect(googleCalendarApi.review).not.toHaveBeenCalled();
+});
+it('fences an interrupted native calendar observation and explicitly resolves its existing key',async()=>{
+ useNative();await mount();await click('Check calendar access');let release!:(r:GoogleCalendarReceipt)=>void;vi.mocked(googleCalendarApi.observe).mockReturnValueOnce(new Promise(r=>{release=r;}));
+ await act(async()=>button('Load next 7 days')!.click());await wait(()=>expect(saved?.pending?.kind).toBe('observe'));const pending=structuredClone(saved!.pending!);
+ const signal=vi.mocked(googleCalendarApi.observe).mock.calls[0][2]!;await nativeHint(false);expect(signal.aborted).toBe(true);await nativeHint(true);
+ await act(async()=>release({...receipt,observation_key:pending.request.idempotency_key}));await idle();expect(host.querySelector('.google-calendar-list')).toBeNull();expect(saved?.pending).toEqual(pending);
+ await click('Restore saved calendar work');vi.mocked(googleCalendarApi.resolve).mockResolvedValueOnce({...receipt,observation_key:pending.request.idempotency_key});await click('Check saved calendar result');
+ expect(saved?.pending).toBeNull();expect(googleCalendarApi.resolve).toHaveBeenCalledWith(props.identity,pending.request.idempotency_key,expect.any(AbortSignal));expect(googleCalendarApi.observe).toHaveBeenCalledOnce();
+});
+it('checks expiry immediately on authenticated native return without relying on WebView focus or timers',async()=>{
+ useNative();await prepare();await nativeHint(false);vi.mocked(Date.now).mockReturnValue(Date.parse('2026-10-02T15:00:00Z'));await nativeHint(true);
+ expect(host.querySelector('pre')).toBeNull();expect(host.textContent).toContain('expired for new work');expect(googleCalendarApi.observe).toHaveBeenCalledOnce();expect(googleCalendarApi.status).toHaveBeenCalledOnce();expect(googleCalendarApi.review).not.toHaveBeenCalled();
+});
+it('withholds a same-email reconnect after native return and refuses to reuse its old source',async()=>{
+ useNative();const status={state:'connected',account:receipt.observation.account,connected_at:'2026-10-02T11:00:00Z',capabilities:{mail:true,calendar:true}};
+ observeConnectionStatus(props.identity,'google',status);await prepare();const prior=structuredClone(saved);await nativeHint(false);
+ await act(async()=>observeConnectionStatus(props.identity,'google',{...status,connected_at:'2026-10-02T13:00:00Z'}));await nativeHint(true);
+ vi.mocked(googleCalendarApi.inspect).mockRejectedValueOnce(new GoogleCalendarRefusal(409,'google_calendar_grant_changed'));await click('Check calendar access');
+ expect(host.querySelector('pre')).toBeNull();expect(saved).toEqual(prior);expect(googleCalendarApi.observe).toHaveBeenCalledOnce();expect(props.onAskChief).not.toHaveBeenCalled();
+});
+it('retains an interrupted native calendar save and retries only its frozen request after explicit restore',async()=>{
+ useNative();await prepare();let release!:(r:GoogleCalendarReviewResponse)=>void;vi.mocked(googleCalendarApi.review).mockReturnValueOnce(new Promise(r=>{release=r;}));
+ await act(async()=>button('Save calendar summary to visit')!.click());await wait(()=>expect(saved?.pending?.kind).toBe('review'));const pending=structuredClone(saved!.pending!);if(pending.kind!=='review')throw new Error('Expected review');
+ const result=await calendarReview(pending.observation_anchor!,pending.request);await nativeHint(false);expect(vi.mocked(googleCalendarApi.review).mock.calls[0][4]!.aborted).toBe(true);await nativeHint(true);await act(async()=>release(result));
+ expect(props.onSaved).not.toHaveBeenCalled();expect(saved?.pending).toEqual(pending);await click('Restore saved calendar work');await click('Retry exact calendar source save');
+ expect(vi.mocked(googleCalendarApi.review).mock.calls[1][2]).toEqual(pending.request);expect(saved?.pending).toBeNull();expect(props.onSaved).toHaveBeenCalledOnce();expect(props.onAskChief).not.toHaveBeenCalled();expect(googleCalendarApi.observe).toHaveBeenCalledOnce();
+});
 beforeEach(async()=>{vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.spyOn(Date,'now').mockReturnValue(Date.parse('2026-10-02T12:30:00Z'));receipt=await calendarReceipt();saved=null;
  access={authorize:vi.fn().mockResolvedValue(undefined),load:vi.fn(async()=>saved),persist:vi.fn(async v=>{saved=v?structuredClone(v):null;}),denied:vi.fn()};
  props={identity:{mode:'clerk_jwt',getToken:vi.fn()},scope:calendarScope,recovery:access,workspace:calendarVisit,onSaved:vi.fn(),onAuthenticationLost:vi.fn(),onBusyChange:vi.fn(),onAskChief:vi.fn(),onRequestCalendarAccess:vi.fn()};
