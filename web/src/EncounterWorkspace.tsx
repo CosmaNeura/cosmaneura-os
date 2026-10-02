@@ -7,6 +7,7 @@ import type { ReviewedTeamDraft } from "./TeamSetupPanel";
 import { TeamConfigurationFlow } from "./TeamConfigurationFlow";
 import {accountIdentityApi} from "./account-identity-api";
 import {assertCurrentDesktopSession} from "./workspace-auth-headers";
+import {subscribeNativeWorkspaceForeground} from './native-workspace-foreground';
 import {validActivityContext,type AiActivityContext,type AiActivitySelection} from "./model-activity-contract";
 import { SettingsHub } from "./SettingsHub";
 import { WelcomeActions } from './WelcomeActions';
@@ -45,7 +46,7 @@ import { CapturePanel } from "./CapturePanel";
 import { ExistingScribeSourcePanel } from './ExistingScribeSourcePanel';
 import {InboxAnalysisPanel} from "./InboxAnalysisPanel";
 import type {InboxDraftSelection} from "./inbox-analysis-contract";
-import {ResearchWorkspace} from "./ResearchWorkspace";
+import {ResearchPanelLoader} from "./ResearchPanelLoader";
 import { CoreRecordLink } from "./CoreRecordLink";
 import { SchedulingPanel } from "./SchedulingPanel";
 import { SCHEDULING_BUILD } from "./scheduling-api";
@@ -272,20 +273,22 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       ["queued", "running"].includes(h.status) || (h.result_entry_id && !workspace.entries.some(e => e.id === h.result_entry_id))))) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>|undefined,reading=false,controller:AbortController|null=null;
-    const visible=()=>document.visibilityState!=='hidden';
+    const nativeOwner=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?authenticated:null;
+    let nativeVisible=nativeOwner?.nativeSession?.isCurrent()??false;
+    const visible=()=>nativeOwner?nativeVisible&&nativeOwner.nativeSession!.isCurrent():document.visibilityState!=='hidden';
     const poll = async () => {
       if(cancelled||reading||!visible())return;
       reading=true;controller=new AbortController();
       try {
         const latest = await workspaceApi.read(identity, workspace.id,controller.signal);
-        if (cancelled||controller.signal.aborted) return;
+        if (cancelled||controller.signal.aborted||!visible()) return;
         if(latest.id!==workspace.id||latest.revision<workspace.revision)throw new WorkspaceApiError(503);
         const noteRevision = (value: Workspace) => value.entries.filter(e => e.kind === "scratchpad").at(-1)?.revision ?? 0;
         if (noteRevision(latest) !== noteRevision(workspace)) {
           setConflict(true); setError("The saved notebook changed while your bot was working. Load the latest version to compare it with your unsaved text.");
         }
         setWorkspace(latest);
-      } catch (cause) { if (!cancelled&&!controller.signal.aborted) modelFailure(cause); }
+      } catch (cause) { if (!cancelled&&!controller.signal.aborted&&visible()) modelFailure(cause); }
       finally{
         reading=false;
         if (!cancelled&&visible()) {
@@ -304,11 +307,18 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       foregroundRequested=false;void poll();
     };
     const visibility=()=>foreground();
-    document.addEventListener('visibilitychange',visibility);
-    window.addEventListener('focus',foreground);
+    const removeNative=nativeOwner?subscribeNativeWorkspaceForeground(nativeOwner,()=>{
+      nativeVisible=true;foreground();
+    },()=>{
+      nativeVisible=false;foregroundRequested=false;clearTimeout(timer);controller?.abort();
+    }):null;
+    if(!nativeOwner){
+      document.addEventListener('visibilitychange',visibility);
+      window.addEventListener('focus',foreground);
+    }
     if(visible())timer=setTimeout(poll,5000);
-    return () => { cancelled = true; clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visibility);window.removeEventListener('focus',foreground); };
-  }, [workspace, identity, busy, pending, conflict, handoffReviewPending]);
+    return () => { cancelled = true; clearTimeout(timer);controller?.abort();removeNative?.();document.removeEventListener('visibilitychange',visibility);window.removeEventListener('focus',foreground); };
+  }, [workspace, identity, authenticated, busy, pending, conflict, handoffReviewPending]);
 
   function checkRecoveryOwner(value: ProviderTeam) {
     if (!authenticated) return;
@@ -1371,7 +1381,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onSelect={setSelected} onClose={()=>setInboxSelection(null)} onSetup={()=>void openSettings()}
             onSubmit={async body=>{if(locked||captureNavigationLocked||captureDraftLocked||!body.inbox_analysis||body.expected_revision!==workspace.revision||body.team_revision!==team.revision)return;
               await saveModel({type:'ask',model_contract:1,origin:'durable_admission_v1',body},'submit');}}/>}
-          {bot?.role === "research" && <>{authenticated && team ? <ResearchWorkspace key={`${workspace.id}:${botAddress(bot)}`}
+          {bot?.role === "research" && <>{authenticated && team ? <ResearchPanelLoader key={`${workspace.id}:${botAddress(bot)}`}
             identity={authenticated} workspaceId={workspace.id} workspaceRevision={workspace.revision} bot={{address:botAddress(bot),team_revision:team.revision}}
             enabled={bot.enabled&&!bot.retired&&team.revision>0} locked={locked||captureNavigationLocked||captureDraftLocked}
             analysis={{workspace,model:team.llm,modelBlocked:bot.blocked_capabilities?.includes('model_answer'),onSubmit:async body=>{

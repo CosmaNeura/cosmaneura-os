@@ -52,7 +52,7 @@ RECOVERY_INPUTS = {
     "apps/capture/ios/App/App.xcodeproj/project.pbxproj": "8b0b7ddb06c68e5e1ace816c1e33dc3210398cebd80db5a5ed781bed85730912",
 }
 RECOVERY_SOURCES = ("WorkspaceRecoveryState.swift", "CosmasBridgeViewController.swift",
-                    "CosmasWorkspaceViewController.swift")
+                    "CosmasWorkspaceViewController.swift", "WorkspaceSceneSignalState.swift")
 
 
 def digest(path: Path) -> str:

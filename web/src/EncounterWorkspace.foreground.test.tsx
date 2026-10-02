@@ -6,6 +6,7 @@ vi.mock('./draft-store',async original=>({...await original<typeof import('./dra
 vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {workspaceApi,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
+import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 import {teamFixture,teamUuid as uuid} from './team-setup-test-fixture';
 import {memoryDraftStorage} from './draft-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
@@ -26,7 +27,7 @@ async function hide(){await act(async()=>{visibility.mockReturnValue('hidden');d
 async function setInput(id:string,value:string){await act(async()=>{const field=host.querySelector<HTMLTextAreaElement>(id)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});await flush();}
 function noWrites(){expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.retryHandoff).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();}
 beforeEach(async()=>{vi.useFakeTimers();vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('visible');current=queued();opened=false;store=memoryDraftStorage();
- vi.spyOn(workspaceApi,'team').mockImplementation(async()=>structuredClone(team));vi.spyOn(workspaceApi,'open').mockImplementation(async()=>({identity,workspace:structuredClone(current),team:structuredClone(team)}));vi.spyOn(workspaceApi,'read').mockImplementation(async()=>structuredClone(current));vi.spyOn(workspaceApi,'catalog').mockImplementation(async()=>[{appointment_id:current.appointment_id,workspace_id:current.id,label:current.label}]);vi.spyOn(workspaceApi,'ask');vi.spyOn(workspaceApi,'retryHandoff');vi.spyOn(workspaceApi,'append');host=document.createElement('div');document.body.append(host);root=createRoot(host);
+ vi.spyOn(workspaceApi,'team').mockImplementation(async()=>structuredClone(team));vi.spyOn(workspaceApi,'open').mockImplementation(async access=>({identity:access??identity,workspace:structuredClone(current),team:structuredClone(team)}));vi.spyOn(workspaceApi,'read').mockImplementation(async()=>structuredClone(current));vi.spyOn(workspaceApi,'catalog').mockImplementation(async()=>[{appointment_id:current.appointment_id,workspace_id:current.id,label:current.label}]);vi.spyOn(workspaceApi,'ask');vi.spyOn(workspaceApi,'retryHandoff');vi.spyOn(workspaceApi,'append');host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();vi.useRealTimers();});
 it('checks completed work immediately on return without advancing the ordinary five-second timer',async()=>{await open();expect(workspaceApi.read).not.toHaveBeenCalled();await hide();current=completed();await foreground();expect(workspaceApi.read).toHaveBeenCalledTimes(1);expect(host.textContent).toContain('Draft ready');noWrites();});
@@ -41,3 +42,39 @@ it('never observes a task with no active admission or queued/running handoff',as
 
 it('keeps an explicit in-progress save gate while foreground events occur',async()=>{await open();await setInput('#team-question','Deliberate private question');let reject!:(e:unknown)=>void;vi.mocked(workspaceApi.ask).mockReturnValueOnce(new Promise((_r,j)=>{reject=j;}));const send=host.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;await act(async()=>send.click());await flush();expect(workspaceApi.ask,host.textContent??'').toHaveBeenCalledOnce();await foreground();expect(workspaceApi.read).not.toHaveBeenCalled();const {WorkspaceApiError}=await import('./workspace-api');await act(async()=>reject(new WorkspaceApiError(503)));await flush();expect(host.textContent).toContain('Check saved result');expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(workspaceApi.retryHandoff).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();});
 it('displays only the current masked source projection on return without copying unavailable private facts',async()=>{current={...queued(),entries:[...queued().entries,{id:uuid(80),revision:2,kind:'google_calendar',content:'PRIVATE old calendar subject',source_label:'Google calendar: PRIVATE old calendar subject',calendar_source_state:'current',origin:'human',ticket:null,created_at:time}]};await open();current={...current,revision:3,entries:current.entries.map(e=>e.id===uuid(80)?{...e,content:'',source_label:'Unavailable calendar source',calendar_source_state:'unavailable'}:e)};await foreground();expect(host.textContent).not.toContain('PRIVATE old calendar subject');expect(workspaceApi.read).toHaveBeenCalledOnce();noWrites();});
+
+function nativeOwner(isCurrent=()=>true):AuthenticatedWorkspaceIdentity{return {mode:'clerk_jwt',getToken:async()=> 'invented-native',nativeSession:{revision:uuid(91),isCurrent}};}
+async function nativeSignal(owner:AuthenticatedWorkspaceIdentity,active:boolean){await act(async()=>notifyNativeWorkspaceForeground(owner,active));await flush();}
+it('uses authenticated native resume rather than raw browser visibility or focus even when WebView remains hidden',async()=>{
+ const native=nativeOwner();await open(native);await foreground();await hide();expect(workspaceApi.read).not.toHaveBeenCalled();
+ await nativeSignal(native,false);current=completed();await nativeSignal(native,true);expect(document.visibilityState).toBe('hidden');
+ expect(workspaceApi.read).toHaveBeenCalledOnce();expect(vi.mocked(workspaceApi.read).mock.calls[0][0]).toBe(native);expect(host.textContent).toContain('Draft ready');noWrites();
+});
+it('suspends native polling and rejects an aborted reply before one coalesced validated replacement',async()=>{
+ let valid=true;const native=nativeOwner(()=>valid);await open(native);let release!:(w:Workspace)=>void,active=0,maxActive=0;
+ vi.mocked(workspaceApi.read).mockImplementationOnce(async()=>{active++;maxActive=Math.max(active,maxActive);try{return await new Promise<Workspace>(r=>{release=r;});}finally{active--;}})
+   .mockImplementationOnce(async()=>{active++;maxActive=Math.max(active,maxActive);try{return completed();}finally{active--;}});
+ await nativeSignal(native,true);const signal=vi.mocked(workspaceApi.read).mock.calls[0][2]!;valid=false;await nativeSignal(native,false);expect(signal.aborted).toBe(true);
+ await act(async()=>vi.advanceTimersByTimeAsync(30000));await foreground();expect(workspaceApi.read).toHaveBeenCalledOnce();
+ valid=true;await nativeSignal(native,true);await nativeSignal(native,true);expect(workspaceApi.read).toHaveBeenCalledOnce();
+ await act(async()=>release(completed(queued(),'ABORTED native private draft')));await flush();expect(host.textContent).not.toContain('ABORTED native private draft');
+ await act(async()=>vi.advanceTimersByTimeAsync(0));await flush();expect(workspaceApi.read).toHaveBeenCalledTimes(2);expect(maxActive).toBe(1);noWrites();
+});
+it('does not read while native authentication is verifying and ignores another identity resume',async()=>{
+ let valid=false;const native=nativeOwner(()=>valid);await open(native);await act(async()=>vi.advanceTimersByTimeAsync(20000));await nativeSignal(native,true);await nativeSignal(nativeOwner(),true);await foreground();expect(workspaceApi.read).not.toHaveBeenCalled();
+ valid=true;await nativeSignal(native,true);expect(workspaceApi.read).toHaveBeenCalledOnce();noWrites();
+});
+it('reuses the native in-flight read without moving focus or changing unsent clinician inputs',async()=>{
+ const native=nativeOwner();await open(native);await setInput('#team-notebook','Native unsent note');await setInput('#team-question','Native unsent question');const question=host.querySelector<HTMLTextAreaElement>('#team-question')!;question.focus();
+ let release!:(w:Workspace)=>void;vi.mocked(workspaceApi.read).mockReturnValueOnce(new Promise(r=>{release=r;}));await nativeSignal(native,true);await nativeSignal(native,true);await foreground();expect(workspaceApi.read).toHaveBeenCalledOnce();
+ await act(async()=>release(completed()));await flush();expect(question.value).toBe('Native unsent question');expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Native unsent note');expect(document.activeElement).toBe(question);noWrites();
+});
+it('fences native listeners and an old private response after identity replacement or unmount',async()=>{
+ const native=nativeOwner();await open(native);let release!:(w:Workspace)=>void;vi.mocked(workspaceApi.read).mockReturnValueOnce(new Promise(r=>{release=r;}));await nativeSignal(native,true);const signal=vi.mocked(workspaceApi.read).mock.calls[0][2]!;
+ await mount(foreignIdentity);expect(signal.aborted).toBe(true);await act(async()=>release(completed(queued(),'OLD native private draft')));await flush();await nativeSignal(native,true);await act(async()=>vi.advanceTimersByTimeAsync(10000));
+ expect(host.textContent).not.toContain('OLD native private draft');expect(workspaceApi.read).toHaveBeenCalledOnce();await act(async()=>root.render(null));await nativeSignal(native,true);await act(async()=>vi.advanceTimersByTimeAsync(10000));expect(workspaceApi.read).toHaveBeenCalledOnce();noWrites();
+});
+it('rejects a native response when its session becomes invalid without requiring a browser event',async()=>{
+ let valid=true;const native=nativeOwner(()=>valid);await open(native);let release!:(w:Workspace)=>void;vi.mocked(workspaceApi.read).mockReturnValueOnce(new Promise(r=>{release=r;}));await nativeSignal(native,true);valid=false;
+ await act(async()=>release(completed(queued(),'UNVERIFIED native private draft')));await flush();expect(host.textContent).not.toContain('UNVERIFIED native private draft');await act(async()=>vi.advanceTimersByTimeAsync(20000));expect(workspaceApi.read).toHaveBeenCalledOnce();noWrites();
+});

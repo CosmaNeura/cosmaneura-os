@@ -4,6 +4,7 @@ import CosmaneuraIOSPCMCapacitor
 /// A native surface stays available even when JavaScript or the WebView fails.
 @MainActor final class CosmasWorkspaceViewController: UIViewController {
     private var recovery = WorkspaceRecoveryState()
+    private var sceneSignal: WorkspaceSceneSignalState?
     private var workspace: CosmasBridgeViewController?
     private var sceneActive = false
     private var sceneDisconnected = false
@@ -31,12 +32,21 @@ import CosmaneuraIOSPCMCapacitor
 
     func setSceneActive(_ active: Bool) {
         sceneActive = active
+        sceneSignal?.setSceneActive(active)
         tick()
+        dispatchSceneSignal()
+    }
+
+    override func viewDidAppear(_ animated: Bool) {
+        super.viewDidAppear(animated)
+        dispatchSceneSignal()
     }
 
     func sceneDidDisconnect() {
+        setSceneActive(false)
         sceneDisconnected = true
         sceneActive = false
+        sceneSignal?.close()
         timer?.invalidate()
         timer = nil
         fail()
@@ -49,6 +59,8 @@ import CosmaneuraIOSPCMCapacitor
     private func openWorkspace() {
         guard !sceneDisconnected else { return }
         recovery = WorkspaceRecoveryState()
+        sceneSignal = WorkspaceSceneSignalState(generation: recovery.generation)
+        sceneSignal?.setSceneActive(sceneActive)
         _ = recovery.tick(now: ProcessInfo.processInfo.systemUptime, sceneActive: sceneActive)
         renderPanel()
         // A disconnected scene may still own a pending or failed native stop.
@@ -65,11 +77,18 @@ import CosmaneuraIOSPCMCapacitor
         }
         let next = CosmasBridgeViewController(generation: recovery.generation)
         workspace = next
-        next.onFailure = { [weak self] in self?.fail() }
-        next.onSignal = { [weak self] signal, generation, mainFrame, sameOrigin in
-            guard let self,
+        next.onFailure = { [weak self, weak next] in
+            guard let self, let next, self.workspace === next else { return }
+            self.fail()
+        }
+        next.onSignal = { [weak self, weak next] signal, generation, mainFrame, sameOrigin in
+            guard let self, let next, self.workspace === next,
                   self.recovery.receive(signal, generation: generation, mainFrame: mainFrame, sameOrigin: sameOrigin) else { return }
-            if signal == .failed { self.showFailure() } else { self.renderPanel() }
+            if signal == .failed { self.showFailure() } else {
+                self.sceneSignal?.ready(generation: generation, mainFrame: mainFrame, sameOrigin: sameOrigin)
+                self.renderPanel()
+                self.dispatchSceneSignal()
+            }
         }
         addChild(next)
         next.view.translatesAutoresizingMaskIntoConstraints = false
@@ -89,9 +108,17 @@ import CosmaneuraIOSPCMCapacitor
     }
 
     private func showFailure() {
+        sceneSignal?.close()
         workspace?.quarantine()
         renderPanel()
         checkStop()
+    }
+
+    private func dispatchSceneSignal() {
+        guard !sceneDisconnected, recovery.phase == .active,
+              let active = sceneSignal?.pending, let workspace,
+              workspace.notifySceneState(active: active, generation: recovery.generation) else { return }
+        sceneSignal?.didDispatch(active, generation: recovery.generation)
     }
 
     private func checkStop() {
