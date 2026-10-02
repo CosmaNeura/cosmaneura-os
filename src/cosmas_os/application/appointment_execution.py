@@ -14,6 +14,7 @@ from sqlalchemy import func, select
 from cosmas_os.application import appointment_work as work
 from cosmas_os.application import follow_up
 from cosmas_os.application import workspace as ws
+from cosmas_os.config import Settings
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import (
     AppointmentExecution,
@@ -27,6 +28,13 @@ from cosmas_os.ports.scheduling_actions import AppointmentOperation, Appointment
 
 LEASE_SECONDS = 60
 MAX_SUBMISSIONS = 3
+
+
+def _execution_gate(s, configuration: Settings | None = None):
+    current = configuration if configuration is not None else follow_up.settings
+    if current.workspace_hosted_enabled or (configuration is not None and not current.workspace_appointment_execution_available):
+        raise ws.WorkspaceError("appointment_execution_not_available", 403)
+    follow_up._local(s)
 
 
 @dataclass(frozen=True)
@@ -103,13 +111,13 @@ def outcome(s, op, intent):
 
 
 def claim(s, box, owner, workspace_id, ticket_id, *, external_identity_id, reauthenticate,
-          operation_id, revision_id, digest, mode, clock=None):
+          operation_id, revision_id, digest, mode, clock=None, configuration: Settings | None = None):
     """Commit a claim before I/O. Existing active claims never dispatch twice."""
     try:
         if mode not in {"submit", "reconcile", "retry"}:
             raise ws.WorkspaceError("appointment_command_invalid", 400)
         s.rollback()
-        follow_up._local(s)
+        _execution_gate(s, configuration)
         reauthenticate()
         w = ws._workspace(s, box, owner, workspace_id, writing=True)
         source, ticket, revision, intent = work._bound(s, w, ticket_id)
@@ -169,6 +177,7 @@ def claim(s, box, owner, workspace_id, ticket_id, *, external_identity_id, reaut
             event_type="appointment.attempt_claimed", initiated_by_principal_id=owner,
             approved_by_principal_id=owner, action_revision_id=revision.id, payload_hash=revision.payload_hash,
             outcome=dispatch_mode, detail={"generation": row.generation}))
+        _execution_gate(s, configuration)
         s.commit()
         return attempt
     except Exception:
@@ -253,12 +262,18 @@ def uncertain(s, attempt):
 
 
 def run(s, box, owner, workspace_id, ticket_id, *, external_identity_id, reauthenticate,
-        port, operation_id, revision_id, digest, mode, clock=None):
+        port, operation_id, revision_id, digest, mode, clock=None, configuration: Settings | None = None):
     attempt = claim(s, box, owner, workspace_id, ticket_id, external_identity_id=external_identity_id,
                     reauthenticate=reauthenticate, operation_id=operation_id, revision_id=revision_id,
-                    digest=digest, mode=mode, clock=clock)
+                    digest=digest, mode=mode, clock=clock, configuration=configuration)
     if attempt:
         try:
+            _execution_gate(s, configuration)
+            reauthenticate()
+            _execution_gate(s, configuration)
+            # Reauthentication may have opened a read transaction. The durable
+            # claim is already committed; release SQL resources before I/O.
+            s.commit()
             value = port.submit(attempt.operation) if attempt.mode == "submit" else port.reconcile(attempt.operation)
             record(s, attempt, value, clock=clock)
         except Exception:

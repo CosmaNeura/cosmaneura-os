@@ -367,13 +367,20 @@ def _appointment_connection(request: Request):
     return runtime.appointments if runtime is not None else build_scheduling_appointments()
 
 
+def _appointment_execution_gate() -> None:
+    _appointment_gate()
+    if not settings.workspace_appointment_execution_available:
+        raise ws.WorkspaceError("appointment_execution_not_available", 403)
+
+
 @app.get("/workspaces/{workspace_id}/appointments", dependencies=[Depends(_workspace_gate), Depends(_appointment_gate)])
 @app.get("/workspaces/{workspace_id}/appointments/pages/{cursor}", dependencies=[Depends(_workspace_gate), Depends(_appointment_gate)])
 def workspace_appointment_catalog(workspace_id: UUID, cursor: UUID | None = None,
     session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity)):
     from cosmas_os.application import appointment_work
     return appointment_work.catalog(session, identity.box_id, identity.principal_id,
-                                    str(workspace_id), cursor=str(cursor) if cursor else None)
+                                    str(workspace_id), cursor=str(cursor) if cursor else None,
+                                    configuration=settings)
 
 
 async def _prepare_workspace_appointment(request, workspace_id, session, identity, availability_port, appointment_port, *, current=False):
@@ -396,7 +403,7 @@ async def _prepare_workspace_appointment(request, workspace_id, session, identit
                                        **context, bot=body.bot, port=appointment_port)
     return await run_in_threadpool(workspace_appointments.prepare, session,
                                   **context, body=body, availability_port=availability_port,
-                                  appointment_port=appointment_port)
+                                  appointment_port=appointment_port, configuration=settings)
 
 
 @app.post("/workspaces/{workspace_id}/appointments/current", dependencies=[Depends(_workspace_gate), Depends(_appointment_gate)])
@@ -420,7 +427,8 @@ def read_workspace_appointment(workspace_id: UUID, ticket_id: UUID,
 
     if identity.auth_mode != "clerk_jwt" or identity.external_identity_id is None:
         raise ws.WorkspaceError("scheduling_access_unavailable", 403)
-    return appointment_work.read(session, identity.box_id, identity.principal_id, str(workspace_id), str(ticket_id))
+    return appointment_work.read(session, identity.box_id, identity.principal_id, str(workspace_id), str(ticket_id),
+                                 configuration=settings)
 
 
 @app.post("/workspaces/{workspace_id}/appointments/{ticket_id}/decide", dependencies=[Depends(_workspace_gate), Depends(_appointment_gate)])
@@ -441,11 +449,12 @@ async def decide_workspace_appointment(request: Request, workspace_id: UUID, tic
             raise ws.WorkspaceError("scheduling_access_unavailable", 403)
         return appointment_work.decide(session, identity.box_id, identity.principal_id,
             str(workspace_id), str(ticket_id), external_identity_id=identity.external_identity_id,
-            revision_id=str(body.revision_id), digest=body.payload_hash, choice=body.choice)
+            revision_id=str(body.revision_id), digest=body.payload_hash, choice=body.choice,
+            configuration=settings)
     return await run_in_threadpool(decide)
 
 
-@app.post("/workspaces/{workspace_id}/appointments/{ticket_id}/execute", dependencies=[Depends(_workspace_gate), Depends(_appointment_gate)])
+@app.post("/workspaces/{workspace_id}/appointments/{ticket_id}/execute", dependencies=[Depends(_workspace_gate), Depends(_appointment_execution_gate)])
 async def execute_workspace_appointment(request: Request, workspace_id: UUID, ticket_id: UUID,
     session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity),
     port=Depends(_appointment_connection)):
@@ -457,7 +466,7 @@ async def execute_workspace_appointment(request: Request, workspace_id: UUID, ti
         raise ws.WorkspaceError("scheduling_access_unavailable", 403)
     body = await read_capture_request(request, AppointmentExecutionRequest, maximum_bytes=2048)
     def reauthenticate():
-        _appointment_gate()
+        _appointment_execution_gate()
         session.expire_all()
         if _identity(request=request, session=session, authorization=request.headers.get("authorization"),
                      x_box_id=None, x_actor_principal_id=None) != identity:
@@ -466,7 +475,7 @@ async def execute_workspace_appointment(request: Request, workspace_id: UUID, ti
         identity.box_id, identity.principal_id, str(workspace_id), str(ticket_id),
         external_identity_id=identity.external_identity_id, reauthenticate=reauthenticate,
         port=port, operation_id=str(body.operation_id), revision_id=str(body.revision_id),
-        digest=body.payload_hash, mode=body.mode)
+        digest=body.payload_hash, mode=body.mode, configuration=settings)
 
 
 @app.post("/workspaces/{workspace_id}/scheduling/availability", dependencies=[Depends(_workspace_gate), Depends(_scheduling_gate)])

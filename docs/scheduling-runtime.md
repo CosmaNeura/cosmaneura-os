@@ -37,7 +37,7 @@ stop the call before HTTP. Tokens are reacquired on each request and never cache
 or persisted by this composition.
 
 Configuration must happen once before startup. A configured profile requires
-the existing authenticated local Scheduling workspace gate. Appointment calls
+the existing authenticated Scheduling workspace gate. Appointment reads
 additionally require the independent appointment gate. Gates are checked both
 before and after credential acquisition. Configuration does not change either
 gate, create an account, approve an appointment or activate any external service.
@@ -51,6 +51,21 @@ failures also release the owned clients. A stopped or disabled runtime cannot
 acquire another credential. Host-owned credential storage and refresh remain the
 responsibility of the supplied provider, including their own shutdown behavior.
 
-This source supports configured local qualification. Real staff login/token
-acquisition, provider and calendar acceptance, authorized beta hosting and native
-device acceptance remain separate unfinished work. The default remains closed.
+Hosted work can save, review, approve, reopen and withdraw exact appointment
+proposals. Those steps do not book, change or cancel a visit. The hosted profile
+denies every execution mode before request-body processing or receiver creation;
+the configured HTTP adapter also denies operation requests before and after
+credential acquisition. The existing synthetic execution path retains its
+separate local database gate. Chief's saved status distinguishes proposal
+approval from a verified appointment receipt.
+
+Patient correspondence remains an additional setup prerequisite. There is no
+product writer for the reviewed Scheduling patient mapping yet, and the pinned
+receiver has no verified patient-selection endpoint. Names, DOB, Core patient
+references and browser-entered Scheduling UUIDs do not establish correspondence.
+DOB remains optional for encounter recording.
+
+Source qualification uses signed synthetic sessions, PostgreSQL, mounted product
+controls and bounded invented receiver reads. Real staff login/token acquisition,
+verified patient setup, provider and calendar acceptance, authorized beta hosting
+and native device acceptance remain separate work. The default remains closed.
