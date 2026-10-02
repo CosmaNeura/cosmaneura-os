@@ -151,6 +151,96 @@ def test_complete_small_source_request_has_no_more_than_160_bytes_over_unchanged
     assert len(encode(v6["body"])) <= len(encode(v5["body"])) + 160
 
 
+@pytest.mark.parametrize("lengths", [(6000,), (20000,), (5000,) * 7])
+def test_outbound_v6_excerpt_diagnostics_never_expose_a_competing_tool_handle_hash(lengths):
+    envelope, bodies = prepared(lengths), []
+    original = deepcopy(envelope)
+    stored_hash = _digest(envelope)
+    GPT41CompactToolsConnector(lambda: "invented-key", transport=transport([
+        answer("invented-source-1" if len(lengths) == 7 else "invented-source-0")], bodies)).review_prepared(
+            envelope, execute=lambda _: pytest.fail("direct reply does not request a tool"))
+    prompt = delivered(bodies[0])
+    assert "decoder_source_windows" not in prompt
+    assert prompt["displayed_excerpt_windows"] == [{
+        "entry_id": item["source_id"], "revision": item["revision"],
+        "prefix_chars": len(item["text"])} for item in prompt["sources"]]
+    assert all(set(record) == {"entry_id", "revision", "excerpt_chars", "delivery"}
+        for record in prompt["source_delivery"])
+    visible_selection = json.loads(bodies[0]["messages"][3]["content"])["tool_selection"]
+    assert visible_selection == envelope["tool_selection"]
+    wire = json.dumps(bodies[0], ensure_ascii=False)
+    for record in envelope["source_delivery"]:
+        assert record["excerpt_sha256"] not in wire
+    assert "ONLY from tool_selection.sources" in bodies[0]["messages"][2]["content"]
+    assert envelope == original and _digest(envelope) == stored_hash
+    validate_prepared(envelope)
+
+
+def test_historical_v6_envelope_hash_stays_fixed_while_outbound_projection_is_unambiguous():
+    envelope = prepared((6000,))
+    # Computed from the previously reviewed25a361a preparation. This pins the
+    # persisted body/manifest/decoder without pinning the new model-only view.
+    assert _digest(envelope) == "db0f2c5e14242d475c7f85e8cc5f9a74113888bdb784a27ebc566c076022046c"
+    saved = json.loads(json.dumps(envelope, sort_keys=True, ensure_ascii=False))
+    validate_prepared(saved)
+    adapter = GPT41CompactToolsConnector(lambda: "invented-key")
+    assert adapter._request_body(saved) == adapter._request_body(envelope)
+    assert _digest(saved) == _digest(envelope)
+    assert adapter._request_body(saved) != saved["body"]
+
+
+def test_model_following_the_only_visible_source_handle_reads_full_text_and_can_quote_its_tail():
+    envelope, bodies, reads = prepared((12000,), scribe=True), [], []
+    original = deepcopy(envelope)
+    def provider(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if len(bodies) == 1:
+            prompt = delivered(body)
+            assert "sha256" not in json.dumps(prompt)
+            handle = json.loads(body["messages"][3]["content"])["tool_selection"]["sources"][0]
+            call = {"id": "copy_full_handle", "type": "function", "function": {
+                "name": "read_selected_source", "arguments": json.dumps({
+                    key: handle[key] for key in ("entry_id", "revision", "sha256")})}}
+            return httpx.Response(200, json=tool_response(call))
+        return httpx.Response(200, json=answer("invented-source-0", content={
+            "excerpts": [{"source_id": "invented-source-0", "quote": "INVENTED-TAIL-0"}],
+            "needs_from_clinician": []}))
+    def execute(request):
+        reads.append(request)
+        return source_result(envelope, request)
+    result = GPT41CompactToolsConnector(lambda: "invented-key", transport=httpx.MockTransport(provider)).review_prepared(
+        envelope, execute=execute)
+    assert reads == [{"tool": "read_selected_source", **{key: envelope["tool_selection"]["sources"][0][key]
+        for key in ("entry_id", "revision", "sha256")}}]
+    returned = json.loads(bodies[1]["messages"][-1]["content"])
+    assert len(returned["data"]["content"]) == 12000
+    assert returned["receipt"]["envelope_sha256"] == _digest(original)
+    assert "INVENTED-TAIL-0" in result.content and len(bodies) == 2
+    assert envelope == original
+
+
+def test_removed_excerpt_hash_still_cannot_authorize_a_full_source_read():
+    envelope, bodies, reads = prepared((12000,)), [], []
+    excerpt_hash = envelope["source_delivery"][0]["excerpt_sha256"]
+    original_hash = envelope["tool_selection"]["sources"][0]["sha256"]
+    assert excerpt_hash != original_hash
+    call = read_call(envelope)
+    arguments = json.loads(call["function"]["arguments"])
+    arguments["sha256"] = excerpt_hash
+    call["function"]["arguments"] = json.dumps(arguments)
+    def guarded_reader(request):
+        reads.append(request)
+        assert request["sha256"] == excerpt_hash
+        raise agent_tools.ws.WorkspaceError("agent_tool_source_unavailable", 404)
+    with pytest.raises(ModelCallFailure) as failure:
+        GPT41CompactToolsConnector(lambda: "invented-key", transport=transport([
+            tool_response(call)], bodies)).review_prepared(envelope, execute=guarded_reader)
+    assert len(bodies) == len(reads) == 1
+    assert failure.value.outcome == "invalid_output"
+    assert excerpt_hash not in json.dumps(bodies[0])
+
+
 def chief_envelope() -> dict[str, Any]:
     ctx = replace(context((6000,)), role="chief", handoff_roles=("scribe",), handoff_targets=(
         {"address": "scribe", "role": "scribe", "name": "Invented Scribe",
@@ -169,7 +259,9 @@ def test_sorted_jsonb_rehydrate_preserves_exact_chief_target_provider_string_and
         answer("invented-source-0", content={"answer": "Invented Chief draft.",
             "source_ids": ["invented-source-0"], "handoffs": []})], bodies)).review_prepared(
                 saved, execute=lambda _: pytest.fail("direct reply needs no tool"))
-    assert result.content == "Invented Chief draft." and bodies == [envelope["body"]]
+    assert result.content == "Invented Chief draft."
+    assert bodies == [GPT41CompactToolsConnector(lambda: "")._request_body(envelope)]
+    assert saved["body"] == envelope["body"] and _digest(saved) == _digest(envelope)
 
 
 def packet_context(count: int = 6, length: int = 4500) -> BotContext:
@@ -249,7 +341,7 @@ def test_verified_full_read_replaces_only_its_excerpt_and_keeps_exact_original_e
     first, second = delivered(bodies[0]), delivered(bodies[1])
     assert second["sources"] == [item for item in first["sources"] if item["source_id"] != "invented-source-0"]
     assert second["source_delivery"] == first["source_delivery"]
-    assert second["decoder_source_windows"] == first["decoder_source_windows"]
+    assert second["displayed_excerpt_windows"] == first["displayed_excerpt_windows"]
     result_data = json.loads(bodies[1]["messages"][-1]["content"])
     assert result_data["data"]["content"] == envelope["context"]["sources"][0]["content"]
     assert result_data["receipt"]["envelope_sha256"] == _digest(original)
@@ -394,6 +486,9 @@ def test_v5_json_replay_keeps_its_original_excerpt_after_a_read_and_rejects_v6_e
         tool_response(read_call(saved)), answer("invented-source-0")], bodies)).review_prepared(
             saved, execute=lambda request: source_result(saved, request))
     assert len(bodies) == 2 and delivered(bodies[1])["sources"] == delivered(bodies[0])["sources"]
+    assert bodies[0] == saved["body"]
+    assert json.dumps(bodies[0], separators=(",", ":"), ensure_ascii=False).encode() == json.dumps(
+        saved["body"], separators=(",", ":"), ensure_ascii=False).encode()
     assert _digest(saved["baseline"]) == _digest(gpt41.GPT41Connector(lambda: "").prepare(ctx))
     with pytest.raises(ModelCallFailure) as failure:
         GPT41ToolsConnector(lambda: "invented-key", transport=transport([], [])).review_prepared(
