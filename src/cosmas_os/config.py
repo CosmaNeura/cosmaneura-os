@@ -143,6 +143,10 @@ class Settings(BaseSettings):
     workspace_session_prep_enabled: bool = False
     core_session_prep_scope: str = ""
     core_session_prep_managed_identity_client_id: str = ""
+    # Separate read-only patient-package permission; founder-owned, default-off.
+    workspace_visit_prep_enabled: bool = False
+    core_visit_prep_scope: str = ""
+    core_visit_prep_managed_identity_client_id: str = ""
     workspace_llm_backend: Literal["disabled", "azure_gpt41"] = "disabled"
     workspace_llm_endpoint: str = "https://cosmascode.services.ai.azure.com/openai/v1"
     workspace_llm_deployment: str = "gpt-4.1"
@@ -209,6 +213,17 @@ class Settings(BaseSettings):
                     and valid_core_web_origin(self.core_capture_origin)
                     and not self.core_capture_origin.endswith(".localhost")
                     and re.fullmatch(r"authority_tenant_[0-7][0-9a-hjkmnp-tv-z]{25}", self.core_connection_tenant_ref))
+
+    @property
+    def workspace_visit_prep_available(self) -> bool:
+        try:
+            UUID(self.core_visit_prep_managed_identity_client_id)
+        except ValueError:
+            return False
+        return bool(self.workspace_visit_prep_enabled and self.workspace_core_connection_available
+                    and self.core_visit_prep_scope.startswith("api://")
+                    and self.core_visit_prep_scope.endswith("/.default")
+                    and not any(c.isspace() for c in self.core_visit_prep_scope))
 
     @property
     def workspace_core_appointment_setup_available(self) -> bool:

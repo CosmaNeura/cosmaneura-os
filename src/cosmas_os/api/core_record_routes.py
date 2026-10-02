@@ -58,9 +58,13 @@ class RecordRoute(APIRoute):
 
 class RecordMiddleware:
     """Only the existing location GET; full middleware output and cleanup are owned."""
-    def __init__(self, app, *, routes, max_response_bytes=MAX_RESPONSE_BYTES, error_factory=problem):
+    def __init__(self, app, *, routes, max_response_bytes=MAX_RESPONSE_BYTES, error_factory=problem,
+                 deadline_seconds=DEADLINE_SECONDS):
         self.app, self.routes = app, routes
         self.max_response_bytes, self.error_factory = max_response_bytes, error_factory
+        if not 0 < deadline_seconds <= DEADLINE_SECONDS:
+            raise ValueError("invalid_record_deadline")
+        self.deadline_seconds = deadline_seconds
 
     async def __call__(self, scope, receive, send):
         if scope["type"] != "http" or not any(route.matches(scope)[0] == Match.FULL for route in self.routes):
@@ -70,7 +74,7 @@ class RecordMiddleware:
         async def private(current_scope, current_receive, current_send):
             owner = current_budget()
             assert owner is not None
-            budget = RecordDeadline(min(DEADLINE_SECONDS, owner.check()))
+            budget = RecordDeadline(min(self.deadline_seconds, owner.check()))
             budget.when = owner.expires_at
             current_scope.setdefault("state", {})["core_record_deadline"] = budget
             with owner.on_cancel(budget.cancel):
@@ -86,7 +90,7 @@ class RecordMiddleware:
                 message = {**message, "headers": [*headers, *required.items()]}
             await send(message)
 
-        await CaptureBoundary(private, DEADLINE_SECONDS, max_response_bytes=self.max_response_bytes,
+        await CaptureBoundary(private, self.deadline_seconds, max_response_bytes=self.max_response_bytes,
                               error_factory=self.error_factory, error_send_seconds=ERROR_SEND_SECONDS)(
             scope, receive, final_send)
 

@@ -18,6 +18,7 @@ const inboxProposal = new RegExp(`^/workspaces/${ID}/inbox-handoffs/(propose|res
 const coreRecordLocation = new RegExp(`^/workspaces/${ID}/cosmaneura-record/location$`);
 const research = new RegExp(`^/workspaces/${ID}/research(?:/(saved|search|resolve|${ID}/save(?:/resolve)?))?$`);
 export const CONNECTOR_HEADERS = ['X-Cosmas-Vendor-Contract','X-Cosmas-Finance-Contract','X-Cosmas-Portal-Contract','X-Cosmas-Portal-Work-Contract','X-Cosmas-Finance-Setup-Contract','X-Cosmas-Membership-Contract','X-Cosmas-Vendor-Setup-Contract','X-Cosmas-Inbox-Contract','X-Cosmas-Inbox-Handoff-Contract','X-Cosmas-Record-Contract','X-Cosmas-Research-Contract','X-Cosmas-Connection-Contract','X-Cosmas-Scheduling-Login','X-Cosmas-Microsoft-Connection','X-Cosmas-Google-Connection','X-Cosmas-Practice-Access-Contract'];
+CONNECTOR_HEADERS.push('X-Cosmas-Visit-Prep-Contract');
 
 /** Closed method/path/query classification, shared by admission and byte budgets. */
 export function connectorApiRoute(target, method) {
@@ -25,6 +26,8 @@ export function connectorApiRoute(target, method) {
   const query = question < 0 ? '' : target.slice(question);
   const plan = (header,input,output,extra={}) => ({header,input,output,seconds:30,...extra});
   const incoming = (header,input,output) => plan(header,input,output,{seconds:15,strictResponse:true,errorOutput:2048});
+  if(path === '/provider-team/visit-prep/read') return method === 'POST' && !query
+    ? plan('X-Cosmas-Visit-Prep-Contract',2048,262144,{seconds:35,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/catalog') return method === 'GET' && !query
     ? incoming(CONNECTOR_HEADERS[11],0,4096) : null;
   if(path === '/vendor-settings/readiness') return method === 'GET' && !query

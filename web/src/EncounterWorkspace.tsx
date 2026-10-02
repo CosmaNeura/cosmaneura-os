@@ -58,6 +58,8 @@ import { SchedulingConnectionPanel } from "./SchedulingConnectionPanel";
 import { APPOINTMENTS_BUILD } from "./appointment-api";
 import { EncounterPrepPanel } from "./EncounterPrepPanel";
 import { SessionPrepPanel } from "./SessionPrepPanel";
+import { VisitPrepPackagePanel } from "./VisitPrepPackagePanel";
+import { VISIT_PREP_BUILD } from "./visit-prep-api";
 import { ENCOUNTER_PREP_BUILD } from "./encounter-prep-api";
 import { CAPTURE_CORRECTIONS_BUILD, CAPTURE_NOTES_BUILD, CAPTURE_WORKSPACE_BUILD } from "./capture-api";
 import type { CaptureDraft } from "./capture-notes-api";
@@ -1177,6 +1179,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               disabled={busy || !!pending} onClick={() => void open(encounter.appointment_id, undefined, undefined, true)}><span aria-hidden="true">🎙️ </span>Record visit</button>}
           </article>) : <p>No confirmed encounters are available for this account. Connect your practice to find its appointments.</p>}
         </section>}
+        {VISIT_PREP_BUILD&&authenticated&&!settingsOpen&&<VisitPrepPackagePanel identity={authenticated}
+          locked={busy||!!pending||connectionNavigationLocked} onAccessLost={failure}/>}
         <p className="team-fine">Notes and private drafts do not need email or calendar setup.</p>
       </section> : <>
         <section hidden={settingsOpen} className="team-encounter-heading"><div><p className="team-kicker">ENCOUNTER NOTEBOOK</p><h1>{workspace.label}</h1>
@@ -1221,6 +1225,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             <button className="team-primary capture-record" disabled={locked || connectionNavigationLocked} onClick={() => void openSettings('connections')}>Set up recording</button>
           </header></section>}
         <div hidden={settingsOpen}>
+        {VISIT_PREP_BUILD&&authenticated&&bot?.role==='visit_prep'&&!settingsOpen&&!practiceOpen&&
+          <VisitPrepPackagePanel key={`patient-prep:${workspace.id}:${selected}:${team?.revision}`} identity={authenticated}
+            locked={locked||captureNavigationLocked||captureDraftLocked} onAccessLost={failure}/>}
         <TeamWorkPanel handoffs={workspace.handoffs??[]} entries={workspace.entries} locked={locked} onRetry={retryTeamTask} onReview={reviewTeamResult}/>
         {identity && reviewHandoffId && workspace.handoffs?.some(h=>h.id===reviewHandoffId) &&
           <HandoffReviewPanel key={`${workspace.id}:${reviewHandoffId}`} workspace={workspace}
