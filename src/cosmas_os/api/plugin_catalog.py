@@ -14,6 +14,11 @@ from cosmas_os.api.capture_schemas import (
     ScribeSourcePacketRequest,
 )
 from cosmas_os.api.research_schemas import Save, Search
+from cosmas_os.api.scheduling_schemas import (
+    AppointmentPrepare,
+    CurrentAppointmentRequest,
+    WorkspaceAvailabilityRequest,
+)
 from cosmas_os.api.team_schemas import ConversationRequest
 from cosmas_os.api.vendor_work_schemas import VendorProposal
 
@@ -38,6 +43,7 @@ class Operation:
     read_only: bool = False
     public_read: bool = False
     deadline_seconds: int = 30
+    method: str = "POST"
 
 
 def command(action: str) -> dict[str, Any]:
@@ -84,6 +90,16 @@ def prep_brief_schema() -> dict[str, Any]:
     return schema
 
 
+def appointment_proposal_schema() -> dict[str, Any]:
+    """A selected slot and explicit private sharing; no cancel/approve/execute."""
+    schema = AppointmentPrepare.model_json_schema()
+    schema["properties"]["action"] = {"type": "string", "enum": ["book", "reschedule"]}
+    schema["properties"]["slot"] = next(value for value in schema["properties"]["slot"]["anyOf"] if value.get("type") != "null")
+    schema["properties"]["share"] = {"type": "boolean", "const": True}
+    schema["required"] = ["bot", "action", "slot", "share", "idempotency_key"]
+    return schema
+
+
 def definitions() -> tuple[Operation, ...]:
     operations = []
     for provider in ("google", "microsoft"):
@@ -109,6 +125,59 @@ def definitions() -> tuple[Operation, ...]:
                 read_only=True, public_read=True, deadline_seconds=45,
             ))
     operations.extend((
+        Operation(
+            id="scheduling.read_availability", plugin="scheduling", title="Check appointment availability",
+            description="Read currently authorized slots and their Google calendar coverage receipt. A slot is time-sensitive and is not reserved or booked.",
+            path="/workspaces/{workspace_id}/scheduling/availability", header=None,
+            request=WorkspaceAvailabilityRequest.model_json_schema(),
+            permission=("current authenticated encounter owner and reviewed Scheduling identity",
+                        "enabled bot with calendar_availability skill and current team revision",
+                        "exact current scheduling account and practitioner/resource grant"),
+            health_check="only a fresh authorized availability receipt establishes observed slots; sign-in is insufficient",
+            completion="slots, checked_at and valid_until; empty, expired and unavailable remain distinct",
+            recovery="deliberately read availability again after expiry; never treat an old slot as reserved",
+            tests=("tests/integration/test_workspace_scheduling.py",), read_only=True, deadline_seconds=120,
+        ),
+        Operation(
+            id="scheduling.read_current", plugin="scheduling", title="Read the encounter's current appointment",
+            description="Read the currently mapped appointment before preparing a change. The appointment and calendar synchronization are separate outcomes.",
+            path="/workspaces/{workspace_id}/appointments/current", header=None,
+            request=CurrentAppointmentRequest.model_json_schema(),
+            permission=("current authenticated encounter owner and reviewed Scheduling identity",
+                        "current bot skill/resource grants and exact patient/encounter correspondence"),
+            health_check="inspect the returned appointment and correspondence; configuration is not a current appointment",
+            completion="current exact appointment observation only; missing or unknown is not cancelled",
+            recovery="repeat the authorized read; do not create an appointment to recover missing read evidence",
+            tests=("tests/integration/test_workspace_appointments.py",), read_only=True, deadline_seconds=120,
+        ),
+        Operation(
+            id="scheduling.prepare_appointment", plugin="scheduling", title="Prepare an appointment for review",
+            description="Save an exact selected appointment proposal in the existing work queue. Human approval and execution remain separate; preparation does not reserve a slot.",
+            path="/workspaces/{workspace_id}/appointments", header=None,
+            request=appointment_proposal_schema(),
+            permission=("current authenticated encounter owner and reviewed Scheduling identity",
+                        "current bot skill/resource grants and exact patient/encounter correspondence",
+                        "explicit selected slot and private proposal sharing; availability is rechecked",
+                        "human approval required before execution"),
+            health_check="inspect current availability, exact proposal revision and outcome independently",
+            completion="saved private proposal and exact revision/hash only; pending approval is not booking",
+            recovery="retain the original request and idempotency key; read its saved proposal before considering another intent",
+            tests=("tests/integration/test_workspace_appointments.py", "tests/integration/test_appointment_work.py"),
+            deadline_seconds=120,
+        ),
+        Operation(
+            id="scheduling.inspect_proposal", plugin="scheduling", title="Check saved appointment work",
+            description="Read a saved proposal and its retained execution observations. Booking and Google calendar synchronization must be assessed separately.",
+            path="/workspaces/{workspace_id}/appointments/{ticket_id}", header=None,
+            request={"type": "object", "properties": {}, "additionalProperties": False},
+            permission=("current authenticated encounter owner and mapped external identity",
+                        "exact encounter and saved ticket; no new approval or execution authority"),
+            health_check="read retained state; pending, unknown, failed and completed remain distinct",
+            completion="saved proposal/operation state and exact evidence; a read is not new submission",
+            recovery="repeat the saved-ticket read after a lost response; never resubmit to recover a receipt",
+            tests=("tests/integration/test_appointment_work.py", "tests/integration/test_appointment_execution.py"),
+            read_only=True, deadline_seconds=120, method="GET",
+        ),
         Operation(
             id="workspace.review", plugin="workspace", title="Review saved encounter work with a bot",
             description="Ask an enabled bot to review its permitted saved sources. Chief can report saved work status "
@@ -239,7 +308,7 @@ def tool(operation: Operation, configured: bool) -> dict[str, Any]:
     body = deepcopy(operation.request)
     definitions_ = body.pop("$defs", {})
     arguments = {"request": body}
-    for name in ("workspace_id", "run_id"):
+    for name in ("workspace_id", "run_id", "ticket_id"):
         if "{" + name + "}" in operation.path:
             arguments[name] = {"type": "string", "format": "uuid"}
     input_schema: dict[str, Any] = {
@@ -259,9 +328,10 @@ def tool(operation: Operation, configured: bool) -> dict[str, Any]:
             "id": operation.id, "plugin": operation.plugin,
             "implementation": "first_party_http", "feature_enabled": configured,
             "account_status": "not_checked", "operation_health": "not_checked",
-            "http": {"method": "POST", "path": operation.path,
+            "http": {"method": operation.method, "path": operation.path,
                      "contract_header": operation.header, "contract_version": "1" if operation.header else None,
-                     "body_argument": "request", "authentication": "current_clerk_jwt",
+                     "body_argument": "request" if operation.method == "POST" else None,
+                     "authentication": "current_clerk_jwt",
                      "required_headers": {"Content-Type": "application/json",
                                           "X-Cosmas-Workspace-Protocol": "1",
                                           "X-Cosmas-Draft-Recovery": "2"}},
@@ -286,11 +356,15 @@ def plugin_catalog(settings, runtime) -> dict[str, Any]:
                            and getattr(settings, "workspace_prep_enabled", False)
                            and getattr(settings, "workspace_session_prep_available", False)),
         "research": bool(getattr(settings, "workspace_research_available", False)),
+        "scheduling": bool(getattr(settings, "workspace_scheduling_available", False)),
     }
     for vendor in ("spruce", "srfax", "documo", "efax"):
         enabled[vendor] = bool(getattr(settings, "vendor_work_enabled", False))
     return {
-        "tools": [tool(operation, enabled[operation.plugin]) for operation in definitions()],
+        "tools": [tool(operation, enabled[operation.plugin] and
+                       (bool(getattr(settings, "workspace_appointments_enabled", False))
+                        if operation.id.startswith("scheduling.") and operation.id != "scheduling.read_availability" else True))
+                  for operation in definitions()],
         "_meta": {
             "ai.cosmas/contract": CONTRACT, "ai.cosmas/schema": "MCP Tool 2025-11-25",
             "ai.cosmas/transport": "existing_authenticated_http",

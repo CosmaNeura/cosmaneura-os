@@ -21,6 +21,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 
 def case_catalog():
+    from lab.administrative_journey import CASE as ADMINISTRATIVE_CASE
     from lab.bot_capabilities import CASES as BOT_CASES
     from lab.connector_journey import CASE as CONNECTOR_TOOLS_CASE
     from lab.fax_teams import CASES as FAX_CASES
@@ -29,6 +30,7 @@ def case_catalog():
     from lab.review_process import INPUTS as REVIEW_INPUTS
 
     return {**CASES, **FAX_CASES, **BOT_CASES, "connector_tools": CONNECTOR_TOOLS_CASE,
+        "administrative_tools": ADMINISTRATIVE_CASE,
         "review_loops": Case("review_loops", "Provider, nurse and PA review and revision loops",
         "Review exact saved materials, request changes, and verify revised material with traceable test sign-off.",
         "SYNTHETIC clinical review workflow", (), inputs=REVIEW_INPUTS),
@@ -40,6 +42,9 @@ def case_catalog():
 
 
 def case_checks(key):
+    if key == "administrative_tools":
+        return ["tests/integration/test_google_inbox_tools.py", "tests/integration/test_scheduling_tools.py",
+                "tests/integration/test_administrative_journey.py", "tests/unit/test_plugin_catalog_scheduling.py"]
     if key == "connector_tools":
         return ["tests/integration/test_account_connector_tools.py", "tests/integration/test_fax_tools.py", "tests/integration/test_connector_mcp.py"]
     if key == "bot_research":
@@ -169,6 +174,10 @@ def worker(args):
                     from lab.connector_journey import run_connectors as run_tool_connectors
 
                     result = run_tool_connectors(app, store, episode, model, concurrency=args.concurrency)
+                elif key == "administrative_tools":
+                    from lab.administrative_journey import run_administrative
+
+                    result = run_administrative(app, store, episode, model, concurrency=args.concurrency)
                 elif key.startswith("fax_"):
                     from lab.fax_teams import run_provider
 

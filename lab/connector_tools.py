@@ -15,7 +15,9 @@ from cosmas_os.ports.vendor_artifacts import ArtifactStoreError
 from lab import account_tools
 from lab.engine import SCHEMAS, Arguments, SaveArgs, World
 from lab.fax_tools import FAX_SCHEMAS, FAX_TOOL_ROLES, FaxTools
+from lab.inbox_tools import INBOX_SCHEMAS, INBOX_TOOL_ROLES, InboxTools
 from lab.research_tools import RESEARCH_SCHEMAS, RESEARCH_TOOL_ROLES, ResearchTools
+from lab.scheduling_tools import SCHEDULING_SCHEMAS, SCHEDULING_TOOL_ROLES, SchedulingTools
 from lab.store import LabError
 
 
@@ -39,12 +41,14 @@ TEAM_SCHEMAS = {
     "save_connector_draft": (CompactDraft, "Save your private draft using short source_refs you actually read and dependency_roles whose exact shared drafts you read. The server binds the original IDs/hashes; no implicit read, review or send occurs."),
 }
 TEAM_ROLES = frozenset({"chief", "scribe", "visit_prep", "research", "follow_up"})
-CONNECTOR_SCHEMAS = {**account_tools.ACCOUNT_SCHEMAS, **FAX_SCHEMAS, **RESEARCH_SCHEMAS, **TEAM_SCHEMAS}
+CONNECTOR_SCHEMAS = {**account_tools.ACCOUNT_SCHEMAS, **FAX_SCHEMAS, **RESEARCH_SCHEMAS, **TEAM_SCHEMAS,
+                     **INBOX_SCHEMAS, **SCHEDULING_SCHEMAS}
 CONNECTOR_ROLES = {**account_tools.ACCOUNT_TOOL_ROLES, **FAX_TOOL_ROLES, **RESEARCH_TOOL_ROLES,
-                   **{name: TEAM_ROLES for name in TEAM_SCHEMAS}}
+                   **{name: TEAM_ROLES for name in TEAM_SCHEMAS}, **INBOX_TOOL_ROLES, **SCHEDULING_TOOL_ROLES}
 ALL_SCHEMAS = {**SCHEMAS, **CONNECTOR_SCHEMAS}
 WRITES = {"save_artifact", "delegate_team", "account_save_selected_observations", "fax_prepare",
-          "fax_prepare_ready", "account_select_observed_items", "research_lookup_trials", "research_save_selection", "save_connector_draft"}
+          "fax_prepare_ready", "account_select_observed_items", "research_lookup_trials", "research_save_selection", "save_connector_draft",
+          "google_inbox_select_message", "google_inbox_prepare_review", "scheduling_prepare_observed"}
 
 
 def visible(role, name):
@@ -56,7 +60,7 @@ def visible(role, name):
 class ConnectorWorld(World):
     schemas = ALL_SCHEMAS
     max_tool_calls_per_turn = 12
-    tool_scope = ("Only offline, invented-data account/research observations and private fax proposals are available. "
+    tool_scope = ("Only offline, invented-data account/research observations, metadata-review drafts and private fax/appointment proposals are available. "
                   "There are no recording, permission, approval, sending, booking or payment tools. ")
     extra_instructions = (
         "Use application_status.workspace_revision before a save. On workspace_revision_conflict read current status and "
@@ -96,7 +100,12 @@ class ConnectorWorld(World):
         super().__init__(*args, **kwargs)
         self.fixtures = ExitStack()
         try:
+            # Reviewed synthetic Scheduling grants precede all account reads.
+            # Startup may advance the team revision; no tool may grant itself access.
+            self.scheduling = SchedulingTools(self.app, self.store.root / (self.episode + "-scheduling"))
+            self.fixtures.callback(self.scheduling.close)
             self.fixtures.enter_context(account_tools.prepared_account_sandboxes(self.app))
+            self.inbox = InboxTools(self.app, self.store, self.episode)
             self.fax = None
             if prepare_fax:
                 self.prepare_fax_fixture()
@@ -222,6 +231,15 @@ class ConnectorWorld(World):
                 if result["result"].get("entry_id"):
                     result["source_ref"] = self.source_reference(result["result"]["entry_id"])
                 return result
+            if name in INBOX_SCHEMAS:
+                result = self.inbox.call(role, name, values)
+                if "error" in result:
+                    raise LabError(result["error"])
+                if name == "google_inbox_select_message" and result.get("entry_id"):
+                    result["source_ref"] = self.source_reference(result["entry_id"])
+                return result
+            if name in SCHEDULING_SCHEMAS:
+                return self.scheduling.call(role, name, values)
             result = super()._execute(role, name, args)
             if name == "list_sources" and isinstance(result, list):
                 refs = {value: key for key, value in self.source_references().items()}

@@ -17,8 +17,12 @@ VERSION = "0.1.0"
 CONNECTOR_INSTRUCTIONS = """The connector-tools startup profile additionally exposes role-scoped
 Google/Microsoft metadata reads and explicit evidence selection, private fax
 proposal/status tools, and a Research-only fixed pre-reviewed invented trial
-lookup/save. All provider transports are offline twins. Fixtures are prepared
-by a separate synthetic human before tools are offered. No account grants,
+lookup/save. All provider transports are offline twins.
+Google Inbox tools save selected headers and a private metadata-review draft;
+they do not read full messages or establish clinical triage. Scheduling tools
+read observed slots and save/inspect exact private appointment proposals.
+Neither flow grants account permissions or human review/approval authority.
+Fixtures are prepared by a separate synthetic human before tools are offered. No account grants,
 human reviews, approvals, sends, bookings or payments are callable. A prepared
 proposal is not delivery. Live HTTP capabilities remain discovery only. Read
 application_status for the current workspace revision before selecting evidence.
@@ -215,7 +219,7 @@ def main(argv=None):
     parser.add_argument("--max-tokens", type=int, default=100000)
     parser.add_argument("--max-seconds", type=int, default=900)
     parser.add_argument("--concurrency", type=int, default=3)
-    parser.add_argument("--connector-tools", action="store_true", help="Expose offline role-scoped account, fax and Research tools; no live account or sending access")
+    parser.add_argument("--connector-tools", action="store_true", help="Expose offline role-scoped account, Inbox, Scheduling, fax and Research tools; no live account or sending access")
     args = parser.parse_args(argv)
     try:
         import anyio

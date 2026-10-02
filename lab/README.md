@@ -6,6 +6,24 @@ cases, an owned disposable PostgreSQL cluster, the actual CosmaBot application
 services, and a separate store of evaluation artifacts. It does not deploy or
 modify the installed Mac/iPhone application.
 
+## Google intake and Scheduling connector tools
+
+`python -m lab.runner --cases administrative_tools --mode replay --repeat 2`
+exercises five bots using exact selected Google headers and observed appointment
+slots, private proposals, shared drafts and separately scripted human metadata
+review/acceptance. Use bounded `--mode azure` for actual model-selected tools.
+Google headers are incomplete messages; no clinical triage, patient match or
+body/attachment permission is inferred. The appointment remains unsubmitted.
+The Scheduling fixture is a fixed New York daylight-saving fold, with distinct
+UTC offsets for repeated local times. Model agents cannot review, approve,
+accept human responsibility or execute an appointment.
+Each role receives only its relevant scenario tools, including exact-read
+recovery. Chief reads sources and drafts in bounded batches. The full optional
+MCP registry and execution-time permission checks remain unchanged.
+The separate synthetic human metadata helper refuses encounters with an
+existing saved clinical note. The typed Scribe artifact in this case is a draft,
+not a persisted clinical note; metadata work cannot replace a clinical note.
+
 ## Start a run
 
 From the repository root, use Python 3.13 with this project's dependencies and

@@ -1,6 +1,8 @@
 // Isolated UI fixtures. No authentication, provider calls or saved user data.
-import {faxConnectionSummary,type ConnectionSummary} from '../src/connection-summary';
+import {faxConnectionSummary,personalConnectionSummary,type ConnectionSummary} from '../src/connection-summary';
 import type {FaxReadiness} from '../src/fax-readiness-api';
+import type {AuthenticatedWorkspaceIdentity} from '../src/workspace-api';
+import {observeConnectionStatus,connectionHealth} from '../src/connection-operation-health';
 export {personalConnectionSummary} from '../src/connection-summary';
 
 export let scenario='mixed';
@@ -29,14 +31,18 @@ export async function readConnectionCatalog(_identity:unknown,signal:AbortSignal
   await wait(signal);if(scenario==='offline')throw new Error('Synthetic offline fixture');
   return {core:true,google:true,microsoft:true,scheduling:false,messaging:scenario in faxScenarios,payments:false,portals:false};
 }
-export async function readConnectionSummary(_identity:unknown,id:string,signal:AbortSignal):Promise<ConnectionSummary>{
+export async function readConnectionSummary(identity:AuthenticatedWorkspaceIdentity,id:string,signal:AbortSignal):Promise<ConnectionSummary>{
   await wait(signal);
   if(id==='messaging'){
     if(scenario==='fax-failure')throw new Error('Synthetic fax status failure');
     return faxConnectionSummary(faxReadiness());
   }
   if(scenario==='failure'&&id==='microsoft')throw new Error('Synthetic status failure');
-  if(scenario==='new')return {label:'Not connected',reason:'Sign in to connect your account.',action:'Connect account',tone:'attention',checkedAt:Date.now()};
-  if(id==='microsoft')return {label:'Sign-in pending',reason:'Continue sign-in, then return to check the result.',action:'Continue setup',tone:'attention',checkedAt:Date.now()};
-  return {label:'Connected',reason:id==='core'?'Cedar synthetic practice':'provider@example.invalid',action:'View connection',tone:'ready',checkedAt:Date.now()};
+  if(scenario==='new')return {label:'Needs setup',reason:'Sign in to connect your account.',action:'Connect account',tone:'attention',checkedAt:Date.now()};
+  if(id==='microsoft')return {label:'Needs setup',reason:'Continue sign-in, then return to check the result.',action:'Continue setup',tone:'attention',checkedAt:Date.now()};
+  if(id==='google'){
+    observeConnectionStatus(identity,'google',{state:'connected',account:{email:'provider@example.invalid'},connected_at:'2026-09-30T10:00:00Z',capabilities:{mail:true,calendar:false}});
+    return personalConnectionSummary('google',connectionHealth(identity,'google'),'provider@example.invalid');
+  }
+  return {label:'Connected',reason:'Cedar synthetic practice',proof:'Account confirmed. Open a visit to check its saved notes and appointments.',action:'Open practice connection',tone:'neutral',checkedAt:Date.now()};
 }

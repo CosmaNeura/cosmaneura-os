@@ -80,6 +80,7 @@ export function SchedulingConnectionPanel({identity,onBusyChange,onAuthenticatio
     <h2>Connect Scheduling</h2><p>Use the Google account approved for your Scheduling practice. Your appointments remain in Scheduling.</p>
     <button disabled={blocked} onClick={()=>void run('status')}>{busy?'Working…':'Check Scheduling connection'}</button>
     {status&&<div className="connection-practice"><h3>{status.label}</h3><p role="status">{status.state==='connected'?'Connected to Scheduling.':status.state==='completing_sign_in'?'Completing Google sign-in…':status.state==='sign_in_pending'?'Google sign-in is ready to continue.':'Sign in with Google to use this Scheduling account.'}</p></div>}
+    {status?.state==='connected'&&<p className="connection-proof">Open a visit and choose Follow-up, then Refresh availability to check times. Each appointment has its own saved result; its calendar update may still be pending.</p>}
     {status&&status.state!=='completing_sign_in'&&<button disabled={blocked||!nativeReady} onClick={()=>void run('start')}>{status.state==='connected'?'Sign in again':'Connect with Google'}</button>}
     {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||!nativeReady}
       data-scheduling-sign-in={blocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}

@@ -1,18 +1,18 @@
 import type {ConnectionId} from './connection-catalog-api';
 
 export const CONNECTION_GUIDES:Record<ConnectionId,{icon:string;group:string;description:string;access:string;steps:string[];setup:string}>={
-  core:{icon:'C',group:'Your practice',description:'Practice account, appointments and visit notes.',access:'Uses your existing Cosmaneura account and its permissions.',
+  core:{icon:'🏥',group:'Your practice',description:'Practice account, appointments and visit notes.',access:'Uses your existing Cosmaneura account and its permissions.',
     steps:['Check your practice account.','Confirm the matching practice.','Choose an appointment to open its notebook.'],setup:'Your practice administrator needs to enable the Cosmaneura connection for this workspace.'},
-  google:{icon:'G',group:'Email & calendar',description:'Your Gmail inbox and the next seven days.',access:'Reads email headers and primary-calendar event titles and times. It cannot send email or change events.',
+  google:{icon:'📨',group:'Email & calendar',description:'Your Gmail inbox and the next seven days.',access:'Reads email headers and primary-calendar event titles and times. It cannot send email or change events.',
     steps:['Continue to Google and choose your account.','Review the requested email and calendar access.','Return here to view recent email or upcoming events.'],setup:'Google sign-in has not been enabled for this workspace. Your practice administrator must finish the Google application setup before you can connect.'},
-  microsoft:{icon:'M',group:'Email & calendar',description:'Recent Outlook email and your next seven days.',access:'Reads email headers and calendar summaries from a Microsoft work or school account.',
+  microsoft:{icon:'📧',group:'Email & calendar',description:'Recent Outlook email and your next seven days.',access:'Reads email headers and calendar summaries from a Microsoft work or school account.',
     steps:['Continue to Microsoft with your work or school account.','Review the email and calendar permissions.','Return here to view recent email or upcoming events.'],setup:'Microsoft sign-in has not been enabled for this workspace. Your practice administrator must finish the Microsoft application setup before you can connect.'},
-  scheduling:{icon:'▦',group:'Your practice',description:'Connect your Scheduling practice and appointments.',access:'Uses the Google account approved for your Scheduling practice. This is separate from Gmail.',
+  scheduling:{icon:'📅',group:'Your practice',description:'Connect your Scheduling practice and appointments.',access:'Uses the Google account approved for your Scheduling practice. This is separate from Gmail.',
     steps:['Confirm your Scheduling practice membership.','Sign in with the approved Google account.','Use the connected schedule in your encounter workspace.'],setup:'Your practice administrator needs to enable Scheduling and confirm your practice membership.'},
   messaging:{icon:'📠',group:'Practice services',description:'Messaging and fax with Spruce, SRFax, Documo or eFax Corporate.',access:'Each delivery is prepared and reviewed before it is sent.',
     steps:['Choose your practice’s messaging or fax provider.','Have an administrator connect the provider account.','Confirm recipients and review the first delivery.'],setup:'Your practice administrator needs to connect a Spruce, SRFax, Documo or eFax Corporate API account and enable delivery for this workspace.'},
-  payments:{icon:'$',group:'Practice services',description:'Prepare and track Stripe payment requests.',access:'Uses your practice’s Stripe account. Card details stay with the payment provider.',
+  payments:{icon:'💳',group:'Practice services',description:'Prepare and track Stripe payment requests.',access:'Uses your practice’s Stripe account. Card details stay with the payment provider.',
     steps:['Have an administrator connect the practice’s Stripe account.','Confirm the customer and payment-request details.','Review the amount before creating the payment request.'],setup:'Your practice administrator needs to connect Stripe and enable payment requests for this workspace.'},
-  portals:{icon:'▣',group:'Practice services',description:'Work with your practice’s supported patient portal.',access:'Portal support depends on the provider and the workflow your practice has enabled.',
+  portals:{icon:'🗂️',group:'Practice services',description:'Work with your practice’s supported patient portal.',access:'Portal support depends on the provider and the workflow your practice has enabled.',
     steps:['Confirm that your practice’s portal is supported.','Have an administrator configure the permitted workflow.','Review each document and destination before submission.'],setup:'Your practice administrator needs to configure a supported portal workflow. An arbitrary portal URL cannot be connected here.'},
 };

@@ -232,5 +232,34 @@ def test_official_sdk_stdio_connector_profile_keeps_closed_schema_and_exact_evid
                     assert metadata["connector_tools"] and metadata["schema_setup"] == "alembic-upgrade-head"
                     assert metadata["artifact_count"] == 0 and metadata["external_effects"] == 0
 
+                    headers = await call("google_inbox_read_headers", {"idempotency_key": "sdk-inbox-read"})
+                    assert headers["metadata_only"] and headers["incomplete_message"]
+                    message = headers["observation"]["items"][0]
+                    revision = (await call("application_status", {}))["workspace_revision"]
+                    selected_inbox = await call("google_inbox_select_message", {"read_key": "sdk-inbox-read",
+                        "message_id": message["id"], "expected_workspace_revision": revision,
+                        "idempotency_key": "sdk-inbox-select"})
+                    assert selected_inbox["status"] == "saved" and selected_inbox["source_ref"].startswith("source-")
+                    assert (await call("read_selected_source", {"source_ref": selected_inbox["source_ref"]}))["id"] == selected_inbox["entry_id"]
+                    draft = await call("google_inbox_prepare_review", {"selection_key": "sdk-inbox-select",
+                        "expected_workspace_revision": (await call("application_status", {}))["workspace_revision"],
+                        "idempotency_key": "sdk-inbox-review"})
+                    assert draft["status"] == "private_draft" and "source_ref" not in draft
+                    reviews = await call("google_inbox_list_reviews", {})
+                    assert any(item["review_key"] == "sdk-inbox-review" for item in reviews["items"])
+                    review = await call("google_inbox_review_status", {"review_key": "sdk-inbox-review"})
+                    assert review["f8"] is None and review["metadata_reviewed_by_human"] is False
+                    assert review["whole_message_reviewed"] is False and review["completed"] is False
+                    availability = await call("scheduling_read_availability", {"timezone": "America/New_York"})
+                    assert len(availability["availability"]["slots"]) == 2
+                    proposed = await call("scheduling_prepare_observed", {
+                        "slot_ref": availability["availability"]["slots"][0]["slot_ref"],
+                        "expected_workspace_revision": availability["workspace_revision"], "idempotency_key": "sdk-appointment"})
+                    assert proposed["detail"]["operation_id"] is None and proposed["detail"]["appointment_saved"] is False
+                    await call("scheduling_list_proposals", {})
+                    assert (await call("scheduling_inspect_prepared", {"proposal_ref": proposed["proposal_ref"]}))["detail"] == proposed["detail"]
+                    for forbidden in ("human_review_assign", "human_accept", "human_execute", "book_appointment"):
+                        assert (await call(forbidden, {}))["error"] == "unknown_tool"
+
     asyncio.run(exercise())
     checked_cleanup(root)

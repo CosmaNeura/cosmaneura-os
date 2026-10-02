@@ -4,4 +4,13 @@
 .team-workspace .practice-hub > nav button[aria-pressed="true"] { background: #315c4c; color: white; border-color: #315c4c; }
 .practice-hub .practice-work, .practice-hub .inbox-panel.inbox-focused { padding: 0; }
 .practice-hub [hidden] { display: none !important; }
+.practice-task-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0 0 20px; }
+.practice-task-cards button { display:flex; align-items:center; gap:10px; min-width:0; min-height:80px; padding:14px; border-radius:12px; text-align:left; white-space:normal; }
+.practice-task-cards button > span:first-child { font-size:24px; }
+.practice-task-cards button > span:last-child { margin-left:auto; }
+.practice-task-cards strong,.practice-task-cards small { display:block; }
+.practice-task-cards strong { font-size:14px; }
+.practice-task-cards small { font-size:12px; line-height:1.45; margin-top:4px; color:var(--team-muted); }
+.practice-task-cards button:focus-visible { outline:3px solid #326c59; outline-offset:2px; }
+@media (max-width: 600px) { .practice-task-cards { grid-template-columns:1fr; }.practice-task-cards button { min-height:76px; padding:12px; } }
 @media (max-width: 600px) { .practice-hub { padding: 16px; } .practice-hub > nav button { flex: 1 1 0; min-width: 0; padding-inline: .6rem; overflow-wrap: anywhere; } }

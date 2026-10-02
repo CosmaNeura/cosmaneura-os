@@ -52,7 +52,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       setDirectory(previous=>({owner:connectionIdentity,catalog:value,error:false,busy:false,
         checks:Object.fromEntries(Object.keys(value).map(key=>{
           const id=key as ConnectionId,last=previous?.owner===connectionIdentity?previous.checks[id]?.last:undefined;
-          const setup:ConnectionSummary={label:'Admin setup',reason:'Your practice administrator needs to finish setup.',action:'View requirements',tone:'attention',checkedAt:Date.now(),checkKind:'availability'};
+          const setup:ConnectionSummary={label:'Needs setup',reason:'Your practice administrator needs to finish setup.',action:'View requirements',tone:'attention',checkedAt:Date.now(),checkKind:'availability'};
           return [id,!value[id]?{value:setup,last:setup,busy:false}:{last,busy:ids.includes(id)&&accountStatusSupported(id)}];
         }))}));
       for(const id of ids){
@@ -70,7 +70,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
             accessLost.current?.(error);return;
           }
           setDirectory(previous=>previous?.owner===connectionIdentity?{...previous,checks:{...previous.checks,[id]:{
-            last:previous.checks[id]?.last,busy:false,value:{label:'Couldn’t check',reason:error instanceof WorkspaceApiError&&error.status===403?'Ask your practice administrator to confirm access.':'Current status is unknown. Open the connection to try again.',action:'Review connection',tone:'attention'}
+            last:previous.checks[id]?.last,busy:false,value:{label:'Needs attention',reason:error instanceof WorkspaceApiError&&error.status===403?'Ask your practice administrator to confirm access.':'Current status is unknown. The latest check failed; open the connection to try again.',action:'Check connection again',tone:'attention'}
           }}}:previous);
         }).finally(()=>clearTimeout(timer));
       }
@@ -106,10 +106,10 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
   const setupUnavailable=selectedGuide&&catalog?.[screen as ConnectionId]===false;
   function summary(id:ConnectionId):ConnectionSummary{
-    if(current?.busy)return {label:current.checks[id]?.last?'Checking again…':'Checking…',reason:'Checking your account connection.',action:'View connection',tone:'neutral'};
-    if(catalogError)return {label:'Couldn’t check',reason:'Current status is unknown. Try again or open the connection.',action:'Review connection',tone:'attention'};
+    if(current?.busy)return {label:'Not checked',reason:current.checks[id]?.last?'Checking again. Previous results are below.':'Checking your account connection.',action:'Wait for this check or open the connection',tone:'neutral'};
+    if(catalogError)return {label:'Needs attention',reason:'Current status is unknown. The latest check failed; try again or open the connection.',action:'Check connection again',tone:'attention'};
     const check=current?.checks[id];
-    if(check?.busy)return {label:check.last?'Checking again…':'Checking…',reason:'Checking your account connection.',action:'View connection',tone:'neutral'};
+    if(check?.busy)return {label:'Not checked',reason:check.last?'Checking again. Previous results are below.':'Checking your account connection.',action:'Wait for this check or open the connection',tone:'neutral'};
     if(check?.value){
       if(check.value.services&&(id==='google'||id==='microsoft')){
         const health=id==='google'?googleHealth:microsoftHealth;
@@ -117,7 +117,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       }
       return check.value;
     }
-    return {label:catalog?.[id]===true?'Review setup':connectionIdentity?'Checking…':'Not checked',reason:catalog?.[id]===true?'Open to review configured accounts and permissions.':'Account status has not been verified.',action:'Review setup',tone:'neutral'};
+    return {label:catalog?.[id]===true?'Available':'Not checked',reason:catalog?.[id]===true?'This service is enabled. Its account and task results have not been checked.':'Account status has not been checked.',action:catalog?.[id]===true?'Review accounts and permissions':'Check connection',tone:'neutral'};
   }
   return <section className="settings-hub" hidden={!open} aria-label="Settings">
     <nav className="settings-hub-nav" aria-label="Settings navigation">
@@ -130,7 +130,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     <header className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
       <h1 ref={title} tabIndex={-1}>{titles[screen]}</h1>
       {screen === 'home' && <p>A little setup. A team that fits your practice.</p>}
-      {screen === 'connections' && <p>Connect the accounts your practice uses. You choose what each service can access.</p>}
+      {screen === 'connections' && <p>Choose a service, check what is ready, and take the next step.</p>}
     </header>
     {screen === 'home' && <div className="settings-cards">
       <button disabled={navigationLocked} className="settings-card" onClick={() => visit('team')}>
@@ -149,21 +149,32 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       </button>}
     </div>}
     {screen === 'connections' && <div className="connection-directory">
-      {connectionIdentity&&<div className="connection-directory-status"><p role="status">{checking?(checkingAgain?'Checking again. Last confirmed results remain below.':'Checking connections…'):catalog?'Account checks appear below. Open a connection for details.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
+      {connectionIdentity&&<div className="connection-directory-status"><p role="status">{checking?(checkingAgain?'Checking again. Last confirmed results remain below.':'Checking connections…'):catalog?'Connected confirms the account. Read results and task outcomes are shown separately.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
         <button disabled={navigationLocked||checking||!catalog&&!catalogError} onClick={()=>setRefreshCatalog(value=>value+1)}>Refresh connections</button></div>}
+      <details className="connection-state-help"><summary>What these states mean</summary><dl>
+        <div><dt>Available</dt><dd>The feature is enabled. Open it to check the account and task.</dd></div>
+        <div><dt>Connected</dt><dd>The account was confirmed. Check each read or task result separately.</dd></div>
+        <div><dt>Needs setup</dt><dd>Finish sign-in, account setup or permissions before use.</dd></div>
+        <div><dt>Needs attention</dt><dd>A check failed or access needs review. The next action explains how to recover.</dd></div>
+        <div><dt>Not checked</dt><dd>No current result is confirmed, or a check is still in progress.</dd></div>
+      </dl></details>
       {['Your practice','Email & calendar','Practice services'].map(group=>{
         const cards=connectionCards.filter(item=>item.group===group);return cards.length>0&&<section className="connection-group" key={group} aria-label={group}>
-          <h2>{group}</h2><div className="connection-cards">{cards.map(item=>{const state=summary(item.id);return <button disabled={navigationLocked||!!connectionIdentity&&!catalog&&!catalogError} className="settings-card connection-card" key={item.id} onClick={()=>visit(item.id)}>
+          <h2>{group}</h2><div className="connection-cards">{cards.map(item=>{const state=summary(item.id),fax=state.faxReadiness;
+            const canOpenFax=item.id==='messaging'&&!checking&&!catalogError&&catalog?.messaging&&fax?.enabled&&fax.work_enabled&&fax.providers.some(provider=>provider.prepare_enabled_accounts>0);
+            return <div className="connection-card-box" key={item.id}><button disabled={navigationLocked||!!connectionIdentity&&!catalog&&!catalogError} className="settings-card connection-card" onClick={()=>visit(item.id)}>
             <span className="settings-card-icon" aria-hidden="true">{item.icon}</span>
             <span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{state.reason}</small>
               {state.services&&<span className="connection-service-summary">{state.services.map(service=><small key={service.kind}><b>{service.name}:</b> {service.label}
                 {service.lastSuccessAt&&<span className="connection-operation-time">Last successful read: {new Date(service.lastSuccessAt).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})}</span>}</small>)}</span>}
+              {state.proof&&<small className="connection-proof">{state.proof}</small>}
             </span>
             <span className="connection-card-state"><span role="status" aria-atomic="true" className={`connection-badge connection-badge-${state.tone}`}>{state.tone==='ready'&&<span aria-hidden="true">✓ </span>}{state.label}</span>
               {!state.checkedAt&&current?.checks[item.id]?.last&&<small>Last confirmed: {current.checks[item.id]!.last!.label}{current.checks[item.id]!.last!.checkedAt?` · ${new Date(current.checks[item.id]!.last!.checkedAt!).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`:''}</small>}
               {state.checkedAt&&<small>{state.checkKind==='availability'?'Availability checked':'Account checked'} {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</small>}
-              <span className="connection-card-action">{state.action} <span aria-hidden="true">›</span></span></span>
-          </button>;})}</div>
+              {!state.action.startsWith('Open ')&&<small className="connection-next-step">Next: {state.action}</small>}
+              <span className="connection-card-action">Open {item.id==='core'?'practice connection':item.id==='google'?'Google':item.id==='microsoft'?'Microsoft':item.id==='scheduling'?'Scheduling':item.id==='messaging'?'fax setup':item.id==='payments'?'payments':'portals'} <span aria-hidden="true">›</span></span></span>
+          </button>{item.id==='messaging'&&onOpenMessagingWork&&<div className="connection-task-action"><button className="team-primary" disabled={navigationLocked||messagingWorkBlocked||!canOpenFax} onClick={()=>{if(canOpenFax&&!navigationLocked&&!messagingWorkBlocked)onOpenMessagingWork();}}>{messagingWorkLabel}</button><small>Prepare and review a draft. Delivery is checked for each fax.</small></div>}</div>;})}</div>
         </section>;
       })}
       {!connectionCards.length && <p>No connection setup is available for this account.</p>}
@@ -177,7 +188,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       onRefresh={()=>setRefreshCatalog(value=>value+1)} onSetup={()=>{messagingEditor.current?.focus();messagingEditor.current?.scrollIntoView?.({block:'start'});}}
       onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/>}
     {setupUnavailable&&selectedGuide&&<section className="connection-setup-guide" aria-label="Connection setup steps">
-      <span className="connection-badge connection-badge-attention">Admin setup</span><h2>{titles[screen]}</h2><p>{selectedGuide.setup}</p>
+      <span className="connection-badge connection-badge-attention">Needs setup</span><h2>{titles[screen]}</h2><p>{selectedGuide.setup}</p>
       <h3>Your next step</h3><p>Ask your practice administrator to enable this service. No setup request has been sent from this screen.</p>
       <p className="team-fine">Administrator contact: not listed here. Use your practice’s usual support contact.</p>
       <button disabled={navigationLocked} onClick={()=>{setRefreshCatalog(value=>value+1);visit('connections');}}>Check availability again</button>

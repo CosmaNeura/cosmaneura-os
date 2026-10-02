@@ -162,3 +162,12 @@ previously read dependency hashes. Compact fax preparation uses only a readiness
 snapshot that the same agent already read; compact receipt inspection uses only
 a proposal that the same agent already listed. No implicit review or send is
 performed. These paths reduce copying mistakes without removing source checks.
+
+The opt-in connector profile also exposes Google metadata intake and Scheduling
+availability/private proposal inspection. The Google flow saves selected headers
+and a metadata-review draft; full-message clinical triage remains unavailable.
+Scheduling checks the active caller through a reviewed synthetic Follow-up grant
+and retains exact observed slots and proposal bindings. Separate scripted human
+review/acceptance or appointment execution is never registered as an MCP tool.
+Use `lab.runner --cases administrative_tools` for the phased combined workflow;
+a standalone MCP session cannot perform those human steps.
