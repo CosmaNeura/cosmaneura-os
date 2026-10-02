@@ -93,7 +93,7 @@ run "calendar_work_requires_underlying_google_connection" {
   command = plan
   variables {
     hosted_enabled = true
-    features = { WORKSPACE_GOOGLE_CALENDAR_ENABLED = true }
+    features       = { WORKSPACE_GOOGLE_CALENDAR_ENABLED = true }
   }
   expect_failures = [terraform_data.configuration_guard]
 }
@@ -102,7 +102,7 @@ run "message_work_requires_underlying_google_connection" {
   command = plan
   variables {
     hosted_enabled = true
-    features = { WORKSPACE_GOOGLE_MESSAGE_ENABLED = true }
+    features       = { WORKSPACE_GOOGLE_MESSAGE_ENABLED = true }
   }
   expect_failures = [terraform_data.configuration_guard]
 }
