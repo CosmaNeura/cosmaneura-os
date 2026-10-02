@@ -11,7 +11,7 @@ describe('compact saved fax receipts and human next action',()=>{
   let root:Root,container:HTMLDivElement;
   beforeEach(()=>{vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.clearAllMocks();container=document.createElement('div');document.body.append(container);root=createRoot(container);});
   afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.unstubAllGlobals();});
-  const render=async(current=identity)=>{await act(async()=>root.render(<FaxFollowthroughCard identity={current} workspaceId={faxScope.workspace_id} ticketId={faxTicket} version={1} head={'a'.repeat(64)}/>));};
+  const render=async(current=identity,head='b'.repeat(64),onReload=vi.fn(async()=>{}))=>{await act(async()=>root.render(<FaxFollowthroughCard identity={current} workspaceId={faxScope.workspace_id} ticketId={faxTicket} version={1} head={head} revisionId="66666666-6666-4666-8666-666666666666" payloadHash={'a'.repeat(64)} onReload={onReload}/>));};
   it('keeps posting and human verification distinct from delivery and missing counts',async()=>{
     vi.mocked(readFaxStatus).mockResolvedValue(await faxFixture({provider:'spruce',status_label:'Posted in Spruce; fax delivery unconfirmed',external_outcome:'spruce_posted_delivery_unconfirmed',next_step:{code:'verify_in_spruce',label:'Verify fax delivery in Spruce',requires_human:true}}));await render();
     expect(container.textContent).toContain('delivery unconfirmed');expect(container.textContent).toContain('Human completion review remains separate');expect(container.textContent).toContain('do not assume zero');expect(container.querySelectorAll('button')).toHaveLength(1);
@@ -30,5 +30,10 @@ describe('compact saved fax receipts and human next action',()=>{
     const observed={id:faxTicket,sequence:1,sha256:'a'.repeat(64),observed_at:'2026-10-02T12:00:00.000000Z',recorded_at:'2026-10-02T12:00:00.000000Z'};
     vi.mocked(readFaxStatus).mockResolvedValue(await faxFixture({transport:'failed',status_label:'Fax transport failed; review the outcome',external_outcome:'provider_transport_failed',observation_head:{sequence:1,sha256:'b'.repeat(64)},last_recorded:observed,pages:{observation:observed,total:3,delivered:1}}));await render();
     expect(container.textContent).toContain('Reported pages: 1 of 3');expect(container.textContent).toContain('Last recorded provider observation');expect(container.textContent).not.toContain('Local human outcome verified.');
+  });
+  it.each([{version:2},{observation_head:{sequence:0,sha256:'c'.repeat(64)}},{revision_id:faxTicket},{payload_hash:'d'.repeat(64)}])('withholds a different saved revision or receipt and delegates an explicit saved-work reload (%o)',async change=>{
+    vi.mocked(readFaxStatus).mockResolvedValue(await faxFixture({...change,status_label:'NEWER UNREVIEWED RECEIPT'}));const reload=vi.fn(async()=>{});await render(identity,'b'.repeat(64),reload);
+    expect(container.textContent).not.toContain('NEWER UNREVIEWED RECEIPT');expect(container.textContent).toContain('changed since this review opened');expect(reload).not.toHaveBeenCalled();
+    await act(async()=>container.querySelector('button')!.click());expect(reload).toHaveBeenCalledTimes(1);expect(container.textContent).not.toContain('NEWER UNREVIEWED RECEIPT');
   });
 });
