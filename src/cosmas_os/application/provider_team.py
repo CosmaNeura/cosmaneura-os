@@ -124,6 +124,11 @@ def read(s: Session, box: str, owner: str, *, version: ProviderTeamRevision | No
                 if capability["key"] == "scribe.transcript.read" and not corrections_enabled:
                     capability["label"] = "Visit transcript"
         if role == "visit_prep":
+            capabilities.append({
+                "key": "core.visit_prep.read", "label": "Patient preparation package",
+                "state": "enabled" if runtime_settings.workspace_visit_prep_available else "awaiting_connection",
+                "connector": "Core", "contract": "core.visit-prep.package.v1",
+            })
             for capability in capabilities:
                 if capability["key"] == "core.session_prep.read":
                     capability["label"] = "Saved intake and prior visit drafts"

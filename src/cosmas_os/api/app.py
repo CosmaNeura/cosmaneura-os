@@ -2014,6 +2014,11 @@ from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: 
 
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")
+from cosmas_os.api.visit_prep_routes import install as install_visit_prep  # noqa: E402
+
+install_visit_prep(app, settings=lambda: settings, session_factory=lambda: SessionLocal(),
+                   identity_dependency=_identity, workspace_gate=_workspace_gate)
+allowed_headers.append("X-Cosmas-Visit-Prep-Contract")
 # Origin policy covers compatibility failures before any inner handler runs.
 app.add_middleware(
     CORSMiddleware,
