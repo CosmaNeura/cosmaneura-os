@@ -99,7 +99,19 @@ class GoogleCalendarObservation(ClosedCalendarModel):
                 or len({event.id for event in self.items}) != len(self.items)):
             raise ValueError("google_calendar_observation_invalid")
         for event in self.items:
-            if not event.all_day:
+            if event.all_day:
+                starts_on, ends_on = event.bounds()
+                # Any datetime UTC offset is strictly less than 24 hours. These
+                # nominal midnights define an ambiguity envelope, not the event
+                # timezone or expiry. Reject only provably disjoint dates.
+                # Compare differences so valid year-9999 dates cannot overflow
+                # while expanding that envelope by a day.
+                start_midnight = datetime.combine(starts_on, datetime.min.time(), UTC)
+                end_midnight = datetime.combine(ends_on, datetime.min.time(), UTC)
+                if (end_midnight - self.window.starts_at <= -timedelta(days=1)
+                        or start_midnight - self.window.ends_at >= timedelta(days=1)):
+                    raise ValueError("google_calendar_event_outside_window")
+            else:
                 starts_at, ends_at = event.bounds()
                 if not isinstance(starts_at, datetime) or not isinstance(ends_at, datetime):
                     raise ValueError("google_calendar_event_invalid")

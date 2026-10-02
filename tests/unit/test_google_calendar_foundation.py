@@ -357,6 +357,41 @@ def test_all_day_bounds_remain_exclusive_calendar_dates_without_claiming_timezon
     assert value.model_dump()["ends_at"] == "2026-11-03" and "timezone" not in value.model_dump()
 
 
+@pytest.mark.parametrize("starts_on,ends_on", [("2000-01-01", "2000-01-02"),
+    ("2030-01-01", "2030-01-02"), ("0001-01-01", "0001-01-02"),
+    ("9999-12-30", "9999-12-31")])
+def test_all_day_summary_rejects_provably_outside_dates_without_overflow(starts_on, ends_on):
+    row = GoogleCalendarEvent(**summary(all_day=True, starts_at=starts_on, ends_at=ends_on))
+    with pytest.raises(ValidationError, match="google_calendar_event_outside_window"):
+        observation(items=(row,))
+
+
+@pytest.mark.parametrize("starts_on,ends_on", [("2026-10-28", "2026-10-30"),
+    ("2026-11-06", "2026-11-07"), ("2026-11-01", "2026-11-03")])
+def test_all_day_summary_keeps_potential_midnight_overlap_and_dst_date_semantics(starts_on, ends_on):
+    row = GoogleCalendarEvent(**summary(all_day=True, starts_at=starts_on, ends_at=ends_on))
+    assert observation(items=(row,)).items == (row,)
+    assert row.starts_at == starts_on and row.ends_at == ends_on
+
+
+@pytest.mark.parametrize("starts_on,ends_on", [("2026-10-27", "2026-10-29"),
+    ("2026-11-07", "2026-11-08")])
+def test_all_day_ambiguity_envelope_is_exclusive_at_twenty_four_hour_limit(starts_on, ends_on):
+    start = NOW.replace(hour=0)
+    row = GoogleCalendarEvent(**summary(all_day=True, starts_at=starts_on, ends_at=ends_on))
+    with pytest.raises(ValidationError, match="google_calendar_event_outside_window"):
+        observation(items=(row,), observed_at=start,
+                    window=GoogleCalendarWindow(starts_at=start, ends_at=start + timedelta(days=7)))
+
+
+def test_all_day_envelope_near_datetime_max_does_not_add_past_year_9999():
+    start = datetime(9999, 12, 24, tzinfo=UTC)
+    row = GoogleCalendarEvent(**summary(all_day=True, starts_at="9999-12-30", ends_at="9999-12-31"))
+    value = observation(items=(row,), observed_at=start,
+                        window=GoogleCalendarWindow(starts_at=start, ends_at=datetime(9999, 12, 31, tzinfo=UTC)))
+    assert value.items == (row,) and value.items[0].ends_at == "9999-12-31"
+
+
 def test_observation_rejects_duplicates_limits_bad_clock_and_extra_fields():
     row = GoogleCalendarEvent(**summary())
     for changes in ({"items": (row, row)}, {"items": (row,) * 26},
