@@ -25,7 +25,9 @@ export interface NativeRecordingState {
 /** Keys/PCM/renewal remain native. This controller reuses only the ciphertext
  * queue uploader and the existing Core completion/review interface. */
 export interface NativeRecorderSnapshot extends CaptureFlowSnapshot {
-  readonly native: { readonly phase: string; readonly busy: boolean; readonly input: MicrophoneInput; readonly signal: unknown };
+  readonly native: { readonly phase: string; readonly busy: boolean; readonly input: MicrophoneInput; readonly signal: unknown;
+    /** Local monotonic time of the latest validated, newer native state. Never sent over the bridge. */
+    readonly signalObservedAtMs?: number };
 }
 export async function connectNativeProviderRecorder(options: {
   workspaceId: string; sessionId: string; port: NativeRecordingPort; bff: CaptureBff;
@@ -39,6 +41,7 @@ export async function connectNativeProviderRecorder(options: {
   let uploading: Promise<void> | null = null;
   let nativeReleased = false, resumePrepared = false;
   let queuedChunks: number | undefined;
+  let signalObservedAtMs: number | undefined;
   let lastReadAt = -Infinity;
   const listeners = new Set<(value: NativeRecorderSnapshot) => void>();
   let queue: CaptureQueue;
@@ -62,7 +65,8 @@ export async function connectNativeProviderRecorder(options: {
     remainingBudgetSeconds: Math.max(0, Math.min((360 - state.recordedChunks) * 10,
       Math.floor((state.maximumPlaintextBytes - state.recordedPlaintextBytes) / 32_000))),
     remainingAuthoritySeconds: null, transcriptionStatus: null, transcript: null,
-    native: { phase: awaitingStart ? "starting" : phase, busy: state.busy, input: state.input, signal: state.signal } };
+    native: { phase: awaitingStart ? "starting" : phase, busy: state.busy, input: state.input, signal: state.signal,
+      signalObservedAtMs } };
   };
   const publish = (): void => {
     if (!state || closed || signal.aborted) return;
@@ -76,7 +80,9 @@ export async function connectNativeProviderRecorder(options: {
       const next = parseNativeRecordingState(response.recording);
       if (next.sessionId !== sessionId || next.workspaceId !== options.workspaceId
         || state && (next.recorderId !== state.recorderId || next.recoveryScope !== state.recoveryScope)) throw failure();
-      if (!state || next.revision > state.revision) { state = next; publish(); }
+      if (!state || next.revision > state.revision) {
+        state = next; signalObservedAtMs = performance.now(); publish();
+      }
     }
     return response.ok;
   };

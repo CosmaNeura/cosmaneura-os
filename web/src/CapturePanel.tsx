@@ -18,6 +18,7 @@ import { sourceGapReview } from "./capture-gap-review";
 import {desktopMeetingCaptureAvailable} from './desktop-capture-runtime';
 import {microphoneInputs,type MicrophoneInput} from '../../clients/capture/src/native/microphone-input';
 import type { SavedScratchpad } from "./notebook-source";
+import { CaptureInputSignal } from "./CaptureInputSignal";
 
 type Preparation = { attestation: CaptureAttestation | null; key: string; bot?: CaptureBotSelection; language?: CaptureLanguage };
 const idle: CaptureFlowSnapshot = { state: "idle", statusCode: "idle", sessionId: null,
@@ -200,6 +201,8 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
           : "Record here. Scribe turns the conversation into a draft for you to review."}</p>
         <div className="capture-state"><span className={`capture-indicator ${snapshot.state === "recording" ? "recording" : ""}`} aria-hidden="true" />
           <span role="status">{status}</span>{(snapshot.state === "recording" || snapshot.elapsedSeconds > 0) && <time aria-label={`Recording duration ${elapsed}`}>{elapsed}</time>}</div>
+        {snapshot.native && runtime.current?.captureMode === "native_microphone" &&
+          <CaptureInputSignal native={snapshot.native} recording={snapshot.state === "recording"} />}
       </div>
       {!expanded && <button className="team-primary capture-record" aria-label="Record visit" disabled={taskBot && !taskBot.enabled} onClick={() => void prepare(pending ?? { attestation: null, key: crypto.randomUUID(), bot: taskBot?.selection })}>Record visit</button>}
       {expanded && !busy && !pending && snapshot.state === "idle" && <button className="team-subtle" onClick={() => setExpanded(false)}>Close setup</button>}
