@@ -286,12 +286,28 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         }
         setWorkspace(latest);
       } catch (cause) { if (!cancelled&&!controller.signal.aborted) modelFailure(cause); }
-      finally{reading=false;}
-      if (!cancelled&&visible()) timer = setTimeout(poll, 5000);
+      finally{
+        reading=false;
+        if (!cancelled&&visible()) {
+          const delay=foregroundRequested?0:5000;foregroundRequested=false;
+          timer = setTimeout(poll,delay);
+        }
+      }
     };
-    const visibility=()=>{clearTimeout(timer);if(document.visibilityState==='hidden')controller?.abort();else timer=setTimeout(poll,5000);};
-    document.addEventListener('visibilitychange',visibility);visibility();
-    return () => { cancelled = true; clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visibility); };
+    // Reuse a healthy in-flight observation. If returning while an aborted
+    // hidden read settles, request one immediate read after its settlement.
+    let foregroundRequested = false;
+    const foreground=()=>{
+      clearTimeout(timer);
+      if(!visible()){foregroundRequested=false;controller?.abort();return;}
+      if(reading){foregroundRequested=controller?.signal.aborted===true;return;}
+      foregroundRequested=false;void poll();
+    };
+    const visibility=()=>foreground();
+    document.addEventListener('visibilitychange',visibility);
+    window.addEventListener('focus',foreground);
+    if(visible())timer=setTimeout(poll,5000);
+    return () => { cancelled = true; clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visibility);window.removeEventListener('focus',foreground); };
   }, [workspace, identity, busy, pending, conflict, handoffReviewPending]);
 
   function checkRecoveryOwner(value: ProviderTeam) {

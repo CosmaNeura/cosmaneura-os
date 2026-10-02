@@ -22,6 +22,7 @@ function button(text:string){const match=[...container.querySelectorAll("button"
 async function click(text:string){await act(async()=>button(text).click());}
 async function share(){await act(async()=>container.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());}
 beforeEach(async()=>{
+ vi.unstubAllEnvs();
  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.useFakeTimers();vi.setSystemTime(new Date("2026-09-21T15:00:00Z"));vi.clearAllMocks();
  access={journal:new DraftJournal(await memoryDraftStorage()({scope:"test"})),workspaceId,
    authorize:vi.fn().mockResolvedValue({id:workspaceId} as Workspace),denied:vi.fn()};
@@ -38,6 +39,32 @@ it("requires deliberate sharing and review before a pending approval, then allow
  expect(appointmentApi.decide).not.toHaveBeenCalled();await click("Approve this appointment change");
  expect(container.textContent).toContain("Send the approved change");expect(appointmentApi.execute).not.toHaveBeenCalled();await click("Withdraw proposal");
  expect(container.textContent).toContain("Withdrawn.");expect(appointmentApi.decide).toHaveBeenCalledTimes(2);
+});
+it("hosted users can prepare, approve and withdraw without suggesting the visit was booked",async()=>{
+ vi.stubEnv("VITE_WORKSPACE_HOSTED_ENABLED","true");
+ await mount();expect(container.textContent).toContain("Booking or changing a visit is not available yet");
+ await share();await click("Prepare appointment proposal");await click("Approve this appointment change");
+ expect(container.textContent).toContain("Approval saved for this proposal");
+ expect(container.textContent).toContain("Scheduling has not booked or changed the visit");
+ expect([...container.querySelectorAll("button")].some(b=>b.textContent==="Send approved appointment change")).toBe(false);
+ expect(appointmentApi.execute).not.toHaveBeenCalled();await click("Withdraw proposal");
+ expect(container.textContent).toContain("Withdrawn.");expect(appointmentApi.decide).toHaveBeenCalledTimes(2);
+});
+it("hosted mode retains historical receipts without offering operation checks or retries",async()=>{
+ vi.stubEnv("VITE_WORKSPACE_HOSTED_ENABLED","true");
+ await openExisting(saved());expect(container.textContent).toContain("Last verified");
+ expect([...container.querySelectorAll("button")].some(b=>["Check saved result","Retry the same appointment change"].includes(b.textContent??""))).toBe(false);
+ await click("Refresh saved proposal");expect(appointmentApi.execute).not.toHaveBeenCalled();
+});
+it("switching to hosted mode preserves a lost execution request and blocks recovery dispatch",async()=>{
+ vi.mocked(appointmentApi.execute).mockRejectedValueOnce(new WorkspaceApiError(503));
+ await openExisting(item("approved"));await click("Send approved appointment change");
+ vi.stubEnv("VITE_WORKSPACE_HOSTED_ENABLED","true");await mount();
+ expect(container.textContent).toContain("its outcome remains unconfirmed");
+ expect(button("Recover the same request").disabled).toBe(true);
+ await click("Recover the same request");expect(appointmentApi.execute).toHaveBeenCalledOnce();
+ expect(container.textContent).not.toContain("Scheduling saved this appointment change.");
+ expect([...container.querySelectorAll("button")].some(b=>b.textContent==="Withdraw proposal")).toBe(false);
 });
 it("retains the selected time and proposal control while expiry disables new preparation",async()=>{
  selectionExpiresAt=new Date(Date.now()+60000).toISOString();await mount();await share();

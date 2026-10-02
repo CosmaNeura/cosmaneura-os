@@ -91,9 +91,10 @@ it('merges a same-revision lifecycle poll and preserves unsaved notebook text, s
   const workspace=await pendingWorkspace(),terminal=await pendingWorkspace(undefined,'unknown');vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team});vi.mocked(workspaceApi.read).mockResolvedValue(terminal);
   const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');vi.useFakeTimers();await open();await input('#team-notebook','Keep my typing');
   await act(async()=>vi.advanceTimersByTimeAsync(15000));expect(workspaceApi.read).not.toHaveBeenCalled();visibility.mockReturnValue('visible');await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
-  await act(async()=>vi.advanceTimersByTimeAsync(4999));expect(workspaceApi.read).not.toHaveBeenCalled();await act(async()=>vi.advanceTimersByTimeAsync(1));
   expect(workspaceApi.read).toHaveBeenCalledOnce();expect(element.textContent).toContain('Outcome unconfirmed');expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Keep my typing');
   await act(async()=>vi.advanceTimersByTimeAsync(15000));expect(workspaceApi.read).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
+  await act(async()=>window.dispatchEvent(new Event('focus')));expect(workspaceApi.read).toHaveBeenCalledOnce();
+  expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Keep my typing');
 });
 it('deduplicates the local bubble against an admitted server question while keeping the original encrypted body',async()=>{
   await open();await input('#team-question',conversationFixture.content);

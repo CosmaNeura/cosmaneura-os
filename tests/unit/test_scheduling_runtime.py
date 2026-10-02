@@ -7,6 +7,8 @@ import pytest
 from fastapi import FastAPI
 from pydantic import SecretStr, ValidationError
 from starlette.requests import Request
+from tests.unit.test_hosted_workspace_config import hosted
+from tests.unit.test_scheduling_actions import operation
 
 from cosmas_os.adapters.scheduling_runtime import (
     SchedulingRuntime,
@@ -173,6 +175,52 @@ def test_closed_runtime_cannot_acquire_or_dispatch(configuration, selection):
     with pytest.raises(ConnectorUnavailable, match="scheduling_identity_unavailable"):
         managed.availability.availability(selection, WINDOW)
     assert calls == requests == []
+
+
+@pytest.mark.parametrize("mode", ["submit", "reconcile"])
+def test_hosted_runtime_operations_denied_before_credentials_but_patient_reads_remain(selection, mode):
+    configuration = hosted(workspace_scheduling_enabled=True, workspace_appointments_enabled=True)
+    assert configuration.workspace_scheduling_available
+    acquisitions, requests = [], []
+    managed = runtime(configuration, lambda value: acquisitions.append(value) or credential(value), requests)
+    patient = AppointmentSelection(**selection.model_dump(), patient_id=uuid4(), patient_link_id=uuid4())
+    try:
+        assert not configuration.workspace_appointment_execution_available
+        with pytest.raises(ConnectorUnavailable, match="^scheduling_execution_not_available$"):
+            getattr(managed.appointments, mode)(_runtime_operation(patient))
+        assert acquisitions == requests == []
+        with pytest.raises(ConnectorUnavailable, match="scheduling_receipt_invalid"):
+            managed.appointments.read_appointment(patient, uuid4())
+        assert acquisitions == [selection] and len(requests) == 1 and requests[0].method == "GET"
+    finally:
+        managed.close()
+
+
+@pytest.mark.parametrize("mode", ["submit", "reconcile"])
+def test_hosted_mode_enabled_during_credential_acquisition_denies_operation(configuration, selection, mode):
+    acquisitions, requests = [], []
+    def provider(value):
+        acquisitions.append(value)
+        configuration.workspace_hosted_enabled = True
+        return credential(value)
+    managed = runtime(configuration, provider, requests)
+    patient = AppointmentSelection(**selection.model_dump(), patient_id=uuid4(), patient_link_id=uuid4())
+    try:
+        with pytest.raises(ConnectorUnavailable):
+            getattr(managed.appointments, mode)(_runtime_operation(patient))
+        assert acquisitions == [selection] and requests == []
+    finally:
+        managed.close()
+
+
+def _runtime_operation(patient):
+    original = operation(patient)
+    assert original.intent.slot is not None and original.intent.google is not None
+    intent = original.intent.model_copy(update={"expires_at": NOW + timedelta(minutes=3),
+        "slot": original.intent.slot.model_copy(update={"starts_at": NOW + timedelta(days=2),
+            "ends_at": NOW + timedelta(days=2, minutes=30)}),
+        "google": original.intent.google.model_copy(update={"checked_at": NOW})})
+    return original.model_copy(update={"intent": intent, "approved_payload_hash": intent.approval_hash()})
 
 
 @pytest.mark.parametrize("origin", ["http://127.0.0.1:9999", "https://other.invalid/path", "https://user:PRIVATE@other.invalid", "https://other.invalid:8443"])

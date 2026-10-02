@@ -237,7 +237,8 @@ class AgentToolExecutor:
             if settings.get("role") != "chief" or not supports_skill(settings, "work_status"):
                 raise ws.WorkspaceError("agent_tool_authority_changed", 403)
             data = operations.read(self.session, row.box_id, row.owner_id, row.workspace_id,
-                kind=checked.kind, record_id=checked.record_id, now=work.now(self.session, self.clock))
+                kind=checked.kind, record_id=checked.record_id, now=work.now(self.session, self.clock),
+                configuration=work.team.runtime_settings)
             if data["evidence"]["commitment"] != checked.commitment:
                 raise ws.WorkspaceError("agent_tool_source_changed", 409)
         self._guard()  # Revoked identity, changed source or expired lease withholds the result.

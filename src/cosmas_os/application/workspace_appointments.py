@@ -7,6 +7,7 @@ from sqlalchemy import select
 from cosmas_os.application import appointment_work as work
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
+from cosmas_os.config import Settings
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import AppointmentObservation, AppointmentWork
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable, supports_skill
@@ -85,19 +86,21 @@ def read_current(s, *, box, owner, workspace_id, external_identity_id, bot, port
 
 
 def prepare(s, *, box, owner, workspace_id, external_identity_id, body,
-            availability_port, appointment_port, reauthenticate):
+            availability_port, appointment_port, reauthenticate, configuration: Settings | None = None):
     fingerprint = payload_hash({"contract": "appointment.prepare.v1", "request": body.model_dump(mode="json")})
     try:
+        work._proposal_gate(s, configuration)
         # Recover a committed response before requiring new source access.
         s.rollback()
         reauthenticate()
+        work._proposal_gate(s, configuration)
         w = ws._workspace(s, box, owner, workspace_id, writing=True)
         prior = s.scalar(select(AppointmentWork).where(AppointmentWork.workspace_id == w.id,
                                                       AppointmentWork.idempotency_key == body.idempotency_key))
         if prior is not None:
             if prior.request_hash != fingerprint:
                 raise ws.WorkspaceError("idempotency_conflict")
-            result = work.read(s, box, owner, workspace_id, prior.ticket_id)
+            result = work.read(s, box, owner, workspace_id, prior.ticket_id, configuration=configuration)
             s.commit()
             return result
         s.commit()
@@ -134,7 +137,7 @@ def prepare(s, *, box, owner, workspace_id, external_identity_id, body,
             raise ws.WorkspaceError("appointment_selection_unavailable") from None
         return work.propose(s, box, owner, workspace_id, external_identity_id=external_identity_id,
                             intent=intent, key=body.idempotency_key, share=True,
-                            request_fingerprint=fingerprint)
+                            request_fingerprint=fingerprint, configuration=configuration)
     except ConnectorUnavailable:
         s.rollback()
         raise ws.WorkspaceError("scheduling_unavailable", 503) from None

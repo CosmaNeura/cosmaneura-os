@@ -107,7 +107,7 @@ class Settings(BaseSettings):
     microsoft_connection_callback_uri: str = ""
     microsoft_connection_return_origin: str = ""
     microsoft_connection_encryption_key: SecretStr | None = None
-    # Local F-8 proposal/review surface only; no appointment execution activation.
+    # F-8 proposal/review surface; hosted activation does not enable execution.
     workspace_appointments_enabled: bool = False
     # Independent delivery/custody gates. Configuration and approval never enable I/O.
     vendor_work_enabled: bool = False
@@ -184,6 +184,12 @@ class Settings(BaseSettings):
     def workspace_scheduling_available(self) -> bool:
         return bool(self.workspace_scheduling_enabled and self.workspace_available
                     and self.workspace_authenticated_enabled and self.auth_mode == "clerk_jwt")
+
+    @property
+    def workspace_appointment_execution_available(self) -> bool:
+        """Existing synthetic execution only; hosted proposals cannot dispatch."""
+        return bool(self.workspace_scheduling_available and self.workspace_appointments_enabled
+                    and not self.workspace_hosted_enabled)
 
     @property
     def workspace_capture_available(self) -> bool:

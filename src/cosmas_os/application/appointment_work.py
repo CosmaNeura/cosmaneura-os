@@ -14,6 +14,7 @@ from sqlalchemy import select
 
 from cosmas_os.application import follow_up
 from cosmas_os.application import workspace as ws
+from cosmas_os.config import Settings
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import (
     ActionRevision,
@@ -30,6 +31,15 @@ from cosmas_os.ports.scheduling_actions import AppointmentIntent, AppointmentSel
 
 LANE = "scheduling_appointment"
 ADAPTER = "scheduling_appointment_v1"
+
+
+def _proposal_gate(s, configuration: Settings | None) -> None:
+    """Explicit signed proposal capability; legacy callers remain local-only."""
+    if configuration is None:
+        follow_up._local(s)
+    elif (not configuration.workspace_scheduling_available
+          or not configuration.workspace_appointments_enabled):
+        raise ws.WorkspaceError("appointment_proposals_unavailable", 403)
 
 
 def _intent(value):
@@ -150,14 +160,14 @@ def _read_bound(s, source, ticket, revision, intent):
             **outcome(s, op, intent)}
 
 
-def read(s, box, actor, workspace_id, ticket_id):
-    follow_up._local(s)
+def read(s, box, actor, workspace_id, ticket_id, *, configuration: Settings | None = None):
+    _proposal_gate(s, configuration)
     w = ws._workspace(s, box, actor, workspace_id)
     return _read_bound(s, *_bound(s, w, ticket_id))
 
 
-def catalog(s, box, actor, workspace_id, *, cursor=None):
-    follow_up._local(s)
+def catalog(s, box, actor, workspace_id, *, cursor=None, configuration: Settings | None = None):
+    _proposal_gate(s, configuration)
     w = ws._workspace(s, box, actor, workspace_id)
     query = select(AppointmentWork.ticket_id).where(AppointmentWork.workspace_id == w.id,
         AppointmentWork.box_id == box, AppointmentWork.owner_id == actor)
@@ -176,9 +186,9 @@ def catalog(s, box, actor, workspace_id, *, cursor=None):
 
 
 def propose(s, box, actor, workspace_id, *, external_identity_id, intent, key, share, now=None,
-            request_fingerprint=None):
+            request_fingerprint=None, configuration: Settings | None = None):
     """Caller supplies a freshly composed receiver-backed intent, never raw UI data."""
-    follow_up._local(s)
+    _proposal_gate(s, configuration)
     w = ws._workspace(s, box, actor, workspace_id, writing=True)
     checked = _intent(intent)
     if share is not True or not isinstance(key, str) or not 1 <= len(key) <= 100:
@@ -212,7 +222,8 @@ def propose(s, box, actor, workspace_id, *, external_identity_id, intent, key, s
         action_type="scheduling." + checked.action, target_ref=_target(checked), content=_content(checked),
         payload=checked.model_dump(mode="json"), payload_hash=checked.approval_hash(),
         automation_class="hitl_required", policy_version="appointment-exact-v1",
-        charter_version="human-selected-v1", config_version="local-disconnected-v1",
+        charter_version="human-selected-v1", config_version=("authenticated-proposal-v1"
+            if configuration is not None else "local-disconnected-v1"),
         created_by_principal_id=actor)
     s.add(revision)
     s.flush()
@@ -222,13 +233,15 @@ def propose(s, box, actor, workspace_id, *, external_identity_id, intent, key, s
         action_revision_id=revision.id, payload_hash=revision.payload_hash, idempotency_key=key,
         request_hash=request_hash))
     _event(s, w, ticket, revision, "appointment.proposed")
+    s.flush()
+    _proposal_gate(s, configuration)
     s.commit()
-    return read(s, box, actor, workspace_id, ticket.id)
+    return read(s, box, actor, workspace_id, ticket.id, configuration=configuration)
 
 
 def decide(s, box, actor, workspace_id, ticket_id, *, external_identity_id,
-           revision_id, digest, choice, now=None):
-    follow_up._local(s)
+           revision_id, digest, choice, now=None, configuration: Settings | None = None):
+    _proposal_gate(s, configuration)
     w = ws._workspace(s, box, actor, workspace_id, writing=True)
     source, ticket, revision, intent = _bound(s, w, ticket_id)
     if revision.id != revision_id or revision.payload_hash != digest:
@@ -247,8 +260,10 @@ def decide(s, box, actor, workspace_id, ticket_id, *, external_identity_id,
         s.add(Decision(box_id=box, ticket_id=ticket.id, action_revision_id=revision.id,
                        actor_principal_id=actor, kind="reject"))
         _event(s, w, ticket, revision, "appointment.rejected")
+        s.flush()
+        _proposal_gate(s, configuration)
         s.commit()
-        return read(s, box, actor, workspace_id, ticket_id)
+        return read(s, box, actor, workspace_id, ticket_id, configuration=configuration)
     if choice != "approve":
         raise ws.WorkspaceError("appointment_decision_invalid", 400)
     account, patient, selection = _current(s, w, external_identity_id)
@@ -275,5 +290,7 @@ def decide(s, box, actor, workspace_id, ticket_id, *, external_identity_id,
     ticket.state = "approved"
     ticket.version += 1
     _event(s, w, ticket, revision, "appointment.approved", approved=True)
+    s.flush()
+    _proposal_gate(s, configuration)
     s.commit()
-    return read(s, box, actor, workspace_id, ticket_id)
+    return read(s, box, actor, workspace_id, ticket_id, configuration=configuration)

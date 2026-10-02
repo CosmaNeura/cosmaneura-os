@@ -8,6 +8,7 @@ import {appointmentApi, type AppointmentAction, type AppointmentCatalog, type Ex
   type AppointmentItem, type CurrentAppointment} from "./appointment-api";
 import type {AvailabilityWindow} from "./scheduling-api";
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity, type CaptureBotSelection} from "./workspace-api";
+import {hostedWorkspaceRequested} from "./hosted-workspace";
 
 type Pending = AppointmentRequest;
 type AppointmentDraft = {bot:CaptureBotSelection;action:AppointmentAction;slot:AvailabilityWindow|null;lastTicket:string|null;pending:Pending|null};
@@ -36,6 +37,7 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
   selectionRefreshStatus?: "failed" | "unavailable";
   onAccessLost?: (cause: WorkspaceApiError) => void;
 }) {
+  const executionAvailable = !hostedWorkspaceRequested();
   const [catalog, setCatalog] = useState<AppointmentCatalog | null>(null);
   const [current, setCurrent] = useState<CurrentAppointment | null>(null);
   const [item, setItem] = useState<AppointmentItem | null>(null);
@@ -121,6 +123,7 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
   }
   async function save(command: Pending) {
     if (busy || locked || recovery.blocked) return;
+    if (command.kind === "execute" && !executionAvailable) return;
     const version = generation.current, controller = new AbortController(); active.current = controller;
     const submitted:AppointmentDraft=command.kind==="prepare"?{bot:{...command.body.bot},action:command.body.action,
       slot:command.body.slot,lastTicket:item?.ticket_id??null,pending:command}:
@@ -141,7 +144,8 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
       setMessage(command.kind === "prepare" ? "Proposal saved. Review the exact appointment below." :
         result.state === "rejected" ? "Proposal withdrawn." : result.state === "sent" ? "Scheduling saved the appointment change." :
         result.dispatch_started ? "The existing operation is retained. Its appointment result is not yet confirmed." :
-        "Approval saved. Send the approved change when you are ready.");
+        executionAvailable ? "Approval saved. Send the approved change when you are ready." :
+        "Approval saved for this proposal. Scheduling has not booked or changed the visit.");
       const appointment = result.intent.slot ?? result.intent.expected!;
       setCatalog(old => ({workspace_id: workspaceId, next_cursor: old?.next_cursor ?? null,
         items: [{ticket_id: result.ticket_id, state: result.state, action: result.intent.action,
@@ -198,10 +202,11 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
   const canPrepare = enabled && !unconfirmed && share && (action === "book" || canChange) && (action === "cancel" || selectedSlot&&!needsSelection&&!selectionExpired&&!selectionRefreshStatus);
   const choose = (choice: "approve" | "reject") => item && void save({kind: "decide", ticket: item.ticket_id,
     body: {revision_id: item.revision_id, payload_hash: item.payload_hash, choice}});
-  const execute = (mode: ExecuteAppointment["mode"]) => item?.operation_id && void save({kind:"execute",ticket:item.ticket_id,
+  const execute = (mode: ExecuteAppointment["mode"]) => executionAvailable && item?.operation_id && void save({kind:"execute",ticket:item.ticket_id,
     body:{operation_id:item.operation_id,revision_id:item.revision_id,payload_hash:item.payload_hash,mode}});
   return <section className="team-prep appointment-panel" aria-label="Appointments">
     <h3>Appointments</h3>
+    {!executionAvailable && <p>Prepare and review appointment proposals here. Booking or changing a visit is not available yet.</p>}
     <EditorRecoveryNotice recovery={recovery} label="Appointment" onRestore={restore}/>
     {earlier&&!recovery.blocked&&<div className="team-recovery">
       <p>Retained choice: {title(earlier.action)}{earlier.slot?` · ${when(earlier.slot.starts_at)}`:""}.</p>
@@ -210,6 +215,7 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
       {pending?.kind==="execute"&&<p>Unconfirmed request: {pending.body.mode==="submit"?"send the approved change":
         pending.body.mode==="reconcile"?"check its saved result":"retry the same appointment change"}. Recovering keeps the same operation and approved details.</p>}
       {pending?.kind==="execute"&&pending.body.mode==="retry"&&<p>Recovering this retry may submit the same operation again. It cannot create a new operation.</p>}
+      {pending?.kind==="execute"&&!executionAvailable&&<p>The earlier request is retained. Checking or sending it is unavailable here; its outcome remains unconfirmed.</p>}
       {!pending&&<><p>Retained choices do not reserve a time. Refresh availability before sharing a recovered proposal.</p>
         <button disabled={busy||locked} onClick={()=>void discardChoices()}>Discard retained appointment choices</button></>}
     </div>}
@@ -251,7 +257,7 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
     {unconfirmed&&<p>Check the existing operation below before preparing another appointment change.</p>}
     {message && <p role="status">{message}</p>}
     {pending && !busy && <div className="capture-actions">
-      <button disabled={locked||recovery.blocked} onClick={() => void save(pending)}>{pending.kind==="execute"?"Recover the same request":"Retry the same save"}</button>
+      <button disabled={locked||recovery.blocked||(pending.kind==="execute"&&!executionAvailable)} onClick={() => void save(pending)}>{pending.kind==="execute"?"Recover the same request":"Retry the same save"}</button>
       {rejected&&<button disabled={locked||recovery.blocked} onClick={()=>void checkRejected()}>Check rejected appointment request</button>}
       {checkedRejected&&<button disabled={locked||recovery.blocked} onClick={()=>void setAside()}>Set aside rejected appointment request</button>}
     </div>}
@@ -262,14 +268,16 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
       <p>{pendingExecution ? `Last known proposal status: ${status(item.state)}. The retained request is unconfirmed.` :
         item.state === "pending_approval" ? "Awaiting your review." : item.state === "sent" ? "Scheduling saved this appointment change." :
         item.state === "rejected" ? "Withdrawn." : item.operation_status === "unknown" ? "The appointment result is unconfirmed." :
-        item.dispatch_started ? "Scheduling is processing this appointment change. No saved appointment is confirmed yet." : "Approved. Send the approved change to Scheduling when you are ready."}</p>
+        item.dispatch_started ? "Scheduling is processing this appointment change. No saved appointment is confirmed yet." :
+        executionAvailable ? "Approved. Send the approved change to Scheduling when you are ready." :
+        "Proposal approved. Scheduling has not booked or changed the visit."}</p>
       {item.result && <p>Calendar: {item.calendar_state === "synced" ? "synchronized" : item.calendar_state === "pending" ? "synchronization pending" :
         item.calendar_state === "failed" ? "synchronization failed" : "disconnected"}. Last verified {when(item.result.observed_at)}.</p>}
       {item.execution_error === "appointment_outcome_unconfirmed" && <p role="status">The latest check could not be confirmed. A saved receipt, if shown, remains the last verified result. Check the existing operation before attempting another change.</p>}
       <p className="team-fine">An appointment change is confirmed only after Scheduling reports it saved. Calendar synchronization and visit completion are separate results.</p>
       {item.state === "pending_approval" && <p>{Date.parse(item.intent.expires_at) <= now ? "This proposal expired. Withdraw it and prepare a fresh proposal." :
         `Review before ${new Date(item.intent.expires_at).toLocaleTimeString()}.`}</p>}
-      {item.state==="approved"&&<p>{pendingExecution?
+      {item.state==="approved"&&executionAvailable&&<p>{pendingExecution?
         Date.parse(item.intent.expires_at)<=now?"Approval expired while this request was unconfirmed. Recover the same request first; expiry does not show whether Scheduling received it.":
           "Recover the same request before taking another appointment action.":Date.parse(item.intent.expires_at)<=now?
         item.dispatch_started?"Approval expired. You can still check the existing operation; a new submission is unavailable.":
@@ -278,10 +286,10 @@ export function AppointmentPanel({workspaceId, identity, bot, enabled, locked, s
           "Sending is a separate action from approval. It submits only the change shown here."}</p>}
       <div className="capture-actions">
         <button disabled={disabled} onClick={() => void read("item", item.ticket_id)}>Refresh saved proposal</button>
-        {item.operation_id&&item.dispatch_started&&<button disabled={disabled||!enabled} onClick={()=>execute("reconcile")}>Check saved result</button>}
-        {item.state==="approved"&&!item.dispatch_started&&<button disabled={disabled||!enabled||Date.parse(item.intent.expires_at)<=now}
+        {executionAvailable&&item.operation_id&&item.dispatch_started&&<button disabled={disabled||!enabled} onClick={()=>execute("reconcile")}>Check saved result</button>}
+        {executionAvailable&&item.state==="approved"&&!item.dispatch_started&&<button disabled={disabled||!enabled||Date.parse(item.intent.expires_at)<=now}
           onClick={()=>execute("submit")}>Send approved appointment change</button>}
-        {item.state==="approved"&&item.dispatch_started&&<button disabled={disabled||!enabled||Date.parse(item.intent.expires_at)<=now}
+        {executionAvailable&&item.state==="approved"&&item.dispatch_started&&<button disabled={disabled||!enabled||Date.parse(item.intent.expires_at)<=now}
           onClick={()=>execute("retry")}>Retry the same appointment change</button>}
         {item.state === "pending_approval" && <button disabled={disabled || !enabled || Date.parse(item.intent.expires_at) <= now}
           onClick={() => choose("approve")}>Approve this appointment change</button>}

@@ -70,6 +70,7 @@ class SchedulingRuntime:
             self.appointments = HttpSchedulingAppointments(
                 profile.origin, lambda selection: self._credential(selection, appointments=True),
                 transport=transport_factory() if transport_factory else None, now=now,
+                execution_allowed=lambda: not self._closed and self._settings.workspace_appointment_execution_available,
             )
         except BaseException:
             self._closed = True

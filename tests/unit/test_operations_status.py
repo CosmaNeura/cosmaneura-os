@@ -13,6 +13,8 @@ from cosmas_os.application.operations_status import project
     ("follow_up", {"state": "sent", "receipt_kinds": ["local_delivery"]}, "record_human_outcome", "synthetic_only"),
     ("follow_up", {"state": "closed", "receipt_kinds": ["local_delivery", "human_completion"]}, "review_complete", "synthetic_only"),
     ("scheduling", {"state": "approved", "appointment_saved": False, "dispatch_started": True}, "check_existing_operation", "unconfirmed"),
+    ("scheduling", {"state": "approved", "appointment_saved": False, "dispatch_started": False,
+        "execution_available": False}, "review_saved_proposal", "not_established"),
     ("scheduling", {"state": "sent", "appointment_saved": True, "calendar_state": "pending"}, "check_calendar_sync", "appointment_saved_calendar_unconfirmed"),
     ("scheduling", {"state": "sent", "appointment_saved": True, "calendar_state": "synced"}, "review_receipt", "calendar_synced"),
     ("membership", {"state": "closed", "evidence_current": "current"}, "review_complete", "membership_not_established"),

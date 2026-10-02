@@ -6,6 +6,7 @@ The receiver must retain its operation journal independently of HTTP retry TTLs.
 """
 
 import json
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from typing import Literal
 from uuid import UUID, uuid4
@@ -55,6 +56,21 @@ class _OperationReceipt(_ReadReceipt):
 class HttpSchedulingAppointments(HttpSchedulingAvailability):
     """Shares the existing fixed-origin transport and explicit staff provider."""
 
+    def __init__(self, origin: str, staff_credential: Callable, *,
+                 execution_allowed: Callable[[], bool] | None = None,
+                 transport: httpx.BaseTransport | None = None,
+                 now: Callable[[], datetime] = lambda: datetime.now(UTC)):
+        super().__init__(origin, staff_credential, transport=transport, now=now)
+        self._execution_allowed = execution_allowed
+
+    def _require_execution(self):
+        if self._execution_allowed is not None:
+            try:
+                if self._execution_allowed() is not True:
+                    raise ValueError
+            except Exception:
+                raise ConnectorUnavailable("scheduling_execution_not_available") from None
+
     def _clock(self) -> datetime:
         try:
             now = self._now()
@@ -82,6 +98,9 @@ class HttpSchedulingAppointments(HttpSchedulingAvailability):
 
     def _exchange(self, selection, method, path, *, payload=None):
         # The read/operation validators run before any credential or network use.
+        operation = path.startswith("/v1/appointment-operations")
+        if operation:
+            self._require_execution()
         try:
             credential = self._staff_credential(selection)
             if not isinstance(credential, SecretStr):
@@ -91,6 +110,8 @@ class HttpSchedulingAppointments(HttpSchedulingAvailability):
                 raise ValueError
         except Exception:
             raise ConnectorUnavailable("scheduling_identity_unavailable") from None
+        if operation:
+            self._require_execution()
         nonce = uuid4()
         request = self._client.build_request(
             method, self._origin + path, params={"requestNonce": str(nonce)}, json=payload,

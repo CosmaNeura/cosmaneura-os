@@ -11,6 +11,7 @@ from cosmas_os.application import (
     membership_work,
 )
 from cosmas_os.application import workspace as ws
+from cosmas_os.config import Settings
 from cosmas_os.config import settings as runtime
 from cosmas_os.ports.bot_capabilities import supports_skill
 
@@ -55,6 +56,8 @@ def project(kind, facts):
             return step("check_calendar_sync", "Check calendar synchronization for the saved appointment"), "appointment_saved_calendar_unconfirmed"
         if facts["dispatch_started"]:
             return step("check_existing_operation", "Check the existing scheduling operation before any further action"), "unconfirmed"
+        if facts.get("execution_available") is False:
+            return step("review_saved_proposal", "Review the saved proposal; booking or changing a visit is not available yet"), "not_established"
         return step("review_booking_action", "Review the approved appointment action"), "not_established"
     if kind == "membership":
         if facts["evidence_current"] == "changed":
@@ -76,7 +79,8 @@ def project(kind, facts):
 
 
 def read(s, box, owner, workspace_id, *, kind, record_id, inbox_registry=inbox_work.no_registry,
-         inbox_policy=inbox_work.DEFAULT_POLICY, membership_policy=membership_work.DEFAULT_POLICY, now=None):
+         inbox_policy=inbox_work.DEFAULT_POLICY, membership_policy=membership_work.DEFAULT_POLICY, now=None,
+         configuration: Settings | None = None):
     if type(kind) is not str or kind not in KINDS or type(record_id) is not str:
         raise ws.WorkspaceError("operations_selection_invalid", 422)
     moment = datetime.now(UTC) if now is None else now
@@ -96,9 +100,11 @@ def read(s, box, owner, workspace_id, *, kind, record_id, inbox_registry=inbox_w
                               for r in selected["receipts"]]}
         provenance = "saved synthetic delivery and human outcome receipts"
     elif kind == "scheduling":
-        selected = appointment_work.read(s, box, owner, workspace_id, record_id)
+        selected = appointment_work.read(s, box, owner, workspace_id, record_id, configuration=configuration)
         facts = {key: selected[key] for key in ("state", "payload_hash", "appointment_saved", "calendar_state", "dispatch_started", "operation_status")}
         facts.update(version=selected["ticket_version"], source_current=None)
+        if configuration is not None:
+            facts["execution_available"] = configuration.workspace_appointment_execution_available
         expires = datetime.fromisoformat(selected["intent"]["expires_at"])
         if not selected["dispatch_started"] and moment >= expires:
             facts["source_current"] = False
@@ -178,7 +184,7 @@ def linked(s, box, owner, workspace_id, snapshot, settings):
             continue
         try:
             value = read(s, box, owner, workspace_id, kind=kind, record_id=record_id,
-                         membership_policy=membership_policy)
+                         membership_policy=membership_policy, configuration=runtime)
         except ws.WorkspaceError:
             # A linked row may have been retired or its current source withdrawn.
             # Do not replace a failed read with a cached state or provider details.
