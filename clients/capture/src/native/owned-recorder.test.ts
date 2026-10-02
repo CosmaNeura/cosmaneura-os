@@ -7,6 +7,7 @@ import { CaptureQueue, type ChunkReservation } from "../queue";
 import type { CaptureBff } from "../bff/contracts";
 import { connectNativeProviderRecorder, parseNativeRecordingState } from "./owned-recorder";
 import { recordingFixture, syntheticSession as sessionId, syntheticWorkspace as workspaceId, syntheticRecovery } from "./owned-recorder.fixture";
+import { parseInputSignal, presentInputSignal } from "./ios-input-signal";
 
 beforeEach(() => {
   vi.stubGlobal("crypto", webcrypto);
@@ -27,6 +28,88 @@ async function fixture() {
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done; }); return { promise, resolve }; }
 
 describe("native provider controller", () => {
+  it("ages the actual retained snapshot without treating an unchanged reply as fresh activity", async () => {
+    const h = await fixture();
+    h.f.set({ phase: "recording", signal: { version: 2, signal: { inputBuffers: 12,
+      convertedBuffers: 12, inputEverNonzero: true, convertedEverNonzero: true,
+      inputLevel: 0.1, convertedLevel: 0.1, inputAgeMs: 0, convertedAgeMs: 0,
+      zeroInputMs: 0, inputMuted: false, route: "built_in" } } });
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
+    const view = await h.open();
+    try {
+      Object.assign(document, { visibilityState: "hidden" });
+      const accepted = structuredClone(h.f.state);
+      h.port.command = vi.fn(async request => ({ requestId: request.requestId, ok: true, recording: accepted }));
+      await vi.advanceTimersByTimeAsync(1600);
+      await view.controller.refreshTranscriptionStatus();
+      const retained = view.controller.snapshot.native;
+      expect(retained.signalObservedAtMs).toBe(0);
+      expect(presentInputSignal(parseInputSignal(retained.signal), performance.now() - retained.signalObservedAtMs!).message)
+        .toBe("Waiting for microphone signal…");
+      expect(h.port.command).toHaveBeenCalledTimes(1);
+    } finally { view.detach(); h.storage.close(); }
+  });
+
+  it("timestamps only a newer validated state with local monotonic time", async () => {
+    const h = await fixture();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
+    const view = await h.open();
+    try {
+      expect(view.controller.snapshot.native.signalObservedAtMs).toBe(0);
+      await vi.advanceTimersByTimeAsync(100);
+      await view.controller.startRecording();
+      expect(view.controller.snapshot.native.signalObservedAtMs).toBe(100);
+      const accepted = structuredClone(h.f.state);
+      h.port.command = async request => ({ requestId: request.requestId, ok: true, recording: accepted });
+      await vi.advanceTimersByTimeAsync(100);
+      await view.controller.refreshTranscriptionStatus();
+      expect(view.controller.snapshot.native.signalObservedAtMs).toBe(100);
+      h.port.command = async request => ({ requestId: request.requestId, ok: true,
+        recording: { ...accepted, revision: accepted.revision - 1 } });
+      await view.controller.refreshTranscriptionStatus();
+      expect(view.controller.snapshot.native.signalObservedAtMs).toBe(100);
+      h.port.command = async request => ({ requestId: request.requestId, ok: true,
+        recording: { ...accepted, revision: accepted.revision + 1 } });
+      await view.controller.refreshTranscriptionStatus();
+      expect(view.controller.snapshot.native.signalObservedAtMs).toBe(200);
+    } finally { view.detach(); h.storage.close(); }
+  });
+
+  it.each(["signal", "workspaceId", "requestId"] as const)("does not freshen an invalid %s reply", async field => {
+    const h = await fixture();
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
+    const view = await h.open();
+    try {
+      const observedAt = view.controller.snapshot.native.signalObservedAtMs;
+      await vi.advanceTimersByTimeAsync(100);
+      h.port.command = async request => ({ requestId: field === "requestId" ? crypto.randomUUID() : request.requestId,
+        ok: true, recording: { ...h.f.state, revision: h.f.state.revision + 1,
+          ...(field === "signal" ? { signal: { version: 2, signal: { private: "excluded" } } } : {}),
+          ...(field === "workspaceId" ? { workspaceId: crypto.randomUUID() } : {}) } });
+      await expect(view.controller.refreshTranscriptionStatus()).rejects.toThrow();
+      expect(view.controller.snapshot.native.signalObservedAtMs).toBe(observedAt);
+    } finally { view.detach(); h.storage.close(); }
+  });
+
+  it("keeps the newer observation timestamp when an older read arrives late", async () => {
+    const h = await fixture(), read = deferred<unknown>(), command = h.port.command;
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "performance"] });
+    const view = await h.open();
+    try {
+      const old = structuredClone(h.f.state); let readId = "";
+      h.port.command = request => {
+        if (request.kind === "read") { readId = request.requestId; return read.promise; }
+        return command(request);
+      };
+      const reading = view.controller.refreshTranscriptionStatus();
+      await vi.advanceTimersByTimeAsync(100); await view.controller.startRecording();
+      await vi.advanceTimersByTimeAsync(100);
+      read.resolve({ requestId: readId, ok: true, recording: old }); await reading;
+      expect(view.controller.snapshot.state).toBe("recording");
+      expect(view.controller.snapshot.native.signalObservedAtMs).toBe(100);
+    } finally { view.detach(); h.storage.close(); }
+  });
+
   it("keeps failed saving recoverable instead of claiming zero cached chunks means no audio", async () => {
     const h = await fixture(), command = h.port.command;
     h.port.command = async request => {

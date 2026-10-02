@@ -30,6 +30,38 @@ const factory = vi.fn<() => Promise<CaptureRuntime>>();
 
 const nativeState = () => ({phase:"ready",busy:false,input:"built_in" as const,signal:{version:2,signal:null}});
 
+it("shows native microphone feedback while recording and masks it after pause", async () => {
+  runtime.sourceKind = "microphone";
+  runtime.captureMode = "native_microphone";
+  snapshot = { ...snapshot, state: "recording", native: { ...nativeState(), phase: "recording",
+    signalObservedAtMs: performance.now(), signal: { version: 2, signal: { inputBuffers: 12,
+      convertedBuffers: 12, inputEverNonzero: true, convertedEverNonzero: true,
+      inputLevel: 0.1, convertedLevel: 0.1, inputAgeMs: 0, convertedAgeMs: 0,
+      zeroInputMs: 0, inputMuted: false, route: "built_in" } } } };
+  await click("Record visit");
+  expect(container.querySelector('[aria-label="Microphone input"]')?.textContent).toContain("iPhone microphone");
+  expect(container.querySelector("meter")?.value).toBeGreaterThan(0);
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  expect("getCaptureSignal" in runtime.controller).toBe(false);
+  await act(async () => {
+    snapshot = { ...snapshot, state: "paused", native: { ...snapshot.native!, phase: "paused" } };
+    listener?.(snapshot);
+  });
+  expect(container.querySelector('[aria-label="Microphone input"]')).toBeNull();
+  expect(runtime.controller.stopRecording).not.toHaveBeenCalled();
+});
+
+it.each([undefined, "desktop_meeting"] as const)("does not show iOS microphone feedback for capture mode %s", async captureMode => {
+  runtime.sourceKind = "microphone"; runtime.captureMode = captureMode;
+  snapshot = { ...snapshot, state: "recording", native: { ...nativeState(), phase: "recording",
+    signalObservedAtMs: performance.now(), signal: { version: 2, signal: null } } };
+  await click("Record visit");
+  expect(container.querySelector('[aria-label="Microphone input"]')).toBeNull();
+  expect(container.textContent).not.toContain("Waiting for microphone signal");
+  expect(runtime.controller.startRecording).not.toHaveBeenCalled();
+  expect(runtime.controller.stopRecording).not.toHaveBeenCalled();
+});
+
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
   vi.clearAllMocks();
