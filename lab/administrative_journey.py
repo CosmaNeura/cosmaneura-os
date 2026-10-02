@@ -29,6 +29,9 @@ class AdministrativeWorld(JourneyWorld):
     extra_instructions = (
         "Use the compact read_selected_source/read_shared_draft/save_connector_draft tools; these satisfy the "
         "source/draft read and save rules. Source_refs and dependency_roles are bound to exact server hashes. "
+        "Source_refs must be literal short strings such as source-1 from list_sources, NEVER UUID source_ids "
+        "copied from teammate drafts. If a reference fails, use already_read_source_refs from the error to "
+        "explicitly retry the same save; do not reread a UUID as source_ref. "
         "Use current application_status.workspace_revision before saving. On a revision conflict, read status "
         "and retry the same intent with a new key/current revision. On a lost save reply, inspect existing work "
         "or repeat the identical request before considering another intent. Account headers are not shared "
@@ -54,6 +57,20 @@ class AdministrativeWorld(JourneyWorld):
     def model_tools(self, role):
         offered = self.common_model_tools | self.role_model_tools[role]
         return [tool for tool in super().model_tools(role) if tool["function"]["name"] in offered]
+
+    def execute(self, role, name, arguments):
+        result = super().execute(role, name, arguments)
+        if (role in self.source_reads and name in {"read_selected_source", "save_connector_draft"}
+                and isinstance(result, dict) and result.get("error") in {
+                    "invalid_tool_arguments", "source_outside_selected_encounter"}):
+            # Expose metadata only; never translate a wrong identifier, perform
+            # an implicit read, or silently retry a save for the model.
+            references = self.source_references()
+            result = {**result, "next_action": "Use literal source-N references, never UUIDs. Explicitly retry the same intent.",
+                "allowed_source_refs": list(references),
+                "already_read_source_refs": [ref for ref, identifier in references.items()
+                    if identifier in self.source_reads[role]]}
+        return result
 
     jobs = {**JourneyWorld.jobs,
         "follow_up": "Read_shared_draft for scribe, visit_prep and research. List/read all selected encounter sources. "

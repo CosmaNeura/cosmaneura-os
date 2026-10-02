@@ -30,3 +30,27 @@ def test_human_review_and_booking_are_never_administrative_agent_tools(clinic):
         assert world.execute("research", "scheduling_read_availability", {})["error"] == "tool_not_available_for_role"
     finally:
         world.close()
+
+
+def test_wrong_uuid_reference_explains_exact_recovery_without_reading_or_saving(clinic):
+    app, store = clinic
+    world = AdministrativeWorld(store, "administrative-reference-recovery", CASE, app, prepare_fax=False)
+    try:
+        original = world.execute("chief", "list_sources", {})[0]
+        failed = world.execute("chief", "read_selected_source", {"source_ref": original["id"]})
+        assert failed["error"] == "invalid_tool_arguments"
+        assert original["source_ref"] in failed["allowed_source_refs"]
+        assert failed["already_read_source_refs"] == []
+        assert not world.source_reads["chief"]
+        world.execute("chief", "read_selected_source", {"source_ref": original["source_ref"]})
+        arguments = {"body": "Synthetic draft; unknown diagnosis and optional DOB.",
+            "source_refs": [original["id"]], "dependency_roles": []}
+        failed = world.execute("chief", "save_connector_draft", arguments)
+        assert failed["error"] == "source_outside_selected_encounter"
+        assert failed["already_read_source_refs"] == [original["source_ref"]]
+        assert not store.visible(world.episode, "chief")
+        recovered = world.execute("chief", "save_connector_draft",
+            {**arguments, "source_refs": failed["already_read_source_refs"]})
+        assert recovered["id"] == "chief" and recovered["source_ids"] == [original["id"]]
+    finally:
+        world.close()
