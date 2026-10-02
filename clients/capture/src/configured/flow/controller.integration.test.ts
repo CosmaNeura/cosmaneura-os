@@ -1028,7 +1028,7 @@ function createController(
 ): CaptureFlowController {
   return new CaptureFlowController({
     bff,
-    standardContinuousCapture,
+    ...(standardContinuousCapture ? { standardContinuousCapture: true as const } : {}),
     flowStore,
     queue: new CaptureQueue(queueStorage, { crypto: TEST_CRYPTO }),
     queueTransport: new BffCaptureQueueTransport(

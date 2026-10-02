@@ -1,8 +1,9 @@
 import { webcrypto } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { IDBFactory } from "fake-indexeddb";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { base64UrlEncode } from "@cosmaneura-scribe/capture-protocol";
+import { base64UrlDecode, base64UrlEncode, parseEnvelope } from "@cosmaneura-scribe/capture-protocol";
 import { HttpCaptureBff, BffResponseError } from "../../bff/http-client";
 import type { CaptureLeaseReceipt, ChunkReservationBatchReceipt } from "../../bff/contracts";
 import type { CaptureProfileBff, CaptureProfileReceipt } from "../../bff/profile-contracts";
@@ -59,9 +60,18 @@ class ControlledSource implements CaptureSource {
     await this.options.onChunk({ sequenceNumber: this.next++, durationMs: fullDuration ? advance : 1,
       wavBytes: encodePcm16MonoWav(samples, profile) });
   }
+  async emitPcm(samples: Int16Array<ArrayBuffer>, durationMs: number) {
+    expect(this.next).toBeLessThan(this.maximum);
+    vi.setSystemTime(Date.now() + durationMs);
+    const wavBytes = encodePcm16MonoWav(samples, pcm16WavProfile(this.options.capabilities));
+    const expected = wavBytes.slice();
+    await this.options.onChunk({ sequenceNumber: this.next++, durationMs, wavBytes });
+    expect(wavBytes.every(byte => byte === 0)).toBe(true);
+    return expected;
+  }
 }
 
-async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
+async function fixture(mode: "profile" | "standard" | "legacy" = "profile", recoverWaveform = false) {
   vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date());
   const service = new MockCaptureService();
   const consent = service.createConsent({ appointment_id: "synthetic-visit", practitioner_id: "synthetic-provider",
@@ -70,7 +80,16 @@ async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
   const session = service.createSession({ appointment_id: consent.appointment_id, practitioner_id: consent.practitioner_id,
     patient_id: consent.patient_id, consent_record_id: consent.id, modality: "in_person" }, "synthetic-session");
   const bff = new HttpCaptureBff(vi.fn().mockRejectedValue(new Error("unconfigured synthetic BFF")));
-  vi.spyOn(bff, "getAudioEncryptionKey").mockImplementation(async () => service.audioEncryptionKey());
+  // This optional, invented RSA keypair lets the recovery test act as the
+  // receiving worker. The controller still creates/binds its real encrypt-only
+  // nonextractable session key; no production key or key factory is replaced.
+  const recipientKey = recoverWaveform ? await crypto.subtle.generateKey({ name: "RSA-OAEP", modulusLength: 3072,
+    publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["wrapKey", "unwrapKey"]) : undefined;
+  const recipientJwk = recipientKey ? await crypto.subtle.exportKey("jwk", recipientKey.publicKey) : undefined;
+  vi.spyOn(bff, "getAudioEncryptionKey").mockImplementation(async () => {
+    const published = service.audioEncryptionKey();
+    return recipientJwk ? { ...published, public_jwk: { ...published.public_jwk, n: recipientJwk.n! } } : published;
+  });
   vi.spyOn(bff, "bindSessionAudioKey").mockImplementation(async (id, request, options) => service.bindSessionAudioKey(id, request, options.idempotencyKey));
   vi.spyOn(bff, "getCapabilities").mockImplementation(async () => ({ ...service.capabilities(), max_chunks: mode === "profile" ? 720 : 2048,
     remaining_aggregate_plaintext_bytes: mode === "profile" ? 268435456 : 402653184 }));
@@ -150,6 +169,13 @@ async function fixture(mode: "profile" | "standard" | "legacy" = "profile") {
   await controller.prepareConfigured(session.id, mode === "profile" ? profile.request : undefined);
   return { controller, create, source, bff, renew, reserve, complete, get queue() { return queue; }, transport, timers, leaseState,
     session, profiles, get flow() { return flow; },
+    decryptSessionKey: async () => {
+      if (!recipientKey) throw new Error("no synthetic receiving worker key");
+      const state = await flow.getSessionKeyState(session.id);
+      if (!state) throw new Error("no bound session key");
+      return crypto.subtle.unwrapKey("raw", new Uint8Array(base64UrlDecode(state.wrappedDek)), recipientKey.privateKey,
+        { name: "RSA-OAEP" }, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+    },
     reopen: async () => { flow.close(); flow = await EncryptedIndexedDbFlowStore.open({ indexedDB, databaseName: name, crypto }); },
     reopenQueue: async () => { storage.close(); storage = await EncryptedIndexedDbQueueStorage.open({ indexedDB, databaseName: queueName, crypto }); queue = new CaptureQueue(storage, { crypto }); },
     emitTo: async (count: number) => { while (source.next < count) { await source.emit();
@@ -275,6 +301,177 @@ it.each(["stopRecording", "pauseRecording", "deactivate"] as const)(
 );
 
 });
+
+it("operational recovery: preserves decrypted PCM tail through interruption, offline reopen and lost receipts", async () => {
+  const f = await fixture("standard", true);
+  const expectedWavs = new Map<number, Uint8Array<ArrayBuffer>>();
+  const steps: Record<string, unknown>[] = [];
+  const record = async (action: string, controller = f.controller) => {
+    const active = await f.flow.getActiveCaptureState();
+    steps.push({ action, state: controller.snapshot.state, statusCode: controller.snapshot.statusCode,
+      recordedChunks: controller.snapshot.recordedChunks, persistedPhase: active?.phase,
+      sourceStarts: f.source.start.mock.calls.length, completeAttempts: f.complete.mock.calls.length });
+  };
+  await f.controller.startRecording();
+  const profile = pcm16WavProfile(f.source.options.capabilities);
+  const fullChunks = 86;
+  for (let sequence = 0; sequence < fullChunks; sequence++) {
+    const samples = new Int16Array(profile.sampleRateHz * 10);
+    for (let frame = 0; frame < samples.length; frame++) samples[frame] = (sequence * 97 + frame * 31) % 65536 - 32768;
+    expectedWavs.set(sequence, await f.source.emitPcm(samples, 10_000));
+    if (f.source.next >= f.source.maximum - 6) await until(() => f.source.maximum > f.source.next + 6);
+  }
+  const tailDurationMs = 317;
+  const tail = new Int16Array(profile.sampleRateHz * tailDurationMs / 1000);
+  for (let frame = 0; frame < tail.length; frame++) tail[frame] = (frame * 19) % 65536 - 32768;
+  tail[0] = -12345; tail[tail.length - 2] = -32760; tail[tail.length - 1] = 32760;
+  expectedWavs.set(fullChunks, await f.source.emitPcm(tail, tailDurationMs));
+  expect(f.source.start).toHaveBeenCalledOnce();
+  expect(f.source.extend).toHaveBeenCalledOnce();
+  expect(f.renew).toHaveBeenCalledOnce();
+  const sessionKey = await f.flow.getSessionKeyState(f.session.id);
+  expect(await f.flow.getSessionKey(f.session.id)).toMatchObject({ extractable: false, usages: ["encrypt"] });
+  const decryptKey = await f.decryptSessionKey();
+  const saved = (await f.queue.list()).filter(row => row.state === "encrypted");
+  expect(saved).toHaveLength(fullChunks + 1);
+  const decrypt = async (envelope: Uint8Array, aad: string) => {
+    const parsed = parseEnvelope(envelope);
+    return new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: new Uint8Array(base64UrlDecode(parsed.header.nonce)),
+      additionalData: new Uint8Array(base64UrlDecode(aad)) }, decryptKey, new Uint8Array(parsed.ciphertext)));
+  };
+  for (const row of saved) {
+    const expected = expectedWavs.get(row.reservation.sequenceNumber)!;
+    const restored = await decrypt(row.envelope, row.reservation.additionalAuthenticatedData);
+    expect(Buffer.from(restored).equals(Buffer.from(expected))).toBe(true);
+    expect(row.byteLength).toBe(row.envelope.byteLength);
+  }
+  await record("generated_pcm_encrypted_and_tail_decrypted");
+
+  f.source.options.onInterruption?.("audio_device_disconnected");
+  await until(async () => (await f.flow.getActiveCaptureState())?.phase === "paused");
+  expect(f.controller.snapshot).toMatchObject({ state: "paused", statusCode: "audio_device_disconnected" });
+  expect(f.transport.upload).not.toHaveBeenCalled();
+  expect(f.complete).not.toHaveBeenCalled();
+  await record("device_interruption_preserved_pause_without_upload");
+  await f.controller.deactivate(); await f.reopen(); await f.reopenQueue();
+  const paused = f.create(); await paused.restore();
+  expect(paused.snapshot.state).toBe("paused");
+  expect(f.source.start).toHaveBeenCalledOnce();
+  expect(await f.flow.getSessionKeyState(f.session.id)).toEqual(sessionKey);
+  for (const row of saved) expect(await f.queue.get(row.reservation.objectId)).toEqual(row);
+  await record("reopen_both_stores_retained_exact_audio_without_restart", paused);
+
+  f.source.stop.mockRejectedValueOnce(new CaptureStopAcknowledgementPending());
+  await expect(paused.stopRecording()).rejects.toThrow();
+  expect(paused.snapshot.state).toBe("paused");
+  expect(f.transport.upload).not.toHaveBeenCalled();
+  expect(f.complete).not.toHaveBeenCalled();
+  await record("stop_unconfirmed_kept_human_retry_available", paused);
+  vi.mocked(f.transport.upload).mockRejectedValue(new QueueTransportError("retryable", "synthetic_offline"));
+  await expect(paused.stopRecording()).rejects.toThrow();
+  expect(paused.snapshot).toMatchObject({ state: "uploading", statusCode: "capture_upload_pending" });
+  expect(f.complete).not.toHaveBeenCalled();
+  await record("explicit_stop_offline_retained_upload_pending", paused);
+  await paused.deactivate(); await f.reopen(); await f.reopenQueue();
+  const uploading = f.create(); await uploading.restore();
+  expect(uploading.snapshot.state).toBe("uploading");
+  expect(f.source.start).toHaveBeenCalledOnce();
+  for (const row of saved) {
+    const retained = await f.queue.get(row.reservation.objectId);
+    expect(retained).toMatchObject({ sha256: row.sha256, byteLength: row.byteLength,
+      idempotencyKeys: row.idempotencyKeys, reservation: row.reservation });
+    expect(retained && "envelope" in retained && Buffer.from(retained.envelope).equals(Buffer.from(row.envelope))).toBe(true);
+  }
+  await record("offline_reopen_retained_ciphertext_and_registration_keys", uploading);
+
+  const receipts = new Map<string, Awaited<ReturnType<CaptureQueueTransport["register"]>>>();
+  const uploaded = new Map<string, Uint8Array>();
+  vi.mocked(f.transport.authorizeUpload).mockImplementation(async (_id, objectId) => ({ objectId,
+    uploadUrl: `https://synthetic.invalid/ciphertext/${objectId}`, expiresAtEpochMs: Date.now() + 900_000,
+    additionalAuthenticatedData: saved.find(row => row.reservation.objectId === objectId)!.reservation.additionalAuthenticatedData }));
+  vi.mocked(f.transport.upload).mockImplementation(async (url, envelope) => {
+    const objectId = url.slice(url.lastIndexOf("/") + 1);
+    expect(uploaded.has(objectId)).toBe(false);
+    const expected = saved.find(row => row.reservation.objectId === objectId)!;
+    expect(Buffer.from(envelope).equals(Buffer.from(expected.envelope))).toBe(true);
+    uploaded.set(objectId, envelope.slice());
+  });
+  vi.mocked(f.transport.getReceipt).mockImplementation(async reservation => receipts.has(reservation.objectId)
+    ? { state: "registered", registration: receipts.get(reservation.objectId)! } : { state: "reserved" });
+  vi.mocked(f.transport.register).mockImplementation(async request => {
+    expect(receipts.has(request.objectId)).toBe(false);
+    const row = saved.find(item => item.reservation.objectId === request.objectId)!;
+    expect(request).toMatchObject({ sha256: row.sha256, byteLength: row.byteLength,
+      idempotencyKey: row.idempotencyKeys.registration, sequenceNumber: row.reservation.sequenceNumber });
+    const receipt = { chunkId: crypto.randomUUID(), sha256: request.sha256, byteLength: request.byteLength,
+      registeredAt: new Date().toISOString() };
+    receipts.set(request.objectId, receipt);
+    if (request.sequenceNumber === fullChunks) throw new QueueTransportError("unknown_success", "synthetic_lost_tail_receipt");
+    return receipt;
+  });
+  vi.setSystemTime(Date.now() + 60_000);
+  await expect(uploading.resumePendingWork()).rejects.toThrow();
+  expect(uploading.snapshot).toMatchObject({ state: "uploading", statusCode: "capture_upload_pending" });
+  expect(receipts.size).toBe(fullChunks + 1); expect(f.complete).not.toHaveBeenCalled();
+  await record("tail_registered_remotely_lost_reply_did_not_complete", uploading);
+  await uploading.deactivate(); await f.reopen(); await f.reopenQueue();
+  const completing = f.create(); await completing.restore();
+  const originalComplete = f.complete.getMockImplementation()!;
+  const completionReceipts = new Map<string, Awaited<ReturnType<typeof originalComplete>>>();
+  f.complete.mockImplementation(async (...args) => {
+    const key = args[2].idempotencyKey;
+    const receipt = completionReceipts.get(key);
+    if (receipt) return structuredClone(receipt);
+    completionReceipts.set(key, await originalComplete(...args));
+    throw new BffResponseError(503, "capture_request_unconfirmed", null);
+  });
+  vi.setSystemTime(Date.now() + 60_000);
+  await expect(completing.resumePendingWork()).rejects.toThrow();
+  expect(completing.snapshot).toMatchObject({ state: "uploading", statusCode: "capture_upload_pending" });
+  expect((await f.flow.getActiveCaptureState())?.phase).toBe("completing");
+  expect(f.complete).toHaveBeenCalledOnce();
+  await record("remote_tail_receipt_reconciled_completion_reply_lost", completing);
+  await completing.deactivate(); await f.reopen(); await f.reopenQueue();
+  const final = f.create(); await final.restore(); await final.resumePendingWork();
+  expect(final.snapshot).toMatchObject({ state: "processing", transcript: null });
+  expect(f.complete).toHaveBeenCalledTimes(2);
+  expect(completionReceipts.size).toBe(1);
+  expect(f.complete.mock.calls[1]).toEqual(f.complete.mock.calls[0]);
+  expect(f.complete.mock.calls[0]![1].channels).toEqual([{ channel: "microphone", final_sequence_number: fullChunks }]);
+  expect(f.source.start).toHaveBeenCalledOnce();
+  expect(f.renew).toHaveBeenCalledOnce();
+  expect(uploaded.size).toBe(fullChunks + 1);
+  expect(vi.mocked(f.transport.register)).toHaveBeenCalledTimes(fullChunks + 1);
+  expect((await f.queue.listMetadata()).filter(row => row.state === "purged")).toHaveLength(fullChunks + 1);
+  const tailRow = saved.find(row => row.reservation.sequenceNumber === fullChunks)!;
+  const recoveredTail = await decrypt(uploaded.get(tailRow.reservation.objectId)!, tailRow.reservation.additionalAuthenticatedData);
+  expect(Buffer.from(recoveredTail).equals(Buffer.from(expectedWavs.get(fullChunks)!))).toBe(true);
+  const tailView = new DataView(recoveredTail.buffer);
+  expect(tailView.getUint32(40, true)).toBe(tail.length * 2);
+  expect(tailView.getInt16(44, true)).toBe(-12345);
+  expect(tailView.getInt16(recoveredTail.byteLength - 4, true)).toBe(-32760);
+  expect(tailView.getInt16(recoveredTail.byteLength - 2, true)).toBe(32760);
+  await record("exact_completion_replay_processing_no_transcript_claim", final);
+
+  // Opt-in machine-readable local evidence; this never writes audio/key bytes.
+  const evidenceDirectory = process.env.SCRIBE_RECOVERY_EVIDENCE_DIR
+    ?? (process.env.COSMABOT_RECORDING_EVIDENCE_DIR ? join(process.env.COSMABOT_RECORDING_EVIDENCE_DIR, "recovery") : undefined);
+  if (evidenceDirectory) {
+    mkdirSync(evidenceDirectory, { recursive: true });
+    writeFileSync(join(evidenceDirectory, "pcm-recovery-steps.json"), JSON.stringify({
+      schema_version: 1, outcome: "passed", synthetic_only: true, network_used: false, physical_microphone_used: false,
+      transcription: "not run; any downstream fixture text is not ASR evidence", sample_rate_hz: profile.sampleRateHz,
+      full_chunks: fullChunks, tail_frames: tail.length, tail_duration_ms: tailDurationMs,
+      generated_pcm_frames: fullChunks * profile.sampleRateHz * 10 + tail.length,
+      generated_pcm_duration_ms: fullChunks * 10_000 + tailDurationMs,
+      unique_uploaded_objects: uploaded.size, unique_registered_objects: receipts.size,
+      completion_attempts: f.complete.mock.calls.length, fixture_completion_commits: completionReceipts.size,
+      completion_idempotency_key_reused: true,
+      exact_wav_bytes_verified: true, tail_boundary_samples_verified: true, local_envelopes_purged_after_receipts: true,
+      steps,
+    }, null, 2) + "\n");
+  }
+}, 120_000);
 
 it.each(["profile", "standard"] as const)("stress: preserves the full one-hour %s PCM limit through repeated lease windows and exact upload", async mode => {
   // The waveform contains a distinct sequence marker in every chunk. Time is

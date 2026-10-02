@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from tests.integration import test_workspace_capture as shared
 
 from cosmas_os.models import CoreCaptureAccount, ExternalIdentity, PatientLink
-from cosmas_os.ports.capture_recovery import CaptureRecoveryReceipt, CaptureRecoveryState
+from cosmas_os.ports.capture_limits import MAX_CAPTURE_CHUNKS
+from cosmas_os.ports.capture_recovery import (
+    CaptureRecoveryReceipt,
+    CaptureRecoveryRequest,
+    CaptureRecoveryState,
+)
+from cosmas_os.ports.capture_working import canonical_hash
 
 capture_case = shared.capture_case
 FIXTURE = Path(__file__).parents[1] / "fixtures/capture_recovery.json"
@@ -30,6 +36,12 @@ def prepare(f):
         receipt["session_id"] = f.session_id
         receipt["lease"]["session_id"] = f.session_id
         if selected.kind == "recover_capture":
+            receipt["request"] = selected.payload.model_dump(mode="json")
+            receipt["request_sha256"] = canonical_hash(selected.payload)
+            receipt["lease"]["lease_id"] = str(selected.payload.capture_lease_id)
+            receipt["lease"]["generation"] = selected.payload.capture_lease_generation + 1
+            if selected.payload.decision == "finish_capture":
+                receipt["following_segment_id"] = None
             return CaptureRecoveryReceipt.model_validate(receipt)
         current = fixture["state"]
         current["history"] = {"session_id": f.session_id, "recoveries": [receipt]}
@@ -116,9 +128,43 @@ def test_invalid_recovery_never_reaches_core(capture_case, fault):
     elif fault == "boolean":
         payload["capture_lease_generation"] = True
     elif fault == "sequence":
-        payload["next_sequence_number"] = 1001
+        payload["next_sequence_number"] = MAX_CAPTURE_CHUNKS + 1
     else:
         payload["decision"] = "private_sentinel"
     response = perform(f, operation={"kind": "recover_capture", "payload": payload})
     assert response.status_code == 422 and not f.port.calls
     assert "private_sentinel" not in response.text
+
+
+@pytest.mark.parametrize("next_sequence,decision", [
+    (1001, "resume_capture"),
+    (MAX_CAPTURE_CHUNKS - 1, "resume_capture"),
+    (MAX_CAPTURE_CHUNKS, "finish_capture"),
+])
+def test_current_recovery_boundaries_keep_exact_signed_request(capture_case, next_sequence, decision):
+    f = capture_case
+    prepare(f)
+    payload = json.loads(FIXTURE.read_text())["request"]
+    payload.update(next_sequence_number=next_sequence, decision=decision)
+    response = perform(f, operation={"kind": "recover_capture", "payload": payload})
+    assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+    receipt = response.json()["receipt"]
+    assert receipt["request"] == payload
+    assert receipt["request_sha256"] == canonical_hash(CaptureRecoveryRequest.model_validate(payload))
+    assert receipt["review_state"] == "required"
+    assert f.port.calls == ["exchange", "resolve", "binding", "admit", "operation"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"next_sequence_number": MAX_CAPTURE_CHUNKS, "decision": "resume_capture"},
+    {"first_sequence_number": MAX_CAPTURE_CHUNKS, "next_sequence_number": MAX_CAPTURE_CHUNKS,
+     "decision": "finish_capture"},
+    {"segment_ordinal": 1000},
+])
+def test_current_recovery_endpoint_and_segment_bounds_call_no_core(capture_case, changes):
+    f = capture_case
+    prepare(f)
+    payload = json.loads(FIXTURE.read_text())["request"]
+    payload.update(changes)
+    response = perform(f, operation={"kind": "recover_capture", "payload": payload})
+    assert response.status_code == 422 and not f.port.calls
