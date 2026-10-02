@@ -251,49 +251,48 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
         t = _ticket(s, w, e.ticket_id) if e.ticket_id else None
         reply = replies.get(e.id)
         content = e.content
-        google_source_state = None
+        from cosmas_os.application import selected_google_sources
+
+        source_states = {}
         related_admissions = ([admitted[e.id]] if e.id in admitted else []) + revision_admissions.get(e.id, [])
         for admission in related_admissions:
             from cosmas_os.adapters.gpt41 import _context
 
-            # Even an uncited result can contain selected-message facts. Withhold
-            # the derived draft and quoted model intent when that grant changes.
-            for passage in _context(admission.prepared_envelope["context"]).sources:
-                original = s.get(WorkspaceEntry, passage.entry_id)
-                if original is not None and original.kind == "google_message":
-                    from cosmas_os.application import google_message
-
-                    try:
-                        google_message.validate_selected_source(s, w, original.id)
-                    except WorkspaceError:
-                        reply = None
-                        content = ""
-                        google_source_state = "unavailable"
-                        break
-        if e.kind == "google_message":
-            from cosmas_os.application import google_message
-
-            try:
-                google_message.validate_selected_source(s, w, e.id)
-                google_source_state = "current"
-            except WorkspaceError:
-                # The independent note remains readable; a stale/revoked message
-                # cannot disclose its content through a workspace read.
+            # Uncited output and quoted revision feedback still inherit every
+            # frozen selected source. Independent notes and current sources stay.
+            unavailable = selected_google_sources.unavailable_states(
+                s, w, _context(admission.prepared_envelope["context"])
+            )
+            if unavailable:
+                reply = None
                 content = ""
-                google_source_state = "unavailable"
+                source_states.update({field: "unavailable" for field in unavailable})
+        if selected_google_sources.is_selected_google(e):
+            field = selected_google_sources.SOURCE_STATE_FIELDS[e.kind]
+            try:
+                selected_google_sources.validate_selected_source(s, w, e.id)
+                source_states[field] = "current"
+            except WorkspaceError:
+                content = ""
+                source_states[field] = "unavailable"
+        unavailable_label = {
+            "google_message": "Unavailable email source",
+            "google_calendar": "Unavailable calendar source",
+        }.get(e.kind)
         entries.append(
             {
                 "id": e.id,
                 "revision": e.revision,
                 "kind": e.kind,
                 "content": content,
-                "source_label": "Unavailable email source" if google_source_state == "unavailable" and e.kind == "google_message" else e.source_label,
+                "source_label": unavailable_label if unavailable_label and any(
+                    state == "unavailable" for state in source_states.values()) else e.source_label,
                 "origin": "synthetic_fixture"
                 if e.kind == "synthetic_source"
                 else "agent_handoff" if e.kind == "handoff_result" else "authenticated_human",
                 "ticket": {"id": t.id, "state": t.state, "lane": t.lane} if t else None,
                 "created_at": e.created_at.isoformat(),
-                **({"google_source_state": google_source_state} if google_source_state else {}),
+                **source_states,
                 "reply": {"agent_name": reply.agent_name, "agent_id": reply.agent_id, "role": reply.role,
                           "backend": reply.backend, "content": reply.content,
                           "team_revision_id": reply.team_revision_id,

@@ -91,3 +91,16 @@ it.each([401,403])('retains sign-in recovery after status %s',async status=>{
  await mount(browser,denied);expect(denied).toHaveBeenCalledWith(error);expect(host.textContent).toContain('Sign in to CosmasOS again');
  await click('Check Google connection');await click('Connect with Google');expect(host.querySelector('a')).not.toBeNull();
 });
+
+it('opens compact calendar work deliberately without reading the old transient calendar path',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');vi.mocked(googleConnectionRequest).mockResolvedValue(connected);const open=vi.fn();
+ await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenCalendarWork={open} calendarWork={<p>Invented calendar work panel</p>}/>));
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status']);await click('📅 Work with calendar');expect(open).toHaveBeenCalledOnce();
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status']);expect(host.textContent).toContain('Invented calendar work panel');vi.unstubAllEnvs();
+});
+it('keeps service and account changes locked while an exact calendar command is unresolved',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');vi.mocked(googleConnectionRequest).mockResolvedValue(connected);
+ await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenCalendarWork={()=>{}} calendarWorkLocked/>));
+ for(const label of ['📅 Work with calendar','Email','Calendar','Reconnect Google','Disconnect Google'])expect([...host.querySelectorAll('button')].find(b=>b.textContent===label)?.disabled,label).toBe(true);
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status']);vi.unstubAllEnvs();
+});

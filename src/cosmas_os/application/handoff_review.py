@@ -60,12 +60,12 @@ def _selected_versions(s, w, settings):
         }
         for e in selected
     ]
-    from cosmas_os.application import google_message
-    from cosmas_os.application.model_work import _google_message_passages
+    from cosmas_os.application import selected_google_sources
+    from cosmas_os.application.model_work import _selected_google_passages
 
-    additional = _google_message_passages(s, w, settings)
+    additional = _selected_google_passages(s, w, settings)
     for source in additional:
-        google_message.validate_selected_source(s, w, source.entry_id)
+        selected_google_sources.validate_selected_source(s, w, source.entry_id)
         versions.append({"entry_id": source.entry_id, "revision": source.revision,
                          "label": source.label, "kind": "evidence", "sha256": _hash(source.content)})
     if additional:
@@ -206,12 +206,13 @@ def _binding(s, w, handoff, attempt, *, current=True):
         for source in versions:
             source_entry = s.get(WorkspaceEntry, source["entry_id"])
             source_kind = source_entry.kind if source_entry is not None else None
-            if source_kind == "google_message":
-                from cosmas_os.application import google_message
+            from cosmas_os.application import selected_google_sources
 
-                source_entry = google_message.historical_source(s, w, source["entry_id"])
+            if selected_google_sources.is_selected_google(source_entry):
+
+                source_entry = selected_google_sources.historical_source(s, w, source["entry_id"])
                 if current:
-                    google_message.validate_selected_source(s, w, source["entry_id"])
+                    selected_google_sources.validate_selected_source(s, w, source["entry_id"])
                 source_kind = "evidence"
             if source_entry is None or (
                 source_entry.workspace_id,
@@ -313,6 +314,8 @@ def _command_receipt(s, w, review):
     """A public command commitment confirms history even when output is withheld."""
     workspace = ws.read(s, w.box_id, w.owner_id, w.id)
     entry = next(e for e in workspace["entries"] if e["id"] == review.result_entry_id)
+    from cosmas_os.application.selected_google_sources import projection_unavailable
+
     return {
         "entry_revision": review.workspace_revision,
         "workspace": workspace,
@@ -323,7 +326,7 @@ def _command_receipt(s, w, review):
             "result_entry_id": review.result_entry_id, "result_sha256": review.result_sha256,
             "decision": review.decision, "feedback": review.feedback,
         }),
-        "feedback_withheld": entry.get("google_source_state") == "unavailable",
+        "feedback_withheld": projection_unavailable(entry),
     }
 
 

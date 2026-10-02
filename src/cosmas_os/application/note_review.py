@@ -56,10 +56,10 @@ def _require_note_lineage(s: Session, w, reply_id):
 
     for source in _context(admission.prepared_envelope["context"]).sources:
         entry = s.get(WorkspaceEntry, source.entry_id)
-        if entry is not None and entry.kind == "google_message":
-            # Email work has independent custody and cannot be represented by
-            # this clinical-note fingerprint. Keep its draft in conversation.
-            raise ws.WorkspaceError("google_message_note_import_unavailable", 409)
+        if entry is not None and entry.kind in {"google_message", "google_calendar"}:
+            # Selected connector work has independent custody and cannot enter
+            # the clinical-note fingerprint through a derived draft.
+            raise ws.WorkspaceError(entry.kind + "_note_import_unavailable", 409)
 
 
 def read(s: Session, w, revision: int) -> dict:

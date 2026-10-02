@@ -7,7 +7,7 @@ export const REQUIRED_WORKSPACE_CONTRACTS:Readonly<Record<string,number>>=Object
   practice_access:1,practice_members:1,vendor:1,vendor_setup:1,finance:1,
   finance_setup:1,portal_setup:1,portal_work:1,membership:1,inbox:1,
   inbox_handoff:1,core_record:1,core_connection:1,research:1,
-  scheduling_login:1,google_connection:1,microsoft_connection:1,google_messages:1,
+  scheduling_login:1,google_connection:1,microsoft_connection:1,google_messages:1,google_calendar:1,
 });
 export type WorkspaceCompatibility={contract_version:1;workspace_protocol:1;requests_require_protocol:true;contracts:Record<string,number>};
 const updateRequired=()=>new WorkspaceApiError(426,'workspace_protocol_required');

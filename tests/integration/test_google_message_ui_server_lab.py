@@ -24,6 +24,7 @@ from tests.integration.test_google_message import InventedGoogle
 from cosmas_os.adapters.gpt41 import _context
 from cosmas_os.api import app as api
 from cosmas_os.api.auth import ClerkTokenVerifier
+from cosmas_os.application import google_calendar as calendars
 from cosmas_os.application import google_message as messages
 from cosmas_os.application import model_work as work
 from cosmas_os.application import note_review as notes
@@ -38,6 +39,13 @@ from cosmas_os.models import (
     ModelWorkAdmission,
     PatientLink,
 )
+from cosmas_os.ports.google_calendar import (
+    GoogleCalendarAccount,
+    GoogleCalendarBinding,
+    GoogleCalendarEvent,
+    GoogleCalendarObservation,
+    GoogleCalendarRead,
+)
 
 NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
 REPO = Path(__file__).resolve().parents[2]
@@ -46,6 +54,12 @@ REPO = Path(__file__).resolve().parents[2]
 def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
     engine, monkeypatch, tmp_path
 ):
+    run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path)
+
+
+def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_kind="email"):
+    assert source_kind in {"email", "calendar"}
+    calendar_lab = source_kind == "calendar"
     assert NODE.is_file()
     with Session(engine) as session:
         seed = svc.provision_box(svc.Container(session), "Invented email UI practice")
@@ -98,6 +112,7 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
         cors_allowed_origins="http://localhost:5173",
         workspace_google_connection_enabled=True,
         workspace_google_message_enabled=True,
+        workspace_google_calendar_enabled=calendar_lab,
     )
     assert configuration.runtime_configuration_errors() == []
     monkeypatch.setattr(api, "settings", configuration)
@@ -115,6 +130,7 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
         "beta_box_id": box,
         "workspace_google_connection_enabled": True,
         "workspace_google_message_enabled": True,
+        "workspace_google_calendar_enabled": calendar_lab,
         "workspace_llm_backend": "azure_gpt41",
         "workspace_llm_api_key": SecretStr("invented-model-no-network"),
         "workspace_agent_tools_enabled": True,
@@ -200,6 +216,42 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
                 port.text = "Subject: Invented visit follow-up\nFrom: sender@example.invalid\n\nInvented administrative request: please prepare follow-up work. Heart history and trial eligibility are unconfirmed. DOB unavailable. No sending or clinical decision requested."
                 return port.read_message(identity, selection)
 
+        def calendar_binding(self, identity, *, session=None):
+            assert session is not None
+            credential = session.get(GoogleConnectionCredential, account_id, populate_existing=True)
+            if (credential is None or credential.status != "ready" or credential.sealed is None
+                    or credential.expires_at <= datetime.now(UTC)):
+                raise ws.WorkspaceError("google_calendar_grant_unavailable")
+            assert identity.external_identity_id == account_id
+            return GoogleCalendarBinding(account_id=account_id, binding_digest="a" * 64,
+                                         connected_at=connected, grant_sha256="d" * 64)
+
+        def calendar_status(self, identity, *, session=None):
+            self.calendar_binding(identity, session=session)
+            return dict(contract_version=1, state="connected", calendar_read=True,
+                        account={"label": "Invented UI account", "email": "owner@example.invalid"})
+
+        def calendar_observation(self, identity, *, window):
+            self.calls.append("calendar")
+            now = datetime.now(UTC)
+            day = (now + timedelta(days=3)).date()
+            observation = GoogleCalendarObservation(kind="calendar",
+                account=GoogleCalendarAccount(label="Invented UI account", email="owner@example.invalid"),
+                items=(
+                    GoogleCalendarEvent(id="invented-timed", subject="Invented visit follow-up",
+                        starts_at=(now + timedelta(hours=2)).isoformat(),
+                        ends_at=(now + timedelta(hours=3)).isoformat(), all_day=False, cancelled=False),
+                    GoogleCalendarEvent(id="invented-allday", subject="Invented all-day follow-up",
+                        starts_at=day.isoformat(), ends_at=(day + timedelta(days=1)).isoformat(),
+                        all_day=True, cancelled=False),
+                    GoogleCalendarEvent(id="invented-cancelled", subject="Invented cancelled follow-up",
+                        starts_at=(now + timedelta(hours=4)).isoformat(),
+                        ends_at=(now + timedelta(hours=5)).isoformat(), all_day=False, cancelled=True),
+                ), more=True, observed_at=now, window=window)
+            with Session(engine) as session:
+                return GoogleCalendarRead(observation=observation,
+                    custody=self.calendar_binding(identity, session=session))
+
     google = Google()
     monkeypatch.setattr(api.app.state, "google_connection", google, raising=False)
     original_dispatch = work.dispatch_claim
@@ -208,7 +260,8 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
 
     def dispatch(claim):
         context = _context(claim.envelope["context"])
-        source = next(p for p in context.sources if p.label.startswith("Google message:"))
+        prefix = "Google calendar:" if calendar_lab else "Google message:"
+        source = next(p for p in context.sources if p.label.startswith(prefix))
 
         def provider(request):
             body = json.loads(request.content)
@@ -264,13 +317,13 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
                 )
                 if context.role == "chief":
                     content = {
-                        "answer": "Preparing a private draft from the human-reviewed email.",
+                        "answer": "Preparing a private draft from the human-reviewed " + source_kind + ".",
                         "source_ids": [source.entry_id],
                         "handoffs": [
                             {
                                 "role": "scribe",
                                 "intended_role": "scribe",
-                                "brief": "Organize a private follow-up draft from the reviewed email; keep uncertainty explicit.",
+                                "brief": "Organize a private follow-up draft from the reviewed " + source_kind + "; keep uncertainty explicit.",
                                 "requirements": REQUIREMENTS,
                             }
                         ],
@@ -475,6 +528,21 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
                         "persona": persona,
                         "round": iteration,
                     }
+                    if calendar_lab:
+                        # Prior reviewed email is independently retained evidence, never
+                        # re-read by the calendar action or silently imported into the note.
+                        existing = messages.list_observed(session, box, owner, account_id,
+                            key="prior-email-list:" + str(uuid4()), port=google)
+                        selected = messages.read_selected(session, box, owner, account_id,
+                            key="prior-email-read:" + str(uuid4()), observation_id=existing["read_id"],
+                            observation_sha256=existing["source_sha256"], message_id="invented-ui-message",
+                            thread_id=None, port=google)
+                        messages.select_review(session, box, owner, initial["id"],
+                            expected=reviewed["revision"], key="prior-email-review:" + str(uuid4()),
+                            read_id=selected["read_id"], source_sha256=selected["source_sha256"],
+                            patient_link_id=link.id, reviewed_patient=True, reviewed_exact_message=True,
+                            reviewed_untrusted_source=True, port=google, external_identity_id=account_id)
+                        case["prior_email"] = current(case)["entries"][-1]
                     cases[initial["id"]] = case
                 return self.respond(
                     200,
@@ -535,11 +603,12 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
     thread.start()
     report_root = Path(os.environ.get("COSMAS_OPERATIONAL_EVIDENCE_DIR", str(tmp_path)))
     report_root.mkdir(parents=True, exist_ok=True)
-    report = report_root / "google-message-ui-server-lab.json"
+    report = report_root / ("google-calendar-ui-server-lab.json" if calendar_lab else "google-message-ui-server-lab.json")
     env = {k: os.environ[k] for k in ("PATH", "TMPDIR") if k in os.environ}
     env.update(
-        COSMAS_GOOGLE_MESSAGE_LAB_URL=f"http://127.0.0.1:{server.server_port}",
-        COSMAS_GOOGLE_MESSAGE_LAB_REPORT=str(report),
+        **{("COSMAS_GOOGLE_CALENDAR_LAB_URL" if calendar_lab else "COSMAS_GOOGLE_MESSAGE_LAB_URL"):
+           f"http://127.0.0.1:{server.server_port}"},
+        **{("COSMAS_GOOGLE_CALENDAR_LAB_REPORT" if calendar_lab else "COSMAS_GOOGLE_MESSAGE_LAB_REPORT"): str(report)},
     )
 
     def close_reserved_lab_work():
@@ -571,7 +640,8 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
             lambda s, a, full: google.message_binding(
                 messages._scoped_identity(a), require_full=full, session=s
             )
-        ):
+        ), calendars.install_binding_reader(lambda s, a: google.calendar_binding(
+            calendars._scoped_identity(a), session=s)):
             original_error = None
             try:
                 result = subprocess.run(
@@ -579,7 +649,7 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
                         str(NODE),
                         "node_modules/vitest/vitest.mjs",
                         "run",
-                        "src/GoogleMessageServerLab.test.tsx",
+                        "src/GoogleCalendarServerLab.test.tsx" if calendar_lab else "src/GoogleMessageServerLab.test.tsx",
                         "--maxWorkers=1",
                     ],
                     cwd=REPO / "web",
@@ -594,7 +664,8 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
                 assert len(evidence["recovery_episodes"]) == 2 and all(
                     e["passed"] for e in evidence["recovery_episodes"]
                 )
-                assert len(cases) == 8 and len(rounds) == 40 and google.calls == ["list", "read"] * 8
+                expected_calls = ["list", "read", "calendar"] * 8 if calendar_lab else ["list", "read"] * 8
+                assert len(cases) == 8 and len(rounds) == 40 and google.calls == expected_calls
                 for case in cases.values():
                     assert current(case)["note"] == case["note"]
                     if case["round"].startswith("masked_"):

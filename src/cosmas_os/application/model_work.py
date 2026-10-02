@@ -571,13 +571,16 @@ def _context_for(
         draft_only=draft_only,
         agent_id=bot.agent_id,
         handoff_targets=targets,
-        additional_sources=_google_message_passages(s, workspace, settings),
+        additional_sources=_selected_google_passages(s, workspace, settings),
     )
-    if any(s.get(WorkspaceEntry, source.entry_id).kind == "google_message"
+    selected_google_kinds = {"google_message", "google_calendar"}
+    if any(s.get(WorkspaceEntry, source.entry_id).kind in selected_google_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 for source in context.sources)
             or sum(len(source.content) for source in context.sources) > 30000):
-        raise ws.WorkspaceError("google_message_context_too_large", 422)
+        has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind == "google_calendar"
+            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
+        raise ws.WorkspaceError("selected_google_context_too_large" if has_calendar else "google_message_context_too_large", 422)
     if "task_brief" in command:
         try:
             if not draft_only:
@@ -612,6 +615,24 @@ def _google_message_passages(s, workspace, settings):
 
     return tuple(SourcePassage(row.id, row.revision, row.source_label, "evidence", row.content)
                  for row in google_message.selected_entries(s, workspace, settings, workspace.revision))
+
+
+def _google_calendar_passages(s, workspace, settings):
+    """Frozen human-reviewed summaries enter evidence only after current custody."""
+    if not team.runtime_settings.workspace_google_calendar_available:
+        return ()
+    from cosmas_os.application import google_calendar
+    from cosmas_os.ports.bot_capabilities import SourcePassage
+
+    return tuple(SourcePassage(row.id, row.revision, row.source_label, "evidence", row.content)
+                 for row in google_calendar.selected_entries(s, workspace, settings, workspace.revision))
+
+
+def _selected_google_passages(s, workspace, settings):
+    return tuple(sorted(
+        (*_google_message_passages(s, workspace, settings), *_google_calendar_passages(s, workspace, settings)),
+        key=lambda source: source.revision,
+    ))
 
 
 def _allowance(s, box, owner, as_of, configuration):
@@ -1324,7 +1345,9 @@ def project_workspace(s, value, *, as_of=None):
     if len(rows) > 50:
         raise ws.WorkspaceError("model_observation_unavailable", 503)
     for row in rows:
-        if entries[row.request_entry_id].get("google_source_state") == "unavailable":
+        from cosmas_os.application.selected_google_sources import projection_unavailable
+
+        if projection_unavailable(entries[row.request_entry_id]):
             continue  # Private quoted intent is withheld with its source-derived output.
         version = s.get(ProviderTeamRevision, row.team_revision_id)
         command = row.request_body

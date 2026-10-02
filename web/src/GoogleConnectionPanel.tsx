@@ -21,8 +21,9 @@ function checkedState(identity:AuthenticatedWorkspaceIdentity,previous:PrivateSt
 }
 
 export type GoogleMessageWorkControls={requestFullMailAccess:()=>void;fullMailAccessBusy:boolean};
-export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLost,messageWork,onOpenMessageWork,messageWorkLocked=false}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void;
-  messageWork?:ReactNode|((controls:GoogleMessageWorkControls)=>ReactNode);onOpenMessageWork?:()=>void;messageWorkLocked?:boolean}){
+export type GoogleCalendarWorkControls={requestCalendarAccess:()=>void;calendarAccessBusy:boolean};
+export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLost,messageWork,onOpenMessageWork,messageWorkLocked=false,calendarWork,onOpenCalendarWork,calendarWorkLocked=false}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void;
+  messageWork?:ReactNode|((controls:GoogleMessageWorkControls)=>ReactNode);onOpenMessageWork?:()=>void;messageWorkLocked?:boolean;calendarWork?:ReactNode|((controls:GoogleCalendarWorkControls)=>ReactNode);onOpenCalendarWork?:()=>void;calendarWorkLocked?:boolean}){
   const [data,setData]=useState<PrivateState|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[opening,setOpening]=useState(false);
   const [service,setService]=useState<GoogleService>('mail');
   const latest=useRef(data);latest.current=data;
@@ -145,6 +146,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   const blocked=busy||opening;
   const calendarNeedsPermission=status?.state==='connected'&&status.capabilities?.calendar===false;
   const messageWorkEnabled=import.meta.env.VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED==='true';
+  const calendarWorkEnabled=import.meta.env.VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED==='true';
   return <section className="core-connection-setup microsoft-connection google-connection" aria-label="Google email and calendar">
     <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>{status?.state==='connected'?'Google Workspace':'Connect Google Workspace'}</h2><p>Email and the week ahead.</p></div></header>
     <p>{status?.state==='connected'?'Your account is connected. Check email and calendar access below.':'Connect your Google account to see recent Gmail headers and your primary calendar here. Google will ask you to approve access.'}</p>
@@ -165,19 +167,21 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       <a className="team-primary microsoft-continue" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Google</a>}</p>}
     {!nativeReady&&<p>Google connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
     {status?.state==='connected'&&<>
-      {messageWorkEnabled&&onOpenMessageWork&&<button className="team-primary" disabled={blocked||messageWorkLocked} onClick={onOpenMessageWork}>Work with email</button>}
+      {calendarWorkEnabled&&onOpenCalendarWork&&<button className="team-primary" disabled={blocked||calendarWorkLocked||messageWorkLocked} onClick={()=>{setService('calendar');onOpenCalendarWork();}}>📅 Work with calendar</button>}
+      {messageWorkEnabled&&onOpenMessageWork&&<button className="team-primary" disabled={blocked||messageWorkLocked||calendarWorkLocked} onClick={()=>{setService('mail');onOpenMessageWork();}}>Work with email</button>}
       <div className="google-service-tabs" role="group" aria-label="Choose Google service">
-        <button aria-pressed={service==='mail'} onClick={()=>setService('mail')}>Email</button>
-        <button aria-pressed={service==='calendar'} onClick={()=>setService('calendar')}>Calendar</button>
+        <button disabled={messageWorkLocked||calendarWorkLocked} aria-pressed={service==='mail'} onClick={()=>setService('mail')}>Email</button>
+        <button disabled={messageWorkLocked||calendarWorkLocked} aria-pressed={service==='calendar'} onClick={()=>setService('calendar')}>Calendar</button>
       </div>
       <PersonalConnectionHealth identity={identity} provider="google"
         mailAction={<button className={service==='mail'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('mail')}>{visible?.views.mail?'Refresh email':'Read recent email'}</button>}
-        calendarAction={calendarNeedsPermission?<button className={service==='calendar'?'team-primary':undefined} disabled={blocked||!nativeReady} onClick={()=>manual('start')}>Add calendar access</button>:
+        calendarAction={calendarWorkEnabled&&onOpenCalendarWork?<button disabled={blocked||messageWorkLocked||calendarWorkLocked} onClick={()=>{setService('calendar');onOpenCalendarWork();}}>Choose calendar summary for work</button>:calendarNeedsPermission?<button className={service==='calendar'?'team-primary':undefined} disabled={blocked||!nativeReady} onClick={()=>manual('start')}>Add calendar access</button>:
           <button className={service==='calendar'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('calendar')}>{visible?.views.calendar?'Refresh calendar':'View next 7 days'}</button>}/>
       {!view&&<p className="google-results-hint">{service==='mail'?'Read recent email to see up to 10 inbox headers.':calendarNeedsPermission?'Choose Add calendar access to view your week.':'View the next 7 days to see event titles and times.'}</p>}
     </>}
     {messageWorkEnabled&&messageWork&&<div className="google-message-work">{typeof messageWork==='function'?messageWork({
       requestFullMailAccess:()=>{if(!blocked&&!messageWorkLocked&&nativeReady)manual('start_full_mail');},fullMailAccessBusy:blocked}):messageWork}</div>}
+    {calendarWorkEnabled&&calendarWork&&<div className="google-calendar-work">{typeof calendarWork==='function'?calendarWork({requestCalendarAccess:()=>{if(!blocked&&!calendarWorkLocked&&nativeReady)manual('start');},calendarAccessBusy:blocked}):calendarWork}</div>}
     {(start||status&&status.state!=='connected'&&status.state!=='sign_in_required')&&<button disabled={blocked} onClick={()=>manual('disconnect')}>Cancel Google connection</button>}
     {view?.kind==='mail'&&<section aria-label="Recent Gmail headers">
       <h3>Recent email</h3><p>Email headers · Last loaded {when(view.observed_at)}</p>
@@ -194,8 +198,8 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       {view.more&&<p>Showing up to 25 events. More are available in Google Calendar.</p>}
     </section>}
     {status?.state==='connected'&&<details className="google-account-controls"><summary>Manage Google account</summary>
-      <div className="microsoft-actions"><button disabled={blocked||!nativeReady} onClick={()=>manual('start')}>Reconnect Google</button>
-        <button disabled={blocked} onClick={()=>manual('disconnect')}>Disconnect Google</button></div>
+      <div className="microsoft-actions"><button disabled={blocked||!nativeReady||messageWorkLocked||calendarWorkLocked} onClick={()=>manual('start')}>Reconnect Google</button>
+        <button disabled={blocked||messageWorkLocked||calendarWorkLocked} onClick={()=>manual('disconnect')}>Disconnect Google</button></div>
     </details>}
     {message&&<p role="status">{message}</p>}
   </section>;

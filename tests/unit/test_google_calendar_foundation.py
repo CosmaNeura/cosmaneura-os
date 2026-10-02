@@ -148,6 +148,34 @@ def test_calendar_only_binding_is_db_only_shared_locked_and_refresh_stable(conne
     assert f.requests == []
 
 
+def test_explicit_server_window_is_sent_exactly_once_without_following_pages(connection):
+    f = connection
+    frozen = window(starts_at=NOW - timedelta(seconds=2), ends_at=NOW - timedelta(seconds=2) + timedelta(days=7))
+    f.state.response["nextPageToken"] = "invented-never-followed"
+    result = f.conn.calendar_observation(f.identity, window=frozen)
+    assert result.observation.window == frozen and result.observation.more is True
+    assert len(f.requests) == 1 and f.requests[0].method == "GET"
+    query = f.requests[0].url.params
+    assert query["timeMin"] == frozen.starts_at.isoformat() and query["timeMax"] == frozen.ends_at.isoformat()
+    assert query["maxResults"] == "25" and "pageToken" not in query
+    assert "description" not in query["fields"] and "attendees" not in query["fields"]
+
+
+def test_local_calendar_status_needs_no_mail_consent_or_provider_io(connection):
+    f = connection
+    assert f.conn.calendar_status(f.identity, session=f.session) == {
+        "contract_version": 1, "state": "connected", "calendar_read": True,
+        "account": {"label": "Invented", "email": "invented@example.invalid"}}
+    f.private["calendar_read"] = False
+    f.private["granted_scopes"] = sorted(SCOPES.split())
+    f.reseal()
+    assert f.conn.calendar_status(f.identity, session=f.session)["calendar_read"] is False
+    f.credential.status = "disconnected"
+    assert f.conn.calendar_status(f.identity, session=f.session) == {
+        "contract_version": 1, "state": "sign_in_required", "calendar_read": False, "account": None}
+    assert f.requests == []
+
+
 def test_calendar_grant_domain_and_exact_scope_changes_cannot_reuse_message_custody(connection):
     f = connection
     calendar = f.conn.calendar_binding(f.identity, session=f.session)

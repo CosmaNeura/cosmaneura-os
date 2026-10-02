@@ -73,6 +73,28 @@ def expected(config):
     )
 
 
+def test_google_callback_projection_uses_connection_gate_without_whole_message_activation():
+    config = bound_config()
+    plan = {"variables": {
+        "workspace_hosted_enabled": {"value": True},
+        "workspace_features": {"value": {
+            "WORKSPACE_GOOGLE_CONNECTION_ENABLED": True,
+            "WORKSPACE_GOOGLE_CALENDAR_ENABLED": True,
+            "WORKSPACE_GOOGLE_MESSAGE_ENABLED": False,
+        }},
+    }}
+    projected, _ = binding._workspace_extension(plan, config)
+    assert projected["GOOGLE_CONNECTION_CALLBACK_URI"] == [
+        "value", config.api_ready_url.removesuffix("/ready") + "/connections/google/callback"]
+    assert projected["GOOGLE_CONNECTION_RETURN_ORIGIN"] == ["value", config.web_origin]
+    assert projected["WORKSPACE_GOOGLE_CALENDAR_ENABLED"] == ["value", "true"]
+    assert projected["WORKSPACE_GOOGLE_MESSAGE_ENABLED"] == ["value", "false"]
+    plan["variables"]["workspace_features"]["value"]["WORKSPACE_GOOGLE_CONNECTION_ENABLED"] = False
+    projected, _ = binding._workspace_extension(plan, config)
+    assert "GOOGLE_CONNECTION_CALLBACK_URI" not in projected
+    assert "GOOGLE_CONNECTION_RETURN_ORIGIN" not in projected
+
+
 def test_bound_producer_and_consumer_roundtrip() -> None:
     config = bound_config()
     evidence = workload.verify_workload(config, fixture.FakeRunner(), now=NOW)

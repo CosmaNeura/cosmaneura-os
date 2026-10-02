@@ -62,10 +62,11 @@ export type AssistantReply = { agent_name: string; agent_id?: string; role: BotR
   citations: { entry_id: string; revision: number; label: string; kind: string }[] };
 export type WorkspaceEntry = {
   id: string; revision: number;
-  kind: "synthetic_source" | "scratchpad" | "conversation" | "evidence" | "work_link" | "handoff_result" | "google_message";
+  kind: "synthetic_source" | "scratchpad" | "conversation" | "evidence" | "work_link" | "handoff_result" | "google_message" | "google_calendar";
   content: string; source_label: string | null; origin: string;
   ticket: WorkReference | null; created_at: string;
   google_source_state?: "current" | "unavailable";
+  calendar_source_state?: "current" | "unavailable";
   reply?: AssistantReply | null;
   model_request?: EntryModelRequest;
 };

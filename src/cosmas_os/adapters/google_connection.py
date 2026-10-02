@@ -34,7 +34,11 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.application.capture_deadline import CaptureBudget, capture_budget, current_budget
 from cosmas_os.google_connection_models import GoogleConnectionAttempt, GoogleConnectionCredential
 from cosmas_os.models import ExternalIdentity
-from cosmas_os.ports.google_calendar import GoogleCalendarBinding, GoogleCalendarRead
+from cosmas_os.ports.google_calendar import (
+    GoogleCalendarBinding,
+    GoogleCalendarRead,
+    GoogleCalendarWindow,
+)
 from cosmas_os.ports.google_message import (
     GoogleMessageBinding,
     GoogleMessageRead,
@@ -305,6 +309,22 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             return GoogleCalendarBinding(account_id=account.id, binding_digest=binding, connected_at=connected_at,
                 grant_sha256=digest(canonical(["cosmas-google-calendar-grant.v1", account.id, binding,
                     connected_at.isoformat(), private["subject"], sorted(scopes)])))
+
+    def calendar_status(self, identity, *, session=None):
+        """Local calendar permission check; never refreshes or reads Google."""
+        with self._session() if session is None else nullcontext(session) as current:
+            account, binding = self._message_account(current, identity)
+            credential = current.scalar(select(self.Credential).where(self.Credential.account_id == account.id)
+                .with_for_update(read=True).execution_options(populate_existing=True))
+            private = None
+            if (credential and credential.status == "ready" and credential.sealed is not None
+                    and credential.binding_digest == binding and credential.expires_at > self.now()):
+                private = self._open(credential.sealed, "credential", account.id, binding)
+                self._grant_scopes(private)
+            self._enabled()
+            return {"contract_version": 1, "state": "connected" if private is not None else "sign_in_required",
+                "calendar_read": private is not None and private.get("calendar_read") is True,
+                "account": {"label": self._text(private["label"], 256), "email": self._text(private["email"], 320)} if private is not None else None}
 
     def message_status(self, identity, *, session=None):
         """Body-connector status is a local check, including pending explicit consent."""
@@ -602,13 +622,13 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
             raise ws.WorkspaceError("google_calendar_consent_required", 409)
         return read_calendar(self, identity, private, binding, account_id)
 
-    def calendar_observation(self, identity) -> GoogleCalendarRead:
+    def calendar_observation(self, identity, *, window: GoogleCalendarWindow | None = None) -> GoogleCalendarRead:
         """Optional exact-window summary read; the existing transient view is unchanged."""
         from cosmas_os.adapters.google_calendar import read_calendar_observation
 
         if current_budget() is None:
             with capture_budget(CaptureBudget(40)):
-                return self.calendar_observation(identity)
+                return self.calendar_observation(identity, window=window)
         private, binding, account_id = self.credential(identity)
         if private.get("calendar_read") is not True:
             raise ws.WorkspaceError("google_calendar_consent_required", 409)
@@ -621,7 +641,7 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
                 raise ws.WorkspaceError("google_connection_changed", 409)
 
         observation = read_calendar_observation(self, identity, private, binding, account_id,
-                                                check=current)
+                                                check=current, window=window)
         return GoogleCalendarRead(observation=observation, custody=custody)
 
     @staticmethod

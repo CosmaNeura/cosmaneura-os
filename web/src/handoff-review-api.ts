@@ -90,9 +90,9 @@ async function exactResponse(value:unknown,workspaceId:string,handoffId:string,b
   const entry=workspace.entries.find(e=>e.id===body.result_entry_id);
   if(!entry||entry.kind!=='handoff_result')throw new WorkspaceApiError(503);
   if(value.feedback_withheld){
-    if(entry.google_source_state!=='unavailable'||entry.reply!=null||entry.content!==''||handoffs.find(h=>h.id===handoffId)!.review_status!=='stale'||
+    if((entry.google_source_state!=='unavailable'&&entry.calendar_source_state!=='unavailable')||entry.reply!=null||entry.content!==''||handoffs.find(h=>h.id===handoffId)!.review_status!=='stale'||
       review.feedback!=='Email access must be checked before viewing this feedback.')throw new WorkspaceApiError(503);
-  }else if(review.feedback!==body.feedback||entry.google_source_state==='unavailable'||!entry.reply||!teamText(entry.reply.content,200000,1)||
+  }else if(review.feedback!==body.feedback||(entry.google_source_state==='unavailable'||entry.calendar_source_state==='unavailable')||!entry.reply||!teamText(entry.reply.content,200000,1)||
     await vendorSha256(new TextEncoder().encode(entry.reply.content))!==body.result_sha256)throw new WorkspaceApiError(503);
   return {entry_revision:Number(value.entry_revision),request_sha256:value.request_sha256,feedback_withheld:value.feedback_withheld,workspace};
 }

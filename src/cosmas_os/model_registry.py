@@ -8,6 +8,7 @@ and deliberately remains outside this registry.
 from cosmas_os import (  # noqa: F401 -- imports register declarative models
     finance_models,
     finance_setup_models,
+    google_calendar_models,
     google_connection_models,
     google_message_models,
     inbox_handoff_models,

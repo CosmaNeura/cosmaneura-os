@@ -93,6 +93,8 @@ class Settings(BaseSettings):
     workspace_google_connection_enabled: bool = False
     # Separate opt-in for explicit selected whole-message custody and review.
     workspace_google_message_enabled: bool = False
+    # Explicitly reviewed calendar snapshots; independent from whole-message consent.
+    workspace_google_calendar_enabled: bool = False
     google_connection_client_id: str = ""
     google_connection_client_secret: SecretStr | None = None
     google_connection_callback_uri: str = ""
@@ -156,6 +158,12 @@ class Settings(BaseSettings):
     @property
     def workspace_google_message_available(self) -> bool:
         return bool(self.workspace_google_message_enabled and self.workspace_google_connection_enabled
+                    and self.workspace_available and self.workspace_authenticated_enabled
+                    and self.auth_mode == "clerk_jwt")
+
+    @property
+    def workspace_google_calendar_available(self) -> bool:
+        return bool(self.workspace_google_calendar_enabled and self.workspace_google_connection_enabled
                     and self.workspace_available and self.workspace_authenticated_enabled
                     and self.auth_mode == "clerk_jwt")
 
