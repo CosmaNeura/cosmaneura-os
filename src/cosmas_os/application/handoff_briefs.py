@@ -117,7 +117,7 @@ def projection(s, assignment, row):
                 ModelWorkAdmission.request_entry_id == assignment.origin_entry_id
             )
         )
-        if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", "cosmas-gpt41-prepared.v5"}:
+        if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", "cosmas-gpt41-prepared.v5", "cosmas-gpt41-prepared.v6"}:
             return {"task_brief_unavailable": True}
         return {}
     try:

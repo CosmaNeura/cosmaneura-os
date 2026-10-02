@@ -104,6 +104,16 @@ class GPT41ToolsConnector:
         monotonic: Callable[[], float] = time.monotonic):
         self.credential, self.transport, self.monotonic = credential, transport, monotonic
 
+    def _validate(self, envelope):
+        return validate_prepared(envelope)
+
+    def _after_tool(self, body, envelope, checked, value):
+        # The pinned v5 request retains its original source excerpts.
+        pass
+
+    def _decode(self, envelope, data, body, **usage):
+        return decode_response(envelope["baseline"], data, **usage)
+
     def prepare(self, context: BotContext, tool_selection: dict) -> dict:
         baseline = GPT41Connector(lambda: "").prepare(context)
         selection = ToolSelection.model_validate(tool_selection).model_dump()
@@ -115,7 +125,7 @@ class GPT41ToolsConnector:
 
     def review_prepared(self, envelope: dict, *, execute: Callable[[dict], dict]) -> BotReply:
         try:
-            validate_prepared(envelope)
+            self._validate(envelope)
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
             raise ModelCallFailure(dispatch="not_dispatched") from None
         dispatch = "not_dispatched"
@@ -176,7 +186,7 @@ class GPT41ToolsConnector:
                     if not requested:
                         if choice.get("finish_reason") != "stop":
                             raise ValueError("incomplete operational answer")
-                        result = decode_response(envelope["baseline"], data,
+                        result = self._decode(envelope, data, body,
                             input_tokens=total_input if usage_verified else None,
                             output_tokens=total_output if usage_verified else None, response_sha256=response_hash)
                         return result
@@ -240,6 +250,7 @@ class GPT41ToolsConnector:
                             raise ValueError("operational tool admission changed")
                         receipt_scope = current_scope
                         body["messages"].append({"role": "tool", "tool_call_id": call_id, "content": encoded})
+                        self._after_tool(body, envelope, checked, value)
                         calls += 1
                     if calls >= MAX_TOOL_CALLS:
                         body["tool_choice"] = "none"
