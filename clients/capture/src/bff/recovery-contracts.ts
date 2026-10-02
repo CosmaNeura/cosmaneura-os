@@ -1,4 +1,5 @@
 /** Closed Scribe recovery projection. Historical receipts never grant capture. */
+import { MAX_CHUNKS } from "@cosmaneura-scribe/capture-protocol";
 import type { CaptureLeaseReceipt, MutationOptions, RequestOptions } from "./contracts";
 import type { CaptureGapReasonCode } from "../flow/types";
 import { QueueInvariantError } from "../queue/errors";
@@ -79,11 +80,11 @@ export function assertCaptureRecoveryRequest(value: unknown): asserts value is C
   requireValue(value.protocol_version === "1.0" && value.channel === "microphone" &&
     uuid(value.capture_lease_id) && integer(value.capture_lease_generation, 1) &&
     uuid(value.segment_id) && uuid(value.gap_id) && value.segment_id !== value.gap_id &&
-    integer(value.segment_ordinal, 0, 999) && integer(value.first_sequence_number, 0, 999) &&
-    integer(value.next_sequence_number, value.first_sequence_number, 1000) &&
+    integer(value.segment_ordinal, 0, 999) && integer(value.first_sequence_number, 0, MAX_CHUNKS - 1) &&
+    integer(value.next_sequence_number, value.first_sequence_number, MAX_CHUNKS) &&
     typeof value.reason_code === "string" && reasons.has(value.reason_code) &&
     (value.decision === "resume_capture" || value.decision === "finish_capture") &&
-    (value.decision !== "resume_capture" || value.next_sequence_number < 1000) &&
+    (value.decision !== "resume_capture" || value.next_sequence_number < MAX_CHUNKS) &&
     (value.decision !== "finish_capture" || value.next_sequence_number > 0));
   requireValue(timestamp(value.segment_started_at) <= timestamp(value.observed_at) &&
     timestamp(value.observed_at) <= timestamp(value.acknowledged_at));
