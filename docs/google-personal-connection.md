@@ -1,5 +1,60 @@
 # Personal Google Workspace connection
 
+## Reviewed calendar work
+
+The separate, default-off `WORKSPACE_GOOGLE_CALENDAR_ENABLED` service and matching
+`VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED` client flag enable calendar summaries for
+encounter work. Calendar permission remains independent from full-email consent.
+The operational beta profile classifies both flags; the first-owner staging profile
+keeps them off. Configure and install a matching release before rollout.
+
+**Work with calendar** explicitly loads one snapshot of up to 25 primary-calendar
+events overlapping the next seven days. The clinician selects one event, confirms
+the current visit and reviews its exact title, dates and cancellation status. DOB
+is optional. Saving adds a distinct `google_calendar` source and preserves the
+clinical note and existing email evidence. **Ask Chief** prepares an editable
+question; the clinician submits it before Chief or a specialist starts work.
+
+The summary includes only event IDs, titles, start/end dates or times and
+cancellation status. Date-only events retain their calendar dates and exclusive
+end date. A result not marked cancelled does not establish that an appointment
+is confirmed. Partial results are labelled; there is no pagination, event-detail
+read, other-calendar traversal, attendee/description/location access, calendar
+mutation or booking. These summaries do not establish current availability.
+
+The server reserves the exact request before the single provider read and binds
+its frozen window, immutable payload, account and semantic grant. A reviewed
+source stops authorizing new work at the earlier of the event's exclusive end or
+the window's end. For all-day events without a timezone, authority ends
+conservatively before the earliest possible exclusive end; this assigns no
+timezone to the event. A newer observation, even an unconfirmed one, supersedes
+older calendar sources. Reconnection, revoked permission and expiry withhold
+source contents and every derived draft or quoted revision feedback.
+
+The encrypted device journal retains exact unresolved reads and reviews before
+dispatch. Checking a saved read result does not repeat the Google request.
+A lost source-review reply can be confirmed using the same request after access
+changes, with contents withheld. That historical receipt does not authorize
+another agent action or import into a clinical note. Calendar-derived Scribe
+drafts remain outside the clinical-note import workflow.
+
+The protocol uses `POST /connections/google/calendar-summaries` and
+`POST /workspaces/{id}/google-calendar/review`, with
+`X-Cosmas-Google-Calendar: 1`, bounded bodies/responses and no-store replies.
+The server owns the account and seven-day range; clients cannot supply provider
+URLs, different calendars or a replacement summary. Current schema is
+`g42b8d3f6a10`; the workspace compatibility contract adds `google_calendar:1`.
+Synthetic tests and injected upstreams qualify local contracts and workflows,
+not installed native behavior or live Google/model performance.
+
+The prepared database runtime retains its seven pure-validator execution grants.
+Ten scoped validation triggers run with the migration owner's privileges and a
+fixed `pg_catalog` search path so their nested private checks work under that
+restricted role. Direct execution of those triggers and state-reading helpers
+remains denied. The inherited Gmail read trigger remains an invoker. Restricted
+credential tests cover ordinary agent admission, calendar/email coexistence,
+handoff revision and acceptance, revoked access and forged ownership.
+
 ## Reviewed email work
 
 The separate, default-off `WORKSPACE_GOOGLE_MESSAGE_ENABLED` service enables
@@ -39,7 +94,7 @@ That receipt confers no current authority to continue work. Handoff revision
 commands still require visible verified prior draft/feedback; recovery of a lost
 revision reply after access changes remains fail-closed.
 
-Required schema: `g39a7e1b6c82`. Matching workspace contracts include
+Current required schema: `g42b8d3f6a10`. Matching workspace contracts include
 `google_messages:1` and `handoff_review:2`. Install a matching native/web release
 and deliberately configure the backend before rollout. The new tests use invented
 mail and injected upstream model responses; they do not establish live full-body
@@ -112,5 +167,5 @@ its broad send/compose/modify scopes, raw-MIME attachment expansion, service-acc
 impersonation and arbitrary API action are not enabled. Official Google contract
 sources are hash-recorded in W59/research. Actual Google consent verification,
 real-account operation and physical-device/native-sign-in acceptance remain open.
-Normal API/worker readiness now expects g39a7e1b6c82. No actual provider account,
+Normal API/worker readiness now expects g42b8d3f6a10. No actual provider account,
 credential, recording, native installation or deployment was used during development.

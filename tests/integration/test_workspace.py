@@ -377,7 +377,7 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
             )
         with pytest.raises(
             RuntimeError,
-            match="Preparation retirement history must remain forward-compatible",
+            match="Retain selected calendar source lineage and human reviews",
         ):
             migrate("0002_external_identities", downgrade=True)
         with Session(target) as s:

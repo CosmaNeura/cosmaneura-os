@@ -35,15 +35,15 @@ def boundary(value):
     raise ValueError("Invalid calendar boundary")
 
 
-def _read_calendar(service, identity, private, binding, account_id, *, check=None, exact=False):
+def _read_calendar(service, identity, private, binding, account_id, *, check=None, exact=False, window=None):
     def current(*, audit: bool | Literal["calendar"] = False) -> None:
         if check is not None:
             check()
         service._read_current(identity, private, binding, account_id, audit=audit)
 
     current()
-    start = aware(service.now()).astimezone(UTC)
-    end = start + timedelta(days=7)
+    start = window.starts_at if window is not None else aware(service.now()).astimezone(UTC)
+    end = window.ends_at if window is not None else start + timedelta(days=7)
     data = service._request("GET", CALENDAR_URL, token=private["token"], params={
         "timeMin": start.isoformat(), "timeMax": end.isoformat(), "maxResults": "25",
         "singleEvents": "true", "orderBy": "startTime", "showDeleted": "false", "timeZone": "UTC",
@@ -96,8 +96,9 @@ def read_calendar(service, identity, private, binding, account_id):
 
 
 def read_calendar_observation(service: "GooglePersonalConnection", identity, private, binding,
-                              account_id, *, check: Callable[[], None]) -> GoogleCalendarObservation:
+                              account_id, *, check: Callable[[], None],
+                              window: GoogleCalendarWindow | None = None) -> GoogleCalendarObservation:
     """Capture the exact query window from the same one bounded provider GET."""
-    value = _read_calendar(service, identity, private, binding, account_id, check=check, exact=True)
+    value = _read_calendar(service, identity, private, binding, account_id, check=check, exact=True, window=window)
     assert isinstance(value, GoogleCalendarObservation)
     return value

@@ -26,6 +26,7 @@ run "configured_account_connections" {
       WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED = true
       WORKSPACE_GOOGLE_CONNECTION_ENABLED     = true
       WORKSPACE_GOOGLE_MESSAGE_ENABLED        = true
+      WORKSPACE_GOOGLE_CALENDAR_ENABLED       = true
       WORKSPACE_MICROSOFT_CONNECTION_ENABLED  = true
       VENDOR_WORK_ENABLED                     = true
       VENDOR_IO_ENABLED                       = true
@@ -65,6 +66,10 @@ run "configured_account_connections" {
     error_message = "Connection returns and Core identity must match the deployment."
   }
   assert {
+    condition     = output.public_env.WORKSPACE_GOOGLE_CALENDAR_ENABLED == "true"
+    error_message = "Calendar review must remain an explicit classified service feature."
+  }
+  assert {
     condition     = length(output.secret_definitions) == 8 && length(output.secret_env) == 8 && output.secret_definitions[output.secret_env.MANAGED_SERVICES_CONFIG_JSON] == "https://invented-beta.vault.azure.net/secrets/managed-accounts/00000000000000000000000000000008"
     error_message = "Manifest and account credentials must resolve to exact versions in the dedicated vault."
   }
@@ -80,6 +85,24 @@ run "missing_oauth_custody_rejected" {
     hosted_enabled       = true
     features             = { WORKSPACE_GOOGLE_CONNECTION_ENABLED = true }
     public_configuration = { GOOGLE_CONNECTION_CLIENT_ID = "invented.apps.googleusercontent.com" }
+  }
+  expect_failures = [terraform_data.configuration_guard]
+}
+
+run "calendar_work_requires_underlying_google_connection" {
+  command = plan
+  variables {
+    hosted_enabled = true
+    features = { WORKSPACE_GOOGLE_CALENDAR_ENABLED = true }
+  }
+  expect_failures = [terraform_data.configuration_guard]
+}
+
+run "message_work_requires_underlying_google_connection" {
+  command = plan
+  variables {
+    hosted_enabled = true
+    features = { WORKSPACE_GOOGLE_MESSAGE_ENABLED = true }
   }
   expect_failures = [terraform_data.configuration_guard]
 }

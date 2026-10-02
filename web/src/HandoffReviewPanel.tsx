@@ -37,7 +37,7 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
   useEffect(()=>{if(proof&&refusal&&!refusal.freshAssignment&&refreshed.current&&workspace!==refreshed.current){setRefusal(null);refreshed.current=null;uncertain.current=false;}},[proof,refusal,workspace]);
   const retained=(handoff as ReviewableHandoff).review;
   const confirmedWithheld=withheldReceipt?.workspaceId===workspace.id&&withheldReceipt.handoffId===handoff.id?withheldReceipt:null;
-  const sourceWithheld=!!confirmedWithheld||workspace.entries.some(entry=>entry.id===handoff.result_entry_id&&entry.google_source_state==='unavailable');
+  const sourceWithheld=!!confirmedWithheld||workspace.entries.some(entry=>entry.id===handoff.result_entry_id&&(entry.google_source_state==='unavailable'||entry.calendar_source_state==='unavailable'));
   const stale=handoff.review_status==='stale'||refusal?.freshAssignment===true||sourceWithheld;
   const receipt=proof&&!stale?[saved,retained].find(value=>validHandoffReviewReceipt(value)&&value.attempt_id===proof.attemptId&&
     value.result_entry_id===proof.entryId&&value.result_sha256===proof.sha256):undefined;
@@ -98,8 +98,8 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
     {checking&&!pending&&<p role="status">Checking the saved draft…</p>}
     {handoff.status!=='completed'&&!pending&&<p role="status">{handoff.status==='queued'?'Draft queued':handoff.status==='running'?'Preparing draft…':'Draft needs attention. Check the assignment before trying again.'}</p>}
     {handoff.status==='completed'&&!checking&&!proof&&!pending&&<p role="alert">The complete saved draft could not be verified. Refresh the encounter before reviewing it.</p>}
-    {stale&&!pending&&<p role="alert">{sourceWithheld?'Email access is unavailable. The draft and its feedback are withheld; check email access before next work.':'The saved sources or assignment changed after this draft. Ask Chief for a fresh assignment before next work.'}</p>}
-    {confirmedWithheld&&!pending&&<p role="status">The exact saved review is confirmed. Its draft and feedback are unavailable; check email access before next work.</p>}
+    {stale&&!pending&&<p role="alert">{sourceWithheld?'Source access is unavailable. The draft and its feedback are withheld; check source access before next work.':'The saved sources or assignment changed after this draft. Ask Chief for a fresh assignment before next work.'}</p>}
+    {confirmedWithheld&&!pending&&<p role="status">The exact saved review is confirmed. Its draft and feedback are unavailable; check source access before next work.</p>}
     {stale&&!sourceWithheld&&!pending&&onFreshAssignment&&<button type="button" disabled={busy||(recoveryLocked??locked)} onClick={()=>{
       if(busy||pending||(recoveryLocked??locked))return;
       onFreshAssignment(feedback||(validHandoffReviewReceipt(retained)&&retained.decision==='changes_requested'?retained.feedback:''));

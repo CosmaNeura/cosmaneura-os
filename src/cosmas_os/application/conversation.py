@@ -236,7 +236,7 @@ def ask(
         settings["role"],
         content,
         agent_id=bot.agent_id,
-        additional_sources=model_work._google_message_passages(s, w, settings),
+        additional_sources=model_work._selected_google_passages(s, w, settings),
     )
     if settings["role"] == "chief":
         from cosmas_os.adapters.chief_review import review

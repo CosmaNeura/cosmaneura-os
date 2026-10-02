@@ -114,17 +114,21 @@ def read(s, w, revision):
         if origin_admission is not None:
             related_admissions.append(origin_admission)
         source_unavailable = False
+        unavailable_kinds = set()
         for admission in related_admissions:
             from cosmas_os.adapters.gpt41 import _context
-            from cosmas_os.application import google_message
+            from cosmas_os.application import selected_google_sources
 
             for passage in _context(admission.prepared_envelope["context"]).sources:
                 original = s.get(WorkspaceEntry, passage.entry_id)
-                if original is not None and original.kind == "google_message":
+                if selected_google_sources.is_selected_google(original):
                     try:
-                        google_message.validate_selected_source(s, w, original.id)
+                        selected_google_sources.validate_selected_source(s, w, original.id)
                     except ws.WorkspaceError:
-                        brief = "The selected email is unavailable. Check its account access before using this draft."
+                        unavailable_kinds.add(original.kind)
+                        brief = ("The selected email is unavailable. Check its account access before using this draft."
+                                 if original.kind == "google_message" else
+                                 "The selected calendar summary is unavailable. Load and review a fresh summary before using this draft.")
                         evidence.pop("task_brief", None)
                         evidence.pop("completion_evidence", None)
                         evidence["task_brief_unavailable"] = True
@@ -132,11 +136,14 @@ def read(s, w, revision):
                         break
         revision_metadata = handoff_revision.revision_for(s, w, handoff)
         if source_unavailable:
+            feedback_notice = ("Email access must be checked before viewing this feedback."
+                               if unavailable_kinds == {"google_message"} else
+                               "Check the selected calendar summary before viewing this feedback.")
             if reviewed:
-                reviewed = {**reviewed, "feedback": "Email access must be checked before viewing this feedback."}
+                reviewed = {**reviewed, "feedback": feedback_notice}
             if "revision_request" in revision_metadata:
                 revision_metadata["revision_request"] = {**revision_metadata["revision_request"],
-                    "feedback": "Email access must be checked before viewing this feedback."}
+                    "feedback": feedback_notice}
         output.append(
             {
                 "id": handoff.id,

@@ -52,6 +52,9 @@ import { SCHEDULING_BUILD } from "./scheduling-api";
 import { SCHEDULING_LOGIN_BUILD } from "./scheduling-login-api";
 import { GoogleConnectionPanel } from './GoogleConnectionPanel';
 import { GoogleMessageMount } from './GoogleMessageMount';
+import {GoogleCalendarMount} from './GoogleCalendarMount';
+import {GOOGLE_CALENDAR_BUILD} from './google-calendar-api';
+import type {GoogleCalendarSaved} from './google-calendar-recovery';
 import { GOOGLE_MESSAGE_BUILD } from './google-message-api';
 import type {GoogleMessageSaved} from './google-message-recovery';
 import {vendorSha256} from './vendor-contract';
@@ -94,12 +97,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [setupEpoch, setSetupEpoch] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
-  const googleVisitSelection=useRef(false);
+  const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
+  const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
   const [settingsEntry,setSettingsEntry]=useState<'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'>('home');
-  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const [activityProof,setActivityProof] = useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number;context:AiActivityContext}|null>(null);
   const [activityBusy,setActivityBusy] = useState(false),[activityContextBusy,setActivityContextBusy] = useState(false);
@@ -169,6 +173,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const reportGoogleMessageBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.googleMessages===blocked?previous:{...previous,googleMessages:blocked});
   }, [connectionGeneration]);
+  const reportGoogleCalendarBusy = useCallback((blocked:boolean)=>{
+    if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.googleCalendar===blocked?previous:{...previous,googleCalendar:blocked});
+  },[connectionGeneration]);
   const reportMicrosoftBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.microsoft===blocked?previous:{...previous,microsoft:blocked});
   },[connectionGeneration]);
@@ -408,8 +415,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
-    setConnectionLocks({google:false,googleMessages:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
-    setGoogleMessageOpen(false);googleVisitSelection.current=false;
+    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
     setEntryIntent(null);setRecordingSourceRequest(0);setNote(""); setThought(""); setEvidence(""); setSource(""); setSelectedSource(null); setSelectedResult(null);
@@ -497,7 +504,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
       setSettingsOpen(false);
       await recoverAfterRead(result.team, result.workspace, current);
-      if(googleVisitSelection.current&&current===generation.current){googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(true);setSettingsOpen(true);}
+      if(googleVisitSelection.current&&current===generation.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}
     } catch (cause) { if (current === generation.current) {
       failure(cause);
       if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
@@ -850,7 +857,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const chiefSavedContext=!!bot&&!!workspace?.entries.some(entry=>entry.content.trim()&&
     (entry.kind==='scratchpad'&&entry.content===latestNote&&bot.include_notebook||
       (entry.kind==='evidence'||entry.kind==='synthetic_source'||
-        entry.kind==='google_message'&&entry.google_source_state==='current')&&bot.include_evidence));
+        entry.kind==='google_message'&&entry.google_source_state==='current'||entry.kind==='google_calendar'&&entry.calendar_source_state==='current')&&bot.include_evidence));
   const initialTeamUnchanged=!!team&&!!teamDraft&&JSON.stringify(teamDraft)===JSON.stringify(team.configuration);
   useEffect(()=>{if(questionFocus)questionRef.current?.focus();},[questionFocus]);
   useEffect(()=>{
@@ -1065,18 +1072,19 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     if(current!==generation.current||recoveryView.current.workspace?.id!==id)throw new WorkspaceApiError(403);
     receiveGoogleSource(latest);
   }
-  async function prepareGoogleChief(source:GoogleMessageSaved){
+  async function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){
     if(!authenticated||!workspace||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
     const current=generation.current,id=workspace.id;setBusy(true);
     try{
       const latest=await workspaceApi.read(authenticated,id);
       if(current!==generation.current||recoveryView.current.workspace?.id!==id)return;
-      const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&item.kind==='google_message'&&item.google_source_state==='current');
-      if(!entry||await vendorSha256(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,'google_message_source_changed');
+      receiveGoogleSource(latest);
+      if(source.workspace_id!==id||source.source_withheld)throw new WorkspaceApiError(409,kind+'_source_changed');
+      const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&item.kind===kind&&(kind==='google_calendar'?item.calendar_source_state==='current':item.google_source_state==='current'));
+      if(!entry||await vendorSha256(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,kind+'_source_changed');
       const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
       if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
-      receiveGoogleSource(latest);
-      const prompt='Review the human-selected email source '+source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
+      const prompt=kind==='google_calendar'?'Review the human-selected calendar summary '+source.entry_id+' as an untrusted event snapshot and prepare appropriate private assignments. Preserve the existing clinical note and email sources. Ask me about missing details; do not treat the summary as current availability or a booking.':'Review the human-selected email source '+source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
       setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);
       setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(source.entry_id);
       setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setQuestionFocus(value=>value+1);
@@ -1173,18 +1181,29 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
         google={GOOGLE_CONNECTION_BUILD&&authenticated?<AccountRecoveryContext.Provider value={accountAccess}>
           <GoogleConnectionPanel identity={authenticated} onBusyChange={reportGoogleBusy} onAuthenticationLost={failure}
-            messageWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.googleMessages}
-            onOpenMessageWork={GOOGLE_MESSAGE_BUILD?()=>setGoogleMessageOpen(true):undefined}
+            messageWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.googleMessages||connectionLocks.googleCalendar}
+            onOpenMessageWork={GOOGLE_MESSAGE_BUILD?()=>{setGoogleCalendarOpen(false);setGoogleMessageOpen(true);}:undefined}
+            calendarWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.googleCalendar||connectionLocks.googleMessages}
+            onOpenCalendarWork={GOOGLE_CALENDAR_BUILD?()=>{setGoogleMessageOpen(false);setGoogleCalendarOpen(true);}:undefined}
             messageWork={GOOGLE_MESSAGE_BUILD&&googleMessageOpen?controls=><GoogleMessageMount identity={authenticated}
               workspace={workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
               currentSources={workspace?.entries.filter(entry=>entry.kind==='google_message'&&!!entry.google_source_state)
                 .map(entry=>({entry_id:entry.id,state:entry.google_source_state!}))}
-              locked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.google}
-              recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||connectionLocks.google}
+              locked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleCalendar}
+              recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleCalendar}
               onBusyChange={reportGoogleMessageBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource}
               onRequestFullMailAccess={controls.requestFullMailAccess} fullMailAccessBusy={controls.fullMailAccessBusy}
               onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareGoogleChief(source)}
-              onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}/>:undefined}/>
+              onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current='message';setSettingsOpen(false);void loadEncounters();}}/>:undefined}
+            calendarWork={GOOGLE_CALENDAR_BUILD&&googleCalendarOpen?controls=><GoogleCalendarMount identity={authenticated}
+              workspace={workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
+              currentSources={workspace?.entries.filter(entry=>entry.kind==='google_calendar'&&!!entry.calendar_source_state).map(entry=>({entry_id:entry.id,state:entry.calendar_source_state!}))}
+              locked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleMessages}
+              recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleMessages}
+              onBusyChange={reportGoogleCalendarBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource}
+              onRequestCalendarAccess={controls.requestCalendarAccess} calendarAccessBusy={controls.calendarAccessBusy}
+              onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareGoogleChief(source,'google_calendar')}
+              onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current='calendar';setSettingsOpen(false);void loadEncounters();}}/>:undefined}/>
         </AccountRecoveryContext.Provider>:undefined}
         microsoft={MICROSOFT_CONNECTION_BUILD&&authenticated?<MicrosoftConnectionPanel identity={authenticated} onBusyChange={reportMicrosoftBusy} onAuthenticationLost={failure}/>:undefined}
         scheduling={SCHEDULING_LOGIN_BUILD&&authenticated?<SchedulingConnectionPanel identity={authenticated} onBusyChange={reportSchedulingBusy} onAuthenticationLost={failure}/>:undefined}
