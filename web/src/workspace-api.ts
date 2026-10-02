@@ -77,6 +77,11 @@ export type DraftHandoff = {
   recipient_agent_id?: string; recipient_key?: BotAddress;
   task_brief?:HandoffTaskBrief;task_brief_unavailable?:boolean;
   completion_evidence?:{kind:"saved_private_draft";entry_id:string;revision:number;sha256:string;source_versions:TaskSourceVersion[]};
+  result_sha256?:string|null;
+  review_status?:"current"|"stale"|"not_reviewed";
+  review?:{id:string;attempt_id:string;result_entry_id:string;result_sha256:string;decision:"accepted"|"changes_requested";
+    feedback:string;created_at:string;revision_handoff_id?:string|null}|null;
+  revision_request?:{parent_handoff_id:string;review_id:string;attempt_id:string;result_entry_id:string;result_sha256:string;feedback:string};
   brief: string; context_revision: number; status: "queued" | "running" | "completed" | "failed" | "interrupted";
   attempt_id: string; attempt_count: number; result_entry_id: string | null; error_code: string | null;
   attempts: { id: string; number: number; status: string; error_code: string | null }[];

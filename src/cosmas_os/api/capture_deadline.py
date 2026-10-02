@@ -359,11 +359,16 @@ def install_capture_boundaries(app, connection_dependency):
         raise ValueError("capture_boundary_already_installed")
     inventory, plans = [], []
     for route in app.routes:
-        if not isinstance(route, APIRoute) or not uses(route.dependant):
+        handoff_paths={
+            '/workspaces/{workspace_id}/handoffs/{handoff_id}/review',
+            '/workspaces/{workspace_id}/handoffs/{handoff_id}/revision',
+        }
+        if not isinstance(route, APIRoute) or not (uses(route.dependant) or route.path in handoff_paths):
             continue
         path = route.path
         seconds = (
-            15 if "/membership-work" in path
+            30 if path in handoff_paths
+            else 15 if "/membership-work" in path
             else 30 if "/vendor-work" in path or "/vendor-artifacts" in path or "/finance-work" in path
             else 45 if "/portal-work" in path
             else CAPTURE_REQUEST_SECONDS

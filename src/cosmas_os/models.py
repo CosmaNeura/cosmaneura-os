@@ -871,6 +871,76 @@ class WorkspaceHandoffAttempt(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkspaceHandoffReview(Base):
+    """Immutable human feedback on one exact private draft and its saved inputs."""
+
+    __tablename__ = "workspace_handoff_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(["handoff_id", "workspace_id", "box_id", "owner_id"], ["workspace_handoffs.id", "workspace_handoffs.workspace_id", "workspace_handoffs.box_id", "workspace_handoffs.owner_id"]),
+        ForeignKeyConstraint(["attempt_id", "workspace_id", "box_id", "owner_id"], ["workspace_handoff_attempts.id", "workspace_handoff_attempts.workspace_id", "workspace_handoff_attempts.box_id", "workspace_handoff_attempts.owner_id"]),
+        ForeignKeyConstraint(["result_entry_id", "workspace_id", "box_id"], ["workspace_entries.id", "workspace_entries.workspace_id", "workspace_entries.box_id"]),
+        ForeignKeyConstraint(["agent_id", "box_id", "owner_id"], ["provider_bots.agent_id", "provider_bots.box_id", "provider_bots.owner_id"]),
+        UniqueConstraint("attempt_id", name="uq_handoff_review_attempt"),
+        UniqueConstraint("workspace_id", "idempotency_key", name="uq_handoff_review_key"),
+        UniqueConstraint("workspace_id", "workspace_revision", name="uq_handoff_review_revision"),
+        CheckConstraint("decision IN ('accepted','changes_requested')", name="ck_handoff_review_decision"),
+        CheckConstraint("char_length(feedback) <= 2000 AND (decision <> 'changes_requested' OR feedback !~ '^[[:space:]]*$')", name="ck_handoff_review_feedback"),
+        CheckConstraint("result_sha256 ~ '^[0-9a-f]{64}$' AND source_sha256 ~ '^[0-9a-f]{64}$' AND request_hash ~ '^[0-9a-f]{64}$'", name="ck_handoff_review_hashes"),
+        CheckConstraint("expected_revision >= 1 AND workspace_revision = expected_revision + 1", name="ck_handoff_review_revision"),
+        CheckConstraint("jsonb_typeof(source_versions) = 'array' AND jsonb_array_length(source_versions) <= 12 AND octet_length(source_versions::text) <= 32768", name="ck_handoff_review_sources"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    handoff_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    attempt_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    result_entry_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    agent_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    result_sha256: Mapped[str] = mapped_column(String(64))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    source_versions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
+    expected_revision: Mapped[int] = mapped_column(Integer)
+    workspace_revision: Mapped[int] = mapped_column(Integer)
+    decision: Mapped[str] = mapped_column(String(24))
+    feedback: Mapped[str] = mapped_column(Text, default="")
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkspaceHandoffRevision(Base):
+    """One explicit human revision request linked to a fresh private assignment."""
+
+    __tablename__ = "workspace_handoff_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(["parent_handoff_id", "workspace_id", "box_id", "owner_id"], ["workspace_handoffs.id", "workspace_handoffs.workspace_id", "workspace_handoffs.box_id", "workspace_handoffs.owner_id"]),
+        ForeignKeyConstraint(["revision_handoff_id", "workspace_id", "box_id", "owner_id"], ["workspace_handoffs.id", "workspace_handoffs.workspace_id", "workspace_handoffs.box_id", "workspace_handoffs.owner_id"]),
+        ForeignKeyConstraint(["origin_entry_id", "workspace_id", "box_id"], ["workspace_entries.id", "workspace_entries.workspace_id", "workspace_entries.box_id"]),
+        ForeignKeyConstraint(["review_id"], ["workspace_handoff_reviews.id"]),
+        UniqueConstraint("review_id", name="uq_handoff_revision_review"),
+        UniqueConstraint("revision_handoff_id", name="uq_handoff_revision_assignment"),
+        UniqueConstraint("origin_entry_id", name="uq_handoff_revision_origin"),
+        UniqueConstraint("workspace_id", "idempotency_key", name="uq_handoff_revision_key"),
+        CheckConstraint("parent_handoff_id <> revision_handoff_id", name="ck_handoff_revision_identity"),
+        CheckConstraint("expected_revision >= 1 AND workspace_revision = expected_revision + 1", name="ck_handoff_revision_revision"),
+        CheckConstraint("request_hash ~ '^[0-9a-f]{64}$'", name="ck_handoff_revision_hash"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    parent_handoff_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    review_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    revision_handoff_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    origin_entry_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    expected_revision: Mapped[int] = mapped_column(Integer)
+    workspace_revision: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class ModelWorkAdmission(Base):
     """One immutable private model input with a single durable dispatch fence."""
 

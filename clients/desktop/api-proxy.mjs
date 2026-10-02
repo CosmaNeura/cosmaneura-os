@@ -2,7 +2,7 @@
 const API_ORIGIN = 'http://127.0.0.1:8018';
 const UUID = '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}';
 const READ = new RegExp(`^/(?:workspaces(?:/${UUID})?|provider-team|queue|tickets/${UUID}/timeline)$`);
-const WRITE = new RegExp(`^/(?:synth/demo-queue|provider-team|workspaces(?:/${UUID}/(?:entries|conversation|work-links|handoffs/${UUID}/retry|notes(?:/${UUID}/review)?|follow-ups(?:/${UUID}/(?:decide|complete))?))?|tickets/${UUID}/(?:decide|edit|close))$`);
+const WRITE = new RegExp(`^/(?:synth/demo-queue|provider-team|workspaces(?:/${UUID}/(?:entries|conversation|work-links|handoffs/${UUID}/(?:retry|review|revision)|notes(?:/${UUID}/review)?|follow-ups(?:/${UUID}/(?:decide|complete))?))?|tickets/${UUID}/(?:decide|edit|close))$`);
 const ID = new RegExp(`^${UUID}$`);
 
 export function permittedApiPath(url, method) {
@@ -50,8 +50,13 @@ export async function proxyWorkspaceRequest(request, fetchImplementation = fetch
     if (value && !ID.test(value)) return unavailable(400);
     if (value) headers.set(name, value);
   }
+  const review = /\/handoffs\/[^/]+\/(?:review|revision)$/.test(path);
+  const reviewContract=request.headers.get('X-Cosmas-Handoff-Review'),modelContract=request.headers.get('X-Cosmas-Model-Contract');
+  if(review ? reviewContract!=='1'||modelContract!=='1' : reviewContract!==null) return unavailable(426);
+  if(modelContract!==null){if(modelContract!=='1')return unavailable(426);headers.set('X-Cosmas-Model-Contract',modelContract);}
+  if(review)headers.set('X-Cosmas-Handoff-Review','1');
   try {
-    const body = await boundedBytes(request.body, 128_000);
+    const body = await boundedBytes(request.body, review?12_288:128_000);
     const response = await fetchImplementation(API_ORIGIN + path, {
       method: request.method, headers,
       body: request.method === 'POST' ? body : undefined,

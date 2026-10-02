@@ -1159,6 +1159,50 @@ def read_workspace(request: Request, workspace_id: UUID, session: Session = Depe
     return value
 
 
+@app.post("/workspaces/{workspace_id}/handoffs/{handoff_id}/review", dependencies=[Depends(_workspace_gate)])
+async def review_handoff(request: Request, workspace_id: UUID, handoff_id: UUID,
+                         session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity)):
+    from cosmas_os.api.handoff_review_schemas import HandoffReview
+    from cosmas_os.api.model_work_schemas import contract_header, read_model_request
+    from cosmas_os.application import handoff_review, model_work
+    from cosmas_os.application.capture_deadline import run_in_threadpool
+    contract_header(request, required=True)
+    if request.headers.getlist("X-Cosmas-Handoff-Review") != ["1"]:
+        raise ws.WorkspaceError("handoff_review_contract_required", 426)
+    body = await read_model_request(request, HandoffReview)
+    def submit():
+        value = handoff_review.review(session, identity.box_id, identity.principal_id,
+            str(workspace_id), str(handoff_id), expected=body.expected_revision, key=body.idempotency_key,
+            attempt_id=str(body.attempt_id), result_entry_id=str(body.result_entry_id),
+            result_sha256=body.result_sha256, decision=body.decision, feedback=body.feedback,
+            external_identity_id=identity.external_identity_id,
+            reauthenticate=lambda: _refresh_model_identity(request, session, identity))
+        value["workspace"] = model_work.project_workspace(session, value["workspace"])
+        return JSONResponse(value, headers={"Cache-Control": "no-store"})
+    return await run_in_threadpool(submit)
+
+
+@app.post("/workspaces/{workspace_id}/handoffs/{handoff_id}/revision", dependencies=[Depends(_workspace_gate)])
+async def revise_handoff(request: Request, workspace_id: UUID, handoff_id: UUID,
+                         session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity)):
+    from cosmas_os.api.handoff_review_schemas import HandoffRevision
+    from cosmas_os.api.model_work_schemas import contract_header, read_model_request
+    from cosmas_os.application import handoff_revision, model_work
+    from cosmas_os.application.capture_deadline import run_in_threadpool
+    contract_header(request, required=True)
+    if request.headers.getlist("X-Cosmas-Handoff-Review") != ["1"]:
+        raise ws.WorkspaceError("handoff_review_contract_required", 426)
+    body = await read_model_request(request, HandoffRevision)
+    def submit():
+        value = handoff_revision.reserve(session, identity.box_id, identity.principal_id,
+            str(workspace_id), str(handoff_id), expected=body.expected_revision, key=body.idempotency_key,
+            review_id=str(body.review_id), external_identity_id=identity.external_identity_id,
+            reauthenticate=lambda: _refresh_model_identity(request, session, identity))
+        value["workspace"] = model_work.project_workspace(session, value["workspace"])
+        return JSONResponse(value, headers={"Cache-Control": "no-store"})
+    return await run_in_threadpool(submit)
+
+
 @app.post("/workspaces/{workspace_id}/notes", dependencies=[Depends(_workspace_gate)])
 def save_private_note(workspace_id: UUID, body: NoteSave, session: Session = Depends(get_session),
                       identity: RequestIdentity = Depends(_identity)):
@@ -1924,7 +1968,7 @@ from cosmas_os.api.practice_access_routes import register as register_practice_a
 register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_verifier,
                         session_factory=lambda: new_capture_session(SessionLocal))
 
-allowed_headers = ["X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
+allowed_headers = ["X-Cosmas-Handoff-Review", "X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
 allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection"])
 allowed_headers.extend(["X-Cosmas-Record-Contract", "X-Cosmas-Connection-Contract", "X-Cosmas-Activity-Contract"])
 if settings.cosmas_env == "synth_os" and settings.auth_mode == "synth_headers":

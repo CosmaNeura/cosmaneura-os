@@ -282,6 +282,7 @@ def read(s, w, revision):
         receipts = list(s.scalars(select(FollowUpReceipt).where(FollowUpReceipt.ticket_id == t.id).order_by(
             FollowUpReceipt.created_at, FollowUpReceipt.kind.desc(), FollowUpReceipt.id)))
         result.append({"ticket_id": t.id, "revision_id": r.id, "payload_hash": r.payload_hash,
+            "ticket_version": t.version,
             "create_key": b.idempotency_key,
             "state": t.state, "body": r.content, "due_date": r.payload["due_date"],
             "expected_outcome": r.payload["expected_outcome"], "owner_id": w.owner_id,

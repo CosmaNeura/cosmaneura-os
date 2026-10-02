@@ -147,6 +147,9 @@ class Settings(BaseSettings):
     workspace_llm_endpoint: str = "https://cosmascode.services.ai.azure.com/openai/v1"
     workspace_llm_deployment: str = "gpt-4.1"
     workspace_llm_api_key: SecretStr | None = None
+    # New admissions opt into the closed product reader loop; saved v1–v4
+    # requests retain their original single-response contract.
+    workspace_agent_tools_enabled: bool = False
 
     @property
     def workspace_research_available(self) -> bool:

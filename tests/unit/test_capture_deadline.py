@@ -320,12 +320,16 @@ def test_auth_error_and_unrelated_route_semantics_survive_boundary(monkeypatch):
 def test_installed_product_inventory_is_exact_and_other_routes_unwrapped():
     from cosmas_os.api.app import app
     inventory = app.state.capture_deadline_routes
-    assert len(inventory) == 32
+    assert len(inventory) == 36
     counts = {}
     for entry in inventory:
         assert entry['methods'] == ['POST']
         counts[entry['seconds']] = counts.get(entry['seconds'], 0) + 1
-    assert counts == {120: 11, 30: 9, 45: 7, 15: 5}
+    assert counts == {120: 13, 30: 11, 45: 7, 15: 5}
+    assert {entry['path'] for entry in inventory if '/handoffs/' in entry['path'] and entry['path'].endswith(('/review','/revision'))} == {
+        '/workspaces/{workspace_id}/handoffs/{handoff_id}/review',
+        '/workspaces/{workspace_id}/handoffs/{handoff_id}/revision',
+    }
     for route in app.routes:
         if isinstance(route, APIRoute):
             found = any(i['path'] == route.path and 'POST' in (route.methods or set()) for i in inventory)
@@ -334,7 +338,7 @@ def test_installed_product_inventory_is_exact_and_other_routes_unwrapped():
     assert sum(item.cls is boundary.CaptureMiddleware for item in app.user_middleware) == 1
 
 
-@pytest.mark.parametrize('index', range(32))
+@pytest.mark.parametrize('index', range(36))
 def test_every_installed_core_callback_route_bounds_slow_body(monkeypatch, index):
     from cosmas_os.api import app as product
     selected = cast(Any, next(item for item in product.app.user_middleware if item.cls is boundary.CaptureMiddleware).kwargs['plans'])[index][0]
@@ -358,11 +362,13 @@ def test_every_installed_core_callback_route_bounds_slow_body(monkeypatch, index
                  product._prep_gate: lambda: None, product._prep_work_gate: lambda: None}
     for key, value in overrides.items():
         monkeypatch.setitem(product.app.dependency_overrides, key, value)
-    params = {name: str(uuid4()) for name in ('workspace_id', 'ticket_id', 'note_id')}
+    params = {name: str(uuid4()) for name in ('workspace_id', 'ticket_id', 'note_id', 'handoff_id')}
     path = selected.path.format(**params)
     monkeypatch.setattr(product.settings, 'workspace_enabled', True)
     monkeypatch.setattr(product.settings, 'database_url', 'postgresql+psycopg://invented:invented@127.0.0.1:1/w1a_offline_deadline')
     lane_headers = []
+    if '/handoffs/' in path and path.endswith(('/review','/revision')):
+        lane_headers.extend([(b'x-cosmas-model-contract',b'1'),(b'x-cosmas-handoff-review',b'1')])
     for family, header in [('vendor','x-cosmas-vendor-contract'),('finance','x-cosmas-finance-contract'),
                            ('portal','x-cosmas-portal-work-contract'),('membership','x-cosmas-membership-contract')]:
         if f'/{family}-work' in path or family == 'vendor' and '/vendor-artifacts' in path:

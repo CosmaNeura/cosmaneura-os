@@ -87,7 +87,7 @@ def read(s, w, revision):
         )
     )
     output = []
-    from cosmas_os.application import model_work
+    from cosmas_os.application import handoff_review, handoff_revision, model_work
 
     as_of = model_work.now(s)
     for handoff in handoffs:
@@ -100,6 +100,8 @@ def read(s, w, revision):
         )
         latest = attempts[-1]
         states = {a.id: model_work.attempt_state(s, a, as_of) for a in attempts}
+        evidence = handoff_briefs.projection(s, handoff, states[latest.id][2])
+        reviewed = handoff_review.stored_review_for(s, w, handoff, latest)
         output.append(
             {
                 "id": handoff.id,
@@ -117,7 +119,11 @@ def read(s, w, revision):
                 "attempt_count": latest.number,
                 "result_entry_id": latest.result_entry_id,
                 "error_code": states[latest.id][1],
-                **handoff_briefs.projection(s, handoff, states[latest.id][2]),
+                **evidence,
+                "result_sha256": evidence.get("completion_evidence", {}).get("sha256"),
+                "review": reviewed,
+                "review_status": handoff_review.review_status_for(s, w, handoff, latest),
+                **handoff_revision.revision_for(s, w, handoff),
                 "attempts": [
                     {
                         "id": a.id,

@@ -17,10 +17,11 @@ export function HandoffCard({ handoff, locked, onRetry, onShow, resultAvailable=
   const preview=shortened?characters.slice(0,159).join('')+'…':goal;
   return <article className="team-handoff" aria-label={`Draft assignment for ${handoff.recipient_name}`}>
     <header><BotAvatar role={handoff.recipient_role} active={handoff.status==='queued'||handoff.status==='running'} /><div><strong>{handoff.recipient_name}</strong>
-      <small>{labels[handoff.status]}</small></div></header>
+      <small>{handoff.review_status==='stale'?'Review needs updating':handoff.review?.decision==='accepted'?'Draft accepted':
+        handoff.review?.decision==='changes_requested'?'Changes requested':labels[handoff.status]}</small></div></header>
     <p className="team-task-goal">{preview}</p>
     {handoff.status === "completed" && handoff.result_entry_id && !handoff.task_brief_unavailable &&
-      <button className="team-task-review" disabled={!resultAvailable} onClick={onShow} aria-label={`Review ${handoff.recipient_name} result`}>{resultAvailable?'Review result':'Loading saved result…'}</button>}
+      <button className="team-task-review" disabled={locked||!resultAvailable} onClick={onShow} aria-label={`Review ${handoff.recipient_name} result`}>{resultAvailable?'Review result':'Loading saved result…'}</button>}
     <p className="team-task-summary team-fine">{handoff.status==='completed'
       ? <>Private draft saved{handoff.completion_evidence?` · revision ${handoff.completion_evidence.revision} · ${handoff.completion_evidence.source_versions.length} sources cited`:''}</>
       : task ? <>{task.source_versions.length} saved {task.source_versions.length===1?'source':'sources'} · Independent draft</>

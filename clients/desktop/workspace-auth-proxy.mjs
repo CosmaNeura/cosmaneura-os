@@ -7,9 +7,10 @@ const API_ORIGIN = 'http://127.0.0.1:8046';
 const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const BOT = `(?:chief|scribe|visit_prep|follow_up|${ID})`;
 const READ = new RegExp(`^/(?:workspaces(?:/${ID}(?:/(?:appointments(?:/(?:pages/)?${ID})?|prep-work(?:/${ID})?))?)?|provider-team(?:/(?:identity|setup|resources|usage|routines/${BOT}(?:/runs/${ID})?))?|practice-work(?:/(?:pages/)?${ID})?)$`);
-const WRITE = new RegExp(`^/(?:provider-team(?:/(?:rehearsal|routines/${BOT}))?|practice-work/${ID}/(?:handoffs|complete)|workspaces(?:/${ID}/(?:entries|conversation(?:/resolve)?|work-links|handoffs/${ID}/retry(?:/resolve)?|notes(?:/${ID}/review)?|follow-ups(?:/${ID}/(?:decide|complete))?|appointments(?:/(?:current|${ID}/(?:decide|execute)))?|prep-work(?:/${ID}/(?:decide|verify))?|scheduling/availability|capture/(?:admission|operations|notes|note-links|prep|existing|source-packets)))?)$`);
+const WRITE = new RegExp(`^/(?:provider-team(?:/(?:rehearsal|routines/${BOT}))?|practice-work/${ID}/(?:handoffs|complete)|workspaces(?:/${ID}/(?:entries|conversation(?:/resolve)?|work-links|handoffs/${ID}/(?:retry(?:/resolve)?|review|revision)|notes(?:/${ID}/review)?|follow-ups(?:/${ID}/(?:decide|complete))?|appointments(?:/(?:current|${ID}/(?:decide|execute)))?|prep-work(?:/${ID}/(?:decide|verify))?|scheduling/availability|capture/(?:admission|operations|notes|note-links|prep|existing|source-packets)))?)$`);
 const SCRIBE_SOURCE = new RegExp(`^/workspaces/${ID}/capture/(existing|source-packets)$`);
 const MODEL_COMMAND = new RegExp(`^/workspaces/${ID}/(?:conversation(?:/resolve)?|handoffs/${ID}/retry(?:/resolve)?)$`);
+const HANDOFF_REVIEW = new RegExp(`^/workspaces/${ID}/handoffs/${ID}/(?:review|revision)$`);
 const WORKSPACE_READ = new RegExp(`^/workspaces/${ID}$`);
 const ROUTINE_RUN_READ = new RegExp(`^/provider-team/routines/${BOT}/runs/${ID}$`);
 const REVISION = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -109,7 +110,10 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   const recoveryGeneration = request.headers.get('X-Cosmas-Draft-Recovery');
   if ((identityPath || activityPath) && recoveryGeneration !== '2') return unavailable(426);
   if (recoveryGeneration !== null && !['1', '2'].includes(recoveryGeneration)) return unavailable(400);
-  const strictResponse = identityPath || activityPath || connector?.strictResponse;
+  const handoffReview = request.method === 'POST' && HANDOFF_REVIEW.test(path);
+  const handoffContract = request.headers.get('X-Cosmas-Handoff-Review');
+  if(handoffReview ? handoffContract !== '1' : handoffContract !== null) return unavailable(426);
+  const strictResponse = identityPath || activityPath || handoffReview || connector?.strictResponse;
   const teamPath = ['/provider-team', '/provider-team/setup', '/provider-team/rehearsal'].includes(path);
   const teamInfoPath = activityPath || ['/provider-team/resources', '/provider-team/usage', '/provider-team/identity'].includes(path);
   const teamContract = request.headers.get('X-Cosmas-Team-Contract');
@@ -119,8 +123,8 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   const modelCommand = request.method === 'POST' && MODEL_COMMAND.test(path);
   const workspaceRead = request.method === 'GET' && WORKSPACE_READ.test(path);
   const modelContract = request.headers.get('X-Cosmas-Model-Contract');
-  if (modelContract !== null && (modelContract !== '1' || !modelCommand && !workspaceRead) ||
-      modelCommand && path.endsWith('/resolve') && modelContract !== '1') return unavailable(426);
+  if (modelContract !== null && (modelContract !== '1' || !modelCommand && !workspaceRead && !handoffReview) ||
+      (handoffReview || modelCommand && path.endsWith('/resolve')) && modelContract !== '1') return unavailable(426);
   // Missing negotiation on the two original command paths reaches the backend
   // only for its exact legacy/deterministic compatibility checks. It is never
   // upgraded here into authority for a new model admission.
@@ -138,7 +142,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     const appointmentPath = path.endsWith('/appointments') || path.includes('/appointments/');
     const prepWorkPath = path.endsWith('/prep-work') || path.includes('/prep-work/');
     const routinePath = path.startsWith('/provider-team/routines/');
-    const maximumInput = identityPath || activityPath ? 0 : scribeSource ? MAX_SCRIBE_SOURCE_REQUEST_BYTES : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
+    const maximumInput = handoffReview ? 12288 : identityPath || activityPath ? 0 : scribeSource ? MAX_SCRIBE_SOURCE_REQUEST_BYTES : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
       path.endsWith('/capture/operations') ? 4194304 : path.includes('/capture/') ? 1048576 : 128000;
     const body = await boundedBytes(request.body, maximumInput, signal);
     if (request.method === 'GET' && body.length) return unavailable(400);
@@ -161,6 +165,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
         ...(teamContract ? {'X-Cosmas-Team-Contract': teamContract} : {}),
         ...(activityContract ? {'X-Cosmas-Activity-Contract': activityContract} : {}),
         ...(modelContract ? {'X-Cosmas-Model-Contract': modelContract} : {}),
+        ...(handoffContract ? {'X-Cosmas-Handoff-Review': handoffContract} : {}),
         ...(routineContract ? {'X-Cosmas-Routine-Contract': routineContract} : {}),
         ...(connector ? {[connector.header]:'1'} : {}),
         ...(writeKey ? {'X-Cosmas-Artifact-Write-Key':writeKey} : {})}, body: request.method === 'POST' || request.method === 'PUT' ? body : undefined,

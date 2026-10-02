@@ -15,3 +15,10 @@
 .team-task-grid .team-handoff>.team-task-summary{font-size:12px;line-height:1.4;margin:.4rem 0;color:var(--team-muted,#687078)}
 .team-task-grid .team-handoff>.team-task-details{margin:.25rem 0 0}
 .team-task-grid .team-handoff>.team-task-details>summary{padding:10px 0}
+
+.handoff-review{margin:0 0 1rem;padding:1rem;border:1px solid var(--team-line,#e6e8eb);border-radius:16px;background:var(--surface,#fff);max-width:100%;overflow-wrap:anywhere}
+.handoff-review h3{margin:0 0 .5rem}.handoff-review p{line-height:1.5}.handoff-review button{min-height:44px;margin:.4rem .5rem .4rem 0;padding:.6rem .9rem;border-radius:10px}
+.handoff-review [aria-label="Complete saved draft"]{padding:.9rem;background:var(--team-subtle,#f5f6f7);border-radius:10px;line-height:1.6;font-size:15px}
+.handoff-review textarea{display:block;box-sizing:border-box;width:100%;min-height:110px;margin:.4rem 0;font:inherit;padding:.75rem;border:1px solid var(--team-line,#e6e8eb);border-radius:10px}
+.handoff-review button:focus-visible,.handoff-review textarea:focus-visible{outline:3px solid var(--team-accent,#386a81);outline-offset:3px}
+@media(max-width:600px){.handoff-review{padding:.75rem}.handoff-review button{width:100%;margin:.35rem 0}}
