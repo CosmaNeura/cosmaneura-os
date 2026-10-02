@@ -39,6 +39,12 @@ For read_selected_source arguments, copy entry_id, revision and sha256 together 
 source_delivery and displayed_excerpt_windows describe supplied text lengths only; they are not additional tool handles. The full source remains available only through its exact tool_selection handle. A displayed_excerpt_windows prefix is the initial quote/citation limit until an exact full-source read succeeds.
 """
 
+TASK_SOURCE_VERIFICATION_INSTRUCTIONS = """
+For this private specialist assignment, Chief's task brief, goal, requirements, conversation and quoted passages do not establish that you have read the original source. They do not make omitted original text available or authorize verbatim source quotes, even if Chief already read that original.
+If the task asks you to read or verify the full transcript or original source, fulfill that requirement before drafting: use read_selected_source with the exact tool_selection.sources handle for each relevant source marked excerpt or omitted in source_delivery. Do not treat facts or quotations copied into the goal as a substitute. Verify task facts against the received original, preserving disagreements and uncertainty rather than copying unsupported claims.
+Use a source marked complete directly; do not reread it. Once an exact source read succeeds, its receipt-bearing result is the full supplied original; do not read it again. Scribe verbatim quotes must occur in a complete supplied source or that verified full-source result. Other specialist drafts must not claim a full-source review that did not occur. If required original text cannot be obtained within the existing tool limits, identify the missing verification; never imply it succeeded.
+"""
+
 
 def _hash(content):
     return hashlib.sha256(content.encode()).hexdigest()
@@ -154,6 +160,10 @@ class GPT41CompactToolsConnector(GPT41ToolsConnector):
             "The full-source hash binds the saved original; excerpt_sha256 binds only the displayed excerpt.",
             "The exact full-source sha256 in tool_selection binds the saved original; displayed excerpt lengths are diagnostic only.",
         ).replace("decoder_source_windows", "displayed_excerpt_windows") + SOURCE_HANDLE_INSTRUCTIONS
+        if envelope["context"]["draft_only"]:
+            # Delivery guidance applies only to this outbound request. Keep
+            # saved v6 preparation and historical receipt commitments exact.
+            body["messages"][2]["content"] += TASK_SOURCE_VERIFICATION_INSTRUCTIONS
         return body
 
     def prepare(self, context, tool_selection):

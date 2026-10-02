@@ -3,6 +3,7 @@
 import json
 from copy import deepcopy
 from dataclasses import asdict, replace
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -11,9 +12,13 @@ import pytest
 from cosmas_os.adapters import gpt41
 from cosmas_os.adapters.gpt41_tools import GPT41ToolsConnector, _digest
 from cosmas_os.adapters.gpt41_tools import validate_prepared as validate_v5
-from cosmas_os.adapters.gpt41_tools_v6 import GPT41CompactToolsConnector, validate_prepared
-from cosmas_os.application import agent_tools
-from cosmas_os.ports.bot_capabilities import BotContext, ModelCallFailure, SourcePassage
+from cosmas_os.adapters.gpt41_tools_v6 import (
+    TASK_SOURCE_VERIFICATION_INSTRUCTIONS,
+    GPT41CompactToolsConnector,
+    validate_prepared,
+)
+from cosmas_os.application import agent_tools, handoff_briefs
+from cosmas_os.ports.bot_capabilities import BotContext, DraftBrief, ModelCallFailure, SourcePassage
 
 
 def invented_text(length: int, number: int) -> str:
@@ -172,6 +177,7 @@ def test_outbound_v6_excerpt_diagnostics_never_expose_a_competing_tool_handle_ha
     for record in envelope["source_delivery"]:
         assert record["excerpt_sha256"] not in wire
     assert "ONLY from tool_selection.sources" in bodies[0]["messages"][2]["content"]
+    assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
     assert envelope == original and _digest(envelope) == stored_hash
     validate_prepared(envelope)
 
@@ -218,6 +224,145 @@ def test_model_following_the_only_visible_source_handle_reads_full_text_and_can_
     assert returned["receipt"]["envelope_sha256"] == _digest(original)
     assert "INVENTED-TAIL-0" in result.content and len(bodies) == 2
     assert envelope == original
+
+
+LATE_TASK_QUOTES = (
+    "Provider-reported callback preference is Tuesday at 14:30. This is a preference, not a booked appointment.",
+    "The proposed records custodian is Lena Ortiz. A records request has not been sent and the owner must be confirmed.",
+    "Ask whether a prior angiogram exists. No angiogram result is available; clinical-trial eligibility remains unknown.",
+)
+
+
+def quoted_task_envelope(delivery="excerpt", role="scribe"):
+    lengths = (350,) if delivery == "complete" else (12000,) if delivery == "excerpt" else (4000,) * 7
+    ctx = replace(context(lengths, scribe=role == "scribe"), role=role, draft_only=True)
+    source = ctx.sources[0]
+    tail = "\n".join(LATE_TASK_QUOTES)
+    source = replace(source, content=source.content[:-(len(tail) + 1)] + "\n" + tail)
+    # The complete case needs room for the independently supplied late facts.
+    if delivery == "complete":
+        source = replace(source, content="Invented complete transcript.\n" + tail)
+    ctx = replace(ctx, sources=(source, *ctx.sources[1:]))
+    brief = DraftBrief(role, "Read the full transcript before drafting. Organize these provider sentences: "
+        + " ".join('"' + quote + '"' for quote in LATE_TASK_QUOTES), {
+        "missing_facts": ["DOB and clinical-trial eligibility remain unconfirmed."],
+        "expected_output": "A private draft using verified original source facts and preserving uncertainty.",
+        "completion_criteria": ["Read the full original and verify the provider sentences."],
+        "independent": True})
+    task = handoff_briefs.prepare(brief, ctx, SimpleNamespace(id="invented-chief-result", revision=1),
+        version=2, prepared_contract="cosmas-gpt41-prepared.v6")
+    ctx = replace(ctx, question=handoff_briefs.question(task))
+    return GPT41CompactToolsConnector(lambda: "invented-key").prepare(ctx, selection(ctx))
+
+
+@pytest.mark.parametrize("delivery", ["excerpt", "omitted"])
+def test_task_goal_quotes_need_original_read_and_runtime_guidance_supports_strict_scribe_decode(delivery):
+    envelope, bodies, reads = quoted_task_envelope(delivery), [], []
+    original, stored_hash = deepcopy(envelope), _digest(envelope)
+    assert envelope["source_delivery"][0]["delivery"] == delivery
+    assert all(quote in envelope["context"]["question"] for quote in LATE_TASK_QUOTES)
+    assert all(quote not in item["text"] for item in delivered(envelope["body"])["sources"]
+        for quote in LATE_TASK_QUOTES)
+
+    def provider(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        if len(bodies) == 1:
+            assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS in body["messages"][2]["content"]
+            prompt = delivered(body)
+            assert all(quote in prompt["question"] for quote in LATE_TASK_QUOTES)
+            assert prompt["source_delivery"][0]["delivery"] == delivery
+            handle = json.loads(body["messages"][3]["content"])["tool_selection"]["sources"][0]
+            call = {"id": "verify_chief_task_original", "type": "function", "function": {
+                "name": "read_selected_source", "arguments": json.dumps({
+                    key: handle[key] for key in ("entry_id", "revision", "sha256")})}}
+            return httpx.Response(200, json=tool_response(call))
+        returned = json.loads(body["messages"][-1]["content"])
+        assert returned["tool"] == "read_selected_source"
+        assert returned["data"]["content"] == envelope["context"]["sources"][0]["content"]
+        assert returned["receipt"]["envelope_sha256"] == stored_hash
+        return httpx.Response(200, json=answer("invented-source-0", content={
+            "excerpts": [{"source_id": "invented-source-0", "quote": quote} for quote in LATE_TASK_QUOTES],
+            "needs_from_clinician": ["Can you confirm DOB and clinical-trial eligibility?"]}))
+
+    def execute(request):
+        reads.append(request)
+        return source_result(envelope, request)
+
+    result = GPT41CompactToolsConnector(lambda: "invented-key", transport=httpx.MockTransport(provider)).review_prepared(
+        envelope, execute=execute)
+    assert len(bodies) == 2 and len(reads) == 1
+    assert reads[0] == {"tool": "read_selected_source", **{key: envelope["tool_selection"]["sources"][0][key]
+        for key in ("entry_id", "revision", "sha256")}}
+    assert all(quote in result.content for quote in LATE_TASK_QUOTES)
+    assert result.input_tokens == 200 and result.output_tokens == 40
+    assert envelope == original and _digest(envelope) == stored_hash
+    validate_prepared(envelope)
+
+
+@pytest.mark.parametrize("delivery", ["excerpt", "omitted"])
+def test_chief_task_goal_quotes_cannot_authorize_unread_scribe_verbatim_output(delivery):
+    envelope, bodies = quoted_task_envelope(delivery), []
+    original = deepcopy(envelope)
+    with pytest.raises(ModelCallFailure) as failure:
+        GPT41CompactToolsConnector(lambda: "invented-key", transport=transport([
+            answer("invented-source-0", content={
+                "excerpts": [{"source_id": "invented-source-0", "quote": quote} for quote in LATE_TASK_QUOTES],
+                "needs_from_clinician": []})], bodies)).review_prepared(
+                    envelope, execute=lambda _: pytest.fail("model did not request an original read"))
+    assert len(bodies) == 1 and failure.value.outcome == "invalid_output"
+    assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS in bodies[0]["messages"][2]["content"]
+    assert envelope == original and failure.value.input_tokens == 100
+
+
+def test_verified_original_read_does_not_authorize_an_inaccurate_quote_in_chiefs_task_goal():
+    envelope, bodies = quoted_task_envelope(), []
+    source_context = gpt41._context(envelope["context"])
+    inaccurate = LATE_TASK_QUOTES[0].replace("Tuesday", "Wednesday")
+    ctx = replace(source_context, question=source_context.question.replace(LATE_TASK_QUOTES[0], inaccurate))
+    envelope = GPT41CompactToolsConnector(lambda: "invented-key").prepare(ctx, selection(ctx))
+    assert inaccurate in ctx.question and inaccurate not in ctx.sources[0].content
+    with pytest.raises(ModelCallFailure) as failure:
+        GPT41CompactToolsConnector(lambda: "invented-key", transport=transport([
+            tool_response(read_call(envelope)), answer("invented-source-0", content={
+                "excerpts": [{"source_id": "invented-source-0", "quote": inaccurate}],
+                "needs_from_clinician": []})], bodies)).review_prepared(
+                    envelope, execute=lambda request: source_result(envelope, request))
+    assert len(bodies) == 2 and failure.value.outcome == "invalid_output"
+    assert failure.value.input_tokens == 200 and failure.value.output_tokens == 40
+
+
+@pytest.mark.parametrize("role", ["scribe", "visit_prep", "follow_up"])
+def test_complete_task_original_finishes_without_added_read_or_verification_prompt(role):
+    envelope, bodies = quoted_task_envelope("complete", role), []
+    assert all(item["delivery"] == "complete" for item in envelope["source_delivery"])
+    content = {"excerpts": [{"source_id": "invented-source-0", "quote": LATE_TASK_QUOTES[0]}],
+        "needs_from_clinician": []} if role == "scribe" else None
+    GPT41CompactToolsConnector(lambda: "invented-key", transport=transport([
+        answer("invented-source-0", content=content)], bodies)).review_prepared(
+            envelope, execute=lambda _: pytest.fail("complete original must not be redundantly read"))
+    assert len(bodies) == 1
+    assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
+    assert bodies[0] == envelope["body"]
+
+
+@pytest.mark.parametrize("role", ["visit_prep", "follow_up"])
+def test_non_scribe_specialist_task_gets_same_original_verification_guidance(role):
+    envelope, bodies, reads = quoted_task_envelope(role=role), [], []
+    original = deepcopy(envelope)
+    def provider(request):
+        body = json.loads(request.content)
+        bodies.append(body)
+        assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS in body["messages"][2]["content"]
+        if len(bodies) == 1:
+            return httpx.Response(200, json=tool_response(read_call(envelope)))
+        return httpx.Response(200, json=answer("invented-source-0"))
+    def execute(request):
+        reads.append(request)
+        return source_result(envelope, request)
+    GPT41CompactToolsConnector(lambda: "invented-key", transport=httpx.MockTransport(provider)).review_prepared(
+        envelope, execute=execute)
+    assert len(bodies) == 2 and len(reads) == 1 and envelope == original
 
 
 def test_removed_excerpt_hash_still_cannot_authorize_a_full_source_read():
@@ -487,6 +632,7 @@ def test_v5_json_replay_keeps_its_original_excerpt_after_a_read_and_rejects_v6_e
             saved, execute=lambda request: source_result(saved, request))
     assert len(bodies) == 2 and delivered(bodies[1])["sources"] == delivered(bodies[0])["sources"]
     assert bodies[0] == saved["body"]
+    assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
     assert json.dumps(bodies[0], separators=(",", ":"), ensure_ascii=False).encode() == json.dumps(
         saved["body"], separators=(",", ":"), ensure_ascii=False).encode()
     assert _digest(saved["baseline"]) == _digest(gpt41.GPT41Connector(lambda: "").prepare(ctx))
