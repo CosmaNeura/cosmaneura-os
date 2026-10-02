@@ -4,6 +4,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {GoogleConnectionPanel} from './GoogleConnectionPanel';
 import {googleConnectionRequest} from './google-connection-api';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
+import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 vi.mock('./google-connection-api',()=>({googleConnectionRequest:vi.fn()}));
 const browser:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null};
 const disconnected={state:'sign_in_required' as const,account:null,connected_at:null};
@@ -15,6 +16,37 @@ beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.cle
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();delete window.cosmasGoogleNavigation;});
 const mount=(identity:AuthenticatedWorkspaceIdentity=browser,onAuthenticationLost:(error:unknown)=>void=()=>{})=>act(async()=>root.render(<GoogleConnectionPanel identity={identity} onAuthenticationLost={onAuthenticationLost}/>));
 const click=(label:string)=>act(async()=>{const button=[...host.querySelectorAll('button')].find(b=>b.textContent===label);expect(button).toBeDefined();button!.click();});
+const nativeOwner=():AuthenticatedWorkspaceIdentity=>({mode:'clerk_jwt',getToken:async()=>null,nativeSession:{revision:'00000000-0000-4000-8000-000000000901',isCurrent:()=>true}});
+const nativeHint=(identity:AuthenticatedWorkspaceIdentity,active:boolean)=>act(async()=>notifyNativeWorkspaceForeground(identity,active));
+it('checks an idle connection once on authenticated native return and never replays its prior inbox read',async()=>{
+ const identity=nativeOwner();vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected).mockResolvedValueOnce(inbox).mockResolvedValueOnce(connected);
+ await mount(identity);await click('Read recent email');expect(host.textContent).toContain('Invented message subject');await nativeHint(identity,false);
+ expect(host.textContent).not.toContain('Invented message subject');expect(host.textContent).not.toContain('member@example.invalid');
+ await act(async()=>{window.dispatchEvent(new Event('focus'));document.dispatchEvent(new Event('visibilitychange'));});expect(googleConnectionRequest).toHaveBeenCalledTimes(2);
+ const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');await nativeHint(identity,true);await nativeHint(identity,true);
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','mail','status']);expect(host.textContent).toContain('Google connected.');expect(host.textContent).not.toContain('Invented message subject');visibility.mockRestore();
+});
+it('observes native OAuth return through status while WebView focus remains unchanged',async()=>{
+ const identity=nativeOwner();window.cosmasGoogleNavigation={version:1,available:true,mode:'trusted-click'};
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link).mockResolvedValueOnce(connected);
+ await mount(identity);await click('Connect with Google');await click('Continue with Google');await nativeHint(identity,false);
+ const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');await nativeHint(identity,true);
+ expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','start','status']);expect(host.textContent).toContain('Google connected.');visibility.mockRestore();
+});
+it('ignores a late native email result and checks status without repeating the read',async()=>{
+ const identity=nativeOwner();let release!:(r:typeof inbox)=>void;
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected).mockReturnValueOnce(new Promise(r=>{release=r;})).mockResolvedValueOnce(connected);
+ await mount(identity);await click('Read recent email');const signal=vi.mocked(googleConnectionRequest).mock.calls[1][2]!;
+ await nativeHint(identity,false);expect(signal.aborted).toBe(true);await nativeHint(identity,true);await act(async()=>release(inbox));
+ expect(host.textContent).not.toContain('Invented message subject');expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','mail','status']);
+});
+it('pauses and fences an in-flight OAuth status check until authenticated return',async()=>{
+ const identity=nativeOwner();window.cosmasGoogleNavigation={version:1,available:true,mode:'trusted-click'};let release!:(r:typeof connected)=>void;
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link).mockReturnValueOnce(new Promise(r=>{release=r;})).mockResolvedValueOnce(disconnected);
+ await mount(identity);await click('Connect with Google');await click('Continue with Google');await nativeHint(identity,true);expect(googleConnectionRequest).toHaveBeenCalledTimes(3);
+ await nativeHint(identity,false);expect(vi.mocked(googleConnectionRequest).mock.calls[2][2]!.aborted).toBe(true);await nativeHint(identity,true);expect(googleConnectionRequest).toHaveBeenCalledTimes(3);
+ await act(async()=>release(connected));expect(host.textContent).not.toContain('member@example.invalid');expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','start','status','status']);
+});
 it('shows calendar dates and explains missing consent without replaying the read',async()=>{
  vi.mocked(googleConnectionRequest).mockResolvedValueOnce(connected)
   .mockRejectedValueOnce(new WorkspaceApiError(409,'google_calendar_consent_required')).mockResolvedValueOnce(connected);
