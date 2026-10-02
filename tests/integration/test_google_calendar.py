@@ -5,6 +5,7 @@ import json
 from copy import deepcopy
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
+from typing import Any, TypedDict
 from uuid import uuid4
 
 import pytest
@@ -40,6 +41,26 @@ from cosmas_os.ports.google_calendar import (
 signed_workspace = _signed_workspace
 google_case = lineage.google_case
 calendar_case = lineage.calendar_case
+
+
+class CalendarReviewReceipt(TypedDict):
+    entry_id: str
+    entry_revision: int
+    request_sha256: str
+    source_withheld: bool
+    workspace: dict[str, Any]
+    source: dict[str, str]
+
+
+def checked_review_receipt(value: object) -> CalendarReviewReceipt:
+    assert isinstance(value, dict)
+    assert isinstance(value["entry_id"], str) and type(value["entry_revision"]) is int
+    assert isinstance(value["request_sha256"], str) and type(value["source_withheld"]) is bool
+    assert isinstance(value["workspace"], dict) and isinstance(value["source"], dict)
+    assert all(isinstance(item, str) for item in value["source"].values())
+    return {"entry_id": value["entry_id"], "entry_revision": value["entry_revision"],
+        "request_sha256": value["request_sha256"], "source_withheld": value["source_withheld"],
+        "workspace": value["workspace"], "source": value["source"]}
 
 
 class InventedCalendar:
@@ -92,13 +113,13 @@ def observe(f, **changes):
     return calendar.observe(f.s, f.box, f.owner, f.account, key=changes.pop("key", "observe-1"), port=f.port, **changes)
 
 
-def select_event(f, receipt, **changes):
+def select_event(f, receipt, **changes) -> CalendarReviewReceipt:
     event = receipt["observation"]["items"][0]
-    return calendar.select_review(f.s, f.box, f.owner, f.w["id"], **{
+    return checked_review_receipt(calendar.select_review(f.s, f.box, f.owner, f.w["id"], **{
         "expected": f.w["revision"], "key": "review-1", "observation_id": receipt["observation_id"],
         "observation_sha256": receipt["source_sha256"], "event_id": event["id"], "event_sha256": calendar.event_hash(event),
         "reviewed_visit": True, "reviewed_exact_summary": True, "reviewed_untrusted_source": True,
-        "port": f.port, "external_identity_id": f.account, **changes})
+        "port": f.port, "external_identity_id": f.account, **changes}))
 
 
 def revoke(f):
@@ -290,6 +311,9 @@ def test_final_receipt_source_race_withholds_uncited_drafts_review_feedback_and_
         lineage.revisions.reserve(s, f.box, f.owner, f.wid, handoff["id"], expected=saved["workspace"]["revision"],
             key="calendar-race-revision", review_id=review["id"])
         source_review = s.scalar(select(GoogleCalendarSourceReview).where(GoogleCalendarSourceReview.entry_id == f.calendar_selected["entry_id"]))
+        assert source_review is not None
+        snapshot = s.get(GoogleCalendarSnapshot, source_review.snapshot_id)
+        assert snapshot is not None
         original = calendar.ws.read
         reads = []
 
@@ -300,10 +324,10 @@ def test_final_receipt_source_race_withholds_uncited_drafts_review_feedback_and_
             return value
 
         monkeypatch.setattr(calendar.ws, "read", flip_after_projection)
-        recovered = calendar.select_review(s, f.box, f.owner, f.wid, expected=source_review.expected_revision,
-            key=source_review.idempotency_key, observation_id=s.get(GoogleCalendarSnapshot, source_review.snapshot_id).observation_id,
+        recovered = checked_review_receipt(calendar.select_review(s, f.box, f.owner, f.wid, expected=source_review.expected_revision,
+            key=source_review.idempotency_key, observation_id=snapshot.observation_id,
             observation_sha256=source_review.observation_sha256, event_id=source_review.event_id, event_sha256=source_review.event_sha256,
-            reviewed_visit=True, reviewed_exact_summary=True, reviewed_untrusted_source=True, external_identity_id=f.account)
+            reviewed_visit=True, reviewed_exact_summary=True, reviewed_untrusted_source=True, external_identity_id=f.account))
         assert recovered["source_withheld"] is True and len(reads) == 2
         assert lineage.gmail.private_fact_paths(recovered, ["calendar café", "Google calendar: Invented calendar"]) == []
         assert recovered["workspace"]["note"]["latest"] == f.note_before

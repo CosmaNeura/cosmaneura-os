@@ -1,8 +1,10 @@
 """Typed custody dispatch and uncited lineage masking; no live account or DB."""
 
 from types import SimpleNamespace
+from typing import cast
 
 import pytest
+from sqlalchemy.orm import Session
 
 from cosmas_os.application import handoff_review, model_work, note_review
 from cosmas_os.application import selected_google_sources as sources
@@ -13,9 +15,13 @@ from cosmas_os.ports.bot_capabilities import SourcePassage
 class FakeSession:
     def __init__(self, entries):
         self.entries = {row.id: row for row in entries}
+        self.scalar_result: SimpleNamespace | None = None
 
     def get(self, _, entry_id):
         return self.entries.get(entry_id)
+
+    def scalar(self, _):
+        return self.scalar_result
 
 
 def entry(identifier, kind, revision=1):
@@ -105,7 +111,7 @@ def test_source_passages_merge_in_exact_revision_order(monkeypatch):
 def test_connector_derived_reply_never_imports_into_clinical_note(monkeypatch, kind):
     row = entry("private_source", kind)
     session = FakeSession([row])
-    session.scalar = lambda _: SimpleNamespace(prepared_envelope={"context": "invented"})
+    session.scalar_result = SimpleNamespace(prepared_envelope={"context": "invented"})
     from cosmas_os.adapters import gpt41
 
     monkeypatch.setattr(
@@ -113,7 +119,7 @@ def test_connector_derived_reply_never_imports_into_clinical_note(monkeypatch, k
     )
     workspace = SimpleNamespace(id="workspace", box_id="box", owner_id="owner")
     with pytest.raises(ws.WorkspaceError, match=kind + "_note_import_unavailable"):
-        note_review._require_note_lineage(session, workspace, "reply")
+        note_review._require_note_lineage(cast(Session, session), workspace, "reply")
 
 
 def test_calendar_masks_exact_historical_review_command_receipt(monkeypatch):
