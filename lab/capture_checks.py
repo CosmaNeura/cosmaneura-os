@@ -16,6 +16,8 @@ CAPTURE_TESTS = [
     "src/configured/flow/automatic-controller.test.ts", "src/configured/native/continuous-source.test.ts",
     "src/storage/encrypted-indexeddb.test.ts", "src/queue/capture-queue.test.ts",
     "src/configured/native/nurse-operational-recording.test.ts",
+    "src/bff/recovery-contracts.test.ts", "src/flow/recovery-exchange.test.ts",
+    "src/bff/source-contracts.test.ts",
 ]
 
 
