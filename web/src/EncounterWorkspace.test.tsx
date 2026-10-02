@@ -97,7 +97,8 @@ describe("private encounter workspace", () => {
     expect(container.textContent).toContain('Choose a visit for Research');expect(workspaceApi.open).not.toHaveBeenCalled();
     await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
     expect(container.querySelector('.team-roster [aria-pressed="true"] strong')?.textContent,container.textContent??'').toBe('Research');
-    expect(container.querySelector('.research-workspace')).not.toBeNull();expect(workspaceApi.ask).not.toHaveBeenCalled();catalogSpy.mockRestore();
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.querySelector('.research-workspace')).not.toBeNull();});
+    expect(workspaceApi.ask).not.toHaveBeenCalled();catalogSpy.mockRestore();
   });
 
   it('opens Chief and focuses the notebook once, only after private recovery is ready',async()=>{

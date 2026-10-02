@@ -6,6 +6,8 @@ import type {Workspace} from './workspace-api';
 import type {HandoffReviewInput,HandoffReviewReceipt,HandoffRevisionInput,ReviewableHandoff} from './handoff-review-api';
 import {handoffReviewHash} from './handoff-review-api';
 import {hasUnsavedWork} from './unsaved-work';
+import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
+import {createHandoffReviewTestRecovery} from './handoff-review-test-recovery';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const time='2026-10-02T14:00:00Z',access={mode:'clerk_jwt' as const,getToken:async()=> 'invented-token'};
@@ -15,6 +17,7 @@ const evidence:{persona:string;round:number;boundary:string;events:EventRecord[]
 const wireFixtures:{persona:string;round:number;initial_workspace:Workspace;exchanges:{kind:string;request:HandoffReviewInput|HandoffRevisionInput;response:unknown}[]}[]=[];
 const exchanges:{kind:string;request:HandoffReviewInput|HandoffRevisionInput;response:unknown}[]=[];
 let root:Root,element:HTMLDivElement,workspace:Workspace,replaceWorkspace:(w:Workspace)=>void;
+let recoveryAccess:EditorRecoveryAccess;
 const requests:HandoffReviewInput[]=[],revisionRequests:HandoffRevisionInput[]=[],saved=vi.fn(),close=vi.fn(),pendingChanged=vi.fn(),refresh=vi.fn(),accessLost=vi.fn(),freshAssignment=vi.fn();
 
 async function encounter(round=1):Promise<Workspace> {
@@ -40,16 +43,18 @@ function installService(){const fetcher=vi.fn(async(url:string,init:RequestInit)
   exchanges.push({kind:'review',request:structuredClone(body),response:structuredClone(reply)});return json(reply);});vi.stubGlobal('fetch',fetcher);return fetcher;}
 function Harness({initial,locked=false,recoveryLocked}:{initial:Workspace;locked?:boolean;recoveryLocked?:boolean}) {
   const [current,setCurrent]=useState(initial),[selected,setSelected]=useState(initial.handoffs![0].id);workspace=current;replaceWorkspace=setCurrent;
-  return <HandoffReviewPanel workspace={current} handoff={current.handoffs!.find(h=>h.id===selected)??current.handoffs![0]} identity={access} locked={locked}
+  return <EditorRecoveryContext.Provider value={recoveryAccess}><HandoffReviewPanel workspace={current} handoff={current.handoffs!.find(h=>h.id===selected)??current.handoffs![0]} identity={access} locked={locked}
     onSaved={value=>{saved(value);setCurrent(value);}} onClose={close} onPendingChange={pendingChanged} onRevisionPrepared={setSelected}
-    onRefresh={refresh} onAccessLost={accessLost} recoveryLocked={recoveryLocked} onFreshAssignment={freshAssignment}/>;
+    onRefresh={refresh} onAccessLost={accessLost} recoveryLocked={recoveryLocked} onFreshAssignment={freshAssignment}/></EditorRecoveryContext.Provider>;
 }
 function button(text:string){const found=[...element.querySelectorAll('button')].find(b=>b.textContent===text);expect(found,text).toBeTruthy();return found!;}
-async function click(text:string){expect(button(text).disabled,text).toBe(false);await act(async()=>button(text).click());}
+async function click(text:string){await until(()=>!button(text).disabled);await act(async()=>button(text).click());}
+async function compare(){await click('Check saved review status');await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');}
 async function input(value:string){const field=element.querySelector('textarea')!;expect(field).toBeTruthy();await act(async()=>{
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function until(check:()=>boolean){for(let n=0;n<100;n++){await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});if(check())return;}throw new Error('Mounted review did not settle');}
-async function mount(initial=workspace,locked=false){await act(async()=>root.render(<Harness initial={initial} locked={locked}/>));await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');}
+async function mount(initial=workspace,locked=false){if(recoveryAccess.workspaceId!==initial.id){recoveryAccess.journal.close();recoveryAccess=await createHandoffReviewTestRecovery(initial.id,async()=>workspace,webcrypto);}
+ await act(async()=>root.render(<Harness initial={initial} locked={locked}/>));await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');}
 async function revised(w=workspace):Promise<Workspace> {
   const original=w.handoffs![0] as ReviewableHandoff,entry=w.entries.find(e=>e.id===original.result_entry_id)!;
   const content=entry.reply!.content+'\nRevision: nurse to confirm medications by tomorrow; provider to review trial options.';
@@ -72,8 +77,10 @@ async function revisionResponse(body:HandoffRevisionInput,w=workspace) {
     entries:[...w.entries,request,result],handoffs:[{...parent,review:{...review,revision_handoff_id:next.id}},next]}};
 }
 beforeEach(async()=>{vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE','http://127.0.0.1:8018');
+  vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
+  recoveryAccess=await createHandoffReviewTestRecovery((await encounter()).id,async()=>workspace,webcrypto);
   workspace=await encounter();requests.splice(0);revisionRequests.splice(0);exchanges.splice(0);saved.mockClear();close.mockClear();pendingChanged.mockClear();refresh.mockReset();accessLost.mockClear();freshAssignment.mockClear();installService();element=document.createElement('div');document.body.append(element);root=createRoot(element);});
-afterEach(async()=>{await act(async()=>root.unmount());element.remove();vi.unstubAllGlobals();vi.unstubAllEnvs();});
+afterEach(async()=>{await act(async()=>root.unmount());recoveryAccess.journal.close();element.remove();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 
 it.each([{persona:'Family-practice physician',round:1},{persona:'Nurse practitioner',round:1},{persona:'Physician assistant',round:1},
   {persona:'Family-practice physician',round:2},{persona:'Nurse practitioner',round:2},{persona:'Physician assistant',round:2}])('$persona round $round completes request-edits and exact revised-draft acceptance through DOM controls',async({persona,round})=>{
@@ -105,8 +112,9 @@ it('keeps an uncertain decision and retries exactly the same body/key even after
   expect(button('Accept draft for next work').disabled).toBe(true);expect(button('Close draft review').disabled).toBe(true);expect(element.querySelector('textarea')!.disabled).toBe(true);expect(hasUnsavedWork()).toBe(true);
   const next=await revised();await act(async()=>replaceWorkspace(next));await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');
   expect(element.querySelector('[aria-label="Complete saved draft"]')!.textContent).toBe(first.entries[0].reply!.content);
-  await click('Retry same review save');await until(()=>element.textContent!.includes('Changes requested'));
-  expect(fetcher).toHaveBeenCalledTimes(2);expect(fetcher.mock.calls[0][1].body).toBe(fetcher.mock.calls[1][1].body);expect(saved).toHaveBeenCalledOnce();expect(hasUnsavedWork()).toBe(false);
+  await compare();await click('Retry same review save');await until(()=>element.textContent!.includes('Changes requested'));
+  expect(fetcher).toHaveBeenCalledTimes(2);expect(fetcher.mock.calls[0][1].body).toBe(fetcher.mock.calls[1][1].body);expect(saved).toHaveBeenCalledTimes(2);
+  expect(saved.mock.calls[0][0]).toEqual(next);expect(hasUnsavedWork()).toBe(false);
 });
 it.each(['accepted','changes_requested'] as const)('confirms a masked %s review after a lost reply without displaying private draft or enabling next work',async decision=>{
  const first=workspace,fetcher=vi.fn().mockRejectedValueOnce(new TypeError('lost response')).mockImplementationOnce(async(_url:string,init:RequestInit)=>{
@@ -119,7 +127,7 @@ it.each(['accepted','changes_requested'] as const)('confirms a masked %s review 
  const unavailable={...first,entries:first.entries.map(e=>({...e,content:'',reply:null,google_source_state:'unavailable' as const})),
   handoffs:first.handoffs!.map(h=>({...h,review_status:'stale' as const}))};
  await act(async()=>replaceWorkspace(unavailable));expect(element.querySelector('[aria-label="Complete saved draft"]')).toBeNull();
- expect(element.querySelector('textarea')).toBeNull();expect(element.textContent).not.toContain('Private quoted email fact');expect(button('Retry same review save').disabled).toBe(false);
+ expect(element.querySelector('textarea')).toBeNull();expect(element.textContent).not.toContain('Private quoted email fact');expect(button('Retry same review save').disabled).toBe(true);await compare();
  await click('Retry same review save');await until(()=>element.textContent!.includes('exact saved review is confirmed'));
  expect(fetcher.mock.calls[0][1].body).toBe(fetcher.mock.calls[1][1].body);expect(element.querySelector('[aria-label="Complete saved draft"]')).toBeNull();
  expect(element.textContent).not.toContain('Private quoted email fact');expect(element.textContent).not.toContain('Invented patient Shawn');expect(element.textContent).not.toContain('Draft accepted');
@@ -141,7 +149,7 @@ it('retains an uncertain revised assignment request and resolves the same body w
     .mockImplementationOnce(async()=>json(savedResponse));vi.stubGlobal('fetch',fetcher);
   await click('Prepare revised draft');await until(()=>element.textContent!.includes('Revised assignment save unconfirmed'));
   expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Prepare revised draft')).toBe(false);expect(button('Close draft review').disabled).toBe(true);expect(hasUnsavedWork()).toBe(true);expect(pendingChanged).toHaveBeenLastCalledWith(true);
-  expect(element.textContent).not.toContain('Revised assignment saved.');await click('Retry same revised assignment');
+  expect(element.textContent).not.toContain('Revised assignment saved.');await compare();await click('Retry same revised assignment');
   await until(()=>workspace.handoffs!.length===2&&element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');
   expect(fetcher).toHaveBeenCalledTimes(2);expect(fetcher.mock.calls[0][1].body).toBe(fetcher.mock.calls[1][1].body);expect(hasUnsavedWork()).toBe(false);expect(pendingChanged).toHaveBeenLastCalledWith(false);
 });
@@ -217,8 +225,8 @@ it('passes historical requested changes into a fresh editable Chief assignment w
 it('retains an uncertain old request through later source refusal and allows conflict-independent exact recovery',async()=>{
   const first=workspace,fetcher=vi.fn().mockRejectedValueOnce(new TypeError('lost response')).mockResolvedValueOnce(new Response(JSON.stringify({detail:'handoff_sources_changed'}),{status:409,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}))
     .mockImplementationOnce(async(_url:string,init:RequestInit)=>{const body=JSON.parse(init.body as string),receipt=await response(body,first);return json({...receipt,workspace:{...receipt.workspace,handoffs:receipt.workspace.handoffs.map(h=>({...h,review_status:'stale'}))}});});vi.stubGlobal('fetch',fetcher);
-  await mount();await click('Accept draft for next work');await until(()=>element.textContent!.includes('Review save unconfirmed'));await click('Retry same review save');
-  await until(()=>button('Retry same review save').disabled===false);await act(async()=>root.render(<Harness initial={first} locked={true} recoveryLocked={false}/>));
+  await mount();await click('Accept draft for next work');await until(()=>element.textContent!.includes('Review save unconfirmed'));await compare();await click('Retry same review save');
+  await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');await compare();await act(async()=>root.render(<Harness initial={first} locked={true} recoveryLocked={false}/>));
   expect(button('Retry same review save').disabled).toBe(false);await click('Retry same review save');await until(()=>element.textContent!.includes('Ask Chief for a fresh assignment'));
   expect(fetcher.mock.calls.every(c=>c[1].body===fetcher.mock.calls[0][1].body)).toBe(true);expect(element.textContent).not.toContain('Draft accepted');expect(hasUnsavedWork()).toBe(false);
 });
@@ -227,9 +235,10 @@ it.each([401,403,404,426])('withholds the exact draft and notifies the product o
   await until(()=>element.textContent!.includes('draft is withheld'));expect(element.querySelector('[aria-label="Complete saved draft"]')).toBeNull();expect(element.textContent).not.toContain('Invented patient Shawn');
   expect(accessLost).toHaveBeenCalledOnce();expect(accessLost.mock.calls[0][0]).toMatchObject({status});
 });
-it('clears change input when opening a different completed assignment before a save',async()=>{
+it('retains encrypted original feedback without authorizing a different completed result',async()=>{
   await mount();await click('Request changes');await input('Feedback for the old result');const next=await revised();await act(async()=>replaceWorkspace(next));
-  await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');expect(element.querySelector('textarea')).toBeNull();expect(hasUnsavedWork()).toBe(false);expect(requests).toHaveLength(0);
+  await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');expect(element.querySelector('textarea')!.value).toBe('Feedback for the old result');
+  expect(button('Accept draft for next work').disabled).toBe(true);expect(hasUnsavedWork()).toBe(true);expect(requests).toHaveLength(0);
 });
 it('blocks excess or blank feedback without submitting a human decision',async()=>{
   await mount();await click('Request changes');await input('   ');expect(button('Save change request').disabled).toBe(true);

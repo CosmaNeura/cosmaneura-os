@@ -8,6 +8,8 @@ import {workspaceApi,type AuthenticatedWorkspaceIdentity,type Workspace} from '.
 import {type GoogleMessageRecoveryAccess,type GoogleMessageRecoveryRecord,type GoogleMessageRecoveryScope,type GoogleMessageSaved} from './google-message-recovery';
 import type {ReviewableHandoff} from './handoff-review-api';
 import {hasUnsavedWork} from './unsaved-work';
+import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
+import {createHandoffReviewTestRecovery} from './handoff-review-test-recovery';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const utilModule='node:util';const {transferableAbortController}=await import(/* @vite-ignore */utilModule) as {transferableAbortController:()=>AbortController};
 const environment=(globalThis as typeof globalThis&{process?:{env:Record<string,string|undefined>}}).process?.env;
@@ -20,6 +22,7 @@ type RecoveryTrial={kind:'masked_source'|'masked_handoff';passed:boolean;elapsed
 type CasePacket={scope:GoogleMessageRecoveryScope;workspace:Workspace;clinical_note:unknown;token?:string;team_revision?:number};
 type Counters={provider_calls:number;model_rounds:number;workspace:Workspace};
 const recoveries:RecoveryTrial[]=[];
+let reviewRecovery:EditorRecoveryAccess|undefined;
 const trials:Trial[]=[],realFetch=globalThis.fetch.bind(globalThis),abortBridges:(()=>void)[]=[];
 let root:Root|undefined,host:HTMLDivElement,current:Workspace,replaceWorkspace:(workspace:Workspace)=>void,activeTrial:Trial|undefined,selectedSource:GoogleMessageSaved|null,
   recoveryRecord:GoogleMessageRecoveryRecord|null,identity:AuthenticatedWorkspaceIdentity,noteBefore:string;
@@ -38,8 +41,8 @@ function Harness({initial,scope,recovery,auth,teamRevision}:{initial:Workspace;s
     {source&&<form aria-busy={busy} onSubmit={e=>{e.preventDefault();void ask();}}><label>Ask Chief<textarea aria-label="Ask Chief" value={question} onChange={e=>setQuestion(e.target.value)}/></label>
       <button disabled={busy||!question.trim()} type="submit">Ask Chief to prepare work</button></form>}
     <nav aria-label="Saved specialist assignments">{workspace.handoffs?.filter(h=>h.status==='completed').map(h=><button key={h.id} onClick={()=>setReviewId(h.id)}>Review {h.recipient_name} result</button>)}</nav>
-    {reviewId&&workspace.handoffs?.some(h=>h.id===reviewId)&&<HandoffReviewPanel identity={auth} workspace={workspace} handoff={workspace.handoffs!.find(h=>h.id===reviewId)!} locked={busy}
-      onSaved={setWorkspace} onRevisionPrepared={setReviewId} onAccessLost={e=>setError(e.message)}/>}
+    {reviewId&&workspace.handoffs?.some(h=>h.id===reviewId)&&<EditorRecoveryContext.Provider value={reviewRecovery}><HandoffReviewPanel key={`${workspace.id}:${reviewId}`} identity={auth} workspace={workspace} handoff={workspace.handoffs!.find(h=>h.id===reviewId)!} locked={busy}
+      onSaved={setWorkspace} onRevisionPrepared={setReviewId} onAccessLost={e=>setError(e.message)}/></EditorRecoveryContext.Provider>}
     {error&&<p role="alert">{error}</p>}
   </>;
 }
@@ -54,6 +57,7 @@ async function openCase(round:string,persona='physician'){
  const seeded=await realFetch(`${base}/lab/case?persona=${persona}&round=${round}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(seeded.status).toBe(200);
  const packet=await seeded.json() as CasePacket;identity={mode:'clerk_jwt',getToken:async()=>packet.token??'invented-lab-token'};
  const recovery:GoogleMessageRecoveryAccess={authorize:async()=>{},load:async()=>recoveryRecord,persist:async value=>{recoveryRecord=value?structuredClone(value):null;}};
+ reviewRecovery=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,current.id),webcrypto);
  root=createRoot(host);await act(async()=>root!.render(<Harness initial={packet.workspace} scope={packet.scope} recovery={recovery} auth={identity} teamRevision={packet.team_revision??1}/>));
  await wait(()=>expect(button('Check email access').disabled).toBe(false));noteBefore=noteIdentity(packet.workspace);return packet;
 }
@@ -69,6 +73,7 @@ async function counters(path:'revoke'|'inspect',wid:string):Promise<Counters>{
 }
 beforeEach(()=>{
  if(!base)return;vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base);
+ vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
  vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
    const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);if(url.origin!==base)throw new Error('Only the loopback synthetic product server is allowed.');
    let nativeInit=init;if(init?.signal){const source=init.signal,native=transferableAbortController(),abort=()=>native.abort(source.reason);source.addEventListener('abort',abort,{once:true});if(source.aborted)abort();abortBridges.push(()=>source.removeEventListener('abort',abort));nativeInit={...init,signal:native.signal};}
@@ -77,7 +82,7 @@ beforeEach(()=>{
    catch(e){if(mutating)activeTrial?.wire.push({path:url.pathname,status:null,action,key,error:e instanceof Error?e.message:String(e)});throw e;}
  });host=document.createElement('div');document.body.append(host);recoveryRecord=null;selectedSource=null;
 });
-afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;}for(const dispose of abortBridges.splice(0))dispose();host?.remove();activeTrial=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
+afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;}reviewRecovery?.journal.close();reviewRecovery=undefined;for(const dispose of abortBridges.splice(0))dispose();host?.remove();activeTrial=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
 it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitioner',round:1},{persona:'physician_assistant',round:1},
  {persona:'physician',round:2},{persona:'nurse_practitioner',round:2},{persona:'physician_assistant',round:2}])('$persona round $round uses actual email custody APIs then Chief/specialist/edit/accept without replacing the clinical note',async({persona,round})=>{
  const started=performance.now(),trial:Trial={persona,round,workspace_id:'',boundary:'Mounted product email and handoff review controls, actual bounded HTTP APIs, FastAPI services, PostgreSQL custody and product model worker. Invented message/visit, deterministic authentication fixture and injected upstream Gmail/model responses; no live service, native layout, clinical sign-off or sending.',steps:[],wire:[],passed:false};trials.push(trial);activeTrial=trial;
@@ -89,6 +94,7 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
   identity={mode:'clerk_jwt',getToken:async()=>packet.token??'invented-lab-token'};trial.workspace_id=packet.workspace.id;noteBefore=noteIdentity(packet.workspace);expect(packet.workspace.note).toBeTruthy();
   const recovery:GoogleMessageRecoveryAccess={authorize:async()=>{},load:async()=>recoveryRecord,persist:async value=>{recoveryRecord=value?structuredClone(value):null;}};
   const teamRevision=packet.team_revision??(await workspaceApi.team(identity)).revision;
+  reviewRecovery=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,current.id),webcrypto);
   root=createRoot(host);await act(async()=>root!.render(<Harness initial={packet.workspace} scope={packet.scope} recovery={recovery} auth={identity} teamRevision={teamRevision}/>));
   await wait(()=>expect(button('Check email access').disabled).toBe(false));expect(trial.wire).toHaveLength(0);step('opened_email_work_no_provider_read');
   await click('Check email access');expect(host.textContent).toContain('Full email access granted');await click('Select email');
@@ -145,7 +151,7 @@ it.skipIf(!base).each(['masked_source','masked_handoff'] as const)('%s confirms 
    loseSuccessfulReply(`/handoffs/${handoff.id}/review`);await click('Save change request');await wait(()=>expect(host.textContent).toContain('Review save unconfirmed'));expect(revoked).toBeTruthy();
    await act(async()=>replaceWorkspace(revoked!.workspace));expect(host.querySelector('[aria-label="Complete saved draft"]')).toBeNull();
    expect(host.querySelector('[aria-label="Complete selected email"]')).toBeNull();expect(host.textContent).not.toContain('sender@example.invalid');expect(host.textContent).not.toContain(feedback);
-   await click('Retry same review save');await wait(()=>expect(host.textContent).toContain('exact saved review is confirmed'));
+   await click('Check saved review status');await click('Retry same review save');await wait(()=>expect(host.textContent).toContain('exact saved review is confirmed'));
    const requests=evidence.wire.filter(w=>w.path.endsWith(`/handoffs/${handoff.id}/review`));expect(requests).toHaveLength(2);expect(requests[1].key).toBe(requests[0].key);
    expect(host.querySelector('[aria-label="Complete saved draft"]')).toBeNull();expect(host.textContent).not.toContain('Draft accepted');expect(host.textContent).not.toContain(feedback);
    expect([...host.querySelectorAll('button')].some(b=>b.textContent==='Prepare revised draft'||b.textContent==='Ask Chief for fresh work')).toBe(false);
