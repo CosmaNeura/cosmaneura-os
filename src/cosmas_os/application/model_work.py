@@ -571,7 +571,13 @@ def _context_for(
         draft_only=draft_only,
         agent_id=bot.agent_id,
         handoff_targets=targets,
+        additional_sources=_google_message_passages(s, workspace, settings),
     )
+    if any(s.get(WorkspaceEntry, source.entry_id).kind == "google_message"
+           for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
+            len(context.sources) > 12 or any(len(source.content) > 5000 for source in context.sources)
+            or sum(len(source.content) for source in context.sources) > 30000):
+        raise ws.WorkspaceError("google_message_context_too_large", 422)
     if "task_brief" in command:
         try:
             if not draft_only:
@@ -591,6 +597,21 @@ def _context_for(
             raise ws.WorkspaceError("handoff_revision_too_large", 422)
         context = replace(context, question=question)
     return context
+
+
+def _google_message_passages(s, workspace, settings):
+    """Only human-selected, current Google custody enters model evidence.
+
+    The saved entry remains a separate source class so note review never changes.
+    Its verified model passage uses the existing pinned evidence decoder shape.
+    """
+    if not team.runtime_settings.workspace_google_message_available:
+        return ()
+    from cosmas_os.application import google_message
+    from cosmas_os.ports.bot_capabilities import SourcePassage
+
+    return tuple(SourcePassage(row.id, row.revision, row.source_label, "evidence", row.content)
+                 for row in google_message.selected_entries(s, workspace, settings, workspace.revision))
 
 
 def _allowance(s, box, owner, as_of, configuration):
@@ -1303,6 +1324,8 @@ def project_workspace(s, value, *, as_of=None):
     if len(rows) > 50:
         raise ws.WorkspaceError("model_observation_unavailable", 503)
     for row in rows:
+        if entries[row.request_entry_id].get("google_source_state") == "unavailable":
+            continue  # Private quoted intent is withheld with its source-derived output.
         version = s.get(ProviderTeamRevision, row.team_revision_id)
         command = row.request_body
         config = next(

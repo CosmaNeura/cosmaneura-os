@@ -11,6 +11,7 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.config import settings as runtime_settings
 from cosmas_os.models import (
     AuditEvent,
+    ModelWorkAdmission,
     ProviderTeamRevision,
     WorkspaceEntry,
     WorkspaceHandoff,
@@ -102,6 +103,40 @@ def read(s, w, revision):
         states = {a.id: model_work.attempt_state(s, a, as_of) for a in attempts}
         evidence = handoff_briefs.projection(s, handoff, states[latest.id][2])
         reviewed = handoff_review.stored_review_for(s, w, handoff, latest)
+        brief = handoff.brief
+        related_admissions = [state[2] for state in states.values() if state[2] is not None]
+        origin_admission = s.scalar(select(ModelWorkAdmission).where(
+            ModelWorkAdmission.request_entry_id == handoff.origin_entry_id,
+            ModelWorkAdmission.workspace_id == w.id,
+            ModelWorkAdmission.box_id == w.box_id,
+            ModelWorkAdmission.owner_id == w.owner_id,
+        ))
+        if origin_admission is not None:
+            related_admissions.append(origin_admission)
+        source_unavailable = False
+        for admission in related_admissions:
+            from cosmas_os.adapters.gpt41 import _context
+            from cosmas_os.application import google_message
+
+            for passage in _context(admission.prepared_envelope["context"]).sources:
+                original = s.get(WorkspaceEntry, passage.entry_id)
+                if original is not None and original.kind == "google_message":
+                    try:
+                        google_message.validate_selected_source(s, w, original.id)
+                    except ws.WorkspaceError:
+                        brief = "The selected email is unavailable. Check its account access before using this draft."
+                        evidence.pop("task_brief", None)
+                        evidence.pop("completion_evidence", None)
+                        evidence["task_brief_unavailable"] = True
+                        source_unavailable = True
+                        break
+        revision_metadata = handoff_revision.revision_for(s, w, handoff)
+        if source_unavailable:
+            if reviewed:
+                reviewed = {**reviewed, "feedback": "Email access must be checked before viewing this feedback."}
+            if "revision_request" in revision_metadata:
+                revision_metadata["revision_request"] = {**revision_metadata["revision_request"],
+                    "feedback": "Email access must be checked before viewing this feedback."}
         output.append(
             {
                 "id": handoff.id,
@@ -112,7 +147,7 @@ def read(s, w, revision):
                     s, w.box_id, w.owner_id, handoff.recipient_agent_id
                 ),
                 "recipient_name": handoff.recipient_name,
-                "brief": handoff.brief,
+                "brief": brief,
                 "context_revision": handoff.context_revision,
                 "status": states[latest.id][0],
                 "attempt_id": latest.id,
@@ -123,7 +158,7 @@ def read(s, w, revision):
                 "result_sha256": evidence.get("completion_evidence", {}).get("sha256"),
                 "review": reviewed,
                 "review_status": handoff_review.review_status_for(s, w, handoff, latest),
-                **handoff_revision.revision_for(s, w, handoff),
+                **revision_metadata,
                 "attempts": [
                     {
                         "id": a.id,

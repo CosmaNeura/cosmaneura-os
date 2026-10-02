@@ -25,6 +25,7 @@ run "configured_account_connections" {
       WORKSPACE_SCHEDULING_LOGIN_ENABLED      = true
       WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED = true
       WORKSPACE_GOOGLE_CONNECTION_ENABLED     = true
+      WORKSPACE_GOOGLE_MESSAGE_ENABLED        = true
       WORKSPACE_MICROSOFT_CONNECTION_ENABLED  = true
       VENDOR_WORK_ENABLED                     = true
       VENDOR_IO_ENABLED                       = true

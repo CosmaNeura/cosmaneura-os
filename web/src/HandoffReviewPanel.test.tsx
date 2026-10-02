@@ -4,6 +4,7 @@ import {afterAll,afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {HandoffReviewPanel} from './HandoffReviewPanel';
 import type {Workspace} from './workspace-api';
 import type {HandoffReviewInput,HandoffReviewReceipt,HandoffRevisionInput,ReviewableHandoff} from './handoff-review-api';
+import {handoffReviewHash} from './handoff-review-api';
 import {hasUnsavedWork} from './unsaved-work';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
@@ -25,16 +26,17 @@ async function encounter(round=1):Promise<Workspace> {
     entries:[{id:handoff.result_entry_id!,revision:3,kind:'handoff_result',content:'Saved handoff',source_label:null,origin:'human',ticket:null,created_at:time,
       reply:{agent_id:uuid(102),agent_name:'Follow-up',role:'follow_up',backend:'synthetic-service-boundary',context_revision:1,content,citations:[]}}],work_candidates:[],handoffs:[handoff]};
 }
-function response(body:HandoffReviewInput,w=workspace) {
+async function response(body:HandoffReviewInput,w=workspace) {
   const review:HandoffReviewReceipt={id:uuid(800+requests.length),attempt_id:body.attempt_id,result_entry_id:body.result_entry_id,
     result_sha256:body.result_sha256,decision:body.decision,feedback:body.feedback,created_at:time};
-  return {entry_revision:body.expected_revision+1,workspace:{...w,revision:Math.max(w.revision,body.expected_revision+1),handoffs:w.handoffs!.map(h=>h.result_entry_id===body.result_entry_id?{...h,review}:h)}};
+  const h=w.handoffs!.find(h=>h.result_entry_id===body.result_entry_id)!;
+  return {entry_revision:body.expected_revision+1,request_sha256:await handoffReviewHash(w.id,h.id,body),feedback_withheld:false,workspace:{...w,revision:Math.max(w.revision,body.expected_revision+1),handoffs:w.handoffs!.map(h=>h.result_entry_id===body.result_entry_id?{...h,review}:h)}};
 }
 const json=(value:unknown)=>new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 function installService(){const fetcher=vi.fn(async(url:string,init:RequestInit)=>{
   if(url.endsWith('/revision')){const body=JSON.parse(init.body as string) as HandoffRevisionInput;revisionRequests.push(body);const reply=await revisionResponse(body);
     exchanges.push({kind:'revision',request:structuredClone(body),response:structuredClone(reply)});return json(reply);}
-  const body=JSON.parse(init.body as string) as HandoffReviewInput;requests.push(body);const reply=response(body);
+  const body=JSON.parse(init.body as string) as HandoffReviewInput;requests.push(body);const reply=await response(body);
   exchanges.push({kind:'review',request:structuredClone(body),response:structuredClone(reply)});return json(reply);});vi.stubGlobal('fetch',fetcher);return fetcher;}
 function Harness({initial,locked=false,recoveryLocked}:{initial:Workspace;locked?:boolean;recoveryLocked?:boolean}) {
   const [current,setCurrent]=useState(initial),[selected,setSelected]=useState(initial.handoffs![0].id);workspace=current;replaceWorkspace=setCurrent;
@@ -98,7 +100,7 @@ it.each([{persona:'Family-practice physician',round:1},{persona:'Nurse practitio
 
 it('keeps an uncertain decision and retries exactly the same body/key even after the workspace changes',async()=>{
   const first=workspace,fetcher=vi.fn().mockRejectedValueOnce(new TypeError('lost response')).mockImplementationOnce(async(_url:string,init:RequestInit)=>{
-    const body=JSON.parse(init.body as string) as HandoffReviewInput;requests.push(body);return json(response(body,first));});vi.stubGlobal('fetch',fetcher);
+    const body=JSON.parse(init.body as string) as HandoffReviewInput;requests.push(body);return json(await response(body,first));});vi.stubGlobal('fetch',fetcher);
   await mount();await click('Request changes');await input('Keep this exact change request.');await click('Save change request');await until(()=>element.textContent!.includes('Review save unconfirmed'));
   expect(button('Accept draft for next work').disabled).toBe(true);expect(button('Close draft review').disabled).toBe(true);expect(element.querySelector('textarea')!.disabled).toBe(true);expect(hasUnsavedWork()).toBe(true);
   const next=await revised();await act(async()=>replaceWorkspace(next));await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');
@@ -106,11 +108,31 @@ it('keeps an uncertain decision and retries exactly the same body/key even after
   await click('Retry same review save');await until(()=>element.textContent!.includes('Changes requested'));
   expect(fetcher).toHaveBeenCalledTimes(2);expect(fetcher.mock.calls[0][1].body).toBe(fetcher.mock.calls[1][1].body);expect(saved).toHaveBeenCalledOnce();expect(hasUnsavedWork()).toBe(false);
 });
+it.each(['accepted','changes_requested'] as const)('confirms a masked %s review after a lost reply without displaying private draft or enabling next work',async decision=>{
+ const first=workspace,fetcher=vi.fn().mockRejectedValueOnce(new TypeError('lost response')).mockImplementationOnce(async(_url:string,init:RequestInit)=>{
+  const body=JSON.parse(init.body as string) as HandoffReviewInput,receipt=await response(body,first);
+  return json({...receipt,feedback_withheld:true,workspace:{...receipt.workspace,entries:receipt.workspace.entries.map(e=>({...e,content:'',reply:null,google_source_state:'unavailable'})),
+   handoffs:receipt.workspace.handoffs.map(h=>({...h,review_status:'stale',review:{...h.review!,feedback:'Email access must be checked before viewing this feedback.'}}))}});
+ });vi.stubGlobal('fetch',fetcher);await mount();
+ if(decision==='changes_requested'){await click('Request changes');await input('Private quoted email fact café.');await click('Save change request');}else await click('Accept draft for next work');
+ await until(()=>element.textContent!.includes('Review save unconfirmed'));
+ const unavailable={...first,entries:first.entries.map(e=>({...e,content:'',reply:null,google_source_state:'unavailable' as const})),
+  handoffs:first.handoffs!.map(h=>({...h,review_status:'stale' as const}))};
+ await act(async()=>replaceWorkspace(unavailable));expect(element.querySelector('[aria-label="Complete saved draft"]')).toBeNull();
+ expect(element.querySelector('textarea')).toBeNull();expect(element.textContent).not.toContain('Private quoted email fact');expect(button('Retry same review save').disabled).toBe(false);
+ await click('Retry same review save');await until(()=>element.textContent!.includes('exact saved review is confirmed'));
+ expect(fetcher.mock.calls[0][1].body).toBe(fetcher.mock.calls[1][1].body);expect(element.querySelector('[aria-label="Complete saved draft"]')).toBeNull();
+ expect(element.textContent).not.toContain('Private quoted email fact');expect(element.textContent).not.toContain('Invented patient Shawn');expect(element.textContent).not.toContain('Draft accepted');
+ expect(button('Accept draft for next work').disabled).toBe(true);expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Prepare revised draft'||b.textContent==='Ask Chief for fresh work')).toBe(false);
+ expect(hasUnsavedWork()).toBe(false);expect(freshAssignment).not.toHaveBeenCalled();
+ const restored=structuredClone(workspace);await act(async()=>root.unmount());root=createRoot(element);await mount(restored);
+ expect(element.querySelector('[aria-label="Complete saved draft"]')).toBeNull();expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Ask Chief for fresh work')).toBe(false);
+});
 it('admits only one review during a pending save and does not claim acceptance before confirmation',async()=>{
   let release!:(value:Response)=>void;const fetcher=vi.fn(async(_url:string,init:RequestInit)=>{requests.push(JSON.parse(init.body as string));return new Promise<Response>(resolve=>{release=resolve;});});vi.stubGlobal('fetch',fetcher);
   await mount();const accept=button('Accept draft for next work');await act(async()=>{accept.click();accept.click();});await until(()=>fetcher.mock.calls.length===1);
   expect(element.textContent).not.toContain('Draft accepted');expect(button('Accept draft for next work').disabled).toBe(true);expect(hasUnsavedWork()).toBe(true);
-  await act(async()=>release(json(response(requests[0]))));await until(()=>element.textContent!.includes('Draft accepted'));expect(fetcher).toHaveBeenCalledOnce();
+  await act(async()=>release(json(await response(requests[0]))));await until(()=>element.textContent!.includes('Draft accepted'));expect(fetcher).toHaveBeenCalledOnce();
 });
 it('retains an uncertain revised assignment request and resolves the same body without another model assignment',async()=>{
   await mount();await click('Request changes');await input('Add an owner.');await click('Save change request');await until(()=>element.textContent!.includes('Changes requested'));
@@ -157,7 +179,7 @@ it('requires a current review after the server marks the previous review stale',
 });
 it('retains feedback after a definite revision conflict and permits a fresh decision only after explicit verified refresh',async()=>{
   const fetcher=vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({detail:'workspace_revision_conflict'}),{status:409,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}))
-    .mockImplementationOnce(async(_url:string,init:RequestInit)=>{const body=JSON.parse(init.body as string);requests.push(body);return json(response(body));});vi.stubGlobal('fetch',fetcher);
+    .mockImplementationOnce(async(_url:string,init:RequestInit)=>{const body=JSON.parse(init.body as string);requests.push(body);return json(await response(body));});vi.stubGlobal('fetch',fetcher);
   await mount();await click('Request changes');await input('Retain this feedback through refresh.');await click('Save change request');await until(()=>element.textContent!.includes('This request was not saved'));
   expect(button('Save change request').disabled).toBe(true);expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Retry same review save')).toBe(false);
   expect(element.querySelector('textarea')!.value).toBe('Retain this feedback through refresh.');
@@ -194,7 +216,7 @@ it('passes historical requested changes into a fresh editable Chief assignment w
 });
 it('retains an uncertain old request through later source refusal and allows conflict-independent exact recovery',async()=>{
   const first=workspace,fetcher=vi.fn().mockRejectedValueOnce(new TypeError('lost response')).mockResolvedValueOnce(new Response(JSON.stringify({detail:'handoff_sources_changed'}),{status:409,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}))
-    .mockImplementationOnce(async(_url:string,init:RequestInit)=>{const body=JSON.parse(init.body as string);return json({...response(body,first),workspace:{...response(body,first).workspace,handoffs:response(body,first).workspace.handoffs.map(h=>({...h,review_status:'stale'}))}});});vi.stubGlobal('fetch',fetcher);
+    .mockImplementationOnce(async(_url:string,init:RequestInit)=>{const body=JSON.parse(init.body as string),receipt=await response(body,first);return json({...receipt,workspace:{...receipt.workspace,handoffs:receipt.workspace.handoffs.map(h=>({...h,review_status:'stale'}))}});});vi.stubGlobal('fetch',fetcher);
   await mount();await click('Accept draft for next work');await until(()=>element.textContent!.includes('Review save unconfirmed'));await click('Retry same review save');
   await until(()=>button('Retry same review save').disabled===false);await act(async()=>root.render(<Harness initial={first} locked={true} recoveryLocked={false}/>));
   expect(button('Retry same review save').disabled).toBe(false);await click('Retry same review save');await until(()=>element.textContent!.includes('Ask Chief for a fresh assignment'));

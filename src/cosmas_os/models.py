@@ -458,7 +458,7 @@ class WorkspaceEntry(Base):
         UniqueConstraint("workspace_id", "idempotency_key", name="uq_workspace_entry_key"),
         UniqueConstraint("id", "workspace_id", "box_id", name="uq_workspace_entry_scope"),
         CheckConstraint("revision >= 1", name="ck_workspace_entry_revision"),
-        CheckConstraint("kind IN ('synthetic_source', 'scratchpad', 'conversation', 'evidence', 'work_link', 'handoff_result')", name="ck_workspace_entry_kind"),
+        CheckConstraint("kind IN ('synthetic_source', 'scratchpad', 'conversation', 'evidence', 'work_link', 'handoff_result', 'google_message')", name="ck_workspace_entry_kind"),
         CheckConstraint("char_length(content) <= 20000", name="ck_workspace_entry_content"),
     )
 

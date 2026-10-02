@@ -25,7 +25,7 @@ HEADERS = {
 
 
 class GoogleCommand(ProtectedModel):
-    action: Literal["status", "start", "disconnect", "mail", "calendar"]
+    action: Literal["status", "start", "start_full_mail", "disconnect", "mail", "calendar"]
     include_capabilities: bool = False
 
 

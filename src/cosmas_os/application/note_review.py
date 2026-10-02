@@ -8,7 +8,13 @@ from sqlalchemy.orm import Session
 from cosmas_os.application import core_note_review
 from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import payload_hash
-from cosmas_os.models import WorkspaceEntry, WorkspaceNote, WorkspaceNoteReview, WorkspaceReply
+from cosmas_os.models import (
+    ModelWorkAdmission,
+    WorkspaceEntry,
+    WorkspaceNote,
+    WorkspaceNoteReview,
+    WorkspaceReply,
+)
 from cosmas_os.ports.capture_gap_review import GapAcknowledgment
 from cosmas_os.ports.core_notes import CoreDraftReceipt
 
@@ -33,6 +39,27 @@ def source_fingerprint(s: Session, wid: str, revision: int) -> str:
             if e.kind != "scratchpad" or e.id == latest_notebook
         ]
     )
+
+
+def _require_note_lineage(s: Session, w, reply_id):
+    if not reply_id:
+        return
+    admission = s.scalar(select(ModelWorkAdmission).where(
+        ModelWorkAdmission.request_entry_id == reply_id,
+        ModelWorkAdmission.workspace_id == w.id,
+        ModelWorkAdmission.box_id == w.box_id,
+        ModelWorkAdmission.owner_id == w.owner_id,
+    ))
+    if admission is None:
+        return
+    from cosmas_os.adapters.gpt41 import _context
+
+    for source in _context(admission.prepared_envelope["context"]).sources:
+        entry = s.get(WorkspaceEntry, source.entry_id)
+        if entry is not None and entry.kind == "google_message":
+            # Email work has independent custody and cannot be represented by
+            # this clinical-note fingerprint. Keep its draft in conversation.
+            raise ws.WorkspaceError("google_message_note_import_unavailable", 409)
 
 
 def read(s: Session, w, revision: int) -> dict:
@@ -160,6 +187,7 @@ def save(
     if previous and previous.version >= 50:
         raise ws.WorkspaceError("note_history_limit")
     source_revision = previous.source_revision if previous else w.revision
+    _require_note_lineage(s, w, source_reply_id)
     if source_reply_id:
         reply = s.scalar(
             select(WorkspaceReply).where(
@@ -243,6 +271,7 @@ def review(
     if n is None or n.id != note_id:
         raise ws.WorkspaceError("note_revision_conflict")
     core_note_review.require_current(s, n, core_checked)
+    _require_note_lineage(s, w, n.source_reply_id)
     gap_review = core_checked.capture_gap_review if core_checked else None
     if ((gap_review is None) != (acknowledgment is None)
         or (gap_review is not None and acknowledgment is not None

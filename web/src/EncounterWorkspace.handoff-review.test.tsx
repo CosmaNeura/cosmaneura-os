@@ -7,6 +7,7 @@ import {workspaceApi,type Workspace} from './workspace-api';
 import {teamFixture} from './team-setup-test-fixture';
 import type {HandoffReviewInput,HandoffRevisionInput,ReviewableHandoff,HandoffReviewReceipt} from './handoff-review-api';
 import {hasUnsavedWork} from './unsaved-work';
+import {modelCanonical} from './model-work-request';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(s:string)=>s}));
@@ -37,7 +38,8 @@ async function wire(url:string,init:RequestInit) {
     const review:HandoffReviewReceipt={id:uuid(800+reviews.length),attempt_id:body.attempt_id,result_entry_id:body.result_entry_id,
       result_sha256:body.result_sha256,decision:body.decision,feedback:body.feedback,created_at:time};
     current={...current,revision:body.expected_revision+1,handoffs:current.handoffs!.map(h=>h.id===parent.id?{...h,review,review_status:'current'}:h)};
-    return json({entry_revision:body.expected_revision+1,workspace:current});
+    return json({entry_revision:body.expected_revision+1,workspace:current,
+      request_sha256:await hash(modelCanonical({workspace_id:current.id,handoff_id:handoffId,...body})),feedback_withheld:false});
   }
   const body=JSON.parse(init.body as string) as HandoffRevisionInput;revisions.push(body);const review=parent.review!,origin=uuid(900),resultId=uuid(901),nextId=uuid(902);
   const prior=current.entries.find(e=>e.id===review.result_entry_id)!,content=prior.reply!.content+'\nRevision: the nurse will confirm medicines by tomorrow; provider reviews trial criteria.';

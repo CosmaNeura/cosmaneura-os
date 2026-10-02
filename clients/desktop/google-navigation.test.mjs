@@ -26,3 +26,10 @@ test('Google calendar consent admits only the exact read-only scope',()=>{
   assert.equal(validGoogleNavigationUrl(url({...fields,scope:invalid}),config),false);
  }
 });
+test('separate full-message consent admits only the pinned read-only permission set',()=>{
+ const scope=fields.scope+' https://www.googleapis.com/auth/calendar.events.readonly https://www.googleapis.com/auth/gmail.readonly';
+ assert.equal(validGoogleNavigationUrl(url({...fields,scope}),config),true);
+ for(const invalid of [scope.replace('gmail.readonly','gmail.modify'),scope+' https://www.googleapis.com/auth/gmail.send',scope+' https://www.googleapis.com/auth/gmail.readonly',scope.replace('openid email','email openid')]){
+  assert.equal(validGoogleNavigationUrl(url({...fields,scope:invalid}),config),false);
+ }
+});

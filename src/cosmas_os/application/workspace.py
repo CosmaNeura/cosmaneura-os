@@ -217,6 +217,25 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
     revision = w.revision if at_revision is None else min(at_revision, w.revision)
     a = _encounter(s, box, w.appointment_id, w.patient_link_id, owner=actor)
     entries = []
+    from cosmas_os.models import (
+        ModelWorkAdmission,
+        WorkspaceHandoffAttempt,
+        WorkspaceHandoffRevision,
+    )
+
+    admitted = {row.request_entry_id: row for row in s.scalars(select(ModelWorkAdmission).where(
+        ModelWorkAdmission.workspace_id == wid, ModelWorkAdmission.box_id == box,
+        ModelWorkAdmission.owner_id == actor))}
+    # Revision origins quote human feedback but have a separate child admission.
+    # Bind their public projection to every child input, including queued work.
+    revision_admissions = {}
+    for origin_id, row in s.execute(select(WorkspaceHandoffRevision.origin_entry_id, ModelWorkAdmission)
+        .join(WorkspaceHandoffAttempt, WorkspaceHandoffAttempt.handoff_id == WorkspaceHandoffRevision.revision_handoff_id)
+        .join(ModelWorkAdmission, ModelWorkAdmission.handoff_attempt_id == WorkspaceHandoffAttempt.id)
+        .where(WorkspaceHandoffRevision.workspace_id == wid, WorkspaceHandoffRevision.box_id == box,
+               WorkspaceHandoffRevision.owner_id == actor, ModelWorkAdmission.workspace_id == wid,
+               ModelWorkAdmission.box_id == box, ModelWorkAdmission.owner_id == actor)):
+        revision_admissions.setdefault(origin_id, []).append(row)
     replies = {reply.entry_id: reply for reply in s.scalars(select(WorkspaceReply).where(
         WorkspaceReply.workspace_id == wid, WorkspaceReply.box_id == box, WorkspaceReply.owner_id == actor,
     ))}
@@ -231,18 +250,50 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
     ):
         t = _ticket(s, w, e.ticket_id) if e.ticket_id else None
         reply = replies.get(e.id)
+        content = e.content
+        google_source_state = None
+        related_admissions = ([admitted[e.id]] if e.id in admitted else []) + revision_admissions.get(e.id, [])
+        for admission in related_admissions:
+            from cosmas_os.adapters.gpt41 import _context
+
+            # Even an uncited result can contain selected-message facts. Withhold
+            # the derived draft and quoted model intent when that grant changes.
+            for passage in _context(admission.prepared_envelope["context"]).sources:
+                original = s.get(WorkspaceEntry, passage.entry_id)
+                if original is not None and original.kind == "google_message":
+                    from cosmas_os.application import google_message
+
+                    try:
+                        google_message.validate_selected_source(s, w, original.id)
+                    except WorkspaceError:
+                        reply = None
+                        content = ""
+                        google_source_state = "unavailable"
+                        break
+        if e.kind == "google_message":
+            from cosmas_os.application import google_message
+
+            try:
+                google_message.validate_selected_source(s, w, e.id)
+                google_source_state = "current"
+            except WorkspaceError:
+                # The independent note remains readable; a stale/revoked message
+                # cannot disclose its content through a workspace read.
+                content = ""
+                google_source_state = "unavailable"
         entries.append(
             {
                 "id": e.id,
                 "revision": e.revision,
                 "kind": e.kind,
-                "content": e.content,
-                "source_label": e.source_label,
+                "content": content,
+                "source_label": "Unavailable email source" if google_source_state == "unavailable" and e.kind == "google_message" else e.source_label,
                 "origin": "synthetic_fixture"
                 if e.kind == "synthetic_source"
                 else "agent_handoff" if e.kind == "handoff_result" else "authenticated_human",
                 "ticket": {"id": t.id, "state": t.state, "lane": t.lane} if t else None,
                 "created_at": e.created_at.isoformat(),
+                **({"google_source_state": google_source_state} if google_source_state else {}),
                 "reply": {"agent_name": reply.agent_name, "agent_id": reply.agent_id, "role": reply.role,
                           "backend": reply.backend, "content": reply.content,
                           "team_revision_id": reply.team_revision_id,

@@ -30,6 +30,12 @@ editable fresh Chief request, without automatically sending it. Definite refusal
 allow a fresh read; uncertain saves retain the same payload and idempotency key.
 Access denial withholds the private draft.
 
+Review replies use the `handoff_review:2` wire contract. An exact public command
+hash confirms the original review even if a selected email becomes unavailable
+after the save. Such replies explicitly withhold feedback/result contents and
+remain historical receipts; the interface cannot use them to authorize a new
+assignment or external action.
+
 ## Activation and limits
 
 `WORKSPACE_AGENT_TOOLS_ENABLED` defaults to false. When explicitly enabled, new

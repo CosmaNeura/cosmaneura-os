@@ -2,7 +2,7 @@ import {WorkspaceApiError, type DraftHandoff, type Workspace, type WorkspaceIden
 import {workspaceFetch} from './workspace-protocol';
 import {assertCurrentDesktopSession, workspaceAuthHeaders} from './workspace-auth-headers';
 import {permittedWorkspaceApi} from './workspace-origin';
-import {modelTime, validModelWorkspace, MODEL_WORKSPACE_BYTES} from './model-work-request';
+import {modelCanonical,modelTime, validModelWorkspace, MODEL_WORKSPACE_BYTES} from './model-work-request';
 import {teamClosed, teamHash, teamNatural, teamText, teamUuid} from './team-setup-request';
 import {parseVendorJson, vendorSha256} from './vendor-contract';
 
@@ -15,7 +15,7 @@ export type HandoffRevisionInput = {expected_revision:number;idempotency_key:str
 export type HandoffRevisionResponse = {entry_revision:number;revision_handoff_id:string;workspace:Workspace};
 export type HandoffRevisionRequest = {parent_handoff_id:string;review_id:string;attempt_id:string;result_entry_id:string;result_sha256:string;feedback:string};
 export type ReviewableHandoff = DraftHandoff & {result_sha256?:string|null;review?:HandoffReviewReceipt|null;revision_request?:HandoffRevisionRequest|null};
-export type HandoffReviewResponse = {entry_revision:number;workspace:Workspace};
+export type HandoffReviewResponse = {entry_revision:number;request_sha256:string;feedback_withheld:boolean;workspace:Workspace};
 export type VerifiedHandoffResult = {attemptId:string;entryId:string;sha256:string;content:string};
 const reviewKey=(value:unknown):value is string=>typeof value==='string'&&/^[A-Za-z0-9:_-]{8,100}$/.test(value);
 const REFUSALS=new Set(['workspace_revision_conflict','handoff_result_already_reviewed','handoff_revision_already_requested',
@@ -40,6 +40,9 @@ export function validHandoffReviewInput(value:unknown):value is HandoffReviewInp
     (value.decision==='accepted'||value.decision==='changes_requested') && teamText(value.feedback,2000) && !value.feedback.includes('\0') &&
     (value.decision!=='changes_requested'||value.feedback.trim().length>0);
 }
+export const handoffReviewHash=(workspaceId:string,handoffId:string,body:HandoffReviewInput)=>vendorSha256(new TextEncoder().encode(modelCanonical({
+  workspace_id:workspaceId,handoff_id:handoffId,...body,
+})));
 
 export function validHandoffReviewReceipt(value:unknown):value is HandoffReviewReceipt {
   return teamClosed(value,'id,attempt_id,result_entry_id,result_sha256,decision,feedback,created_at','revision_handoff_id') && teamUuid(value.id) &&
@@ -74,7 +77,8 @@ function currentIdentity(identity:WorkspaceIdentity):void {
 }
 
 async function exactResponse(value:unknown,workspaceId:string,handoffId:string,body:HandoffReviewInput):Promise<HandoffReviewResponse> {
-  if(!teamClosed(value,'entry_revision,workspace')||value.entry_revision!==body.expected_revision+1||
+  if(!teamClosed(value,'entry_revision,request_sha256,feedback_withheld,workspace')||value.entry_revision!==body.expected_revision+1||
+    !teamHash(value.request_sha256)||typeof value.feedback_withheld!=='boolean'||value.request_sha256!==await handoffReviewHash(workspaceId,handoffId,body)||
     !await validModelWorkspace(value.workspace,workspaceId))throw new WorkspaceApiError(503);
   const workspace=value.workspace as Workspace;
   if(workspace.revision<Number(value.entry_revision))throw new WorkspaceApiError(503);
@@ -82,11 +86,15 @@ async function exactResponse(value:unknown,workspaceId:string,handoffId:string,b
   if(!Array.isArray(handoffs)||handoffs.filter(h=>h.id===handoffId).length!==1)throw new WorkspaceApiError(503);
   const review=(handoffs.find(h=>h.id===handoffId) as ReviewableHandoff).review;
   if(!validHandoffReviewReceipt(review)||review.attempt_id!==body.attempt_id||review.result_entry_id!==body.result_entry_id||
-    review.result_sha256!==body.result_sha256||review.decision!==body.decision||review.feedback!==body.feedback)throw new WorkspaceApiError(503);
+    review.result_sha256!==body.result_sha256||review.decision!==body.decision)throw new WorkspaceApiError(503);
   const entry=workspace.entries.find(e=>e.id===body.result_entry_id);
-  if(!entry||entry.kind!=='handoff_result'||!entry.reply||!teamText(entry.reply.content,200000,1)||
+  if(!entry||entry.kind!=='handoff_result')throw new WorkspaceApiError(503);
+  if(value.feedback_withheld){
+    if(entry.google_source_state!=='unavailable'||entry.reply!=null||entry.content!==''||handoffs.find(h=>h.id===handoffId)!.review_status!=='stale'||
+      review.feedback!=='Email access must be checked before viewing this feedback.')throw new WorkspaceApiError(503);
+  }else if(review.feedback!==body.feedback||entry.google_source_state==='unavailable'||!entry.reply||!teamText(entry.reply.content,200000,1)||
     await vendorSha256(new TextEncoder().encode(entry.reply.content))!==body.result_sha256)throw new WorkspaceApiError(503);
-  return {entry_revision:Number(value.entry_revision),workspace};
+  return {entry_revision:Number(value.entry_revision),request_sha256:value.request_sha256,feedback_withheld:value.feedback_withheld,workspace};
 }
 
 /** One bounded operation, including fresh credentials, streaming and exact result verification. */

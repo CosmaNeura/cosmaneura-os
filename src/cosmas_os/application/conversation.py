@@ -51,8 +51,12 @@ def build_context(
         )
         for e in selected
     )
+    if additional_sources:
+        sources = tuple(source for source in sources if source.kind == "scratchpad") + tuple(sorted(
+            [source for source in sources if source.kind != "scratchpad"] + list(additional_sources),
+            key=lambda source: source.revision,
+        ))
     latest_source_revision = max((source.revision for source in sources), default=0)
-    sources += tuple(additional_sources)
     from cosmas_os.application.scribe_source import require_complete_context
     require_complete_context(sources)
     source_ids = {source.entry_id for source in sources}
@@ -232,6 +236,7 @@ def ask(
         settings["role"],
         content,
         agent_id=bot.agent_id,
+        additional_sources=model_work._google_message_passages(s, w, settings),
     )
     if settings["role"] == "chief":
         from cosmas_os.adapters.chief_review import review

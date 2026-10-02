@@ -45,7 +45,9 @@ synthetic build retains the microphone denial. Camera, geolocation and payment
 remain denied. Missing/partial/non-web feature manifests stop policy generation.
 The static `web/nginx.conf` template stays deny-by-default.
 
-The profile includes Gmail inbox summaries. Both native composers require an
+The profile includes Gmail inbox summaries and reviewed full-message work. Full
+message reads require the separately configured, default-off server flag and
+explicit expanded consent described in `google-personal-connection.md`. Both native composers require an
 explicit --google-connection-client-id and --google-connection-callback-uri
 matching the reviewed server client and /connections/google/callback. These
 settings are separate from the Scheduling Google login configuration.

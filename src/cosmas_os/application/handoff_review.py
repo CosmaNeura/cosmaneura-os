@@ -50,7 +50,7 @@ def _selected_versions(s, w, settings):
     )
     if settings["include_evidence"]:
         selected += [e for e in entries if e.kind in {"evidence", "synthetic_source"}]
-    return [
+    versions = [
         {
             "entry_id": e.id,
             "revision": e.revision,
@@ -60,6 +60,18 @@ def _selected_versions(s, w, settings):
         }
         for e in selected
     ]
+    from cosmas_os.application import google_message
+    from cosmas_os.application.model_work import _google_message_passages
+
+    additional = _google_message_passages(s, w, settings)
+    for source in additional:
+        google_message.validate_selected_source(s, w, source.entry_id)
+        versions.append({"entry_id": source.entry_id, "revision": source.revision,
+                         "label": source.label, "kind": "evidence", "sha256": _hash(source.content)})
+    if additional:
+        versions = [v for v in versions if v["kind"] == "scratchpad"] + sorted(
+            [v for v in versions if v["kind"] != "scratchpad"], key=lambda v: v["revision"])
+    return versions
 
 
 def _current_settings(s, w, handoff):
@@ -193,12 +205,20 @@ def _binding(s, w, handoff, attempt, *, current=True):
         # source is allowed to make that receipt historical rather than unreadable.
         for source in versions:
             source_entry = s.get(WorkspaceEntry, source["entry_id"])
+            source_kind = source_entry.kind if source_entry is not None else None
+            if source_kind == "google_message":
+                from cosmas_os.application import google_message
+
+                source_entry = google_message.historical_source(s, w, source["entry_id"])
+                if current:
+                    google_message.validate_selected_source(s, w, source["entry_id"])
+                source_kind = "evidence"
             if source_entry is None or (
                 source_entry.workspace_id,
                 source_entry.box_id,
                 source_entry.actor_id,
                 source_entry.revision,
-                source_entry.kind,
+                source_kind,
                 source_entry.source_label or "Your jotted notes",
                 _hash(source_entry.content),
             ) != (
@@ -289,6 +309,24 @@ def review_status_for(s, w, handoff, attempt):
     return "current" if current else "stale" if _record(s, w, handoff) else "not_reviewed"
 
 
+def _command_receipt(s, w, review):
+    """A public command commitment confirms history even when output is withheld."""
+    workspace = ws.read(s, w.box_id, w.owner_id, w.id)
+    entry = next(e for e in workspace["entries"] if e["id"] == review.result_entry_id)
+    return {
+        "entry_revision": review.workspace_revision,
+        "workspace": workspace,
+        "request_sha256": payload_hash({
+            "workspace_id": w.id, "handoff_id": review.handoff_id,
+            "expected_revision": review.expected_revision,
+            "idempotency_key": review.idempotency_key, "attempt_id": review.attempt_id,
+            "result_entry_id": review.result_entry_id, "result_sha256": review.result_sha256,
+            "decision": review.decision, "feedback": review.feedback,
+        }),
+        "feedback_withheld": entry.get("google_source_state") == "unavailable",
+    }
+
+
 def review(
     s,
     box,
@@ -371,10 +409,7 @@ def review(
         if reauthenticate:
             reauthenticate()
         model_work._identity(s, box, actor, external_identity_id)
-        return {
-            "entry_revision": replay.workspace_revision,
-            "workspace": ws.read(s, box, actor, wid),
-        }
+        return _command_receipt(s, w, replay)
     row, reply, versions = _binding(s, w, handoff, attempt)
     if attempt.result_entry_id != result_entry_id or _hash(reply.content) != result_sha256:
         raise ws.WorkspaceError("handoff_result_changed")
@@ -417,4 +452,4 @@ def review(
     except Exception:
         s.rollback()
         raise
-    return {"entry_revision": saved.workspace_revision, "workspace": ws.read(s, box, actor, wid)}
+    return _command_receipt(s, w, saved)

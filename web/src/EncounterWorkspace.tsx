@@ -51,6 +51,10 @@ import { SchedulingPanel } from "./SchedulingPanel";
 import { SCHEDULING_BUILD } from "./scheduling-api";
 import { SCHEDULING_LOGIN_BUILD } from "./scheduling-login-api";
 import { GoogleConnectionPanel } from './GoogleConnectionPanel';
+import { GoogleMessageMount } from './GoogleMessageMount';
+import { GOOGLE_MESSAGE_BUILD } from './google-message-api';
+import type {GoogleMessageSaved} from './google-message-recovery';
+import {vendorSha256} from './vendor-contract';
 import { GOOGLE_CONNECTION_BUILD } from './google-connection-api';
 import { MicrosoftConnectionPanel } from './MicrosoftConnectionPanel';
 import { MICROSOFT_CONNECTION_BUILD } from './microsoft-connection-api';
@@ -89,11 +93,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [setupProjection, setSetupProjection] = useState<SetupProjection | null>(null);
   const [setupEpoch, setSetupEpoch] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
+  const googleVisitSelection=useRef(false);
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
   const [settingsEntry,setSettingsEntry]=useState<'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'>('home');
-  const [connectionLocks, setConnectionLocks] = useState({google:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const [activityProof,setActivityProof] = useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number;context:AiActivityContext}|null>(null);
   const [activityBusy,setActivityBusy] = useState(false),[activityContextBusy,setActivityContextBusy] = useState(false);
@@ -159,6 +165,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[connectionGeneration]);
   const reportGoogleBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.google===blocked?previous:{...previous,google:blocked});
+  }, [connectionGeneration]);
+  const reportGoogleMessageBusy = useCallback((blocked:boolean) => {
+    if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.googleMessages===blocked?previous:{...previous,googleMessages:blocked});
   }, [connectionGeneration]);
   const reportMicrosoftBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.microsoft===blocked?previous:{...previous,microsoft:blocked});
@@ -399,7 +408,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
-    setConnectionLocks({google:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setConnectionLocks({google:false,googleMessages:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setGoogleMessageOpen(false);googleVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
     setEntryIntent(null);setRecordingSourceRequest(0);setNote(""); setThought(""); setEvidence(""); setSource(""); setSelectedSource(null); setSelectedResult(null);
@@ -487,6 +497,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
       setSettingsOpen(false);
       await recoverAfterRead(result.team, result.workspace, current);
+      if(googleVisitSelection.current&&current===generation.current){googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(true);setSettingsOpen(true);}
     } catch (cause) { if (current === generation.current) {
       failure(cause);
       if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
@@ -838,7 +849,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const latestNote = workspace?.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "";
   const chiefSavedContext=!!bot&&!!workspace?.entries.some(entry=>entry.content.trim()&&
     (entry.kind==='scratchpad'&&entry.content===latestNote&&bot.include_notebook||
-      (entry.kind==='evidence'||entry.kind==='synthetic_source')&&bot.include_evidence));
+      (entry.kind==='evidence'||entry.kind==='synthetic_source'||
+        entry.kind==='google_message'&&entry.google_source_state==='current')&&bot.include_evidence));
   const initialTeamUnchanged=!!team&&!!teamDraft&&JSON.stringify(teamDraft)===JSON.stringify(team.configuration);
   useEffect(()=>{if(questionFocus)questionRef.current?.focus();},[questionFocus]);
   useEffect(()=>{
@@ -1037,6 +1049,40 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSettingsOpen(false);setPracticeOpen(false);setSelectedResult(null);setMobilePanel('Conversation');
     setQuestionFocus(value=>value+1);
   }
+  function receiveGoogleSource(latest:Workspace){
+    const current=recoveryView.current;
+    if(current.workspace?.id!==latest.id||current.workspace.revision>latest.revision)return;
+    const before=current.workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
+    const after=latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
+    if(before!==after&&current.note!==before)setConflict(true);
+    else if(current.note===before)setNote(after);
+    setWorkspace(latest);
+  }
+  async function refreshGoogleVisit(){
+    if(!authenticated||!workspace)throw new WorkspaceApiError(403);
+    const current=generation.current,id=workspace.id;
+    const latest=await workspaceApi.read(authenticated,id);
+    if(current!==generation.current||recoveryView.current.workspace?.id!==id)throw new WorkspaceApiError(403);
+    receiveGoogleSource(latest);
+  }
+  async function prepareGoogleChief(source:GoogleMessageSaved){
+    if(!authenticated||!workspace||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    const current=generation.current,id=workspace.id;setBusy(true);
+    try{
+      const latest=await workspaceApi.read(authenticated,id);
+      if(current!==generation.current||recoveryView.current.workspace?.id!==id)return;
+      const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&item.kind==='google_message'&&item.google_source_state==='current');
+      if(!entry||await vendorSha256(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,'google_message_source_changed');
+      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
+      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
+      receiveGoogleSource(latest);
+      const prompt='Review the human-selected email source '+source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
+      setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);
+      setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(source.entry_id);
+      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setQuestionFocus(value=>value+1);
+    }catch(cause){if(current===generation.current)failure(cause);}
+    finally{if(current===generation.current)setBusy(false);}
+  }
 
   return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
     <aside className="team-sidebar">
@@ -1125,7 +1171,21 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
         initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
-        google={GOOGLE_CONNECTION_BUILD&&authenticated?<GoogleConnectionPanel identity={authenticated} onBusyChange={reportGoogleBusy} onAuthenticationLost={failure}/>:undefined}
+        google={GOOGLE_CONNECTION_BUILD&&authenticated?<AccountRecoveryContext.Provider value={accountAccess}>
+          <GoogleConnectionPanel identity={authenticated} onBusyChange={reportGoogleBusy} onAuthenticationLost={failure}
+            messageWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.googleMessages}
+            onOpenMessageWork={GOOGLE_MESSAGE_BUILD?()=>setGoogleMessageOpen(true):undefined}
+            messageWork={GOOGLE_MESSAGE_BUILD&&googleMessageOpen?controls=><GoogleMessageMount identity={authenticated}
+              workspace={workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
+              currentSources={workspace?.entries.filter(entry=>entry.kind==='google_message'&&!!entry.google_source_state)
+                .map(entry=>({entry_id:entry.id,state:entry.google_source_state!}))}
+              locked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.google}
+              recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||connectionLocks.google}
+              onBusyChange={reportGoogleMessageBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource}
+              onRequestFullMailAccess={controls.requestFullMailAccess} fullMailAccessBusy={controls.fullMailAccessBusy}
+              onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareGoogleChief(source)}
+              onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}/>:undefined}/>
+        </AccountRecoveryContext.Provider>:undefined}
         microsoft={MICROSOFT_CONNECTION_BUILD&&authenticated?<MicrosoftConnectionPanel identity={authenticated} onBusyChange={reportMicrosoftBusy} onAuthenticationLost={failure}/>:undefined}
         scheduling={SCHEDULING_LOGIN_BUILD&&authenticated?<SchedulingConnectionPanel identity={authenticated} onBusyChange={reportSchedulingBusy} onAuthenticationLost={failure}/>:undefined}
         core={CORE_CONNECTION_BUILD&&authenticated?<CoreConnectionPanel identity={authenticated} onBusyChange={reportCoreBusy} onAuthenticationLost={failure} openBlocked={locked||captureNavigationLocked||captureDraftLocked} onOpenNotebook={command=>open(undefined,command)}/>:undefined}
