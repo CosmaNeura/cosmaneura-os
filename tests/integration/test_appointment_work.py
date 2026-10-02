@@ -82,9 +82,9 @@ def prepare(s, seeded, *, existing=None, patient_mapping=True):
     if patient_mapping:
         s.add(patient)
     s.commit()
-    selected = AppointmentSelection(box_id=box, owner_id=owner, patient_link_id=patient.patient_link_id,
+    selected = AppointmentSelection.model_validate(dict(box_id=box, owner_id=owner, patient_link_id=patient.patient_link_id,
         practice_id=account.practice_id, expected_actor_id=account.actor_id, practitioner_id=account.practitioner_id,
-        location_id=account.location_id, appointment_type_id=account.appointment_type_id, patient_id=patient.patient_id)
+        location_id=account.location_id, appointment_type_id=account.appointment_type_id, patient_id=patient.patient_id))
     return SimpleNamespace(box=box, owner=owner, wid=workspace["id"], selection=selected,
                            identity=identity.id, account=account.id, patient=patient.id if patient_mapping else None, link=patient.patient_link_id)
 
@@ -293,8 +293,8 @@ def test_concurrent_human_decisions_produce_one_durable_operation(engine, compet
         outcomes = list(pool.map(run, [0, 1]))
     with Session(engine) as s:
         current = work.read(s, case.box, case.owner, case.wid, item["ticket_id"])
-        assert s.scalar(select(func.count()).select_from(Operation).where(Operation.ticket_id == item["ticket_id"])) <= 1
-        assert s.scalar(select(func.count()).select_from(Decision).where(Decision.ticket_id == item["ticket_id"], Decision.kind == "approve")) <= 1
+        assert (s.scalar(select(func.count()).select_from(Operation).where(Operation.ticket_id == item["ticket_id"])) or 0) <= 1
+        assert (s.scalar(select(func.count()).select_from(Decision).where(Decision.ticket_id == item["ticket_id"], Decision.kind == "approve")) or 0) <= 1
         if competing == "approve":
             assert outcomes == ["approved", "approved"] and current["state"] == "approved"
         else:

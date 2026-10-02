@@ -17,7 +17,7 @@ def hosted(**changes):
         database_url="postgresql+psycopg://invented:invented@db.example.invalid/cosmas_os?sslmode=verify-full&sslrootcert=system",
         redis_url="rediss://:invented@redis.example.invalid/0?ssl_cert_reqs=required")
     values.update(changes)
-    return Settings(_env_file=None, **values)
+    return Settings(_env_file=None, **values)  # pyright: ignore[reportCallIssue] -- BaseSettings accepts _env_file at runtime.
 
 
 def test_hosted_workspace_and_existing_feature_gates():

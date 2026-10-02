@@ -183,8 +183,8 @@ def test_patient_setup_stays_closed_without_explicit_feature_gate(configuration,
 
     calls, requests = [], []
     managed = runtime(configuration, lambda value: calls.append(value) or credential(value), requests)
-    request = PatientPreviewRequest(request_nonce=uuid4(), expected_actor_id=selection.expected_actor_id,
-        selector={"kind": "search", "query": "Invented patient", "birth_date": None}, limit=5)
+    request = PatientPreviewRequest.model_validate(dict(request_nonce=uuid4(), expected_actor_id=selection.expected_actor_id,
+        selector={"kind": "search", "query": "Invented patient", "birth_date": None}, limit=5))
     try:
         with pytest.raises(ConnectorUnavailable):
             managed.patient_setup.preview(selection, request)
@@ -204,8 +204,8 @@ def test_patient_setup_disabled_during_credential_acquisition_never_dispatches(c
         configuration.workspace_scheduling_patient_setup_enabled = False
         return credential(value)
     managed = runtime(configuration, provider, requests)
-    request = PatientPreviewRequest(request_nonce=uuid4(), expected_actor_id=selection.expected_actor_id,
-        selector={"kind": "search", "query": "Invented patient", "birth_date": None}, limit=5)
+    request = PatientPreviewRequest.model_validate(dict(request_nonce=uuid4(), expected_actor_id=selection.expected_actor_id,
+        selector={"kind": "search", "query": "Invented patient", "birth_date": None}, limit=5))
     try:
         with pytest.raises(ConnectorUnavailable):
             managed.patient_setup.preview(selection, request)

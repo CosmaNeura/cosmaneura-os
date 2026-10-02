@@ -156,12 +156,19 @@ def test_no_local_locks_during_io_and_intervening_revocation_discards_proposal(e
             with Session(engine) as other:
                 other.execute(text("SET LOCAL lock_timeout = '1s'"))
                 if target == "account":
-                    other.get(SchedulingAccount, case.account).revoked_at = datetime.now(UTC)
+                    account = other.get(SchedulingAccount, case.account)
+                    assert account is not None
+                    account.revoked_at = datetime.now(UTC)
                 elif target == "patient":
-                    other.get(SchedulingPatientAccount, case.patient).revoked_at = datetime.now(UTC)
+                    patient = other.get(SchedulingPatientAccount, case.patient)
+                    assert patient is not None
+                    patient.revoked_at = datetime.now(UTC)
                 elif target == "observation":
                     w = other.get(EncounterWorkspace, case.wid)
-                    other.get(AppointmentObservation, w.appointment_id).external_id = str(uuid4())
+                    assert w is not None
+                    observation = other.get(AppointmentObservation, w.appointment_id)
+                    assert observation is not None
+                    observation.external_id = str(uuid4())
                 else:
                     saved = team.read(other, case.box, case.owner)
                     config = deepcopy(saved["configuration"])
