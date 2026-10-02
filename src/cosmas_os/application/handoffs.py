@@ -242,8 +242,12 @@ def process_next(factory):
 
 
 async def run_worker(factory, stop, *, progress=None):
-    async def lane():
+    from cosmas_os.application.handoff_wakeup import subscribe_worker
+
+    async def lane(wakeup):
         while not stop.is_set():
+            if wakeup is not None:
+                wakeup.clear_before_scan()
             worked = False
             try:
                 worked = await asyncio.to_thread(process_next, factory)
@@ -256,6 +260,9 @@ async def run_worker(factory, stop, *, progress=None):
                     progress.succeeded()
             if worked:
                 continue  # No artificial dwell between already-admitted jobs.
+            if wakeup is not None:
+                await wakeup.wait(stop, timeout=2)
+                continue
             try:
                 await asyncio.wait_for(stop.wait(), timeout=2)
             except TimeoutError:
@@ -264,7 +271,10 @@ async def run_worker(factory, stop, *, progress=None):
     try:
         # Claims commit before model I/O. Existing owner locks, leases, source
         # checks and single-dispatch records fence all three independent lanes.
-        await asyncio.gather(*(lane() for _ in range(3)))
+        # Subscribe before the first scan. A commit racing with that scan is
+        # retained as a hint; every lane still reads/claims the durable queue.
+        with subscribe_worker(factory, lanes=3) as wakeups:
+            await asyncio.gather(*(lane(wakeup) for wakeup in wakeups))
     finally:
         if progress is not None:
             progress.stopped()
