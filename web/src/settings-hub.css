@@ -35,9 +35,9 @@
 .connection-directory-status button { flex-shrink:0; }
 .connection-group { margin-top:22px; }
 .connection-group h2 { font-size:15px; font-weight:600; margin:0 0 12px; }
-.connection-cards { display:grid; grid-template-columns:1fr; gap:0; border:1px solid var(--team-line); border-radius:12px; overflow:hidden; }
-.team-workspace .connection-card { display:grid; grid-template-columns:36px minmax(0,1fr) auto; align-items:center; gap:14px; min-width:0; min-height:96px; padding:14px 16px; background:#fff; border:0; border-bottom:1px solid var(--team-line); border-radius:0; }
-.team-workspace .connection-card:last-child { border-bottom:0; }
+.connection-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.connection-card-box { display:flex; flex-direction:column; min-width:0; background:#fff; border:1px solid var(--team-line); border-radius:12px; overflow:hidden; }
+.team-workspace .connection-card { flex:1; display:grid; grid-template-columns:30px minmax(0,1fr); align-content:start; align-items:start; gap:10px; min-width:0; padding:14px; background:#fff; border:0; border-radius:0; }
 .connection-card .settings-card-icon { width:36px; height:36px; border-radius:9px; font-size:21px; }
 .connection-badge { display:inline-block; font-size:12px; line-height:1.4; padding:5px 9px; border-radius:6px; background:#f3f0e9; color:#735c2b; }
 .connection-badge-ready { background:#edf5ed; color:#285741; }
@@ -46,9 +46,20 @@
 .connection-card .connection-card-copy { min-width:0; }
 .connection-card .connection-card-copy strong { font-size:15px; line-height:1.35; }
 .connection-card .connection-card-copy small { font-size:13px; line-height:1.4; overflow-wrap:anywhere; }
-.team-workspace .connection-card > .connection-card-state { display:flex; flex-direction:column; align-items:flex-end; gap:5px; margin:0; font-size:13px; }
+.team-workspace .connection-card > .connection-card-state { grid-column:2; display:flex; flex-wrap:wrap; align-items:center; gap:6px 10px; margin:0; font-size:13px; }
 .connection-card-state > small { font-size:11px; margin:0; }
-.connection-card-action { color:#326c59; font-size:12px; }
+.connection-card-action { width:100%; color:#326c59; font-size:13px; font-weight:600; padding-top:3px; }
+.connection-card .connection-next-step { width:100%; color:#334c41; font-size:12px; }
+.connection-proof { font-size:13px; color:var(--team-muted); line-height:1.45; }
+.connection-state-help { margin:0 0 14px; color:var(--team-muted); font-size:13px; }
+.connection-state-help summary { cursor:pointer; min-height:44px; display:list-item; align-content:center; }
+.connection-state-help dl { display:grid; gap:8px; margin:8px 0 14px; }
+.connection-state-help dl > div { display:grid; grid-template-columns:110px minmax(0,1fr); gap:10px; }
+.connection-state-help dt { font-weight:600; color:var(--team-text); }
+.connection-state-help dd { margin:0; }
+.connection-task-action { display:grid; gap:6px; padding:0 14px 14px; }
+.connection-task-action small { color:var(--team-muted); font-size:12px; line-height:1.4; }
+.connection-task-action button { width:100%; white-space:normal; }
 .connection-card:focus-visible { outline:3px solid #326c59; outline-offset:-3px; }
 .connection-setup-guide { padding:24px; border:1px solid var(--team-line); border-radius:12px; background:#fff; }
 .connection-setup-guide h2 { margin-top:16px; }
@@ -61,11 +72,10 @@
 @media (max-width:600px) {
   .connection-cards { grid-template-columns:1fr; }
   .connection-directory-status { align-items:flex-start; flex-direction:column; gap:4px; }
-  .team-workspace .connection-card { grid-template-columns:32px minmax(0,1fr); min-height:0; padding:14px 12px; gap:8px 12px; }
+  .team-workspace .connection-card { grid-template-columns:30px minmax(0,1fr); min-height:0; padding:12px; gap:8px 10px; }
   .connection-card .settings-card-icon { width:32px; height:32px; }
-  .team-workspace .connection-card > .connection-card-state { grid-column:2; align-items:flex-start; flex-direction:row; flex-wrap:wrap; gap:7px 10px; }
-  .connection-card-state > small { align-self:center; }
-  .connection-card-action { width:100%; }
+  .team-workspace .connection-card > .connection-card-state { gap:6px 10px; }
+  .connection-state-help dl > div { grid-template-columns:1fr; gap:3px; }
 }
 @media (max-width: 600px) {
   .team-workspace[data-settings-open="true"]:not([data-settings-navigation-locked="true"]) .team-topbar { display: none; }
@@ -73,16 +83,12 @@
 .connection-setup-guide { padding:18px; }
 .connection-setup-guide h3 { margin:18px 0 6px; font-size:15px; }
 .connection-setup-guide p { margin:6px 0 12px; }
-.team-workspace .connection-card { min-height:84px; }
-
 /* Compact service rows retain readable targets and separate operation proof. */
-.team-workspace .connection-card { min-height:68px; padding:10px 12px; gap:10px; }
 .connection-card .settings-card-icon { width:30px; height:30px; font-size:19px; border-radius:8px; }
 .connection-group { margin-top:16px; }
 .connection-group h2 { margin-bottom:8px; }
 .connection-service-summary { display:flex; flex-wrap:wrap; gap:6px 18px; margin-top:6px; }
 .connection-card .connection-service-summary small { font-size:12px; margin:0; }
 .connection-operation-time { display:block; font-size:11px; color:var(--team-muted); margin-top:2px; }
-.connection-card .connection-card-state { max-width:10rem; }
-.connection-card .connection-card-state > small { text-align:right; }
-@media(max-width:600px) { .team-workspace .connection-card { padding:10px; }.connection-card .connection-card-state { max-width:none; }.connection-card .connection-card-state > small { text-align:left; }.connection-service-summary { display:grid; gap:6px; } }
+.connection-card .connection-card-state > small { text-align:left; }
+@media(max-width:600px) { .connection-service-summary { display:grid; gap:6px; } }

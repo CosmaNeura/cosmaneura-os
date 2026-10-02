@@ -53,7 +53,13 @@ export function PracticeHub({identity,onDenied,onBusyChange,onDraftInbox,childre
       {INBOX_HANDOFF_BUILD&&<button aria-pressed={view==='handoffs'} disabled={blocked} onClick={()=>go('handoffs')}>Incoming follow-up</button>}
     </nav>
     {blocked&&<p role="status">Save or recover your unfinished edits before leaving this view.</p>}
-    <div hidden={view!=='assigned'}><IncomingBriefNavigation.Provider value={INBOX_HANDOFF_BUILD?{openTicket,blocked}:null}>{children}</IncomingBriefNavigation.Provider></div>
+    <div hidden={view!=='assigned'}>
+      <div className="practice-task-cards" aria-label="Start a practice task">
+        {INBOX_BUILD&&<button disabled={blocked} onClick={()=>go('incoming')}><span aria-hidden="true">📥</span><span><strong>Review incoming messages</strong><small>Confirm the patient and review the message before choosing a next step.</small></span><span aria-hidden="true">›</span></button>}
+        {INBOX_HANDOFF_BUILD&&<button disabled={blocked} onClick={()=>go('handoffs')}><span aria-hidden="true">🤝</span><span><strong>Review incoming follow-up</strong><small>Check who owns the next action and its saved result.</small></span><span aria-hidden="true">›</span></button>}
+      </div>
+      <IncomingBriefNavigation.Provider value={INBOX_HANDOFF_BUILD?{openTicket,blocked}:null}>{children}</IncomingBriefNavigation.Provider>
+    </div>
     {visited.incoming&&<div hidden={view!=='incoming'}><InboxMount identity={identity} onDenied={onDenied} onBusyChange={reportIncoming} onOpenHandoff={INBOX_HANDOFF_BUILD?openHandoff:undefined} onDraftInbox={onDraftInbox}/></div>}
     {visited.handoffs&&<div hidden={view!=='handoffs'}><InboxHandoffMount identity={identity} onDenied={onDenied} onBusyChange={reportHandoffs} sourceItemId={source?.itemId} sourceRequest={source?.request} selectedTicketId={selectedTicket?.id} ticketRequest={selectedTicket?.request} onDone={doneHandoff}/></div>}
   </section>;

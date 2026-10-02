@@ -5,8 +5,10 @@ from lab.account_tools import ACCOUNT_SCHEMAS
 from lab.cases import ROLES
 from lab.connector_tools import ALL_SCHEMAS, CONNECTOR_SCHEMAS, TEAM_SCHEMAS, visible
 from lab.fax_tools import FAX_SCHEMAS
+from lab.inbox_tools import INBOX_SCHEMAS
 from lab.mcp_runtime import MCPRuntime, _checked_arguments, _definitions
 from lab.research_tools import RESEARCH_SCHEMAS
+from lab.scheduling_tools import SCHEDULING_SCHEMAS
 from lab.store import LabError
 
 FORBIDDEN_FIELDS = {"actor", "actor_id", "actor_principal_id", "role", "owner_id", "box_id",
@@ -29,7 +31,9 @@ def synthetic_binary(tmp_path):
 def expected_connectors(role):
     return set(TEAM_SCHEMAS) | (set(ACCOUNT_SCHEMAS) if role in {"chief", "visit_prep", "follow_up"} else set()) | (
         set(FAX_SCHEMAS) if role in {"chief", "follow_up"} else set()) | (
-        set(RESEARCH_SCHEMAS) if role == "research" else set())
+        set(RESEARCH_SCHEMAS) if role == "research" else set()) | (
+        set(INBOX_SCHEMAS) if role in {"chief", "follow_up"} else set()) | (
+        set(SCHEDULING_SCHEMAS) if role in {"chief", "visit_prep", "follow_up"} else set())
 
 
 @pytest.mark.parametrize("role", ROLES)

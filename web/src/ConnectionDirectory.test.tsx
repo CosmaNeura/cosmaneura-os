@@ -20,7 +20,7 @@ const mount=(google:React.ReactNode,owner=identity)=>act(async()=>root.render(<S
 it('shows disabled services with useful setup steps without mounting a dead editor',async()=>{
   const editor=vi.fn();function Google(){useEffect(()=>{editor();},[]);return <p>OAuth editor</p>;}
   vi.mocked(readConnectionCatalog).mockResolvedValue(catalog);await mount(<Google/>);
-  expect(host.querySelectorAll('.connection-card')).toHaveLength(7);expect(host.textContent).toContain('Admin setup');
+  expect(host.querySelectorAll('.connection-card')).toHaveLength(7);expect(host.textContent).toContain('Needs setup');
   const unavailable=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
   expect(unavailable.textContent).toContain('Availability checked');expect(unavailable.textContent).not.toContain('Account checked');
   await click('Google email & calendar');expect(editor).not.toHaveBeenCalled();expect(host.textContent).toContain('Google sign-in has not been enabled');
@@ -31,7 +31,7 @@ it('shows disabled services with useful setup steps without mounting a dead edit
 it('does not turn a failed availability read into an available or connected badge',async()=>{
   vi.mocked(readConnectionCatalog).mockRejectedValue(new Error('offline'));await mount(<p>Google</p>);
   expect(host.textContent).toContain('Connections could not be checked');
-  expect([...host.querySelectorAll('.connection-badge')].every(x=>x.textContent==='Couldn’t check')).toBe(true);
+  expect([...host.querySelectorAll('.connection-badge')].every(x=>x.textContent==='Needs attention')).toBe(true);
   expect(readConnectionSummary).not.toHaveBeenCalled();
 });
 it('shows independent account results without confusing enabled setup with a connection',async()=>{
@@ -44,7 +44,7 @@ it('shows independent account results without confusing enabled setup with a con
   await mount(<p>Google</p>);
   const row=(name:string)=>[...host.querySelectorAll('.connection-card')].find(x=>x.textContent?.includes(name))!;
   expect(row('Google email & calendar').textContent).toContain('Connected');expect(row('Google email & calendar').textContent).toContain('Account checked');
-  expect(row('Microsoft email').textContent).toContain('Couldn’t check');
+  expect(row('Microsoft email').textContent).toContain('Needs attention');
   expect(row('Cosmaneura account').textContent).toContain('Needs review');
   expect(readConnectionSummary).toHaveBeenCalledTimes(3);
   expect(host.querySelectorAll('.connection-badge-ready')).toHaveLength(1);
@@ -120,7 +120,7 @@ it('drops a cached account label and proof when a background check changes or re
   expect(host.textContent).not.toContain(connected.account.email);expect(host.textContent).toContain('Account connection changed');expect(host.textContent).not.toContain('Verified in this session');
   await act(async()=>observeConnectionStatus(identity,'google',{state:'sign_in_required',account:null,connected_at:null}));
   const row=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
-  expect(row.textContent).toContain('Not connected');expect(row.textContent).not.toContain('Account connected');expect(row.textContent).toContain('Connect account');
+  expect(row.textContent).toContain('Needs setup');expect(row.textContent).not.toContain('Account connected');expect(row.textContent).toContain('Connect account');
 });
 it('connects fax setup to work and withdraws stale readiness when rechecking fails',async()=>{
   const work=vi.fn();vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,messaging:true});
@@ -151,4 +151,30 @@ it('clears abandoned loading flags when entering fax setup interrupts another ac
   expect(host.textContent).not.toContain('Stale account response');
   vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:true,messaging:true});
   await act(async()=>retry.click());expect(overview.textContent).toContain('available for preparing a fax draft');
+});
+it('uses Available only for enabled setup and Not checked when there is no account check',async()=>{
+ vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,payments:true});
+ await mount(<p>Google</p>);
+ const payments=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Payments'))!;
+ expect(payments.querySelector('.connection-badge')?.textContent).toBe('Available');
+ expect(payments.textContent).toContain('Its account and task results have not been checked');
+ expect(payments.textContent).toContain('Next: Review accounts and permissions');
+ expect(readConnectionSummary).not.toHaveBeenCalled();
+ await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} google={<p>Google editor</p>} teamSummary="Team" teamDirty={false} onClose={()=>{}}/>));
+ expect(host.querySelector('.connection-card .connection-badge')?.textContent).toBe('Not checked');
+ const card=host.querySelector<HTMLButtonElement>('.connection-card')!;
+ card.focus();expect(document.activeElement).toBe(card);expect(card.tagName).toBe('BUTTON');
+ await act(async()=>card.click());expect(document.activeElement?.textContent).toBe('Google email & calendar');
+});
+it('launches fax work from the overview only with current preparation evidence and recovers after recheck',async()=>{
+ const work=vi.fn(),editor=vi.fn();function Editor(){useEffect(()=>editor(),[]);return <p>Provider account editor</p>;}
+ vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,messaging:true});
+ vi.mocked(readConnectionSummary).mockResolvedValue({label:'Available',reason:'Account configured for drafts.',action:'Review fax options',tone:'neutral',faxReadiness:faxReady});
+ await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} messaging={<Editor/>} teamSummary="Team" teamDirty={false} onClose={()=>{}} connectionIdentity={identity} onOpenMessagingWork={work}/>));
+ const action=()=>host.querySelector<HTMLButtonElement>('.connection-task-action button')!;
+ expect(editor).not.toHaveBeenCalled();expect(action().disabled).toBe(false);await act(async()=>action().click());expect(work).toHaveBeenCalledOnce();
+ vi.mocked(readConnectionSummary).mockRejectedValueOnce(new Error('offline'));await click('Refresh connections');
+ expect(action().disabled).toBe(true);await act(async()=>action().click());expect(work).toHaveBeenCalledOnce();
+ expect(host.textContent).toContain('Current status is unknown');
+ await click('Refresh connections');expect(action().disabled).toBe(false);expect(editor).not.toHaveBeenCalled();
 });
