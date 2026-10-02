@@ -71,7 +71,7 @@ export type WorkspaceEntry = {
   model_request?: EntryModelRequest;
 };
 export type TaskSourceVersion = {entry_id:string;revision:number;label:string;kind:string;sha256:string};
-export type HandoffTaskBrief = {version:1;goal:string;missing_facts:string[];expected_output:string;
+export type HandoffTaskBrief = {version:1|2;goal:string;missing_facts:string[];expected_output:string;
   completion_criteria:string[];independent:true;source_versions:TaskSourceVersion[];
   allowed_actions:["prepare_private_draft"];depends_on:{entry_id:string;revision:number}};
 export type DraftHandoff = {
@@ -150,6 +150,8 @@ export type AppendInput = {
 export class WorkspaceApiError extends Error {
   constructor(public status: number, public code?: string) {
     super(code === "workspace_recovery_unavailable" ? "The workspace service could not confirm private draft recovery. Existing drafts are retained. Recheck recovery before continuing." :
+      code === "handoff_source_context_too_large" ? "The selected sources are too large for a complete team handoff. Your recording and saved notes are retained. Select fewer saved sources before asking Chief to delegate." :
+      code === "handoff_source_contract_unavailable" ? "Team handoffs need the source-reading tools enabled for this request. Your recording and saved notes are retained. Check Chief’s tools before preparing a new assignment." :
       code === "session_prep_analysis_too_large" ? "This brief and the selected saved notes are too large to review together. Ask without Session Prep, or narrow this bot's saved sources." :
       ["session_prep_analysis_unavailable","session_prep_not_ready","session_prep_context_changed","session_prep_request_conflict","session_prep_unavailable","invalid_session_prep_analysis"].includes(code??'') ? "Session Prep could not be confirmed. Keep this request for recovery, then open the current brief before starting a new question." :
       code === "inbox_selection_required" ? "Open Incoming messages, review the patient and message, then choose Draft a reply." :

@@ -172,7 +172,8 @@ def _binding(s, w, handoff, attempt, *, current=True):
         context = _context(row.prepared_envelope["context"])
         task = row.request_body["task_brief"]
         handoff_briefs.validate(
-            task, context, goal=handoff.brief, origin_id=handoff.origin_entry_id
+            task, context, goal=handoff.brief, origin_id=handoff.origin_entry_id,
+            prepared_contract=row.envelope_contract,
         )
         origin = s.get(WorkspaceEntry, handoff.origin_entry_id)
         expected_question = handoff_briefs.question(task)

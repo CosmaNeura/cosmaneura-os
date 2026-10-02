@@ -254,3 +254,22 @@ afterAll(async()=>{
   await writeFile(`${directory}/handoff-review-wire-fixtures.json`,JSON.stringify({schema:'cosmabot.handoff-review-synthetic-wire-fixtures.v1',synthetic_only:true,
     boundary:'Reusable invented requests and mocked responses from mounted UI trials; not a database seed or server end-to-end result.',fixtures:wireFixtures},null,2)+'\n');
 });
+
+
+it.each([
+  {code:'handoff_source_contract_unavailable',guidance:'Check Chief’s tools'},
+  {code:'handoff_source_context_too_large',guidance:'Select fewer saved sources'},
+])('shows actionable $code guidance when a revised handoff is refused, retaining saved feedback',async({code,guidance})=>{
+  await mount();await click('Request changes');await input('Retain the exact requested owner and deadline.');
+  await click('Save change request');await until(()=>element.textContent!.includes('Changes requested'));
+  const savedReview=(workspace.handoffs![0] as ReviewableHandoff).review;
+  vi.stubGlobal('fetch',vi.fn(async(_url:string,init:RequestInit)=>{
+    revisionRequests.push(JSON.parse(init.body as string));
+    return new Response(JSON.stringify({detail:code}),{status:422,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+  }));
+  await click('Prepare revised draft');await until(()=>element.textContent!.includes(guidance));
+  expect(element.textContent).toContain('Your change request is retained.');
+  expect((workspace.handoffs![0] as ReviewableHandoff).review).toEqual(savedReview);
+  expect(workspace.handoffs).toHaveLength(1);expect(revisionRequests).toHaveLength(1);
+  expect(button('Prepare revised draft').disabled).toBe(true);expect(saved).toHaveBeenCalledTimes(1);
+});

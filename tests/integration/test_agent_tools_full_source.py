@@ -72,12 +72,12 @@ def append_sources(engine: Any, scope: tuple[str, str, str], lengths: tuple[int,
     return ids
 
 
-def reserve(engine: Any, scope: tuple[str, str, str]) -> str:
+def reserve(engine: Any, scope: tuple[str, str, str], *, role: str = "chief") -> str:
     box, owner, wid = scope
     with Session(engine) as s:
         snapshot = ws.read(s, box, owner, wid)
         aid, _ = work.reserve_conversation(s, box, owner, wid, expected=snapshot["revision"],
-            team_revision=1, key="invented-full-admission", role="chief",
+            team_revision=1, key="invented-full-admission", role=role,
             content="Review the invented evidence; no external action.")
         assert aid is not None
         return aid
@@ -98,7 +98,7 @@ def no_reply(s: Session, wid: str) -> bool:
     return s.scalar(select(WorkspaceReply).where(WorkspaceReply.workspace_id == wid)) is None
 
 
-@pytest.mark.parametrize("lengths", [(6000,), (20000,), (5000,) * 7])
+@pytest.mark.parametrize("lengths", [(6000,), (20000,)])
 def test_actual_reservation_read_and_settlement_keep_full_sources_independent_of_delivery(engine, full_case, lengths):
     ids = append_sources(engine, full_case, lengths)
     aid = reserve(engine, full_case)
@@ -129,6 +129,16 @@ def test_actual_reservation_read_and_settlement_keep_full_sources_independent_of
         row = s.get(ModelWorkAdmission, aid)
         assert row is not None and row.state == "completed"
         assert not no_reply(s, claimed.workspace_id)
+
+
+def test_chief_delegation_context_above_thirty_thousand_is_refused_before_any_admission(engine, full_case):
+    append_sources(engine, full_case, (5000,) * 7)
+    with pytest.raises(ws.WorkspaceError, match="handoff_source_context_too_large"):
+        reserve(engine, full_case)
+    with Session(engine) as s:
+        assert s.scalar(select(ModelWorkAdmission.id).where(
+            ModelWorkAdmission.workspace_id == full_case[2])) is None
+        assert no_reply(s, full_case[2])
 
 
 @pytest.mark.parametrize("boundary", ["claim", "read", "settle"])
@@ -168,7 +178,7 @@ def test_full_digest_refuses_projection_change_even_with_identical_decoder_sourc
     # The only injected seam is the current authorized source projection. The
     # row, saved JSON, claim, executor and settlement are real product services.
     append_sources(engine, full_case, (6000,) if source_region == "tail" else (5000,) * 7)
-    aid = reserve(engine, full_case)
+    aid = reserve(engine, full_case, role="visit_prep" if source_region == "omitted-source" else "chief")
     claimed = claim(engine, full_case, aid)
     frozen = _context(claimed.envelope["context"])
     eligible = {source["source_id"] for source in claimed.envelope["baseline"]["sources"]}

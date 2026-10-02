@@ -22,7 +22,7 @@ const REFUSALS=new Set(['workspace_revision_conflict','handoff_result_already_re
   'handoff_sources_changed','handoff_context_changed','handoff_result_changed','handoff_result_unavailable','handoff_result_unverifiable',
   'handoff_review_stale','handoff_revision_stale','handoff_revision_unverifiable','handoff_revision_limit','handoff_revision_too_large',
   'invalid_handoff_review','invalid_handoff_revision','invalid_model_work_request','model_request_too_large','workspace_history_limit',
-  'model_unavailable','team_work_limit','bot_capability_restricted']);
+  'model_unavailable','team_work_limit','bot_capability_restricted','handoff_source_context_too_large','handoff_source_contract_unavailable']);
 export class HandoffReviewRefusal extends WorkspaceApiError {
   constructor(status:number,code:string){super(status,code);this.name='HandoffReviewRefusal';}
 }

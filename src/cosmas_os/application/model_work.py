@@ -517,7 +517,7 @@ def _finish(s, row, state, reason, at, *, dispatch=None, outcome=None, reply=Non
 
 
 def _context_for(
-    s, workspace, version, settings, bot, command, *, handoff_roles=(), draft_only=False, session_prep_phase="before"
+    s, workspace, version, settings, bot, command, *, handoff_roles=(), draft_only=False, session_prep_phase="before", prepared_contract=None
 ):
     from cosmas_os.application import conversation
 
@@ -592,7 +592,8 @@ def _context_for(
             if not draft_only:
                 raise ValueError("task brief requires private handoff")
             task = command["task_brief"]
-            handoff_briefs.validate(task, context, goal=command["content"], origin_id=task["depends_on"]["entry_id"])
+            handoff_briefs.validate(task, context, goal=command["content"],
+                origin_id=task["depends_on"]["entry_id"], prepared_contract=prepared_contract)
             context = replace(context, question=handoff_briefs.question(task))
         except (ValueError, TypeError, KeyError):
             raise ws.WorkspaceError("source_changed") from None
@@ -662,6 +663,18 @@ def _new_admission(
     *,
     attempt=None,
 ):
+    full_source_task = command.get("task_brief", {}).get("version") == 2
+    tools_available = (team.runtime_settings.workspace_agent_tools_enabled
+        and not any(key in command for key in (
+            "research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")))
+    if full_source_task and not tools_available:
+        raise ws.WorkspaceError("handoff_source_contract_unavailable", 422)
+    if context.role == "chief" and context.handoff_roles and context.handoff_limit:
+        try:
+            handoff_briefs.validate_sources(context, version=2 if tools_available else 1,
+                prepared_contract=handoff_briefs.FULL_SOURCE_CONTRACT if tools_available else None)
+        except (ValueError, TypeError, KeyError):
+            raise ws.WorkspaceError("handoff_source_context_too_large", 422) from None
     try:
         if not any(
             key in command for key in ("research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")
@@ -676,6 +689,8 @@ def _new_admission(
             envelope = GPT41Connector(lambda: "").prepare(context)
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
         raise ws.WorkspaceError("model_unavailable", 503) from None
+    if full_source_task and envelope["contract"] != handoff_briefs.FULL_SOURCE_CONTRACT:
+        raise ws.WorkspaceError("handoff_source_contract_unavailable", 422)
     # Application bounds use canonical bytes; the DB has a finite allowance for
     # PostgreSQL jsonb's inserted whitespace/escaping, not a larger model body.
     if len(canonical(command)) > 65_536:
@@ -835,6 +850,20 @@ def reserve_conversation(
     from dataclasses import replace
 
     context = replace(context, handoff_limit=0 if any(item is not None for item in (research_analysis, inbox_analysis, membership_analysis, session_prep_analysis)) else handoff_limit)
+    if context.role == "chief" and context.handoff_roles and context.handoff_limit:
+        # Each installed recipient may select a different notebook/evidence set.
+        # Validate those possible full source sets before paying Chief, rather
+        # than discovering a recipient-only overflow during child publication.
+        tools_available = team.runtime_settings.workspace_agent_tools_enabled
+        for address in context.handoff_roles:
+            _, recipient, recipient_settings = team.active_bot(s, box, owner, address, version.revision)
+            child = _context_for(s, workspace, version, recipient_settings, recipient,
+                {"content": "Preflight private draft source bounds."}, draft_only=True)
+            try:
+                handoff_briefs.validate_sources(child, version=2 if tools_available else 1,
+                    prepared_contract=handoff_briefs.FULL_SOURCE_CONTRACT if tools_available else None)
+            except (ValueError, TypeError, KeyError):
+                raise ws.WorkspaceError("handoff_source_context_too_large", 422) from None
     row = _new_admission(
         s,
         workspace,
@@ -913,6 +942,11 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
         and team.blocked(settings, "private_draft_handoff")
     ):
         raise ws.WorkspaceError("authority_changed")
+    if command.get("task_brief", {}).get("version") == 2 and (
+        row.envelope_contract != handoff_briefs.FULL_SOURCE_CONTRACT
+        or not team.runtime_settings.workspace_agent_tools_enabled
+    ):
+        raise ws.WorkspaceError("authority_changed")
     frozen = _context(row.prepared_envelope["context"])
     context = _context_for(
         s,
@@ -924,6 +958,7 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
         handoff_roles=frozen.handoff_roles,
         draft_only=row.kind == "private_handoff",
         session_prep_phase=session_prep_phase,
+        prepared_contract=row.envelope_contract,
     )
     if source_digest(context) != row.source_sha256:
         raise ws.WorkspaceError("source_changed")
@@ -1205,6 +1240,7 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
                 result.handoffs,
                 external_identity_id=row.external_identity_id,
                 clock=clock,
+                prepared_contract=row.envelope_contract,
             )
             published = replace(
                 result,
@@ -1422,7 +1458,7 @@ def project_workspace(s, value, *, as_of=None):
 
 
 def reserve_children(
-    s, workspace, origin, version, chief, context, briefs, *, external_identity_id, clock=None
+    s, workspace, origin, version, chief, context, briefs, *, external_identity_id, clock=None, prepared_contract=None
 ):
     from dataclasses import replace
 
@@ -1509,7 +1545,9 @@ def reserve_children(
         child_context = replace(child_context, context_revision=context.context_revision)
         if brief.requirements is not None:
             try:
-                task = handoff_briefs.prepare(brief, child_context, origin)
+                task = handoff_briefs.prepare(brief, child_context, origin,
+                    version=2 if prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT else 1,
+                    prepared_contract=prepared_contract)
             except (ValueError, TypeError, KeyError):
                 raise ws.WorkspaceError("invalid_model_output") from None
             command["task_brief"] = task
@@ -1761,7 +1799,10 @@ def reserve_retry(
     }
     if original and "task_brief" in original.request_body:
         command["task_brief"] = original.request_body["task_brief"]
-    context = _context_for(s, workspace, version, settings, bot, command, draft_only=True)
+        if "revision_request" in original.request_body:
+            command["revision_request"] = original.request_body["revision_request"]
+    context = _context_for(s, workspace, version, settings, bot, command, draft_only=True,
+        prepared_contract=original.envelope_contract if original else None)
     _new_admission(
         s,
         workspace,
