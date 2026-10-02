@@ -13,6 +13,8 @@ from cosmas_os.adapters import gpt41
 from cosmas_os.adapters.gpt41_tools import GPT41ToolsConnector, _digest
 from cosmas_os.adapters.gpt41_tools import validate_prepared as validate_v5
 from cosmas_os.adapters.gpt41_tools_v6 import (
+    READ_ONLY_TURN_INSTRUCTIONS,
+    TASK_READ_TURN_INSTRUCTIONS,
     TASK_SOURCE_VERIFICATION_INSTRUCTIONS,
     GPT41CompactToolsConnector,
     validate_prepared,
@@ -178,6 +180,8 @@ def test_outbound_v6_excerpt_diagnostics_never_expose_a_competing_tool_handle_ha
         assert record["excerpt_sha256"] not in wire
     assert "ONLY from tool_selection.sources" in bodies[0]["messages"][2]["content"]
     assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
+    assert READ_ONLY_TURN_INSTRUCTIONS in bodies[0]["messages"][2]["content"]
+    assert TASK_READ_TURN_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
     assert envelope == original and _digest(envelope) == stored_hash
     validate_prepared(envelope)
 
@@ -343,26 +347,81 @@ def test_complete_task_original_finishes_without_added_read_or_verification_prom
             envelope, execute=lambda _: pytest.fail("complete original must not be redundantly read"))
     assert len(bodies) == 1
     assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
+    assert READ_ONLY_TURN_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
+    assert TASK_READ_TURN_INSTRUCTIONS not in bodies[0]["messages"][2]["content"]
     assert bodies[0] == envelope["body"]
 
 
 @pytest.mark.parametrize("role", ["visit_prep", "follow_up"])
-def test_non_scribe_specialist_task_gets_same_original_verification_guidance(role):
-    envelope, bodies, reads = quoted_task_envelope(role=role), [], []
-    original = deepcopy(envelope)
+@pytest.mark.parametrize("delivery", ["excerpt", "omitted"])
+@pytest.mark.parametrize("call_content", [None, ""])
+def test_non_scribe_specialist_task_gets_same_original_verification_guidance(role, delivery, call_content):
+    envelope, bodies, reads = quoted_task_envelope(delivery, role), [], []
+    original, stored_hash = deepcopy(envelope), _digest(envelope)
     def provider(request):
         body = json.loads(request.content)
         bodies.append(body)
-        assert TASK_SOURCE_VERIFICATION_INSTRUCTIONS in body["messages"][2]["content"]
+        guidance = body["messages"][2]["content"]
+        assert all(text in guidance for text in (READ_ONLY_TURN_INSTRUCTIONS,
+            TASK_SOURCE_VERIFICATION_INSTRUCTIONS, TASK_READ_TURN_INSTRUCTIONS))
+        assert body["tool_choice"] == "auto" and body["parallel_tool_calls"] is False
+        assert body["tools"] == envelope["body"]["tools"]
+        assert body["response_format"] == envelope["baseline"]["body"]["response_format"]
+        assert body["messages"][0] == envelope["baseline"]["body"]["messages"][0]
         if len(bodies) == 1:
-            return httpx.Response(200, json=tool_response(read_call(envelope)))
-        return httpx.Response(200, json=answer("invented-source-0"))
+            assert all(quote not in item["text"] for item in delivered(body)["sources"] for quote in LATE_TASK_QUOTES)
+            handle = json.loads(body["messages"][3]["content"])["tool_selection"]["sources"][0]
+            call = read_call(envelope)
+            assert json.loads(call["function"]["arguments"]) == {
+                key: handle[key] for key in ("entry_id", "revision", "sha256")}
+            response = tool_response(call)
+            response["choices"][0]["message"]["content"] = call_content
+            return httpx.Response(200, json=response)
+        returned = json.loads(body["messages"][-1]["content"])
+        assert returned["data"]["content"] == envelope["context"]["sources"][0]["content"]
+        assert returned["receipt"]["envelope_sha256"] == stored_hash
+        return httpx.Response(200, json=answer("invented-source-0", content={
+            "answer": "Source-verified invented private draft: " + " ".join(LATE_TASK_QUOTES),
+            "source_ids": ["invented-source-0"]}))
     def execute(request):
         reads.append(request)
         return source_result(envelope, request)
-    GPT41CompactToolsConnector(lambda: "invented-key", transport=httpx.MockTransport(provider)).review_prepared(
+    result = GPT41CompactToolsConnector(lambda: "invented-key", transport=httpx.MockTransport(provider)).review_prepared(
         envelope, execute=execute)
     assert len(bodies) == 2 and len(reads) == 1 and envelope == original
+    assert all(quote in result.content for quote in LATE_TASK_QUOTES)
+    assert result.citations[0].content == envelope["context"]["sources"][0]["content"]
+    assert _digest(envelope) == stored_hash
+    assert all(text not in json.dumps(envelope) for text in (READ_ONLY_TURN_INSTRUCTIONS, TASK_READ_TURN_INSTRUCTIONS))
+    validate_prepared(envelope)
+
+
+@pytest.mark.parametrize("violation", ["preface", "json_answer_with_call", "extra_argument", "string_revision"])
+def test_outbound_read_turn_clarification_does_not_relax_transport_or_argument_checks(violation):
+    envelope, bodies = quoted_task_envelope(role="visit_prep"), []
+    original, stored_hash = deepcopy(envelope), _digest(envelope)
+    response = tool_response(read_call(envelope))
+    message = response["choices"][0]["message"]
+    if violation == "preface":
+        message["content"] = "I will read the source now."
+    elif violation == "json_answer_with_call":
+        message["content"] = json.dumps({"answer": "Premature draft", "source_ids": []})
+    else:
+        arguments = json.loads(message["tool_calls"][0]["function"]["arguments"])
+        if violation == "extra_argument":
+            arguments["owner_id"] = "invented-human"
+        else:
+            arguments["revision"] = str(arguments["revision"])
+        message["tool_calls"][0]["function"]["arguments"] = json.dumps(arguments)
+    with pytest.raises(ModelCallFailure) as failure:
+        GPT41CompactToolsConnector(lambda: "invented-key", transport=transport([response], bodies)).review_prepared(
+            envelope, execute=lambda _: pytest.fail("invalid read turn must not enter the scoped reader"))
+    assert len(bodies) == 1 and failure.value.dispatch == "response_received"
+    assert failure.value.outcome == "invalid_output"
+    assert failure.value.input_tokens == 100 and failure.value.output_tokens == 20
+    assert READ_ONLY_TURN_INSTRUCTIONS in bodies[0]["messages"][2]["content"]
+    assert TASK_READ_TURN_INSTRUCTIONS in bodies[0]["messages"][2]["content"]
+    assert envelope == original and _digest(envelope) == stored_hash
 
 
 def test_removed_excerpt_hash_still_cannot_authorize_a_full_source_read():
