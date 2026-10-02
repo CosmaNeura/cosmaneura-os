@@ -1,10 +1,21 @@
 """One bounded primary-calendar read; no attendees, descriptions or mutations."""
 
 import re
+from collections.abc import Callable
 from datetime import UTC, date, datetime, timedelta
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from cosmas_os.adapters.google_connection import CALENDAR_URL
+from cosmas_os.ports.google_calendar import (
+    GoogleCalendarAccount,
+    GoogleCalendarEvent,
+    GoogleCalendarObservation,
+    GoogleCalendarWindow,
+    aware,
+)
+
+if TYPE_CHECKING:
+    from cosmas_os.adapters.google_connection import GooglePersonalConnection
 
 
 def boundary(value):
@@ -24,20 +35,22 @@ def boundary(value):
     raise ValueError("Invalid calendar boundary")
 
 
-def read_calendar(service, identity, private, binding, account_id):
+def _read_calendar(service, identity, private, binding, account_id, *, check=None, exact=False):
     def current(*, audit: bool | Literal["calendar"] = False) -> None:
+        if check is not None:
+            check()
         service._read_current(identity, private, binding, account_id, audit=audit)
 
     current()
-    start = service.now()
+    start = aware(service.now()).astimezone(UTC)
     end = start + timedelta(days=7)
     data = service._request("GET", CALENDAR_URL, token=private["token"], params={
         "timeMin": start.isoformat(), "timeMax": end.isoformat(), "maxResults": "25",
         "singleEvents": "true", "orderBy": "startTime", "showDeleted": "false", "timeZone": "UTC",
         "fields": "items(id,summary,status,start(date,dateTime),end(date,dateTime)),nextPageToken",
-    })
+    }, **({"check": current} if check is not None else {}))
     current()
-    if set(data) - {"items", "nextPageToken"}:
+    if not isinstance(data, dict) or set(data) - {"items", "nextPageToken"}:
         raise ValueError("Unexpected calendar response")
     rows, page = data.get("items", []), data.get("nextPageToken")
     if (not isinstance(rows, list) or len(rows) > 25
@@ -59,11 +72,32 @@ def read_calendar(service, identity, private, binding, account_id):
             raise ValueError("Invalid calendar interval")
         # Date-only events retain their original date; local display must not
         # turn a midnight UTC conversion into the preceding calendar day.
-        if all_day and (finishes.date() <= start.date() or begins.date() > end.date()):
+        # The exact observation relies on Google's date-only filtering; this
+        # response does not provide a timezone for an independent UTC proof.
+        if all_day and not exact and (finishes.date() <= start.date() or begins.date() > end.date()):
             raise ValueError("Invalid calendar interval")
         items.append({"id": identifier, "subject": service._text(row.get("summary", ""), 998),
                       "starts_at": starts_at, "ends_at": ends_at, "all_day": all_day,
                       "cancelled": status == "cancelled"})
+    observed_at = service.now()
+    value = {"kind": "calendar", "account": {"label": private["label"], "email": private["email"]},
+             "items": items, "more": page is not None, "observed_at": observed_at.isoformat()}
+    if exact:
+        value = GoogleCalendarObservation(kind="calendar", account=GoogleCalendarAccount(**value["account"]),
+            items=tuple(GoogleCalendarEvent(**item) for item in items), more=page is not None,
+            observed_at=observed_at, window=GoogleCalendarWindow(starts_at=start, ends_at=end))
     current(audit="calendar")
-    return {"kind": "calendar", "account": {"label": private["label"], "email": private["email"]},
-            "items": items, "more": page is not None, "observed_at": service.now().isoformat()}
+    return value
+
+
+def read_calendar(service, identity, private, binding, account_id):
+    """Preserve the existing transient response; no observation field is added."""
+    return _read_calendar(service, identity, private, binding, account_id)
+
+
+def read_calendar_observation(service: "GooglePersonalConnection", identity, private, binding,
+                              account_id, *, check: Callable[[], None]) -> GoogleCalendarObservation:
+    """Capture the exact query window from the same one bounded provider GET."""
+    value = _read_calendar(service, identity, private, binding, account_id, check=check, exact=True)
+    assert isinstance(value, GoogleCalendarObservation)
+    return value

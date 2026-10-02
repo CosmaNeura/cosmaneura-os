@@ -34,6 +34,7 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.application.capture_deadline import CaptureBudget, capture_budget, current_budget
 from cosmas_os.google_connection_models import GoogleConnectionAttempt, GoogleConnectionCredential
 from cosmas_os.models import ExternalIdentity
+from cosmas_os.ports.google_calendar import GoogleCalendarBinding, GoogleCalendarRead
 from cosmas_os.ports.google_message import (
     GoogleMessageBinding,
     GoogleMessageRead,
@@ -283,6 +284,26 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
                 self._full_mail_enabled()
             return GoogleMessageBinding(account_id=account.id, binding_digest=binding, connected_at=connected_at,
                 grant_sha256=digest(canonical(["cosmas-google-message-grant.v1", account.id, binding,
+                    connected_at.isoformat(), private["subject"], sorted(scopes)])))
+
+    def calendar_binding(self, identity, *, session=None) -> GoogleCalendarBinding:
+        """DB-only calendar custody; no refresh, mailbox scope or nested ownership."""
+        self._enabled()
+        with self._session() if session is None else nullcontext(session) as current:
+            account, binding = self._message_account(current, identity)
+            credential = current.scalar(select(self.Credential).where(self.Credential.account_id == account.id)
+                .with_for_update(read=True).execution_options(populate_existing=True))
+            if (not credential or credential.status != "ready" or credential.sealed is None
+                    or credential.binding_digest != binding or credential.expires_at <= self.now()):
+                raise ws.WorkspaceError("google_connection_changed", 409)
+            private = self._open(credential.sealed, "credential", account.id, binding)
+            scopes = self._grant_scopes(private)
+            if private.get("calendar_read") is not True or CALENDAR_SCOPE not in scopes:
+                raise ws.WorkspaceError("google_calendar_consent_required", 409)
+            connected_at = credential.connected_at.astimezone(UTC)
+            self._enabled()
+            return GoogleCalendarBinding(account_id=account.id, binding_digest=binding, connected_at=connected_at,
+                grant_sha256=digest(canonical(["cosmas-google-calendar-grant.v1", account.id, binding,
                     connected_at.isoformat(), private["subject"], sorted(scopes)])))
 
     def message_status(self, identity, *, session=None):
@@ -580,6 +601,28 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
         if private.get("calendar_read") is not True:
             raise ws.WorkspaceError("google_calendar_consent_required", 409)
         return read_calendar(self, identity, private, binding, account_id)
+
+    def calendar_observation(self, identity) -> GoogleCalendarRead:
+        """Optional exact-window summary read; the existing transient view is unchanged."""
+        from cosmas_os.adapters.google_calendar import read_calendar_observation
+
+        if current_budget() is None:
+            with capture_budget(CaptureBudget(40)):
+                return self.calendar_observation(identity)
+        private, binding, account_id = self.credential(identity)
+        if private.get("calendar_read") is not True:
+            raise ws.WorkspaceError("google_calendar_consent_required", 409)
+        custody = self.calendar_binding(identity)
+        if (custody.account_id, custody.binding_digest) != (account_id, binding):
+            raise ws.WorkspaceError("google_connection_changed", 409)
+
+        def current():
+            if self.calendar_binding(identity) != custody:
+                raise ws.WorkspaceError("google_connection_changed", 409)
+
+        observation = read_calendar_observation(self, identity, private, binding, account_id,
+                                                check=current)
+        return GoogleCalendarRead(observation=observation, custody=custody)
 
     @staticmethod
     def _plain_body(payload):
