@@ -14,6 +14,7 @@ from starlette.requests import Request
 from cosmas_os.api import vendor_retirement_schemas
 from cosmas_os.api import vendor_work_schemas as schema
 from cosmas_os.application import (
+    fax_status,
     vendor_artifacts,
     vendor_events,
     vendor_execution,
@@ -36,7 +37,7 @@ WORK_ROOT = rf"/workspaces/{UUID_PATH}/vendor-work"
 ARTIFACT_ROOT = rf"/workspaces/{UUID_PATH}/vendor-artifacts"
 PRACTICE_ROOT = rf"/practice-work/{UUID_PATH}"
 PRIVATE_PATH = re.compile(
-    rf"(?:/workspaces/{UUID_PATH}/vendor-preparations/retire|{WORK_ROOT}(?:/(?:options|resolve|{UUID_PATH}(?:/(?:decide|withdraw|publish|submit|reconcile|observations|result|verify|retire))?))?|{ARTIFACT_ROOT}(?:/(?:resolve|{UUID_PATH}/content))?)"
+    rf"(?:/workspaces/{UUID_PATH}/vendor-preparations/retire|{WORK_ROOT}(?:/(?:options|resolve|{UUID_PATH}(?:/(?:decide|withdraw|publish|submit|reconcile|observations|status|result|verify|retire))?))?|{ARTIFACT_ROOT}(?:/(?:resolve|{UUID_PATH}/content))?)"
 )
 SHARED_PATH = re.compile(
     rf"(?:/practice-work|/practice-work/pages/{UUID_PATH}|{PRACTICE_ROOT}(?:/(?:handoffs|result|vendor-command/resolve))?)"
@@ -435,6 +436,12 @@ def install(
                 session, identity.box_id, identity.principal_id, str(workspace_id), str(ticket_id)
             ),
         )
+
+    @app.get("/workspaces/{workspace_id}/vendor-work/{ticket_id}/status")
+    async def saved_fax_status(request: Request, workspace_id: UUID, ticket_id: UUID,
+                               session=Depends(vendor_session), identity=Depends(identity_dependency)):
+        return await run(request, session, identity, lambda: fax_status.read(
+            session, identity.box_id, identity.principal_id, str(workspace_id), str(ticket_id)))
 
     @app.get("/workspaces/{workspace_id}/vendor-work/{ticket_id}/observations")
     async def observations(

@@ -16,7 +16,7 @@ from cosmas_os.config import settings as runtime
 from cosmas_os.ports.bot_capabilities import supports_skill
 
 KINDS = frozenset({"inbox", "follow_up", "scheduling", "membership", "payment"})
-LINKED_LANES = {"encounter_follow_up": "follow_up", "scheduling_appointment": "scheduling",
+LINKED_LANES = {"encounter_follow_up": "follow_up", "scheduling_appointment": "scheduling", "encounter_vendor_delivery": "fax",
                 "encounter_membership_work": "membership", "encounter_payment_request": "payment"}
 
 
@@ -81,12 +81,26 @@ def project(kind, facts):
 def read(s, box, owner, workspace_id, *, kind, record_id, inbox_registry=inbox_work.no_registry,
          inbox_policy=inbox_work.DEFAULT_POLICY, membership_policy=membership_work.DEFAULT_POLICY, now=None,
          configuration: Settings | None = None):
-    if type(kind) is not str or kind not in KINDS or type(record_id) is not str:
+    if type(kind) is not str or kind not in KINDS | {"fax"} or type(record_id) is not str:
         raise ws.WorkspaceError("operations_selection_invalid", 422)
     moment = datetime.now(UTC) if now is None else now
     if not isinstance(moment, datetime) or moment.tzinfo is None or moment.utcoffset() is None:
         raise ws.WorkspaceError("operations_selection_invalid", 422)
     w = ws._workspace(s, box, owner, workspace_id)
+    if kind == "fax":
+        from cosmas_os.application import fax_status
+
+        selected = fax_status.read(s, box, owner, workspace_id, record_id, require_link=True)
+        value = {"contract_version": 1, "scope": selected["scope"], "kind": "fax",
+            "record_id": record_id, "state": selected["state"], "next_step": selected["next_step"],
+            "evidence": {"source_current": selected["source_current"],
+                "workflow_closed": selected["verification"] == "verified",
+                "external_outcome": selected["external_outcome"],
+                "provenance": "saved fax submission, transport and human verification receipts",
+                "version": selected["version"], "commitment": selected["sha256"]},
+            "observed_at": selected["observed_at"]}
+        ws._workspace(s, box, owner, workspace_id)
+        return value
     if kind == "follow_up":
         items = follow_up.read(s, w, w.revision)
         selected = next((row for row in items if row["ticket_id"] == record_id), None)
