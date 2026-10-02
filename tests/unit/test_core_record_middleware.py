@@ -166,25 +166,41 @@ def test_actual_record_final_output_is_bounded(actual_record, behavior, status, 
     asyncio.run(run())
 
 
-def test_actual_resistant_read_retains_capacity_and_its_session(actual_record):
+def test_actual_resistant_read_retains_capacity_and_its_session(actual_record, monkeypatch):
     f=actual_record
     f.behavior='blocked'
+    # This case qualifies retained ownership after an admitted reader blocks.
+    # Separate final-output cases retain the 40 ms public wall-clock budget.
+    monkeypatch.setattr(record, 'DEADLINE_SECONDS', 0.25)
     async def run():
-        first=await invoke(f)
-        assert first[0]['status']==504
-        assert f.events==['session','auth']
-        second=await invoke(f)
-        assert second[0]['status']==503
-        assert f.events==['session','auth'], 'timeout released capacity over live reader'
-        f.release.set()
-        await settled(lambda:'close' in f.events)
-        assert f.events==['session','auth','identity returned','rollback','close']
-        await asyncio.sleep(0.01)
-        f.behavior='success'
-        third=await invoke(f)
-        assert third[0]['status']==200
-        body=json.loads(b''.join(m.get('body',b'') for m in third))
-        assert body['href'].startswith('https://core.example.invalid/notes/appointment_')
+        first_task=asyncio.create_task(invoke(f))
+        try:
+            await settled(lambda:'auth' in f.events)
+            assert not first_task.done(), 'reader did not remain blocked after admission'
+            first=await asyncio.wait_for(asyncio.shield(first_task), timeout=0.6)
+            assert first[0]['status']==504
+            assert f.events==['session','auth']
+            second=await invoke(f)
+            assert second[0]['status']==503
+            assert f.events==['session','auth'], 'timeout released capacity over live reader'
+            f.release.set()
+            await settled(lambda:'close' in f.events)
+            assert f.events==['session','auth','identity returned','rollback','close']
+            def ownership_released():
+                available=boundary._workers.acquire(blocking=False)
+                if available:
+                    boundary._workers.release()
+                return available
+            await settled(ownership_released)
+            f.behavior='success'
+            third=await invoke(f)
+            assert third[0]['status']==200
+            body=json.loads(b''.join(m.get('body',b'') for m in third))
+            assert body['href'].startswith('https://core.example.invalid/notes/appointment_')
+        finally:
+            f.release.set()
+            await asyncio.wait_for(asyncio.gather(first_task,return_exceptions=True), timeout=2)
+            await settled(lambda:f.events.count('session')==f.events.count('close'))
     asyncio.run(run())
 
 

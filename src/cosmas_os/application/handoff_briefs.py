@@ -108,6 +108,7 @@ def projection(s, assignment, row):
 
     from cosmas_os.adapters.gpt41 import _context
     from cosmas_os.application.model_work import digest
+    from cosmas_os.application.workspace import WorkspaceError
     from cosmas_os.models import ModelWorkAdmission, WorkspaceEntry, WorkspaceReply
 
     if row is None or "task_brief" not in row.request_body:
@@ -116,13 +117,20 @@ def projection(s, assignment, row):
                 ModelWorkAdmission.request_entry_id == assignment.origin_entry_id
             )
         )
-        if parent and parent.envelope_contract == "cosmas-gpt41-prepared.v4":
+        if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", "cosmas-gpt41-prepared.v5"}:
             return {"task_brief_unavailable": True}
         return {}
     try:
         context = _context(row.prepared_envelope["context"])
         task = row.request_body["task_brief"]
         validate(task, context, goal=assignment.brief, origin_id=assignment.origin_entry_id)
+        expected_question = question(task)
+        if "revision_request" in row.request_body:
+            from cosmas_os.application.handoff_revision import revision_question
+            from cosmas_os.models import EncounterWorkspace
+
+            expected_question += revision_question(s, s.get(EncounterWorkspace, assignment.workspace_id),
+                                                   row.request_body["revision_request"])
         if (
             row.workspace_id != assignment.workspace_id
             or context.workspace_id != assignment.workspace_id
@@ -131,10 +139,10 @@ def projection(s, assignment, row):
             or row.owner_id != assignment.owner_id
             or row.agent_id != assignment.recipient_agent_id
             or row.envelope_sha256 != digest(row.prepared_envelope)
-            or context.question != question(task)
+            or context.question != expected_question
         ):
             raise ValueError("task receipt mismatch")
-    except (ValueError, TypeError, KeyError):
+    except (ValueError, TypeError, KeyError, WorkspaceError):
         return {"task_brief_unavailable": True}
     output = {"task_brief": task}
     if row.state == "completed" and row.result_entry_id == row.request_entry_id:

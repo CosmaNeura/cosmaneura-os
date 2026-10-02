@@ -3,7 +3,7 @@ import {hostedWorkspaceRequested} from './hosted-workspace';
 
 export const WORKSPACE_PROTOCOL_HEADER='X-Cosmas-Workspace-Protocol';
 export const REQUIRED_WORKSPACE_CONTRACTS:Readonly<Record<string,number>>=Object.freeze({
-  workspace:1,draft_recovery:2,team:4,activity:2,model:1,routine:2,
+  workspace:1,draft_recovery:2,team:4,activity:2,model:1,handoff_review:1,routine:2,
   practice_access:1,practice_members:1,vendor:1,vendor_setup:1,finance:1,
   finance_setup:1,portal_setup:1,portal_work:1,membership:1,inbox:1,
   inbox_handoff:1,core_record:1,core_connection:1,research:1,

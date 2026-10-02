@@ -167,14 +167,14 @@ def main() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]  # pg_ctl must bind this otherwise-free port itself.
-    local_tool_dirs = [str(Path(found).parent) for tool in ("git", "node", "jq", "swift", "xcodebuild")
+    local_tool_dirs = [str(Path(found).parent) for tool in ("openssl", "git", "node", "jq", "swift", "xcodebuild")
                        if (found := shutil.which(tool))]
     scratch = output / "tmp"
     scratch.mkdir()
     env = {"PATH": os.pathsep.join((str(pg_bin), str(Path(sys.executable).parent), *local_tool_dirs, os.defpath)),
            "LANG": "C", "LC_ALL": "C", "PYTHONUTF8": "1", "TMPDIR": str(scratch),
            "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1",
-           "PYTHONPATH": str(REPO / "src"), "COSMAS_ENV": "synth_os", "DATA_MODE": "synthetic",
+           "PYTHONPATH": os.pathsep.join((str(REPO), str(REPO / "src"))), "COSMAS_ENV": "synth_os", "DATA_MODE": "synthetic",
            "AUTH_MODE": "synth_headers", "WORKSPACE_ENABLED": "false", "SYNTH_SEED": "true",
            "BLOB_BACKEND": "local", "CORS_ALLOWED_ORIGINS": "http://127.0.0.1:5173,http://localhost:5173",
            "SYNC_WORKER": "true", "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5",

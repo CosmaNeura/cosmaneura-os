@@ -47,11 +47,17 @@ def test_slow_initial_identity_cannot_begin_core_work(monkeypatch):
     )
 
     def authenticate(
+        request: Request,
         session=Depends(sessions),
         authorization=Header(None),
         x_box_id=Header(None),
         x_actor_principal_id=Header(None),
     ):
+        assert request.method == "GET"
+        assert request.url.path.endswith("/cosmaneura-record/location")
+        assert request.headers["authorization"] == authorization == "Bearer invented"
+        assert request.headers["x-cosmas-record-contract"] == "1"
+        assert x_box_id is None and x_actor_principal_id is None
         time.sleep(0.12)
         events.append("identity_returned")
         return identity
@@ -177,6 +183,10 @@ def fixture(monkeypatch):
     monkeypatch.setattr(route, "session_deadline", no_database)
 
     def authenticate(**kwargs):
+        request = kwargs["request"]
+        assert isinstance(request, Request)
+        assert request.method == "GET" and request.url.path.endswith("/cosmaneura-record/location")
+        assert request.headers["authorization"] == kwargs["authorization"]
         assert kwargs["session"].owner == get_ident()
         assert kwargs["x_box_id"] is None and kwargs["x_actor_principal_id"] is None
         assert kwargs["authorization"] == "Bearer synthetic_PRIVATE_jwt"

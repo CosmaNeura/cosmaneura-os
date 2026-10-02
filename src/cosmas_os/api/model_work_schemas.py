@@ -211,11 +211,13 @@ def _unique(pairs):
     return result
 
 
-async def read_model_request[RequestModel: (ConversationRequest, HandoffRetry)](
+async def read_model_request[RequestModel: BaseModel](
     request, schema: type[RequestModel]
 ) -> RequestModel:
-    maximum = RETRY_REQUEST_BYTES if schema is HandoffRetry else MODEL_REQUEST_BYTES
-    if schema not in {ConversationRequest, HandoffRetry}:
+    from cosmas_os.api.handoff_review_schemas import HandoffReview, HandoffRevision
+
+    maximum = 12_288 if schema is HandoffReview else RETRY_REQUEST_BYTES if schema in {HandoffRetry, HandoffRevision} else MODEL_REQUEST_BYTES
+    if schema not in {ConversationRequest, HandoffRetry, HandoffReview, HandoffRevision}:
         raise ValueError("unsupported private model request")
     try:
         if (

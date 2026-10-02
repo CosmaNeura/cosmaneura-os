@@ -140,6 +140,29 @@ def test_additive_migration_preserves_all_other_setup_revision_guards():
     restored = restored.replace("WHEN 'documo' THEN '[\"documo_fax\"]'::jsonb WHEN 'efax' THEN '[\"efax_fax\"]'::jsonb ELSE '[]'::jsonb END", "ELSE '[\"documo_fax\"]'::jsonb END")
     assert restored == previous.strip()
     assert "vendor_event" not in migration.CHECK_DDL
-    assert json.loads((ROOT / "infra/beta/environment/release-schema.json").read_text())["schema_revision"] == migration.revision
+    # This additive vendor migration remains in the shipped history as new
+    # operational workflow migrations advance the selected release head.
+    selected=json.loads((ROOT / 'infra/beta/environment/release-schema.json').read_text())['schema_revision']
+    graph={}
+    import ast
+    for file in (ROOT/'migrations/versions').glob('*.py'):
+        metadata={}
+        for node in ast.parse(file.read_text()).body:
+            if isinstance(node,ast.Assign):
+                for target in node.targets:
+                    if isinstance(target,ast.Name) and target.id in {'revision','down_revision'}:
+                        metadata[target.id]=ast.literal_eval(node.value)
+        if 'revision' in metadata:
+            graph[metadata['revision']]=metadata['down_revision']
+    pending=[selected]
+    seen=set()
+    while pending:
+        head=pending.pop()
+        if head in seen:
+            continue
+        seen.add(head)
+        parent=graph[head]
+        pending.extend(parent if isinstance(parent,(list,tuple)) else [parent] if parent else [])
+    assert migration.revision in seen
     with pytest.raises(RuntimeError, match="Retained eFax work"):
         migration.downgrade()

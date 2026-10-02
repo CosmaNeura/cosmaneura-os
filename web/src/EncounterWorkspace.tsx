@@ -23,6 +23,7 @@ import { AccountRecoveryContext, type AccountRecoveryAccess } from "./account-re
 import { supportsSkill, requireRecoveryScope, validRecoveryScope } from "./workspace-api";
 import { BotAvatar } from "./BotAvatar";
 import { TeamWorkPanel } from "./TeamWorkPanel";
+import { HandoffReviewPanel } from "./HandoffReviewPanel";
 import {modelWorkApi} from "./model-work-api";
 import {conversationFromEntry, exactModelObservation, modelActive, modelRequestHash, modelStateLabel, validModelOperation, type HandoffRetryObservation, type ModelOperation, type ModelRequestObservation, type PreviousModelRequest} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
@@ -101,7 +102,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
   const [accessBusy,setAccessBusy]=useState(false);
   const [scribeSourceBusy,setScribeSourceBusy]=useState(false);
-  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy;
+  const [handoffReviewPending,setHandoffReviewPending]=useState(false);
+  const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
+  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
@@ -236,15 +239,20 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[workspace?.id,panel]);
   useEffect(() => { if (selectedSource) document.getElementById(`source-${selectedSource}`)?.focus(); }, [panel, selectedSource]);
   useEffect(() => {
-    if (selectedResult && mobilePanel === "Conversation" && !settingsOpen) {
+    if (selectedResult && !reviewHandoffId && mobilePanel === "Conversation" && !settingsOpen) {
       const result = document.getElementById(`turn-${selectedResult}`);
       if(result && !result.closest("[hidden]")){
         result.scrollIntoView?.({ block: "center" }); result.focus(); setSelectedResult(null);
       }
     }
-  }, [selectedResult, selected, savedResearchChat, mobilePanel, workspace?.revision, settingsOpen]);
+  }, [selectedResult, selected, savedResearchChat, mobilePanel, workspace?.revision, settingsOpen, reviewHandoffId]);
   useEffect(() => {
-    if (!workspace || !identity || busy || conflict || !(workspace.entries.some(modelActive)||workspace.handoffs?.some(h =>
+    if (!reviewHandoffId || settingsOpen || practiceOpen) return;
+    const heading=document.querySelector<HTMLElement>('.handoff-review h3');
+    heading?.scrollIntoView?.({block:'start'});heading?.focus();
+  },[reviewHandoffId,workspace?.id,settingsOpen,practiceOpen]);
+  useEffect(() => {
+    if (!workspace || !identity || busy || conflict || handoffReviewPending || !(workspace.entries.some(modelActive)||workspace.handoffs?.some(h =>
       ["queued", "running"].includes(h.status) || (h.result_entry_id && !workspace.entries.some(e => e.id === h.result_entry_id))))) return;
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout>|undefined,reading=false,controller:AbortController|null=null;
@@ -268,7 +276,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const visibility=()=>{clearTimeout(timer);if(document.visibilityState==='hidden')controller?.abort();else timer=setTimeout(poll,5000);};
     document.addEventListener('visibilitychange',visibility);visibility();
     return () => { cancelled = true; clearTimeout(timer);controller?.abort();document.removeEventListener('visibilitychange',visibility); };
-  }, [workspace, identity, busy, pending, conflict]);
+  }, [workspace, identity, busy, pending, conflict, handoffReviewPending]);
 
   function checkRecoveryOwner(value: ProviderTeam) {
     if (!authenticated) return;
@@ -402,6 +410,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setCaptureDraftLocked(false); setConfirmCaptureExit(false);
     setCaptureRequest(0); setObservedCaptureDraft(null);
     setResearchEntry(false);
+    setReviewHandoffId(null);setHandoffReviewPending(false);
   }
   function failure(cause: unknown) {
     if (cause instanceof WorkspaceApiError && [401, 403, 404, 426].includes(cause.status)) {
@@ -697,6 +706,22 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     } catch (cause) { if (current === generation.current) failure(cause); }
     finally { if (current === generation.current) setBusy(false); }
   }
+  async function refreshHandoffReview() {
+    const access=authenticated||identity;
+    if(!access||!workspace||busy||pending||captureNavigationLocked||captureDraftLocked||recoveryBlocked)
+      throw new WorkspaceApiError(503);
+    const current=generation.current,wid=workspace.id,revision=workspace.revision;
+    setBusy(true);setError('');
+    try {
+      const [latest,latestTeam]=await Promise.all([workspaceApi.read(access,wid),workspaceApi.team(access)]);
+      if(current!==generation.current)throw new WorkspaceApiError(401);
+      if(latest.id!==wid||latest.revision<revision)throw new WorkspaceApiError(503);
+      checkRecoveryOwner(latestTeam);
+      setWorkspace(latest);setTeam(latestTeam);setConflict(false);
+      setMessage('Current saved draft loaded. Your change request is preserved for review.');
+    }catch(cause){if(current===generation.current)failure(cause);throw cause;}
+    finally{if(current===generation.current)setBusy(false);}
+  }
   async function recheckRecovery() {
     const access = authenticated || identity;
     if (!access || busy) return;
@@ -792,7 +817,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const recoveryBlocked = !!authenticated && (!validRecoveryScope(team?.recovery_scope) ||
     !journal.current || journal.current.serverScope !== team?.recovery_scope || recoveryState === "failed");
   const baseLocked = busy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
-  const locked = baseLocked || scribeSourceBusy;
+  const actionLocked = baseLocked || scribeSourceBusy;
+  const locked = actionLocked || handoffReviewPending;
   const reviewWorkspace = workspace ? withObservedCaptureDraft(workspace, observedCaptureDraft) : null;
   const bot = team?.configuration.bots.find(b => botAddress(b) === selected);
   const template = team?.members.find(b => botAddress(b) === selected);
@@ -824,7 +850,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,workspace?.id,bot?.role,settingsOpen,practiceOpen,panel,mobilePanel]);
   // Activity is read-only: its own busy navigation lock is excluded here so the
   // final selection can still inspect independently retained unsaved work.
-  useUnsavedWork(accessBusy || connectionEditorsLocked || !!pending || !!recoveryOffers.length || recoveryState === "saving" || captureNavigationLocked || note !== latestNote || !!thought || !!evidence || !!source ||
+  useUnsavedWork(handoffReviewPending || accessBusy || connectionEditorsLocked || !!pending || !!recoveryOffers.length || recoveryState === "saving" || captureNavigationLocked || note !== latestNote || !!thought || !!evidence || !!source ||
     !!team && !!teamDraft && JSON.stringify(teamDraft) !== JSON.stringify(team.configuration));
   useEffect(()=>{
     if(!inboxNavigation||inboxNavigationConsumed.current===inboxNavigation)return;
@@ -993,11 +1019,23 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       body:{expected_revision:workspace.revision,previous_attempt_id:handoff.attempt_id,idempotency_key:crypto.randomUUID()}});
   }
   function reviewTeamResult(handoff:DraftHandoff) {
-    if(!handoff.result_entry_id)return;
+    if(handoffReviewPending||!handoff.result_entry_id)return;
+    const reviewable=typeof handoff.result_sha256==='string'&&/^[0-9a-f]{64}$/.test(handoff.result_sha256);
+    setReviewHandoffId(reviewable?handoff.id:null);
     setSettingsOpen(false);setPracticeOpen(false);setMobilePanel("Conversation");
     setSelected(handoff.recipient_key??handoff.recipient_role);
     if(handoff.recipient_role==='research')setSavedResearchChat(true);
-    setSelectedResult(handoff.result_entry_id);
+    setSelectedResult(reviewable?null:handoff.result_entry_id);
+  }
+  function prepareFreshHandoff(feedback:string) {
+    if(!workspace||busy||pending||captureNavigationLocked||captureDraftLocked||recoveryBlocked)return;
+    const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
+    if(!chief){setError('Enable Chief in Team settings before starting fresh work. Your change request is retained.');return;}
+    const fresh='Prepare fresh assignments using the current saved encounter sources.'+(feedback?'\nPlease preserve these requested changes: '+feedback:'');
+    setThought(previous=>previous.trim()?previous+'\n\n'+fresh:fresh);
+    setSelected(botAddress(chief));setReviewHandoffId(null);setHandoffReviewPending(false);
+    setSettingsOpen(false);setPracticeOpen(false);setSelectedResult(null);setMobilePanel('Conversation');
+    setQuestionFocus(value=>value+1);
   }
 
   return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
@@ -1143,7 +1181,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       </section> : <>
         <section hidden={settingsOpen} className="team-encounter-heading"><div><p className="team-kicker">ENCOUNTER NOTEBOOK</p><h1>{workspace.label}</h1>
           <p>Private encounter notebook</p>
-          <button className="team-subtle" disabled={busy || !!pending} onClick={() => void refresh()}>Refresh encounter</button>
+          <button className="team-subtle" disabled={busy || !!pending || handoffReviewPending} onClick={() => void refresh()}>Refresh encounter</button>
           {import.meta.env.VITE_COSMANEURA_RECORD_ENABLED === "true" && authenticated && team?.capture?.enabled &&
             <CoreRecordLink key={workspace.id} identity={authenticated} workspaceId={workspace.id}
               locked={busy || !!pending || captureNavigationLocked || recoveryBlocked} onDenied={failure} />}</div>
@@ -1184,6 +1222,17 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </header></section>}
         <div hidden={settingsOpen}>
         <TeamWorkPanel handoffs={workspace.handoffs??[]} entries={workspace.entries} locked={locked} onRetry={retryTeamTask} onReview={reviewTeamResult}/>
+        {identity && reviewHandoffId && workspace.handoffs?.some(h=>h.id===reviewHandoffId) &&
+          <HandoffReviewPanel key={`${workspace.id}:${reviewHandoffId}`} workspace={workspace}
+            handoff={workspace.handoffs.find(h=>h.id===reviewHandoffId)!} identity={identity}
+            locked={actionLocked||captureNavigationLocked||captureDraftLocked}
+            recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked}
+            onPendingChange={setHandoffReviewPending}
+            onAccessLost={failure} onRefresh={refreshHandoffReview}
+            onFreshAssignment={prepareFreshHandoff}
+            onSaved={latest=>setWorkspace(previous=>previous?.id===latest.id&&previous.revision<=latest.revision?latest:previous)}
+            onClose={()=>{if(!handoffReviewPending)setReviewHandoffId(null);}}
+            onRevisionPrepared={id=>{setReviewHandoffId(id);setHandoffReviewPending(false);}}/>}
         <nav className={`team-mobile-tabs${bot?.role === "scribe" ? " team-scribe-tabs" : ""}`} aria-label={bot?.role === "scribe" ? "Visit view" : "Mobile encounter view"}>
           {(bot?.role === "scribe" ? ["Notebook", "Conversation", "Review"] : ["Conversation", "Notebook", "Sources", "Review", "Work"]).map(value => <button key={value} aria-pressed={mobilePanel === value}
             onClick={() => { setMobilePanel(value); if (value !== "Conversation") setPanel(value); }}>{bot?.role === "scribe" ? ({Notebook:"Visit notes",Conversation:"Ask Scribe",Review:"Review note"})[value] : value}</button>)}

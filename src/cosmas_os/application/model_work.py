@@ -10,7 +10,11 @@ from uuid import uuid4
 
 from sqlalchemy import and_, exists, func, or_, select
 
-from cosmas_os.adapters.gpt41 import SUPPORTED_PREPARED_CONTRACTS, GPT41Connector, _context
+from cosmas_os.adapters.gpt41 import SUPPORTED_PREPARED_CONTRACTS as TEXT_PREPARED_CONTRACTS
+from cosmas_os.adapters.gpt41 import GPT41Connector, _context
+from cosmas_os.adapters.gpt41_tools import CURRENT_PREPARED_CONTRACT as TOOL_PREPARED_CONTRACT
+from cosmas_os.adapters.gpt41_tools import GPT41ToolsConnector
+from cosmas_os.adapters.gpt41_tools import validate_prepared as validate_tools
 from cosmas_os.api.model_work_schemas import (
     ENTRY_MODEL_BYTES,
     EntryModelRequest,
@@ -42,6 +46,7 @@ from cosmas_os.ports.task_brief import TaskRequirements
 
 ACTIVE = {"reserved", "running"}
 TERMINAL = {"completed", "failed", "unknown", "abandoned"}
+SUPPORTED_PREPARED_CONTRACTS = TEXT_PREPARED_CONTRACTS | {TOOL_PREPARED_CONTRACT}
 
 
 def canonical(value):
@@ -576,6 +581,15 @@ def _context_for(
             context = replace(context, question=handoff_briefs.question(task))
         except (ValueError, TypeError, KeyError):
             raise ws.WorkspaceError("source_changed") from None
+    if "revision_request" in command:
+        from cosmas_os.application.handoff_revision import revision_question
+
+        if not draft_only or "task_brief" not in command:
+            raise ws.WorkspaceError("source_changed")
+        question = context.question + revision_question(s, workspace, command["revision_request"])
+        if len(question) > 12000:
+            raise ws.WorkspaceError("handoff_revision_too_large", 422)
+        context = replace(context, question=question)
     return context
 
 
@@ -601,7 +615,17 @@ def _new_admission(
     attempt=None,
 ):
     try:
-        envelope = GPT41Connector(lambda: "").prepare(context)
+        if not any(
+            key in command for key in ("research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")
+        ) and team.runtime_settings.workspace_agent_tools_enabled:
+            from cosmas_os.application.agent_tools import prepare_tool_selection
+
+            selection = prepare_tool_selection(s, box=workspace.box_id, owner=workspace.owner_id,
+                workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
+                context_revision=context.context_revision, settings=settings, context=context)
+            envelope = GPT41ToolsConnector(lambda: "").prepare(context, selection)
+        else:
+            envelope = GPT41Connector(lambda: "").prepare(context)
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
         raise ws.WorkspaceError("model_unavailable", 503) from None
     # Application bounds use canonical bytes; the DB has a finite allowance for
@@ -906,6 +930,11 @@ def claim(s, box, owner, admission_id, *, reauthenticate=None, clock=None):
             or digest(row.prepared_envelope) != row.envelope_sha256
         ):
             raise ws.WorkspaceError("source_changed")
+        if row.envelope_contract == TOOL_PREPARED_CONTRACT:
+            try:
+                validate_tools(row.prepared_envelope)
+            except (ValueError, TypeError, KeyError):
+                raise ws.WorkspaceError("source_changed") from None
     except ws.WorkspaceError as error:
         _finish(
             s,
@@ -943,10 +972,29 @@ def claim(s, box, owner, admission_id, *, reauthenticate=None, clock=None):
     return result
 
 
-def dispatch_claim(claimed):
+def dispatch_claim(claimed, *, session_factory=None, transport=None):
     if digest(claimed.envelope) != claimed.envelope_sha256:
         raise ModelCallFailure()
     key = team.runtime_settings.workspace_llm_api_key
+    if claimed.envelope.get("contract") == TOOL_PREPARED_CONTRACT:
+        from cosmas_os.application.agent_tools import AgentToolExecutor
+        from cosmas_os.db import make_session_factory
+        from cosmas_os.models import AuditEvent
+
+        factory = session_factory or make_session_factory()
+        def execute(request):
+            with factory() as tool_session:
+                value = AgentToolExecutor(tool_session, claimed).execute(request)
+                receipt = value["receipt"]
+                tool_session.add(AuditEvent(box_id=claimed.box, aggregate_type="model_admission",
+                    aggregate_id=claimed.admission_id, event_type="workspace.agent_tool_read",
+                    actor_principal_id=receipt["actor_agent_id"], initiated_by_principal_id=claimed.owner,
+                    outcome="read", correlation_id=claimed.dispatch_id, payload_hash=receipt["sha256"],
+                    detail=receipt))
+                tool_session.commit()
+                return value
+        return GPT41ToolsConnector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
+            claimed.envelope, execute=execute)
     return GPT41Connector(lambda: key.get_secret_value() if key else "").review_prepared(
         claimed.envelope
     )
@@ -1027,7 +1075,7 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
     try:
         workspace, version, bot, settings = _current_input(s, row, reauthenticate=reauthenticate, session_prep_phase="after")
         frozen = _context(row.prepared_envelope["context"])
-        if row.envelope_contract == "cosmas-gpt41-prepared.v4":
+        if row.envelope_contract in {"cosmas-gpt41-prepared.v4", TOOL_PREPARED_CONTRACT}:
             try:
                 for brief in result.handoffs:
                     TaskRequirements.model_validate(brief.requirements)
@@ -1629,7 +1677,7 @@ def reserve_retry(
         WorkspaceHandoffAttempt, WorkspaceHandoffAttempt.id == ModelWorkAdmission.handoff_attempt_id
     ).where(WorkspaceHandoffAttempt.handoff_id == hid).order_by(WorkspaceHandoffAttempt.number).limit(1))
     parent = s.scalar(select(ModelWorkAdmission).where(ModelWorkAdmission.request_entry_id == assignment.origin_entry_id))
-    if parent and parent.envelope_contract == "cosmas-gpt41-prepared.v4" and (original is None or "task_brief" not in original.request_body):
+    if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", TOOL_PREPARED_CONTRACT} and (original is None or "task_brief" not in original.request_body):
         raise ws.WorkspaceError("handoff_context_changed")
     _allowance(s, box, owner, now(s, clock), version.configuration)
     if old and old.state in ACTIVE:

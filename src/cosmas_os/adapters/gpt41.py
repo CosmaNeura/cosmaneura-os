@@ -367,13 +367,6 @@ class GPT41Connector:
             _checked_envelope(envelope)
         except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
             raise ModelCallFailure(dispatch="not_dispatched") from None
-        context = _context(envelope["context"])
-        selected = list(context.sources)
-        sources = envelope["sources"]
-        permitted = {source["source_id"] for source in sources}
-        source_draft, work_status, can_handoff = (
-            envelope["flags"][name] for name in ("source_draft", "work_status", "can_handoff")
-        )
         body = envelope["body"]
         dispatch, response_sha256 = "not_dispatched", None
         input_tokens, output_tokens = None, None
@@ -407,110 +400,8 @@ class GPT41Connector:
                     values = [usage.get("prompt_tokens"), usage.get("completion_tokens")]
                     if all(type(value) is int and 0 <= value < 1000000 for value in values):
                         input_tokens, output_tokens = values
-            if not isinstance(data, dict):
-                raise ValueError("invalid response")
-            if data.get("model") not in {"gpt-4.1", "gpt-4.1-2025-04-14"}:
-                raise ValueError("unexpected model")
-            choice = data["choices"][0]
-            if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
-                raise ValueError("invalid response")
-            if (
-                choice.get("finish_reason") != "stop"
-                or choice["message"].get("refusal")
-                or choice["message"].get("tool_calls")
-            ):
-                raise ValueError("incomplete or unavailable answer")
-            if source_draft:
-                draft = _ScribeDraft.model_validate_json(choice["message"]["content"])
-                supplied = {source["source_id"]: source for source in sources}
-                for excerpt in draft.excerpts:
-                    if (
-                        not excerpt.quote.strip()
-                        or excerpt.source_id not in supplied
-                        or excerpt.quote not in supplied[excerpt.source_id]["text"]
-                    ):
-                        raise ValueError("draft excerpt is not verbatim source text")
-                if any(
-                    not question.strip() or len(question) > 500
-                    for question in draft.needs_from_clinician
-                ):
-                    raise ValueError("invalid clinician question")
-                paragraphs = ["Source-based draft — human review required", "Saved note excerpts:"]
-                paragraphs.extend(
-                    f"{supplied[e.source_id]['label']} (revision {supplied[e.source_id]['revision']}):\n“{e.quote}”"
-                    for e in draft.excerpts
-                )
-                if not draft.excerpts:
-                    paragraphs.append("No relevant saved source text was available for this draft.")
-                paragraphs.append(
-                    "Needs from clinician:\n"
-                    + (
-                        "\n".join("- " + q for q in draft.needs_from_clinician)
-                        or "No additional questions were proposed; review the excerpts before using them."
-                    )
-                )
-                answer = _Answer(
-                    answer="\n\n".join(paragraphs),
-                    source_ids=list(dict.fromkeys(e.source_id for e in draft.excerpts)),
-                )
-            else:
-                chief_answer, chief_work_answer = (
-                    (_ChiefAnswerV4, _ChiefWorkAnswerV4)
-                    if envelope["contract"] == "cosmas-gpt41-prepared.v4"
-                    else (_ChiefAnswerV3, _ChiefWorkAnswerV3)
-                    if envelope["contract"] == "cosmas-gpt41-prepared.v3"
-                    else (_ChiefAnswer, _ChiefWorkAnswer)
-                )
-                answer_type = (
-                    (chief_work_answer if can_handoff else _WorkAnswer)
-                    if work_status
-                    else (chief_answer if can_handoff else _Answer)
-                )
-                answer = answer_type.model_validate_json(choice["message"]["content"])
-                if work_status and getattr(answer, "intent", None) == "work_status":
-                    if isinstance(answer, (_ChiefAnswer, _ChiefAnswerV3, _ChiefAnswerV4)) and answer.handoffs:
-                        raise ValueError("a status read cannot initiate handoffs")
-                    rendered = WorkspaceReviewConnector().review(replace(context, role="follow_up"))
-                    answer = _WorkAnswer(
-                        answer=rendered.content, source_ids=[], intent="work_status"
-                    )
-            if not answer.answer.strip() or not set(answer.source_ids) <= permitted:
-                raise ValueError("invalid citation")
-            briefs = answer.handoffs if isinstance(answer, (_ChiefAnswer, _ChiefAnswerV3, _ChiefAnswerV4)) else []
-            roles = [brief.role for brief in briefs]
-            if (
-                len(roles) > context.handoff_limit
-                or len(set(roles)) != len(roles)
-                or not set(roles) <= set(context.handoff_roles)
-            ):
-                raise ValueError("invalid handoff")
-            if isinstance(answer, (_ChiefAnswerV3, _ChiefAnswerV4)):
-                target_roles = {target["address"]: target["role"] for target in context.handoff_targets}
-                if len(target_roles) != len(context.handoff_targets):
-                    raise ValueError("ambiguous handoff target")
-                for brief in answer.handoffs:
-                    # Baseline addresses are already exact role identities; UUID
-                    # instances must have a matching admitted target descriptor.
-                    target_role = target_roles.get(brief.role, brief.role)
-                    if brief.intended_role != target_role:
-                        raise ValueError("handoff intended role does not match target")
-            citations = tuple(
-                next(s for s in selected if s.entry_id == sid)
-                for sid in dict.fromkeys(answer.source_ids)
-            )
-            return BotReply(
-                answer.answer,
-                citations,
-                "azure_gpt41_source_draft_v1"
-                if source_draft
-                else "azure_gpt41_work_status_v1"
-                if isinstance(answer, _WorkAnswer) and answer.intent == "work_status"
-                else "azure_gpt41",
-                input_tokens,
-                output_tokens,
-                tuple(DraftBrief(brief.role, brief.brief, brief.requirements.model_dump() if isinstance(brief, _BriefV4) else None) for brief in briefs),
-                response_sha256=response_sha256,
-            )
+            return decode_response(envelope, data, input_tokens=input_tokens,
+                output_tokens=output_tokens, response_sha256=response_sha256)
         except (httpx.HTTPError, ValidationError, ValueError, TypeError, KeyError, IndexError):
             # Provider errors can include input and authorization headers. Never propagate them.
             raise ModelCallFailure(
@@ -522,6 +413,121 @@ class GPT41Connector:
                 output_tokens=output_tokens,
                 response_sha256=response_sha256,
             ) from None
+
+
+def decode_response(envelope, data, *, input_tokens=None, output_tokens=None, response_sha256=None):
+    """Shared versioned output decoding; transport and tool dispatch grant no new citations."""
+    context = _context(envelope["context"])
+    selected = list(context.sources)
+    sources = envelope["sources"]
+    permitted = {source["source_id"] for source in sources}
+    source_draft, work_status, can_handoff = (
+        envelope["flags"][name] for name in ("source_draft", "work_status", "can_handoff")
+    )
+    if not isinstance(data, dict):
+        raise ValueError("invalid response")
+    if data.get("model") not in {"gpt-4.1", "gpt-4.1-2025-04-14"}:
+        raise ValueError("unexpected model")
+    choice = data["choices"][0]
+    if not isinstance(choice, dict) or not isinstance(choice.get("message"), dict):
+        raise ValueError("invalid response")
+    if (
+        choice.get("finish_reason") != "stop"
+        or choice["message"].get("refusal")
+        or choice["message"].get("tool_calls")
+    ):
+        raise ValueError("incomplete or unavailable answer")
+    if source_draft:
+        draft = _ScribeDraft.model_validate_json(choice["message"]["content"])
+        supplied = {source["source_id"]: source for source in sources}
+        for excerpt in draft.excerpts:
+            if (
+                not excerpt.quote.strip()
+                or excerpt.source_id not in supplied
+                or excerpt.quote not in supplied[excerpt.source_id]["text"]
+            ):
+                raise ValueError("draft excerpt is not verbatim source text")
+        if any(
+            not question.strip() or len(question) > 500
+            for question in draft.needs_from_clinician
+        ):
+            raise ValueError("invalid clinician question")
+        paragraphs = ["Source-based draft — human review required", "Saved note excerpts:"]
+        paragraphs.extend(
+            f"{supplied[e.source_id]['label']} (revision {supplied[e.source_id]['revision']}):\n“{e.quote}”"
+            for e in draft.excerpts
+        )
+        if not draft.excerpts:
+            paragraphs.append("No relevant saved source text was available for this draft.")
+        paragraphs.append(
+            "Needs from clinician:\n"
+            + (
+                "\n".join("- " + q for q in draft.needs_from_clinician)
+                or "No additional questions were proposed; review the excerpts before using them."
+            )
+        )
+        answer = _Answer(
+            answer="\n\n".join(paragraphs),
+            source_ids=list(dict.fromkeys(e.source_id for e in draft.excerpts)),
+        )
+    else:
+        chief_answer, chief_work_answer = (
+            (_ChiefAnswerV4, _ChiefWorkAnswerV4)
+            if envelope["contract"] == "cosmas-gpt41-prepared.v4"
+            else (_ChiefAnswerV3, _ChiefWorkAnswerV3)
+            if envelope["contract"] == "cosmas-gpt41-prepared.v3"
+            else (_ChiefAnswer, _ChiefWorkAnswer)
+        )
+        answer_type = (
+            (chief_work_answer if can_handoff else _WorkAnswer)
+            if work_status
+            else (chief_answer if can_handoff else _Answer)
+        )
+        answer = answer_type.model_validate_json(choice["message"]["content"])
+        if work_status and getattr(answer, "intent", None) == "work_status":
+            if isinstance(answer, (_ChiefAnswer, _ChiefAnswerV3, _ChiefAnswerV4)) and answer.handoffs:
+                raise ValueError("a status read cannot initiate handoffs")
+            rendered = WorkspaceReviewConnector().review(replace(context, role="follow_up"))
+            answer = _WorkAnswer(
+                answer=rendered.content, source_ids=[], intent="work_status"
+            )
+    if not answer.answer.strip() or not set(answer.source_ids) <= permitted:
+        raise ValueError("invalid citation")
+    briefs = answer.handoffs if isinstance(answer, (_ChiefAnswer, _ChiefAnswerV3, _ChiefAnswerV4)) else []
+    roles = [brief.role for brief in briefs]
+    if (
+        len(roles) > context.handoff_limit
+        or len(set(roles)) != len(roles)
+        or not set(roles) <= set(context.handoff_roles)
+    ):
+        raise ValueError("invalid handoff")
+    if isinstance(answer, (_ChiefAnswerV3, _ChiefAnswerV4)):
+        target_roles = {target["address"]: target["role"] for target in context.handoff_targets}
+        if len(target_roles) != len(context.handoff_targets):
+            raise ValueError("ambiguous handoff target")
+        for brief in answer.handoffs:
+            # Baseline addresses are already exact role identities; UUID
+            # instances must have a matching admitted target descriptor.
+            target_role = target_roles.get(brief.role, brief.role)
+            if brief.intended_role != target_role:
+                raise ValueError("handoff intended role does not match target")
+    citations = tuple(
+        next(s for s in selected if s.entry_id == sid)
+        for sid in dict.fromkeys(answer.source_ids)
+    )
+    return BotReply(
+        answer.answer,
+        citations,
+        "azure_gpt41_source_draft_v1"
+        if source_draft
+        else "azure_gpt41_work_status_v1"
+        if isinstance(answer, _WorkAnswer) and answer.intent == "work_status"
+        else "azure_gpt41",
+        input_tokens,
+        output_tokens,
+        tuple(DraftBrief(brief.role, brief.brief, brief.requirements.model_dump() if isinstance(brief, _BriefV4) else None) for brief in briefs),
+        response_sha256=response_sha256,
+    )
 
 
 def _context(value):

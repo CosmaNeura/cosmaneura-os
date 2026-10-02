@@ -88,9 +88,12 @@ def read(s, box, owner, workspace_id, *, kind, record_id, inbox_registry=inbox_w
         selected = next((row for row in items if row["ticket_id"] == record_id), None)
         if selected is None:
             raise ws.WorkspaceError("operations_record_unavailable", 404)
-        facts = {"state": selected["state"], "version": w.revision, "payload_hash": selected["payload_hash"],
+        facts = {"state": selected["state"], "version": selected["ticket_version"], "payload_hash": selected["payload_hash"],
+                 "revision_id": selected["revision_id"], "note_version": selected["note_version"],
                  "source_current": not selected["source_changed"], "operation_status": selected["operation_status"],
-                 "receipt_kinds": [r["kind"] for r in selected["receipts"]]}
+                 "receipt_kinds": [r["kind"] for r in selected["receipts"]],
+                 "receipts": [{"id": r["id"], "sha256": public_digest("cosmas-follow-up-receipt.v1", r)}
+                              for r in selected["receipts"]]}
         provenance = "saved synthetic delivery and human outcome receipts"
     elif kind == "scheduling":
         selected = appointment_work.read(s, box, owner, workspace_id, record_id)
