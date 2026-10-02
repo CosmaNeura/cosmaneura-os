@@ -6,7 +6,12 @@ from cosmas_os.application import provider_team, team_resources
 from cosmas_os.application import workspace as ws
 from cosmas_os.models import CoreCaptureAccount, ExternalIdentity
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
-from cosmas_os.ports.core_visit_prep import CoreVisitPrepRead, CoreVisitPrepReceipt
+from cosmas_os.ports.core_visit_prep import (
+    CoreVisitPrepList,
+    CoreVisitPrepRead,
+    CoreVisitPrepReceipt,
+    CoreVisitPrepSelections,
+)
 
 
 def read(session, *, identity, command, tenant_ref, bearer, port, reauthenticate, budget):
@@ -64,8 +69,15 @@ def read(session, *, identity, command, tenant_ref, bearer, port, reauthenticate
         )
 
     before = scope()
-    request = CoreVisitPrepRead(
-        preparation_ref=command.preparation_ref,
+    is_list = hasattr(command, "before_ref")
+    model = CoreVisitPrepList if is_list else CoreVisitPrepRead
+    selection = (
+        dict(before_ref=command.before_ref, limit=command.limit)
+        if is_list
+        else dict(preparation_ref=command.preparation_ref)
+    )
+    request = model(
+        **selection,
         expected_actor_ref=before[3],
         expected_tenant_ref=before[4],
         connection_sha256=command.connection_sha256,
@@ -74,7 +86,7 @@ def read(session, *, identity, command, tenant_ref, bearer, port, reauthenticate
     )
     session.commit()  # Release local locks before HTTP; no clinical bytes are saved.
     try:
-        receipt = port.read(request, bearer)
+        receipt = port.list(request, bearer) if is_list else port.read(request, bearer)
     except ConnectorUnavailable as error:
         raise ws.WorkspaceError(
             "visit_prep_unavailable", 403 if str(error) == "visit_prep_access_denied" else 503
@@ -82,17 +94,23 @@ def read(session, *, identity, command, tenant_ref, bearer, port, reauthenticate
     if scope() != before:
         raise ws.WorkspaceError("visit_prep_access_denied", 403)
     body = receipt.model_dump_json().encode("utf-8")
-    receipt = CoreVisitPrepReceipt.model_validate_json(body, strict=True)
-    if len(body) > 262144 or (
-        receipt.preparation_ref,
+    receipt = (CoreVisitPrepSelections if is_list else CoreVisitPrepReceipt).model_validate_json(
+        body, strict=True
+    )
+    if len(body) > (32768 if is_list else 262144) or (
         receipt.connection_sha256,
         receipt.workspace_id,
         receipt.request_nonce,
     ) != (
-        request.preparation_ref,
         request.connection_sha256,
         request.workspace_id,
         request.request_nonce,
+    ):
+        raise ws.WorkspaceError("visit_prep_unavailable", 503)
+    if (
+        isinstance(receipt, CoreVisitPrepReceipt)
+        and isinstance(request, CoreVisitPrepRead)
+        and receipt.preparation_ref != request.preparation_ref
     ):
         raise ws.WorkspaceError("visit_prep_unavailable", 503)
     budget.check()

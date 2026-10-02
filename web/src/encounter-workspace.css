@@ -134,6 +134,10 @@
 .team-prep details { margin-top: .6rem; }
 .team-prep summary { cursor: pointer; font-size: .86rem; }
 .team-prep-content { white-space: pre-wrap; overflow-wrap: anywhere; font-size: .86rem; line-height: 1.55; }
+.team-prep fieldset { min-width: 0; margin: .8rem 0; padding: .7rem; border: 1px solid var(--team-border, #d9dfdb); border-radius: .6rem; }
+.team-prep-selection { display: grid; grid-template-columns: 1.2rem minmax(0, 1fr); gap: .35rem .65rem; padding: .7rem 0; overflow-wrap: anywhere; }
+.team-prep-selection input { grid-column: 1; grid-row: 1 / 4; align-self: start; margin-top: .2rem; }
+.team-prep-selection small { grid-column: 2; color: var(--team-muted, #5c6962); }
 .session-prep section { margin-top: 1rem; }
 .session-prep h4 { margin: 0 0 .35rem; }
 .session-prep ul, .session-prep ol { padding-inline-start: 1.4rem; }

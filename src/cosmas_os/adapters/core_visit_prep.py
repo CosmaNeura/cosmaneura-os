@@ -11,9 +11,15 @@ from cosmas_os.adapters.core_capture_connection import _CoreClient
 from cosmas_os.adapters.core_record_connection import BoundedIdentityTransport
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
 from cosmas_os.ports.core_record_location import valid_core_web_origin
-from cosmas_os.ports.core_visit_prep import CoreVisitPrepRead, CoreVisitPrepReceipt
+from cosmas_os.ports.core_visit_prep import (
+    CoreVisitPrepList,
+    CoreVisitPrepRead,
+    CoreVisitPrepReceipt,
+    CoreVisitPrepSelections,
+)
 
 PATH = "/service/v1/companion/visit-prep/package"
+LIST_PATH = "/service/v1/companion/visit-prep/preparations"
 MAX_BYTES = 262144
 
 
@@ -33,15 +39,23 @@ class HttpCoreVisitPrep:
         if not valid_core_web_origin(origin) or origin.endswith(".localhost"):
             raise ValueError("invalid_visit_prep_origin")
         self.origin, self.token, self.budget, self.now = origin, token, budget, now
-        self.http = _CoreClient(origin, budget, transport_factory, path_limits={PATH: MAX_BYTES})
+        self.http = _CoreClient(
+            origin, budget, transport_factory, path_limits={PATH: MAX_BYTES, LIST_PATH: 32768}
+        )
 
     def close(self):
         self.http.close()
 
     def read(self, request: CoreVisitPrepRead, bearer: SecretStr) -> CoreVisitPrepReceipt:
+        return self._read(request, bearer, PATH, CoreVisitPrepReceipt, MAX_BYTES)
+
+    def list(self, request: CoreVisitPrepList, bearer: SecretStr) -> CoreVisitPrepSelections:
+        return self._read(request, bearer, LIST_PATH, CoreVisitPrepSelections, 32768)
+
+    def _read(self, request, bearer, path, model, maximum):
         try:
             self.budget.check()
-            request = CoreVisitPrepRead.model_validate(request.model_dump())
+            request = type(request).model_validate(request.model_dump())
             raw = request.model_dump_json().encode()
             if len(raw) > 2048:
                 raise ValueError
@@ -57,7 +71,7 @@ class HttpCoreVisitPrep:
                 raise ValueError
             with self.http.stream(
                 "POST",
-                self.origin + PATH,
+                self.origin + path,
                 json=request.model_dump(mode="json"),
                 headers={
                     "Authorization": "Bearer " + tokens[0],
@@ -76,7 +90,7 @@ class HttpCoreVisitPrep:
                     or response.headers.get("content-type") != "application/json"
                     or response.headers.get("referrer-policy") != "no-referrer"
                     or "no-store" not in response.headers.get("cache-control", "").split(",")
-                    or len(response.content) > MAX_BYTES
+                    or len(response.content) > maximum
                 ):
                     raise ValueError
                 json.loads(
@@ -84,18 +98,24 @@ class HttpCoreVisitPrep:
                     object_pairs_hook=_pairs,
                     parse_constant=lambda _: (_ for _ in ()).throw(ValueError()),
                 )
-                result = CoreVisitPrepReceipt.model_validate_json(response.content, strict=True)
+                result = model.model_validate_json(response.content, strict=True)
                 if any(token in response.content.decode("utf-8") for token in tokens):
                     raise ValueError
             now = self.now()
             if (
-                result.preparation_ref != request.preparation_ref
+                path == PATH
+                and result.preparation_ref != request.preparation_ref
                 or result.connection_sha256 != request.connection_sha256
                 or result.workspace_id != request.workspace_id
                 or result.request_nonce != request.request_nonce
                 or not now - timedelta(seconds=30)
                 <= result.checked_at
                 <= now + timedelta(seconds=5)
+            ):
+                raise ValueError
+            if path == LIST_PATH and (
+                len(result.preparations) > request.limit
+                or any(p.preparation_ref == request.before_ref for p in result.preparations)
             ):
                 raise ValueError
             self.budget.check()

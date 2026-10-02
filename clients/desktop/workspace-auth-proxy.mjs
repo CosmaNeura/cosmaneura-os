@@ -193,7 +193,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     if (!sameAuthState(before, after)) return unavailable(401);
     return new Response(bytes, {status: response.status, headers: {'Content-Type': responseType,
       'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff',
-      ...(path === '/provider-team/visit-prep/read' ? {'Referrer-Policy':'no-referrer'} : {}),
+      ...(['/provider-team/visit-prep/read','/provider-team/visit-prep/preparations'].includes(path) ? {'Referrer-Policy':'no-referrer'} : {}),
       ...(response.headers.has('X-Cosmas-Workspace-Protocol') ? {'X-Cosmas-Workspace-Protocol':response.headers.get('X-Cosmas-Workspace-Protocol')} : {})}});
   } catch { return unavailable(strictResponse && expired ? 504 : controller.signal.aborted ? 401 : authorityStatus ?? 503); }
   finally { clearTimeout(timer); remove(); }

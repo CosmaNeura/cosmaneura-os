@@ -14,6 +14,33 @@ export type VisitPrepReceipt={contract_version:'1';preparation_ref:string;connec
         physician_display_name:string;practice_display_name:string;scheduled_at:string;timezone_name:string}};
     brief:({headline:BriefItem|null}&Record<'summary'|'visit_priorities'|'medication_and_adherence'|'barriers'|'uncertainties',BriefItem[]>)|null}};
 export type VisitPrepCommand={preparation_ref:string;connection_sha256:string;workspace_id:string;request_nonce:string;bot:{address:string;team_revision:number}};
+export type VisitPrepListCommand=Omit<VisitPrepCommand,'preparation_ref'>&{before_ref:string|null;limit:number};
+export type PreparationSelection={preparation_ref:string;recipient_first_name:string;recipient_role:'patient'|'caregiver';scheduled_at:string;
+  timezone_name:string;lifecycle_state:'invited'|'confirmed'|'in_progress'|'completed'|'misdirected';chart_linked:boolean;available_to_open:boolean;created_at:string|null};
+export type VisitPrepSelections={contract_version:'1';connection_sha256:string;workspace_id:string;request_nonce:string;checked_at:string;
+  preparations:PreparationSelection[];next_before_ref:string|null};
+const prepRef=(v:unknown):v is string=>typeof v==='string'&&/^visit_prep_[0-7][0-9a-hjkmnp-tv-z]{25}$/.test(v);
+const date=(v:unknown):v is string=>typeof v==='string'&&/(?:Z|[+-]\d\d:\d\d)$/.test(v)&&Number.isFinite(Date.parse(v));
+const text=(v:unknown,max:number)=>typeof v==='string'&&[...v].length>=1&&[...v].length<=max&&!v.includes('\0')&&!/[\uD800-\uDFFF]/u.test(v);
+export function validateVisitPrepSelections(value:unknown,command:VisitPrepListCommand):VisitPrepSelections{
+  const closed=(v:unknown,keys:string):v is Record<string,unknown>=>vendorObject(v)&&Object.keys(v).sort().join(',')===keys;
+  if(!closed(value,'checked_at,connection_sha256,contract_version,next_before_ref,preparations,request_nonce,workspace_id')||value.contract_version!=='1'||
+    value.connection_sha256!==command.connection_sha256||value.workspace_id!==command.workspace_id||value.request_nonce!==command.request_nonce||
+    !date(value.checked_at)||Date.parse(value.checked_at)<Date.now()-30000||Date.parse(value.checked_at)>Date.now()+5000||
+    !Array.isArray(value.preparations)||value.preparations.length>command.limit||value.next_before_ref!==null&&!prepRef(value.next_before_ref))return fail();
+  const refs=new Set<string>();
+  for(const p of value.preparations){
+    if(!closed(p,'available_to_open,chart_linked,created_at,lifecycle_state,preparation_ref,recipient_first_name,recipient_role,scheduled_at,timezone_name')||
+      !prepRef(p.preparation_ref)||p.preparation_ref===command.before_ref||refs.has(p.preparation_ref)||!text(p.recipient_first_name,120)||
+      !['patient','caregiver'].includes(p.recipient_role as string)||!date(p.scheduled_at)||!text(p.timezone_name,64)||
+      !['invited','confirmed','in_progress','completed','misdirected'].includes(p.lifecycle_state as string)||
+      typeof p.chart_linked!=='boolean'||typeof p.available_to_open!=='boolean'||p.created_at!==null&&!date(p.created_at)||
+      p.available_to_open===true&&!['confirmed','in_progress','completed'].includes(p.lifecycle_state as string))return fail();
+    refs.add(p.preparation_ref);
+  }
+  if(value.next_before_ref!==null&&value.next_before_ref!==value.preparations.at(-1)?.preparation_ref)return fail();
+  return value as VisitPrepSelections;
+}
 type Rule={$ref?:string;type?:string|string[];const?:unknown;enum?:unknown[];anyOf?:Rule[];allOf?:Rule[];if?:Rule;then?:Rule;else?:Rule;
   properties?:Record<string,Rule>;required?:string[];additionalProperties?:boolean;items?:Rule;minItems?:number;maxItems?:number;uniqueItems?:boolean;
   minLength?:number;maxLength?:number;minimum?:number;maximum?:number;pattern?:string;format?:string};
