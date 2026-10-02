@@ -34,6 +34,11 @@ The full-source hash binds the saved original; excerpt_sha256 binds only the dis
 decoder_source_windows defines the initial citation/quote window. A successful exact read_selected_source result makes that source's returned text available for citations and Scribe verbatim quotes, including an initially omitted source. No other tool adds clinical citations. Without a successful read, Scribe quotes must fit the actual displayed excerpt; never quote an unseen tail. Preserve missing, omitted or truncated evidence explicitly.
 """
 
+SOURCE_HANDLE_INSTRUCTIONS = """
+For read_selected_source arguments, copy entry_id, revision and sha256 together ONLY from tool_selection.sources. That sha256 is the full original source hash. Never calculate a hash from displayed text or copy a quote-window/excerpt diagnostic into a tool argument.
+source_delivery and displayed_excerpt_windows describe supplied text lengths only; they are not additional tool handles. The full source remains available only through its exact tool_selection handle. A displayed_excerpt_windows prefix is the initial quote/citation limit until an exact full-source read succeeds.
+"""
+
 
 def _hash(content):
     return hashlib.sha256(content.encode()).hexdigest()
@@ -127,6 +132,29 @@ def validate_prepared(envelope):
 class GPT41CompactToolsConnector(GPT41ToolsConnector):
     def _validate(self, envelope):
         return validate_prepared(envelope)
+
+    def _request_body(self, envelope):
+        body = super()._request_body(envelope)
+        content = _json_unique(body["messages"][1]["content"])
+        if "source_delivery" not in content:
+            return body  # Complete sources keep the existing short fast path.
+        # Keep the historical prepared body/manifest and its receipt hash
+        # unchanged. Display diagnostics must not compete with full handles in
+        # tool_selection, especially when a model copies a nearby sha256 field.
+        content["source_delivery"] = [
+            {key: value for key, value in record.items() if key not in {"sha256", "excerpt_sha256"}}
+            for record in content["source_delivery"]
+        ]
+        content["displayed_excerpt_windows"] = [
+            {key: value for key, value in record.items() if key != "sha256"}
+            for record in content.pop("decoder_source_windows")
+        ]
+        body["messages"][1]["content"] = _canonical(content)
+        body["messages"][2]["content"] = body["messages"][2]["content"].replace(
+            "The full-source hash binds the saved original; excerpt_sha256 binds only the displayed excerpt.",
+            "The exact full-source sha256 in tool_selection binds the saved original; displayed excerpt lengths are diagnostic only.",
+        ).replace("decoder_source_windows", "displayed_excerpt_windows") + SOURCE_HANDLE_INSTRUCTIONS
+        return body
 
     def prepare(self, context, tool_selection):
         baseline = GPT41Connector(lambda: "").prepare(context)

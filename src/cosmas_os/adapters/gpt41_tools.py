@@ -111,6 +111,11 @@ class GPT41ToolsConnector:
         # The pinned v5 request retains its original source excerpts.
         pass
 
+    def _request_body(self, envelope):
+        # Saved admission envelopes remain immutable. Version-specific model
+        # projections can change delivery without rewriting receipt custody.
+        return deepcopy(envelope["body"])
+
     def _decode(self, envelope, data, body, **usage):
         return decode_response(envelope["baseline"], data, **usage)
 
@@ -133,7 +138,7 @@ class GPT41ToolsConnector:
         receipt_scope = None
         total_input, total_output, usage_verified, sent_unknown = 0, 0, True, False
         calls = 0
-        body = deepcopy(envelope["body"])
+        body = self._request_body(envelope)
         response_hash = None
         try:
             key = self.credential()
