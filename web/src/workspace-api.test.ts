@@ -143,4 +143,17 @@ describe("signed workspace transport", () => {
     await expect(workspaceApi.catalog({ mode: "clerk_jwt", getToken })).rejects.toThrow();
     expect(getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
   });
+  it('does not obtain credentials or read when the native account has already closed',async()=>{
+    const getToken=vi.fn(),fetchMock=vi.fn<typeof fetch>();vi.stubGlobal('fetch',fetchMock);
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken,nativeSession:{revision:appointment,isCurrent:()=>false}};
+    await expect(workspaceApi.catalog(access)).rejects.toMatchObject({status:401});
+    expect(getToken).not.toHaveBeenCalled();expect(fetchMock).not.toHaveBeenCalled();
+  });
+  it('fences a token resolved after its native account closed before any request is sent',async()=>{
+    let current=true,release!:(value:string)=>void;const getToken=vi.fn(()=>new Promise<string>(resolve=>{release=resolve;}));
+    const fetchMock=vi.fn<typeof fetch>();vi.stubGlobal('fetch',fetchMock);
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken,nativeSession:{revision:appointment,isCurrent:()=>current}};
+    const result=workspaceApi.catalog(access),rejected=expect(result).rejects.toMatchObject({status:401});
+    current=false;release('invented-token');await rejected;expect(fetchMock).not.toHaveBeenCalled();
+  });
 });

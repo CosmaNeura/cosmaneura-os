@@ -130,6 +130,20 @@ import CosmasWorkspaceAuthPlugin
         onSignal?(signal, generation, message.frameInfo.isMainFrame, sameOrigin)
     }
 
+    /// A foreground hint requires this current scene's live, local document.
+    /// JavaScript owns fresh authentication before any work observation.
+    func notifySceneState(active: Bool, generation: String) -> Bool {
+        guard !quarantined, startedNavigation, isViewLoaded,
+              generation == workspaceGeneration,
+              let webView, let scene = webView.window?.windowScene, let url = webView.url,
+              url.scheme == "capacitor", url.host == "localhost", url.port == nil,
+              url.user == nil, url.password == nil,
+              !active || scene.activationState == .foregroundActive,
+              let source = WorkspaceSceneSignalState.script(generation: generation, active: active) else { return false }
+        webView.evaluateJavaScript(source, in: nil, in: .page) { _ in }
+        return true
+    }
+
     func quarantine() {
         guard !quarantined else { return }
         quarantined = true

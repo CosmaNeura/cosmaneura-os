@@ -7,10 +7,12 @@ import { StatusScreen } from "./App";
 import { EncounterWorkspace } from "./EncounterWorkspace";
 import { parseNativeAuthState, parseNativeToken, sameNativeState, type NativeAuthState } from "./native-auth";
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
+import {nativeSceneSignal,notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 
 type Session = {
   plugin: WorkspaceAuthPlugin; active: boolean; epoch: number; pending: boolean;
   current: NativeAuthState | null; refresh: () => Promise<void>;
+  foreground:boolean;
 };
 
 export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available = nativeWorkspaceAuthAvailable(), createIdentity }: {
@@ -21,6 +23,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
   const session = useRef<Session | null>(null);
+  const currentIdentity=useRef<AuthenticatedWorkspaceIdentity|null>(null);
   const identity = useMemo(() => {
     if (state?.phase !== "ready" || !state.identity) return null;
     const scope = session.current;
@@ -38,9 +41,16 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     return createIdentity ? createIdentity(expected, stillCurrent) : { mode: "clerk_jwt" as const, getToken,
       nativeSession: {revision:expected.revision,isCurrent:stillCurrent} };
   }, [state, plugin, createIdentity]);
+  currentIdentity.current=identity;
+  useLayoutEffect(()=>{
+    // Readiness can arrive while the app is inactive, before an observer exists.
+    // Retain that scene state for the newly mounted encounter observer.
+    if(identity&&session.current?.active&&!session.current.foreground)
+      notifyNativeWorkspaceForeground(identity,false);
+  },[identity]);
 
   useLayoutEffect(() => {
-    const scope: Session = { plugin, active: true, epoch: 0, pending: false, current: null, refresh: async () => {} };
+    const scope: Session = { plugin, active: true, epoch: 0, pending: false, current: null, refresh: async () => {},foreground:true };
     session.current = scope;
     setState(null); setFailed(false); setBusy(false);
     let remove: (() => Promise<void>) | undefined;
@@ -62,13 +72,17 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
         setFailed(false);
       } catch { invalidate(); }
     };
-    scope.refresh = async () => {
-      if (!scope.active || scope.pending) return;
+    let reading:Promise<void>|null=null;
+    scope.refresh = () => {
+      if (!scope.active || scope.pending || !scope.foreground) return Promise.resolve();
+      if(reading)return reading;
       const started = scope.epoch;
-      try {
+      const read=async()=>{try {
         const value = await plugin.getState();
         if (scope.active && !scope.pending && scope.epoch === started) accept(value);
-      } catch { if (scope.active && !scope.pending && scope.epoch === started) invalidate(); }
+      } catch { if (scope.active && !scope.pending && scope.epoch === started) invalidate(); }};
+      const pending=read();reading=pending;
+      void pending.finally(()=>{if(reading===pending)reading=null;});return pending;
     };
     if (available) {
       void plugin.addListener("authStateChanged", accept).then(handle => {
@@ -77,13 +91,50 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
         return scope.refresh();
       }).catch(invalidate);
     }
-    const resume = () => { if (document.visibilityState === "visible" && available) void scope.refresh(); };
+    let resumeReading:Promise<void>|null=null;
+    let sceneEpoch=0;
+    const scene=(active:boolean)=>{
+      if(!scope.active||!available)return;
+      const captured=currentIdentity.current;
+      if(!active){
+        sceneEpoch++;
+        scope.foreground=false;scope.epoch++;
+        if(captured)notifyNativeWorkspaceForeground(captured,false);return;
+      }
+      const alreadyForeground=scope.foreground;
+      scope.foreground=true;
+      if(!alreadyForeground||!resumeReading)sceneEpoch++;
+      if(resumeReading)return;
+      const verify=async()=>{
+        // Settle a read begun before backgrounding, then obtain a fresh native
+        // state. Neither a late pre-background reply nor another owner resumes work.
+        while(scope.active&&scope.foreground&&!scope.pending){
+          const selectedScene=sceneEpoch;
+          if(reading)await reading;
+          if(!scope.active||!scope.foreground||scope.pending)return;
+          const before=scope.current;
+          await scope.refresh();
+          if(!scope.active||!scope.foreground||scope.pending)return;
+          if(selectedScene!==sceneEpoch)continue;
+          if(before?.phase==='ready'&&scope.current&&sameNativeState(before,scope.current)&&
+            captured&&captured===currentIdentity.current)notifyNativeWorkspaceForeground(captured,true);
+          return;
+        }
+      };
+      const pending=verify();resumeReading=pending;
+      void pending.finally(()=>{if(resumeReading===pending)resumeReading=null;});
+    };
+    let nativeSceneKnown=false;
+    const resume = () => { if(nativeSceneKnown)return;if (document.visibilityState === "visible") scene(true);else if(document.visibilityState==='hidden')scene(false); };
+    const nativeScene=(event:Event)=>{const active=nativeSceneSignal(event);if(active!==null){nativeSceneKnown=true;scene(active);}};
     document.addEventListener("visibilitychange", resume);
+    window.addEventListener?.('cosmas:native-scene-state',nativeScene);
     const timer = available ? window.setInterval(() => { void scope.refresh(); }, 5_000) : undefined;
     return () => {
       scope.active = false; scope.epoch++; scope.current = null;
       if (timer !== undefined) window.clearInterval(timer);
       document.removeEventListener("visibilitychange", resume);
+      window.removeEventListener?.('cosmas:native-scene-state',nativeScene);
       void remove?.().catch(() => {});
     };
   }, [plugin, available]);

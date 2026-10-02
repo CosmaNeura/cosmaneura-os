@@ -23,9 +23,12 @@ export async function workspaceAuthHeaders(identity: AuthenticatedWorkspaceIdent
     assertCurrentDesktopSession(identity);
     headers.set("X-Cosmas-Desktop-Session", identity.revision);
   } else {
+    const checkNative=()=>{if(identity.nativeSession&&!identity.nativeSession.isCurrent())throw new Error("Secure session unavailable");};
+    checkNative();
     if (!permittedSignedWorkspaceApi(base, window.location.href,
       import.meta.env.VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED === "true")) throw new Error("Secure session unavailable");
     const token = await identity.getToken({ skipCache: true });
+    checkNative();
     if (!token || token.length > 8192 || /\s/.test(token)) throw new Error("Secure session unavailable");
     headers.set("Authorization", `Bearer ${token}`);
   }
