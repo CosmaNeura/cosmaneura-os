@@ -83,6 +83,9 @@ it('retains an unconfirmed review in the actual product and blocks navigation an
   for(const label of ['Team settings','Practice work','Close draft review'])expect(button(label)?.disabled,label).toBe(true);
   expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.disabled).toBe(true);expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(true);
   expect(button('Refresh encounter')?.disabled).toBe(true);await click('Close notebook');expect(host.querySelector('.handoff-review')).toBe(panel);
+  const readsBefore=vi.mocked(workspaceApi.read).mock.calls.length;
+  expect(button('Retry same review save')?.disabled).toBe(true);await click('Check saved review status');
+  expect(vi.mocked(workspaceApi.read).mock.calls.length).toBe(readsBefore+1);expect(fetcher).toHaveBeenCalledOnce();
   await click('Retry same review save');await wait(()=>expect(host.textContent).toContain('Changes requested'));expect(fetcher.mock.calls[1][1].body).toBe(encoded);
   expect(hasUnsavedWork()).toBe(false);expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
 });

@@ -5,6 +5,8 @@ import {HandoffReviewPanel} from './HandoffReviewPanel';
 import {workspaceApi,type Workspace,type WorkspaceIdentity} from './workspace-api';
 import type {HandoffReviewInput,HandoffRevisionInput,ReviewableHandoff} from './handoff-review-api';
 import {hasUnsavedWork} from './unsaved-work';
+import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
+import {createHandoffReviewTestRecovery} from './handoff-review-test-recovery';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const utilModule='node:util';const {transferableAbortController}=await import(/* @vite-ignore */utilModule) as {transferableAbortController:()=>AbortController};
 const labEnvironment=(globalThis as typeof globalThis&{process?:{env:Record<string,string|undefined>}}).process?.env;
@@ -21,13 +23,14 @@ type Trial={persona:string;round:number;workspace_id:string;boundary:string;step
 const trials:Trial[]=[],readWorkspace=workspaceApi.read,realFetch=globalThis.fetch.bind(globalThis);
 let root:Root|undefined,host:HTMLDivElement,current:Workspace,replaceWorkspace:(w:Workspace)=>void,currentIdentity:WorkspaceIdentity;
 let activeTrial:Trial|undefined;
+let reviewRecovery:EditorRecoveryAccess|undefined;
 const abortBridges:(()=>void)[]=[];
 const hash=async(text:string)=>[...new Uint8Array(await webcrypto.subtle.digest('SHA-256',new TextEncoder().encode(text)))].map(n=>n.toString(16).padStart(2,'0')).join('');
 function Harness({initial,identity}:{initial:Workspace;identity:WorkspaceIdentity}) {
   const [workspace,setWorkspace]=useState(initial),[selected,setSelected]=useState(initial.handoffs!.find(h=>h.status==='completed')!.id);
   current=workspace;replaceWorkspace=setWorkspace;
-  return <HandoffReviewPanel workspace={workspace} handoff={workspace.handoffs!.find(h=>h.id===selected)!} identity={identity}
-    locked={false} onSaved={setWorkspace} onRevisionPrepared={setSelected}/>;
+  return <EditorRecoveryContext.Provider value={reviewRecovery}><HandoffReviewPanel key={`${workspace.id}:${selected}`} workspace={workspace} handoff={workspace.handoffs!.find(h=>h.id===selected)!} identity={identity}
+    locked={false} onSaved={setWorkspace} onRevisionPrepared={setSelected}/></EditorRecoveryContext.Provider>;
 }
 function button(label:string){const found=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===label);expect(found,label).toBeTruthy();return found!;}
 async function wait(check:()=>void){for(let n=0;n<300;n++){let done=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10));try{check();done=true;}catch{}});if(done)return;}check();}
@@ -40,6 +43,7 @@ function bridgeHeaders(identity:WorkspaceIdentity):Headers {
 beforeEach(()=>{
   if(!base)return;
   vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base);
+  vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
   vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
     const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);
     if(url.origin!==base)throw new Error('Non-loopback request blocked by the synthetic UI lab.');
@@ -58,7 +62,7 @@ beforeEach(()=>{
   });
   host=document.createElement('div');document.body.append(host);
 });
-afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;}for(const dispose of abortBridges.splice(0))dispose();host?.remove();activeTrial=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
+afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;}reviewRecovery?.journal.close();reviewRecovery=undefined;for(const dispose of abortBridges.splice(0))dispose();host?.remove();activeTrial=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
 
 it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitioner',round:1},{persona:'physician_assistant',round:1},
   {persona:'physician',round:2},{persona:'nurse_practitioner',round:2},{persona:'physician_assistant',round:2}])('actual product server $persona round $round reviews, revises, runs the specialist and accepts its exact saved draft',async({persona,round})=>{
@@ -71,6 +75,7 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
     const packet=await seeded.json() as {identity:WorkspaceIdentity;workspace:Workspace};expect('mode' in packet.identity).toBe(false);currentIdentity=packet.identity;
     const original=packet.workspace.handoffs!.find(h=>h.status==='completed')! as ReviewableHandoff;trial.workspace_id=packet.workspace.id;
     const originalEntry=packet.workspace.entries.find(e=>e.id===original.result_entry_id)!;expect(originalEntry.reply).toBeTruthy();
+    reviewRecovery=await createHandoffReviewTestRecovery(packet.workspace.id,()=>readWorkspace(currentIdentity,current.id),webcrypto);
     root=createRoot(host);await act(async()=>root!.render(<Harness initial={packet.workspace} identity={packet.identity}/>));
     await wait(()=>expect(host.querySelector('[aria-label="Complete saved draft"]')?.textContent).toBe(originalEntry.reply!.content));step('opened_saved_draft',original);
     await click('Request changes');const feedback=`${persona}: identify an owner and due date; preserve unknown diagnosis and trial eligibility.`;

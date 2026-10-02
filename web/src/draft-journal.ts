@@ -20,11 +20,12 @@ import { validateInboxRecovery } from "./inbox-recovery";
 import { validInboxHandoffActor, validateInboxHandoffRecovery } from "./inbox-handoff-recovery";
 import { validGoogleMessageScope, validateGoogleMessageRecovery } from "./google-message-recovery";
 import { validGoogleCalendarScope, validateGoogleCalendarRecovery } from "./google-calendar-recovery";
+import {validateHandoffReviewRecovery} from './handoff-review-recovery';
 
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
   note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest };
-export type EditorKind = "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | "follow-up-proposal" | "appointments" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
+export type EditorKind = "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | "follow-up-proposal" | "appointments" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
 export type AccountEditorKind = "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | `practice-result:${string}` | `vendor-work:${string}`;
@@ -37,7 +38,7 @@ const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const validEditor = (kind: unknown) => typeof kind === "string" &&
   (["private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
-    kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) ||
+    kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) || kind.startsWith("handoff-review:") && UUID.test(kind.slice("handoff-review:".length)) ||
     kind.startsWith("follow-up-result:") && UUID.test(kind.slice("follow-up-result:".length)) || kind.startsWith("research:") && UUID.test(kind.slice("research:".length)));
 const operations = ["entry", "ask", "retry", "note", "coreNoteLink", "review", "followUpPropose", "followUpDecision", "followUpComplete", "link"];
 
@@ -121,6 +122,11 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if(draft?.kind==='editor'&&draft.editor.startsWith('handoff-review:')){
+    try{const data=await validateHandoffReviewRecovery(draft.data,draft.workspaceId,draft.editor.slice('handoff-review:'.length));
+      if(draft.pending!==(data.pending?.body.idempotency_key??null))throw new Error();}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
   if (draft?.kind === "account-editor" && draft.editor === "google-calendar") {
     if (draft.pending !== null) throw new DraftStoreError("integrity");
     try {const scope=(draft.data as {scope?:unknown}).scope;if(!validGoogleCalendarScope(scope))throw new Error();await validateGoogleCalendarRecovery(draft.data,scope);}
