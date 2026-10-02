@@ -47,6 +47,14 @@ URLs, different calendars or a replacement summary. Current schema is
 Synthetic tests and injected upstreams qualify local contracts and workflows,
 not installed native behavior or live Google/model performance.
 
+The prepared database runtime retains its seven pure-validator execution grants.
+Ten scoped validation triggers run with the migration owner's privileges and a
+fixed `pg_catalog` search path so their nested private checks work under that
+restricted role. Direct execution of those triggers and state-reading helpers
+remains denied. The inherited Gmail read trigger remains an invoker. Restricted
+credential tests cover ordinary agent admission, calendar/email coexistence,
+handoff revision and acceptance, revoked access and forged ownership.
+
 ## Reviewed email work
 
 The separate, default-off `WORKSPACE_GOOGLE_MESSAGE_ENABLED` service enables

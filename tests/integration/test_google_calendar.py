@@ -29,7 +29,7 @@ from cosmas_os.google_calendar_models import (
     GoogleCalendarSourceReview,
 )
 from cosmas_os.google_connection_models import GoogleConnectionCredential
-from cosmas_os.models import EncounterWorkspace, ExternalIdentity
+from cosmas_os.models import EncounterWorkspace, ExternalIdentity, ModelWorkAdmission
 from cosmas_os.ports.google_calendar import (
     GoogleCalendarAccount,
     GoogleCalendarBinding,
@@ -41,6 +41,33 @@ from cosmas_os.ports.google_calendar import (
 signed_workspace = _signed_workspace
 google_case = lineage.google_case
 calendar_case = lineage.calendar_case
+
+
+@pytest.fixture
+def isolated_calendar_case(calendar_case, monkeypatch):
+    """Always close this committed fixture's work through the authority fence."""
+    f = calendar_case
+    try:
+        yield f
+    finally:
+        before_io = (len(f.port.calls), len(f.calendar_port.calls))
+        monkeypatch.setattr(lineage.work, "dispatch_claim", lambda *_args, **_kwargs: pytest.fail("cleanup must not dispatch a model"))
+        with Session(f.engine) as s:
+            credential = s.get(GoogleConnectionCredential, f.account)
+            assert credential is not None
+            credential.status, credential.sealed = "disconnected", None
+            s.commit()
+            reserved = list(s.scalars(select(ModelWorkAdmission.id).where(ModelWorkAdmission.box_id == f.box,
+                ModelWorkAdmission.owner_id == f.owner, ModelWorkAdmission.workspace_id == f.wid,
+                ModelWorkAdmission.state == "reserved")))
+            for admission_id in reserved:
+                assert lineage.work.claim(s, f.box, f.owner, admission_id) is None
+                admission = s.get(ModelWorkAdmission, admission_id)
+                assert admission is not None and admission.state in {"failed", "abandoned"}
+            assert not list(s.scalars(select(ModelWorkAdmission.id).where(ModelWorkAdmission.box_id == f.box,
+                ModelWorkAdmission.owner_id == f.owner, ModelWorkAdmission.workspace_id == f.wid,
+                ModelWorkAdmission.state.in_({"reserved", "running"}))))
+        assert (len(f.port.calls), len(f.calendar_port.calls)) == before_io
 
 
 class CalendarReviewReceipt(TypedDict):
@@ -302,8 +329,8 @@ def test_initial_unavailable_projection_stays_masked_when_final_reader_recovers(
     assert calendar._withheld_sources.get() == frozenset()
 
 
-def test_final_receipt_source_race_withholds_uncited_drafts_review_feedback_and_revised_brief(calendar_case, monkeypatch):
-    f = calendar_case
+def test_final_receipt_source_race_withholds_uncited_drafts_review_feedback_and_revised_brief(isolated_calendar_case, monkeypatch):
+    f = isolated_calendar_case
     command, handoff = lineage.finish_handoff(f, cited=False)
     with Session(f.engine) as s:
         saved = lineage.reviews.review(s, f.box, f.owner, f.wid, handoff["id"], **command)
@@ -332,6 +359,14 @@ def test_final_receipt_source_race_withholds_uncited_drafts_review_feedback_and_
         assert lineage.gmail.private_fact_paths(recovered, ["calendar café", "Google calendar: Invented calendar"]) == []
         assert recovered["workspace"]["note"]["latest"] == f.note_before
         assert calendar._withheld_sources.get() == frozenset()
+        # This fixture commits its isolated workspace for real model/tool
+        # sessions. Close its intentionally queued revision before legacy
+        # global worker tests run; use the normal authority fence, not a state
+        # rewrite or a global cleanup of another fixture's work.
+        reserved = list(s.scalars(select(ModelWorkAdmission.id).where(ModelWorkAdmission.box_id == f.box,
+            ModelWorkAdmission.owner_id == f.owner, ModelWorkAdmission.workspace_id == f.wid,
+            ModelWorkAdmission.state == "reserved")))
+        assert len(reserved) == 1
 
 
 def test_a_new_reservation_during_get_prevents_superseded_snapshot_return(case):

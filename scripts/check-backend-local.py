@@ -22,6 +22,7 @@ REPO = Path(__file__).resolve().parents[1]
 DEPLOYMENT_TESTS = (
     "tests/integration/test_database_fingerprint.py",
     "tests/integration/test_database_preparation.py",
+    "tests/integration/test_google_calendar_runtime_privileges.py",
 )
 COMPACT_TEST = "tests/integration/test_compact_execution.py"
 

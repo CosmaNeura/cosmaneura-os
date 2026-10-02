@@ -11,6 +11,7 @@ depends_on = None
 def upgrade():
     op.execute(HANDOFF_GUARDS)
     op.execute(MODEL_GUARDS)
+    op.execute(TRIGGER_PRIVILEGES)
 
 
 def downgrade():
@@ -99,6 +100,30 @@ BEGIN
  END LOOP;
  RETURN NEW;
 END $$;
+"""
+
+# These scoped, read-only NEW-row validators call private custody helpers. The
+# prepared runtime role may write the guarded tables but may execute only its
+# existing seven pure validators. Trigger entrypoints run as the migration
+# owner; direct calls remain denied. All relations/custom helpers in these
+# bodies are public-qualified, and the search path contains only pg_catalog.
+# guard_google_message_read is deliberately excluded: it calls only the
+# already-permitted research_json_digest and reads its scoped public tables.
+TRIGGER_PRIVILEGES = """
+ALTER FUNCTION public.guard_google_calendar_observation() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_google_calendar_snapshot() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_google_calendar_review() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_google_calendar_entry() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_google_message_snapshot() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_google_message_review() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_google_message_entry() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_handoff_review() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_handoff_revision() SECURITY DEFINER SET search_path=pg_catalog;
+ALTER FUNCTION public.guard_selected_google_model_sources() SECURITY DEFINER SET search_path=pg_catalog;
+REVOKE ALL ON FUNCTION public.guard_google_calendar_observation(),public.guard_google_calendar_snapshot(),
+ public.guard_google_calendar_review(),public.guard_google_calendar_entry(),public.guard_google_message_snapshot(),
+ public.guard_google_message_review(),public.guard_google_message_entry(),public.guard_handoff_review(),
+ public.guard_handoff_revision(),public.guard_selected_google_model_sources() FROM PUBLIC;
 """
 
 MODEL_GUARDS = r"""
