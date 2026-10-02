@@ -110,7 +110,9 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
         try{await recovery.commit(retainedRecord.feedback?editorDraft(workspace.id,editor,retainedRecord):null);}catch{setError('Local recovery could not record the refusal. The original request is retained.');return;}
         setRecoveryRecord(retainedRecord.feedback?retainedRecord:null);
         setPending(null);setFeedback(request.kind==='review'?request.body.feedback:request.feedback);setAskingChanges(request.kind==='review'&&request.body.decision==='changes_requested');
-        setRefusal({code:cause.code!,workspace,freshAssignment:refusalNeedsFreshAssignment(cause.code)});setError('This request was not saved. Your change request is retained.');
+        setRefusal({code:cause.code!,workspace,freshAssignment:refusalNeedsFreshAssignment(cause.code)});
+        const sourceRefusal=cause.code==='handoff_source_context_too_large'||cause.code==='handoff_source_contract_unavailable';
+        setError(sourceRefusal?cause.message+' Your change request is retained.':'This request was not saved. Your change request is retained.');
       }else{if(dispatched){uncertain.current=true;if(recovery.access)setReplayCompared(false);}setError(!dispatched?'The request was not submitted because its private recovery copy could not be saved. Recheck local recovery before continuing.':
         cause instanceof WorkspaceApiError?cause.message:'The save could not be confirmed. Retry the same review save.');}
     }}

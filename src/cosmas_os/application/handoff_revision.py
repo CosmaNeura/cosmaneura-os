@@ -298,7 +298,9 @@ def reserve(
             for field in TaskRequirements.model_fields
         }
         task = handoff_briefs.prepare(
-            DraftBrief(team.bot_address(settings), parent.brief, requirements), context, origin
+            DraftBrief(team.bot_address(settings), parent.brief, requirements), context, origin,
+            version=old_row.request_body["task_brief"]["version"],
+            prepared_contract=old_row.envelope_contract,
         )
         question = handoff_briefs.question(task) + revision_text
         if len(question) > 12000:

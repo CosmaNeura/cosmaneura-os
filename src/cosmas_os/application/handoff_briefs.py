@@ -6,6 +6,44 @@ import json
 from cosmas_os.ports.task_brief import TaskRequirements
 
 ALLOWED_ACTIONS = ("prepare_private_draft",)
+FULL_SOURCE_CONTRACT = "cosmas-gpt41-prepared.v6"
+
+
+def _read_result_bytes(source):
+    """Size the actual finite tool-result shape before any paid delegation.
+
+    Product scope identifiers are UUIDs; unknown hashes are fixed-length SHA-256.
+    This uses the reader's less compact serialization, retaining UTF-8/escaping.
+    No larger tool byte allowance is introduced for v2.
+    """
+    digest, identifier = "0" * 64, "0" * 36
+    data = {"entry_id": source.entry_id, "revision": source.revision,
+        "sha256": digest, "label": source.label, "kind": source.kind,
+        "content": source.content}
+    receipt = {"contract": "cosmas-agent-tool-receipt.v1", "tool": "read_selected_source",
+        "admission_id": identifier, "dispatch_id": identifier, "workspace_id": identifier,
+        "actor_agent_id": identifier, "initiated_by_human_id": identifier,
+        "envelope_sha256": digest, "selection_sha256": digest,
+        "request_sha256": digest, "result_sha256": digest, "sha256": digest}
+    value = {"contract": "cosmas-agent-tool-result.v1", "tool": "read_selected_source",
+        "data": data, "receipt": receipt}
+    return len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode())
+
+
+def validate_sources(context, *, version=1, prepared_contract=None):
+    if type(version) is not int or version not in {1, 2}:
+        raise ValueError("invalid task brief version")
+    if version == 2 and prepared_contract != FULL_SOURCE_CONTRACT:
+        raise ValueError("full-source task requires the v6 prepared contract")
+    if (len(context.sources) > 12
+        or any(len(source.content) > (20000 if version == 2 else 5000)
+            for source in context.sources)
+        or sum(len(source.content) for source in context.sources) > 30000):
+        raise ValueError("task sources must fit completely in the model input")
+    if version == 2:
+        from cosmas_os.application.agent_tools import MAX_RESPONSE_BYTES
+        if any(_read_result_bytes(source) > MAX_RESPONSE_BYTES for source in context.sources):
+            raise ValueError("task source exceeds the finite tool read bytes")
 
 
 def source_versions(context):
@@ -21,21 +59,22 @@ def source_versions(context):
     ]
 
 
-def prepare(brief, context, origin):
+def prepare(brief, context, origin, *, version=1, prepared_contract=None):
     requirements = TaskRequirements.model_validate(brief.requirements).model_dump()
     value = {
-        "version": 1,
+        "version": version,
         "goal": brief.brief,
         **requirements,
         "source_versions": source_versions(context),
         "allowed_actions": list(ALLOWED_ACTIONS),
         "depends_on": {"entry_id": origin.id, "revision": origin.revision},
     }
-    validate(value, context, goal=brief.brief, origin_id=origin.id)
+    validate(value, context, goal=brief.brief, origin_id=origin.id,
+        prepared_contract=prepared_contract)
     return value
 
 
-def validate(value, context, *, goal, origin_id):
+def validate(value, context, *, goal, origin_id, prepared_contract=None):
     fields = {
         "version",
         "goal",
@@ -49,17 +88,11 @@ def validate(value, context, *, goal, origin_id):
     }
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError("invalid task brief")
-    if (
-        len(context.sources) > 12
-        or any(len(source.content) > 5000 for source in context.sources)
-        or sum(len(source.content) for source in context.sources) > 30000
-    ):
-        raise ValueError("task sources must fit completely in the model input")
+    validate_sources(context, version=value["version"], prepared_contract=prepared_contract)
     TaskRequirements.model_validate({key: value[key] for key in TaskRequirements.model_fields})
     dependency = value["depends_on"]
     if (
         type(value["version"]) is not int
-        or value["version"] != 1
         or value["goal"] != goal
         or not isinstance(goal, str)
         or not 1 <= len(goal.strip()) <= 4000
@@ -123,7 +156,10 @@ def projection(s, assignment, row):
     try:
         context = _context(row.prepared_envelope["context"])
         task = row.request_body["task_brief"]
-        validate(task, context, goal=assignment.brief, origin_id=assignment.origin_entry_id)
+        if task.get("version") == 2 and getattr(row, "envelope_contract", None) != row.prepared_envelope.get("contract"):
+            raise ValueError("full-source task contract mismatch")
+        validate(task, context, goal=assignment.brief, origin_id=assignment.origin_entry_id,
+            prepared_contract=row.prepared_envelope.get("contract"))
         expected_question = question(task)
         if "revision_request" in row.request_body:
             from cosmas_os.application.handoff_revision import revision_question

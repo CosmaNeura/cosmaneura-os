@@ -30,6 +30,16 @@ it('retries and resolves the original handoff command without substituting a cur
   expect(fetcher.mock.calls.map(c=>c[0])).toEqual([`http://127.0.0.1:8018/workspaces/${id}/handoffs/${handoffId}/retry`,`http://127.0.0.1:8018/workspaces/${id}/handoffs/${handoffId}/retry/resolve`]);
   expect(fetcher.mock.calls.every(c=>(c[1] as RequestInit).body===JSON.stringify(body))).toBe(true);
 });
+it.each([
+  ['handoff_source_context_too_large','Select fewer saved sources'],
+  ['handoff_source_contract_unavailable','Check Chief’s tools'],
+])('shows an actionable source refusal for %s without retrying',async(code,next)=>{
+  const fetcher=vi.fn().mockResolvedValue(json({detail:code},422));vi.stubGlobal('fetch',fetcher);
+  const error=await modelWorkApi.submit(access,id,op).catch(value=>value);
+  expect(error).toMatchObject({status:422,code});
+  expect(error.message).toContain('Your recording and saved notes are retained.');
+  expect(error.message).toContain(next);expect(fetcher).toHaveBeenCalledTimes(1);
+});
 it.each(['workspace','key','digest','unknown-field','wrong-status','content-type','no-store','utf8'])('rejects bad negotiated receipt: %s',async fault=>{
   const value=await modelReceipt() as any;let headers:Record<string,string>={},status=200;
   if(fault==='workspace')value.workspace_id=modelUuid(99);if(fault==='key')value.idempotency_key='wrong-model-key';if(fault==='digest')value.request_sha256='b'.repeat(64);
