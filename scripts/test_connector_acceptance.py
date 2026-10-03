@@ -313,3 +313,40 @@ def test_fd_input_prints_only_safe_report(tmp_path, monkeypatch, capsys):
         assert json.loads(capsys.readouterr().out) == {"contract_version": 1, "qualification": "synthetic_fixture"}
     finally:
         os.close(read_fd)
+
+
+def test_reviewed_inbound_fax_source_is_verified_without_reacquisition():
+    plan, values = fixture()
+    content = "Invented reviewed fax passage. No external treatment or delivery occurred."
+    entry = {"id": identifier(70), "kind": "efax_inbound_source", "content": content, "fax_source_state": "current"}
+    plan["sources"].append({"entry_id": entry["id"], "kind": entry["kind"], "content_sha256": acceptance.sha(content)})
+    values["/workspaces/" + plan["workspace_id"]]["entries"].append(entry)
+    report, code, calls = checked_run(plan, values)
+    assert code == 0 and report["selected_source_count"] == 3
+    assert report["clinical_note_unchanged"] and report["product_requests"] == 11
+    assert report["provider_read_requests"] == report["provider_write_requests"] == 0
+    assert content not in acceptance.canonical(report)
+    assert not any("efax-inbound" in request.url.path for request in calls)
+
+
+@pytest.mark.parametrize("fault", ["revoked", "changed", "missing", "duplicate"])
+def test_inbound_fax_source_refuses_stale_changed_missing_or_ambiguous_evidence(fault):
+    plan, values = fixture()
+    content = "Invented reviewed fax passage"
+    entry = {"id": identifier(70), "kind": "efax_inbound_source", "content": content, "fax_source_state": "current"}
+    plan["sources"].append({"entry_id": entry["id"], "kind": entry["kind"], "content_sha256": acceptance.sha(content)})
+    workspace = values["/workspaces/" + plan["workspace_id"]]
+    workspace["entries"].append(entry)
+    if fault == "revoked":
+        entry["fax_source_state"] = "unavailable"
+        entry["content"] = ""
+    elif fault == "changed":
+        entry["content"] += " changed"
+    elif fault == "missing":
+        workspace["entries"].remove(entry)
+    else:
+        workspace["entries"].append(dict(entry))
+    report, code, calls = checked_run(plan, values)
+    assert code == 1 and report["product_requests"] == 2
+    assert report["provider_read_requests"] == report["provider_write_requests"] == 0
+    assert content not in acceptance.canonical(report)

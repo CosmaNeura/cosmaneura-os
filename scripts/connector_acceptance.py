@@ -130,7 +130,7 @@ def plan_checked(plan):
         exact(item, {"entry_id", "kind", "content_sha256"})
         uuid(item["entry_id"])
         digest(item["content_sha256"])
-        require(item["kind"] in {"google_message", "google_calendar"})
+        require(item["kind"] in {"google_message", "google_calendar", "efax_inbound_source"})
     for item in plan["faxes"]:
         exact(item, {"ticket_id", "provider", "operation_id", "revision_id", "payload_hash", "status_sha256"})
         require(item["provider"] in {"spruce", "srfax", "documo", "efax"})
@@ -248,11 +248,12 @@ def note_binding(workspace, plan):
                 "review_sha256": sha(canonical(note["review"])) if note["review"] is not None else None}
     require(expected == plan["note"], "clinical_note_changed")
     for selected in plan["sources"]:
-        entry = next((e for e in workspace["entries"] if e["id"] == selected["entry_id"]), None)
-        if entry is None:
-            raise Refused("selected_source_missing")
+        matches = [e for e in workspace["entries"] if e["id"] == selected["entry_id"]]
+        require(len(matches) == 1, "selected_source_missing")
+        entry = matches[0]
         require(entry["kind"] == selected["kind"], "selected_source_missing")
-        state = "google_source_state" if selected["kind"] == "google_message" else "calendar_source_state"
+        state = {"google_message": "google_source_state", "google_calendar": "calendar_source_state",
+                 "efax_inbound_source": "fax_source_state"}[selected["kind"]]
         require(entry.get(state) == "current" and sha(entry["content"]) == selected["content_sha256"], "selected_source_unavailable")
     return sha(canonical(expected))
 
