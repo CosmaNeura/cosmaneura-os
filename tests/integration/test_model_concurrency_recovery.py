@@ -6,8 +6,9 @@ Barriers measure workflow overlap and custody; never model latency/cost qualific
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from threading import Barrier, Lock
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -15,15 +16,22 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 from tests.helpers.task_brief import REQUIREMENTS
 from tests.integration.test_handoff_wakeup import prepared_case
+from tests.integration.test_product_agent_tool_workflow import (
+    SUMMARY,
+    TRANSCRIPT,
+    read_call,
+    response,
+)
 from tests.integration.test_product_agent_tool_workflow import operational as operational
-from tests.integration.test_product_agent_tool_workflow import read_call, response
 
 from cosmas_os.adapters.gpt41 import ENDPOINT, _context
 from cosmas_os.application import model_work as work
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.models import (
+    AppointmentObservation,
     ModelWorkAdmission,
+    PatientLink,
     WorkspaceEntry,
     WorkspaceHandoffAttempt,
     WorkspaceReply,
@@ -129,10 +137,76 @@ def counts(engine, case):
         )
 
 
+def same_owner_encounter(engine, base):
+    box, owner = base[:2]
+    with Session(engine) as s:
+        patient = PatientLink(
+            box_id=box,
+            source_pair_key="invented-concurrent:" + str(uuid4()),
+            label="Invented separate encounter",
+            state="confirmed",
+            confirmed_by_principal_id=owner,
+            attested_at=datetime.now(UTC),
+        )
+        s.add(patient)
+        s.flush()
+        appointment = AppointmentObservation(
+            box_id=box,
+            patient_link_id=patient.id,
+            external_id=str(uuid4()),
+            source="synthetic",
+            start_at=datetime.now(UTC),
+            patient_label="Invented separate encounter",
+        )
+        s.add(appointment)
+        s.commit()
+        snapshot = ws.create(
+            s, box, owner, appointment.id, str(uuid4()), initial_synthetic_source=False
+        )
+        for label, content in (("Invented transcript", TRANSCRIPT), ("Invented summary", SUMMARY)):
+            snapshot = ws.append(
+                s,
+                box,
+                owner,
+                snapshot["id"],
+                expected=snapshot["revision"],
+                key=str(uuid4()),
+                kind="evidence",
+                source_label=label,
+                content=content,
+            )["workspace"]
+        aid, _ = work.reserve_conversation(
+            s,
+            box,
+            owner,
+            snapshot["id"],
+            expected=snapshot["revision"],
+            team_revision=1,
+            key=str(uuid4()),
+            role="chief",
+            content="Prepare invented private draft tasks.",
+        )
+        claim = work.claim(s, box, owner, aid)
+    result = dispatch(engine, claim)
+    with Session(engine) as s:
+        work.settle(s, claim, result)
+        row = s.get(ModelWorkAdmission, aid)
+        assert row.state == "completed"
+        return box, owner, snapshot["id"], row.result_entry_id
+
+
+@pytest.mark.parametrize("scope", ["separate_accounts", "same_clinician"])
 def test_three_accounts_three_specialists_concurrent_claim_replay_settlement_and_isolation(
-    engine, operational, tmp_path
+    engine, operational, tmp_path, scope
 ):
-    cases = [prepared_case(engine) for _ in range(3)]
+    first = prepared_case(engine)
+    cases = [first] + (
+        [prepared_case(engine) for _ in range(2)]
+        if scope == "separate_accounts"
+        else [same_owner_encounter(engine, first) for _ in range(2)]
+    )
+    outsider = prepared_case(engine) if scope == "same_clinician" else None
+    outsider_aid = children(engine, outsider)[0] if outsider else None
     queued_at = time.monotonic()
     ids = [(case, aid) for case in cases for aid in children(engine, case)]
     assert len(ids) == 9
@@ -211,6 +285,12 @@ def test_three_accounts_three_specialists_concurrent_claim_replay_settlement_and
                 )
                 == 4
             )
+        if outsider is not None:
+            with Session(engine) as denied:
+                with pytest.raises(ws.WorkspaceError) as error:
+                    work.claim(denied, case[0], case[1], outsider_aid)
+                assert error.value.status == 404
+            continue
         foreign = next(c for c in claims if c.box != case[0])
         with Session(engine) as denied:
             with pytest.raises(ws.WorkspaceError) as error:
@@ -220,7 +300,9 @@ def test_three_accounts_three_specialists_concurrent_claim_replay_settlement_and
         json.dumps(
             {
                 "boundary": "Actual PostgreSQL and product tool dispatch, synthetic HTTP responses; barriers deliberately synchronize dispatch. Queue/dispatch measurements are not real model p95 or cost.",
-                "accounts": 3,
+                "scope": scope,
+                "accounts": 3 if scope == "separate_accounts" else 1,
+                "encounters": 3,
                 "specialists": 9,
                 "unique_dispatches": 9,
                 "measurements": measurements,
