@@ -293,3 +293,64 @@ def test_secure_reader_rejects_symlink_without_reading_target(tmp_path: Path) ->
     link.symlink_to(target)
     with pytest.raises(OSError):
         binding._read(link)
+
+
+PATIENT_SETUP_FEATURE = "WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED"
+
+
+def patient_setup_plan(enabled=True):
+    return {"variables": {
+        "workspace_hosted_enabled": {"value": True},
+        "workspace_features": {"value": {
+            "WORKSPACE_SCHEDULING_ENABLED": True,
+            "WORKSPACE_SCHEDULING_LOGIN_ENABLED": True,
+            "WORKSPACE_APPOINTMENTS_ENABLED": True,
+            PATIENT_SETUP_FEATURE: enabled,
+        }},
+        "workspace_public_configuration": {"value": {
+            "SCHEDULING_ORIGIN": "https://synthetic-scheduling.example",
+            "SCHEDULING_GOOGLE_CLIENT_ID": "invented-client",
+        }},
+        "workspace_secret_references": {"value": {
+            "SCHEDULING_GOOGLE_CLIENT_SECRET": {
+                "secret_name": "invented-scheduling-client", "version": "1" * 32},
+            "SCHEDULING_LOGIN_ENCRYPTION_KEY": {
+                "secret_name": "invented-scheduling-custody", "version": "2" * 32},
+        }},
+    }}
+
+
+def test_patient_setup_activation_preserves_reviewed_public_and_secret_projection():
+    projected, secrets = binding._workspace_extension(patient_setup_plan(), bound_config())
+    assert projected[PATIENT_SETUP_FEATURE] == ["value", "true"]
+    assert projected["WORKSPACE_APPOINTMENTS_ENABLED"] == ["value", "true"]
+    assert projected["WORKSPACE_SCHEDULING_LOGIN_ENABLED"] == ["value", "true"]
+    assert projected["SCHEDULING_GOOGLE_CALLBACK_URI"][1].endswith(
+        "/connections/scheduling/google/callback")
+    assert set(secrets) == {
+        "ws-" + hashlib.sha256(name.encode()).hexdigest()[:32]
+        for name in ("SCHEDULING_GOOGLE_CLIENT_SECRET", "SCHEDULING_LOGIN_ENCRYPTION_KEY")
+    }
+
+
+def test_patient_setup_disabled_remains_explicit_in_runtime_projection():
+    projected, _ = binding._workspace_extension(patient_setup_plan(False), bound_config())
+    assert projected[PATIENT_SETUP_FEATURE] == ["value", "false"]
+
+
+def test_patient_setup_activation_still_refuses_unknown_and_nonboolean_features():
+    for name, value in (("WORKSPACE_UNREVIEWED_ENABLED", True),
+                        (PATIENT_SETUP_FEATURE, "true"), (PATIENT_SETUP_FEATURE, 1)):
+        plan = patient_setup_plan()
+        plan["variables"]["workspace_features"]["value"][name] = value
+        with pytest.raises(binding.BindingError, match="unknown-workspace-feature"):
+            binding._workspace_extension(plan, bound_config())
+
+
+def test_protected_feature_allowlist_matches_actual_terraform_module_inputs():
+    import re
+
+    text = (DIRECTORY / "environment/modules/workspace-runtime/main.tf").read_text()
+    declaration = text.split("alltrue([for name in keys(var.features) : contains([", 1)[1]
+    declaration = declaration.split("], name)", 1)[0]
+    assert set(re.findall(r'"([A-Z][A-Z0-9_]+)"', declaration)) == binding.FEATURE_NAMES
