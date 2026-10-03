@@ -43,7 +43,7 @@ The protocol uses `POST /connections/google/calendar-summaries` and
 `X-Cosmas-Google-Calendar: 1`, bounded bodies/responses and no-store replies.
 The server owns the account and seven-day range; clients cannot supply provider
 URLs, different calendars or a replacement summary. Current schema is
-`g42b8d3f6a10`; the workspace compatibility contract adds `google_calendar:1`.
+`e45a9d7c3b82`; the workspace compatibility contract adds `google_calendar:1`.
 Synthetic tests and injected upstreams qualify local contracts and workflows,
 not installed native behavior or live Google/model performance.
 
@@ -94,7 +94,7 @@ That receipt confers no current authority to continue work. Handoff revision
 commands still require visible verified prior draft/feedback; recovery of a lost
 revision reply after access changes remains fail-closed.
 
-Current required schema: `g42b8d3f6a10`. Matching workspace contracts include
+Current required schema: `e45a9d7c3b82`. Matching workspace contracts include
 `google_messages:1` and `handoff_review:2`. Install a matching native/web release
 and deliberately configure the backend before rollout. The new tests use invented
 mail and injected upstream model responses; they do not establish live full-body
@@ -167,5 +167,5 @@ its broad send/compose/modify scopes, raw-MIME attachment expansion, service-acc
 impersonation and arbitrary API action are not enabled. Official Google contract
 sources are hash-recorded in W59/research. Actual Google consent verification,
 real-account operation and physical-device/native-sign-in acceptance remain open.
-Normal API/worker readiness now expects g42b8d3f6a10. No actual provider account,
+Normal API/worker readiness now expects e45a9d7c3b82. No actual provider account,
 credential, recording, native installation or deployment was used during development.

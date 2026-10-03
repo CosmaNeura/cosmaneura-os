@@ -530,7 +530,7 @@ describe("private encounter workspace", () => {
     await click("Open synthetic encounter"); await input("Jotted notes", "Keep my private unsaved notes.");
     const notebook = container.querySelector<HTMLTextAreaElement>("#team-notebook");
     await click("Practice work");
-    expect(container.querySelector('[aria-label="Practice work"]')?.textContent).toContain("No shared work");
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.querySelector('[aria-label="Practice work"]')?.textContent).toContain("No shared work");});
     await click("Back to notebook");
     expect(container.querySelector("#team-notebook")).toBe(notebook);
     expect(notebook!.value).toBe("Keep my private unsaved notes.");
@@ -542,7 +542,7 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.practiceWork).mockResolvedValue({items: [], people: [], next_cursor: null});
     await act(async () => root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={authenticated} />));
     await click("Practice work");
-    expect(workspaceApi.practiceWork).toHaveBeenCalledWith(authenticated, undefined);
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(workspaceApi.practiceWork).toHaveBeenCalledWith(authenticated, undefined);});
     expect(workspaceApi.open).not.toHaveBeenCalled();
   });
 

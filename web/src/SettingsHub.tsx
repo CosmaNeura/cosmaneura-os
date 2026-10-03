@@ -158,6 +158,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       <details className="connection-state-help"><summary>What these states mean</summary><dl>
         <div><dt>Available</dt><dd>The feature is enabled. Open it to check the account and task.</dd></div>
         <div><dt>Connected</dt><dd>The account was confirmed. Check each read or task result separately.</dd></div>
+        <div><dt>Verified</dt><dd>Both email and calendar reads succeeded for the current account in this session. Task results still need their own review.</dd></div>
         <div><dt>Needs setup</dt><dd>Finish sign-in, account setup or permissions before use.</dd></div>
         <div><dt>Needs attention</dt><dd>A check failed or access needs review. The next action explains how to recover.</dd></div>
         <div><dt>Not checked</dt><dd>No current result is confirmed, or a check is still in progress.</dd></div>
@@ -170,15 +171,18 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
             <span className="settings-card-icon" aria-hidden="true">{item.icon}</span>
             <span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{state.reason}</small>
               {state.services&&<span className="connection-service-summary">{state.services.map(service=><small key={service.kind}><b>{service.name}:</b> {service.label}
-                {service.lastSuccessAt&&<span className="connection-operation-time">Last successful read: {new Date(service.lastSuccessAt).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})}</span>}</small>)}</span>}
-              {state.proof&&<small className="connection-proof">{state.proof}</small>}
+                </small>)}</span>}
             </span>
             <span className="connection-card-state"><span role="status" aria-atomic="true" className={`connection-badge connection-badge-${state.tone}`}>{state.tone==='ready'&&<span aria-hidden="true">✓ </span>}{state.label}</span>
               {!state.checkedAt&&current?.checks[item.id]?.last&&<small>Last confirmed: {current.checks[item.id]!.last!.label}{current.checks[item.id]!.last!.checkedAt?` · ${new Date(current.checks[item.id]!.last!.checkedAt!).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`:''}</small>}
-              {state.checkedAt&&<small>{state.checkKind==='availability'?'Availability checked':'Account checked'} {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</small>}
               {!state.action.startsWith('Open ')&&<small className="connection-next-step">Next: {state.action}</small>}
               <span className="connection-card-action">Open {item.id==='core'?'practice connection':item.id==='google'?'Google':item.id==='microsoft'?'Microsoft':item.id==='scheduling'?'Scheduling':item.id==='messaging'?'fax setup':item.id==='payments'?'payments':'portals'} <span aria-hidden="true">›</span></span></span>
-          </button>{item.id==='messaging'&&onOpenMessagingWork&&<div className="connection-task-action"><button className="team-primary" disabled={navigationLocked||messagingWorkBlocked||!canOpenFax} onClick={()=>{if(canOpenFax&&!navigationLocked&&!messagingWorkBlocked)onOpenMessagingWork();}}>{messagingWorkLabel}</button><small>Prepare and review a draft. Delivery is checked for each fax.</small></div>}</div>;})}</div>
+          </button>{(state.proof||state.checkedAt||state.services?.some(service=>service.lastSuccessAt))&&<details className="connection-state-help" aria-label={`${titles[item.id]} check details`}>
+            <summary>Check details</summary>
+            {state.proof&&<p className="connection-proof">{state.proof}</p>}
+            {state.checkedAt&&<p>{state.checkKind==='availability'?'Availability checked':'Account checked'} {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</p>}
+            {state.services?.filter(service=>service.lastSuccessAt).map(service=><p key={service.kind}>{service.name} · Last successful read: {new Date(service.lastSuccessAt!).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})}</p>)}
+          </details>}{item.id==='messaging'&&onOpenMessagingWork&&<div className="connection-task-action"><button className="team-primary" disabled={navigationLocked||messagingWorkBlocked||!canOpenFax} onClick={()=>{if(canOpenFax&&!navigationLocked&&!messagingWorkBlocked)onOpenMessagingWork();}}>{messagingWorkLabel}</button><small>Prepare and review a draft. Delivery is checked for each fax.</small></div>}</div>;})}</div>
         </section>;
       })}
       {!connectionCards.length && <p>No connection setup is available for this account.</p>}
