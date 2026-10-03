@@ -1,7 +1,10 @@
 {
   "package": "pdfjs-dist",
-  "version": "5.6.205",
-  "source": "/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/pdfjs-dist",
+  "version": "6.2.108",
+  "source": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.2.108.tgz",
+  "registry": "https://registry.npmjs.org/pdfjs-dist/6.2.108",
+  "tarball_sha256": "b3e68d5cda70551a90b3f771419d379e20fc788ce056fa32de73608e01df47f4",
+  "integrity": "sha512-YxFb+SQcodN2rnX9Tn3dHYlqfb7NjlzzfONPpJd+AKoKtUjEdevTfbC07d5TcczzOK6261auRkP/M8OBHs9vFQ==",
   "license": "Apache-2.0",
   "files": {
     "LICENSE": {
@@ -685,16 +688,16 @@
       "bytes": 179
     },
     "package.json": {
-      "sha256": "c91f1f1071e5535e5161f2fff925917550f4f0d2463a52ec94be24bd00b55971",
-      "bytes": 778
+      "sha256": "d7918934bf0ef5b18beed1bd2d9b49a04447de445c171305a2de082ccee369ed",
+      "bytes": 710
     },
     "pdf.mjs": {
-      "sha256": "d4b840a3238bf6fbebe3dec7a7665757dad60fe014d657351a3f1f067a3df924",
-      "bytes": 999720
+      "sha256": "9fab0c910bf1484835c5c2aeb68f7eb3dfce7f9eb435a004526c5af86d70890c",
+      "bytes": 512483
     },
     "pdf.worker.mjs": {
-      "sha256": "499da1f7f1c6c24be898b556638d2ffec999b2ad234c796508e3d7c7025c28cb",
-      "bytes": 2358232
+      "sha256": "bc0d1b88ea0b66196b1d36a58ac243c6d92adfe725624e2a9fdd381bdf8ef434",
+      "bytes": 1312452
     },
     "standard_fonts/FoxitDingbats.pfb": {
       "sha256": "845c752392b6c914fb989c75a08b7792b88f542d2499042ef2889f8c814a16ed",
@@ -788,17 +791,28 @@
       "sha256": "e6bee67724a7b5436fe8162638e3708cfc8d52b6342db69a49715e30ff27cfdc",
       "bytes": 104852
     },
+    "wasm/jbig2_nowasm_fallback.js": {
+      "sha256": "04c795a6657a4553a64b781ea3e85256203d913c3b71b72b85fa3ce00622f458",
+      "bytes": 145703
+    },
     "wasm/openjpeg.wasm": {
-      "sha256": "67b8e2b162da472e98cb48d3d32e3e38fff481b9b32ff4818e78bb248af88ab2",
-      "bytes": 250009
+      "sha256": "004a0e62db930ba9ff2a22212f4554d0bb57a0635a8287caf70f98117cee14ba",
+      "bytes": 252032
     },
     "wasm/openjpeg_nowasm_fallback.js": {
-      "sha256": "07c3c3361827308741bc31c561b59e705ebb4d1e8efb84e4d24884e230dbb894",
-      "bytes": 451777
+      "sha256": "0f998419819da4491d8302222aa9e2ff2494685641aa2a6c21c3760c29f3e319",
+      "bytes": 451590
     },
     "wasm/qcms_bg.wasm": {
-      "sha256": "6017eca5939cde1836e88e6d8cd27ae039246f206515ea4487bdfd0e3fb16e26",
-      "bytes": 94519
+      "sha256": "663d86126d5f5fcb1c61490f94353e2a8375660b8c5498ab3ebab5a34b08800e",
+      "bytes": 96589
     }
-  }
+  },
+  "build": "official legacy/build/pdf.min.mjs and pdf.worker.min.mjs, named pdf.mjs/pdf.worker.mjs for existing local transport",
+  "omitted_resources": [
+    "build/pdf.sandbox.mjs",
+    "web/pdf_viewer.mjs",
+    "wasm/quickjs-eval.js",
+    "wasm/quickjs-eval.wasm"
+  ]
 }

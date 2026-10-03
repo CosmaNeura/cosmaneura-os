@@ -13,9 +13,10 @@ type ParsedDocument=Omit<PdfDocument,'getPage'>&{getPage:(page:number)=>Promise<
 type PdfLoading={promise:Promise<ParsedDocument>;destroy:()=>Promise<void>};
 type PdfWorker={destroy:()=>void};
 type PdfModule={version:string;OPS:{paintImageXObject:number;paintImageXObjectRepeat:number;setFont:number};PDFWorker:new(options:{port:Worker})=>PdfWorker;getDocument:(options:Record<string,unknown>)=>PdfLoading};
+export const PRIVATE_PDF_EXECUTION_POLICY=Object.freeze({isEvalSupported:false,enableScripting:false,enableXfa:false,useWasm:false});
 let library:Promise<PdfModule>|undefined;
 function localResources(){
- const base=new URL(`${import.meta.env.BASE_URL??'/'}vendor/pdfjs-5.6.205/`,window.location.href);
+ const base=new URL(`${import.meta.env.BASE_URL??'/'}vendor/pdfjs-6.2.108/`,window.location.href);
  if(base.protocol!==window.location.protocol||base.host!==window.location.host||!['http:','https:','app:','capacitor:'].includes(base.protocol))throw new Error('Private PDF resources are unavailable.');
  return base;
 }
@@ -23,11 +24,11 @@ function localResources(){
 export async function openPrivatePdf(bytes:Uint8Array,document:Document,signal:AbortSignal):Promise<PdfDocument>{
  await requirePdf(document,bytes);signal.throwIfAborted();
  const base=localResources(),moduleUrl=new URL('pdf.mjs',base).href;
- library??=import(/* @vite-ignore */ moduleUrl).then(value=>{if(value.version!=='5.6.205')throw new Error('Private PDF resources do not match.');return value as PdfModule;}).catch(error=>{library=undefined;throw error;});
+ library??=import(/* @vite-ignore */ moduleUrl).then(value=>{if(value.version!=='6.2.108')throw new Error('Private PDF resources do not match.');return value as PdfModule;}).catch(error=>{library=undefined;throw error;});
  const pdf=await library;signal.throwIfAborted();
  // Explicit port avoids PDF.js's blob/CDN wrapper for app:// and capacitor://.
  const port=new Worker(new URL('pdf.worker.mjs',base),{type:'module',name:'cosmas-private-pdf'});let worker:PdfWorker,task:PdfLoading;
- try{worker=new pdf.PDFWorker({port});task=pdf.getDocument({worker,data:new Uint8Array(bytes),isEvalSupported:false,useWasm:false,enableXfa:false,stopAtErrors:true,disableAutoFetch:true,disableStream:true,disableRange:true,useWorkerFetch:false,isImageDecoderSupported:false,isOffscreenCanvasSupported:false,disableFontFace:true,cMapUrl:new URL('cmaps/',base).href,cMapPacked:true,standardFontDataUrl:new URL('standard_fonts/',base).href,wasmUrl:new URL('wasm/',base).href,maxImageSize:16_000_000,canvasMaxAreaInBytes:PDF_REVIEW_MAX_PIXELS*4,verbosity:0});}catch(error){port.terminate();throw error;}
+ try{worker=new pdf.PDFWorker({port});task=pdf.getDocument({worker,data:new Uint8Array(bytes),...PRIVATE_PDF_EXECUTION_POLICY,stopAtErrors:true,disableAutoFetch:true,disableStream:true,disableRange:true,useWorkerFetch:false,isImageDecoderSupported:false,isOffscreenCanvasSupported:false,disableFontFace:true,cMapUrl:new URL('cmaps/',base).href,cMapPacked:true,standardFontDataUrl:new URL('standard_fonts/',base).href,wasmUrl:new URL('wasm/',base).href,maxImageSize:16_000_000,canvasMaxAreaInBytes:PDF_REVIEW_MAX_PIXELS*4,verbosity:0});}catch(error){port.terminate();throw error;}
  let destroyed=false;const destroy=async()=>{if(destroyed)return;destroyed=true;void task.destroy().catch(()=>{});worker.destroy();port.terminate();};
  const abort=()=>{void destroy();};signal.addEventListener('abort',abort,{once:true});
  try{const doc=await task.promise;signal.throwIfAborted();if(!Number.isSafeInteger(doc.numPages)||doc.numPages<1||doc.numPages>PDF_REVIEW_MAX_PAGES){await destroy();throw new Error('This PDF exceeds the private review page limit.');}return {numPages:doc.numPages,getPage:async number=>{const page=await doc.getPage(number);return {getViewport:options=>page.getViewport(options),render:options=>page.render(options),cleanup:()=>page.cleanup(),verifyImages:()=>requireRenderedPdfImages(page,pdf.OPS),readText:signal=>{signal.throwIfAborted();return readPrivatePdfText(page.streamTextContent({includeMarkedContent:false}),signal);}};},destroy};}catch(error){abort();throw error;}finally{signal.removeEventListener('abort',abort);}

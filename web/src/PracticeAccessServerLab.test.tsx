@@ -1,0 +1,42 @@
+import {act} from 'react';
+import {createRoot,type Root} from 'react-dom/client';
+import {afterEach,expect,it,vi} from 'vitest';
+import {PracticeAccessGate} from './PracticeAccessGate';
+import {PracticeAccessPanel} from './PracticeAccessPanel';
+import {practiceAccessApi} from './practice-access-api';
+const environment=(globalThis as typeof globalThis&{process?:{env:Record<string,string|undefined>}}).process?.env;
+const base=environment?.COSMAS_ACCESS_LAB_URL;
+const realFetch=globalThis.fetch.bind(globalThis);
+let roots:Root[]=[];
+afterEach(async()=>{await act(async()=>roots.forEach(root=>root.unmount()));roots=[];document.body.replaceChildren();vi.unstubAllGlobals();vi.unstubAllEnvs();});
+it.skipIf(!base)('joins through signed real UI, owner approves, pauses/restores exact member and reopens without duplicate changes',async()=>{
+  const util='node:util';const {transferableAbortController}=await import(/* @vite-ignore */util) as {transferableAbortController:()=>AbortController};const nativeAbort=transferableAbortController();vi.stubGlobal('AbortController',nativeAbort.constructor);vi.stubGlobal('AbortSignal',nativeAbort.signal.constructor);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base!);vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');window.history.replaceState(null,'','http://localhost:3000/');
+  vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{const url=typeof input==='string'?input:input instanceof URL?input.href:input.url;const response=await realFetch(url,init);return new Response(await response.arrayBuffer(),{status:response.status,headers:response.headers});});
+  const packet=await (await fetch(base+'/lab/identity')).json() as {applicant_token:string;owner_token:string};
+  const applicant={mode:'clerk_jwt' as const,getToken:async()=>packet.applicant_token};
+  const owner={mode:'clerk_jwt' as const,getToken:async()=>packet.owner_token};
+  const a=document.createElement('div'),o=document.createElement('div');document.body.append(a,o);
+  let ar=createRoot(a);const or=createRoot(o);roots.push(ar,or);
+  async function wait(check:()=>void){const end=performance.now()+10000;while(performance.now()<end){let passed=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));try{check();passed=true;}catch{}});if(passed)return;}check();}
+  const button=(host:HTMLElement,label:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===label)!;
+  async function click(host:HTMLElement,label:string){await wait(()=>{expect(button(host,label)).toBeTruthy();expect(button(host,label).disabled).toBe(false);});await act(async()=>button(host,label).click());}
+  const gate=()=>ar.render(<PracticeAccessGate identity={applicant} accountControls={<button>Account</button>}>{context=><p>Private workspace: {context.role}</p>}</PracticeAccessGate>);
+  await act(gate);await wait(()=>expect(button(a,'Request practice access'),a.textContent??'').toBeTruthy());expect(a.textContent).not.toContain('Private workspace');
+  await act(async()=>{const input=a.querySelector('input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Invented nurse applicant');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click(a,'Request practice access');await wait(()=>expect(a.textContent).toContain('Waiting for your practice owner'));
+  const code=a.querySelector('.practice-access-code')!.textContent;expect(code).toBeTruthy();
+  await expect(practiceAccessApi.pending(applicant)).rejects.toMatchObject({status:403});
+  const losses=vi.fn();await act(async()=>or.render(<PracticeAccessPanel identity={owner} access={{role:'owner',onAccessLost:losses}} onBusyChange={()=>{}}/>));
+  await click(o,'Review Invented nurse applicant');expect(o.querySelector('.practice-access-review .practice-access-code')?.textContent).toBe(code);
+  expect(button(o,'Approve member').disabled).toBe(true);await act(async()=>o.querySelector<HTMLInputElement>('.practice-access-review input')!.click());await click(o,'Approve member');
+  await wait(()=>expect(o.textContent).toContain('access approved'));await click(a,'Check access');await wait(()=>expect(a.textContent).toContain('Private workspace: member'));
+  await click(o,'Manage connected members');await click(o,'Review pause for Invented nurse applicant');expect(button(o,'Pause CosmasOS access').disabled).toBe(true);
+  await act(async()=>o.querySelector<HTMLInputElement>('[aria-label="Review member access"] input')!.click());await click(o,'Pause CosmasOS access');await wait(()=>expect(o.textContent).toContain('Access paused'));
+  await act(async()=>ar.unmount());roots=roots.filter(r=>r!==ar);ar=createRoot(a);roots.push(ar);await act(gate);
+  await wait(()=>expect(a.textContent).toContain('Practice access is unavailable'));expect(a.textContent).not.toContain('Private workspace');expect(a.textContent).not.toContain('Invented nurse applicant');
+  await click(o,'Review restore for Invented nurse applicant');await act(async()=>o.querySelector<HTMLInputElement>('[aria-label="Review member access"] input')!.click());await click(o,'Restore CosmasOS access');await wait(()=>expect(o.textContent).toContain('Access active'));
+  await click(a,'Check access');await wait(()=>expect(a.textContent).toContain('Private workspace: member'));expect(losses).not.toHaveBeenCalled();
+  await act(async()=>ar.unmount());roots=roots.filter(r=>r!==ar);ar=createRoot(a);roots.push(ar);await act(gate);await wait(()=>expect(a.textContent).toContain('Private workspace: member'));
+  const fs='node:fs/promises';const {writeFile}=await import(/* @vite-ignore */fs) as {writeFile:(path:string,text:string)=>Promise<void>};
+  await writeFile(environment!.COSMAS_ACCESS_LAB_REPORT!,JSON.stringify({synthetic_only:true,completed:true,actual_signed_api:true,actual_DOM_controls:true,real_users_tested:false,steps:['request is not grant','matching owner review','member connected','exact reviewed pause','paused member denied on reopen','exact reviewed restore','restored member reopen']},null,2)+'\n');
+},45000);
