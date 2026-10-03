@@ -28,6 +28,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [inboundBusy,setInboundBusy]=useState(false);
+  const [inboundOwner,setInboundOwner]=useState<AuthenticatedWorkspaceIdentity|null>(null);
   const leaveLocked=navigationLocked||inboundBusy;
   const [visited, setVisited] = useState<Editor[]>(!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
@@ -114,6 +115,10 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     if(open&&screen in CONNECTION_GUIDES&&(!connectionIdentity||catalog?.[screen as ConnectionId]===true||catalogError&&!current?.denied))
       setVisited(previous=>previous.includes(screen as Editor)?previous:[...previous,screen as Editor]);
   },[open,screen,connectionIdentity,catalog,catalogError,current?.denied]);
+  useEffect(()=>{
+    if(open&&visited.includes('messaging')&&connectionIdentity&&catalog?.messaging===true&&!current?.denied)
+      setInboundOwner(connectionIdentity);
+  },[open,visited,connectionIdentity,catalog,current?.denied]);
   function summary(id:ConnectionId):ConnectionSummary{
     if(current?.busy)return {label:'Not checked',reason:current.checks[id]?.last?'Checking again. Previous results are below.':'Checking your account connection.',action:'Wait for this check or open the connection',tone:'neutral'};
     if(catalogError)return {label:'Needs attention',reason:'Current status is unknown. The latest check failed; try again or open the connection.',action:'Check connection again',tone:'attention'};
@@ -200,7 +205,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       loading={checking} unavailable={!!setupUnavailable} locked={navigationLocked}
       onRefresh={()=>setRefreshCatalog(value=>value+1)} onSetup={()=>{messagingEditor.current?.focus();messagingEditor.current?.scrollIntoView?.({block:'start'});}}
       onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/>}
-    {visited.includes('messaging')&&connectionIdentity&&<div hidden={screen!=='messaging'}><EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/></div>}
+    {inboundOwner===connectionIdentity&&connectionIdentity&&<div data-settings-inbound="messaging" hidden={screen!=='messaging'||!!setupUnavailable||availabilityPending||!!current?.denied}><EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/></div>}
     {selectedGuide&&connectionIdentity&&(availabilityPending||catalogError)&&<section className="connection-setup-guide" aria-label="Connection availability">
       <p role="status">{availabilityPending?'Checking whether this service is enabled…':current?.denied?'Sign in to CosmasOS again to check this connection.':'Service availability could not be confirmed. Check again, or review the connection status below to finish sign-in.'}</p>
       {catalogError&&<button disabled={navigationLocked||!!current?.busy} onClick={()=>setRefreshCatalog(value=>value+1)}>Check availability again</button>}
