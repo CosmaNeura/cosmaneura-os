@@ -1,4 +1,8 @@
-FROM python:3.13-slim@sha256:cc9dffa47c8294ba9bb795a8dfaeb7b76f2b30acade2c52a461a2999d127eb00
+FROM python:3.13-slim@sha256:bb2988715db2cf7ace7b53f38f3cffbef7c7046a656bee66245eb0ed386e2e81
+# Apply the verified Debian security fix omitted by this pinned base.
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends libpcre2-8-0=10.46-1~deb13u3 \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -21,6 +25,9 @@ COPY fixtures ./fixtures
 COPY docs/third-party ./docs/third-party
 RUN groupadd --gid 10001 cosmas \
     && useradd --uid 10001 --gid cosmas --no-create-home --shell /usr/sbin/nologin cosmas \
+    && test "$(readlink -f /usr/bin/mount)" = /usr/bin/mount \
+    && test "$(readlink -f /usr/bin/umount)" = /usr/bin/umount \
+    && chmod a-s /usr/bin/mount /usr/bin/umount \
     && mkdir -p /data/blobs \
     && chown -R cosmas:cosmas /data/blobs
 USER 10001:10001

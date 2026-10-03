@@ -25,3 +25,11 @@ test('missing features, foreign clients and conflicting headers cannot generate 
     assert.throws(()=>renderBetaNginx(text,manifest));
   }
 });
+
+test('generated hosted policy serves PDF ES modules as JavaScript without relaxing nosniff',()=>{
+  for(const candidate of [manifest,resolveBetaFeatureProfile({...env,VITE_WORKSPACE_CAPTURE_MODE:'synthetic'}).manifest]) {
+    const generated=renderBetaNginx(template,candidate);
+    assert.match(generated,/location ~ \\.mjs\$ \{\s*types \{ application\/javascript mjs; \}\s*try_files \$uri =404;/);
+    assert.match(generated,/add_header X-Content-Type-Options "nosniff" always;/);
+  }
+});
