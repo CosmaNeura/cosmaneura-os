@@ -3,6 +3,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_EFAX_INBOUND_ENABLED','true');});
 import {SettingsHub} from './SettingsHub';
+import {WorkspaceApiError} from './workspace-api';
 import {AccountRecoveryContext,type AccountRecoveryAccess} from './account-recovery';
 import {DraftJournal} from './draft-journal';
 import {openDraftStore,privateDraftScope} from './draft-store';
@@ -29,4 +30,28 @@ it('reaches the actual private inbound panel below fax readiness and keeps its u
  await click('Connections');await click('Messaging & fax');await wait(()=>expect(visible('Check received-fax access')).toBeDefined());expect(host.querySelector('[aria-label="Received eFax"]')).toBeTruthy();expect(efaxInboundApi.status).not.toHaveBeenCalled();await click('Check received-fax access');expect(efaxInboundApi.status).toHaveBeenCalledOnce();
  await act(async()=>{const select=host.querySelector<HTMLSelectElement>('.efax-inbound-panel select')!;select.value=efaxStatus.installations[0].installation_id;select.dispatchEvent(new Event('change',{bubbles:true}));host.querySelector<HTMLInputElement>('.efax-inbound-panel input')!.click();});
  expect(visible('Done')!.disabled).toBe(true);await act(async()=>visible('Done')!.click());expect(close).not.toHaveBeenCalled();expect(efaxInboundApi.command).not.toHaveBeenCalled();
+});
+
+it.each(['disabled','denied','unknown'] as const)('does not open received-fax storage on initially %s availability',async mode=>{
+ if(mode==='disabled')vi.mocked(readConnectionCatalog).mockResolvedValue({core:false,scheduling:false,google:false,microsoft:false,messaging:false,payments:false,portals:false});
+ else vi.mocked(readConnectionCatalog).mockRejectedValue(mode==='denied'?new WorkspaceApiError(403):new Error('offline'));
+ await act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><SettingsHub open initialScreen="connections" team={<p>Team</p>} messaging={<p>Provider accounts</p>} teamSummary="5 coworkers" teamDirty={false} connectionIdentity={identity} onClose={()=>{}}/></AccountRecoveryContext.Provider>));
+ await click('Messaging & fax');
+ expect(host.querySelector('[data-settings-inbound]')).toBeNull();expect(accountIdentityApi.read).not.toHaveBeenCalled();expect(efaxInboundApi.status).not.toHaveBeenCalled();
+});
+it('hides a previously mounted received-fax panel during pending, disabled and denied checks without losing its review',async()=>{
+ await act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><SettingsHub open initialScreen="connections" team={<p>Team</p>} messaging={<p>Provider accounts</p>} teamSummary="5 coworkers" teamDirty={false} connectionIdentity={identity} onClose={()=>{}}/></AccountRecoveryContext.Provider>));
+ await click('Messaging & fax');await click('Check received-fax access');
+ const panel=host.querySelector('[data-settings-inbound]')!;const select=panel.querySelector<HTMLSelectElement>('select')!;
+ await act(async()=>{select.value=efaxStatus.installations[0].installation_id;select.dispatchEvent(new Event('change',{bubbles:true}));});
+ const selection=select.value;let finish!:(value:Awaited<ReturnType<typeof readConnectionCatalog>>)=>void;
+ vi.mocked(readConnectionCatalog).mockReturnValueOnce(new Promise(resolve=>{finish=resolve}));
+ await click('Check fax setup');expect(panel.hasAttribute('hidden')).toBe(false);
+ // The previous enabled catalog remains usable while its refresh is pending.
+ await act(async()=>finish({core:false,scheduling:false,google:false,microsoft:false,messaging:false,payments:false,portals:false}));
+ expect(panel.hasAttribute('hidden')).toBe(true);expect(host.querySelector('[data-settings-inbound]')).toBe(panel);expect(select.value).toBe(selection);
+ vi.mocked(readConnectionCatalog).mockRejectedValueOnce(new WorkspaceApiError(403));await click('Check fax setup');
+ expect(panel.hasAttribute('hidden')).toBe(true);expect(select.value).toBe(selection);
+ vi.mocked(readConnectionCatalog).mockResolvedValue({core:false,scheduling:false,google:false,microsoft:false,messaging:true,payments:false,portals:false});await click('Check fax setup');
+ expect(panel.hasAttribute('hidden')).toBe(false);expect(host.querySelector('[data-settings-inbound]')).toBe(panel);expect(panel.querySelector('select')).toBe(select);expect(select.value).toBe(selection);expect(efaxInboundApi.status).toHaveBeenCalledOnce();expect(efaxInboundApi.command).not.toHaveBeenCalled();
 });

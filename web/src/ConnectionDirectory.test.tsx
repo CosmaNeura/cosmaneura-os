@@ -192,3 +192,43 @@ it('keeps next steps and independent service states visible while disclosing che
  await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
  expect(details.open).toBe(true);expect(readConnectionSummary).toHaveBeenCalledOnce();
 });
+
+it.each(['google','microsoft','scheduling','core'] as const)('checks disabled %s availability on direct entry before mounting its editor',async initialScreen=>{
+ const mounted=vi.fn();let resolve!:(value:typeof catalog)=>void;
+ vi.mocked(readConnectionCatalog).mockReturnValue(new Promise(done=>{resolve=done}));
+ function Editor(){useEffect(()=>{mounted()},[]);return <p>Direct account editor</p>}
+ await act(async()=>root.render(<SettingsHub open initialScreen={initialScreen} team={<p>Team</p>} {...{[initialScreen]:<Editor/>}} teamSummary="Team" teamDirty={false} onClose={()=>{}} connectionIdentity={identity}/>));
+ expect(host.textContent).toContain('Checking whether this service is enabled');expect(mounted).not.toHaveBeenCalled();
+ await act(async()=>resolve({...catalog,[initialScreen]:false}));
+ expect(host.textContent).toContain('Needs setup');expect(mounted).not.toHaveBeenCalled();
+});
+it('keeps direct OAuth completion available after a failed availability check and retries the current service',async()=>{
+ const mounted=vi.fn();function Editor(){useEffect(()=>{mounted()},[]);return <button>Finish account sign-in</button>}
+ vi.mocked(readConnectionCatalog).mockRejectedValueOnce(new Error('offline')).mockResolvedValue({...catalog,google:false});
+ await act(async()=>root.render(<SettingsHub open initialScreen="google" team={<p>Team</p>} google={<Editor/>} teamSummary="Team" teamDirty={false} onClose={()=>{}} connectionIdentity={identity}/>));
+ expect(host.textContent).toContain('Service availability could not be confirmed');expect(mounted).toHaveBeenCalledOnce();
+ expect(host.querySelector('[data-settings-screen="google"]')?.hasAttribute('hidden')).toBe(false);
+ await click('Check availability again');expect(host.textContent).toContain('Needs setup');
+ expect(host.querySelector('[data-settings-screen="google"]')?.hasAttribute('hidden')).toBe(true);expect(mounted).toHaveBeenCalledOnce();
+});
+it('ignores a late direct availability response after the account changes',async()=>{
+ let resolve!:(value:typeof catalog)=>void;vi.mocked(readConnectionCatalog).mockReturnValueOnce(new Promise(done=>{resolve=done})).mockResolvedValue({...catalog,google:false});
+ const mounted=vi.fn();function Editor(){useEffect(()=>{mounted()},[]);return <p>Account editor</p>}
+ const render=(owner:AuthenticatedWorkspaceIdentity)=>act(async()=>root.render(<SettingsHub open initialScreen="google" team={<p>Team</p>} google={<Editor/>} teamSummary="Team" teamDirty={false} onClose={()=>{}} connectionIdentity={owner}/>));
+ await render(identity);await render({...identity});await act(async()=>resolve({...catalog,google:true}));
+ expect(host.textContent).toContain('Needs setup');expect(mounted).not.toHaveBeenCalled();
+});
+it('does not mount the direct editor after an authentication-denied availability response',async()=>{
+ const {WorkspaceApiError}=await import('./workspace-api');const denied=vi.fn(),mounted=vi.fn();function Editor(){useEffect(()=>{mounted()},[]);return <p>Account editor</p>}
+ vi.mocked(readConnectionCatalog).mockRejectedValue(new WorkspaceApiError(401));
+ await act(async()=>root.render(<SettingsHub open initialScreen="google" team={<p>Team</p>} google={<Editor/>} teamSummary="Team" teamDirty={false} onClose={()=>{}} connectionIdentity={identity} onConnectionAccessLost={denied}/>));
+ expect(denied).toHaveBeenCalledOnce();expect(mounted).not.toHaveBeenCalled();
+});
+it('rechecks direct availability on reopen and retains the panel when the service becomes disabled',async()=>{
+ const mounted=vi.fn(),unmounted=vi.fn();function Editor(){useEffect(()=>{mounted();return()=>{unmounted()}},[]);return <button>Complete sign-in</button>}
+ vi.mocked(readConnectionCatalog).mockResolvedValueOnce({...catalog,google:true}).mockResolvedValueOnce({...catalog,google:false});
+ const render=(open:boolean)=>act(async()=>root.render(<SettingsHub open={open} initialScreen="google" team={<p>Team</p>} google={<Editor/>} teamSummary="Team" teamDirty={false} onClose={()=>{}} connectionIdentity={identity}/>));
+ await render(true);expect(mounted).toHaveBeenCalledOnce();expect(readConnectionSummary).toHaveBeenCalledWith(identity,'google',expect.any(AbortSignal));
+ await render(false);await render(true);expect(readConnectionCatalog).toHaveBeenCalledTimes(2);expect(host.textContent).toContain('Needs setup');
+ expect(host.querySelector('[data-settings-screen="google"]')?.hasAttribute('hidden')).toBe(true);expect(unmounted).not.toHaveBeenCalled();
+});
