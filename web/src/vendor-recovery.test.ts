@@ -1,10 +1,28 @@
 import {describe,it,expect,vi} from 'vitest';
 import {actual,artifact,shared,actualContent,actualProposal,actualAcceptance} from './vendor-test-fixture';
 import {validateVendor,vendorCanonical} from './vendor-contract';
-import {emptyVendorRecovery,validateVendorRecovery,recordVendorCommand,recordVendorReceipt} from './vendor-recovery';
+import {emptyVendorRecovery,validateVendorRecovery,recordVendorCommand,recordVendorReceipt,persistVendorRecovery} from './vendor-recovery';
 import {prepareVendorOperation,validateVendorOperation,verifyOperationReceipt,vendorOperationPath} from './vendor-operation';
 
 describe('exact metadata-only delivery recovery',()=>{
+  it('persists and restores an exact private eFax draft without adding delivery authority',async()=>{
+    const source=await actualProposal(),metadata=validateVendor('ArtifactResponse',artifact.artifact_content_receipt).artifact!;
+    const record=emptyVendorRecovery(source.scope);record.artifact=metadata;record.draft={...record.draft,action:'efax_fax',connection_id:source.request.connection.id,correspondence_id:source.request.correspondence!.id,source:source.request.source!,document:metadata.document,due_date:source.request.due_date,expected_outcome:'Confirm invented referral delivery after explicit approval.'};
+    let saved:unknown=null;const access={load:async()=>structuredClone(saved),persist:vi.fn(async value=>{saved=structuredClone(value);}),authorize:vi.fn().mockResolvedValue(undefined)};
+    await persistVendorRecovery(access,record);const reopened=await validateVendorRecovery(await access.load(),source.scope);
+    expect(reopened).toEqual(record);expect(reopened.pending).toBeNull();expect(reopened.receipt).toBeNull();expect(access.authorize).toHaveBeenCalledOnce();
+    await expect(validateVendorRecovery({...record,draft:{...record.draft,action:'invented_fax'}},source.scope)).rejects.toThrow();
+  });
+  it('retains the exact pending eFax command through recovery and refuses replacement while unconfirmed',async()=>{
+    const source=await actualProposal(),metadata=validateVendor('ArtifactResponse',artifact.artifact_content_receipt).artifact!;
+    const {message:_,...request}=source.request;const operation=await prepareVendorOperation(source.scope,'propose',null,{...request,action:'efax_fax',document:metadata.document});
+    const record=emptyVendorRecovery(source.scope);record.artifact=metadata;record.draft={...record.draft,action:'efax_fax',document:metadata.document};
+    let saved:unknown=null;const access={load:async()=>structuredClone(saved),persist:vi.fn(async value=>{saved=structuredClone(value);}),authorize:vi.fn().mockResolvedValue(undefined)};
+    await recordVendorCommand(access,record,operation);const reopened=await validateVendorRecovery(await access.load(),source.scope);
+    expect(reopened.pending).toEqual(operation);expect(reopened.pending!.request.idempotency_key).toBe(operation.request.idempotency_key);expect(reopened.pending!.request_sha256).toBe(operation.request_sha256);expect(reopened.receipt).toBeNull();
+    const replacement=await prepareVendorOperation(source.scope,'propose',null,{...operation.request,idempotency_key:'different-efax-command'});
+    await expect(recordVendorCommand(access,reopened,replacement)).rejects.toThrow();expect(access.persist).toHaveBeenCalledOnce();
+  });
   it('crosses actual proposal, content, acceptance and immutable replay HTTP receipts',async()=>{
     const proposal=await actualProposal();expect(proposal.request_sha256).toBe(actual.proposal_receipt.request_sha256);await verifyOperationReceipt(proposal,actual.proposal_receipt);
     const content=await actualContent();expect(content.request_sha256).toBe(artifact.artifact_content_receipt.request_sha256);await verifyOperationReceipt(content,artifact.artifact_replay_receipt);
