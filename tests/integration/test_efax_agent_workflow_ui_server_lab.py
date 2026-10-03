@@ -37,7 +37,6 @@ from cosmas_os.models import (
     AuditEvent,
     EncounterWorkspace,
     ModelWorkAdmission,
-    Principal,
     WorkspaceHandoffAttempt,
 )
 from cosmas_os.ports.bot_capabilities import BotReply, ModelCallFailure
@@ -90,7 +89,7 @@ def test_six_signed_fax_chief_human_revision_acceptance_graphs(long_fax, monkeyp
             if row.kind == "private_handoff":
                 assert row.request_body["task_brief"]["version"] == 2
                 assert row.request_body["task_brief"]["source_versions"] == handoff_briefs.source_versions(context)
-        bodies, receipts = [], []
+        bodies, receipts, provider_boundaries = [], [], []
         tool_sessions = []
 
         class TrackedToolSession(Session):
@@ -114,20 +113,18 @@ def test_six_signed_fax_chief_human_revision_acceptance_graphs(long_fax, monkeyp
             body = json.loads(request.content)
             assert body["model"] == "gpt-4.1" and body["store"] is False
             bodies.append(body)
-            assert all(s.boundary_closed and not s.in_transaction() for s in tool_sessions)
-            if len(bodies) == 2 and holder.barrier is not None:
-                # All three tool transactions have returned before testing
-                # the second HTTP round's lock boundary. Otherwise a peer's
-                # legitimate concurrent tool read can confuse this probe.
-                holder.barrier.wait(timeout=15)
-            # Provider I/O occurs outside the owner/admission transaction.
-            # Serialize only this diagnostic probe so three model requests
-            # do not falsely report a lock held by another probe itself.
-            with lock, Session(f.case.engine) as s:
-                assert s.scalar(select(Principal).where(Principal.id == f.owner).with_for_update(nowait=True))
+            # Check this dispatch's sessions, rather than global owner-lock
+            # availability: mounted UI refreshes legitimately read under that
+            # lock while these independent model HTTP calls are in flight.
+            assert not s.in_transaction()  # admission inspection ended above
+            assert len(tool_sessions) == (0 if len(bodies) == 1 else 2)
+            assert all(session.boundary_closed and not session.in_transaction()
+                and not session.in_nested_transaction() for session in tool_sessions)
+            provider_boundaries.append({"round": len(bodies), "tool_sessions": len(tool_sessions),
+                "own_transactions_closed": True})
             if holder.barrier is not None:
-                # A peer must not begin tool I/O or result settlement until
-                # all three lock probes have left their HTTP boundary.
+                # Keep the three specialist HTTP rounds overlapping without
+                # allowing one peer to settle before the others reach HTTP.
                 holder.barrier.wait(timeout=15)
             if len(bodies) == 1:
                 return httpx.Response(200, json=full.product.response(calls=[{
@@ -172,10 +169,15 @@ def test_six_signed_fax_chief_human_revision_acceptance_graphs(long_fax, monkeyp
         result = original_dispatch(claim, session_factory=tool_session, transport=httpx.MockTransport(provider))
         assert isinstance(result, BotReply) and result.input_tokens == 200 and result.output_tokens == 40
         assert len(bodies) == 2 and len(receipts) == 2
+        assert provider_boundaries == [
+            {"round": 1, "tool_sessions": 0, "own_transactions_closed": True},
+            {"round": 2, "tool_sessions": 2, "own_transactions_closed": True},
+        ]
         with lock:
             dispatches.append({"case_id": episode.id, "admission_id": claim.admission_id,
                 "role": context.role, "input_tokens": result.input_tokens, "output_tokens": result.output_tokens,
                 "provider_rounds": len(bodies), "tool_reads": len(receipts),
+                "provider_boundaries": provider_boundaries,
                 "tool_sessions_closed_before_http": all(s.boundary_closed for s in tool_sessions)})
         return result
 
