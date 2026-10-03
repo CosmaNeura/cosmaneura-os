@@ -11,11 +11,11 @@ const ERRORS=new Set(["model_contract_required","model_contract_unsupported","te
   "bot_unavailable","model_unavailable","workspace_not_found","workspace_forbidden","invalid_model_work_request","invalid_model_request","model_observation_unavailable"]);
 type Receipt=ModelRequestObservation|HandoffRetryObservation;
 
-/** Credentials, HTTP stream and asynchronous receipt checks share this deadline. */
-async function bounded<T>(identity:WorkspaceIdentity,path:string,body:unknown|undefined,inputLimit:number,outputLimit:number,validate:(value:unknown,status:number)=>Promise<T>,signal?:AbortSignal,timeoutMs=30000):Promise<T> {
-  const controller=new AbortController(),abort=()=>controller.abort(),deadline=Date.now()+timeoutMs;
+/** Credentials are bounded; model submissions get a separate server-work response budget. */
+async function bounded<T>(identity:WorkspaceIdentity,path:string,body:unknown|undefined,inputLimit:number,outputLimit:number,validate:(value:unknown,status:number)=>Promise<T>,signal?:AbortSignal,responseTimeoutMs=30000):Promise<T> {
+  const controller=new AbortController(),abort=()=>controller.abort();let deadline=Date.now()+30000;
   const check=()=>{if(Date.now()>=deadline)controller.abort();controller.signal.throwIfAborted();};
-  const timer=setTimeout(abort,timeoutMs);signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
+  let timer=setTimeout(abort,30000);signal?.addEventListener("abort",abort,{once:true});if(signal?.aborted)abort();
   let reader:ReadableStreamDefaultReader<Uint8Array>|undefined,onAbort:(()=>void)|undefined;
   const cancel=(stream:{cancel:()=>Promise<unknown>}|undefined|null)=>{try{void stream?.cancel().catch(()=>{});}catch{/* Cancellation cannot delay or replace the outcome. */}};
   const stopRead=()=>cancel(reader);controller.signal.addEventListener("abort",stopRead,{once:true});
@@ -30,7 +30,10 @@ async function bounded<T>(identity:WorkspaceIdentity,path:string,body:unknown|un
     let headers:Headers;
     if("mode" in identity){headers=await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);}));assertCurrentDesktopSession(identity);}
     else headers=new Headers({"Content-Type":"application/json","X-Box-Id":identity.boxId,"X-Actor-Principal-Id":identity.actorId});
-    check();headers.set("X-Cosmas-Model-Contract","1");
+    check();
+    // Credentials stay bounded to 30s; model responses cover the server tool budget.
+    if(responseTimeoutMs>30000){clearTimeout(timer);deadline=Date.now()+responseTimeoutMs;timer=setTimeout(abort,responseTimeoutMs);}
+    headers.set("X-Cosmas-Model-Contract","1");
     const response=await wait(workspaceFetch(identity,base+path,{method:encoded===undefined?"GET":"POST",body:encoded,headers,signal:controller.signal,
       cache:"no-store",credentials:"omit",redirect:"error",referrerPolicy:"no-referrer"}));
     if("mode" in identity)assertCurrentDesktopSession(identity);check();
@@ -65,7 +68,7 @@ async function command(identity:WorkspaceIdentity,id:string,operation:ModelOpera
       if(!validModelObservation(value)||resolve&&status!==200||!resolve&&(status===200?value.outcome!=="saved":value.outcome==="saved"||value.outcome==="not_found"))throw new WorkspaceApiError(503);
     }else if(!validRetryObservation(value)||status!==200||!resolve&&value.outcome!=="recorded")throw new WorkspaceApiError(503);
     return value as Receipt;
-  },signal,!resolve&&operation.type==="ask"&&operation.body.session_prep_analysis?90000:30000);
+  },signal,!resolve&&operation.type==="ask"?(operation.body.session_prep_analysis?90000:75000):30000);
 }
 export const modelWorkApi={
   submit:(identity:WorkspaceIdentity,id:string,operation:ModelOperation,signal?:AbortSignal)=>command(identity,id,operation,false,signal),

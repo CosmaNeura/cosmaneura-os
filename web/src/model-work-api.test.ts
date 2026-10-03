@@ -66,7 +66,7 @@ it('bounds stalled credentials and prevents dispatch after their late resolution
 it('keeps hash validation within the same deadline and abandons nonsettling cancellation',async()=>{
   const value=await modelReceipt();vi.useFakeTimers();vi.stubGlobal('crypto',{subtle:{digest:()=>new Promise(()=>{})}});
   vi.stubGlobal('fetch',vi.fn().mockResolvedValue(json(value)));
-  const check=expect(modelWorkApi.submit(access,id,op)).rejects.toMatchObject({status:503});await vi.advanceTimersByTimeAsync(30000);await check;
+  const check=expect(modelWorkApi.submit(access,id,op)).rejects.toMatchObject({status:503});await vi.advanceTimersByTimeAsync(75000);await check;
   const body={getReader:()=>({read:()=>new Promise(()=>{}),cancel:()=>new Promise(()=>{}),releaseLock:()=>{}})};
   vi.stubGlobal('fetch',vi.fn().mockResolvedValue({status:200,ok:true,headers:new Headers({'Content-Type':'application/json','Cache-Control':'no-store'}),body}));
   const stalled=expect(modelWorkApi.resolve(access,id,op)).rejects.toMatchObject({status:503});await vi.advanceTimersByTimeAsync(30000);await stalled;
@@ -102,4 +102,19 @@ it('retains a selected brief through the longer submit window and keeps resolve 
   await vi.advanceTimersByTimeAsync(30000);await resolved;expect(submitEnded).toBe(false);
   await vi.advanceTimersByTimeAsync(60000);await submitted;
   expect(fetcher).toHaveBeenCalledTimes(2);expect(fetcher.mock.calls.every(c=>c[1].body===JSON.stringify(selected.body))).toBe(true);
+});
+
+it('accepts a valid operational reply after 40s without dispatching another request',async()=>{
+ const receipt=await modelReceipt();vi.useFakeTimers();let release!:(value:Response)=>void;
+ const fetcher=vi.fn().mockImplementation(()=>new Promise<Response>(resolve=>{release=resolve;}));vi.stubGlobal('fetch',fetcher);
+ const pending=modelWorkApi.submit(access,id,op);await vi.advanceTimersByTimeAsync(40000);
+ expect((fetcher.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(false);
+ release(json(receipt));await expect(pending).resolves.toMatchObject({outcome:'saved'});expect(fetcher).toHaveBeenCalledOnce();
+});
+it('bounds a stalled operational reply and rejects late completion',async()=>{
+ const receipt=await modelReceipt();vi.useFakeTimers();let release!:(value:Response)=>void;
+ const fetcher=vi.fn().mockImplementation(()=>new Promise<Response>(resolve=>{release=resolve;}));vi.stubGlobal('fetch',fetcher);
+ const pending=modelWorkApi.submit(access,id,op),check=expect(pending).rejects.toMatchObject({status:503});
+ await vi.advanceTimersByTimeAsync(75000);await check;expect((fetcher.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(true);
+ release(json(receipt));await vi.advanceTimersByTimeAsync(1);expect(fetcher).toHaveBeenCalledOnce();
 });
