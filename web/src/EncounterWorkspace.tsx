@@ -1082,6 +1082,16 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const turns = workspace?.entries.filter(e => ["conversation", "handoff_result"].includes(e.kind)
     && (e.model_request?e.model_request.bot.address===selected:e.reply&&(e.reply.agent_id ? e.reply.agent_id === template?.agent_id
       : !bot?.instance_id && e.reply.role === bot?.role))) ?? [];
+  function savedDraftReviewLabel(entry:WorkspaceEntry):string {
+    const matches=workspace?.handoffs?.filter(h=>h.result_entry_id===entry.id)??[];
+    if(matches.length!==1)return "Unreviewed draft";
+    const handoff=matches[0],review=handoff.review;
+    if(handoff.review_status==='stale')return "Review needs updating";
+    if(handoff.status!=='completed'||handoff.review_status!=='current'||!review||
+      review.attempt_id!==handoff.attempt_id||review.result_entry_id!==entry.id||
+      review.result_sha256!==handoff.result_sha256)return "Unreviewed draft";
+    return review.decision==='accepted'?"Draft accepted":"Changes requested";
+  }
   const localModelPending=pending?.type==='ask'||pending?.type==='retry'?pending:null;
   const localQuestionRepresented=pending?.type==='ask'&&workspace?.entries.some(entry=>entry.model_request?.request.kind==='conversation'&&
     entry.model_request.request.idempotency_key===pending.body.idempotency_key&&entry.model_request.request_sha256===modelHashes[pending.body.idempotency_key]);
@@ -1464,7 +1474,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               {bot?.role!=='chief'&&<button disabled={locked || !team?.revision || !bot?.enabled} onClick={() => ask(template?.prompt)}>{template?.prompt ?? "Review this encounter"}<span aria-hidden="true"> ↗</span></button>}</div>}
             {turns.map(entry => <div className="team-turn" key={entry.id} id={`turn-${entry.id}`} tabIndex={-1}><article className="team-human-message"><small>{entry.kind === "handoff_result" ? "Brief from Chief" : "You"}</small><p>{entry.content}</p></article>
               {entry.reply && <article className="team-bot-message"><header><BotAvatar role={entry.reply.role} />
-                <strong>{entry.reply.agent_name}</strong><span className="team-pill">{entry.reply.backend === "azure_gpt41_work_status_v1" ? "Saved work status" : entry.reply.backend === "azure_gpt41_unavailable" ? "GPT-4.1 unavailable" : entry.reply.backend.startsWith("azure_gpt41") ? "GPT-4.1" : "Local review"}</span>{(entry.kind === "handoff_result" || entry.model_request?.request.kind==='conversation'&&(entry.model_request.request.inbox_analysis||entry.model_request.request.membership_analysis)) && <span className="team-pill pending">Unreviewed draft</span>}</header>
+                <strong>{entry.reply.agent_name}</strong><span className="team-pill">{entry.reply.backend === "azure_gpt41_work_status_v1" ? "Saved work status" : entry.reply.backend === "azure_gpt41_unavailable" ? "GPT-4.1 unavailable" : entry.reply.backend.startsWith("azure_gpt41") ? "GPT-4.1" : "Local review"}</span>{(entry.kind === "handoff_result" || entry.model_request?.request.kind==='conversation'&&(entry.model_request.request.inbox_analysis||entry.model_request.request.membership_analysis)) && <span className="team-pill pending">{entry.kind === "handoff_result" ? savedDraftReviewLabel(entry) : "Unreviewed draft"}</span>}</header>
                 <p>{entry.reply.content}</p><div className="team-citations">{entry.reply.citations.map((citation, index) => ["membership_work","payment_work"].includes(citation.kind)?<button key={citation.entry_id} onClick={()=>{setPanel("Work");setMobilePanel("Work");}}>[{index+1}] {citation.label} · r{citation.revision}</button>:["inbox_message","inbox_triage","session_prep"].includes(citation.kind)?<span key={citation.entry_id}>[{index+1}] {citation.label} · r{citation.revision}</span>:<button key={citation.entry_id}
                   onClick={() => { setPanel("Sources"); setMobilePanel("Sources"); setSelectedSource(citation.entry_id); }}>[{index + 1}] {citation.label} <span>r{citation.revision}</span></button>)}</div>
                 <small className="team-fine">Context through revision {entry.reply.context_revision}{latestSourceRevision > entry.reply.context_revision ? " · Newer sources available — ask again to review them" : ""}</small>
