@@ -26,7 +26,7 @@ it("opens private briefs before selecting or writing any encounter",async()=>{
   try {
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={{mode:"clerk_jwt",getToken:async()=>"invented.token.value"}}/>));
     await act(async()=>[...container.querySelectorAll("button")].find(b=>b.textContent==="Practice work")!.click());
-    expect(container.textContent).toContain("Private work briefs");expect(container.textContent).toContain("Work observed on 2026-09-21");
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.textContent).toContain("Private work briefs");});expect(container.textContent).toContain("Work observed on 2026-09-21");
     expect(container.querySelector('[aria-label="Configure Provider Team"]')).not.toBeNull();
     expect(workspaceApi.team).toHaveBeenCalledTimes(2);expect(workspaceApi.open).not.toHaveBeenCalled();expect(workspaceApi.catalog).not.toHaveBeenCalled();
   }finally{await act(async()=>root.unmount());container.remove();}
@@ -34,7 +34,7 @@ it("opens private briefs before selecting or writing any encounter",async()=>{
 
 it.each([false,true])("refreshes team authority from briefs and preserves edited settings (%s)",async edited=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});const container=document.createElement("div");document.body.append(container);const root=createRoot(container);
-  const click=async(text:string)=>{const button=[...container.querySelectorAll("button")].find(b=>b.textContent===text||b.getAttribute("aria-label")===text)!;await act(async()=>button.click());};
+  const click=async(text:string)=>{let button:HTMLButtonElement|undefined;await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});button=[...container.querySelectorAll("button")].find(b=>b.textContent===text||b.getAttribute("aria-label")===text);expect(button).toBeDefined();});await act(async()=>button!.click());};
   const context=()=>container.querySelector<HTMLTextAreaElement>(".team-practice-editor textarea")!;
   try{
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={{mode:"clerk_jwt",getToken:async()=>"invented.token.value"}}/>));

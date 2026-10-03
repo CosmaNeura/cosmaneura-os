@@ -22,7 +22,7 @@ it('shows disabled services with useful setup steps without mounting a dead edit
   vi.mocked(readConnectionCatalog).mockResolvedValue(catalog);await mount(<Google/>);
   expect(host.querySelectorAll('.connection-card')).toHaveLength(7);expect(host.textContent).toContain('Needs setup');
   const unavailable=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
-  expect(unavailable.textContent).toContain('Availability checked');expect(unavailable.textContent).not.toContain('Account checked');
+  expect(unavailable.parentElement!.textContent).toContain('Availability checked');expect(unavailable.parentElement!.textContent).not.toContain('Account checked');
   await click('Google email & calendar');expect(editor).not.toHaveBeenCalled();expect(host.textContent).toContain('Google sign-in has not been enabled');
   expect(host.textContent).toContain('Review the requested email and calendar access');
   vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true});await click('Check availability again');await click('Google email & calendar');
@@ -43,7 +43,7 @@ it('shows independent account results without confusing enabled setup with a con
   });
   await mount(<p>Google</p>);
   const row=(name:string)=>[...host.querySelectorAll('.connection-card')].find(x=>x.textContent?.includes(name))!;
-  expect(row('Google email & calendar').textContent).toContain('Connected');expect(row('Google email & calendar').textContent).toContain('Account checked');
+  expect(row('Google email & calendar').textContent).toContain('Connected');expect(row('Google email & calendar').parentElement!.textContent).toContain('Account checked');
   expect(row('Microsoft email').textContent).toContain('Needs attention');
   expect(row('Cosmaneura account').textContent).toContain('Needs review');
   expect(readConnectionSummary).toHaveBeenCalledTimes(3);
@@ -106,10 +106,10 @@ it('updates independent read proof without another account check and never carri
   vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,google:true});
   vi.mocked(readConnectionSummary).mockImplementation(async(owner,id)=>{expect(id).toBe('google');observeConnectionStatus(owner,'google',connected);return personalConnectionSummary('google',connectionHealth(owner,'google'),connected.account.email);});
   await mount(<p>Google</p>);const row=()=>[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
-  expect(row().textContent).toContain('Email: Not verified');expect(row().textContent).toContain('Calendar: Permission needed');expect(row().textContent).toContain('Account checked');
+  expect(row().textContent).toContain('Email: Not verified');expect(row().textContent).toContain('Calendar: Permission needed');expect(row().parentElement!.textContent).toContain('Account checked');
   await act(async()=>{observeConnectionRead(identity,'google',connectionReadScope(identity,'google'),{kind:'mail',account:connected.account,observed_at:new Date().toISOString()});});
-  expect(row().textContent).toContain('Email: Verified in this session');expect(row().textContent).toContain('Last successful read:');expect(readConnectionSummary).toHaveBeenCalledOnce();
-  await mount(<p>Google</p>,{...identity});expect(row().textContent).not.toContain('Verified in this session');expect(row().textContent).not.toContain('Last successful read:');expect(row().textContent).toContain('Email: Not verified');
+  expect(row().textContent).toContain('Email: Verified in this session');expect(row().parentElement!.textContent).toContain('Last successful read:');expect(readConnectionSummary).toHaveBeenCalledOnce();
+  await mount(<p>Google</p>,{...identity});expect(row().textContent).not.toContain('Verified in this session');expect(row().parentElement!.textContent).not.toContain('Last successful read:');expect(row().textContent).toContain('Email: Not verified');
 });
 it('drops a cached account label and proof when a background check changes or revokes the connection',async()=>{
   const connected={state:'connected',account:{email:'previous@example.invalid'},connected_at:new Date(Date.now()-600000).toISOString(),capabilities:{mail:true,calendar:true}};
@@ -177,4 +177,18 @@ it('launches fax work from the overview only with current preparation evidence a
  expect(action().disabled).toBe(true);await act(async()=>action().click());expect(work).toHaveBeenCalledOnce();
  expect(host.textContent).toContain('Current status is unknown');
  await click('Refresh connections');expect(action().disabled).toBe(false);expect(editor).not.toHaveBeenCalled();
+});
+
+it('keeps next steps and independent service states visible while disclosing check evidence on demand',async()=>{
+ const connected={state:'connected',account:{email:'invented@example.invalid'},connected_at:new Date(Date.now()-600000).toISOString(),capabilities:{mail:true,calendar:true}};
+ vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,google:true});
+ vi.mocked(readConnectionSummary).mockImplementation(async(owner)=>{observeConnectionStatus(owner,'google',connected);return personalConnectionSummary('google',connectionHealth(owner,'google'),connected.account.email);});
+ await mount(<p>Google</p>);
+ const card=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
+ expect(card.textContent).toContain('📨');expect(card.textContent).toContain('Email: Not verified');expect(card.textContent).toContain('Calendar: Not verified');expect(card.textContent).toContain('Next: Read recent email');
+ expect(card.textContent).not.toContain('Account checked');expect(card.textContent).not.toContain('Sign-in confirmed');
+ const details=card.parentElement!.querySelector<HTMLDetailsElement>('details')!;
+ expect(details.open).toBe(false);expect(details.textContent).toContain('Account checked');expect(details.textContent).toContain('Sign-in confirmed');
+ await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
+ expect(details.open).toBe(true);expect(readConnectionSummary).toHaveBeenCalledOnce();
 });

@@ -1,5 +1,5 @@
+import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
-import {MembershipAnalysisPanel} from "./MembershipAnalysisPanel";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
 import type {PracticeAccessContext} from './PracticeAccessGate';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
@@ -29,8 +29,6 @@ import {modelWorkApi} from "./model-work-api";
 import {conversationFromEntry, exactModelObservation, modelActive, modelRequestHash, modelStateLabel, validModelOperation, type HandoffRetryObservation, type ModelOperation, type ModelRequestObservation, type PreviousModelRequest} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
 import { FollowUpWork } from "./FollowUpWork";
-import { PracticeWork } from "./PracticeWork";
-import { PracticeHub } from "./PracticeHub";
 import { VendorWorkspaceMount } from "./VendorWorkMount";
 import { PortalSetupMount, PORTAL_SETUP_BUILD } from "./PortalSetupMount";
 import { FinanceWorkspaceMount, FINANCE_WORK_BUILD } from "./FinanceWorkMount";
@@ -38,13 +36,11 @@ import { PortalWorkspaceMount, PORTAL_WORK_BUILD } from "./PortalWorkMount";
 import { FinanceSetupMount, FINANCE_SETUP_BUILD } from "./FinanceSetupMount";
 import { VendorSetupMount, VENDOR_SETUP_BUILD } from "./VendorSetupMount";
 import { MembershipWorkspaceMount, MEMBERSHIP_WORK_BUILD } from "./MembershipWorkMount";
-import { WorkRoutines } from "./WorkRoutines";
 import { ROUTINES_BUILD } from "./routine-api";
 import {EncounterWorkSummary} from "./EncounterWorkSummary";
 import { EncounterSources } from "./EncounterSources";
 import { CapturePanel } from "./CapturePanel";
 import { ExistingScribeSourcePanel } from './ExistingScribeSourcePanel';
-import {InboxAnalysisPanel} from "./InboxAnalysisPanel";
 import type {InboxDraftSelection} from "./inbox-analysis-contract";
 import {ResearchPanelLoader} from "./ResearchPanelLoader";
 import { CoreRecordLink } from "./CoreRecordLink";
@@ -83,6 +79,12 @@ import "./encounter-workspace.css";
 export type PendingSave = NoteOperation | FollowUpOperation | { type: "entry"; body: AppendInput } | ModelOperation |
   { type: "team"; body: TeamSaveInput } |
   { type: "link"; body: { expected_revision: number; idempotency_key: string; ticket_id: string } };
+
+const MembershipAnalysisPanel=deferredWorkspacePanel(()=>import('./MembershipAnalysisPanel').then(module=>module.MembershipAnalysisPanel),'Membership review');
+const InboxAnalysisPanel=deferredWorkspacePanel(()=>import('./InboxAnalysisPanel').then(module=>module.InboxAnalysisPanel),'Inbox review');
+const PracticeWork=deferredWorkspacePanel(()=>import('./PracticeWork').then(module=>module.PracticeWork),'Practice work');
+const PracticeHub=deferredWorkspacePanel(()=>import('./PracticeHub').then(module=>module.PracticeHub),'Practice');
+const WorkRoutines=deferredWorkspacePanel(()=>import('./WorkRoutines').then(module=>module.WorkRoutines),'Work briefs');
 
 const isFollowUpRecovery = (draft: RecoveryOffer["draft"]) => draft.kind === "workspace" && draft.pending?.type.startsWith("followUp") === true;
 
