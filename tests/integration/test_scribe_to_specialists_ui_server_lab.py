@@ -1121,7 +1121,7 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
                 VITE_API_BASE=f"http://127.0.0.1:{server.server_port}",
                 VITE_CAPTURE_UPLOAD_ORIGINS=f"http://127.0.0.1:{server.server_port}",
             )
-            for key in ("COSMAS_PLAYWRIGHT_MODULE_URL", "COSMAS_CHROMIUM_EXECUTABLE"):
+            for key in ("COSMAS_PLAYWRIGHT_MODULE_URL", "COSMAS_CHROMIUM_EXECUTABLE", "COSMAS_SCRIBE_BROWSER_SCENARIO"):
                 if key in os.environ:
                     env[key] = os.environ[key]
         selected_test = os.environ.get("COSMAS_SCRIBE_LAB_TEST_NAME")
