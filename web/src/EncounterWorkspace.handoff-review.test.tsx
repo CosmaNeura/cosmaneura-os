@@ -122,3 +122,25 @@ it('carries stale-source requested changes into an editable Chief question witho
   expect(host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toContain('Keep my existing question about records.');
   expect(workspaceApi.ask).not.toHaveBeenCalled();expect(fetcher).not.toHaveBeenCalled();expect(revisions).toHaveLength(0);
 });
+
+
+it.each([
+  ['accepted','current','exact','Draft accepted'],
+  ['changes_requested','current','exact','Changes requested'],
+  ['accepted','stale','exact','Review needs updating'],
+  ['accepted','not_reviewed','exact','Unreviewed draft'],
+  ['accepted','current','wrong_attempt','Unreviewed draft'],
+  ['accepted','current','wrong_hash','Unreviewed draft'],
+] as const)('shows %s/%s/%s review state on the saved conversation after reopening',async(decision,status,binding,label)=>{
+  const handoff=current.handoffs![0];
+  handoff.review_status=status;
+  handoff.review={id:uuid(810),attempt_id:binding==='wrong_attempt'?uuid(799):handoff.attempt_id!,
+    result_entry_id:handoff.result_entry_id!,result_sha256:binding==='wrong_hash'?'f'.repeat(64):handoff.result_sha256!,
+    decision,feedback:decision==='changes_requested'?'Confirm the responsible person.':'',created_at:time};
+  await open();
+  const choose=async()=>{const control=[...host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')]
+    .find(b=>b.querySelector('strong')?.textContent==='follow up');expect(control).toBeTruthy();await act(async()=>control!.click());
+    await wait(()=>expect(host.querySelector(`#turn-${handoff.result_entry_id} .team-bot-message header`)?.textContent).toContain(label));};
+  await choose();await act(async()=>root.unmount());await mount();await open();await choose();
+  expect(fetcher).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+});
