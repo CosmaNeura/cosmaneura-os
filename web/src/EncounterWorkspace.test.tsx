@@ -590,6 +590,35 @@ describe("private encounter workspace", () => {
     expect(workspaceApi.ask).toHaveBeenCalledOnce();
   });
 
+  it("lets the clinician explicitly replace a Chief request that expired before starting, with a fresh key and current revision", async () => {
+    const {pendingWorkspace,admissionFixture}=await import('./model-work-test-fixture');
+    const connected=structuredClone(team);connected.llm.enabled=true;
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:connected});
+    vi.mocked(workspaceApi.team).mockResolvedValue(connected);
+    await click("Open synthetic encounter");
+    await click("Chief");
+    await input("Thought or question","Prepare drafts from the invented Scribe transcript.");
+    vi.mocked(workspaceApi.ask).mockRejectedValueOnce(new TypeError('connection dropped before claim'));
+    await click("Send message");
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.textContent).toContain("Check saved result");});
+    const first=vi.mocked(workspaceApi.ask).mock.calls[0][2];expect(first.role).toBe('chief');
+    const expired=await pendingWorkspace(first,'abandoned');expired.entries[0].model_request!.bot={address:'chief',role:'chief',name:'Chief',agent_id:modelUuid(102),team_revision:1};
+    vi.mocked(workspaceApi.read).mockResolvedValue(expired);
+    vi.mocked(modelWorkApi.resolve).mockImplementation(async(_,id)=>({...await modelReceipt(first,id),outcome:'abandoned',saved_entry:null,admission:admissionFixture('abandoned'),reason:'reservation_expired'}));
+    await click("Check saved result");
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.textContent).toContain("Request expired before starting");});
+    expect(workspaceApi.ask).toHaveBeenCalledOnce();
+    await click("Start another attempt");
+    expect(workspaceApi.ask).toHaveBeenCalledOnce();
+    const latest={...expired,revision:4};vi.mocked(workspaceApi.read).mockResolvedValue(latest);
+    vi.mocked(workspaceApi.ask).mockImplementation(async(_,id,body)=>{const saved=await pendingWorkspace(body,'completed');saved.revision=5;saved.entries[0].revision=5;saved.entries[0].reply={role:'chief',agent_name:'Chief',backend:'azure_gpt41',content:'Invented fresh response for review.',context_revision:4,citations:[]};saved.entries[0].model_request!.bot={address:'chief',role:'chief',name:'Chief',agent_id:modelUuid(102),team_revision:1};vi.mocked(workspaceApi.read).mockResolvedValue(saved);return modelReceipt(body,id,5);});
+    await click("Send new attempt");
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(workspaceApi.ask).toHaveBeenCalledTimes(2);});
+    const next=vi.mocked(workspaceApi.ask).mock.calls[1][2];expect(next).toMatchObject({role:'chief',content:first.content,expected_revision:4,team_revision:1});
+    expect(next.idempotency_key).not.toBe(first.idempotency_key);
+    await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.textContent).toContain("Previous request retained as superseded history");});
+  });
+
   it("retries an unconfirmed follow-up approval with its exact original revision and hash", async () => {
     const followUp = {ticket_id: "ticket", revision_id: "revision", payload_hash: "a".repeat(64),
       state: "pending_approval", create_key: "fixture-key", body: "Invented message", due_date: "2026-10-01",

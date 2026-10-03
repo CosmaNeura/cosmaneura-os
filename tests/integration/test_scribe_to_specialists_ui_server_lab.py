@@ -883,11 +883,19 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
         def respond(self, status, value):
             raw = json.dumps(value).encode()
             self.send_response(status)
+            self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:5173")
             self.send_header("Content-Type", "application/json")
             self.send_header("Cache-Control", "no-store")
             self.send_header("Content-Length", str(len(raw)))
             self.end_headers()
             self.wfile.write(raw)
+
+        def do_OPTIONS(self):
+            self.send_response(204)
+            self.send_header("Access-Control-Allow-Origin", "http://127.0.0.1:5173")
+            self.send_header("Access-Control-Allow-Methods", "GET,POST,PUT,OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "authorization,content-type,idempotency-key")
+            self.end_headers()
 
         def do_GET(self):
             try:
@@ -1106,8 +1114,18 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
             "src/ScribeToSpecialistsServerLab.test.tsx",
             "--maxWorkers=1",
         ]
+        browser_driver = os.environ.get("COSMAS_SCRIBE_BROWSER_DRIVER")
+        if browser_driver:
+            command = [str(NODE), browser_driver]
+            env.update(
+                VITE_API_BASE=f"http://127.0.0.1:{server.server_port}",
+                VITE_CAPTURE_UPLOAD_ORIGINS=f"http://127.0.0.1:{server.server_port}",
+            )
+            for key in ("COSMAS_PLAYWRIGHT_MODULE_URL", "COSMAS_CHROMIUM_EXECUTABLE"):
+                if key in os.environ:
+                    env[key] = os.environ[key]
         selected_test = os.environ.get("COSMAS_SCRIBE_LAB_TEST_NAME")
-        if selected_test:
+        if selected_test and not browser_driver:
             command.extend(["-t", selected_test])
         result = subprocess.run(
             command,
