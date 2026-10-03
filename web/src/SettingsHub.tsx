@@ -29,12 +29,12 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [inboundBusy,setInboundBusy]=useState(false);
   const leaveLocked=navigationLocked||inboundBusy;
-  const [visited, setVisited] = useState<Editor[]>(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'?[initialScreen]:[]);
+  const [visited, setVisited] = useState<Editor[]>(!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
   const messagingEditor=useRef<HTMLDivElement|null>(null);
   const googleHealth=useConnectionHealth(connectionIdentity,'google'),microsoftHealth=useConnectionHealth(connectionIdentity,'microsoft');
   type Check = {value?:ConnectionSummary; last?:ConnectionSummary; busy:boolean};
-  const [directory,setDirectory]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog|null;error:boolean;busy:boolean;checks:Partial<Record<ConnectionId,Check>>}|null>(null);
+  const [directory,setDirectory]=useState<{owner:AuthenticatedWorkspaceIdentity;catalog:ConnectionCatalog|null;error:boolean;denied?:boolean;busy:boolean;checks:Partial<Record<ConnectionId,Check>>}|null>(null);
   const [refreshCatalog,setRefreshCatalog]=useState(0);
   const accessLost=useRef(onConnectionAccessLost);accessLost.current=onConnectionAccessLost;
   const current=directory?.owner===connectionIdentity?directory:null;
@@ -44,7 +44,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   const checkingAgain=!!current&&Object.values(current.checks).some(check=>check.last&&(current.busy||check.busy));
   const summaryIds=([['core',core],['google',google],['microsoft',microsoft],['scheduling',scheduling],['messaging',messaging]] as const).filter(([,editor])=>editor!=null).map(([id])=>id).join(',');
   useEffect(()=>{
-    if(!open||!['connections','messaging'].includes(screen)||!connectionIdentity)return;
+    if(!open||!(screen==='connections'||screen in CONNECTION_GUIDES)||!connectionIdentity)return;
     const controller=new AbortController();const controllers:AbortController[]=[controller];let active=true;
     const catalogTimer=setTimeout(()=>controller.abort(),15000);
     setDirectory(previous=>({owner:connectionIdentity,catalog:previous?.owner===connectionIdentity?previous.catalog:null,
@@ -52,7 +52,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     void readConnectionCatalog(connectionIdentity,controller.signal).then(value=>{
       if(!active)return;
       clearTimeout(catalogTimer);
-      const ids=summaryIds.split(',').filter(id=>!!id&&(screen!=='messaging'||id==='messaging')) as ConnectionId[];
+      const ids=summaryIds.split(',').filter(id=>!!id&&(screen==='connections'||id===screen)) as ConnectionId[];
       setDirectory(previous=>({owner:connectionIdentity,catalog:value,error:false,busy:false,
         checks:Object.fromEntries(Object.keys(value).map(key=>{
           const id=key as ConnectionId,last=previous?.owner===connectionIdentity?previous.checks[id]?.last:undefined;
@@ -70,7 +70,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
           const denied=error instanceof WorkspaceApiError&&(error.status===401||error.status===403&&id!=='core');
           if(denied){
             active=false;controllers.forEach(item=>item.abort());
-            setDirectory({owner:connectionIdentity,catalog:null,error:true,busy:false,checks:{}});
+            setDirectory({owner:connectionIdentity,catalog:null,error:true,denied:true,busy:false,checks:{}});
             accessLost.current?.(error);return;
           }
           setDirectory(previous=>previous?.owner===connectionIdentity?{...previous,checks:{...previous.checks,[id]:{
@@ -82,15 +82,15 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       if(!active)return;
       clearTimeout(catalogTimer);
       const denied=error instanceof WorkspaceApiError&&[401,403].includes(error.status);
-      setDirectory(previous=>({owner:connectionIdentity,catalog:null,error:true,busy:false,checks:!denied&&previous?.owner===connectionIdentity?Object.fromEntries(Object.entries(previous.checks).map(([id,check])=>[id,{last:check.last,busy:false}])):{}}));
+      setDirectory(previous=>({owner:connectionIdentity,catalog:null,error:true,denied,busy:false,checks:!denied&&previous?.owner===connectionIdentity?Object.fromEntries(Object.entries(previous.checks).map(([id,check])=>[id,{last:check.last,busy:false}])):{}}));
       if(denied)accessLost.current?.(error);
     });
     return()=>{active=false;clearTimeout(catalogTimer);controllers.forEach(item=>item.abort());};
   },[open,screen,connectionIdentity,refreshCatalog,summaryIds]);
   useEffect(() => { if (!open) setScreen(initialScreen); }, [open,initialScreen]);
   useEffect(() => {
-    if(open){setScreen(initialScreen);if(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
-  }, [initialScreen]);
+    if(open){setScreen(initialScreen);if(!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'))setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
+  }, [initialScreen,connectionIdentity]);
   useEffect(() => {
     if (!open) return;
     title.current?.focus({preventScroll:true});
@@ -99,7 +99,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   function visit(next: Screen) {
     if (leaveLocked) return;
     if (next !== 'home' && next !== 'connections') {
-      if(!(next in CONNECTION_GUIDES)||catalog?.[next as ConnectionId]!==false)
+      if(!(next in CONNECTION_GUIDES)||!connectionIdentity||catalog?.[next as ConnectionId]===true||catalogError&&!current?.denied)
         setVisited(previous => previous.includes(next) ? previous : [...previous, next]);
     }
     setScreen(next);
@@ -109,6 +109,11 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     .filter(id=>editors[id]!=null).map(id=>({id,...CONNECTION_GUIDES[id]}));
   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
   const setupUnavailable=selectedGuide&&catalog?.[screen as ConnectionId]===false;
+  const availabilityPending=!!selectedGuide&&!!connectionIdentity&&!catalog&&!catalogError;
+  useEffect(()=>{
+    if(open&&screen in CONNECTION_GUIDES&&(!connectionIdentity||catalog?.[screen as ConnectionId]===true||catalogError&&!current?.denied))
+      setVisited(previous=>previous.includes(screen as Editor)?previous:[...previous,screen as Editor]);
+  },[open,screen,connectionIdentity,catalog,catalogError,current?.denied]);
   function summary(id:ConnectionId):ConnectionSummary{
     if(current?.busy)return {label:'Not checked',reason:current.checks[id]?.last?'Checking again. Previous results are below.':'Checking your account connection.',action:'Wait for this check or open the connection',tone:'neutral'};
     if(catalogError)return {label:'Needs attention',reason:'Current status is unknown. The latest check failed; try again or open the connection.',action:'Check connection again',tone:'attention'};
@@ -196,6 +201,10 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       onRefresh={()=>setRefreshCatalog(value=>value+1)} onSetup={()=>{messagingEditor.current?.focus();messagingEditor.current?.scrollIntoView?.({block:'start'});}}
       onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/>}
     {visited.includes('messaging')&&connectionIdentity&&<div hidden={screen!=='messaging'}><EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/></div>}
+    {selectedGuide&&connectionIdentity&&(availabilityPending||catalogError)&&<section className="connection-setup-guide" aria-label="Connection availability">
+      <p role="status">{availabilityPending?'Checking whether this service is enabled…':current?.denied?'Sign in to CosmasOS again to check this connection.':'Service availability could not be confirmed. Check again, or review the connection status below to finish sign-in.'}</p>
+      {catalogError&&<button disabled={navigationLocked||!!current?.busy} onClick={()=>setRefreshCatalog(value=>value+1)}>Check availability again</button>}
+    </section>}
     {setupUnavailable&&selectedGuide&&<section className="connection-setup-guide" aria-label="Connection setup steps">
       <span className="connection-badge connection-badge-attention">Needs setup</span><h2>{titles[screen]}</h2><p>{selectedGuide.setup}</p>
       <h3>Your next step</h3><p>Ask your practice administrator to enable this service. No setup request has been sent from this screen.</p>
@@ -204,6 +213,6 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       <h3>Administrator steps</h3><p>{selectedGuide.setup}</p>
       <details><summary>Your steps after setup</summary><ol>{selectedGuide.steps.filter(step=>!step.startsWith("Have an administrator")).map(step=><li key={step}>{step}</li>)}</ol><p className="connection-access-summary">{selectedGuide.access}</p></details>
     </section>}
-    {visited.map(id => <div key={id} ref={id==='messaging'?messagingEditor:undefined} tabIndex={id==='messaging'?-1:undefined} data-settings-screen={id} hidden={screen !== id||!!setupUnavailable}>{editors[id]}</div>)}
+    {visited.map(id => <div key={id} ref={id==='messaging'?messagingEditor:undefined} tabIndex={id==='messaging'?-1:undefined} data-settings-screen={id} hidden={screen !== id||!!setupUnavailable||availabilityPending||!!current?.denied}>{editors[id]}</div>)}
   </section>;
 }
