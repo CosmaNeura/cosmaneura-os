@@ -25,6 +25,9 @@ COPY fixtures ./fixtures
 COPY docs/third-party ./docs/third-party
 RUN groupadd --gid 10001 cosmas \
     && useradd --uid 10001 --gid cosmas --no-create-home --shell /usr/sbin/nologin cosmas \
+    && test "$(readlink -f /usr/bin/mount)" = /usr/bin/mount \
+    && test "$(readlink -f /usr/bin/umount)" = /usr/bin/umount \
+    && chmod a-s /usr/bin/mount /usr/bin/umount \
     && mkdir -p /data/blobs \
     && chown -R cosmas:cosmas /data/blobs
 USER 10001:10001
