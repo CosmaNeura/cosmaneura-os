@@ -58,6 +58,6 @@ export function FaxConnectionOverview({value,loading,unavailable,locked,onRefres
       {onOpenWork&&<button className="team-primary" disabled={locked||workBlocked||!current||!ready} onClick={onOpenWork}>{workLabel}</button>}
     </div>
     <p>Fax work keeps the document, recipient, review and delivery status with the selected visit. Each send needs a separate approval.</p>
-    <p className="team-fine">Checking setup does not verify the provider login or fax delivery. Incoming faxes are not available in CosmaBot yet.</p>
+    <p className="team-fine">Checking setup does not verify the provider login or fax delivery. Received eFax requires separate inbound setup and human approval before downloading an image.</p>
   </section>;
 }

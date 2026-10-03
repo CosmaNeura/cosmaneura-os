@@ -11,6 +11,8 @@ from sqlalchemy.orm import Session
 from cosmas_os.adapters.managed_event_routing import ManagedEventProfile, ManagedEventRoutes
 from cosmas_os.adapters.vendor_connectors.transport import Credential
 from cosmas_os.application import finance_settings, vendor_settings
+from cosmas_os.application.efax_inbound import Installation as EFaxInboundInstallation
+from cosmas_os.application.efax_inbound_execution import EFaxInboundExecution
 from cosmas_os.application.finance_settings_execution import FinanceSettingsExecution
 from cosmas_os.application.finance_work import FinancePolicy
 from cosmas_os.application.vendor_settings_execution import VendorSettingsExecution
@@ -37,6 +39,8 @@ class ManagedServiceProfile:
     artifact_store: VendorArtifactStore | None = field(default=None, repr=False)
     transport_factory: Callable[[], httpx.AsyncBaseTransport] | None = field(default=None, repr=False)
     events: ManagedEventProfile | None = field(default=None, repr=False)
+    # Inbound grant and read-state mutation authority are independently installed.
+    efax_inbound_installations: tuple[EFaxInboundInstallation, ...] = field(default=(), repr=False)
 
 
 class ManagedServices:
@@ -61,6 +65,12 @@ class ManagedServices:
         self.artifact_store = profile.artifact_store
         self._settings, self._profile, self._sessions = settings, profile, sessions
         self._closed = False
+        if (len(profile.efax_inbound_installations) > 50
+                or any(type(item) is not EFaxInboundInstallation for item in profile.efax_inbound_installations)
+                or len({str(item.selection.connection_id) for item in profile.efax_inbound_installations})
+                    != len(profile.efax_inbound_installations)):
+            raise ValueError("Explicit bounded inbound installations required")
+        self.efax_inbound_installations = tuple(profile.efax_inbound_installations)
 
     def _available(self) -> bool:
         return bool(not self._closed and self._settings.workspace_available
@@ -133,6 +143,38 @@ class ManagedServices:
     def has_credentials(self) -> bool:
         return self._available() and self._profile.credentials is not None
 
+    def efax_inbound_execution(self, identity_current: CurrentIdentity) -> EFaxInboundExecution:
+        if not self._available() or self._profile.credentials is None:
+            raise VendorError("connector_disabled")
+        provider = self._profile.credentials
+
+        def enabled():
+            return self._available() and self._settings.efax_inbound_enabled
+
+        async def credentials(selected):
+            if not enabled() or not any(item.selection == selected for item in self.efax_inbound_installations):
+                raise VendorError("connection_changed")
+            value = await provider(selected)
+            if (not enabled() or not isinstance(value, Credential)
+                    or value.selection_sha256 != selected.commitment()
+                    or value.credential_ref != str(selected.credential_ref)):
+                raise VendorError("connection_changed")
+            return value
+
+        return EFaxInboundExecution(self._sessions, self.efax_inbound_installations, credentials,
+            identity_current=identity_current, enabled=enabled,
+            transport_factory=self._profile.transport_factory)
+
+    def efax_source_current(self, session, retained) -> bool:
+        """DB-only custody guard shared by human requests and source readers."""
+        if not self.has_credentials or not self._settings.efax_inbound_source_available:
+            return False
+        selection = ConnectionSelection.model_validate(retained.selection)
+        matches = [item for item in self.efax_inbound_installations if item.selection == selection]
+        return bool(len(matches) == 1 and matches[0].label == retained.label
+                    and matches[0].metadata_enabled and matches[0].image_enabled
+                    and retained.metadata_enabled and retained.image_enabled)
+
     def vendor_event(self, vendor: str, route_id: str):
         if not self._available() or not self._settings.vendor_events_enabled or self.events is None:
             return None
@@ -176,7 +218,10 @@ def managed_services_lifespan(app: FastAPI, settings: Settings, sessions: Callab
             profile = load_managed_profile(settings)
         runtime = ManagedServices(settings, profile, sessions) if profile is not None else None
         app.state.managed_services = runtime
-        yield
+        from cosmas_os.application.efax_inbound_source import install_binding_reader
+
+        with install_binding_reader(runtime.efax_source_current if runtime is not None else None):
+            yield
     finally:
         app.state.managed_services = None
         app.state.managed_lifespan_active = False

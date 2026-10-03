@@ -13,7 +13,7 @@ export type ConnectionSummary = {
 export function personalConnectionSummary(provider:PersonalConnection,health:ConnectionHealth,accountLabel:string):ConnectionSummary{
   const services=connectionServices(provider,health),missing=services.find(row=>row.label==='Permission needed'),failed=services.find(row=>row.label==='Last read failed');
   const verified=services.every(row=>row.tone==='ready'),next=services.find(row=>row.tone!=='ready');
-  return {label:!health.accountCurrent?'Not checked':!health.connected?'Needs setup':missing||failed?'Needs attention':'Connected',
+  return {label:!health.accountCurrent?'Not checked':!health.connected?'Needs setup':missing||failed?'Needs attention':verified?'Verified in this session':'Connected',
     reason:!health.accountCurrent?'Check which account is connected.':!health.connected?'Sign in to connect your account.':accountLabel,
     action:!health.accountCurrent?'Check account':!health.connected?'Connect account':missing?`Review ${missing.name.toLowerCase()} access`:failed?`Retry ${failed.name.toLowerCase()} read`:next?.kind==='mail'?'Read recent email':next?.kind==='calendar'?'View next 7 days':'Open email & calendar',
     proof:health.accountCurrent&&health.connected?'Sign-in confirmed. Email and calendar checks are separate.':'No current account or read result confirmed.',
@@ -30,7 +30,7 @@ export function faxConnectionSummary(readiness:FaxReadiness):ConnectionSummary{
     action:'Review fax setup',tone:'attention'};
   const missing=[!readiness.work_enabled&&'fax work',!readiness.credential_access_configured&&'service access',!readiness.document_storage_configured&&'private PDF storage',!readiness.delivery_enabled&&'sending'].filter(Boolean);
   if(missing.length)return {...base,label:'Needs setup',reason:`Administrator setup needed: ${missing.join(', ')}.`,proof:'Fax delivery has not been checked.',action:'View requirements',tone:'attention'};
-  return {...base,label:'Available',reason:'An account is configured for preparing fax drafts.',proof:'Delivery is confirmed separately for each fax. Incoming faxes are not available here.',action:'Review fax options',tone:'neutral'};
+  return {...base,label:'Available',reason:'An account is configured for preparing fax drafts.',proof:'Delivery is confirmed separately for each fax. Received eFax has separate account setup and document review.',action:'Review fax options',tone:'neutral'};
 }
 export const accountStatusSupported=(id:ConnectionId)=>['core','google','microsoft','scheduling','messaging'].includes(id);
 export async function readConnectionSummary(identity:AuthenticatedWorkspaceIdentity,id:ConnectionId,signal:AbortSignal):Promise<ConnectionSummary>{

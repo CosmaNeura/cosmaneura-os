@@ -1771,6 +1771,28 @@ register_vendor_setup(app, get_session, _identity, reauthenticate=_vendor_reauth
     policy_dependency=_vendor_setup_policy, catalog_dependency=_vendor_installed_catalog,
     readiness_dependency=_vendor_readiness_configuration)
 
+
+def _efax_inbound_execution(request: Request, identity=Depends(_identity)):
+    runtime = managed_services(request.app)
+    if runtime is None or not runtime.has_credentials or not settings.efax_inbound_enabled:
+        return None
+
+    async def current():
+        with new_capture_session(SessionLocal) as scoped:
+            fresh = _identity(request=request, session=scoped,
+                authorization=request.headers.get("authorization"),
+                x_box_id=request.headers.get("x-box-id"),
+                x_actor_principal_id=request.headers.get("x-actor-principal-id"))
+            return fresh == identity
+
+    return runtime.efax_inbound_execution(current)
+
+
+from cosmas_os.api.efax_inbound_routes import register as register_efax_inbound  # noqa: E402
+
+register_efax_inbound(app, get_session, _identity, execution_dependency=_efax_inbound_execution,
+    reauthenticate=_vendor_reauthenticate)
+
 from cosmas_os.api.portal_setup_routes import register as register_portal_setup  # noqa: E402
 
 
@@ -1985,6 +2007,7 @@ register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_
 
 allowed_headers = ["X-Cosmas-Handoff-Review", "X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
 allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection", "X-Cosmas-Google-Messages", "X-Cosmas-Google-Calendar"])
+allowed_headers.append("X-Cosmas-EFax-Inbound")
 allowed_headers.extend(["X-Cosmas-Record-Contract", "X-Cosmas-Connection-Contract", "X-Cosmas-Activity-Contract"])
 if settings.cosmas_env == "synth_os" and settings.auth_mode == "synth_headers":
     allowed_headers.extend(["X-Box-Id", "X-Actor-Principal-Id"])

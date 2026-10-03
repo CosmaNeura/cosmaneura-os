@@ -21,15 +21,18 @@ import { validInboxHandoffActor, validateInboxHandoffRecovery } from "./inbox-ha
 import { validGoogleMessageScope, validateGoogleMessageRecovery } from "./google-message-recovery";
 import { validGoogleCalendarScope, validateGoogleCalendarRecovery } from "./google-calendar-recovery";
 import {validateHandoffReviewRecovery} from './handoff-review-recovery';
+import {validateEFaxRecovery} from "./efax-inbound-recovery";
+import {validateEFaxSourceRecovery} from './efax-inbound-source-recovery';
+import {validEFaxSourceScope} from './efax-inbound-source-api';
 import {validateSchedulingPatientRecovery} from './scheduling-patient-recovery';
 
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
   note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest };
-export type EditorKind = "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
+export type EditorKind = "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
-export type AccountEditorKind = "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | `practice-result:${string}` | `vendor-work:${string}`;
+export type AccountEditorKind = "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | "efax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
 export type AccountEditorDraft = {kind:"account-editor";editor:AccountEditorKind;data:unknown;pending:string|null};
 export const accountEditorAddress = (editor: AccountEditorKind) => `account-editor:${editor}`;
 export type RecoveredDraft = TeamDraft | NotebookDraft | EditorDraft | AccountOperationDraft | AccountEditorDraft;
@@ -40,6 +43,7 @@ const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const validEditor = (kind: unknown) => typeof kind === "string" &&
   (["private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
     kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) || kind.startsWith("handoff-review:") && UUID.test(kind.slice("handoff-review:".length)) ||
+    kind.startsWith("efax-source-review:") && UUID.test(kind.slice("efax-source-review:".length)) ||
     kind.startsWith("follow-up-result:") && UUID.test(kind.slice("follow-up-result:".length)) || kind.startsWith("research:") && UUID.test(kind.slice("research:".length)));
 const operations = ["entry", "ask", "retry", "note", "coreNoteLink", "review", "followUpPropose", "followUpDecision", "followUpComplete", "link"];
 
@@ -88,7 +92,7 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   const draft = value.body as RecoveredDraft;
   if (draft && draft.kind === "account-editor") {
     if (Object.keys(draft).sort().join(",")!=="data,editor,kind,pending" ||
-        typeof draft.editor!=="string" || !(draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="google-calendar" ||
+        typeof draft.editor!=="string" || !(draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="google-calendar" || draft.editor==="efax-inbound" ||
           draft.editor.startsWith("practice-result:") && UUID.test(draft.editor.slice("practice-result:".length)) ||
           draft.editor.startsWith("vendor-work:") && UUID.test(draft.editor.slice("vendor-work:".length))) ||
         address!==accountEditorAddress(draft.editor) || draft.pending!==null && !UUID.test(draft.pending) ||
@@ -123,6 +127,12 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if(draft?.kind==='editor'&&draft.editor.startsWith('efax-source-review:')){
+    try{const scope=(draft.data as {scope?:unknown}).scope;if(!validEFaxSourceScope(scope)||scope.workspace_id!==draft.workspaceId||draft.pending!==null)throw new Error();
+      const data=await validateEFaxSourceRecovery(draft.data,scope);
+      if(data.offered.operation_id!==draft.editor.slice('efax-source-review:'.length))throw new Error();}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
   if(draft?.kind==='editor'&&draft.editor==='scheduling-patient'){
     try{const data=await validateSchedulingPatientRecovery(draft.data,draft.workspaceId);
       if(draft.pending!==(data.pending?.idempotency_key??null))throw new Error();}
@@ -132,6 +142,11 @@ async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
     try{const data=await validateHandoffReviewRecovery(draft.data,draft.workspaceId,draft.editor.slice('handoff-review:'.length));
       if(draft.pending!==(data.pending?.body.idempotency_key??null))throw new Error();}
     catch{throw new DraftStoreError('integrity');}return;
+  }
+  if (draft?.kind === "account-editor" && draft.editor === "efax-inbound") {
+    if (draft.pending !== null) throw new DraftStoreError("integrity");
+    try {const scope=(draft.data as {scope?:unknown}).scope;if(!scope||typeof scope!=="object"||Array.isArray(scope))throw new Error();await validateEFaxRecovery(draft.data,scope as {box_id:string;owner_id:string});}
+    catch {throw new DraftStoreError("integrity");}return;
   }
   if (draft?.kind === "account-editor" && draft.editor === "google-calendar") {
     if (draft.pending !== null) throw new DraftStoreError("integrity");

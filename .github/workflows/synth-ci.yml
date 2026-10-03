@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Sync
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra efax-inbound
       - name: Ruff
         run: uv run ruff check src tests
       - name: Pyright
@@ -73,7 +73,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Sync
-        run: uv sync --extra dev
+        run: uv sync --extra dev --extra efax-inbound
       - name: Migrations on empty database
         run: uv run alembic upgrade head
       - name: Pytest

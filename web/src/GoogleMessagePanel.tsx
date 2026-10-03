@@ -160,7 +160,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
       {status&&!connectionChanged&&<p role="status">{status.state==='connected'?`${status.account!.email} · ${status.full_mail_read?'Full email access granted':'Full email permission needed'}`:'Connect Google again to continue.'}</p>}
       {(sourceWithheld||connectionChanged||projectedSourceUnavailable)&&<p role="alert">Saved email contents are withheld until account access and this source are checked. The private recovery record is retained.</p>}
       {record.saved?.source_withheld&&<p role="status">The exact email source save is confirmed. Its contents are unavailable; check access and review current email before asking Chief for new work.</p>}
-      {status?.state==='connected'&&!status.full_mail_read&&<button disabled={blocked||!onRequestFullMailAccess} onClick={onRequestFullMailAccess}>Add full email access</button>}
+      {status&&!status.full_mail_read&&<button disabled={blocked||!onRequestFullMailAccess} onClick={onRequestFullMailAccess}>{status.state==='connected'?'Add full email access':'Connect Google for email'}</button>}
       <button disabled={blocked||status?.state!=='connected'} onClick={list}>{record.list?'Refresh email list':'Select email'}</button>
       {showSource&&record.list&&<div className="google-message-list"><p>Headers from {record.list.observation!.account.email} · Loaded {when(record.list.observation!.observed_at)}</p>
         {record.list.observation!.items.length===0&&<p>No messages were returned in this bounded inbox check.</p>}

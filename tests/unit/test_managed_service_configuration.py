@@ -50,13 +50,19 @@ def document(settings, vendor="documo", *, credential=True):
         item.update(
             sender_label="Invented sender",
             capabilities=[
-                {"spruce": "spruce_secure_message", "srfax": "srfax_fax", "documo": "documo_fax", "efax": "efax_fax"}[
-                    vendor
-                ]
+                {
+                    "spruce": "spruce_secure_message",
+                    "srfax": "srfax_fax",
+                    "documo": "documo_fax",
+                    "efax": "efax_fax",
+                }[vendor]
             ],
             routing={"internal_endpoint_id": "invented_endpoint"}
             if vendor == "spruce"
-            else {"caller_id": "2125550199", **({"sender_email": "fax@example.invalid"} if vendor == "srfax" else {})},
+            else {
+                "caller_id": "2125550199",
+                **({"sender_email": "fax@example.invalid"} if vendor == "srfax" else {}),
+            },
         )
     return {
         "version": 1,
@@ -389,3 +395,68 @@ def test_document_sas_with_broader_permissions_is_refused(
     assert isinstance(store, configured.ConfiguredArtifactStore)
     with pytest.raises(ValueError, match="not scoped"):
         store._container()
+
+
+def test_inbound_catalog_is_explicit_independent_and_exact(tmp_path, configuration, monkeypatch):
+    selected = selection("efax").model_copy(update={"box_id": UUID(configuration.beta_box_id)})
+    doc = {
+        "version": 1,
+        "box_id": configuration.beta_box_id,
+        "efax_inbound": [
+            {
+                "selection": selected.model_dump(mode="json"),
+                "label": "Invented received fax account",
+                "metadata_enabled": True,
+                "image_enabled": True,
+                "credential": secret_ref("INBOUND"),
+            }
+        ],
+    }
+    install(tmp_path, configuration, doc)
+    config = configured.load_managed_profile(configuration)
+    assert not config.vendor_catalog.installations and len(config.efax_inbound_installations) == 1
+    runtime = ManagedServices(configuration, config, no_session)
+    assert configuration.efax_inbound_enabled is False
+    configuration.efax_inbound_enabled = True
+
+    async def current():
+        return True
+
+    inbound = runtime.efax_inbound_execution(current)
+    assert inbound.current(None, config.efax_inbound_installations[0]) is True
+    assert configuration.vendor_io_enabled is False and configuration.vendor_work_enabled is False
+    monkeypatch.setenv("COSMAS_MANAGED_SECRET_INBOUND", "PRIVATE_invented")
+    credential = asyncio.run(inbound._credentials(selected))
+    assert credential.selection_sha256 == selected.commitment()
+    with pytest.raises(VendorError):
+        asyncio.run(inbound._credentials(selected.model_copy(update={"connection_id": uuid4()})))
+    configuration.efax_inbound_enabled = False
+    with pytest.raises(VendorError):
+        asyncio.run(inbound._credentials(selected))
+    assert inbound.current(None, config.efax_inbound_installations[0]) is False
+
+
+@pytest.mark.parametrize("fault", ["wrong_vendor", "boolean_permission", "extra", "wrong_box"])
+def test_inbound_invalid_configuration_is_rejected(tmp_path, configuration, fault):
+    selected = selection("efax").model_copy(update={"box_id": UUID(configuration.beta_box_id)})
+    item = {
+        "selection": selected.model_dump(mode="json"),
+        "label": "Invented inbound",
+        "metadata_enabled": True,
+        "image_enabled": False,
+    }
+    if fault == "wrong_vendor":
+        item["selection"]["vendor"] = "documo"
+    if fault == "boolean_permission":
+        item["metadata_enabled"] = "true"
+    if fault == "extra":
+        item["poll_interval"] = 1
+    if fault == "wrong_box":
+        item["selection"]["box_id"] = str(uuid4())
+    install(
+        tmp_path,
+        configuration,
+        {"version": 1, "box_id": configuration.beta_box_id, "efax_inbound": [item]},
+    )
+    with pytest.raises(ValueError):
+        configured.load_managed_profile(configuration)

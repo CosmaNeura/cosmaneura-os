@@ -1,0 +1,16 @@
+import {efaxPublicHash,efaxFaxHash,type EFaxScope,type EFaxStatus,type EFaxPending,type EFaxReceipt,type EFaxProposal,type EFaxMetadata} from './efax-inbound-api';
+export const efaxUuid=(n:number)=>`00000000-0000-4000-8000-${n.toString().padStart(12,'0')}`;
+export const efaxScope:EFaxScope={box_id:efaxUuid(1),owner_id:efaxUuid(2)};
+export const efaxStatus:EFaxStatus={contract_version:1,scope:efaxScope,enabled:true,grants:[{grant_id:efaxUuid(4),label:'Invented eFax account',state:'available',image_enabled:true,expires_at:'2026-10-03T18:00:00Z'}],installations:[{installation_id:efaxUuid(3),label:'Invented eFax account',metadata_available:true,image_available:true}]};
+export const efaxFax:EFaxMetadata={fax_id:efaxUuid(5),size:64,duration:10,pages:1,image_downloaded:false,completed_timestamp:'2026-10-02T12:00:00Z',destination_fax_number:'+12025550101',originating_fax_number:'+12025550102',originating_fax_tsid:'Invented private sender',fax_status:'STORED'};
+export const efaxPdf=new TextEncoder().encode('%PDF-1.4\nInvented test-only content\n%%EOF');
+export async function efaxReceipt(p:EFaxPending):Promise<EFaxReceipt>{
+ const base={contract_version:1 as const,scope:efaxScope,kind:p.kind,idempotency_key:p.request.idempotency_key,receipt_id:efaxUuid(8),request_sha256:'a'.repeat(64),public_request_sha256:await efaxPublicHash(efaxScope,p)};
+ if(p.kind==='grant')return {...base,state:'granted',grant_id:efaxUuid(4),label:'Invented eFax account',metadata_enabled:true,image_enabled:p.request.image_enabled,expires_at:p.request.expires_at};
+ if(p.kind==='revoke')return {...base,state:'revoked',grant_id:p.request.grant_id};
+ if(p.kind==='observe')return {...base,state:'observed',grant_id:p.request.grant_id,observation_id:efaxUuid(6),source_sha256:'b'.repeat(64),snapshot:{request:{request_id:efaxUuid(6),starts_at:p.request.starts_at,ends_at:p.request.ends_at,limit:25,offset:0},first_record:0,last_record:0,items:[efaxFax],observed_at:'2026-10-02T12:05:00Z',raw_sha256:'c'.repeat(64),source_sha256:'b'.repeat(64),scope:'one_received_metadata_page',inbox_complete:false,continuation:'unknown'}};
+ if(p.kind==='propose')return {...base,state:'approval_required',ticket_id:efaxUuid(7),revision_id:efaxUuid(9),version:1,command_sha256:'d'.repeat(64),side_effect:'marks_fax_downloaded_or_read',expires_at:'2099-10-02T18:00:00Z'};
+ if(p.kind==='decide')return {...base,state:p.request.choice==='approve'?'approved':'rejected',ticket_id:p.request.ticket_id,revision_id:p.request.revision_id,version:p.request.expected_version+1,decision_id:efaxUuid(10),approval_sha256:p.request.choice==='approve'?'e'.repeat(64):null};
+ return {...base,state:'outcome_unconfirmed',ticket_id:p.request.ticket_id,revision_id:p.request.revision_id,operation_id:efaxUuid(11),version:p.request.expected_version+1,retry_allowed:false,content_available:false,source_withheld:false,document:null};
+}
+export async function efaxProposal():Promise<EFaxProposal>{return {contract_version:1,scope:efaxScope,ticket_id:efaxUuid(7),revision_id:efaxUuid(9),version:1,state:'pending_approval',command_sha256:'d'.repeat(64),expires_at:'2099-10-02T18:00:00Z',side_effect:'marks_fax_downloaded_or_read',source_withheld:false,fax:efaxFax,fax_sha256:await efaxFaxHash(efaxFax),observation_id:efaxUuid(6),observation_sha256:'b'.repeat(64),account_label:'Invented eFax account'};}

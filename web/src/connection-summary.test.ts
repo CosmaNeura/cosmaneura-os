@@ -1,5 +1,5 @@
 import {beforeEach,expect,it,vi} from 'vitest';
-import {readConnectionSummary,accountStatusSupported,faxConnectionSummary} from './connection-summary';
+import {readConnectionSummary,accountStatusSupported,faxConnectionSummary,personalConnectionSummary} from './connection-summary';
 import {readFaxReadiness,type FaxReadiness,FAX_PROVIDERS} from './fax-readiness-api';
 import {coreConnectionApi} from './core-connection-api';
 import {googleConnectionRequest} from './google-connection-api';
@@ -78,4 +78,12 @@ it('keeps scheduling sign-in separate from availability, saved appointments and 
  expect(result.proof).toContain('Check available times from Follow-up in a visit');
  expect(result.proof).toContain('saved appointments and calendar updates have separate results');
  expect(schedulingLoginRequest).toHaveBeenCalledExactlyOnceWith(expect.anything(),'status',expect.any(AbortSignal));
+});
+
+it('distinguishes current successful reads from sign-in and drops verification after a failed read',()=>{
+ const read={lastSuccessAt:'2026-10-03T12:00:00Z',latest:'succeeded' as const};
+ const health={accountCurrent:true,connected:true,checkedAt:Date.now(),accountVersion:1,permissions:{mail:true,calendar:true},mail:read,calendar:read};
+ expect(personalConnectionSummary('google',health,'owner@example.invalid')).toMatchObject({label:'Verified in this session',tone:'ready'});
+ expect(personalConnectionSummary('google',{...health,mail:{...read,latest:'failed'}},'owner@example.invalid')).toMatchObject({label:'Needs attention',action:'Retry email read',tone:'attention'});
+ expect(personalConnectionSummary('google',{...health,accountCurrent:false},'owner@example.invalid')).toMatchObject({label:'Not checked',tone:'neutral'});
 });

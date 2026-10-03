@@ -272,3 +272,12 @@ it('allows a current-visit recovery refresh after a definitive refusal while new
  expect(button('Use for current visit')!.disabled).toBe(true);expect(button('Save reviewed email for this visit')!.disabled).toBe(true);
  expect(googleMessageApi.review).toHaveBeenCalledTimes(1);
 });
+
+it('offers a direct connection action when selected-message access requires sign-in',async()=>{
+ vi.mocked(googleMessageApi.status).mockResolvedValue({contract_version:1,state:'sign_in_required',full_mail_read:false,account:null});
+ await mount();await click('Check email access');
+ expect(button('Select email')!.disabled).toBe(true);
+ await click('Connect Google for email');
+ expect(props.onRequestFullMailAccess).toHaveBeenCalledOnce();
+ expect(googleMessageApi.list).not.toHaveBeenCalled();expect(googleMessageApi.read).not.toHaveBeenCalled();
+});

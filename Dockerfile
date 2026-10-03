@@ -8,7 +8,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY pyproject.toml uv.lock README.md ./
 RUN printf '%s\n' 'uv==0.12.5 --hash=sha256:3e195ccf1ed60c8bb24a6447ce306441a4181d54b602407e09bc56e963911c15' >/tmp/uv-bootstrap.lock \
     && python -m pip install --no-cache-dir --require-hashes --only-binary=:all: --requirement /tmp/uv-bootstrap.lock \
-    && uv export --offline --frozen --no-dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.lock \
+    && uv export --offline --frozen --extra efax-inbound --no-dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.lock \
     && mkdir -p /wheels \
     && python -m pip download --require-hashes --only-binary=:all: --dest /wheels --requirement /tmp/requirements.lock
 COPY src ./src

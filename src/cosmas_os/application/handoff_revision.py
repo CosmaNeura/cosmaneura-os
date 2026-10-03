@@ -291,7 +291,8 @@ def reserve(
             "role": team.bot_address(settings),
             "content": parent.brief,
         }
-        context = model_work._context_for(s, w, version, settings, bot, command, draft_only=True)
+        context = model_work._context_for(s, w, version, settings, bot, command, draft_only=True,
+            prepared_contract=old_row.envelope_contract)
         context = replace(context, context_revision=parent.context_revision)
         requirements = {
             field: old_row.request_body["task_brief"][field]

@@ -24,6 +24,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+efax-inbound = [
+    "pypdf==6.10.0",
+]
 mcp = [
     "mcp==2.2.0",
 ]

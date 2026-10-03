@@ -577,16 +577,28 @@ def _context_for(
         draft_only=draft_only,
         agent_id=bot.agent_id,
         handoff_targets=targets,
-        additional_sources=_selected_google_passages(s, workspace, settings),
+        additional_sources=_selected_connector_passages(s, workspace, settings),
     )
     selected_google_kinds = {"google_message", "google_calendar"}
     if any(s.get(WorkspaceEntry, source.entry_id).kind in selected_google_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
-            len(context.sources) > 12 or any(len(source.content) > 5000 for source in context.sources)
+            len(context.sources) > 12 or any(len(source.content) > 5000 and not (
+                prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT
+                and s.get(WorkspaceEntry, source.entry_id).kind == "efax_inbound_source"
+            ) for source in context.sources)
             or sum(len(source.content) for source in context.sources) > 30000):
         has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind == "google_calendar"
             for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
         raise ws.WorkspaceError("selected_google_context_too_large" if has_calendar else "google_message_context_too_large", 422)
+    has_fax = any(s.get(WorkspaceEntry, source.entry_id).kind == "efax_inbound_source"
+                  for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
+    if has_fax:
+        try:
+            handoff_briefs.validate_sources(context,
+                version=2 if prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT else 1,
+                prepared_contract=prepared_contract)
+        except ValueError:
+            raise ws.WorkspaceError("efax_inbound_source_context_too_large", 422) from None
     if "task_brief" in command:
         try:
             if not draft_only:
@@ -640,6 +652,18 @@ def _selected_google_passages(s, workspace, settings):
         (*_google_message_passages(s, workspace, settings), *_google_calendar_passages(s, workspace, settings)),
         key=lambda source: source.revision,
     ))
+
+
+def _selected_connector_passages(s, workspace, settings):
+    sources = _selected_google_passages(s, workspace, settings)
+    if not team.runtime_settings.efax_inbound_source_available:
+        return sources
+    from cosmas_os.application import efax_inbound_source
+    from cosmas_os.ports.bot_capabilities import SourcePassage
+
+    reviewed = efax_inbound_source.selected_entries(s, workspace, settings, workspace.revision)
+    return tuple(sorted((*sources, *(SourcePassage(row.id, row.revision, row.source_label,
+                        "evidence", row.content) for row in reviewed)), key=lambda source: source.revision))
 
 
 def _allowance(s, box, owner, as_of, configuration):
@@ -846,7 +870,9 @@ def reserve_conversation(
         from cosmas_os.application.session_prep_analysis import selection
 
         command["session_prep_analysis"] = selection(session_prep_analysis)
-    context = _context_for(s, workspace, version, settings, bot, command, handoff_roles=roles)
+    tools_available = team.runtime_settings.workspace_agent_tools_enabled
+    context = _context_for(s, workspace, version, settings, bot, command, handoff_roles=roles,
+        prepared_contract=handoff_briefs.FULL_SOURCE_CONTRACT if tools_available else None)
     from dataclasses import replace
 
     context = replace(context, handoff_limit=0 if any(item is not None for item in (research_analysis, inbox_analysis, membership_analysis, session_prep_analysis)) else handoff_limit)
@@ -858,7 +884,8 @@ def reserve_conversation(
         for address in context.handoff_roles:
             _, recipient, recipient_settings = team.active_bot(s, box, owner, address, version.revision)
             child = _context_for(s, workspace, version, recipient_settings, recipient,
-                {"content": "Preflight private draft source bounds."}, draft_only=True)
+                {"content": "Preflight private draft source bounds."}, draft_only=True,
+                prepared_contract=handoff_briefs.FULL_SOURCE_CONTRACT if tools_available else None)
             try:
                 handoff_briefs.validate_sources(child, version=2 if tools_available else 1,
                     prepared_contract=handoff_briefs.FULL_SOURCE_CONTRACT if tools_available else None)
@@ -1390,7 +1417,7 @@ def project_workspace(s, value, *, as_of=None):
     if len(rows) > 50:
         raise ws.WorkspaceError("model_observation_unavailable", 503)
     for row in rows:
-        from cosmas_os.application.selected_google_sources import projection_unavailable
+        from cosmas_os.application.selected_connector_sources import projection_unavailable
 
         if projection_unavailable(entries[row.request_entry_id]):
             continue  # Private quoted intent is withheld with its source-derived output.
@@ -1540,7 +1567,8 @@ def reserve_children(
             "content": brief.brief,
         }
         child_context = _context_for(
-            s, workspace, version, config, recipient, command, draft_only=True
+            s, workspace, version, config, recipient, command, draft_only=True,
+            prepared_contract=prepared_contract
         )
         child_context = replace(child_context, context_revision=context.context_revision)
         if brief.requirements is not None:

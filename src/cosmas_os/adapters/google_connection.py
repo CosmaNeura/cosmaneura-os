@@ -311,13 +311,22 @@ class GooglePersonalConnection(MicrosoftPersonalConnection):
                     connected_at.isoformat(), private["subject"], sorted(scopes)])))
 
     def calendar_status(self, identity, *, session=None):
-        """Local calendar permission check; never refreshes or reads Google."""
+        """Local calendar permission check; never refreshes or reads Google.
+
+        An unfinished replacement sign-in must not present the previous grant
+        as the newly selected account. Match the selected-message status until
+        that exact attempt completes, fails or expires.
+        """
         with self._session() if session is None else nullcontext(session) as current:
             account, binding = self._message_account(current, identity)
             credential = current.scalar(select(self.Credential).where(self.Credential.account_id == account.id)
                 .with_for_update(read=True).execution_options(populate_existing=True))
+            pending = current.scalar(select(self.Attempt).where(self.Attempt.account_id == account.id,
+                self.Attempt.status.in_(["pending", "exchanging"]),
+                self.Attempt.expires_at > self.now(), self.Attempt.binding_digest == binding)
+                .with_for_update(read=True))
             private = None
-            if (credential and credential.status == "ready" and credential.sealed is not None
+            if (pending is None and credential and credential.status == "ready" and credential.sealed is not None
                     and credential.binding_digest == binding and credential.expires_at > self.now()):
                 private = self._open(credential.sealed, "credential", account.id, binding)
                 self._grant_scopes(private)

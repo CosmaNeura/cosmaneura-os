@@ -55,7 +55,7 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
   const retained=(handoff as ReviewableHandoff).review;
   const confirmedWithheld=withheldReceipt?.workspaceId===workspace.id&&withheldReceipt.handoffId===handoff.id?withheldReceipt:null;
   const sourceWithheld=identityChanged||journalChanged||recovery.access===null||!!confirmedWithheld||workspace.entries.some(entry=>(entry.id===handoff.result_entry_id||entry.id===pending?.result.entryId||entry.id===recoveryRecord?.result.result_entry_id)&&
-    (entry.google_source_state==='unavailable'||entry.calendar_source_state==='unavailable'));
+    (entry.google_source_state==='unavailable'||entry.calendar_source_state==='unavailable'||entry.fax_source_state==='unavailable'));
   const restoredChanged=!!recoveryRecord&&!handoffRecoveryMatches(recoveryRecord,workspace,handoff);
   const stale=handoff.review_status==='stale'||refusal?.freshAssignment===true||sourceWithheld||restoredChanged;
   const receipt=proof&&!stale?[saved,retained].find(value=>validHandoffReviewReceipt(value)&&value.attempt_id===proof.attemptId&&
