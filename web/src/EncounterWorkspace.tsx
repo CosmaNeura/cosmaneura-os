@@ -289,6 +289,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const heading=document.querySelector<HTMLElement>('.handoff-review h3');
     heading?.scrollIntoView?.({block:'start'});heading?.focus();
   },[reviewHandoffId,workspace?.id,settingsOpen,practiceOpen]);
+  const fastObservationOwner = useRef<{identity:typeof identity;workspaceId:string}|null>(null);
   useEffect(() => {
     if (!workspace || !identity || busy || conflict || handoffReviewPending || !(workspace.entries.some(modelActive)||workspace.handoffs?.some(h =>
       ["queued", "running"].includes(h.status) || (h.result_entry_id && !workspace.entries.some(e => e.id === h.result_entry_id))))) return;
@@ -300,6 +301,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const poll = async () => {
       if(cancelled||reading||!visible())return;
       reading=true;controller=new AbortController();
+      fastObservationOwner.current={identity,workspaceId:workspace.id};
       try {
         const latest = await workspaceApi.read(identity, workspace.id,controller.signal);
         if (cancelled||controller.signal.aborted||!visible()) return;
@@ -337,7 +339,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       document.addEventListener('visibilitychange',visibility);
       window.addEventListener('focus',foreground);
     }
-    if(visible())timer=setTimeout(poll,5000);
+    // Surface short completions sooner; unchanged repeats remain bounded at five seconds.
+    if(visible())timer=setTimeout(poll,fastObservationOwner.current?.identity===identity&&fastObservationOwner.current.workspaceId===workspace.id?5000:2000);
     return () => { cancelled = true; clearTimeout(timer);controller?.abort();removeNative?.();document.removeEventListener('visibilitychange',visibility);window.removeEventListener('focus',foreground); };
   }, [workspace, identity, authenticated, busy, pending, conflict, handoffReviewPending]);
 
