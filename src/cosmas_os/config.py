@@ -116,6 +116,10 @@ class Settings(BaseSettings):
     vendor_io_enabled: bool = False
     vendor_events_enabled: bool = False
     vendor_setup_enabled: bool = False
+    # Independent inbound metadata/image permission; outbound flags grant none.
+    efax_inbound_enabled: bool = False
+    # Explicit human-reviewed fax passages remain separate from clinical notes.
+    efax_inbound_source_enabled: bool = False
     # Deployment-owned, hash-pinned account catalog; secrets are separate process inputs.
     managed_services_config_path: str = ""
     managed_services_config_json: SecretStr | None = None
@@ -156,6 +160,12 @@ class Settings(BaseSettings):
     # New admissions opt into the closed product reader loop; saved v1–v4
     # requests retain their original single-response contract.
     workspace_agent_tools_enabled: bool = False
+
+    @property
+    def efax_inbound_source_available(self) -> bool:
+        return bool(self.workspace_available and self.workspace_authenticated_enabled
+                    and self.auth_mode == "clerk_jwt" and self.efax_inbound_enabled
+                    and self.efax_inbound_source_enabled)
 
     @property
     def workspace_google_message_available(self) -> bool:

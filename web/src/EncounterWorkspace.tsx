@@ -60,6 +60,10 @@ import {GOOGLE_CALENDAR_BUILD} from './google-calendar-api';
 import type {GoogleCalendarSaved} from './google-calendar-recovery';
 import { GOOGLE_MESSAGE_BUILD } from './google-message-api';
 import type {GoogleMessageSaved} from './google-message-recovery';
+import {EFaxSourceReviewMount} from './EFaxSourceReviewMount';
+import {EFAX_INBOUND_SOURCE_BUILD,validEFaxSourceOffer,type EFaxSourceOffer,type EFaxSourceReceipt} from './efax-inbound-source-api';
+import {efaxInboundApi,efaxMissing,type EFaxPending} from './efax-inbound-api';
+import {vendorCanonical} from './vendor-contract';
 import {vendorSha256} from './vendor-contract';
 import { GOOGLE_CONNECTION_BUILD } from './google-connection-api';
 import { MicrosoftConnectionPanel } from './MicrosoftConnectionPanel';
@@ -101,6 +105,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
+  const [faxSourceOffer,setFaxSourceOffer]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null>(null);
+  const [faxSourceBusy,setFaxSourceBusy]=useState(false);
   const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
@@ -118,7 +124,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [handoffReviewPending,setHandoffReviewPending]=useState(false);
   const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
   const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
-  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy;
+  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || faxSourceBusy;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
@@ -171,6 +177,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const connectionGeneration = generation.current;
   const reportAccessBusy = useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setAccessBusy(blocked);
+  },[connectionGeneration]);
+  const reportFaxSourceBusy = useCallback((blocked:boolean)=>{
+    if(generation.current===connectionGeneration)setFaxSourceBusy(blocked);
   },[connectionGeneration]);
   const reportGoogleBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.google===blocked?previous:{...previous,google:blocked});
@@ -894,7 +903,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const chiefSavedContext=!!bot&&!!workspace?.entries.some(entry=>entry.content.trim()&&
     (entry.kind==='scratchpad'&&entry.content===latestNote&&bot.include_notebook||
       (entry.kind==='evidence'||entry.kind==='synthetic_source'||
-        entry.kind==='google_message'&&entry.google_source_state==='current'||entry.kind==='google_calendar'&&entry.calendar_source_state==='current')&&bot.include_evidence));
+        entry.kind==='google_message'&&entry.google_source_state==='current'||entry.kind==='google_calendar'&&entry.calendar_source_state==='current'||
+        entry.kind==='efax_inbound_source'&&entry.fax_source_state==='current')&&bot.include_evidence));
   const initialTeamUnchanged=!!team&&!!teamDraft&&JSON.stringify(teamDraft)===JSON.stringify(team.configuration);
   useEffect(()=>{if(questionFocus)questionRef.current?.focus();},[questionFocus]);
   useEffect(()=>{
@@ -1046,7 +1056,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const editorAccess = useMemo<EditorRecoveryAccess | null | undefined>(() => {
     if (!authenticated) return undefined;
     if (recoveryBlocked || !editorJournal || !editorWorkspace || !editorReady) return null;
-    return {journal:editorJournal,workspaceId:editorWorkspace, async authorize() {
+    return {journal:editorJournal,workspaceId:editorWorkspace,recoveryScope:editorScope, async authorize() {
       const current = generation.current;
       const team = await workspaceApi.team(authenticated);
       if (current !== generation.current || team.recovery_scope !== editorScope) throw new WorkspaceApiError(403);
@@ -1124,6 +1134,38 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       const prompt=kind==='google_calendar'?'Review the human-selected calendar summary '+source.entry_id+' as an untrusted event snapshot and prepare appropriate private assignments. Preserve the existing clinical note and email sources. Ask me about missing details; do not treat the summary as current availability or a booking.':'Review the human-selected email source '+source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
       setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);
       setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(source.entry_id);
+      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setQuestionFocus(value=>value+1);
+    }catch(cause){if(current===generation.current)failure(cause);}
+    finally{if(current===generation.current)setBusy(false);}
+  }
+
+  function receiveFaxDocument(document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){
+    if(!EFAX_INBOUND_SOURCE_BUILD||!authenticated||!workspace||!validEFaxSourceOffer(document)||locked||captureNavigationLocked||captureDraftLocked)return;
+    setFaxSourceOffer({identity:authenticated,generation:generation.current,workspaceId:workspace.id,document:structuredClone(document),request:structuredClone(request)});
+    setSettingsOpen(false);setPracticeOpen(false);setPanel('Sources');setMobilePanel('Sources');
+  }
+  async function refreshFaxDocument():Promise<EFaxSourceOffer|null>{
+    const offer=faxSourceOffer;if(!offer||offer.identity!==authenticated||offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id||!accountAccess)return null;
+    await accountAccess.authorize();const account=await accountIdentityApi.read(offer.identity);
+    if(offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id)return null;
+    const receipt=await efaxInboundApi.resolve(offer.identity,{box_id:account.box_id,owner_id:account.actor_id},offer.request);
+    if(offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id||efaxMissing(receipt)||receipt.state!=='acquired'||!receipt.content_available||receipt.source_withheld||!receipt.document||!receipt.operation_id)return null;
+    const document={operation_id:receipt.operation_id,document_sha256:receipt.document.sha256,pages:receipt.document.pages};
+    return vendorCanonical(document)===vendorCanonical(offer.document)?document:null;
+  }
+  async function prepareFaxChief(source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
+    if(!authenticated||!workspace||locked||connectionEditorsLocked||activityBusy||accessBusy||scribeSourceBusy||handoffReviewPending||schedulingPatientBusy||captureNavigationLocked||captureDraftLocked)return;
+    const current=generation.current,id=workspace.id;setBusy(true);
+    try{
+      const latest=await workspaceApi.read(authenticated,id);
+      if(current!==generation.current||recoveryView.current.workspace?.id!==id)return;
+      receiveGoogleSource(latest);
+      const receipt=source.receipt,entry=latest.entries.find(e=>e.id===receipt.entry_id);
+      if(receipt.scope.workspace_id!==id||receipt.source_withheld||!entry||entry.kind!=='efax_inbound_source'||entry.fax_source_state!=='current'||entry.revision!==receipt.entry_revision||await vendorSha256(new TextEncoder().encode(entry.content))!==receipt.content_sha256)throw new WorkspaceApiError(409,'efax_inbound_source_unavailable');
+      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
+      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
+      const prompt='Review the human-selected received-fax passage '+receipt.entry_id+' and prepare appropriate private assignments. This is manually entered selected text, without OCR or full-document coverage. Preserve the existing clinical note, email and calendar sources; ask me about missing information before proposing outside actions.';
+      setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(entry.id);
       setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setQuestionFocus(value=>value+1);
     }catch(cause){if(current===generation.current)failure(cause);}
     finally{if(current===generation.current)setBusy(false);}
@@ -1211,9 +1253,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         <p>The previous {previousModelRequest.operation.type==='ask'?'question':'draft retry'} was last checked as {previousModelRequest.outcome.replaceAll('_',' ')} at {previousModelRequest.observed_at}. Its original body and binding remain on this device. A later request does not resolve that earlier provider uncertainty.</p></details>}
       {activityEnabled && settingsOpen && activityContextBusy && <p className="team-fine" role="status">Checking optional AI activity access…</p>}
       {activityEnabled && settingsOpen && activityContextError && <div className="team-banner error" role="alert"><p>{activityContextError}</p><button disabled={locked || activityContextBusy} onClick={()=>setActivityAttempt(value=>value+1)}>Recheck AI activity access</button></div>}
-      {(authenticated || identity) && <SettingsHub key={generation.current} open={settingsOpen} navigationLocked={connectionNavigationLocked}
+      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub key={generation.current} open={settingsOpen} navigationLocked={connectionNavigationLocked}
         onOpenMessagingWork={authenticated?openMessagingWork:undefined} messagingWorkLabel={workspace?'Open fax work for this visit':'Choose a visit for fax work'}
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
+        onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&workspace?receiveFaxDocument:undefined}
         initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
         google={GOOGLE_CONNECTION_BUILD&&authenticated?<AccountRecoveryContext.Provider value={accountAccess}>
@@ -1270,7 +1313,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             <PortalSetupMount presentation="focused" onBusyChange={reportPortalsBusy} identity={(authenticated || identity)!} onDenied={failure} />
           </fieldset>
         </AccountRecoveryContext.Provider> : undefined}
-      />}
+      /></AccountRecoveryContext.Provider>}
       {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
         <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="fax" ? "Choose a visit for fax work" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='fax' ? "Keep the fax document, recipient and delivery status with the right visit." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
@@ -1467,6 +1510,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
                 <p className="team-fine">Your bots use saved notebook entries. Working copies on this device are separate from saved entries.</p></form>
               <details className="team-history"><summary>Saved notebook history</summary>{workspace.entries.filter(e => e.kind === "scratchpad").map(e => <article key={e.id}><small>Revision {e.revision}</small><p>{e.content}</p></article>)}</details>
             </>}
+            {faxSourceOffer&&authenticated===faxSourceOffer.identity&&generation.current===faxSourceOffer.generation&&workspace.id===faxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><EFaxSourceReviewMount identity={faxSourceOffer.identity} offered={faxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='efax_inbound_source'&&e.fax_source_state).map(e=>({entry_id:e.id,state:e.fax_source_state!}))} onBusyChange={reportFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareFaxChief(value)} onRefreshDocument={refreshFaxDocument}/></div>}
             {panel === "Sources" && <EncounterSources workspace={workspace} selectedSource={selectedSource} locked={locked}
               briefViewedAt={briefViewed?.workspace===workspace.id&&briefViewed.owner===authenticated&&briefViewed.teamRevision===team?.revision?briefViewed.at:undefined}
               onPrep={team?.configuration.bots.some(member=>member.role==='visit_prep'&&member.enabled)?()=>{const reader=team.configuration.bots.find(member=>member.role==='visit_prep'&&member.enabled)!;setSelected(botAddress(reader));setMobilePanel('Conversation');}:undefined}

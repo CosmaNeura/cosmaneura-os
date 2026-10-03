@@ -117,18 +117,20 @@ def read(s, w, revision):
         unavailable_kinds = set()
         for admission in related_admissions:
             from cosmas_os.adapters.gpt41 import _context
-            from cosmas_os.application import selected_google_sources
+            from cosmas_os.application import selected_connector_sources
 
             for passage in _context(admission.prepared_envelope["context"]).sources:
                 original = s.get(WorkspaceEntry, passage.entry_id)
-                if selected_google_sources.is_selected_google(original):
+                if selected_connector_sources.is_selected_connector(original):
                     try:
-                        selected_google_sources.validate_selected_source(s, w, original.id)
+                        selected_connector_sources.validate_selected_source(s, w, original.id)
                     except ws.WorkspaceError:
                         unavailable_kinds.add(original.kind)
-                        brief = ("The selected email is unavailable. Check its account access before using this draft."
-                                 if original.kind == "google_message" else
-                                 "The selected calendar summary is unavailable. Load and review a fresh summary before using this draft.")
+                        brief = {
+                            "google_message": "The selected email is unavailable. Check its account access before using this draft.",
+                            "google_calendar": "The selected calendar summary is unavailable. Load and review a fresh summary before using this draft.",
+                            "efax_inbound_source": "The reviewed fax passage is unavailable. Check its received-fax access and selected visit before using this draft.",
+                        }[original.kind]
                         evidence.pop("task_brief", None)
                         evidence.pop("completion_evidence", None)
                         evidence["task_brief_unavailable"] = True
@@ -138,6 +140,8 @@ def read(s, w, revision):
         if source_unavailable:
             feedback_notice = ("Email access must be checked before viewing this feedback."
                                if unavailable_kinds == {"google_message"} else
+                               "Check the reviewed fax passage before viewing this feedback."
+                               if "efax_inbound_source" in unavailable_kinds else
                                "Check the selected calendar summary before viewing this feedback.")
             if reviewed:
                 reviewed = {**reviewed, "feedback": feedback_notice}

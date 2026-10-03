@@ -127,9 +127,9 @@ count, a completion timestamp and no reported transmission error. An uncertain
 submission is not automatically sent again; its durable submission claim remains
 in place. Both documented legacy retry counts are set to zero in the request.
 
-This implementation covers outbound submission and delivery status. It does not
-receive faxes, register callbacks, cancel or delete transmissions, or create
-provider accounts. Local tests use invented documents and mocked API responses;
+The outbound adapter covers submission and delivery status. The separate inbound
+path is described below. Neither path registers callbacks, cancels or deletes
+transmissions, or creates provider accounts. Local tests use invented documents and mocked API responses;
 they do not establish live credential validity or successful provider delivery.
 Before enabling a real account, qualify token renewal, caller ID, recipient
 format and a reviewed test transmission with that account. Nothing in this
@@ -137,3 +137,60 @@ configuration activates vendor I/O or deploys a release.
 
 The official protocol references and interpretation are recorded in
 [`validation/efax-api-reference.json`](validation/efax-api-reference.json).
+
+## Received eFax and reviewed encounter passages
+
+Inbound metadata, image acquisition and encounter-source sharing have separate
+controls. Both `EFAX_INBOUND_ENABLED` and `EFAX_INBOUND_SOURCE_ENABLED` default to
+false. The source path also requires the authenticated workspace with Clerk JWT
+identity. The full operational client profile includes
+`VITE_EFAX_INBOUND_ENABLED` and `VITE_EFAX_INBOUND_SOURCE_ENABLED`; the restricted
+first-owner staging profile keeps them false. A client build flag does not
+authorize provider access or replace a reviewed account grant.
+
+The managed manifest has an optional `efax_inbound` array. Each entry supplies an
+exact `ConnectionSelection`, a label, explicit `metadata_enabled` and
+`image_enabled` booleans, and an optional protected credential reference. The
+selection identifies the reviewed inbound account version; it is not inferred
+from an outbound installation. Manifest loading creates no grant and makes no
+provider request. The owner must review the installed account and independently
+grant metadata access and, if desired, image access in the application.
+
+Metadata reads cover one bounded page of at most 25 faxes within a maximum
+seven-day interval. The transport accepts only the fixed
+`https://api.securedocex.com` origin and refuses redirects. Opening a provider
+image marks the fax downloaded/read at eFax. It therefore requires explicit
+human approval of the exact image command through F-8. The application commits
+its immutable once-ever claim before the image GET. An unknown result retains
+that claim; recovery reads local custody and never automatically repeats the
+provider request.
+
+The server inspects received PDFs in a separate process: at most 1 MiB and 50
+pages, five seconds elapsed, three seconds CPU and a 256 MiB memory bound. It
+rejects encrypted documents, embedded files, forms, scripts and external actions.
+The pinned optional dependency is `pypdf==6.10.0`. For a local runtime, install the
+`efax-inbound` extra from the reviewed lock. The API image includes this extra;
+an absent parser or unsupported resource fence leaves image acquisition
+unavailable. This inspection supplies a page count, not OCR or a transcription.
+
+After acquisition, a human chooses the confirmed encounter, reviews the exact
+document and explicitly enters a passage with selected page numbers. Sharing
+requires four acknowledgements covering patient, document, exact text and the
+untrusted source. The resulting source is bounded to 12,000 characters and
+records the original document, receipt, selection and content hashes. It does
+not overwrite an existing clinical note or imply whole-document coverage.
+Chief and specialist tools can read only that currently authorized exact source.
+Revocation, changed account authority or a superseded selection withholds it and
+its derived drafts from current views; historical receipts do not grant access.
+
+The source-review and handoff-review interfaces store pending commands in the
+existing encrypted private draft journal before dispatch. After a lost response,
+the user can restore the command, check its saved status and explicitly retry
+the same command and key. A retry does not reacquire the provider image or create
+a second review. Refresh, restart, grant changes and human acceptance must be
+qualified against the exact release before real use.
+
+Synthetic signed API and mounted-interface checks exercise these paths with
+invented accounts, documents, model responses and provider transports. Real API
+entitlement, coordinated bearer-token renewal, controlled delivery/receipt and
+the matching native installation remain separate acceptance requirements.

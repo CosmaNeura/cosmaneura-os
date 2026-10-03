@@ -251,7 +251,7 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
         t = _ticket(s, w, e.ticket_id) if e.ticket_id else None
         reply = replies.get(e.id)
         content = e.content
-        from cosmas_os.application import selected_google_sources
+        from cosmas_os.application import selected_connector_sources
 
         source_states = {}
         related_admissions = ([admitted[e.id]] if e.id in admitted else []) + revision_admissions.get(e.id, [])
@@ -260,17 +260,17 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
 
             # Uncited output and quoted revision feedback still inherit every
             # frozen selected source. Independent notes and current sources stay.
-            unavailable = selected_google_sources.unavailable_states(
+            unavailable = selected_connector_sources.unavailable_states(
                 s, w, _context(admission.prepared_envelope["context"])
             )
             if unavailable:
                 reply = None
                 content = ""
                 source_states.update({field: "unavailable" for field in unavailable})
-        if selected_google_sources.is_selected_google(e):
-            field = selected_google_sources.SOURCE_STATE_FIELDS[e.kind]
+        if selected_connector_sources.is_selected_connector(e):
+            field = selected_connector_sources.SOURCE_STATE_FIELDS[e.kind]
             try:
-                selected_google_sources.validate_selected_source(s, w, e.id)
+                selected_connector_sources.validate_selected_source(s, w, e.id)
                 source_states[field] = "current"
             except WorkspaceError:
                 content = ""
@@ -278,6 +278,7 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
         unavailable_label = {
             "google_message": "Unavailable email source",
             "google_calendar": "Unavailable calendar source",
+            "efax_inbound_source": "Unavailable received-fax source",
         }.get(e.kind)
         entries.append(
             {

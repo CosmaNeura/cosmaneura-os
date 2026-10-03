@@ -7,6 +7,7 @@ import { useUnsavedWork } from "./unsaved-work";
 export type EditorRecoveryAccess = {
   journal: DraftJournal;
   workspaceId: string;
+  recoveryScope?: string;
   authorize(): Promise<Workspace>;
   denied(error: unknown): void;
 };

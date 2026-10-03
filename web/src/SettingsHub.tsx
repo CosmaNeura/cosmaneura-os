@@ -6,6 +6,8 @@ import {CONNECTION_GUIDES} from './connection-guides';
 import {accountStatusSupported,readConnectionSummary,personalConnectionSummary,type ConnectionSummary} from './connection-summary';
 import {useConnectionHealth} from './connection-operation-health';
 import {FaxConnectionOverview} from './FaxConnectionOverview';
+import {EFaxInboundMount} from './EFaxInboundMount';
+import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
 type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google';
@@ -17,14 +19,16 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false}: {
+export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument}: {
   open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   teamSummary: string; teamDirty: boolean; onClose: () => void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
-  onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;
+  onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
+  const [inboundBusy,setInboundBusy]=useState(false);
+  const leaveLocked=navigationLocked||inboundBusy;
   const [visited, setVisited] = useState<Editor[]>(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
   const messagingEditor=useRef<HTMLDivElement|null>(null);
@@ -93,7 +97,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     title.current?.scrollIntoView?.({block:'start'});
   }, [open, screen]);
   function visit(next: Screen) {
-    if (navigationLocked) return;
+    if (leaveLocked) return;
     if (next !== 'home' && next !== 'connections') {
       if(!(next in CONNECTION_GUIDES)||catalog?.[next as ConnectionId]!==false)
         setVisited(previous => previous.includes(next) ? previous : [...previous, next]);
@@ -121,12 +125,12 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
   }
   return <section className="settings-hub" hidden={!open} aria-label="Settings">
     <nav className="settings-hub-nav" aria-label="Settings navigation">
-      {screen !== 'home' && <button disabled={navigationLocked} onClick={() => visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
+      {screen !== 'home' && <button disabled={leaveLocked} onClick={() => visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
         <span aria-hidden="true">← </span>{screen === 'members' || screen === 'team' || screen === 'connections' ? 'All settings' : 'All connections'}
       </button>}
-      <button className="settings-done" disabled={navigationLocked} onClick={onClose}>Done</button>
+      <button className="settings-done" disabled={leaveLocked} onClick={onClose}>Done</button>
     </nav>
-    {navigationLocked && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
+    {leaveLocked && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
     <header className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
       <h1 ref={title} tabIndex={-1}>{titles[screen]}</h1>
       {screen === 'home' && <p>A little setup. A team that fits your practice.</p>}
@@ -187,6 +191,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       loading={checking} unavailable={!!setupUnavailable} locked={navigationLocked}
       onRefresh={()=>setRefreshCatalog(value=>value+1)} onSetup={()=>{messagingEditor.current?.focus();messagingEditor.current?.scrollIntoView?.({block:'start'});}}
       onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/>}
+    {visited.includes('messaging')&&connectionIdentity&&<div hidden={screen!=='messaging'}><EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/></div>}
     {setupUnavailable&&selectedGuide&&<section className="connection-setup-guide" aria-label="Connection setup steps">
       <span className="connection-badge connection-badge-attention">Needs setup</span><h2>{titles[screen]}</h2><p>{selectedGuide.setup}</p>
       <h3>Your next step</h3><p>Ask your practice administrator to enable this service. No setup request has been sent from this screen.</p>

@@ -33,6 +33,7 @@ from cosmas_os.adapters.vendor_artifact_transport import BoundedAzureArtifactCon
 from cosmas_os.adapters.vendor_artifacts import AzureVendorArtifactStore
 from cosmas_os.adapters.vendor_connectors.transport import Credential
 from cosmas_os.application import finance_settings, vendor_settings
+from cosmas_os.application.efax_inbound import Installation as EFaxInboundInstallation
 from cosmas_os.application.finance_events import FinanceEventRoute
 from cosmas_os.application.vendor_events import EventRoute
 from cosmas_os.config import Settings
@@ -65,6 +66,14 @@ class PaymentInstallation(ProtectedModel):
     credential: SecretReference | None = None
 
 
+class InboundInstallation(ProtectedModel):
+    selection: ConnectionSelection
+    label: str = Field(strict=True, min_length=1, max_length=80)
+    metadata_enabled: bool = Field(strict=True)
+    image_enabled: bool = Field(strict=True)
+    credential: SecretReference | None = None
+
+
 class InstalledEvent(ProtectedModel):
     selection: ConnectionSelection
     route_id: UUID
@@ -87,6 +96,7 @@ class Configuration(ProtectedModel):
     payments: list[PaymentInstallation] = Field(default_factory=list, max_length=50)
     events: list[InstalledEvent] = Field(default_factory=list, max_length=1000)
     artifacts: ArtifactConfiguration | None = None
+    efax_inbound: list[InboundInstallation] = Field(default_factory=list, max_length=50)
 
 
 def _secret(reference: SecretReference) -> str:
@@ -237,7 +247,7 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
         config = _read_configuration(settings)
         if str(config.box_id) != settings.beta_box_id:
             raise ValueError("Configured Box differs")
-        accounts = [*config.delivery, *config.payments]
+        accounts = [*config.delivery, *config.payments, *config.efax_inbound]
         identifiers, credential_ids, secrets = set(), set(), {}
         credentials = []
 
@@ -273,6 +283,8 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
         finance = finance_settings.Catalog(
             finance_settings.Installation(item.selection, item.label) for item in config.payments
         )
+        inbound = tuple(EFaxInboundInstallation(item.selection, item.label,
+            item.metadata_enabled, item.image_enabled) for item in config.efax_inbound)
 
         async def acquire(supplied: ConnectionSelection) -> Credential:
             try:
@@ -280,9 +292,10 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
                 matches = [
                     ref
                     for original, ref in credentials
-                    if original.connection_id != selected.connection_id
-                    and original.model_copy(update={"connection_id": selected.connection_id})
-                    == selected
+                    if (original == selected and any(item.selection == original for item in inbound))
+                    or (original.connection_id != selected.connection_id
+                        and original.model_copy(update={"connection_id": selected.connection_id}) == selected
+                        and not any(item.selection == original for item in inbound))
                 ]
                 if len(matches) != 1:
                     raise ValueError("Account changed")
@@ -341,6 +354,7 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
             credentials=acquire if credentials else None,
             artifact_store=artifact_store,
             events=events if config.events else None,
+            efax_inbound_installations=inbound,
         )
     except Exception:
         raise ValueError("Managed service configuration is invalid or unavailable") from None
