@@ -15,7 +15,7 @@ function compose(value:unknown):VendorComposeDraft {
   const baseKeys=(v:object)=>Object.keys(v).filter(k=>!['revises','supersedes'].includes(k)).sort().join(',');if(baseKeys(value)!==baseKeys(emptyVendorDraft()))fail();
   if(Object.hasOwn(value,'supersedes')&&!Object.hasOwn(value,'revises'))fail();
   const d={...value,revises:Object.hasOwn(value,'revises')?value.revises:null,supersedes:Object.hasOwn(value,'supersedes')?value.supersedes:null} as VendorComposeDraft;
-  if(!['spruce_secure_message','spruce_media_upload','spruce_fax','srfax_fax','documo_fax'].includes(d.action)||!['reported_success','reported_exception','verified_in_vendor','unable_to_establish'].includes(d.result_disposition)||typeof d.share_to_practice!=='boolean')fail();
+  if(!['spruce_secure_message','spruce_media_upload','spruce_fax','srfax_fax','documo_fax','efax_fax'].includes(d.action)||!['reported_success','reported_exception','verified_in_vendor','unable_to_establish'].includes(d.result_disposition)||typeof d.share_to_practice!=='boolean')fail();
   for(const key of ['connection_id','correspondence_id','uploaded_media_operation_id','recipient_id'] as const)if(d[key]!==''&&!vendorUuid(d[key]))fail();
   for(const [key,max] of [['message',4000],['due_date',10],['expected_outcome',500],['result_evidence',2000]] as const)if(typeof d[key]!=='string'||Array.from(d[key]).length>max)fail();
   if(d.source!==null)validateVendor('ReviewedSource',d.source);if(d.document!==null)validateVendor('Document',d.document);if(d.revises!==null)validateVendor('Revision',d.revises);if(d.supersedes!==null){validateVendor('Summary',d.supersedes);if(d.revises!==null||!d.supersedes.submit_claimed)fail();}return structuredClone(d);
