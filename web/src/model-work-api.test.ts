@@ -118,3 +118,14 @@ it('bounds a stalled operational reply and rejects late completion',async()=>{
  await vi.advanceTimersByTimeAsync(75000);await check;expect((fetcher.mock.calls[0][1] as RequestInit).signal?.aborted).toBe(true);
  release(json(receipt));await vi.advanceTimersByTimeAsync(1);expect(fetcher).toHaveBeenCalledOnce();
 });
+
+it('retains an expired unstarted Chief request without replay, and submits only an explicit fresh request',async()=>{
+  const chief={...conversationFixture,role:'chief' as const},original={type:'ask' as const,body:chief};
+  const expired={...await modelReceipt(chief,id),outcome:'abandoned',saved_entry:null,admission:admissionFixture('abandoned'),reason:'reservation_expired'};
+  const fresh={...chief,expected_revision:4,idempotency_key:'invented-expired-fresh-key'};
+  const fetcher=vi.fn().mockResolvedValueOnce(json(expired)).mockResolvedValueOnce(json(await modelReceipt(fresh,id,5)));vi.stubGlobal('fetch',fetcher);
+  await expect(modelWorkApi.resolve(access,id,original)).resolves.toMatchObject({outcome:'abandoned',reason:'reservation_expired',admission:{dispatch:'not_started'}});
+  expect(fetcher).toHaveBeenCalledOnce();expect(fetcher.mock.calls[0][0]).toContain('/conversation/resolve');
+  await modelWorkApi.submit(access,id,{type:'ask',body:fresh});expect(fetcher).toHaveBeenCalledTimes(2);
+  expect(JSON.parse(fetcher.mock.calls[1][1].body)).toMatchObject({idempotency_key:'invented-expired-fresh-key',expected_revision:4,role:'chief'});
+});
