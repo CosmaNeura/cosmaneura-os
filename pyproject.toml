@@ -17,7 +17,7 @@ dependencies = [
     "typer>=0.14.0",
     "httpx>=0.28.0",
     "python-multipart>=0.0.12",
-    "pyjwt[crypto]>=2.10.1",
+    "pyjwt[crypto]>=2.15.1",
     "cryptography>=44",
     "azure-identity>=1.24.0",
     "azure-storage-blob>=12.26.0",
@@ -25,7 +25,7 @@ dependencies = [
 
 [project.optional-dependencies]
 efax-inbound = [
-    "pypdf==6.10.0",
+    "pypdf==6.19.0",
 ]
 mcp = [
     "mcp==2.2.0",
