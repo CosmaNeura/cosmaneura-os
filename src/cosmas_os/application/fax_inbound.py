@@ -651,6 +651,9 @@ def claim(
     old, _ = previous(s, box, actor, "acquire", key, request)
     if old:
         return resolve(s, box, actor, key=key, current=current), None
+    from cosmas_os.application.fax_inbound_document import cipher
+
+    cipher()  # Fail before the one-shot claim when protected custody is unavailable.
     i, t, _, g, scope, fax = image_current(s, box, actor, ticket_id, revision_id, current)
     op = s.scalar(select(Operation).where(Operation.id == i.operation_id).with_for_update())
     approved = s.scalar(
@@ -801,15 +804,16 @@ def settle(s, box, actor, invocation, document, *, current):
         fail("fax_inbound_document_invalid")
     sha = hashlib.sha256(document).hexdigest() if document is not None else None
     state = "acquired" if document is not None else "outcome_unconfirmed"
+    from cosmas_os.application.fax_inbound_document import protect
+
+    protected = protect(document, attempt, i, s.get(FaxInboundGrant, i.grant_id), fax.pages) if document is not None else {}
     s.add(
         FaxInboundOutcome(
             operation_id=oid,
             box_id=box,
             owner_id=actor,
             state=state,
-            document=document,
-            document_sha256=sha,
-            pages=fax.pages if document is not None else None,
+            **protected,
         )
     )
     op = s.get(Operation, oid)
@@ -849,6 +853,11 @@ def resolve(s, box, actor, *, key, current):
             available = False
         outcome = s.get(FaxInboundOutcome, result["operation_id"])
         if outcome:
+            if available and outcome.state == "acquired":
+                try:
+                    document(s, box, actor, result["operation_id"], current=current)
+                except ws.WorkspaceError:
+                    available = False
             result.update(
                 state=outcome.state,
                 document_sha256=outcome.document_sha256 if available else None,
@@ -904,12 +913,13 @@ def document(s, box, actor, oid, *, current):
     if attempt is None:
         fail(status=404)
     i = s.get(FaxInboundImage, attempt.image_id)
-    image_current(s, box, actor, i.ticket_id, i.revision_id, current)
+    _, _, _, grant, _, _ = image_current(s, box, actor, i.ticket_id, i.revision_id, current)
     o = s.get(FaxInboundOutcome, oid)
     if (
         o is None
         or o.state != "acquired"
-        or hashlib.sha256(o.document).hexdigest() != o.document_sha256
     ):
         fail("fax_inbound_document_unavailable", 404)
-    return o.document
+    from cosmas_os.application.fax_inbound_document import open_document
+
+    return open_document(o, attempt, i, grant)

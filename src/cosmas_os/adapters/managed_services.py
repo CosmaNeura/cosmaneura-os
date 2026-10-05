@@ -13,6 +13,8 @@ from cosmas_os.adapters.vendor_connectors.transport import Credential
 from cosmas_os.application import finance_settings, vendor_settings
 from cosmas_os.application.efax_inbound import Installation as EFaxInboundInstallation
 from cosmas_os.application.efax_inbound_execution import EFaxInboundExecution
+from cosmas_os.application.fax_inbound import Installation as FaxInboundInstallation
+from cosmas_os.application.fax_inbound_execution import Execution as FaxInboundExecution
 from cosmas_os.application.finance_settings_execution import FinanceSettingsExecution
 from cosmas_os.application.finance_work import FinancePolicy
 from cosmas_os.application.vendor_settings_execution import VendorSettingsExecution
@@ -41,6 +43,7 @@ class ManagedServiceProfile:
     events: ManagedEventProfile | None = field(default=None, repr=False)
     # Inbound grant and read-state mutation authority are independently installed.
     efax_inbound_installations: tuple[EFaxInboundInstallation, ...] = field(default=(), repr=False)
+    fax_inbound_installations: tuple[FaxInboundInstallation, ...] = field(default=(), repr=False)
 
 
 class ManagedServices:
@@ -71,6 +74,11 @@ class ManagedServices:
                     != len(profile.efax_inbound_installations)):
             raise ValueError("Explicit bounded inbound installations required")
         self.efax_inbound_installations = tuple(profile.efax_inbound_installations)
+        if (len(profile.fax_inbound_installations) > 20
+                or any(type(i) is not FaxInboundInstallation for i in profile.fax_inbound_installations)
+                or len({str(i.selection.connection_id) for i in profile.fax_inbound_installations}) != len(profile.fax_inbound_installations)):
+            raise ValueError("Distinct bounded fax inbound installations required")
+        self.fax_inbound_installations = tuple(profile.fax_inbound_installations)
 
     def _available(self) -> bool:
         return bool(not self._closed and self._settings.workspace_available
@@ -164,6 +172,24 @@ class ManagedServices:
         return EFaxInboundExecution(self._sessions, self.efax_inbound_installations, credentials,
             identity_current=identity_current, enabled=enabled,
             transport_factory=self._profile.transport_factory)
+
+    def fax_inbound_execution(self, identity_current: CurrentIdentity) -> FaxInboundExecution:
+        if not self.has_credentials:
+            raise VendorError("connector_disabled")
+        provider = self._profile.credentials
+        def enabled():
+            return self._available() and self._settings.fax_inbound_enabled
+        async def credentials(selected):
+            if not enabled() or not any(i.selection == selected for i in self.fax_inbound_installations):
+                raise VendorError("connection_changed")
+            value = await provider(selected)
+            if (not enabled() or not isinstance(value, Credential)
+                    or value.selection_sha256 != selected.commitment()
+                    or value.credential_ref != str(selected.credential_ref)):
+                raise VendorError("connection_changed")
+            return value
+        return FaxInboundExecution(self._sessions, self.fax_inbound_installations, credentials,
+            identity_current=identity_current, enabled=enabled, transport_factory=self._profile.transport_factory)
 
     def efax_source_current(self, session, retained) -> bool:
         """DB-only custody guard shared by human requests and source readers."""

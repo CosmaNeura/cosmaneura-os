@@ -18,20 +18,20 @@ run "configured_account_connections" {
   variables {
     hosted_enabled = true
     features = {
-      WORKSPACE_CORE_CONNECTION_ENABLED       = true
-      WORKSPACE_ATHENA_CONNECTION_ENABLED     = true
-      WORKSPACE_ATHENA_VISIT_LINK_ENABLED     = true
-      WORKSPACE_SCHEDULING_ENABLED            = true
-      WORKSPACE_SCHEDULING_LOGIN_ENABLED      = true
-      WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED = true
+      WORKSPACE_CORE_CONNECTION_ENABLED          = true
+      WORKSPACE_ATHENA_CONNECTION_ENABLED        = true
+      WORKSPACE_ATHENA_VISIT_LINK_ENABLED        = true
+      WORKSPACE_SCHEDULING_ENABLED               = true
+      WORKSPACE_SCHEDULING_LOGIN_ENABLED         = true
+      WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED    = true
       WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED = true
-      WORKSPACE_APPOINTMENTS_ENABLED = true
-      WORKSPACE_GOOGLE_CONNECTION_ENABLED     = true
-      WORKSPACE_GOOGLE_MESSAGE_ENABLED        = true
-      WORKSPACE_GOOGLE_CALENDAR_ENABLED       = true
-      WORKSPACE_MICROSOFT_CONNECTION_ENABLED  = true
-      VENDOR_WORK_ENABLED                     = true
-      VENDOR_IO_ENABLED                       = true
+      WORKSPACE_APPOINTMENTS_ENABLED             = true
+      WORKSPACE_GOOGLE_CONNECTION_ENABLED        = true
+      WORKSPACE_GOOGLE_MESSAGE_ENABLED           = true
+      WORKSPACE_GOOGLE_CALENDAR_ENABLED          = true
+      WORKSPACE_MICROSOFT_CONNECTION_ENABLED     = true
+      VENDOR_WORK_ENABLED                        = true
+      VENDOR_IO_ENABLED                          = true
     }
     public_configuration = {
       CORE_CAPTURE_ORIGIN               = "https://core-api.example.invalid"
@@ -108,7 +108,7 @@ run "patient_setup_requires_sign_in_and_proposals" {
   command = plan
   variables {
     hosted_enabled = true
-    features = { WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED = true }
+    features       = { WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED = true }
   }
   expect_failures = [terraform_data.configuration_guard]
 }
@@ -163,6 +163,53 @@ run "athena_without_core_rejected" {
   variables {
     hosted_enabled = true
     features       = { WORKSPACE_ATHENA_CONNECTION_ENABLED = true }
+  }
+  expect_failures = [terraform_data.configuration_guard]
+}
+
+run "provider_fax_requires_document_custody_key" {
+  command = plan
+  variables {
+    hosted_enabled   = true
+    features         = { FAX_INBOUND_ENABLED = true }
+    managed_manifest = { secret_name = "fax-accounts", version = "00000000000000000000000000000009", sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+  }
+  expect_failures = [terraform_data.configuration_guard]
+}
+
+run "provider_fax_requires_receiving_for_source" {
+  command = plan
+  variables {
+    hosted_enabled = true
+    features       = { FAX_INBOUND_SOURCE_ENABLED = true }
+  }
+  expect_failures = [terraform_data.configuration_guard]
+}
+
+run "provider_fax_configured_custody_keeps_key_private" {
+  command = plan
+  variables {
+    hosted_enabled       = true
+    features             = { FAX_INBOUND_ENABLED = true, FAX_INBOUND_SOURCE_ENABLED = true }
+    public_configuration = { FAX_INBOUND_DOCUMENT_KEY_ID = "invented-fax-v1" }
+    secret_references    = { FAX_INBOUND_DOCUMENT_ENCRYPTION_KEY = { secret_name = "fax-custody", version = "00000000000000000000000000000010" } }
+    managed_manifest     = { secret_name = "fax-accounts", version = "00000000000000000000000000000009", sha256 = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" }
+  }
+  assert {
+    condition     = output.public_env.FAX_INBOUND_ENABLED == "true" && output.public_env.FAX_INBOUND_SOURCE_ENABLED == "true" && output.public_env.FAX_INBOUND_DOCUMENT_KEY_ID == "invented-fax-v1" && !contains(keys(output.public_env), "FAX_INBOUND_DOCUMENT_ENCRYPTION_KEY")
+    error_message = "Receiving and passage review require distinct explicit gates with a private key reference."
+  }
+  assert {
+    condition     = output.secret_definitions[output.secret_env.FAX_INBOUND_DOCUMENT_ENCRYPTION_KEY] == "https://invented-beta.vault.azure.net/secrets/fax-custody/00000000000000000000000000000010"
+    error_message = "Document custody retains its exact private key version."
+  }
+}
+
+run "provider_fax_invalid_key_id_rejected" {
+  command = plan
+  variables {
+    hosted_enabled       = true
+    public_configuration = { FAX_INBOUND_DOCUMENT_KEY_ID = "invented/key" }
   }
   expect_failures = [terraform_data.configuration_guard]
 }
