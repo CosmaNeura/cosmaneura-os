@@ -20,12 +20,36 @@ remains in the selected OS service's Google/Microsoft connection docs and retain
 MIT license.
 
 Google uses a separate confidential web client from Scheduling staff login and
-Calendar. The existing flow requests `openid email gmail.metadata` and only
-displays bounded inbox metadata. Microsoft uses one configured work/school tenant,
+Calendar. Normal sign-in requests `openid email gmail.metadata` plus
+`https://www.googleapis.com/auth/calendar.events.readonly`, matching the existing
+adapter. Metadata-only legacy grants remain accepted; they cannot read calendar
+summaries until the human adds calendar access. Microsoft uses one configured work/school tenant,
 requests `offline_access User.Read Mail.Read Calendars.Read`, and displays bounded
 email/calendar summaries. The flows retain explicit account consent, PKCE,
 server-side encrypted token custody, current member checks and disconnect behavior.
 Neither input accepts custom scopes or endpoints.
+
+The Google section optionally accepts this closed feature selection:
+
+```json
+"enabled": {"full_message": false, "calendar": false}
+```
+
+Omitting `enabled` preserves both source features as false. If present, both
+fields must be literal booleans. They select `WORKSPACE_GOOGLE_MESSAGE_ENABLED`
+and `WORKSPACE_GOOGLE_CALENDAR_ENABLED` in the complete service and Athena maps.
+They enable the existing selected-source interfaces, not account grants or human
+review. Matching client feature flags and reviewed public OAuth inputs still
+require an appropriate web/native build. Calendar summaries remain bounded to
+the primary calendar's next seven days; selected full email remains bounded to
+5,000 characters with unsupported content withheld for human handling.
+
+`provider-registration.json` records normal sign-in scopes, accepted legacy
+scopes and the selected source features separately. Only explicit
+`full_message:true` adds `full_message_consent_scopes` with `gmail.readonly` for
+the separate human full-message consent flow. Normal sign-in does not acquire
+that scope. Neither feature selection performs consent, source review, a read,
+email sending or calendar mutation.
 
 Each OAuth client secret and 32-byte custody key needs a separate immutable Key
 Vault reference. Supply the actual values using the existing secret ownership

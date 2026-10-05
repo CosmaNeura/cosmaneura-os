@@ -1933,7 +1933,8 @@ def _inbox_registry():
     # Fresh server-installed read authority is separate from outgoing permissions.
     from cosmas_os.application.inbox_work import no_registry
 
-    return no_registry
+    runtime = managed_services(app)
+    return runtime.inbox_registry if runtime is not None else no_registry
 
 
 def _inbox_analysis_sources():
@@ -1951,7 +1952,7 @@ def _routine_sources():
 
     # The worker and signed reads resolve the same current server configuration.
     # Trusted dependency overrides are fixture/integration configuration only;
-    # the product's unconfigured supplier remains the empty reviewed registry.
+    # an unconfigured product retains the empty reviewed registry.
     def registry():
         return app.dependency_overrides.get(_inbox_registry, _inbox_registry)()()
     def policy():
