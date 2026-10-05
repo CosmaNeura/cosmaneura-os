@@ -584,13 +584,13 @@ def _context_for(
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
                 prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT
-                and s.get(WorkspaceEntry, source.entry_id).kind == "efax_inbound_source"
+                and s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
             ) for source in context.sources)
             or sum(len(source.content) for source in context.sources) > 30000):
         has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind == "google_calendar"
             for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
         raise ws.WorkspaceError("selected_google_context_too_large" if has_calendar else "google_message_context_too_large", 422)
-    has_fax = any(s.get(WorkspaceEntry, source.entry_id).kind == "efax_inbound_source"
+    has_fax = any(s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
                   for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
     if has_fax:
         try:
@@ -656,12 +656,14 @@ def _selected_google_passages(s, workspace, settings):
 
 def _selected_connector_passages(s, workspace, settings):
     sources = _selected_google_passages(s, workspace, settings)
-    if not team.runtime_settings.efax_inbound_source_available:
-        return sources
-    from cosmas_os.application import efax_inbound_source
+    from cosmas_os.application import efax_inbound_source, fax_inbound_source
     from cosmas_os.ports.bot_capabilities import SourcePassage
 
-    reviewed = efax_inbound_source.selected_entries(s, workspace, settings, workspace.revision)
+    reviewed = []
+    if team.runtime_settings.efax_inbound_source_available:
+        reviewed.extend(efax_inbound_source.selected_entries(s, workspace, settings, workspace.revision))
+    if team.runtime_settings.fax_inbound_source_available:
+        reviewed.extend(fax_inbound_source.selected_entries(s, workspace, settings, workspace.revision))
     return tuple(sorted((*sources, *(SourcePassage(row.id, row.revision, row.source_label,
                         "evidence", row.content) for row in reviewed)), key=lambda source: source.revision))
 

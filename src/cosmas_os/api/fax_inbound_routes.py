@@ -8,6 +8,7 @@ from starlette.responses import JSONResponse, Response
 
 from cosmas_os.api import fax_inbound_schemas as schema
 from cosmas_os.application import fax_inbound as ledger
+from cosmas_os.application import fax_inbound_source as source
 from cosmas_os.application.workspace import WorkspaceError
 from cosmas_os.ports.fax_inbound import bounded_json
 
@@ -67,7 +68,43 @@ def register(app, get_session, identity_dependency, *, execution_dependency, rea
             ledger.fail("fax_inbound_request_invalid", 400)
 
     # Use Request explicitly so FastAPI does not mistake it for a query field.
+    from uuid import UUID
+
     from starlette.requests import Request
+
+    @app.post("/workspaces/{workspace_id}/fax-inbound-source")
+    async def review_source(
+        workspace_id: UUID,
+        request: Request,
+        session=Depends(get_session),
+        identity=Depends(identity_dependency),
+        runtime=Depends(execution_dependency),
+    ):
+        try:
+            value = await body(request, source.FaxSourceReviewCommand, limit=65536)
+        except WorkspaceError as exc:
+            return JSONResponse({"error": exc.code}, status_code=exc.status, headers=HEADERS)
+        return await execute(request, session, identity, runtime,
+            lambda: source.select_review(session, identity.box_id, identity.principal_id,
+                str(workspace_id), expected=value.expected_revision, key=value.idempotency_key,
+                **value.model_dump(exclude={"expected_revision", "idempotency_key"}),
+                reauthenticate=lambda: reauthenticate(request, session, identity)))
+
+    @app.post("/workspaces/{workspace_id}/fax-inbound-source/resolve")
+    async def resolve_source(
+        workspace_id: UUID,
+        request: Request,
+        session=Depends(get_session),
+        identity=Depends(identity_dependency),
+        runtime=Depends(execution_dependency),
+    ):
+        try:
+            value = await body(request, schema.Resolve, limit=2048)
+        except WorkspaceError as exc:
+            return JSONResponse({"error": exc.code}, status_code=exc.status, headers=HEADERS)
+        return await execute(request, session, identity, runtime,
+            lambda: source.resolve_review(session, identity.box_id, identity.principal_id,
+                str(workspace_id), key=value.idempotency_key))
 
     @app.get("/fax-inbound")
     async def status(

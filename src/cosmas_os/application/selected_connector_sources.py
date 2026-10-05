@@ -11,6 +11,7 @@ SOURCE_STATE_FIELDS = {
     "google_message": "google_source_state",
     "google_calendar": "calendar_source_state",
     "efax_inbound_source": "fax_source_state",
+    "fax_inbound_source": "practice_fax_source_state",
 }
 
 
@@ -31,6 +32,10 @@ def _service(kind):
         from cosmas_os.application import efax_inbound_source
 
         return efax_inbound_source
+    if kind == "fax_inbound_source":
+        from cosmas_os.application import fax_inbound_source
+
+        return fax_inbound_source
     raise ws.WorkspaceError("selected_connector_source_invalid")
 
 

@@ -118,6 +118,7 @@ class Settings(BaseSettings):
     vendor_setup_enabled: bool = False
     # Independent inbound metadata/image permission; outbound flags grant none.
     fax_inbound_enabled: bool = False
+    fax_inbound_source_enabled: bool = False
     fax_inbound_document_encryption_key: SecretStr | None = None
     fax_inbound_document_key_id: str = "fax-document-v1"
     efax_inbound_enabled: bool = False
@@ -163,6 +164,12 @@ class Settings(BaseSettings):
     # New admissions opt into the closed product reader loop; saved v1–v4
     # requests retain their original single-response contract.
     workspace_agent_tools_enabled: bool = False
+
+    @property
+    def fax_inbound_source_available(self) -> bool:
+        return bool(self.workspace_available and self.workspace_authenticated_enabled
+                    and self.auth_mode == "clerk_jwt" and self.fax_inbound_enabled
+                    and self.fax_inbound_source_enabled)
 
     @property
     def efax_inbound_source_available(self) -> bool:

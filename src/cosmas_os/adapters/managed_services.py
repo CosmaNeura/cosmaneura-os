@@ -191,6 +191,11 @@ class ManagedServices:
         return FaxInboundExecution(self._sessions, self.fax_inbound_installations, credentials,
             identity_current=identity_current, enabled=enabled, transport_factory=self._profile.transport_factory)
 
+    def fax_source_current(self, item) -> bool:
+        """Local installed-account comparison; no credentials or provider reads."""
+        return bool(self.has_credentials and self._settings.fax_inbound_source_available
+                    and item.image_enabled and any(i == item for i in self.fax_inbound_installations))
+
     def efax_source_current(self, session, retained) -> bool:
         """DB-only custody guard shared by human requests and source readers."""
         if not self.has_credentials or not self._settings.efax_inbound_source_available:
@@ -245,8 +250,11 @@ def managed_services_lifespan(app: FastAPI, settings: Settings, sessions: Callab
         runtime = ManagedServices(settings, profile, sessions) if profile is not None else None
         app.state.managed_services = runtime
         from cosmas_os.application.efax_inbound_source import install_binding_reader
+        from cosmas_os.application.fax_inbound_source import (
+            install_binding_reader as install_fax_reader,
+        )
 
-        with install_binding_reader(runtime.efax_source_current if runtime is not None else None):
+        with install_binding_reader(runtime.efax_source_current if runtime is not None else None), install_fax_reader(runtime.fax_source_current if runtime is not None else None):
             yield
     finally:
         app.state.managed_services = None
