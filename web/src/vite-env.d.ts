@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_COSMAS_ENV?: "synth_os" | "early_adopter_beta";
   readonly VITE_VENDOR_SETUP_ENABLED?: string;
   readonly VITE_EFAX_INBOUND_ENABLED?: string;
+  readonly VITE_FAX_INBOUND_ENABLED?: string;
+  readonly VITE_FAX_INBOUND_SOURCE_ENABLED?: string;
   readonly VITE_EFAX_INBOUND_SOURCE_ENABLED?: string;
   readonly VITE_INBOX_ENABLED?: string;
   readonly VITE_INBOX_HANDOFF_ENABLED?: string;

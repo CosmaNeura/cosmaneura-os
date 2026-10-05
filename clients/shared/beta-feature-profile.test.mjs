@@ -27,7 +27,7 @@ test('profile covers every actual workflow gate, including the formerly omitted 
   }
   for(const key of gates)assert.ok(key in env,`Unclassified build gate: ${key}`);
   for(const key of BETA_FEATURE_FLAGS)assert.ok(gates.has(key),`Unused profile flag: ${key}`);
-  for(const key of ['VITE_WORKSPACE_CAPTURE_ENABLED','VITE_WORKSPACE_APPOINTMENTS_ENABLED','VITE_INBOX_ENABLED','VITE_COSMANEURA_RECORD_ENABLED'])assert.equal(env[key],'true');
+  for(const key of ['VITE_WORKSPACE_CAPTURE_ENABLED','VITE_WORKSPACE_APPOINTMENTS_ENABLED','VITE_INBOX_ENABLED','VITE_COSMANEURA_RECORD_ENABLED','VITE_FAX_INBOUND_ENABLED','VITE_FAX_INBOUND_SOURCE_ENABLED'])assert.equal(env[key],'true');
 });
 test('rejects prior partial recipes, misspelled flags and individual feature exclusions',()=>{
   for(const change of [{VITE_WORKSPACE_FEATURE_PROFILE:undefined},{VITE_WORKSPACE_AI_ACTIVITY_ENABLED:'true'},
