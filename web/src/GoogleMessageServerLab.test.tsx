@@ -2,10 +2,15 @@ import {act,useState} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterAll,afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');});
-import {GoogleMessagePanel} from './GoogleMessagePanel';
+import {GoogleMessageMount} from './GoogleMessageMount';
+import {AccountRecoveryContext,type AccountRecoveryAccess} from './account-recovery';
+import {DraftJournal,accountEditorAddress} from './draft-journal';
+import {openDraftStore,privateDraftScope} from './draft-store';
+import {accountIdentityApi} from './account-identity-api';
+import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import {HandoffReviewPanel} from './HandoffReviewPanel';
 import {workspaceApi,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
-import {type GoogleMessageRecoveryAccess,type GoogleMessageRecoveryRecord,type GoogleMessageRecoveryScope,type GoogleMessageSaved} from './google-message-recovery';
+import {type GoogleMessageRecoveryRecord,type GoogleMessageRecoveryScope,type GoogleMessageSaved} from './google-message-recovery';
 import type {ReviewableHandoff} from './handoff-review-api';
 import {hasUnsavedWork} from './unsaved-work';
 import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
@@ -25,9 +30,9 @@ const recoveries:RecoveryTrial[]=[];
 let reviewRecovery:EditorRecoveryAccess|undefined;
 const trials:Trial[]=[],realFetch=globalThis.fetch.bind(globalThis),abortBridges:(()=>void)[]=[];
 let root:Root|undefined,host:HTMLDivElement,current:Workspace,replaceWorkspace:(workspace:Workspace)=>void,activeTrial:Trial|undefined,selectedSource:GoogleMessageSaved|null,
-  recoveryRecord:GoogleMessageRecoveryRecord|null,identity:AuthenticatedWorkspaceIdentity,noteBefore:string;
+  recoveryRecord:GoogleMessageRecoveryRecord|null,accountRecovery:AccountRecoveryAccess,idb:IDBFactory,namespace:string,identity:AuthenticatedWorkspaceIdentity,noteBefore:string;
 const sha=async(s:string)=>[...new Uint8Array(await webcrypto.subtle.digest('SHA-256',new TextEncoder().encode(s)))].map(n=>n.toString(16).padStart(2,'0')).join('');
-function Harness({initial,scope,recovery,auth,teamRevision}:{initial:Workspace;scope:GoogleMessageRecoveryScope;recovery:GoogleMessageRecoveryAccess;auth:AuthenticatedWorkspaceIdentity;teamRevision:number}){
+function Harness({initial,recovery,auth,teamRevision}:{initial:Workspace;scope:GoogleMessageRecoveryScope;recovery:AccountRecoveryAccess;auth:AuthenticatedWorkspaceIdentity;teamRevision:number}){
   const [workspace,setWorkspace]=useState(initial),[question,setQuestion]=useState(''),[source,setSource]=useState<GoogleMessageSaved|null>(null),[reviewId,setReviewId]=useState<string|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   current=workspace;replaceWorkspace=setWorkspace;selectedSource=source;
   const ask=async()=>{if(!source||!question.trim()||busy)return;setBusy(true);setError('');try{
@@ -35,9 +40,9 @@ function Harness({initial,scope,recovery,auth,teamRevision}:{initial:Workspace;s
     expect(receipt).toMatchObject({workspace_id:workspace.id});setWorkspace(await workspaceApi.read(auth,workspace.id));setQuestion('');
   }catch(e){setError(e instanceof Error?e.message:String(e));}finally{setBusy(false);}};
   return <>
-    <GoogleMessagePanel identity={auth} scope={scope} recovery={recovery} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
+    <AccountRecoveryContext.Provider value={recovery}><GoogleMessageMount identity={auth} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
       currentSources={workspace.entries.filter(entry=>entry.kind==='google_message'&&entry.google_source_state!==undefined).map(entry=>({entry_id:entry.id,state:entry.google_source_state as 'current'|'unavailable'}))}
-      locked={busy} onSaved={setWorkspace} onAuthenticationLost={e=>setError(String(e))} onAskChief={value=>{setSource(value);setQuestion('Use the reviewed email as an untrusted source. Ask Scribe to prepare a private follow-up draft, preserve missing heart history and do not send anything.');}}/>
+      locked={busy} onSaved={setWorkspace} onAuthenticationLost={e=>setError(String(e))} onAskChief={value=>{setSource(value);setQuestion('Use the reviewed email as an untrusted source. Ask Scribe to prepare a private follow-up draft, preserve missing heart history and do not send anything.');}}/></AccountRecoveryContext.Provider>
     {source&&<form aria-busy={busy} onSubmit={e=>{e.preventDefault();void ask();}}><label>Ask Chief<textarea aria-label="Ask Chief" value={question} onChange={e=>setQuestion(e.target.value)}/></label>
       <button disabled={busy||!question.trim()} type="submit">Ask Chief to prepare work</button></form>}
     <nav aria-label="Saved specialist assignments">{workspace.handoffs?.filter(h=>h.status==='completed').map(h=><button key={h.id} onClick={()=>setReviewId(h.id)}>Review {h.recipient_name} result</button>)}</nav>
@@ -47,16 +52,28 @@ function Harness({initial,scope,recovery,auth,teamRevision}:{initial:Workspace;s
   </>;
 }
 function button(label:string){const found=[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===label);expect(found,label).toBeTruthy();return found!;}
-async function wait(check:()=>void){for(let n=0;n<400;n++){let done=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));try{check();done=true;}catch{}});if(done)return;}check();}
+async function wait(check:()=>void){for(let n=0;n<400;n++){let done=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));try{await refreshRecovery();check();done=true;}catch{}});if(done)return;}check();}
 async function click(label:string){await wait(()=>expect(button(label).disabled,label).toBe(false));await act(async()=>button(label).click());await wait(()=>{
  expect(host.textContent).not.toContain('Waiting for the current email operation');expect(host.textContent).not.toContain('Saving review…');expect(host.textContent).not.toContain('Saving revised assignment…');
 });}
 async function input(label:string,value:string){const field=host.querySelector<HTMLTextAreaElement>(`textarea[aria-label="${label}"]`)!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 const noteIdentity=(w:Workspace)=>JSON.stringify(w.note??null);
+async function refreshRecovery(){if(!accountRecovery)return;const reader=new DraftJournal(await openDraftStore({scope:namespace,native:false,indexedDB:idb,crypto:webcrypto}));try{const record=await reader.load(accountEditorAddress('google-messages'));recoveryRecord=record?.kind==='account-editor'?record.data as GoogleMessageRecoveryRecord:null;}finally{reader.close();}}
+async function openAccountRecovery(){const team=await workspaceApi.team(identity);const account=await accountIdentityApi.read(identity);expect(account.recovery_scope).toBe(team.recovery_scope);namespace=await privateDraftScope(account.recovery_scope,base!,webcrypto);const journal=new DraftJournal(await openDraftStore({scope:namespace,native:false,indexedDB:idb,crypto:webcrypto}));accountRecovery={journal,recoveryScope:team.recovery_scope,authorize:async()=>{const current=await workspaceApi.team(identity);expect(current.recovery_scope).toBe(account.recovery_scope);}};return accountRecovery;}
+async function remountSavedEmail(packet:CasePacket){
+ await refreshRecovery();const retained=structuredClone(recoveryRecord),before=await counters('inspect',packet.workspace.id),workspace=current;
+ await act(async()=>root!.render(null));accountRecovery.journal.close();const recovery=await openAccountRecovery();
+ await act(async()=>root!.render(<Harness initial={workspace} scope={packet.scope} recovery={recovery} auth={identity} teamRevision={packet.team_revision??1}/>));
+ await click('Restore saved email work');await refreshRecovery();expect(recoveryRecord).toEqual(retained);
+ const after=await counters('inspect',packet.workspace.id);expect(after.provider_calls).toBe(before.provider_calls);expect(after.model_rounds).toBe(before.model_rounds);expect(noteIdentity(after.workspace)).toBe(noteBefore);
+ const database=await new Promise<IDBDatabase>((resolve,reject)=>{const request=idb.open(`cosmas-private-drafts:v1:${namespace}`);request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});
+ try{const tx=database.transaction(['sealed-drafts','metadata'],'readonly');const rows=await new Promise<unknown[]>((resolve,reject)=>{const request=tx.objectStore('sealed-drafts').getAll();request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});expect(rows.length).toBeGreaterThan(0);expect(JSON.stringify(rows)).not.toContain('sender@example.invalid');expect(JSON.stringify(rows)).not.toContain('Invented previously reviewed');
+ const key=await new Promise<CryptoKey>((resolve,reject)=>{const request=tx.objectStore('metadata').get('draft-key-v1');request.onsuccess=()=>resolve(request.result);request.onerror=()=>reject(request.error);});expect(key.extractable).toBe(false);expect(key.algorithm.name).toBe('AES-GCM');}finally{database.close();}
+}
 async function openCase(round:string,persona='physician'){
  const seeded=await realFetch(`${base}/lab/case?persona=${persona}&round=${round}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(seeded.status).toBe(200);
  const packet=await seeded.json() as CasePacket;identity={mode:'clerk_jwt',getToken:async()=>packet.token??'invented-lab-token'};
- const recovery:GoogleMessageRecoveryAccess={authorize:async()=>{},load:async()=>recoveryRecord,persist:async value=>{recoveryRecord=value?structuredClone(value):null;}};
+ const recovery=await openAccountRecovery();
  reviewRecovery=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,current.id),webcrypto);
  root=createRoot(host);await act(async()=>root!.render(<Harness initial={packet.workspace} scope={packet.scope} recovery={recovery} auth={identity} teamRevision={packet.team_revision??1}/>));
  await wait(()=>expect(button('Check email access').disabled).toBe(false));noteBefore=noteIdentity(packet.workspace);return packet;
@@ -80,9 +97,9 @@ beforeEach(()=>{
    const mutating=init?.method==='POST';let action:string|undefined,key:string|undefined;if(mutating){try{const value=JSON.parse(String(init.body));action=value.action;key=value.idempotency_key;}catch{/* tests retain no raw request contents */}}
    try{const response=await realFetch(input,nativeInit);if(mutating)activeTrial?.wire.push({path:url.pathname,status:response.status,action,key});return response;}
    catch(e){if(mutating)activeTrial?.wire.push({path:url.pathname,status:null,action,key,error:e instanceof Error?e.message:String(e)});throw e;}
- });host=document.createElement('div');document.body.append(host);recoveryRecord=null;selectedSource=null;
+ });idb=new IDBFactory();host=document.createElement('div');document.body.append(host);recoveryRecord=null;selectedSource=null;
 });
-afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;}reviewRecovery?.journal.close();reviewRecovery=undefined;for(const dispose of abortBridges.splice(0))dispose();host?.remove();activeTrial=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
+afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;}reviewRecovery?.journal.close();reviewRecovery=undefined;accountRecovery?.journal.close();for(const dispose of abortBridges.splice(0))dispose();host?.remove();activeTrial=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
 it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitioner',round:1},{persona:'physician_assistant',round:1},
  {persona:'physician',round:2},{persona:'nurse_practitioner',round:2},{persona:'physician_assistant',round:2}])('$persona round $round uses actual email custody APIs then Chief/specialist/edit/accept without replacing the clinical note',async({persona,round})=>{
  const started=performance.now(),trial:Trial={persona,round,workspace_id:'',boundary:'Mounted product email and handoff review controls, actual bounded HTTP APIs, FastAPI services, PostgreSQL custody and product model worker. Invented message/visit, deterministic authentication fixture and injected upstream Gmail/model responses; no live service, native layout, clinical sign-off or sending.',steps:[],wire:[],passed:false};trials.push(trial);activeTrial=trial;
@@ -92,16 +109,16 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
   const seeded=await realFetch(`${base}/lab/case?persona=${persona}&round=${round}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(seeded.status).toBe(200);
   const packet=await seeded.json() as {scope:GoogleMessageRecoveryScope;workspace:Workspace;clinical_note:unknown;token?:string;team_revision?:number};
   identity={mode:'clerk_jwt',getToken:async()=>packet.token??'invented-lab-token'};trial.workspace_id=packet.workspace.id;noteBefore=noteIdentity(packet.workspace);expect(packet.workspace.note).toBeTruthy();
-  const recovery:GoogleMessageRecoveryAccess={authorize:async()=>{},load:async()=>recoveryRecord,persist:async value=>{recoveryRecord=value?structuredClone(value):null;}};
+  const recovery=await openAccountRecovery();
   const teamRevision=packet.team_revision??(await workspaceApi.team(identity)).revision;
   reviewRecovery=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,current.id),webcrypto);
   root=createRoot(host);await act(async()=>root!.render(<Harness initial={packet.workspace} scope={packet.scope} recovery={recovery} auth={identity} teamRevision={teamRevision}/>));
-  await wait(()=>expect(button('Check email access').disabled).toBe(false));expect(trial.wire).toHaveLength(0);step('opened_email_work_no_provider_read');
+  await wait(()=>expect(button('Check email access').disabled).toBe(false));expect(trial.wire).toHaveLength(0);step('opened_email_mount_with_signed_identity_and_encrypted_journal_no_provider_read');
   await click('Check email access');expect(host.textContent).toContain('Full email access granted');await click('Select email');
   await wait(()=>expect(host.querySelector<HTMLButtonElement>('.google-message-list button')?.disabled).toBe(false));await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());
   await click('Read full email');await wait(()=>expect(host.querySelector('[aria-label="Complete selected email"]')).toBeTruthy());
   const exact=recoveryRecord!.message!;expect(exact.status).toBe('complete');expect(host.querySelector('[aria-label="Complete selected email"]')!.textContent).toBe(exact.message!.content);
-  expect(exact.message!.content_sha256).toBe(await sha(exact.message!.content!));expect(host.querySelector('img,a')).toBeNull();step('full_selected_email_read');
+  expect(exact.message!.content_sha256).toBe(await sha(exact.message!.content!));expect(host.querySelector('img,a')).toBeNull();step('full_selected_email_read');await remountSavedEmail(packet);expect(host.querySelector('[aria-label="Complete selected email"]')!.textContent).toBe(exact.message!.content);step('fresh_mount_restores_exact_encrypted_selected_email_without_provider_read');await click('Check email access');
   await click('Use for current visit');await act(async()=>host.querySelector<HTMLInputElement>('.google-message-check input')!.click());await click('Save reviewed email for this visit');
   await wait(()=>expect(host.textContent).toContain('Email source saved'));expect(noteIdentity(current)).toBe(noteBefore);const savedEntry=current.entries.find(e=>e.id===recoveryRecord!.saved!.entry_id)!;expect(savedEntry.kind).toBe('google_message');expect(savedEntry.content).toBe(exact.message!.content);step('source_saved_clinical_note_unchanged');
   expect(current.handoffs??[]).toHaveLength(0);await click('Ask Chief about this email');expect(host.querySelector('textarea[aria-label="Ask Chief"]')).toBeTruthy();
@@ -138,7 +155,7 @@ it.skipIf(!base).each(['masked_source','masked_handoff'] as const)('%s confirms 
   });
   if(kind==='masked_source'){
    loseSuccessfulReply('/google-messages/review');await click('Save reviewed email for this visit');await wait(()=>expect(recoveryRecord?.pending?.kind).toBe('review'));
-   expect(revoked).toBeTruthy();const original=recoveryRecord!.pending!;await click('Retry exact source save');
+   expect(revoked).toBeTruthy();const original=recoveryRecord!.pending!;await remountSavedEmail(packet);expect(recoveryRecord!.pending).toEqual(original);await click('Retry exact source save');
    await wait(()=>expect(host.textContent).toContain('exact email source save is confirmed'));expect(recoveryRecord?.pending).toBeNull();expect(recoveryRecord?.saved?.source_withheld).toBe(true);
    const requests=evidence.wire.filter(w=>w.path.endsWith('/google-messages/review'));expect(requests).toHaveLength(2);expect(requests[0].key).toBe(original.request.idempotency_key);expect(requests[1].key).toBe(requests[0].key);
    expect(host.querySelector('[aria-label="Complete selected email"]')).toBeNull();expect(host.textContent).not.toContain('sender@example.invalid');expect([...host.querySelectorAll('button')].some(b=>b.textContent==='Ask Chief about this email')).toBe(false);
@@ -161,4 +178,4 @@ it.skipIf(!base).each(['masked_source','masked_handoff'] as const)('%s confirms 
  }catch(e){evidence.failure=(e instanceof Error?e.message:String(e))+'; '+(host.textContent??'');throw e;}
 },45000);
 afterAll(async()=>{const output=environment?.COSMAS_GOOGLE_MESSAGE_LAB_REPORT;if(!output||!base)return;const fsModule='node:fs/promises';const fs=await import(/* @vite-ignore */fsModule) as {writeFile:(p:string,s:string)=>Promise<void>};
- await fs.writeFile(output,JSON.stringify({schema:'cosmabot.google-message-product-server-ui.v1',synthetic_only:true,server_origin:base,episodes:trials,total:trials.length,completed:trials.filter(t=>t.passed).length,failed:trials.filter(t=>!t.passed).length,recovery_episodes:recoveries},null,2)+'\n');});
+ await fs.writeFile(output,JSON.stringify({schema:'cosmabot.google-message-product-server-ui.v1',synthetic_only:true,mounted_google_message:true,encrypted_indexeddb:true,fresh_journal_remount:true,nonextractable_aes_gcm_key:true,server_origin:base,episodes:trials,total:trials.length,completed:trials.filter(t=>t.passed).length,failed:trials.filter(t=>!t.passed).length,recovery_episodes:recoveries},null,2)+'\n');});
