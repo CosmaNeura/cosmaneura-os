@@ -30,6 +30,8 @@ RUN groupadd --gid 10001 cosmas \
     && chmod a-s /usr/bin/mount /usr/bin/umount \
     && mkdir -p /data/blobs \
     && chown -R cosmas:cosmas /data/blobs
+COPY scripts/remove_runtime_mount.py /tmp/remove_runtime_mount.py
+RUN --network=none python -B /tmp/remove_runtime_mount.py && rm /tmp/remove_runtime_mount.py
 USER 10001:10001
 EXPOSE 8000 8001
 CMD ["uvicorn", "cosmas_os.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
