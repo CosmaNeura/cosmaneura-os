@@ -186,7 +186,7 @@ class FaxInboundOutcome(OwnerScope, Base):
         ),
         CheckConstraint("state IN ('acquired','outcome_unconfirmed')"),
         CheckConstraint(
-            "((state='acquired' AND document IS NOT NULL AND octet_length(document) BETWEEN 1 AND 1048576 AND pages BETWEEN 1 AND 50 AND document_sha256 ~ '^[a-f0-9]{64}$') OR (state='outcome_unconfirmed' AND document IS NULL AND document_sha256 IS NULL AND pages IS NULL)) IS TRUE"
+            "((state='acquired' AND document IS NOT NULL AND octet_length(document)=document_byte_length+28 AND document_byte_length BETWEEN 1 AND 1048576 AND pages BETWEEN 1 AND 50 AND document_sha256 ~ '^[a-f0-9]{64}$' AND document_ciphertext_sha256 ~ '^[a-f0-9]{64}$' AND document_key_id ~ '^[A-Za-z0-9:_-]{1,80}$') OR (state='outcome_unconfirmed' AND document IS NULL AND document_sha256 IS NULL AND pages IS NULL AND document_byte_length IS NULL AND document_ciphertext_sha256 IS NULL AND document_key_id IS NULL)) IS TRUE"
         ),
     )
     operation_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
@@ -194,6 +194,9 @@ class FaxInboundOutcome(OwnerScope, Base):
     document: Mapped[bytes | None] = mapped_column(LargeBinary)
     document_sha256: Mapped[str | None] = mapped_column(String(64))
     pages: Mapped[int | None] = mapped_column(Integer)
+    document_byte_length: Mapped[int | None] = mapped_column(Integer)
+    document_ciphertext_sha256: Mapped[str | None] = mapped_column(String(64))
+    document_key_id: Mapped[str | None] = mapped_column(String(80))
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.clock_timestamp()
     )

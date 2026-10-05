@@ -1793,6 +1793,28 @@ from cosmas_os.api.efax_inbound_routes import register as register_efax_inbound 
 register_efax_inbound(app, get_session, _identity, execution_dependency=_efax_inbound_execution,
     reauthenticate=_vendor_reauthenticate)
 
+from cosmas_os.api.fax_inbound_routes import register as register_fax_inbound  # noqa: E402
+
+
+def _fax_inbound_execution(request: Request, identity=Depends(_identity)):
+    runtime = managed_services(request.app)
+    if runtime is None or not runtime.has_credentials or not settings.fax_inbound_enabled:
+        return None
+
+    async def current():
+        with new_capture_session(SessionLocal) as scoped:
+            fresh = _identity(request=request, session=scoped,
+                authorization=request.headers.get("authorization"),
+                x_box_id=request.headers.get("x-box-id"),
+                x_actor_principal_id=request.headers.get("x-actor-principal-id"))
+            return fresh == identity
+
+    return runtime.fax_inbound_execution(current)
+
+
+register_fax_inbound(app, get_session, _identity, execution_dependency=_fax_inbound_execution,
+    reauthenticate=_vendor_reauthenticate)
+
 from cosmas_os.api.portal_setup_routes import register as register_portal_setup  # noqa: E402
 
 
