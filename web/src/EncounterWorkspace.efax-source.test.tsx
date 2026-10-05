@@ -119,3 +119,10 @@ it('hides the old document offer on identity and visit changes and refuses its l
 it('never routes an invalid upstream document offer into source review',async()=>{
  await settings('Team settings');await settings('Connections');await settings('Messaging & fax');await act(async()=>inbound.onReviewDocument!({...documentOffer,document_sha256:'invalid'},acquireRequest));expect(host.querySelector('[aria-label="Controlled fax passage mount"]')).toBeNull();assertNoWork();
 });
+
+it.each([false,true])('fresh editor authorization preserves unfinished notes and conflicts only if saved scratchpad changed: %s',async changed=>{
+ await setText('#team-notebook','Unfinished provider note');await offerFax();await wait(()=>expect(editorAccess).toBeTruthy());await preparePacket();
+ if(changed)current={...current,entries:current.entries.map(e=>e.kind==='scratchpad'?{...e,content:'Externally changed saved note',revision:3}:e)};
+ await act(async()=>{await editorAccess!.authorize();});await showNotebook();expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Unfinished provider note');
+ expect(source.locked).toBe(changed);expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.disabled).toBe(changed);assertNoWork();
+});
