@@ -1070,7 +1070,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       const view = recoveryView.current;
       if (view.workspace?.id !== latest.id) throw new WorkspaceApiError(403);
       const saved = view.workspace.entries.filter(e=>e.kind === "scratchpad").at(-1)?.content ?? "";
-      if (latest.revision !== view.workspace.revision && view.note !== saved) setConflict(true);
+      if (latest.revision !== view.workspace.revision && view.note !== saved && (latest.entries.filter(e=>e.kind === "scratchpad").at(-1)?.content ?? "") !== saved) setConflict(true);
       setWorkspace(latest);
       return latest;
     }, denied(cause) {
