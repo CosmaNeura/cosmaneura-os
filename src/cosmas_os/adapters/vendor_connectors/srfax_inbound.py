@@ -13,6 +13,8 @@ from cosmas_os.ports.fax_inbound import (
     bounded_json,
     checked_page,
     count,
+    reported_label,
+    reported_number,
     validate_pdf,
 )
 
@@ -90,6 +92,8 @@ class SRFaxInbound:
                     count(row.get("Size"), 16777216),
                     viewed == "Y",
                     True,
+                    sender_label=reported_label(row.get("RemoteID")),
+                    sender_number=reported_number(row.get("CallerID")),
                 )
             )
         return checked_page(scope, raw, items)

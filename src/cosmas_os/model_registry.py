@@ -8,6 +8,7 @@ and deliberately remains outside this registry.
 from cosmas_os import (  # noqa: F401 -- imports register declarative models
     efax_inbound_models,
     efax_source_models,
+    fax_inbound_models,
     finance_models,
     finance_setup_models,
     google_calendar_models,
