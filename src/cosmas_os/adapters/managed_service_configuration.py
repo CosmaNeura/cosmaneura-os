@@ -34,6 +34,7 @@ from cosmas_os.adapters.vendor_artifacts import AzureVendorArtifactStore
 from cosmas_os.adapters.vendor_connectors.transport import Credential
 from cosmas_os.application import finance_settings, vendor_settings
 from cosmas_os.application.efax_inbound import Installation as EFaxInboundInstallation
+from cosmas_os.application.fax_inbound import Installation as FaxInboundInstallation
 from cosmas_os.application.finance_events import FinanceEventRoute
 from cosmas_os.application.vendor_events import EventRoute
 from cosmas_os.config import Settings
@@ -74,6 +75,18 @@ class InboundInstallation(ProtectedModel):
     credential: SecretReference | None = None
 
 
+class FaxInstallation(ProtectedModel):
+    selection: ConnectionSelection
+    label: str = Field(strict=True, min_length=1, max_length=80)
+    image_enabled: bool = Field(strict=True, default=False)
+    account_timezone: str | None = None
+    account_date_format: str | None = None
+    received_status: str | None = None
+    conversation_id: str | None = None
+    internal_endpoint_id: str | None = None
+    credential: SecretReference | None = None
+
+
 class InstalledEvent(ProtectedModel):
     selection: ConnectionSelection
     route_id: UUID
@@ -97,6 +110,7 @@ class Configuration(ProtectedModel):
     events: list[InstalledEvent] = Field(default_factory=list, max_length=1000)
     artifacts: ArtifactConfiguration | None = None
     efax_inbound: list[InboundInstallation] = Field(default_factory=list, max_length=50)
+    fax_inbound: list[FaxInstallation] = Field(default_factory=list, max_length=20)
 
 
 def _secret(reference: SecretReference) -> str:
@@ -247,7 +261,7 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
         config = _read_configuration(settings)
         if str(config.box_id) != settings.beta_box_id:
             raise ValueError("Configured Box differs")
-        accounts = [*config.delivery, *config.payments, *config.efax_inbound]
+        accounts = [*config.delivery, *config.payments, *config.efax_inbound, *config.fax_inbound]
         identifiers, credential_ids, secrets = set(), set(), {}
         credentials = []
 
@@ -286,16 +300,20 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
         inbound = tuple(EFaxInboundInstallation(item.selection, item.label,
             item.metadata_enabled, item.image_enabled) for item in config.efax_inbound)
 
+        fax_inbound = tuple(FaxInboundInstallation(**item.model_dump(exclude={"credential", "selection"}),
+            selection=item.selection) for item in config.fax_inbound)
+        exact_inbound = (*inbound, *fax_inbound)
+
         async def acquire(supplied: ConnectionSelection) -> Credential:
             try:
                 selected = ConnectionSelection.model_validate(supplied.model_dump(mode="python"))
                 matches = [
                     ref
                     for original, ref in credentials
-                    if (original == selected and any(item.selection == original for item in inbound))
+                    if (original == selected and any(item.selection == original for item in exact_inbound))
                     or (original.connection_id != selected.connection_id
                         and original.model_copy(update={"connection_id": selected.connection_id}) == selected
-                        and not any(item.selection == original for item in inbound))
+                        and not any(item.selection == original for item in exact_inbound))
                 ]
                 if len(matches) != 1:
                     raise ValueError("Account changed")
@@ -354,7 +372,7 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
             credentials=acquire if credentials else None,
             artifact_store=artifact_store,
             events=events if config.events else None,
-            efax_inbound_installations=inbound,
+            efax_inbound_installations=inbound, fax_inbound_installations=fax_inbound,
         )
     except Exception:
         raise ValueError("Managed service configuration is invalid or unavailable") from None

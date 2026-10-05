@@ -118,6 +118,8 @@ class Settings(BaseSettings):
     vendor_setup_enabled: bool = False
     # Independent inbound metadata/image permission; outbound flags grant none.
     fax_inbound_enabled: bool = False
+    fax_inbound_document_encryption_key: SecretStr | None = None
+    fax_inbound_document_key_id: str = "fax-document-v1"
     efax_inbound_enabled: bool = False
     # Explicit human-reviewed fax passages remain separate from clinical notes.
     efax_inbound_source_enabled: bool = False

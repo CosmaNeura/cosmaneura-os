@@ -354,3 +354,33 @@ def test_protected_feature_allowlist_matches_actual_terraform_module_inputs():
     declaration = text.split("alltrue([for name in keys(var.features) : contains([", 1)[1]
     declaration = declaration.split("], name)", 1)[0]
     assert set(re.findall(r'"([A-Z][A-Z0-9_]+)"', declaration)) == binding.FEATURE_NAMES
+
+
+def test_provider_fax_custody_bound_to_explicit_private_key_and_manifest():
+    config = bound_config()
+    plan = {"variables": {
+        "workspace_hosted_enabled": {"value": True},
+        "workspace_features": {"value": {"FAX_INBOUND_ENABLED": True, "FAX_INBOUND_SOURCE_ENABLED": True}},
+        "workspace_public_configuration": {"value": {"FAX_INBOUND_DOCUMENT_KEY_ID": "invented-fax-v1"}},
+        "workspace_secret_references": {"value": {"FAX_INBOUND_DOCUMENT_ENCRYPTION_KEY": {
+            "secret_name": "fax-custody", "version": "1" * 32}}},
+        "workspace_managed_manifest": {"value": {
+            "secret_name": "fax-accounts", "version": "2" * 32, "sha256": "a" * 64}},
+    }}
+    projected, private = binding._workspace_extension(plan, config)
+    assert projected["FAX_INBOUND_ENABLED"] == ["value", "true"]
+    assert projected["FAX_INBOUND_SOURCE_ENABLED"] == ["value", "true"]
+    assert projected["FAX_INBOUND_DOCUMENT_KEY_ID"] == ["value", "invented-fax-v1"]
+    assert projected["FAX_INBOUND_DOCUMENT_ENCRYPTION_KEY"][0] == "secretRef"
+    assert len(private) == 2
+    assert any(value.endswith("/fax-custody/" + "1" * 32) for value in private.values())
+    for variable, value, code in (
+        ("workspace_secret_references", {}, "fax-requires-document-custody-key"),
+        ("workspace_managed_manifest", None, "fax-requires-installed-account-manifest"),
+        ("workspace_features", {"FAX_INBOUND_SOURCE_ENABLED": True}, "fax-source-requires-receiving"),
+        ("workspace_public_configuration", {"FAX_INBOUND_DOCUMENT_KEY_ID": "invalid/key"}, "invalid-fax-document-key-id"),
+    ):
+        changed = copy.deepcopy(plan)
+        changed["variables"][variable]["value"] = value
+        with pytest.raises(binding.BindingError, match=code):
+            binding._workspace_extension(changed, config)
