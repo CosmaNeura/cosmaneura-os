@@ -1,6 +1,6 @@
-"""Mounted received practice fax UI against registered signed APIs and real PDF custody.
+"""Actual full EncounterWorkspace/SettingsHub received practice fax UI against registered signed APIs and real PDF custody.
 
-Only vendor HTTP is synthetic. No endpoint, identity, journal, ledger, approval,
+Vendor/model HTTP, generated PDFs and scripted personas are synthetic. No endpoint, identity verifier, journal, ledger, approval,
 execution adapter or PDF parser is replaced by a frontend mock.
 """
 
@@ -113,7 +113,7 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                 old=session.get(EncounterWorkspace,f.wid)
                 from cosmas_os.models import AppointmentObservation
                 prior=session.get(AppointmentObservation,old.appointment_id)
-                appointment=AppointmentObservation(box_id=f.box,patient_link_id=prior.patient_link_id,external_id=uuid4().hex,source="synthetic",start_at=prior.start_at,patient_label=prior.patient_label)
+                appointment=AppointmentObservation(box_id=f.box,patient_link_id=prior.patient_link_id,external_id=uuid4().hex,source="synthetic",start_at=prior.start_at,patient_label=f"Invented {persona} fax encounter round {iteration}")
                 session.add(appointment);session.commit();f.wid=ws.create(session,f.box,f.owner,appointment.id,"fax-ui-next:"+uuid4().hex)["id"]
         with Session(f.case.engine) as session:
             team_snapshot=team.read(session,f.box,f.owner)
@@ -181,11 +181,11 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                         return self.respond(200,inspect(episode))
                     if self.command=="POST" and parsed.path=="/lab/work":
                         size=int(self.headers.get("Content-Length","0"));body=json.loads(self.rfile.read(size));episode=cases[body["case_id"]];return self.respond(200,run_tasks(episode,body.get("handoff_id")))
-                    assert parsed.path == "/provider-team/identity" or parsed.path.startswith("/fax-inbound") or parsed.path.startswith("/workspaces/")
+                    assert parsed.path in {"/provider-team", "/workspaces"} or parsed.path.startswith(("/provider-team/", "/connections/", "/vendor-settings", "/fax-inbound", "/workspaces/"))
                     assert not parsed.query
                     headers = {name: value for name, value in self.headers.items()
                         if name.lower() in {"authorization", "x-cosmas-draft-recovery", "x-cosmas-fax-inbound",
-                            "x-cosmas-team-contract", "x-cosmas-model-contract", "x-cosmas-handoff-review", "accept", "content-type"}}
+                            "x-cosmas-team-contract", "x-cosmas-model-contract", "x-cosmas-handoff-review", "x-cosmas-connection-contract", "x-cosmas-vendor-setup-contract", "accept", "content-type"}}
                     if self.command == "GET":
                         response = holder.client.get(self.path, headers=headers)
                     else:
