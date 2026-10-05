@@ -6,7 +6,7 @@ import subprocess
 
 def packages():
     text = subprocess.check_output(['dpkg-query','-W','-f=${binary:Package}\t${Version}\t${Essential}\t${db:Status-Status}\n'], text=True)
-    return {p[0]: dict(zip(['version','essential','status'],p[1:])) for row in text.splitlines() if len(p := row.split('\t')) == 4 and p[3] == 'installed'}
+    return {p[0]: dict(zip(['version','essential','status'],p[1:], strict=True)) for row in text.splitlines() if len(p := row.split('\t')) == 4 and p[3] == 'installed'}
 
 
 before = packages()
