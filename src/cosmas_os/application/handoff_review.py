@@ -296,6 +296,15 @@ def _review_for(s, w, handoff, attempt, *, current):
     }
 
 
+def result_recovery_digest(s, w, handoff, attempt):
+    """Identify an exact historical result without granting current source access."""
+    try:
+        _, reply, _ = _binding(s, w, handoff, attempt, current=False)
+    except ws.WorkspaceError:
+        return None
+    return _hash(reply.content)
+
+
 def stored_review_for(s, w, handoff, attempt):
     """Exact immutable command receipt for recovery; never current-work authorization."""
     return _review_for(s, w, handoff, attempt, current=False)

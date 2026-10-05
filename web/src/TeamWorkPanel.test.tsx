@@ -63,3 +63,28 @@ it('keeps every queued or running assignment visible in recent order and folds o
   expect(names()).toEqual(['latest-ready','new-failed','new-ready','old-queued']);expect([...host.querySelectorAll('.team-earlier-tasks article header strong')].map(node=>node.textContent)).toEqual(['old-running','old-failed']);
   expect(review).not.toHaveBeenCalled();expect(retry).not.toHaveBeenCalled();
 });
+
+const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+const maskedTask:DraftHandoff={...task,id:uuid(1),attempt_id:uuid(2),result_entry_id:uuid(3),result_sha256:'a'.repeat(64),
+ task_brief:undefined,task_brief_unavailable:true,brief:'Selected source unavailable',review_status:'stale'};
+const maskedResult:WorkspaceEntry={...result,id:uuid(3),content:'',reply:null};
+it.each(['google_source_state','calendar_source_state','fax_source_state','practice_fax_source_state'] as const)('opens only a masked saved review for %s without exposing a reply or offering retry',async field=>{
+ const entry={...maskedResult,[field]:'unavailable' as const};
+ await act(async()=>root.render(<TeamWorkPanel handoffs={[maskedTask]} entries={[entry]} locked={false} onReview={review} onRetry={retry}/>));
+ expect(host.textContent).not.toContain(result.content);expect(host.textContent).not.toContain(result.reply!.content);
+ const button=host.querySelector<HTMLButtonElement>('button')!;expect(button.textContent).toBe('Check saved review');expect(button.disabled).toBe(false);
+ await act(async()=>button.click());expect(review).toHaveBeenCalledExactlyOnceWith(maskedTask);expect(retry).not.toHaveBeenCalled();
+ await act(async()=>root.render(<TeamWorkPanel handoffs={[maskedTask]} entries={[entry]} locked onReview={review} onRetry={retry}/>));
+ expect(host.querySelector<HTMLButtonElement>('button')?.disabled).toBe(true);
+});
+it.each(['missing entry','wrong entry','wrong kind','visible text','visible reply','no unavailable state','missing hash','invalid hash','invalid attempt','not completed','not stale','no withheld brief'])('withholds masked review recovery for %s',async fault=>{
+ let handoff={...maskedTask},entry:WorkspaceEntry={...maskedResult,google_source_state:'unavailable'},entries=[entry];
+ if(fault==='missing entry')entries=[];if(fault==='wrong entry')entry.id=uuid(4);if(fault==='wrong kind')entry.kind='evidence';
+ if(fault==='visible text')entry.content='Private retained source';if(fault==='visible reply')entry.reply=result.reply;
+ if(fault==='no unavailable state')entry.google_source_state='current';if(fault==='missing hash')handoff.result_sha256=null;
+ if(fault==='invalid hash')handoff.result_sha256='short';if(fault==='invalid attempt')handoff.attempt_id='invalid';
+ if(fault==='not completed')handoff.status='queued';if(fault==='not stale')handoff.review_status='not_reviewed';
+ if(fault==='no withheld brief')handoff.task_brief_unavailable=false;
+ await act(async()=>root.render(<TeamWorkPanel handoffs={[handoff]} entries={entries} locked={false} onReview={review} onRetry={retry}/>));
+ expect([...host.querySelectorAll('button')].some(b=>b.textContent==='Check saved review')).toBe(false);expect(review).not.toHaveBeenCalled();expect(retry).not.toHaveBeenCalled();
+});

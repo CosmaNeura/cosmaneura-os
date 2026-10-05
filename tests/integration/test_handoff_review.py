@@ -1254,3 +1254,48 @@ def test_stored_revised_result_review_retains_exact_recursive_provenance_after_s
     w, h, a, _ = projected(session, new_case)
     assert reviews.stored_review_for(session, w, h, a)["id"] == receipt["id"]
     assert reviews.review_for(session, w, h, a) is None
+    assert reviews.result_recovery_digest(session, w, h, a) == new_case[6]
+
+
+@pytest.mark.parametrize("projection", [{}, {"task_brief_unavailable": True}])
+def test_unverified_completion_projection_never_invents_result_digest(session, case, monkeypatch, projection):
+    from cosmas_os.application import handoff_briefs
+
+    assert case[5]["result_sha256"] == case[6]
+    monkeypatch.setattr(handoff_briefs, "projection", lambda *args, **kwargs: deepcopy(projection))
+    current = ws.read(session, case[0], case[1], case[2]["id"])
+    selected = next(h for h in current["handoffs"] if h["id"] == case[5]["id"])
+    assert selected["result_sha256"] is None
+    assert "completion_evidence" not in selected
+
+
+@pytest.mark.parametrize("fault", ["foreign_workspace", "foreign_owner", "wrong_handoff", "old_attempt", "not_completed", "missing_result", "wrong_agent", "corrupt_envelope"])
+def test_historical_result_digest_rejects_missing_or_corrupt_binding(session, case, fault):
+    from copy import copy
+
+    w, h, a, _ = projected(session, case)
+    assert reviews.result_recovery_digest(session, w, h, a) == case[6]
+    selected_w, selected_h, selected_a = copy(w), copy(h), copy(a)
+    if fault == "foreign_workspace":
+        selected_w.id = str(uuid4())
+    if fault == "foreign_owner":
+        selected_w.owner_id = str(uuid4())
+    if fault == "wrong_handoff":
+        selected_h.id = str(uuid4())
+    if fault == "old_attempt":
+        selected_a.id = str(uuid4())
+    if fault == "not_completed":
+        selected_a.status = "running"
+    if fault == "missing_result":
+        selected_a.result_entry_id = None
+    if fault == "wrong_agent":
+        selected_h.recipient_agent_id = str(uuid4())
+    row = session.scalar(select(ModelWorkAdmission).where(ModelWorkAdmission.handoff_attempt_id == a.id))
+    original = row.envelope_sha256
+    try:
+        if fault == "corrupt_envelope":
+            row.envelope_sha256 = "0" * 64
+        with session.no_autoflush:
+            assert reviews.result_recovery_digest(session, selected_w, selected_h, selected_a) is None
+    finally:
+        row.envelope_sha256 = original

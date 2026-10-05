@@ -136,3 +136,31 @@ it('keeps service and account changes locked while an exact calendar command is 
  for(const label of ['📅 Work with calendar','Email','Calendar','Reconnect Google','Disconnect Google'])expect([...host.querySelectorAll('button')].find(b=>b.textContent===label)?.disabled,label).toBe(true);
  expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status']);vi.unstubAllEnvs();
 });
+
+it('opens private recovery work after a disconnected account check without reading Google',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');
+ vi.mocked(googleConnectionRequest).mockResolvedValue(disconnected);const mail=vi.fn(),calendar=vi.fn();
+ try{
+  await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenMessageWork={mail} onOpenCalendarWork={calendar}/>));
+  await click('Work with email');await click('📅 Work with calendar');
+  expect(mail).toHaveBeenCalledOnce();expect(calendar).toHaveBeenCalledOnce();
+  expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status']);
+  expect(host.textContent).toContain('contents need current Google access');
+  for(const label of ['Read recent email','View next 7 days','Reconnect Google','Disconnect Google'])expect([...host.querySelectorAll('button')].some(b=>b.textContent===label)).toBe(false);
+  await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenMessageWork={mail} onOpenCalendarWork={calendar} messageWorkLocked/>));
+  for(const label of ['Work with email','📅 Work with calendar'])expect([...host.querySelectorAll('button')].find(b=>b.textContent===label)?.disabled).toBe(true);
+ }finally{vi.unstubAllEnvs();}
+});
+it('withholds private recovery entry until the current identity account check finishes',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');let release!:(r:typeof disconnected)=>void;
+ const other:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null};
+ vi.mocked(googleConnectionRequest).mockResolvedValueOnce(disconnected).mockReturnValueOnce(new Promise(r=>{release=r;}));
+ try{
+  await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenMessageWork={()=>{}}/>));
+  expect(host.textContent).toContain('Work with email');
+  await act(async()=>root.render(<GoogleConnectionPanel identity={other} onAuthenticationLost={()=>{}} onOpenMessageWork={()=>{}}/>));
+  expect([...host.querySelectorAll('button')].some(b=>b.textContent==='Work with email')).toBe(false);
+  await act(async()=>release(disconnected));expect(host.textContent).toContain('Work with email');
+  expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','status']);
+ }finally{vi.unstubAllEnvs();}
+});

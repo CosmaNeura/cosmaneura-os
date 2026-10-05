@@ -1,5 +1,6 @@
 import { BotAvatar } from "./BotAvatar";
 import type { DraftHandoff } from "./workspace-api";
+import {teamHash,teamUuid} from './team-setup-request';
 
 const labels = { queued: "Queued", running: "Working on draft", completed: "Draft ready", failed: "Needs attention", interrupted: "Interrupted" };
 const reasons:Record<string,string>={team_work_limit:"Not started: team work limit",legacy_queued_unadmitted:"Not started by this version; review before retry",
@@ -9,10 +10,12 @@ const reasons:Record<string,string>={team_work_limit:"Not started: team work lim
   source_changed:"The saved source versions changed. Ask Chief for a new assignment using the current sources.",
   authority_changed:"This teammate’s access changed. Review its source settings, then ask Chief for a new assignment."};
 
-export function HandoffCard({ handoff, locked, onRetry, onShow, resultAvailable=true }: {
-  handoff: DraftHandoff; locked: boolean; resultAvailable?:boolean; onRetry: () => void; onShow: () => void;
+export function HandoffCard({ handoff, locked, onRetry, onShow, resultAvailable=true, maskedResultAvailable=false }: {
+  handoff: DraftHandoff; locked: boolean; resultAvailable?:boolean; maskedResultAvailable?:boolean; onRetry: () => void; onShow: () => void;
 }) {
   const recoverable = !handoff.task_brief_unavailable && !["source_changed","authority_changed"].includes(handoff.error_code??"") && Object.hasOwn(reasons,handoff.error_code??"")&&["failed","interrupted"].includes(handoff.status);
+  const reviewRecovery=maskedResultAvailable&&handoff.status==='completed'&&handoff.review_status==='stale'&&handoff.task_brief_unavailable===true&&
+    teamUuid(handoff.id)&&teamUuid(handoff.attempt_id)&&teamUuid(handoff.result_entry_id)&&teamHash(handoff.result_sha256);
   const task=handoff.task_brief,goal=task?.goal??handoff.brief,characters=[...goal],shortened=characters.length>160;
   const preview=shortened?characters.slice(0,159).join('')+'…':goal;
   return <article className="team-handoff" aria-label={`Draft assignment for ${handoff.recipient_name}`}>
@@ -22,6 +25,7 @@ export function HandoffCard({ handoff, locked, onRetry, onShow, resultAvailable=
     <p className="team-task-goal">{preview}</p>
     {handoff.status === "completed" && handoff.result_entry_id && !handoff.task_brief_unavailable &&
       <button className="team-task-review" disabled={locked||!resultAvailable} onClick={onShow} aria-label={`Review ${handoff.recipient_name} result`}>{resultAvailable?'Review result':'Loading saved result…'}</button>}
+    {reviewRecovery&&<button className="team-task-review" disabled={locked} onClick={onShow} aria-label={`Check saved ${handoff.recipient_name} review`}>Check saved review</button>}
     <p className="team-task-summary team-fine">{handoff.status==='completed'
       ? <>Private draft saved{handoff.completion_evidence?` · revision ${handoff.completion_evidence.revision} · ${handoff.completion_evidence.source_versions.length} sources cited`:''}</>
       : task ? <>{task.source_versions.length} saved {task.source_versions.length===1?'source':'sources'} · Independent draft</>

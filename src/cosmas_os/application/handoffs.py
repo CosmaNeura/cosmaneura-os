@@ -102,6 +102,9 @@ def read(s, w, revision):
         latest = attempts[-1]
         states = {a.id: model_work.attempt_state(s, a, as_of) for a in attempts}
         evidence = handoff_briefs.projection(s, handoff, states[latest.id][2])
+        # Retain the validated result binding for private pending-review recovery.
+        # Content-bearing task and completion evidence is masked below.
+        result_sha256 = evidence.get("completion_evidence", {}).get("sha256")
         reviewed = handoff_review.stored_review_for(s, w, handoff, latest)
         brief = handoff.brief
         related_admissions = [state[2] for state in states.values() if state[2] is not None]
@@ -136,9 +139,12 @@ def read(s, w, revision):
                         evidence.pop("completion_evidence", None)
                         evidence["task_brief_unavailable"] = True
                         source_unavailable = True
-                        break
         revision_metadata = handoff_revision.revision_for(s, w, handoff)
         if source_unavailable:
+            if result_sha256 is None and states[latest.id][0] == "completed":
+                # Revised results can lose their current completion projection.
+                # Only their independently verified immutable digest is recoverable.
+                result_sha256 = handoff_review.result_recovery_digest(s, w, handoff, latest)
             feedback_notice = ("Email access must be checked before viewing this feedback."
                                if unavailable_kinds == {"google_message"} else
                                "Check the reviewed fax passage before viewing this feedback."
@@ -167,7 +173,7 @@ def read(s, w, revision):
                 "result_entry_id": latest.result_entry_id,
                 "error_code": states[latest.id][1],
                 **evidence,
-                "result_sha256": evidence.get("completion_evidence", {}).get("sha256"),
+                "result_sha256": result_sha256,
                 "review": reviewed,
                 "review_status": handoff_review.review_status_for(s, w, handoff, latest),
                 **revision_metadata,
