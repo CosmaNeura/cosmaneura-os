@@ -5,6 +5,8 @@
 !uv.lock
 !README.md
 !alembic.ini
+!scripts/
+!scripts/remove_runtime_mount.py
 !src/
 !src/**
 !migrations/
