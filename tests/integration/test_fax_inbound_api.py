@@ -586,3 +586,31 @@ def test_ciphertext_and_associated_scope_metadata_tamper_are_refused(inbox):
         altered_attempt = SimpleNamespace(box_id=attempt.box_id, owner_id=str(uuid4()), operation_id=attempt.operation_id)
         with pytest.raises(WorkspaceError, match="fax_inbound_document_custody_invalid"):
             custody.open_document(outcome, altered_attempt, image, grant)
+
+
+@pytest.mark.parametrize("boundary", ["decision", "acquire"])
+def test_expired_exact_image_approval_refuses_without_provider_or_attempt(inbox, monkeypatch, boundary):
+    from cosmas_os.application import fax_inbound as ledger
+    f = inbox
+    with f.case.start(f.profile) as c:
+        g, observation = begin(f, c, "documo")
+        if boundary == "acquire":
+            command = approved(f, c, g, observation)
+        else:
+            proposed = reply(c.post("/fax-inbound/propose", headers=f.headers(), json={
+                "idempotency_key": key(), "grant_id": g["grant_id"],
+                "observation_id": observation["observation_id"],
+                "observation_sha256": observation["source_sha256"],
+                "source_sha256": observation["items"][0]["source_sha256"]}))
+            command = {"idempotency_key": key(), "ticket_id": proposed["ticket_id"],
+                "revision_id": proposed["revision_id"], "expected_version": proposed["version"],
+                "choice": "approve", "reviewed_exact_fax": True}
+        real_now = ledger.now
+        monkeypatch.setattr(ledger, "now", lambda s: real_now(s) + timedelta(minutes=6))
+        reply(c.post("/fax-inbound/" + ("decide" if boundary == "decision" else "acquire"),
+            headers=f.headers(), json=command), 409)
+        assert len(f.wire) == 1
+        with Session(f.case.engine) as s:
+            assert s.scalar(select(FaxInboundAttempt.operation_id).where(
+                FaxInboundAttempt.box_id == f.case.vendor["box"],
+                FaxInboundAttempt.owner_id == f.case.vendor["actor"])) is None
