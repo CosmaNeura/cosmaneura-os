@@ -30,12 +30,13 @@ DO $$ DECLARE n text; BEGIN
  END LOOP;
 END $$;
 ALTER TABLE public.fax_inbound_outcomes ADD CONSTRAINT ck_fax_inbound_encrypted_document CHECK (
+ (
  (state='acquired' AND document IS NOT NULL AND octet_length(document)=document_byte_length+28
   AND document_byte_length BETWEEN 1 AND 1048576 AND pages BETWEEN 1 AND 50
   AND document_sha256 ~ '^[a-f0-9]{64}$' AND document_ciphertext_sha256 ~ '^[a-f0-9]{64}$'
   AND document_key_id ~ '^[A-Za-z0-9:_-]{1,80}$') OR
  (state='outcome_unconfirmed' AND document IS NULL AND document_sha256 IS NULL AND pages IS NULL
-  AND document_byte_length IS NULL AND document_ciphertext_sha256 IS NULL AND document_key_id IS NULL));
+  AND document_byte_length IS NULL AND document_ciphertext_sha256 IS NULL AND document_key_id IS NULL)) IS TRUE);
 CREATE OR REPLACE FUNCTION public.guard_fax_inbound_outcome() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path=pg_catalog AS $$
 DECLARE c public.fax_inbound_attempts;

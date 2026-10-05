@@ -614,3 +614,34 @@ def test_expired_exact_image_approval_refuses_without_provider_or_attempt(inbox,
             assert s.scalar(select(FaxInboundAttempt.operation_id).where(
                 FaxInboundAttempt.box_id == f.case.vendor["box"],
                 FaxInboundAttempt.owner_id == f.case.vendor["actor"])) is None
+
+
+def test_database_refuses_each_missing_acquired_custody_field(inbox, monkeypatch):
+    from cosmas_os.application import fax_inbound_document as custody
+    from sqlalchemy.exc import DBAPIError
+
+    f = inbox
+    original_protect = custody.protect
+    rejected = []
+
+    def checked_protect(document, attempt, image, grant, pages):
+        valid = original_protect(document, attempt, image, grant, pages)
+        with Session(f.case.engine) as s:
+            for field in ("document", "document_sha256", "pages", "document_byte_length",
+                          "document_ciphertext_sha256", "document_key_id"):
+                row = dict(operation_id=attempt.operation_id, box_id=attempt.box_id,
+                           owner_id=attempt.owner_id, state="acquired", **valid)
+                row[field] = None
+                with pytest.raises(DBAPIError) as caught, s.begin_nested():
+                    s.execute(FaxInboundOutcome.__table__.insert().values(**row))
+                assert caught.value.orig.sqlstate == "23514"
+                rejected.append(field)
+        return valid
+
+    monkeypatch.setattr(custody, "protect", checked_protect)
+    with f.case.start(f.profile) as c:
+        grant, observation = begin(f, c, "documo")
+        command = approved(f, c, grant, observation)
+        outcome = reply(c.post("/fax-inbound/acquire", headers=f.headers(), json=command))
+        assert outcome["state"] == "acquired" and len(rejected) == 6 and len(f.wire) == 2
+        assert c.get("/fax-inbound/document/" + outcome["operation_id"], headers=f.headers()).content == f.pdf
