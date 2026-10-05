@@ -235,6 +235,47 @@ def test_package_owner_accepts_single_architecture_qualified_owner(monkeypatch):
     assert guard.package_owner("/usr/bin/nsenter") == "pkg:amd64"
 
 
+@pytest.mark.parametrize("fault", [None, "mode", "hash", "owner", "symlink", "hardlink", "tool_bytes",
+                                  "unreviewed_named_alias"])
+def test_exact_nonexecutable_completion_metadata_only(tmp_path, fault):
+    root, pins, packages = synthetic_root(tmp_path)
+    relative = "usr/share/bash-completion/completions/nsenter"
+    path = root / relative
+    path.parent.mkdir(parents=True)
+    data = b"_nsenter_module() { # invented completion metadata\n}\n"
+    path.write_bytes(data)
+    path.chmod(0o644)
+    pin = guard.ToolPin("nsenter", len(data), hashlib.sha256(data).hexdigest(), pins[1].package,
+                        pins[1].version, os.getuid(), os.getgid(), 0o644)
+    def package_owner(candidate):
+        if candidate == "/" + relative:
+            return "wrong-owner" if fault == "owner" else pin.package
+        return owner(pins)(candidate)
+    if fault == "mode":
+        path.chmod(0o755)
+    elif fault == "hash":
+        path.write_bytes(b"x" * len(data))
+    elif fault == "symlink":
+        path.unlink()
+        path.symlink_to("../../../bin/nsenter")
+    elif fault == "hardlink":
+        os.link(path, root / "usr/lib/copied-completion")
+    elif fault == "tool_bytes":
+        path.write_bytes((root / "usr/bin/nsenter").read_bytes())
+    elif fault == "unreviewed_named_alias":
+        (root / "usr/lib/nsenter").symlink_to("../share/bash-completion/completions/nsenter")
+    before = snapshot(root)
+    if fault:
+        with pytest.raises(guard.HardeningError):
+            guard.harden(root, pins, lambda: packages.copy(), package_owner, lambda: None, {relative: pin})
+        assert snapshot(root) == before
+    else:
+        receipt = guard.harden(root, pins, lambda: packages.copy(), package_owner, lambda: None, {relative: pin})
+        assert receipt["retained_pinned_metadata"] == [relative]
+        assert path.read_bytes() == data and stat.S_IMODE(path.stat().st_mode) == 0o644
+        assert not (root / "usr/bin/nsenter").exists()
+
+
 def test_optimized_python_still_fails_closed_without_mutation(tmp_path):
     root, pins, packages = synthetic_root(tmp_path)
     payload = {"root": str(root), "packages": packages,
