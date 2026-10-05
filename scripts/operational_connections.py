@@ -7,6 +7,12 @@ import re
 from uuid import UUID
 
 GOOGLE_SCOPES = "openid email https://www.googleapis.com/auth/gmail.metadata"
+GOOGLE_CALENDAR_SCOPE = "https://www.googleapis.com/auth/calendar.events.readonly"
+GOOGLE_FULL_MESSAGE_SCOPE = "https://www.googleapis.com/auth/gmail.readonly"
+GOOGLE_SOURCE_FLAGS = {
+    "full_message": "WORKSPACE_GOOGLE_MESSAGE_ENABLED",
+    "calendar": "WORKSPACE_GOOGLE_CALENDAR_ENABLED",
+}
 MICROSOFT_SCOPES = "offline_access User.Read Mail.Read Calendars.Read"
 MANAGED_FLAGS = {
     "vendor_io": "VENDOR_IO_ENABLED",
@@ -82,7 +88,17 @@ def add_connections(inputs, bindings, identity, connections):
 
     google = connections["google"]
     if google is not None:
-        exact(google, {"client_id", "client_secret", "encryption_key"})
+        fields = {"client_id", "client_secret", "encryption_key"}
+        if isinstance(google, dict) and "enabled" in google:
+            fields.add("enabled")
+        exact(google, fields)
+        selected_sources = google.get("enabled", dict.fromkeys(GOOGLE_SOURCE_FLAGS, False))
+        exact(selected_sources, GOOGLE_SOURCE_FLAGS)
+        for name, flag in GOOGLE_SOURCE_FLAGS.items():
+            value = selected_sources[name]
+            if type(value) is not bool:
+                raise ValueError("Google source selections must be explicit booleans")
+            features[flag] = value
         client = google["client_id"]
         if (
             not isinstance(client, str)
@@ -107,10 +123,20 @@ def add_connections(inputs, bindings, identity, connections):
         registration["accounts"]["google"] = {
             "client_id": client,
             "callback_uri": callback,
-            "scopes": GOOGLE_SCOPES.split(),
-            "access": "inbox_metadata_read",
+            # Normal sign-in already requests Calendar, independently of the
+            # source-save feature. Existing metadata-only grants remain accepted.
+            "scopes": (GOOGLE_SCOPES + " " + GOOGLE_CALENDAR_SCOPE).split(),
+            "accepted_legacy_scopes": GOOGLE_SCOPES.split(),
+            "access": "inbox_metadata_and_calendar_summaries_read",
+            "source_features": copy.deepcopy(selected_sources),
             "separate_from_scheduling": True,
         }
+        if selected_sources["full_message"]:
+            # This is a separate human start_full_mail intent, never an implicit
+            # expansion of the normal sign-in request or evidence of consent.
+            registration["accounts"]["google"]["full_message_consent_scopes"] = (
+                GOOGLE_SCOPES + " " + GOOGLE_CALENDAR_SCOPE + " " + GOOGLE_FULL_MESSAGE_SCOPE
+            ).split()
 
     microsoft = connections["microsoft"]
     if microsoft is not None:

@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from cosmas_os.adapters.managed_event_routing import ManagedEventProfile, ManagedEventRoutes
 from cosmas_os.adapters.vendor_connectors.transport import Credential
-from cosmas_os.application import finance_settings, vendor_settings
+from cosmas_os.application import finance_settings, inbox_work, vendor_settings
 from cosmas_os.application.efax_inbound import Installation as EFaxInboundInstallation
 from cosmas_os.application.efax_inbound_execution import EFaxInboundExecution
 from cosmas_os.application.fax_inbound import Installation as FaxInboundInstallation
@@ -44,6 +44,8 @@ class ManagedServiceProfile:
     # Inbound grant and read-state mutation authority are independently installed.
     efax_inbound_installations: tuple[EFaxInboundInstallation, ...] = field(default=(), repr=False)
     fax_inbound_installations: tuple[FaxInboundInstallation, ...] = field(default=(), repr=False)
+    # Independently reviewed exact item/participant scope; delivery grants do not confer reads.
+    inbox_grants: tuple[inbox_work.InboxReadGrant, ...] = field(default=(), repr=False)
 
 
 class ManagedServices:
@@ -79,6 +81,14 @@ class ManagedServices:
                 or len({str(i.selection.connection_id) for i in profile.fax_inbound_installations}) != len(profile.fax_inbound_installations)):
             raise ValueError("Distinct bounded fax inbound installations required")
         self.fax_inbound_installations = tuple(profile.fax_inbound_installations)
+        if type(profile.inbox_grants) is not tuple:
+            raise ValueError("Exact installed inbox grants required")
+        self._inbox_registry = inbox_work.InboxRegistry(profile.inbox_grants)
+        from cosmas_os.adapters.managed_event_routing import installed_selection
+
+        for grant in self._inbox_registry.grants.values():
+            # Match the installed account while retaining the reviewed native version.
+            installed_selection(grant.binding.selection, self.vendor_catalog)
 
     def _available(self) -> bool:
         return bool(not self._closed and self._settings.workspace_available
@@ -150,6 +160,10 @@ class ManagedServices:
     @property
     def has_credentials(self) -> bool:
         return self._available() and self._profile.credentials is not None
+
+    def inbox_registry(self) -> inbox_work.InboxRegistry:
+        """Current server-installed reads only; no discovery, grant creation or I/O."""
+        return self._inbox_registry if self._available() and self._settings.inbox_work_enabled else inbox_work.EMPTY_REGISTRY
 
     def efax_inbound_execution(self, identity_current: CurrentIdentity) -> EFaxInboundExecution:
         if not self._available() or self._profile.credentials is None:

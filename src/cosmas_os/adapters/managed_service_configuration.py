@@ -32,7 +32,7 @@ from cosmas_os.adapters.managed_services import ManagedServiceProfile
 from cosmas_os.adapters.vendor_artifact_transport import BoundedAzureArtifactContainer
 from cosmas_os.adapters.vendor_artifacts import AzureVendorArtifactStore
 from cosmas_os.adapters.vendor_connectors.transport import Credential
-from cosmas_os.application import finance_settings, vendor_settings
+from cosmas_os.application import finance_settings, inbox_work, vendor_settings
 from cosmas_os.application.efax_inbound import Installation as EFaxInboundInstallation
 from cosmas_os.application.fax_inbound import Installation as FaxInboundInstallation
 from cosmas_os.application.finance_events import FinanceEventRoute
@@ -111,6 +111,7 @@ class Configuration(ProtectedModel):
     artifacts: ArtifactConfiguration | None = None
     efax_inbound: list[InboundInstallation] = Field(default_factory=list, max_length=50)
     fax_inbound: list[FaxInstallation] = Field(default_factory=list, max_length=20)
+    inbox_grants: list[inbox_work.InboxReadGrant] = Field(default_factory=list, max_length=100)
 
 
 def _secret(reference: SecretReference) -> str:
@@ -297,6 +298,11 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
         finance = finance_settings.Catalog(
             finance_settings.Installation(item.selection, item.label) for item in config.payments
         )
+        inbox_registry = inbox_work.InboxRegistry(config.inbox_grants)
+        for grant in inbox_registry.grants.values():
+            if grant.binding.selection.box_id != config.box_id:
+                raise ValueError("Inbox grant differs from configured Box")
+            installed_selection(grant.binding.selection, vendor)
         inbound = tuple(EFaxInboundInstallation(item.selection, item.label,
             item.metadata_enabled, item.image_enabled) for item in config.efax_inbound)
 
@@ -373,6 +379,7 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
             artifact_store=artifact_store,
             events=events if config.events else None,
             efax_inbound_installations=inbound, fax_inbound_installations=fax_inbound,
+            inbox_grants=tuple(inbox_registry.grants.values()),
         )
     except Exception:
         raise ValueError("Managed service configuration is invalid or unavailable") from None
