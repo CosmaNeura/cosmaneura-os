@@ -121,6 +121,7 @@ def test_delivery_action_requirements_match_the_handler(provider):
     request = delivery_request(provider)
     assert VendorProposal.model_validate(request).action == request["action"]
     assert schema["properties"]["action"] == {"type": "string", "const": request["action"]}
+    assert schema["properties"]["share_to_practice"] == {"type": "boolean", "const": False}
     required, forbidden = DELIVERY_FIELDS[provider]
     assert required <= set(schema["required"])
     assert not forbidden & schema["properties"].keys()
