@@ -186,7 +186,7 @@ class FaxInboundOutcome(OwnerScope, Base):
         ),
         CheckConstraint("state IN ('acquired','outcome_unconfirmed')"),
         CheckConstraint(
-            "(state='acquired' AND document IS NOT NULL AND octet_length(document) BETWEEN 1 AND 1048576 AND pages BETWEEN 1 AND 50 AND document_sha256 ~ '^[a-f0-9]{64}$') OR (state='outcome_unconfirmed' AND document IS NULL AND document_sha256 IS NULL AND pages IS NULL)"
+            "((state='acquired' AND document IS NOT NULL AND octet_length(document) BETWEEN 1 AND 1048576 AND pages BETWEEN 1 AND 50 AND document_sha256 ~ '^[a-f0-9]{64}$') OR (state='outcome_unconfirmed' AND document IS NULL AND document_sha256 IS NULL AND pages IS NULL)) IS TRUE"
         ),
     )
     operation_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
