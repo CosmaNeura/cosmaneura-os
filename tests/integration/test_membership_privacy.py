@@ -98,8 +98,9 @@ def test_all_legacy_commands_and_audit_are_denied_without_writes(
 
 @pytest.mark.parametrize("closed", [False, True])
 def test_no_other_owner_or_staff_candidate_link_or_published_work(
-    session, vendor_case, other_humans, closed
+    session, vendor_case, other_humans, closed, monkeypatch
 ):
+    monkeypatch.setattr(routines.settings, "workspace_routines_enabled", True)
     c = vendor_case
     tid = created(session, c)
     if closed:
