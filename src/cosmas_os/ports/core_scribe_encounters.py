@@ -1,9 +1,10 @@
 """Existing Core provider-encounter v1 catalog; no creation or matching authority."""
 
+from datetime import date
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import AwareDatetime, Field, model_validator
+from pydantic import AwareDatetime, Field, field_validator, model_validator
 
 from cosmas_os.ports.core_encounters import (
     ActorRef,
@@ -30,6 +31,18 @@ class ScribeCatalogEncounter(Closed):
     patient_name: Label = Field(repr=False)
     title: Label = Field(repr=False)
     appointment_at: AwareDatetime
+    # Optional display metadata adds no encounter or recording authority.
+    date_of_birth: date | None = Field(default=None, repr=False)
+    status: Literal["recording_saved", "draft_ready"] | None = None
+
+    @field_validator("date_of_birth", mode="before")
+    @classmethod
+    def canonical_birth_date(cls, value):
+        if value is None or type(value) is date:
+            return value
+        if not isinstance(value, str) or date.fromisoformat(value).isoformat() != value:
+            raise ValueError("invalid_birth_date")
+        return value
 
 
 class ScribeCatalog(Closed):
