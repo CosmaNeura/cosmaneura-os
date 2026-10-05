@@ -6,6 +6,8 @@ import {CONNECTION_GUIDES} from './connection-guides';
 import {accountStatusSupported,readConnectionSummary,personalConnectionSummary,type ConnectionSummary} from './connection-summary';
 import {useConnectionHealth} from './connection-operation-health';
 import {FaxConnectionOverview} from './FaxConnectionOverview';
+import {FaxInboundMount} from './FaxInboundMount';
+import type {FaxInboundPanelProps} from './FaxInboundPanel';
 import {EFaxInboundMount} from './EFaxInboundMount';
 import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
@@ -19,17 +21,17 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument}: {
+export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
   open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   teamSummary: string; teamDirty: boolean; onClose: () => void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
-  onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];
+  onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];onReviewProviderFaxDocument?:FaxInboundPanelProps['onReviewDocument'];
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
-  const [inboundBusy,setInboundBusy]=useState(false);
+  const [inboundBusy,setInboundBusy]=useState(false),[providerInboundBusy,setProviderInboundBusy]=useState(false);
   const [inboundOwner,setInboundOwner]=useState<AuthenticatedWorkspaceIdentity|null>(null);
-  const leaveLocked=navigationLocked||inboundBusy;
+  const leaveLocked=navigationLocked||inboundBusy||providerInboundBusy;
   const [visited, setVisited] = useState<Editor[]>(!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen]:[]);
   const title = useRef<HTMLHeadingElement>(null);
   const messagingEditor=useRef<HTMLDivElement|null>(null);
@@ -205,7 +207,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       loading={checking} unavailable={!!setupUnavailable} locked={navigationLocked}
       onRefresh={()=>setRefreshCatalog(value=>value+1)} onSetup={()=>{messagingEditor.current?.focus();messagingEditor.current?.scrollIntoView?.({block:'start'});}}
       onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/>}
-    {inboundOwner===connectionIdentity&&connectionIdentity&&<div data-settings-inbound="messaging" hidden={screen!=='messaging'||!!setupUnavailable||availabilityPending||!!current?.denied}><EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/></div>}
+    {inboundOwner===connectionIdentity&&connectionIdentity&&<div data-settings-inbound="messaging" hidden={screen!=='messaging'||!!setupUnavailable||availabilityPending||!!current?.denied}><EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/><FaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setProviderInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewProviderFaxDocument}/></div>}
     {selectedGuide&&connectionIdentity&&(availabilityPending||catalogError)&&<section className="connection-setup-guide" aria-label="Connection availability">
       <p role="status">{availabilityPending?'Checking whether this service is enabled…':current?.denied?'Sign in to CosmasOS again to check this connection.':'Service availability could not be confirmed. Check again, or review the connection status below to finish sign-in.'}</p>
       {catalogError&&<button disabled={navigationLocked||!!current?.busy} onClick={()=>setRefreshCatalog(value=>value+1)}>Check availability again</button>}
