@@ -57,7 +57,7 @@ def test_actual_signed_email_ui_runs_six_source_chief_revision_acceptance_loops(
     run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path)
 
 
-def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_kind="email"):
+def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_kind="email", full_workspace=False):
     assert source_kind in {"email", "calendar"}
     calendar_lab = source_kind == "calendar"
     assert NODE.is_file()
@@ -189,6 +189,17 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
                 full_mail_read=True,
                 account={"label": "Invented UI account", "email": "owner@example.invalid"},
             )
+
+        def status(self, identity, *, include_capabilities=False):
+            with Session(engine) as session:
+                credential = session.get(GoogleConnectionCredential, account_id, populate_existing=True)
+                ready = credential is not None and credential.status == "ready" and credential.sealed is not None
+            value = dict(state="connected" if ready else "sign_in_required",
+                         account=dict(label="Invented UI account", email="owner@example.invalid") if ready else None,
+                         connected_at=connected.isoformat() if ready else None)
+            if include_capabilities:
+                value["capabilities"] = dict(mail=ready, calendar=ready and calendar_lab)
+            return value
 
         def mail(self, identity):
             self.calls.append("list")
@@ -464,12 +475,12 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
                     "physician",
                     "nurse_practitioner",
                     "physician_assistant",
-                } or iteration not in {"1", "2", "masked_source", "masked_handoff"} or (
-                    iteration.startswith("masked_") and persona != "physician"
+                } or iteration not in {"1", "2", "masked_source", "masked_handoff", "masked_revised_handoff", "revoked_accepted"} or (
+                    (iteration.startswith("masked_") or iteration == "revoked_accepted") and persona != "physician"
                 ):
                     return self.respond(422, {"detail": "invalid invented case"})
                 with Session(engine) as session:
-                    if iteration.startswith("masked_"):
+                    if (iteration.startswith("masked_") or iteration == "revoked_accepted"):
                         # Explicit invented fixture setup between terminal episodes only.
                         # This never runs during reconciliation of a lost review reply.
                         credential = session.get(GoogleConnectionCredential, account_id)
@@ -479,7 +490,7 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
                     link = PatientLink(
                         box_id=box,
                         source_pair_key="ui-email:" + str(uuid4()),
-                        label="Invented email visit",
+                        label=(f"Invented {source_kind} visit {persona} {iteration}" if full_workspace else "Invented email visit"),
                         state="confirmed",
                         confirmed_by_principal_id=owner,
                         attested_at=datetime.now(UTC),
@@ -492,7 +503,7 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
                         external_id=str(uuid4()),
                         source="synthetic",
                         start_at=datetime.now(UTC),
-                        patient_label="Invented email visit",
+                        patient_label=link.label,
                     )
                     session.add(appointment)
                     session.commit()
@@ -574,15 +585,27 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
                 if not isinstance(value, dict) or set(value) != {"workspace_id"}:
                     return self.respond(422, {"detail": "invalid invented case"})
                 case = cases.get(value["workspace_id"])
-                if case is None or not case["round"].startswith("masked_"):
+                if case is None or not (case["round"].startswith("masked_") or case["round"] == "revoked_accepted"):
                     return self.respond(404, {"detail": "invented terminal case unavailable"})
+                before_revoke = current(case)
                 with Session(engine) as session:
                     credential = session.get(GoogleConnectionCredential, account_id)
                     assert credential is not None and credential.status == "ready"
                     credential.status, credential.sealed = "disconnected", None
                     session.commit()
                 case["revoked_counts"] = dict(provider_calls=len(google.calls), model_rounds=len(rounds))
-                return self.respond(200, inspect_case(case))
+                masked = inspect_case(case)
+                for previous in before_revoke.get("handoffs", []):
+                    selected = next(h for h in masked["workspace"]["handoffs"] if h["id"] == previous["id"])
+                    assert selected["result_sha256"] == previous["result_sha256"]
+                    assert selected["task_brief_unavailable"] is True
+                    assert "task_brief" not in selected and "completion_evidence" not in selected
+                    assert selected["review_status"] == "stale"
+                    result = next(e for e in masked["workspace"]["entries"] if e["id"] == selected["result_entry_id"])
+                    assert result["content"] == "" and result["reply"] is None
+                    if previous.get("review", {}).get("feedback"):
+                        assert previous["review"]["feedback"] not in str(masked)
+                return self.respond(200, masked)
             if self.path == "/lab/work":
                 value = json.loads(body)
                 assert set(value) <= {"workspace_id", "handoff_id"}
@@ -603,12 +626,13 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
     thread.start()
     report_root = Path(os.environ.get("COSMAS_OPERATIONAL_EVIDENCE_DIR", str(tmp_path)))
     report_root.mkdir(parents=True, exist_ok=True)
-    report = report_root / ("google-calendar-ui-server-lab.json" if calendar_lab else "google-message-ui-server-lab.json")
+    report = report_root / (("google-calendar-full-workspace.json" if calendar_lab else "google-message-full-workspace.json") if full_workspace else ("google-calendar-ui-server-lab.json" if calendar_lab else "google-message-ui-server-lab.json"))
     env = {k: os.environ[k] for k in ("PATH", "TMPDIR") if k in os.environ}
     env.update(
-        **{("COSMAS_GOOGLE_CALENDAR_LAB_URL" if calendar_lab else "COSMAS_GOOGLE_MESSAGE_LAB_URL"):
+        **{("COSMAS_GOOGLE_FULL_LAB_URL" if full_workspace else "COSMAS_GOOGLE_CALENDAR_LAB_URL" if calendar_lab else "COSMAS_GOOGLE_MESSAGE_LAB_URL"):
            f"http://127.0.0.1:{server.server_port}"},
-        **{("COSMAS_GOOGLE_CALENDAR_LAB_REPORT" if calendar_lab else "COSMAS_GOOGLE_MESSAGE_LAB_REPORT"): str(report)},
+        **{("COSMAS_GOOGLE_FULL_LAB_REPORT" if full_workspace else "COSMAS_GOOGLE_CALENDAR_LAB_REPORT" if calendar_lab else "COSMAS_GOOGLE_MESSAGE_LAB_REPORT"): str(report)},
+        COSMAS_GOOGLE_FULL_LAB_KIND=source_kind,
     )
 
     def close_reserved_lab_work():
@@ -649,7 +673,7 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
                         str(NODE),
                         "node_modules/vitest/vitest.mjs",
                         "run",
-                        "src/GoogleCalendarServerLab.test.tsx" if calendar_lab else "src/GoogleMessageServerLab.test.tsx",
+                        "src/GoogleFullWorkspaceServerLab.test.tsx" if full_workspace else "src/GoogleCalendarServerLab.test.tsx" if calendar_lab else "src/GoogleMessageServerLab.test.tsx",
                         "--maxWorkers=1",
                     ],
                     cwd=REPO / "web",
@@ -661,14 +685,14 @@ def run_signed_selected_source_ui_lab(engine, monkeypatch, tmp_path, *, source_k
                 assert result.returncode == 0, result.stdout + result.stderr
                 evidence = json.loads(report.read_text())
                 assert len(evidence["episodes"]) == 6 and all(e["passed"] for e in evidence["episodes"])
-                assert len(evidence["recovery_episodes"]) == 2 and all(
+                assert len(evidence["recovery_episodes"]) == (4 if full_workspace else 2) and all(
                     e["passed"] for e in evidence["recovery_episodes"]
                 )
-                expected_calls = ["list", "read", "calendar"] * 8 if calendar_lab else ["list", "read"] * 8
-                assert len(cases) == 8 and len(rounds) == 40 and google.calls == expected_calls
+                expected_calls = ["list", "read", "calendar"] * (10 if full_workspace else 8) if calendar_lab else ["list", "read"] * (10 if full_workspace else 8)
+                assert len(cases) == (10 if full_workspace else 8) and len(rounds) == (52 if full_workspace else 40) and google.calls == expected_calls
                 for case in cases.values():
                     assert current(case)["note"] == case["note"]
-                    if case["round"].startswith("masked_"):
+                    if case["round"].startswith("masked_") or case["round"] == "revoked_accepted":
                         assert case["inspection_counts"] and all(
                             counter == case["revoked_counts"] for counter in case["inspection_counts"]
                         )

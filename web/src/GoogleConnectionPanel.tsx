@@ -181,9 +181,12 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       onClick={begin}>{opening?'Opening Google…':'Continue with Google'}</button>:
       <a className="team-primary microsoft-continue" href={start.authorization_url} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer" onClick={begin} onAuxClick={begin}>Continue with Google</a>}</p>}
     {!nativeReady&&<p>Google connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
-    {status?.state==='connected'&&<>
+    {(status?.state==='connected'||status?.state==='sign_in_required')&&<>
+      {status.state==='sign_in_required'&&(messageWorkEnabled||calendarWorkEnabled)&&<p>Open saved work to check an unresolved request. Email and calendar contents need current Google access.</p>}
       {calendarWorkEnabled&&onOpenCalendarWork&&<button className="team-primary" disabled={blocked||calendarWorkLocked||messageWorkLocked} onClick={()=>{setService('calendar');onOpenCalendarWork();}}>📅 Work with calendar</button>}
       {messageWorkEnabled&&onOpenMessageWork&&<button className="team-primary" disabled={blocked||messageWorkLocked||calendarWorkLocked} onClick={()=>{setService('mail');onOpenMessageWork();}}>Work with email</button>}
+    </>}
+    {status?.state==='connected'&&<>
       <div className="google-service-tabs" role="group" aria-label="Choose Google service">
         <button disabled={messageWorkLocked||calendarWorkLocked} aria-pressed={service==='mail'} onClick={()=>setService('mail')}>Email</button>
         <button disabled={messageWorkLocked||calendarWorkLocked} aria-pressed={service==='calendar'} onClick={()=>setService('calendar')}>Calendar</button>

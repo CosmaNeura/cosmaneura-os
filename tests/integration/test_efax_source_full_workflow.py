@@ -312,6 +312,11 @@ def test_full_manual_fax_email_note_to_three_specialists_and_exact_human_edit_lo
             revoke(f)
             masked = fax.read(f, f.client)
             assert masked["note"] == original_note
+            for earlier in final["handoffs"]:
+                retained = next(h for h in masked["handoffs"] if h["id"] == earlier["id"])
+                assert retained["result_sha256"] == earlier["result_sha256"]
+                assert retained["task_brief_unavailable"] is True
+                assert "task_brief" not in retained and "completion_evidence" not in retained
             assert LATE_FACT not in str(masked) and FINAL_FACT not in str(masked) and FEEDBACK not in str(masked)
             assert next(e for e in masked["entries"] if e["id"] == mail["id"]) == mail
             assert fax.resolve(f, f.client, f.fax_command)["source_withheld"] is True

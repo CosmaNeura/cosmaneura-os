@@ -380,6 +380,10 @@ def test_actual_scoped_tool_and_derived_chief_handoff_are_withheld_after_signed_
             json={"idempotency_key": signed_fixture.key(), "grant_id": f.grant_id}))
         masked = read(f, client)
         assert PASSAGE not in str(masked) and masked["note"] == before["note"]
+        retained = next(h for h in masked["handoffs"] if h["id"] == handoff["id"])
+        assert retained["result_sha256"] == handoff["result_sha256"]
+        assert retained["task_brief_unavailable"] is True
+        assert "task_brief" not in retained and "completion_evidence" not in retained
         assert next(e for e in masked["entries"] if e["id"] == saved["entry_id"])["practice_fax_source_state"] == "unavailable"
         derived = [e for e in masked["entries"] if e["kind"] in {"conversation", "handoff_result"}]
         assert len(derived) >= 2 and all(e["reply"] is None for e in derived)
