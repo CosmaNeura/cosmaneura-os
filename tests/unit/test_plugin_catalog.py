@@ -43,13 +43,16 @@ def test_discovery_separates_configuration_from_account_and_operation_evidence()
     missing = plugin_catalog(settings, SimpleNamespace())
     assert all(not tool["_meta"][META]["feature_enabled"] for tool in missing["tools"])
     configured = plugin_catalog(settings, SimpleNamespace(google_connection=object()))
+    from cosmas_os.api.plugin_account_operations import configured as account_configured
     for tool in configured["tools"]:
         meta = tool["_meta"][META]
-        assert meta["feature_enabled"] is (meta["plugin"] == "google")
+        operation = find_operation(meta["id"])
+        expected = account_configured(operation, settings, SimpleNamespace(google_connection=object())) if operation.agent_callable else meta["plugin"] == "google"
+        assert meta["feature_enabled"] is expected
         assert meta["account_status"] == meta["operation_health"] == "not_checked"
         assert meta["external_send"] is False
     assert configured["_meta"]["ai.cosmas/discovery_only"] is True
-    assert "no Google, Microsoft or fax inbox transport" in configured["_meta"]["ai.cosmas/inbound"]["production"]
+    assert "Google selected-message" in configured["_meta"]["ai.cosmas/inbound"]["production"]
 
 
 def test_contract_inventory_has_closed_arguments_and_real_test_references():
@@ -63,7 +66,8 @@ def test_contract_inventory_has_closed_arguments_and_real_test_references():
         schema = tool["inputSchema"]
         assert schema["type"] == "object" and schema["additionalProperties"] is False
         assert set(schema["required"]) == set(schema["properties"])
-        assert schema["properties"]["request"]["additionalProperties"] is False
+        if "request" in schema["properties"]:
+            assert schema["properties"]["request"]["additionalProperties"] is False
         assert tool["annotations"]["destructiveHint"] is False
         for path in meta["test_files"]:
             assert Path(path).is_file(), path
@@ -173,6 +177,7 @@ def test_http_bindings_include_shared_workspace_and_current_identity_requirement
             "Content-Type": "application/json",
             "X-Cosmas-Workspace-Protocol": "1",
             "X-Cosmas-Draft-Recovery": "2",
+            **dict(operation.extra_headers),
         }
         assert binding["contract_header"] == operation.header
         assert binding["contract_version"] == ("1" if operation.header else None)

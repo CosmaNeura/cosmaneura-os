@@ -1,0 +1,17 @@
+{
+  "name": "cosmabot-connectors",
+  "version": "0.1.0",
+  "description": "Operational CosmaBot connectors and bot handoffs through the authenticated product API.",
+  "author": {"name": "CosmaNeura"},
+  "interface": {
+    "displayName": "CosmaBot Connectors",
+    "shortDescription": "Connected sources, private team drafts and recovery.",
+    "longDescription": "Calls configured first-party CosmaBot operations using current sign-in and server grants. Human review and destination approval remain in CosmaBot.",
+    "developerName": "CosmaNeura",
+    "category": "Productivity",
+    "capabilities": ["Read", "Write", "Interactive"],
+    "defaultPrompt": ["Reopen my saved encounter and show each bot's handoff progress."]
+  },
+  "mcpServers": "./.mcp.json",
+  "repository": "https://github.com/CosmaNeura/cosmaneura-os"
+}

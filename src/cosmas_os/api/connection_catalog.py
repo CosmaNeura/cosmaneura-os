@@ -34,7 +34,11 @@ def router(*, settings, runtime, identity_dependency, workspace_gate):
         from cosmas_os.api.plugin_catalog import plugin_catalog
 
         validate(request, identity)
-        return JSONResponse(plugin_catalog(settings(), runtime()), headers={
+        from cosmas_os.adapters.managed_services import managed_services
+        from cosmas_os.adapters.portal_services import portal_services
+
+        return JSONResponse(plugin_catalog(settings(), runtime(), managed=managed_services(request.app),
+            portal=portal_services(request.app)), headers={
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
         })
 

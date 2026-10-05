@@ -3,6 +3,7 @@
 Discovery is data, not authorization. Existing HTTP handlers remain the only
 execution path; this module neither installs plugins nor implements MCP transport.
 """
+import re
 from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
@@ -44,6 +45,10 @@ class Operation:
     public_read: bool = False
     deadline_seconds: int = 30
     method: str = "POST"
+    extra_headers: tuple[tuple[str, str], ...] = ()
+    path_arguments: tuple[tuple[str, dict[str, Any]], ...] = ()
+    query_arguments: tuple[tuple[str, dict[str, Any]], ...] = ()
+    agent_callable: bool = False
 
 
 def command(action: str) -> dict[str, Any]:
@@ -55,6 +60,7 @@ def command(action: str) -> dict[str, Any]:
 def delivery_schema(action: str) -> dict[str, Any]:
     schema = VendorProposal.model_json_schema()
     schema["properties"]["action"] = {"type": "string", "const": action}
+    schema["properties"]["share_to_practice"] = {"type": "boolean", "const": False}
     required, optional = {
         "spruce_secure_message": ({"correspondence", "message"}, {"uploaded_media_operation_id"}),
         "srfax_fax": ({"correspondence", "document"}, set()),
@@ -293,6 +299,14 @@ def definitions() -> tuple[Operation, ...]:
             tests=("tests/integration/test_lab_inbound.py",
                    "tests/integration/test_virtual_clinic_lab.py"),
         ))
+    from cosmas_os.api import (
+        plugin_account_operations,
+        plugin_journey_operations,
+        plugin_managed_operations,
+    )
+
+    for module in (plugin_account_operations, plugin_journey_operations, plugin_managed_operations):
+        operations.extend(module.definitions())
     return tuple(operations)
 
 
@@ -307,10 +321,11 @@ def find_operation(operation_id: str) -> Operation:
 def tool(operation: Operation, configured: bool) -> dict[str, Any]:
     body = deepcopy(operation.request)
     definitions_ = body.pop("$defs", {})
-    arguments = {"request": body}
-    for name in ("workspace_id", "run_id", "ticket_id"):
-        if "{" + name + "}" in operation.path:
-            arguments[name] = {"type": "string", "format": "uuid"}
+    arguments = {"request": body} if operation.method == "POST" or not operation.agent_callable else {}
+    overrides = dict(operation.path_arguments)
+    for name in re.findall(r"\{([a-z_]+)\}", operation.path):
+        arguments[name] = deepcopy(overrides.get(name, {"type": "string", "format": "uuid"}))
+    arguments.update(deepcopy(dict(operation.query_arguments)))
     input_schema: dict[str, Any] = {
         "type": "object", "additionalProperties": False,
         "properties": arguments, "required": list(arguments),
@@ -334,17 +349,38 @@ def tool(operation: Operation, configured: bool) -> dict[str, Any]:
                      "authentication": "current_clerk_jwt",
                      "required_headers": {"Content-Type": "application/json",
                                           "X-Cosmas-Workspace-Protocol": "1",
-                                          "X-Cosmas-Draft-Recovery": "2"}},
+                                          "X-Cosmas-Draft-Recovery": "2", **dict(operation.extra_headers)},
+                     "query_arguments": list(dict(operation.query_arguments))},
             "validation": "Existing handlers also enforce current identity, grants, revisions and semantic field validation.",
             "permissions": list(operation.permission), "health_check": operation.health_check,
             "completion_evidence": operation.completion, "recovery": operation.recovery,
             "deadline_seconds": operation.deadline_seconds, "test_files": list(operation.tests),
             "external_send": False,
+            "agent_callable": operation.agent_callable,
         }},
     }
 
 
-def plugin_catalog(settings, runtime) -> dict[str, Any]:
+def plugin_catalog(settings, runtime, *, managed=None, portal=None) -> dict[str, Any]:
+    from cosmas_os.api import (
+        plugin_account_operations,
+        plugin_journey_operations,
+        plugin_managed_operations,
+    )
+
+    account_ids = {operation.id for operation in plugin_account_operations.definitions()}
+    journey_ids = {operation.id for operation in plugin_journey_operations.definitions()}
+    managed_ids = {operation.id for operation in plugin_managed_operations.definitions()}
+
+    def available(operation):
+        if operation.id in account_ids:
+            return plugin_account_operations.configured(operation, settings, runtime)
+        if operation.id in journey_ids:
+            return plugin_journey_operations.configured(operation.id, settings, runtime)
+        if operation.id in managed_ids:
+            return plugin_managed_operations.configured(operation, settings, runtime, managed=managed, portal=portal)
+        return enabled.get(operation.plugin, False) and (bool(getattr(settings, "workspace_appointments_enabled", False))
+            if operation.id.startswith("scheduling.") and operation.id != "scheduling.read_availability" else True)
     enabled = {
         "workspace": bool(getattr(settings, "workspace_available", False)),
         "google": bool(getattr(settings, "workspace_google_connection_enabled", False)
@@ -361,16 +397,14 @@ def plugin_catalog(settings, runtime) -> dict[str, Any]:
     for vendor in ("spruce", "srfax", "documo", "efax"):
         enabled[vendor] = bool(getattr(settings, "vendor_work_enabled", False))
     return {
-        "tools": [tool(operation, enabled[operation.plugin] and
-                       (bool(getattr(settings, "workspace_appointments_enabled", False))
-                        if operation.id.startswith("scheduling.") and operation.id != "scheduling.read_availability" else True))
+        "tools": [tool(operation, available(operation))
                   for operation in definitions()],
         "_meta": {
             "ai.cosmas/contract": CONTRACT, "ai.cosmas/schema": "MCP Tool 2025-11-25",
             "ai.cosmas/transport": "existing_authenticated_http",
             "ai.cosmas/discovery_only": True,
             "ai.cosmas/inbound": {
-                "production": "Spruce reviewed inbox only; no Google, Microsoft or fax inbox transport",
+                "production": "Google selected-message and calendar reads; Microsoft bounded summaries; SRFax/Documo fax reads; Spruce fax metadata; separately approved eFax reads. Configuration is not account acceptance.",
                 "virtual_scenarios": [
                     "inbound.google", "inbound.microsoft", "inbound.documo", "inbound.srfax",
                     "inbound.duplicate_out_of_order", "inbound.attachment_integrity",
