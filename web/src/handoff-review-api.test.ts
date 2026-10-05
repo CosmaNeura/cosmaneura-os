@@ -144,3 +144,11 @@ it('rejects a revised assignment request with additional claims before fresh cre
   await expect(prepareHandoffRevision({...access,getToken:token},wid,hid,{...f.body,model_signoff:true} as HandoffRevisionInput)).rejects.toMatchObject({status:422});
   expect(token).not.toHaveBeenCalled();expect(fetcher).not.toHaveBeenCalled();
 });
+
+it('resolves an immutable generic fax review after revocation using its separate source mask and canonical withheld notice',async()=>{
+ const f=await fixture(),review=f.response.workspace.handoffs[0].review;
+ const masked={...f.response,feedback_withheld:true,workspace:{...f.response.workspace,entries:f.response.workspace.entries.map(e=>({...e,content:'',reply:null,practice_fax_source_state:'unavailable'})),handoffs:[{...f.handoff,review_status:'stale',review:{...review,feedback:'Check the reviewed fax passage before viewing this feedback.'}}]}};
+ const fetcher=vi.fn().mockResolvedValueOnce(json(masked));vi.stubGlobal('fetch',fetcher);await expect(saveHandoffReview(access,wid,hid,f.body)).resolves.toMatchObject({feedback_withheld:true,request_sha256:f.response.request_sha256});
+ fetcher.mockResolvedValueOnce(json({...masked,workspace:{...masked.workspace,handoffs:[{...masked.workspace.handoffs[0],review:{...review,feedback:'Email access must be checked before viewing this feedback.'}}]}}));
+ await expect(saveHandoffReview(access,wid,hid,f.body)).rejects.toMatchObject({status:503});expect(fetcher).toHaveBeenCalledTimes(2);
+});
