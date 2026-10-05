@@ -76,6 +76,55 @@ def catalog_case():
     return discovery, row
 
 
+@pytest.mark.parametrize("metadata,accepted", [
+    ({}, True),
+    ({"date_of_birth": None}, True),
+    ({"date_of_birth": "2000-02-29", "status": "recording_saved"}, True),
+    ({"date_of_birth": None, "status": "draft_ready"}, True),
+    ({"date_of_birth": "20000229"}, False),
+    ({"date_of_birth": "2000-02-30"}, False),
+    ({"date_of_birth": "2000-02-29T00:00:00Z"}, False),
+    ({"date_of_birth": 951782400}, False),
+    ({"date_of_birth": True}, False),
+    ({"status": "admitted"}, False),
+    ({"status": 1}, False),
+    ({"unrequested": True}, False),
+])
+def test_current_core_catalog_metadata_is_optional_closed_and_read_only(metadata, accepted):
+    discovery, row = catalog_case()
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        payload = json.loads(request.content)
+        assert request.method == "POST" and request.url.path == PATH
+        assert payload == {
+            "action": "list", "expected_actor_ref": discovery.connection.actor_ref,
+            "expected_tenant_ref": discovery.connection.tenant_ref,
+            "request_nonce": payload["request_nonce"],
+        }
+        return httpx.Response(200, json={
+            "version": "1", "action": "list", "request_nonce": payload["request_nonce"],
+            "account": {"actor_ref": discovery.connection.actor_ref,
+                        "tenant_ref": discovery.connection.tenant_ref,
+                        "doctor_ref": "doctor_" + "0" * 25 + "1",
+                        "email": "invented@example.invalid"},
+            "encounters": [{**row, **metadata}],
+        }, headers={"Cache-Control": "no-store", "X-Cosmaneura-Scribe-Encounter-Version": "1"})
+
+    port = CoreEncounterConnection("https://core.example.invalid", RecordDeadline(),
+                                   transport_factory=lambda: httpx.MockTransport(handler))
+    try:
+        if accepted:
+            assert str(port.scribe_workspace(discovery, SecretStr("invented-human"))) == row["workspace_id"]
+        else:
+            with pytest.raises(ConnectorUnavailable):
+                port.scribe_workspace(discovery, SecretStr("invented-human"))
+        assert len(calls) == 1
+    finally:
+        port.close()
+
+
 @pytest.mark.parametrize(
     "fault",
     [
