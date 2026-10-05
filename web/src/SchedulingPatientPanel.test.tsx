@@ -94,8 +94,8 @@ it('retains an unresolved server reservation without showing a provider retry bu
 });
 it('fails closed with missing encrypted recovery, unavailable feature or expired preview',async()=>{
  access=null;await act(async()=>root.render(<Harness/>));expect(host.querySelector('[aria-label="Patient name"]')).toBeNull();expect(button('Check patient setup').disabled).toBe(true);expect(fetch).not.toHaveBeenCalled();await act(async()=>root.render(<Harness enabled={false}/>));expect(host.textContent).toContain('Setup unavailable');
- await newJournal();await act(async()=>root.render(<Harness/>));await wait(()=>expect(button('Check patient setup').disabled).toBe(false));await search();const original=receipts.get(requests[0].idempotency_key)!;const at=new Date(Date.now()-300001).toISOString();
- const expired={...original,preview:{...original.preview!,checked_at:at,expires_at:new Date(Date.now()-1).toISOString()}};receipts.set(original.request_key,expired);await reopen();await click('Restore scheduling patient draft');await click('Check saved patient details');
+ await newJournal();await act(async()=>root.render(<Harness/>));await wait(()=>expect(button('Check patient setup').disabled).toBe(false));await search();const original=receipts.get(requests[0].idempotency_key)!;const expiredAt=Date.now()-1;
+ const expired={...original,preview:{...original.preview!,checked_at:new Date(expiredAt-300000).toISOString(),expires_at:new Date(expiredAt).toISOString()}};receipts.set(original.request_key,expired);await reopen();await click('Restore scheduling patient draft');await click('Check saved patient details');
  await wait(()=>expect(host.textContent).toContain('choices expired'));expect(host.querySelector('[aria-label="Patient matches"]')).toBeNull();
 });
 it('rejects malformed choices, excessive matches and altered command bindings while preserving existing ciphertext',async()=>{
