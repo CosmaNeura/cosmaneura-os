@@ -279,6 +279,7 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
             "google_message": "Unavailable email source",
             "google_calendar": "Unavailable calendar source",
             "efax_inbound_source": "Unavailable received-fax source",
+            "fax_inbound_source": "Unavailable received practice-fax source",
         }.get(e.kind)
         entries.append(
             {
