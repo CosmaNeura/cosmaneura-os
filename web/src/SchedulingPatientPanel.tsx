@@ -31,7 +31,7 @@ export function SchedulingPatientPanel({identity,workspace,enabled,locked,recove
  const selected=schedulingPatientSelected(record),expired=!!record.preview?.preview&&now>=Date.parse(record.preview.preview.expires_at);
  const withheld=authorityLost||sourceLost||scopeChanged||recovery.access===null||record.preview?.source_withheld===true||record.saved?.source_withheld===true||
   availabilityUnchecked.current&&(record.preview!==null||record.saved!==null);
- const previewVisible=verifiedPreview&&!withheld&&!expired&&!availabilityUnchecked.current;
+ const previewVisible=record.pending===null&&verifiedPreview&&!withheld&&!expired&&!availabilityUnchecked.current;
  const ready=verifiedSaved&&!withheld&&!availabilityUnchecked.current&&record.saved?.status==='saved'&&!!record.saved.mapping;
  const disabled=!enabled||locked||busy||recovery.blocked||!!record.pending||authorityLost||scopeChanged;
  const pendingLocked=!enabled||(recoveryLocked??locked)||busy||recovery.blocked||authorityLost||scopeChanged;
