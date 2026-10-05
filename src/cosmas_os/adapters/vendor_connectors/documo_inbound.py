@@ -10,6 +10,8 @@ from cosmas_os.ports.fax_inbound import (
     bounded_json,
     checked_page,
     count,
+    reported_label,
+    reported_number,
     timestamp,
     validate_pdf,
 )
@@ -80,6 +82,8 @@ class DocumoInbound:
                     viewed,
                     not row["isFilePurged"],
                     "document_unavailable" if row["isFilePurged"] else None,
+                    sender_label=reported_label(row.get("faxCsid")),
+                    sender_number=reported_number(row.get("faxCallerId")),
                 )
             )
         return checked_page(scope, raw, items)

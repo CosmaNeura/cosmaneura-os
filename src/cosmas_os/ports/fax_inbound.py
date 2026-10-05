@@ -20,7 +20,7 @@ class InboundFailure(Exception):
 
 def commitment(value) -> str:
     return hashlib.sha256(
-        json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
     ).hexdigest()
 
 
@@ -88,6 +88,8 @@ class ReceivedFax:
     image_available: bool
     image_block_reason: str | None = None
     private_image_url: str | None = field(default=None, repr=False)
+    sender_label: str | None = None
+    sender_number: str | None = None
 
     def __post_init__(self):
         import re
@@ -114,6 +116,18 @@ class ReceivedFax:
             or type(self.image_available) is not bool
             or self.image_available
             and self.pages < 1
+            or self.sender_label is not None
+            and (
+                type(self.sender_label) is not str
+                or not 1 <= len(self.sender_label) <= 80
+                or any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in self.sender_label)
+            )
+            or self.sender_number is not None
+            and (
+                type(self.sender_number) is not str
+                or not 1 <= len(self.sender_number) <= 30
+                or any(c not in "+0123456789 ()-" for c in self.sender_number)
+            )
         ):
             raise InboundFailure("locator_invalid")
 
@@ -128,6 +142,8 @@ class ReceivedFax:
                 "viewed": self.viewed,
                 "image_available": self.image_available,
                 "block": self.image_block_reason,
+                "sender_label": self.sender_label,
+                "sender_number": self.sender_number,
                 "url_commitment": hashlib.sha256(self.private_image_url.encode()).hexdigest()
                 if self.private_image_url
                 else None,
@@ -232,3 +248,23 @@ async def validate_pdf(raw: bytes):
         return await validate_received_pdf(raw)
     except Exception:
         raise InboundFailure("document_needs_human") from None
+
+
+def reported_label(value):
+    if (
+        type(value) is str
+        and 1 <= len(value.strip()) <= 80
+        and all(ord(c) >= 32 and ord(c) != 127 and not 0xD800 <= ord(c) <= 0xDFFF for c in value.strip())
+    ):
+        return value.strip()
+    return None
+
+
+def reported_number(value):
+    if (
+        type(value) is str
+        and 1 <= len(value.strip()) <= 30
+        and all(c in "+0123456789 ()-" for c in value.strip())
+    ):
+        return value.strip()
+    return None

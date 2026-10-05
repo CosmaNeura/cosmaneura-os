@@ -8,6 +8,7 @@ from cosmas_os.ports.fax_inbound import (
     WirePlan,
     bounded_json,
     checked_page,
+    reported_label,
     timestamp,
 )
 
@@ -104,6 +105,9 @@ class SpruceFaxInbound:
                     False,
                     "download_host_unverified",
                     signed["url"],
+                    sender_label=reported_label(row.get("author", {}).get("displayName"))
+                    if type(row.get("author")) is dict
+                    else None,
                 )
             )
         return checked_page(scope, raw, items)

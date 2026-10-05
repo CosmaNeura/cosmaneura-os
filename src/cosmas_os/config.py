@@ -117,6 +117,7 @@ class Settings(BaseSettings):
     vendor_events_enabled: bool = False
     vendor_setup_enabled: bool = False
     # Independent inbound metadata/image permission; outbound flags grant none.
+    fax_inbound_enabled: bool = False
     efax_inbound_enabled: bool = False
     # Explicit human-reviewed fax passages remain separate from clinical notes.
     efax_inbound_source_enabled: bool = False
