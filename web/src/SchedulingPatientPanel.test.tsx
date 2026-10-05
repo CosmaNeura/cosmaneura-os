@@ -128,7 +128,7 @@ it('can set aside a definitely refused request only after original-key resolutio
   requests.push(body);expect(await journal.load(address)).toMatchObject({pending:body.idempotency_key});
   return new Response(JSON.stringify({detail:'workspace_revision_conflict'}),{status:409,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
  }));
- await click('Find patient');await wait(()=>expect(host.textContent).toContain('Keep this exact patient search'));
+ await click('Find patient');await wait(()=>{expect(requests).toHaveLength(1);expect(host.textContent).toContain('Keep this exact patient search');});
  expect([...host.querySelectorAll('button')].some(b=>b.textContent==='Set aside unsuccessful setup')).toBe(false);const original=requests[0];
  await click('Check saved setup result');await wait(()=>expect(button('Set aside unsuccessful setup').disabled).toBe(false));expect(requests).toHaveLength(1);
  expect(JSON.parse(String(vi.mocked(fetch).mock.calls[1][1]?.body))).toEqual({action:'resolve',kind:'preview',idempotency_key:original.idempotency_key});
@@ -200,4 +200,17 @@ it('retains the exact pending confirmation if freshness changes during the encry
  expect(host.textContent).not.toContain('Shawn Café');expect(linked).not.toHaveBeenCalled();await act(async()=>finish());await wait(()=>expect(button('Check saved setup result').disabled).toBe(false));
  expect(await journal.load(address)).toMatchObject({pending:original.idempotency_key,data:{pending:original}});expect(requests).toHaveLength(2);expect(linked).not.toHaveBeenCalled();
  afterWrite=null;await click('Check saved setup result');await wait(()=>expect(host.textContent).toContain('Patient ready'));expect(linked).toHaveBeenCalledOnce();expect(requests).toHaveLength(2);
+});
+
+it('withholds earlier patient choices during an unresolved confirmation and retains its exact encrypted command through reopen',async()=>{
+ await mount();await search();await select();let finish!:()=>void;const held=new Promise<void>(resolve=>finish=resolve);
+ vi.stubGlobal('fetch',vi.fn(async(url,init)=>{const command=JSON.parse(String(init?.body));if(command.action!=='confirm')return wire(String(url),init!);
+  requests.push(command);expect(await journal.load(address)).toMatchObject({pending:command.idempotency_key,data:{pending:command}});await held;
+  return new Response(JSON.stringify({detail:'scheduling_patient_response_unconfirmed'}),{status:409,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+ }));await click('Save patient connection');await wait(()=>expect(requests).toHaveLength(2));const original=requests[1];
+ expect(host.querySelector('[aria-label="Patient matches"]')).toBeNull();expect(host.textContent).not.toContain('Shawn Café');expect(host.textContent).not.toContain('Shawn Other');
+ await act(async()=>finish());await wait(()=>expect(host.textContent).toContain('Patient setup could not be confirmed'));expect(host.textContent).not.toContain('Shawn Café');expect(linked).not.toHaveBeenCalled();
+ expect(await journal.load(address)).toMatchObject({pending:original.idempotency_key,data:{pending:original,selected_choice_ref:uuid(11),preview:{preview:{choices:expect.arrayContaining([expect.objectContaining({display_name:'Shawn Café'})])}}}});
+ await reopen();await click('Restore scheduling patient draft');expect(host.textContent).not.toContain('Shawn Café');expect(requests).toHaveLength(2);
+ await click('Check saved setup result');await wait(()=>expect(host.textContent).toContain('No saved request was found'));expect(requests).toHaveLength(2);expect(await journal.load(address)).toMatchObject({pending:original.idempotency_key,data:{pending:original}});
 });
