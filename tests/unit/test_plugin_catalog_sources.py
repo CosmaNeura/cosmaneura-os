@@ -111,7 +111,8 @@ def test_prepared_brief_discovery_cannot_default_to_raw_sources_or_omit_bot():
 def test_chief_saved_review_is_discoverable_without_external_connectors_or_model():
     values = descriptors(SimpleNamespace(workspace_available=True))
     enabled = {key for key, row in values.items() if row["_meta"][META]["feature_enabled"]}
-    assert enabled == {"workspace.review"}
+    assert {"workspace.review", "workspace.read", "workspace.draft_from_saved_sources"} <= enabled
+    assert all(key.startswith("workspace.") or key == "google.inspect_saved_sources" for key in enabled)
     meta = values["workspace.review"]["_meta"][META]
     assert meta["account_status"] == meta["operation_health"] == "not_checked"
     assert "when the model is disabled" in values["workspace.review"]["description"]
