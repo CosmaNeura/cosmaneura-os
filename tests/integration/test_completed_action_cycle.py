@@ -299,7 +299,7 @@ def test_completed_action_cycle(capture_case, monkeypatch, tmp_path, scenario):
         current_selection = scribe_source.selection(f.view)
         assert current_selection is not None
         selected = current_selection.model_dump(mode="json")
-        clarified = human("POST", base + "/capture/source-packets", json={"expected_revision": saved.json()["entry_revision"],
+        clarified = human("POST", base + "/capture/source-packets", json={"expected_revision": snapshot()["revision"],
             "idempotency_key": "cycle-clarified-source-" + uuid4().hex, "selection": selected, "reviewed": True, "share_with_team": True})
         assert clarified.status_code == 200, clarified.text
         saved = clarified
