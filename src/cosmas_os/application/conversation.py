@@ -146,6 +146,7 @@ def ask(
     session_prep_analysis=None,
     external_identity_id=None,
     reauthenticate=None,
+    dispatch=None,
 ):
     from cosmas_os.application import model_work
 
@@ -220,6 +221,7 @@ def ask(
             wid,
             external_identity_id=external_identity_id,
             reauthenticate=reauthenticate,
+            dispatch=dispatch,
             **command,
         )
     if expected != w.revision:

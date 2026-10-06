@@ -10,8 +10,9 @@ import type { SharedVendorWork, Person } from "./vendor-schema";
 import type { WorkspaceIdentity } from "./workspace-api";
 
 /** Connect delivery editors to the existing account-scoped encrypted journal. */
-export function VendorWorkspaceMount({ identity, workspaceId, locked, onChanged }: {
+export function VendorWorkspaceMount({ identity, workspaceId, locked, onChanged,followUpBots }: {
   identity: WorkspaceIdentity; workspaceId: string; locked?: boolean; onChanged?: () => void;
+  followUpBots?:{agent_id:string;name:string}[];
 }) {
   const context = useContext(EditorRecoveryContext);
   const recovery = useMemo<VendorRecoveryAccess | null>(() => {
@@ -28,7 +29,7 @@ export function VendorWorkspaceMount({ identity, workspaceId, locked, onChanged 
       denied: error => context.denied(error),
     };
   }, [context, workspaceId, identity]);
-  return <VendorWorkPanel identity={identity} workspaceId={workspaceId} recovery={recovery} locked={locked} onChanged={onChanged} />;
+  return <VendorWorkPanel identity={identity} workspaceId={workspaceId} recovery={recovery} locked={locked} onChanged={onChanged} followUpBots={followUpBots} />;
 }
 
 export function VendorPracticeMount({ identity, item, people, locked, onChanged, onDenied }: {

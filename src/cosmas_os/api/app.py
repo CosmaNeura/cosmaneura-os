@@ -1080,6 +1080,7 @@ async def converse(request: Request, workspace_id: UUID, session: Session = Depe
             membership_analysis=body.membership_analysis.model_dump(mode="json") if body.membership_analysis else None,
             session_prep_analysis=body.session_prep_analysis.model_dump(mode="json") if body.session_prep_analysis else None,
             external_identity_id=identity.external_identity_id,
+            dispatch=_model_dispatch(request, identity),
             reauthenticate=lambda: _refresh_model_identity(request, session, identity))
         return JSONResponse(value, status_code=409 if negotiated and value["outcome"] != "saved" else 200,
                             headers={"Cache-Control": "no-store"})
@@ -1705,6 +1706,33 @@ def invoke_capability(
         return {"ok": True}
     except Exception as exc:  # noqa: BLE001
         raise _map_err(exc) from exc
+
+
+def _model_dispatch(request: Request, identity: RequestIdentity):
+    """Bind admitted model tools to this app's installed delivery runtime."""
+    from cosmas_os.application import model_work
+
+    runtime = managed_services(request.app)
+    if runtime is None or not runtime.has_credentials:
+        return None
+
+    def factory(admitted_current):
+        import asyncio
+
+        def signed_current():
+            with SessionLocal() as session:
+                try:
+                    _refresh_model_identity(request, session, identity)
+                    return True
+                except Exception:
+                    return False
+
+        async def current():
+            return await admitted_current() is True and await asyncio.to_thread(signed_current) is True
+
+        return runtime.vendor_execution(current)
+    return lambda claimed: model_work.dispatch_claim(claimed, session_factory=SessionLocal,
+        delivery_execution_factory=factory)
 
 
 def _vendor_execution_factory(request: Request):

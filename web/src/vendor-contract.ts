@@ -71,6 +71,7 @@ function actionUnion(v:Obj,media:string){const permitted:Record<string,[string[]
 function model(name:string,value:unknown,depth=0):unknown {
   const v=shape(schemas[name],value,depth) as Obj;
   if(name==='VendorRetire')model(({decide:'VendorDecision',submit:'BoundCommand',verify:'VendorVerify'} as Record<string,string>)[v.command_kind as string],v.request,depth+1);
+  if(name==='VendorDecision'&&((v.administrative_delivery_confirmed===true)!==(v.follow_up_bot_id!==undefined)||v.follow_up_bot_id!==undefined&&v.choice!=='approve'))fail();
   if(name==='VendorPreparationRetire'){
     model(({propose:'VendorProposal',artifact_intent:'VendorArtifactIntent',artifact_content:'VendorArtifactContent'} as Record<string,string>)[v.command_kind as string],v.request,depth+1);
     if(vendorBytes(v.request)>(v.command_kind==='propose'?32768:2048))fail();
