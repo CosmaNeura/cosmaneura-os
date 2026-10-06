@@ -43,6 +43,9 @@ import { CapturePanel } from "./CapturePanel";
 import { ExistingScribeSourcePanel } from './ExistingScribeSourcePanel';
 import type {InboxDraftSelection} from "./inbox-analysis-contract";
 import {ResearchPanelLoader} from "./ResearchPanelLoader";
+import {ConnectorToolsPanel} from './ConnectorToolsPanel';
+import {AgentResearchReviewPanel} from './AgentResearchReviewPanel';
+import {validateAgentResearchRecovery, type AgentResearchRecoveryAccess} from './agent-research-recovery';
 import { CoreRecordLink } from "./CoreRecordLink";
 import { SchedulingPanel } from "./SchedulingPanel";
 import { SCHEDULING_BUILD } from "./scheduling-api";
@@ -130,8 +133,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [scribeSourceBusy,setScribeSourceBusy]=useState(false);
   const [handoffReviewPending,setHandoffReviewPending]=useState(false);
   const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
+  const [agentResearchBusy,setAgentResearchBusy]=useState(false);
   const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
-  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || faxSourceBusy || providerFaxSourceBusy;
+  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
@@ -211,6 +215,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[connectionGeneration]);
   const reportSchedulingPatientBusy=useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setSchedulingPatientBusy(blocked);
+  },[connectionGeneration]);
+  const reportAgentResearchBusy=useCallback((blocked:boolean)=>{
+    if(generation.current===connectionGeneration)setAgentResearchBusy(blocked);
   },[connectionGeneration]);
   const reportCoreBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.core===blocked?previous:{...previous,core:blocked});
@@ -473,7 +480,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
-    setSchedulingPatientBusy(false);
+    setSchedulingPatientBusy(false);setAgentResearchBusy(false);
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
@@ -895,7 +902,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     !journal.current || journal.current.serverScope !== team?.recovery_scope || recoveryState === "failed");
   const baseLocked = busy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
   const actionLocked = baseLocked || scribeSourceBusy;
-  const locked = actionLocked || handoffReviewPending || schedulingPatientBusy;
+  const lockedWithoutAgentResearch = actionLocked || handoffReviewPending || schedulingPatientBusy;
+  const locked = lockedWithoutAgentResearch || agentResearchBusy;
   const reviewWorkspace = workspace ? withObservedCaptureDraft(workspace, observedCaptureDraft) : null;
   const bot = team?.configuration.bots.find(b => botAddress(b) === selected);
   const template = team?.members.find(b => botAddress(b) === selected);
@@ -929,7 +937,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,workspace?.id,bot?.role,settingsOpen,practiceOpen,panel,mobilePanel]);
   // Activity is read-only: its own busy navigation lock is excluded here so the
   // final selection can still inspect independently retained unsaved work.
-  useUnsavedWork(handoffReviewPending || accessBusy || connectionEditorsLocked || !!pending || !!recoveryOffers.length || recoveryState === "saving" || captureNavigationLocked || note !== latestNote || !!thought || !!evidence || !!source ||
+  useUnsavedWork(agentResearchBusy || handoffReviewPending || accessBusy || connectionEditorsLocked || !!pending || !!recoveryOffers.length || recoveryState === "saving" || captureNavigationLocked || note !== latestNote || !!thought || !!evidence || !!source ||
     !!team && !!teamDraft && JSON.stringify(teamDraft) !== JSON.stringify(team.configuration));
   useEffect(()=>{
     if(!inboxNavigation||inboxNavigationConsumed.current===inboxNavigation)return;
@@ -1087,6 +1095,17 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       }
     }};
   },[authenticated,editorScope,editorJournal,editorWorkspace,editorReady,recoveryBlocked]);
+  const agentResearchRecovery = useMemo<AgentResearchRecoveryAccess | null>(() => {
+    if (!editorAccess || !editorWorkspace) return null;
+    const address = editorAddress(editorWorkspace,'agent-research-review');
+    return {async authorize(){await editorAccess.authorize();}, async load(){
+      const value=await editorAccess.journal.load(address);
+      if(value===null)return null;
+      if(value?.kind!=='editor'||value.editor!=='agent-research-review')throw new DraftStoreError('integrity');
+      return validateAgentResearchRecovery(value.data,editorWorkspace);
+    },async persist(value){await editorAccess.journal.persist(address,value===null?null:{kind:'editor',
+      workspaceId:editorWorkspace,editor:'agent-research-review',data:value,pending:value.pending?.revision_id??null});}};
+  },[editorAccess,editorWorkspace]);
   const turns = workspace?.entries.filter(e => ["conversation", "handoff_result"].includes(e.kind)
     && (e.model_request?e.model_request.bot.address===selected:e.reply&&(e.reply.agent_id ? e.reply.agent_id === template?.agent_id
       : !bot?.instance_id && e.reply.role === bot?.role))) ?? [];
@@ -1507,6 +1526,15 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onDenied={failure} onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}}/>
             : <p className="research-status">Sign in to use private Research settings and check public source connections.</p>}
             <button className="team-subtle" aria-expanded={savedResearchChat} onClick={()=>setSavedResearchChat(value=>!value)}>Saved encounter conversation</button></>}
+          {authenticated && <details><summary>Team connector tools</summary><ConnectorToolsPanel identity={authenticated}
+            locked={locked||captureNavigationLocked||captureDraftLocked} onAuthenticationLost={failure}/></details>}
+          {bot?.role==='research'&&authenticated&&agentResearchRecovery&&<AgentResearchReviewPanel
+            identity={authenticated} workspaceId={workspace.id} recovery={agentResearchRecovery}
+            locked={lockedWithoutAgentResearch||captureNavigationLocked||captureDraftLocked} onBusyChange={reportAgentResearchBusy} onAuthenticationLost={failure}
+            onReady={proposal=>{if(locked||proposal.bot!==selected)return;setSavedResearchChat(true);
+              setThought(previous=>previous.trim()?previous+'\n\n'+`Run the reviewed public query for revision ${proposal.revision_id} and report its actual result.`:
+                `Run the reviewed public query for revision ${proposal.revision_id} and report its actual result.`);
+              setMobilePanel('Conversation');setQuestionFocus(value=>value+1);}}/>}
           <div hidden={bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
             {!turns.length && !visitPrepReader && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />

@@ -100,6 +100,9 @@ def _json_unique(raw):
 
 
 class GPT41ToolsConnector:
+    request_adapter = REQUEST_ADAPTER
+    tool_names = TOOL_NAMES
+
     def __init__(self, credential: Callable[[], str], *, transport: httpx.BaseTransport | None = None,
         monotonic: Callable[[], float] = time.monotonic):
         self.credential, self.transport, self.monotonic = credential, transport, monotonic
@@ -207,14 +210,14 @@ class GPT41ToolsConnector:
                         call_id, function = requested_call["id"], requested_call["function"]
                         if not isinstance(call_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", call_id) or call_id in ids or (
                             requested_call["type"] != "function" or not isinstance(function, dict)
-                            or set(function) != {"name", "arguments"} or function["name"] not in TOOL_NAMES
+                            or set(function) != {"name", "arguments"} or function["name"] not in self.tool_names
                             or not isinstance(function["arguments"], str) or len(function["arguments"].encode()) > 2048
                         ):
                             raise ValueError("invalid or repeated operational tool")
                         arguments = _json_unique(function["arguments"])
                         if not isinstance(arguments, dict) or "tool" in arguments:
                             raise ValueError("invalid operational arguments")
-                        checked = REQUEST_ADAPTER.validate_python({"tool": function["name"], **arguments}).model_dump()
+                        checked = self.request_adapter.validate_python({"tool": function["name"], **arguments}).model_dump()
                         digest = _digest(checked)
                         if digest in requests:
                             raise ValueError("repeated operational evidence read")
