@@ -17,6 +17,7 @@ const inboxHandoff = new RegExp(`^/inbox-handoffs/(${ID})(?:/(decide|handoff|res
 const inboxProposal = new RegExp(`^/workspaces/${ID}/inbox-handoffs/(propose|resolve)$`);
 const coreRecordLocation = new RegExp(`^/workspaces/${ID}/cosmaneura-record/location$`);
 const research = new RegExp(`^/workspaces/${ID}/research(?:/(saved|search|resolve|${ID}/save(?:/resolve)?))?$`);
+const agentResearch = new RegExp(`^/workspaces/${ID}/agent-research(?:/(${ID})/review)?$`);
 const googleCalendarReview = new RegExp(`^/workspaces/${ID}/google-calendar/review$`);
 const googleMessageReview = new RegExp(`^/workspaces/${ID}/google-messages/review$`);
 const schedulingPatientSetup = new RegExp(`^/workspaces/${ID}/scheduling-patient/setup$`);
@@ -36,6 +37,8 @@ export function connectorApiRoute(target, method) {
     ? plan('X-Cosmas-Google-Messages',4096,googleMessageReview.test(path)?12000000:131072,{seconds:50,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/catalog') return method === 'GET' && !query
     ? incoming(CONNECTOR_HEADERS[11],0,4096) : null;
+  if(path === '/connections/plugins') return method === 'GET' && !query
+    ? incoming(CONNECTOR_HEADERS[11],0,1048576) : null;
   if(path === '/vendor-settings/readiness') return method === 'GET' && !query
     ? plan(CONNECTOR_HEADERS[6],0,4096,{seconds:15}) : null;
   if(vendorPreparation.test(path)) return method==='POST'&&!query ? plan(CONNECTOR_HEADERS[0],33792,16384) : null;
@@ -54,6 +57,9 @@ export function connectorApiRoute(target, method) {
   if(path === '/connections/cosmaneura/read') return method === 'POST' && !query
     ? plan(CONNECTOR_HEADERS[11],2048,69632,{seconds:35,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/research/catalog') return method === 'GET' && !query ? plan(CONNECTOR_HEADERS[10],0,131072,{seconds:35,strictResponse:true,errorOutput:2048}) : null;
+  const agentResearchMatch=agentResearch.exec(path);
+  if(agentResearchMatch) return !query && method === (agentResearchMatch[1] ? 'POST' : 'GET')
+    ? plan(CONNECTOR_HEADERS[10],agentResearchMatch[1]?8192:0,131072,{seconds:35,strictResponse:true,errorOutput:2048}) : null;
   const researchMatch=research.exec(path);
   if(researchMatch){
     if(!researchMatch[1]||researchMatch[1]==='saved')return method==='GET'&&new RegExp(`^\\?bot=${ID}(?:&before=${ID})?$`).test(query)?plan(CONNECTOR_HEADERS[10],0,researchMatch[1]==='saved'?131072:1048576,{seconds:35,strictResponse:true,canonicalQuery:true,errorOutput:2048}):null;

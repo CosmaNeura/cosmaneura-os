@@ -7,6 +7,7 @@ from cosmas_os.ports.task_brief import TaskRequirements
 
 ALLOWED_ACTIONS = ("prepare_private_draft",)
 FULL_SOURCE_CONTRACT = "cosmas-gpt41-prepared.v6"
+FULL_SOURCE_CONTRACTS = {FULL_SOURCE_CONTRACT, "cosmas-gpt41-prepared.v7"}
 
 
 def _read_result_bytes(source):
@@ -33,7 +34,7 @@ def _read_result_bytes(source):
 def validate_sources(context, *, version=1, prepared_contract=None):
     if type(version) is not int or version not in {1, 2}:
         raise ValueError("invalid task brief version")
-    if version == 2 and prepared_contract != FULL_SOURCE_CONTRACT:
+    if version == 2 and prepared_contract not in FULL_SOURCE_CONTRACTS:
         raise ValueError("full-source task requires the v6 prepared contract")
     if (len(context.sources) > 12
         or any(len(source.content) > (20000 if version == 2 else 5000)
@@ -150,7 +151,7 @@ def projection(s, assignment, row):
                 ModelWorkAdmission.request_entry_id == assignment.origin_entry_id
             )
         )
-        if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", "cosmas-gpt41-prepared.v5", "cosmas-gpt41-prepared.v6"}:
+        if parent and parent.envelope_contract in {"cosmas-gpt41-prepared.v4", "cosmas-gpt41-prepared.v5", *FULL_SOURCE_CONTRACTS}:
             return {"task_brief_unavailable": True}
         return {}
     try:

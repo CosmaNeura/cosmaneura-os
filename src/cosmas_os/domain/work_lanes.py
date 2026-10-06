@@ -1,6 +1,7 @@
 """Private connector work is exposed only through its scoped review surface."""
 
 PRIVATE_CONNECTOR_LANES = frozenset({
+    "encounter_agent_research",
     "account_efax_inbound",
     "account_fax_inbound",
     "encounter_vendor_delivery",

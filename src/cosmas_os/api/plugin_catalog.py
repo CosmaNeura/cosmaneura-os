@@ -107,7 +107,17 @@ def appointment_proposal_schema() -> dict[str, Any]:
 
 
 def definitions() -> tuple[Operation, ...]:
-    operations = []
+    operations = [Operation(
+        id="research.inspect_bot_queries", plugin="research", title="Read Research bot query reviews",
+        description="Read exact bot-proposed public queries and retained lookup states. Human approval and model execution remain separate.",
+        path="/workspaces/{workspace_id}/agent-research", header="X-Cosmas-Research-Contract",
+        request={"type": "object", "properties": {}, "additionalProperties": False},
+        permission=("current authenticated encounter owner", "same identity, team and exact admitted evidence"),
+        health_check="signed review history establishes proposals only",
+        completion="bounded retained query review states; no publisher read",
+        recovery="read exact retained history; never approve or execute to recover a lost response",
+        tests=("tests/integration/test_agent_connector_tools.py",), read_only=True, method="GET", agent_callable=True,
+    )]
     for provider in ("google", "microsoft"):
         for action, name, label, scope in (
             ("mail", "mail_headers", "email headers",

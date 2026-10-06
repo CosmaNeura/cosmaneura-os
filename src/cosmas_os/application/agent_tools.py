@@ -20,6 +20,8 @@ from cosmas_os.models import (
     WorkspaceHandoffAttempt,
     WorkspaceReply,
 )
+from cosmas_os.ports.agent_connectors import CONNECTOR_TOOL_NAMES, ToolSelectionV2
+from cosmas_os.ports.agent_connectors import REQUEST_ADAPTER as CONNECTOR_REQUEST_ADAPTER
 from cosmas_os.ports.agent_tools import (
     REQUEST_ADAPTER,
     AgentToolRequest,
@@ -181,7 +183,8 @@ class AgentToolExecutor:
             raise ws.WorkspaceError("agent_tool_authority_changed", 403)
         try:
             context = _context(row.prepared_envelope["context"])
-            selection = ToolSelection.model_validate(row.prepared_envelope["tool_selection"])
+            selection_model = ToolSelectionV2 if row.envelope_contract == work.CONNECTOR_TOOL_PREPARED_CONTRACT else ToolSelection
+            selection = selection_model.model_validate(row.prepared_envelope["tool_selection"])
             value = selection.model_dump()
             commitment = value.pop("sha256")
             if commitment != work.digest(value) or context.workspace_id != claimed.workspace_id or (
@@ -201,11 +204,16 @@ class AgentToolExecutor:
             value = request.model_dump() if isinstance(request, BaseModel) else request
             if len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode()) > MAX_REQUEST_BYTES:
                 raise ValueError("oversized request")
-            checked = REQUEST_ADAPTER.validate_python(value)
+            adapter = CONNECTOR_REQUEST_ADAPTER if self.claimed.envelope.get("contract") == work.CONNECTOR_TOOL_PREPARED_CONTRACT else REQUEST_ADAPTER
+            checked = adapter.validate_python(value)
         except (ValidationError, ValueError, TypeError, RecursionError):
             raise ws.WorkspaceError("agent_tool_request_invalid", 422) from None
         row, context, selection, settings = self._guard()
-        if isinstance(checked, ListSelectedSources):
+        if checked.tool in CONNECTOR_TOOL_NAMES:
+            from cosmas_os.application.agent_connector_tools import AgentConnectorToolExecutor
+            data = AgentConnectorToolExecutor(self.session, self.claimed, guard=self._guard,
+                configuration=lambda: work.team.runtime_settings, clock=self.clock).execute(checked.model_dump())
+        elif isinstance(checked, ListSelectedSources):
             data = selection.model_dump(exclude={"contract", "sha256"})
         elif isinstance(checked, ReadSelectedSource):
             source = next((p for p in context.sources if p.entry_id == checked.entry_id

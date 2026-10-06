@@ -20,6 +20,11 @@ from cosmas_os.adapters.gpt41_tools_v6 import (
 )
 from cosmas_os.adapters.gpt41_tools_v6 import GPT41CompactToolsConnector
 from cosmas_os.adapters.gpt41_tools_v6 import validate_prepared as validate_compact_tools
+from cosmas_os.adapters.gpt41_tools_v7 import (
+    CURRENT_PREPARED_CONTRACT as CONNECTOR_TOOL_PREPARED_CONTRACT,
+)
+from cosmas_os.adapters.gpt41_tools_v7 import GPT41ConnectorToolsConnector
+from cosmas_os.adapters.gpt41_tools_v7 import validate_prepared as validate_connector_tools
 from cosmas_os.api.model_work_schemas import (
     ENTRY_MODEL_BYTES,
     EntryModelRequest,
@@ -51,7 +56,7 @@ from cosmas_os.ports.task_brief import TaskRequirements
 
 ACTIVE = {"reserved", "running"}
 TERMINAL = {"completed", "failed", "unknown", "abandoned"}
-TOOL_PREPARED_CONTRACTS = {TOOL_PREPARED_CONTRACT, COMPACT_TOOL_PREPARED_CONTRACT}
+TOOL_PREPARED_CONTRACTS = {TOOL_PREPARED_CONTRACT, COMPACT_TOOL_PREPARED_CONTRACT, CONNECTOR_TOOL_PREPARED_CONTRACT}
 SUPPORTED_PREPARED_CONTRACTS = TEXT_PREPARED_CONTRACTS | TOOL_PREPARED_CONTRACTS
 
 
@@ -583,7 +588,7 @@ def _context_for(
     if any(s.get(WorkspaceEntry, source.entry_id).kind in selected_google_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
-                prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT
+                prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS
                 and s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
             ) for source in context.sources)
             or sum(len(source.content) for source in context.sources) > 30000):
@@ -595,7 +600,7 @@ def _context_for(
     if has_fax:
         try:
             handoff_briefs.validate_sources(context,
-                version=2 if prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT else 1,
+                version=2 if prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS else 1,
                 prepared_contract=prepared_contract)
         except ValueError:
             raise ws.WorkspaceError("efax_inbound_source_context_too_large", 422) from None
@@ -710,12 +715,23 @@ def _new_admission(
             selection = prepare_tool_selection(s, box=workspace.box_id, owner=workspace.owner_id,
                 workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
                 context_revision=context.context_revision, settings=settings, context=context)
-            envelope = GPT41CompactToolsConnector(lambda: "").prepare(context, selection)
+            from cosmas_os.application.agent_connector_tools import prepare_connector_intents
+            from cosmas_os.ports.agent_connectors import ToolSelectionV2
+            connector_selection = prepare_connector_intents(s, box=workspace.box_id, owner=workspace.owner_id,
+                workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
+                context=context, settings=settings, external_identity_id=external_identity_id)
+            if connector_selection["connector_capabilities"] or connector_selection["connector_intents"]:
+                value = {**selection, **connector_selection, "contract": "cosmas-agent-tool-selection.v2"}
+                value.pop("sha256")
+                selection = ToolSelectionV2.model_validate({**value, "sha256": digest(value)}).model_dump()
+                envelope = GPT41ConnectorToolsConnector(lambda: "").prepare(context, selection)
+            else:
+                envelope = GPT41CompactToolsConnector(lambda: "").prepare(context, selection)
         else:
             envelope = GPT41Connector(lambda: "").prepare(context)
     except (ValueError, TypeError, KeyError, AttributeError, RecursionError):
         raise ws.WorkspaceError("model_unavailable", 503) from None
-    if full_source_task and envelope["contract"] != handoff_briefs.FULL_SOURCE_CONTRACT:
+    if full_source_task and envelope["contract"] not in handoff_briefs.FULL_SOURCE_CONTRACTS:
         raise ws.WorkspaceError("handoff_source_contract_unavailable", 422)
     # Application bounds use canonical bytes; the DB has a finite allowance for
     # PostgreSQL jsonb's inserted whitespace/escaping, not a larger model body.
@@ -972,7 +988,7 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
     ):
         raise ws.WorkspaceError("authority_changed")
     if command.get("task_brief", {}).get("version") == 2 and (
-        row.envelope_contract != handoff_briefs.FULL_SOURCE_CONTRACT
+        row.envelope_contract not in handoff_briefs.FULL_SOURCE_CONTRACTS
         or not team.runtime_settings.workspace_agent_tools_enabled
     ):
         raise ws.WorkspaceError("authority_changed")
@@ -1044,7 +1060,7 @@ def claim(s, box, owner, admission_id, *, reauthenticate=None, clock=None):
             raise ws.WorkspaceError("source_changed")
         if row.envelope_contract in TOOL_PREPARED_CONTRACTS:
             try:
-                validator = validate_compact_tools if row.envelope_contract == COMPACT_TOOL_PREPARED_CONTRACT else validate_tools
+                validator = validate_connector_tools if row.envelope_contract == CONNECTOR_TOOL_PREPARED_CONTRACT else validate_compact_tools if row.envelope_contract == COMPACT_TOOL_PREPARED_CONTRACT else validate_tools
                 validator(row.prepared_envelope)
             except (ValueError, TypeError, KeyError):
                 raise ws.WorkspaceError("source_changed") from None
@@ -1100,13 +1116,15 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None):
                 value = AgentToolExecutor(tool_session, claimed).execute(request)
                 receipt = value["receipt"]
                 tool_session.add(AuditEvent(box_id=claimed.box, aggregate_type="model_admission",
-                    aggregate_id=claimed.admission_id, event_type="workspace.agent_tool_read",
+                    aggregate_id=claimed.admission_id, event_type="workspace.agent_connector_tool" if request["tool"] in {"propose_research_query", "execute_reviewed_research", "read_research_result"} else "workspace.agent_tool_read",
                     actor_principal_id=receipt["actor_agent_id"], initiated_by_principal_id=claimed.owner,
-                    outcome="read", correlation_id=claimed.dispatch_id, payload_hash=receipt["sha256"],
+                    outcome="pending_approval" if request["tool"] == "propose_research_query" else
+                        value["data"].get("state", "observed") if request["tool"] in {"execute_reviewed_research", "read_research_result"} else "read",
+                    correlation_id=claimed.dispatch_id, payload_hash=receipt["sha256"],
                     detail=receipt))
                 tool_session.commit()
                 return value
-        connector = (GPT41CompactToolsConnector if claimed.envelope["contract"] == COMPACT_TOOL_PREPARED_CONTRACT
+        connector = (GPT41ConnectorToolsConnector if claimed.envelope["contract"] == CONNECTOR_TOOL_PREPARED_CONTRACT else GPT41CompactToolsConnector if claimed.envelope["contract"] == COMPACT_TOOL_PREPARED_CONTRACT
             else GPT41ToolsConnector)
         return connector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
             claimed.envelope, execute=execute)
@@ -1576,7 +1594,7 @@ def reserve_children(
         if brief.requirements is not None:
             try:
                 task = handoff_briefs.prepare(brief, child_context, origin,
-                    version=2 if prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT else 1,
+                    version=2 if prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS else 1,
                     prepared_contract=prepared_contract)
             except (ValueError, TypeError, KeyError):
                 raise ws.WorkspaceError("invalid_model_output") from None

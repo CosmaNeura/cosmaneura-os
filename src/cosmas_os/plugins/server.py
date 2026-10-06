@@ -69,10 +69,10 @@ async def serve(runtime):
         await server.run(reader, writer, server.create_initialization_options())
 
 
-def main(argv=None):
+def main(argv=None, *, session=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--origin", required=True)
-    parser.add_argument("--token-file", required=True, type=Path)
+    parser.add_argument("--token-file", type=Path, help="External stdio only: existing owner-only credential file")
     parser.add_argument("--workspace-id")
     parser.add_argument("--plugin", action="append", default=[])
     parser.add_argument("--check", action="store_true", help="Read signed configuration only; no provider request")
@@ -81,16 +81,19 @@ def main(argv=None):
     logging.basicConfig(stream=sys.stderr, level=logging.CRITICAL)
     try:
         import anyio
-        runtime = PluginRuntime(args.origin, args.token_file, workspace_id=args.workspace_id, plugins=args.plugin)
+        runtime = PluginRuntime(args.origin, args.token_file, workspace_id=args.workspace_id, plugins=args.plugin,
+                                session=session)
         if args.check:
             rows = runtime.tool_definitions()
-            print(json.dumps({"ready": True, "transport": "authenticated_product_http",
+            print(json.dumps({"ready": True, "transport": "current_app_session" if session else "authenticated_product_http",
                               "tools": [row["name"] for row in rows], "account_status": "not_checked"}))
         else:
             anyio.run(serve, runtime)
         return 0
     except (PluginError, ValueError):
-        sys.stderr.write("CosmaBot plugin requires the configured API and current private sign-in file.\n")
+        sys.stderr.write("CosmaBot plugin requires its authenticated application session. "
+                         "External stdio may instead use an existing owner-only --token-file. "
+                         "Browser sign-in is not exported to stdio.\n")
         return 1
     finally:
         if runtime:

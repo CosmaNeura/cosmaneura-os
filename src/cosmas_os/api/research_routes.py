@@ -2,6 +2,7 @@
 
 import json
 from contextvars import Context
+from typing import Literal
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Response
@@ -34,10 +35,13 @@ from cosmas_os.application.capture_deadline import (
     run_in_threadpool,
 )
 from cosmas_os.models import ExternalIdentity, Principal
+from cosmas_os.ports.agent_connectors import ResearchHandle
 from cosmas_os.ports.research import catalog
 
 HEADERS = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff"}
 INVENTORY = {
+    ("GET", "/workspaces/{workspace_id}/agent-research"),
+    ("POST", "/workspaces/{workspace_id}/agent-research/{ticket_id}/review"),
     ("GET", "/research/catalog"),
     ("GET", "/workspaces/{workspace_id}/research"),
     ("GET", "/workspaces/{workspace_id}/research/saved"),
@@ -46,6 +50,10 @@ INVENTORY = {
     ("POST", "/workspaces/{workspace_id}/research/{run_id}/save"),
     ("POST", "/workspaces/{workspace_id}/research/{run_id}/save/resolve"),
 }
+
+
+class ResearchReview(ResearchHandle):
+    public_query_confirmed: Literal[True]
 
 
 def problem(status, code="research_unavailable"):
@@ -165,8 +173,15 @@ def router(*, settings, session_factory, identity_dependency, workspace_gate, po
 
             try:
                 json.loads(body, object_pairs_hook=unique)
-                schema = Search if action == "search" else Save if action == "save" else Resolve
-                command = schema.model_validate_json(bytes(body))
+                schema = Search if action == "search" else Save if action == "save" else ResearchReview if action == "agent_review" else Resolve
+                value = json.loads(body, object_pairs_hook=unique)
+                if action == "agent_review":
+                    if type(value) is not dict or "ticket_id" in value or value.get("public_query_confirmed") is not True:
+                        raise ValueError("invalid review")
+                    value = {**value, "ticket_id": str(run_id)}
+                    command = schema.model_validate(value)
+                else:
+                    command = schema.model_validate_json(bytes(body))
             except (ValueError, ValidationError, RecursionError):
                 raise ws.WorkspaceError("invalid_research_request", 422) from None
 
@@ -220,6 +235,21 @@ def router(*, settings, session_factory, identity_dependency, workspace_gate, po
                     if action == "catalog":
                         result = catalog(enabled=config.workspace_research_available and config.workspace_research_io_enabled,
                                          configured=configured)
+                    elif action in {"agent_history", "agent_review"}:
+                        from cosmas_os.application.agent_connector_tools import (
+                            list_research_queries,
+                            review_research_query,
+                        )
+                        current()
+                        if action == "agent_history":
+                            result = list_research_queries(session, box, owner, wid,
+                                external_identity_id=identity.external_identity_id)
+                        else:
+                            assert isinstance(command, ResearchReview)
+                            result = review_research_query(session, box, owner, wid,
+                                command.ticket_id, command.revision_id, command.payload_hash,
+                                external_identity_id=identity.external_identity_id,
+                                public_query_confirmed=command.public_query_confirmed)
                     elif action == "history":
                         result = research.history(session, box, owner, wid, bot=query["bot"], before=query.get("before"))
                     elif action == "saved_history":
@@ -257,6 +287,14 @@ def router(*, settings, session_factory, identity_dependency, workspace_gate, po
     @routes.get("/research/catalog")
     async def source_catalog(request: Request):
         return await execute(request, "catalog")
+
+    @routes.get("/workspaces/{workspace_id}/agent-research")
+    async def agent_queries(request: Request, workspace_id: UUID):
+        return await execute(request, "agent_history", workspace_id)
+
+    @routes.post("/workspaces/{workspace_id}/agent-research/{ticket_id}/review")
+    async def review_agent_query(request: Request, workspace_id: UUID, ticket_id: UUID):
+        return await execute(request, "agent_review", workspace_id, ticket_id)
 
     @routes.get("/workspaces/{workspace_id}/research")
     async def recent(request: Request, workspace_id: UUID):

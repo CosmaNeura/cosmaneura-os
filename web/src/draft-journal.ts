@@ -29,11 +29,12 @@ import {validFaxSourceScope} from './fax-inbound-source-api';
 import {validateEFaxSourceRecovery} from './efax-inbound-source-recovery';
 import {validEFaxSourceScope} from './efax-inbound-source-api';
 import {validateSchedulingPatientRecovery} from './scheduling-patient-recovery';
+import {validateAgentResearchRecovery} from './agent-research-recovery';
 
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
   note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest };
-export type EditorKind = "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
+export type EditorKind = "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
 export type AccountEditorKind = "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
@@ -45,7 +46,7 @@ export const editorAddress = (workspaceId: string, editor: EditorKind) => `edito
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const validEditor = (kind: unknown) => typeof kind === "string" &&
-  (["private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
+  (["agent-research-review", "private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
     kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) || kind.startsWith("handoff-review:") && UUID.test(kind.slice("handoff-review:".length)) ||
     kind.startsWith("fax-source-review:") && UUID.test(kind.slice("fax-source-review:".length)) ||
     kind.startsWith("efax-source-review:") && UUID.test(kind.slice("efax-source-review:".length)) ||
@@ -132,6 +133,11 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if(draft?.kind==='editor'&&draft.editor==='agent-research-review'){
+    try{const data=validateAgentResearchRecovery(draft.data,draft.workspaceId);
+      if(draft.pending!==(data.pending?.revision_id??null))throw new Error();}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
   if(draft?.kind==='editor'&&draft.editor.startsWith('fax-source-review:')){
     try{const scope=(draft.data as {scope?:unknown}).scope;if(!validFaxSourceScope(scope)||scope.workspace_id!==draft.workspaceId||draft.pending!==null)throw new Error();
       const data=await validateFaxSourceRecovery(draft.data,scope);
