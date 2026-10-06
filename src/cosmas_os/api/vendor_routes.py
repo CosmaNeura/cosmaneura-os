@@ -487,6 +487,7 @@ def install(
                     str(ticket_id),
                     body,
                     core_checked=checked,
+                    external_identity_id=identity.external_identity_id,
                 )
 
             if body.choice == "reject":

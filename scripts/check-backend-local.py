@@ -182,9 +182,9 @@ def main() -> int:
            "BLOB_BACKEND": "local", "CORS_ALLOWED_ORIGINS": "http://127.0.0.1:5173,http://localhost:5173",
            "SYNC_WORKER": "true", "PGPASSWORD": password, "PGCONNECT_TIMEOUT": "5",
            "REDIS_URL": "redis://127.0.0.1:1/0"}
-    # Optional browser laboratory tooling only. Never inherit credentials or download tools.
+    # Optional laboratory paths only. Never inherit credentials or download tools.
     for key in ("COSMAS_PLAYWRIGHT_MODULE_URL", "COSMAS_CHROMIUM_EXECUTABLE",
-                "COSMAS_SCRIBE_SPECIALIST_EVIDENCE_DIR"):
+                "COSMAS_SCRIBE_SPECIALIST_EVIDENCE_DIR", "COSMAS_COMPLETED_CYCLE_OUTPUT"):
         if key in os.environ:
             env[key] = os.environ[key]
     checks = Checks(output, env, prefix)

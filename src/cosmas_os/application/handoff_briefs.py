@@ -7,7 +7,7 @@ from cosmas_os.ports.task_brief import TaskRequirements
 
 ALLOWED_ACTIONS = ("prepare_private_draft",)
 FULL_SOURCE_CONTRACT = "cosmas-gpt41-prepared.v6"
-FULL_SOURCE_CONTRACTS = {FULL_SOURCE_CONTRACT, "cosmas-gpt41-prepared.v7"}
+FULL_SOURCE_CONTRACTS = {FULL_SOURCE_CONTRACT, "cosmas-gpt41-prepared.v7", "cosmas-gpt41-prepared.v8"}
 
 
 def _read_result_bytes(source):

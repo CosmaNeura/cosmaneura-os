@@ -599,7 +599,8 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
         if context.draft_only and context.role in {"research", "visit_prep", "follow_up"}:
             assert "Accepted Scribe summary copied from the exact tool receipt:" in context.question
             assert "confirm missing DOB and owner without inventing facts" in context.question
-        assert claim.envelope["contract"] == "cosmas-gpt41-prepared.v6"
+        assert claim.envelope["contract"] == (
+            "cosmas-gpt41-prepared.v7" if context.role == "research" else "cosmas-gpt41-prepared.v6")
         packet_sources = [
             p for p in context.sources if p.label.startswith("Reviewed Scribe snapshot ·")
         ]

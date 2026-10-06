@@ -1,6 +1,6 @@
 // Generated from the existing public Python contract. Do not hand-edit shapes.
 // Relational checks and exact commitments are in vendor-contract.ts.
-// Source SHA-256: 473a7f3388fbd468aae48cb9b554f981006e97e09e5e4401d697000c8df63f94
+// Source SHA-256: 041cd01b0fc1d7a02b58c07067f3240faf19541056ad3230a91f7bdd64bb58c4
 // Retirement source SHA-256: 3e3aeb1b9071fc0360db852c4562ac6710ed5560c9f551de37062c2c83763df7
 export const VENDOR_SCHEMAS = {
   "Closed": {
@@ -418,6 +418,37 @@ export const VENDOR_SCHEMAS = {
         ],
         "title": "Choice",
         "type": "string"
+      },
+      "administrative_delivery_confirmed": {
+        "anyOf": [
+          {
+            "const": true,
+            "type": "boolean",
+            "x-rules": [
+              "_true"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Administrative Delivery Confirmed"
+      },
+      "follow_up_bot_id": {
+        "anyOf": [
+          {
+            "type": "string",
+            "x-rules": [
+              "_uuid"
+            ]
+          },
+          {
+            "type": "null"
+          }
+        ],
+        "default": null,
+        "title": "Follow Up Bot Id"
       }
     },
     "required": [
@@ -3627,7 +3658,7 @@ export type Document = { "artifact_id": string; "sha256": string; "byte_length":
 export type Revision = { "ticket_id": string; "expected_version": number; "revision_id": string; "payload_hash": string };
 export type VendorProposal = { "expected_workspace_revision": number; "idempotency_key": string; "proposed_operation_id": string; "action": "spruce_secure_message" | "spruce_fax" | "spruce_media_upload" | "srfax_fax" | "documo_fax" | "efax_fax"; "connection": Selection; "source": ReviewedSource; "due_date": string; "expected_outcome": string; "share_to_practice": boolean; "correspondence"?: Selection; "document"?: Document; "message"?: string; "uploaded_media_operation_id"?: string; "supersedes_operation_id"?: string; "acknowledge_prior_uncertainty"?: true; "revises"?: Revision };
 export type BoundCommand = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string };
-export type VendorDecision = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string; "review_sha256": string; "choice": "approve" | "reject" };
+export type VendorDecision = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string; "review_sha256": string; "choice": "approve" | "reject"; "administrative_delivery_confirmed"?: true; "follow_up_bot_id"?: string };
 export type VendorPublication = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string; "review_sha256": string; "share_to_practice": true };
 export type ObservationHead = { "sequence": number; "sha256": string };
 export type VendorResult = { "expected_version": number; "operation_id": string; "revision_id": string; "payload_hash": string; "idempotency_key": string; "observation_head": ObservationHead; "evidence_sha256": string; "disposition": "reported_success" | "reported_exception" | "verified_in_vendor" | "unable_to_establish"; "evidence": string };

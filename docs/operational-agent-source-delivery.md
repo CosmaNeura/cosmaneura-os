@@ -1,6 +1,6 @@
 # Operational agent source delivery
 
-New operational admissions use `cosmas-gpt41-prepared.v6`. The existing v1–v4
+Ordinary operational admissions use `cosmas-gpt41-prepared.v6`. The existing v1–v4
 text decoders and v5 tool envelope remain supported for their saved requests.
 The v5 body, selection, output schema, tool definitions and receipt validation
 are unchanged. A v6 body cannot be replayed under a v5 contract.
@@ -42,3 +42,21 @@ Qualification uses invented sources and fake upstream HTTP with the actual
 adapter, PostgreSQL admission, scoped tool reader and settlement. Report wire
 bytes separately from verified provider tokens. Scripted response rounds do
 not establish actual model quality, latency, cost or public-launch readiness.
+
+Research admissions with current reviewed connector authority use v7. A new
+v8 envelope adds `execute_reviewed_delivery` and `read_delivery_status` only
+for an explicit Follow up conversation with a current approved administrative
+Spruce message. Private specialist handoffs remain drafts. Saved v6 and v7
+envelopes replay through their original validators and definitions.
+
+The human approval names the current Follow up bot and commits the unchanged
+recipient, message, reviewed note, revision and operation. Each tool and the
+provider runtime recheck that approval, current team, signed identity and source.
+The model receives four handles; it cannot supply a destination, attachment or
+replacement message. Runtime unavailability does not spend a submit claim.
+Once the existing connector claims an operation, reconnection reads retained
+receipts and never submits it again, including when the outcome is uncertain.
+Provider acceptance remains separate from observed transport, patient receipt
+and clinical completion. The local completed-action lab adds an independent
+receiver receipt and a later virtual-patient acknowledgment to qualify its
+own sandbox outcome.

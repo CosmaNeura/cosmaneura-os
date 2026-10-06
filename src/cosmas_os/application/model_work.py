@@ -25,6 +25,15 @@ from cosmas_os.adapters.gpt41_tools_v7 import (
 )
 from cosmas_os.adapters.gpt41_tools_v7 import GPT41ConnectorToolsConnector
 from cosmas_os.adapters.gpt41_tools_v7 import validate_prepared as validate_connector_tools
+from cosmas_os.adapters.gpt41_tools_v8 import (
+    CURRENT_PREPARED_CONTRACT as DELIVERY_TOOL_PREPARED_CONTRACT,
+)
+from cosmas_os.adapters.gpt41_tools_v8 import (
+    GPT41DeliveryToolsConnector,
+)
+from cosmas_os.adapters.gpt41_tools_v8 import (
+    validate_prepared as validate_delivery_tools,
+)
 from cosmas_os.api.model_work_schemas import (
     ENTRY_MODEL_BYTES,
     EntryModelRequest,
@@ -56,7 +65,7 @@ from cosmas_os.ports.task_brief import TaskRequirements
 
 ACTIVE = {"reserved", "running"}
 TERMINAL = {"completed", "failed", "unknown", "abandoned"}
-TOOL_PREPARED_CONTRACTS = {TOOL_PREPARED_CONTRACT, COMPACT_TOOL_PREPARED_CONTRACT, CONNECTOR_TOOL_PREPARED_CONTRACT}
+TOOL_PREPARED_CONTRACTS = {TOOL_PREPARED_CONTRACT, COMPACT_TOOL_PREPARED_CONTRACT, CONNECTOR_TOOL_PREPARED_CONTRACT, DELIVERY_TOOL_PREPARED_CONTRACT}
 SUPPORTED_PREPARED_CONTRACTS = TEXT_PREPARED_CONTRACTS | TOOL_PREPARED_CONTRACTS
 
 
@@ -720,7 +729,18 @@ def _new_admission(
             connector_selection = prepare_connector_intents(s, box=workspace.box_id, owner=workspace.owner_id,
                 workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
                 context=context, settings=settings, external_identity_id=external_identity_id)
-            if connector_selection["connector_capabilities"] or connector_selection["connector_intents"]:
+            from cosmas_os.application.agent_delivery_tools import prepare_delivery_intents
+            from cosmas_os.ports.agent_delivery_tools import ToolSelectionV3
+            delivery_selection = prepare_delivery_intents(s, box=workspace.box_id, owner=workspace.owner_id,
+                workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
+                context=context, settings=settings, external_identity_id=external_identity_id)
+            if delivery_selection["delivery_intents"] and attempt is None and not context.draft_only:
+                value = {**selection, **connector_selection, **delivery_selection,
+                    "contract": "cosmas-agent-tool-selection.v3"}
+                value.pop("sha256")
+                selection = ToolSelectionV3.model_validate({**value, "sha256": digest(value)}).model_dump()
+                envelope = GPT41DeliveryToolsConnector(lambda: "").prepare(context, selection)
+            elif connector_selection["connector_capabilities"] or connector_selection["connector_intents"]:
                 value = {**selection, **connector_selection, "contract": "cosmas-agent-tool-selection.v2"}
                 value.pop("sha256")
                 selection = ToolSelectionV2.model_validate({**value, "sha256": digest(value)}).model_dump()
@@ -1060,7 +1080,7 @@ def claim(s, box, owner, admission_id, *, reauthenticate=None, clock=None):
             raise ws.WorkspaceError("source_changed")
         if row.envelope_contract in TOOL_PREPARED_CONTRACTS:
             try:
-                validator = validate_connector_tools if row.envelope_contract == CONNECTOR_TOOL_PREPARED_CONTRACT else validate_compact_tools if row.envelope_contract == COMPACT_TOOL_PREPARED_CONTRACT else validate_tools
+                validator = validate_delivery_tools if row.envelope_contract == DELIVERY_TOOL_PREPARED_CONTRACT else validate_connector_tools if row.envelope_contract == CONNECTOR_TOOL_PREPARED_CONTRACT else validate_compact_tools if row.envelope_contract == COMPACT_TOOL_PREPARED_CONTRACT else validate_tools
                 validator(row.prepared_envelope)
             except (ValueError, TypeError, KeyError):
                 raise ws.WorkspaceError("source_changed") from None
@@ -1101,7 +1121,7 @@ def claim(s, box, owner, admission_id, *, reauthenticate=None, clock=None):
     return result
 
 
-def dispatch_claim(claimed, *, session_factory=None, transport=None):
+def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_execution_factory=None):
     if digest(claimed.envelope) != claimed.envelope_sha256:
         raise ModelCallFailure()
     key = team.runtime_settings.workspace_llm_api_key
@@ -1113,18 +1133,19 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None):
         factory = session_factory or make_session_factory()
         def execute(request):
             with factory() as tool_session:
-                value = AgentToolExecutor(tool_session, claimed).execute(request)
+                value = AgentToolExecutor(tool_session, claimed, session_factory=factory,
+                    delivery_execution_factory=delivery_execution_factory).execute(request)
                 receipt = value["receipt"]
                 tool_session.add(AuditEvent(box_id=claimed.box, aggregate_type="model_admission",
-                    aggregate_id=claimed.admission_id, event_type="workspace.agent_connector_tool" if request["tool"] in {"propose_research_query", "execute_reviewed_research", "read_research_result"} else "workspace.agent_tool_read",
+                    aggregate_id=claimed.admission_id, event_type="workspace.agent_connector_tool" if request["tool"] in {"propose_research_query", "execute_reviewed_research", "read_research_result", "execute_reviewed_delivery", "read_delivery_status"} else "workspace.agent_tool_read",
                     actor_principal_id=receipt["actor_agent_id"], initiated_by_principal_id=claimed.owner,
                     outcome="pending_approval" if request["tool"] == "propose_research_query" else
-                        value["data"].get("state", "observed") if request["tool"] in {"execute_reviewed_research", "read_research_result"} else "read",
+                        value["data"].get("state", "observed") if request["tool"] in {"execute_reviewed_research", "read_research_result", "execute_reviewed_delivery", "read_delivery_status"} else "read",
                     correlation_id=claimed.dispatch_id, payload_hash=receipt["sha256"],
                     detail=receipt))
                 tool_session.commit()
                 return value
-        connector = (GPT41ConnectorToolsConnector if claimed.envelope["contract"] == CONNECTOR_TOOL_PREPARED_CONTRACT else GPT41CompactToolsConnector if claimed.envelope["contract"] == COMPACT_TOOL_PREPARED_CONTRACT
+        connector = (GPT41DeliveryToolsConnector if claimed.envelope["contract"] == DELIVERY_TOOL_PREPARED_CONTRACT else GPT41ConnectorToolsConnector if claimed.envelope["contract"] == CONNECTOR_TOOL_PREPARED_CONTRACT else GPT41CompactToolsConnector if claimed.envelope["contract"] == COMPACT_TOOL_PREPARED_CONTRACT
             else GPT41ToolsConnector)
         return connector(lambda: key.get_secret_value() if key else "", transport=transport).review_prepared(
             claimed.envelope, execute=execute)

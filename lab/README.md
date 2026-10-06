@@ -380,6 +380,48 @@ a newer evaluator without spending model tokens again. It preserves the original
 report and cannot repair missing artifacts, agent failures or failed service
 checks. Review the actual draft and trace when a text check fails.
 
+## Completed administrative action cycle
+
+The next cycle runs three invented provider/patient encounters through the
+existing signed capture API, reviewed Scribe handoff, Research, Visit Prep and
+Follow up. Research performs token-free PubMed HTTPS reads. A human approves
+one unchanged administrative Spruce message and names the current Follow up
+bot; that bot executes the reviewed handle through the existing connector.
+An owned HTTP receiver retains the exact message before a virtual patient
+authors an acknowledgment. Reopening reads saved receipts without sending
+again. The mobile referral case creates a private PDF and requires exact
+preview review before saying the packet is ready; it does not send that PDF.
+
+Run from a clean checkout containing the virtual environment and the existing
+`dev`, `mcp` and `efax-inbound` extras (the PDF helper uses pinned `pypdf`), with evidence
+outside the repository and an owned PostgreSQL installation:
+
+```sh
+COSMAS_COMPLETED_CYCLE_OUTPUT=/absolute/path/to/new-cycle-evidence \
+  .venv/bin/python scripts/check-backend-local.py \
+  --profile workspace --postgres-bin /absolute/path/to/postgresql/bin \
+  --evidence-dir /absolute/path/to/new-check-evidence \
+  --pytest-timeout 7200 --stack-dump-after 660 \
+  tests/integration/test_completed_action_cycle.py
+```
+
+Each `ACTOR_MAILBOX` exposes a context with actual current source, team and
+receipt commitments. A current-session agent reads that context and writes the
+requested plan, binding its `context_sha256` and truthful `author_agent_id`.
+Later mailboxes expose accepted Scribe text and actual research results, PDF
+extraction for review, and finally the receiver receipt for acknowledgment.
+Missing or stale plans stop the cycle before the corresponding admission.
+Authored plans are inputs; `action/RESULT.json` and `action/VERDICT.json` check
+actual returned product and receiver records. Output and temporary credentials
+stay outside the source tree; the check driver shuts down its owned database.
+
+This cycle uses explicit simulated speech transcription and an owned model
+HTTP endpoint carrying the authored plans through the real function loop.
+It qualifies local connector execution and recovery, not live Spruce account
+delivery, physical mobile recording, diagnosis, clinical benefit or a booked
+referral. The separate Scribe interface lab exercises the physical recording
+controller with encrypted PCM chunks and desktop/mobile views.
+
 ## Interface and accessibility tests
 
 The UX lab mounts the production `SettingsHub` with local fixture adapters. It

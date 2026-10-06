@@ -1,4 +1,4 @@
-"""Read-only product tools bound to a running admission and exact saved evidence."""
+"""Product tools bound to a running admission, exact evidence and reviewed authority."""
 
 import hashlib
 import json
@@ -22,6 +22,8 @@ from cosmas_os.models import (
 )
 from cosmas_os.ports.agent_connectors import CONNECTOR_TOOL_NAMES, ToolSelectionV2
 from cosmas_os.ports.agent_connectors import REQUEST_ADAPTER as CONNECTOR_REQUEST_ADAPTER
+from cosmas_os.ports.agent_delivery_tools import DELIVERY_TOOL_NAMES, ToolSelectionV3
+from cosmas_os.ports.agent_delivery_tools import REQUEST_ADAPTER as DELIVERY_REQUEST_ADAPTER
 from cosmas_os.ports.agent_tools import (
     REQUEST_ADAPTER,
     AgentToolRequest,
@@ -145,13 +147,16 @@ def prepare_tool_selection(
 
 
 class AgentToolExecutor:
-    """One scoped server-side reader. No model-supplied identity or HTTP client."""
+    """One scoped server-side tool executor with server-owned identity and clients."""
 
     def __init__(self, session: Session, claimed: work.ModelClaim, *,
         reauthenticate: Callable[[], None] | None = None,
-        clock: Callable[[], datetime] | None = None):
+        clock: Callable[[], datetime] | None = None, session_factory=None,
+        delivery_execution_factory=None):
         self.session, self.claimed = session, claimed
         self.reauthenticate, self.clock = reauthenticate, clock
+        self.session_factory = session_factory
+        self.delivery_execution_factory = delivery_execution_factory
 
     def _guard(self):
         s, claimed = self.session, self.claimed
@@ -183,7 +188,7 @@ class AgentToolExecutor:
             raise ws.WorkspaceError("agent_tool_authority_changed", 403)
         try:
             context = _context(row.prepared_envelope["context"])
-            selection_model = ToolSelectionV2 if row.envelope_contract == work.CONNECTOR_TOOL_PREPARED_CONTRACT else ToolSelection
+            selection_model = ToolSelectionV3 if row.envelope_contract == work.DELIVERY_TOOL_PREPARED_CONTRACT else ToolSelectionV2 if row.envelope_contract == work.CONNECTOR_TOOL_PREPARED_CONTRACT else ToolSelection
             selection = selection_model.model_validate(row.prepared_envelope["tool_selection"])
             value = selection.model_dump()
             commitment = value.pop("sha256")
@@ -204,12 +209,17 @@ class AgentToolExecutor:
             value = request.model_dump() if isinstance(request, BaseModel) else request
             if len(json.dumps(value, ensure_ascii=False, allow_nan=False).encode()) > MAX_REQUEST_BYTES:
                 raise ValueError("oversized request")
-            adapter = CONNECTOR_REQUEST_ADAPTER if self.claimed.envelope.get("contract") == work.CONNECTOR_TOOL_PREPARED_CONTRACT else REQUEST_ADAPTER
+            adapter = DELIVERY_REQUEST_ADAPTER if self.claimed.envelope.get("contract") == work.DELIVERY_TOOL_PREPARED_CONTRACT else CONNECTOR_REQUEST_ADAPTER if self.claimed.envelope.get("contract") == work.CONNECTOR_TOOL_PREPARED_CONTRACT else REQUEST_ADAPTER
             checked = adapter.validate_python(value)
         except (ValidationError, ValueError, TypeError, RecursionError):
             raise ws.WorkspaceError("agent_tool_request_invalid", 422) from None
         row, context, selection, settings = self._guard()
-        if checked.tool in CONNECTOR_TOOL_NAMES:
+        if checked.tool in DELIVERY_TOOL_NAMES:
+            from cosmas_os.application.agent_delivery_tools import AgentDeliveryToolExecutor
+            data = AgentDeliveryToolExecutor(self.session, self.claimed, guard=self._guard,
+                session_factory=self.session_factory, execution_factory=self.delivery_execution_factory,
+                clock=self.clock).execute(checked)
+        elif checked.tool in CONNECTOR_TOOL_NAMES:
             from cosmas_os.application.agent_connector_tools import AgentConnectorToolExecutor
             data = AgentConnectorToolExecutor(self.session, self.claimed, guard=self._guard,
                 configuration=lambda: work.team.runtime_settings, clock=self.clock).execute(checked.model_dump())

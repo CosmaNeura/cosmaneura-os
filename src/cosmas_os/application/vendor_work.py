@@ -1282,7 +1282,7 @@ def _new_current(s, w, r, core_checked):
     return c, co
 
 
-def decide(s, box, actor, wid, tid, request, *, core_checked=None):
+def decide(s, box, actor, wid, tid, request, *, core_checked=None, external_identity_id=None):
     w = _owner(s, box, actor, wid, writing=True)
     old, digest = _receipt(s, w, actor, "decide", request)
     if old:
@@ -1306,6 +1306,29 @@ def decide(s, box, actor, wid, tid, request, *, core_checked=None):
         error("vendor_revision_changed")
     if request.choice == "approve" and _clock(s) >= r.expires_at:
         error("vendor_approval_expired")
+    delegation = None
+    if request.follow_up_bot_id is not None:
+        from cosmas_os.application import model_work, provider_team
+        from cosmas_os.ports.bot_capabilities import supports_skill
+
+        model_work._identity(s, box, actor, external_identity_id)
+        if external_identity_id is None:
+            error("vendor_permission_unavailable", 403)
+        version = provider_team.current(s, box, actor)
+        address = provider_team.address_for_agent(s, box, actor, request.follow_up_bot_id)
+        if version is None:
+            error("vendor_permission_unavailable", 403)
+        _, bot, bot_settings = provider_team.active_bot(s, box, actor, address, version.revision)
+        if (r.public_review["action"] != "spruce_secure_message"
+            or r.public_review.get("uploaded_media") is not None
+            or bot.role != "follow_up"
+            or not supports_skill(bot_settings, "saved_context")
+            or not supports_skill(bot_settings, "work_status")
+            or provider_team.blocked(bot_settings, "model_answer")
+            or not settings.workspace_agent_tools_enabled):
+            error("vendor_permission_unavailable", 403)
+        delegation = {"agent_id": bot.agent_id, "team_revision_id": version.id,
+            "external_identity_id": external_identity_id}
     t.version += 1
     t.state = "approved" if request.choice == "approve" else "rejected"
     s.add(
@@ -1344,6 +1367,14 @@ def decide(s, box, actor, wid, tid, request, *, core_checked=None):
         if request.choice == "approve" and r.public_review["share_to_practice"]
         else None,
     )
+    if delegation is not None:
+        detail = {**delegation, "approval_receipt_id": receipt.id,
+            "approval_receipt_sha256": receipt.receipt_sha256, "revision_id": r.action_revision_id,
+            "payload_hash": r.payload_hash, "operation_id": r.intended_operation_id}
+        s.add(AuditEvent(box_id=box, aggregate_type="vendor_work", aggregate_id=tid,
+            event_type="workspace.agent_delivery_authorized", actor_principal_id=actor,
+            initiated_by_principal_id=actor, outcome="approved", payload_hash=model_work.digest(detail),
+            detail=detail))
     s.commit()
     return command_response(s, receipt)
 

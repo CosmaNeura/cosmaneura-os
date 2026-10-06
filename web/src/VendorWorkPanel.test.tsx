@@ -62,6 +62,18 @@ describe('owner and staff delivery surfaces with actual HTTP fixtures',()=>{
     await click('Approve reviewed delivery');expect(vendorApi.execute).toHaveBeenCalledTimes(1);const op=vi.mocked(vendorApi.execute).mock.calls[0][1];expect(op.kind).toBe('decide');expect(op.request).toMatchObject({review_sha256:actual.detail_pending.review_sha256,revision_id:actual.detail_pending.summary.revision_id,payload_hash:actual.detail_pending.summary.payload_hash,choice:'approve'});
     expect(store.value()?.pending).toEqual(op);expect(container.textContent).toContain('Vendor delivery: not observed');expect(container.textContent).toContain('Completion verification: pending');
   });
+  it('requires an explicit administrative confirmation bound to the selected Follow up bot',async()=>{
+    const bot='11111111-1111-4111-8111-111111111111',store=recovery();
+    await act(async()=>root.render(<VendorWorkPanel identity={identity} workspaceId={actualOptions().workspace_id} recovery={store.access} followUpBots={[{agent_id:bot,name:'Follow up test' }]}/>));await idle();
+    const open=Array.from(container.querySelectorAll('button')).find(b=>b.textContent?.includes('Invented patient receives'))!;await act(async()=>open.click());await idle();
+    const check=Array.from(container.querySelectorAll('label')).find(l=>l.textContent?.includes('I reviewed this destination'))!.querySelector('input')!;await act(async()=>check.click());
+    const select=Array.from(container.querySelectorAll('label')).find(l=>l.textContent?.includes('Who sends this reviewed message?'))!.querySelector('select')!;
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,bot);select.dispatchEvent(new Event('change',{bubbles:true}));});
+    expect(button('Approve reviewed delivery').disabled).toBe(true);expect(vendorApi.execute).not.toHaveBeenCalled();
+    const administrative=Array.from(container.querySelectorAll('label')).find(l=>l.textContent?.includes('This is an administrative message.'))!.querySelector('input')!;await act(async()=>administrative.click());
+    await click('Approve reviewed delivery');expect(vi.mocked(vendorApi.execute).mock.calls[0][1].request).toMatchObject({administrative_delivery_confirmed:true,follow_up_bot_id:bot,revision_id:actual.detail_pending.summary.revision_id,payload_hash:actual.detail_pending.summary.payload_hash});
+    expect(vendorApi.execute).toHaveBeenCalledTimes(1);
+  });
   it('explains a changed source and requires exact receipt recovery and retirement before a fresh review',async()=>{
     const store=recovery();await renderOwner(store.access);const open=Array.from(container.querySelectorAll('button')).find(b=>b.textContent?.includes('Invented patient receives'))!;await act(async()=>open.click());
     const check=Array.from(container.querySelectorAll('label')).find(l=>l.textContent?.includes('I reviewed this destination'))!.querySelector('input')!;await act(async()=>check.click());

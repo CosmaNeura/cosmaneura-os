@@ -188,6 +188,16 @@ class BoundCommand(Closed):
 class VendorDecision(BoundCommand):
     review_sha256: Digest
     choice: Literal["approve", "reject"]
+    administrative_delivery_confirmed: Confirmed | None = None
+    follow_up_bot_id: ID | None = None
+
+    @model_validator(mode="after")
+    def exact_delegation(self):
+        if (self.administrative_delivery_confirmed is True) != (self.follow_up_bot_id is not None):
+            raise ValueError("administrative confirmation and exact Follow up bot required together")
+        if self.follow_up_bot_id is not None and self.choice != "approve":
+            raise ValueError("only an exact approval can authorize Follow up")
+        return self
 
 
 class VendorPublication(BoundCommand):
