@@ -588,7 +588,7 @@ def _context_for(
     if any(s.get(WorkspaceEntry, source.entry_id).kind in selected_google_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
-                prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT
+                prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS
                 and s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
             ) for source in context.sources)
             or sum(len(source.content) for source in context.sources) > 30000):
@@ -600,7 +600,7 @@ def _context_for(
     if has_fax:
         try:
             handoff_briefs.validate_sources(context,
-                version=2 if prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT else 1,
+                version=2 if prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS else 1,
                 prepared_contract=prepared_contract)
         except ValueError:
             raise ws.WorkspaceError("efax_inbound_source_context_too_large", 422) from None
@@ -988,7 +988,7 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
     ):
         raise ws.WorkspaceError("authority_changed")
     if command.get("task_brief", {}).get("version") == 2 and (
-        row.envelope_contract != handoff_briefs.FULL_SOURCE_CONTRACT
+        row.envelope_contract not in handoff_briefs.FULL_SOURCE_CONTRACTS
         or not team.runtime_settings.workspace_agent_tools_enabled
     ):
         raise ws.WorkspaceError("authority_changed")
@@ -1594,7 +1594,7 @@ def reserve_children(
         if brief.requirements is not None:
             try:
                 task = handoff_briefs.prepare(brief, child_context, origin,
-                    version=2 if prepared_contract == handoff_briefs.FULL_SOURCE_CONTRACT else 1,
+                    version=2 if prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS else 1,
                     prepared_contract=prepared_contract)
             except (ValueError, TypeError, KeyError):
                 raise ws.WorkspaceError("invalid_model_output") from None
