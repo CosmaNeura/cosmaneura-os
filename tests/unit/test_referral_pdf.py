@@ -4,6 +4,7 @@ from io import BytesIO
 import pytest
 from lab.referral_pdf import build_referral_pdf, sha
 from pypdf import PdfReader
+from pypdf.generic import DictionaryObject
 
 
 def packet(**extra):
@@ -25,7 +26,9 @@ def test_real_pdf_extracts_missing_facts_and_preserves_unknown_allergy():
     assert 'Examination, imaging, diagnosis and medication dose are unverified.' in result.extracted_text
     assert 'No referral has been sent or consultation booked.' in result.extracted_text
     assert reader.pages[0].mediabox.width == 612 and reader.pages[0].mediabox.height == 792
-    assert not reader.trailer['/Root'].get('/AcroForm') and not reader.trailer['/Root'].get('/Names')
+    root = reader.trailer['/Root']
+    assert isinstance(root, DictionaryObject)
+    assert not root.get('/AcroForm') and not root.get('/Names')
 
 
 def test_three_page_bound_refuses_silent_truncation():

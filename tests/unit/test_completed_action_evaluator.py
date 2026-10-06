@@ -1,6 +1,7 @@
 """Receipt joins, chronology and uncertain-state regressions; invented fixtures."""
 from base64 import b64encode
 from copy import deepcopy
+from typing import Any
 
 import pytest
 from lab.completed_action_evaluator import (
@@ -21,7 +22,7 @@ def evidence(case):
     action = {"action": "spruce_secure_message", "ticket_id": "ticket", "revision_id": "revision",
               "operation_id": "operation", "payload_hash": "a" * 64}
     team = {role: "bot-" + role for role in ("scribe", "visit_prep", "research", "follow_up", "chief")}
-    def draft(role):
+    def draft(role) -> dict[str, Any]:
         return {"state": "accepted", "agent_id": team[role], "source_sha256": source_sha,
             "content": role + " reviewed result", "content_sha256": text_digest(role + " reviewed result"),
             "acceptance_receipt_id": role + "-accept", "revision_id": role + "-revision"}
