@@ -3,7 +3,7 @@ import {PracticeAccessGate} from './PracticeAccessGate';
 import {hostedWorkspaceRequested} from './hosted-workspace';
 import { useLayoutEffect, useMemo, useRef, useState } from "react";
 import { WorkspaceAuth, nativeWorkspaceAuthAvailable, type WorkspaceAuthPlugin } from "../../clients/capture/src/native/workspace-auth-plugin";
-import { StatusScreen } from "./App";
+import {AppleHostedStatus as StatusScreen} from "./AppleHostedStatus";
 import { EncounterWorkspace } from "./EncounterWorkspace";
 import { parseNativeAuthState, parseNativeToken, sameNativeState, type NativeAuthState } from "./native-auth";
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
@@ -164,8 +164,8 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
       ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls}>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;
   }
-  if (state?.phase === "unavailable" || failed) return <StatusScreen title="Secure session is unavailable"
-    detail="Try signing in again. If the problem continues, reopen the app. Your workspace stays closed until your account is verified.">
+  if (state?.phase === "unavailable" || failed) return <StatusScreen title="Sign-in needs attention"
+    detail="This installation could not verify your account. Try signing in again, or reopen the app. Your private workspace stays closed until verification succeeds.">
     <div className="row account-controls" aria-label="Account recovery">
       <button className="button" onClick={() => void act("signIn")}>Sign in again</button>
       <button className="button secondary" onClick={() => void act("signOut")}>Sign out</button>
@@ -174,9 +174,9 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   if (!state || state.phase === "loading") return <StatusScreen title="Checking your session"
     detail="Your workspace will open after your account is verified." role="status" />;
   const pending = state.phase === "signOutPending";
-  return <StatusScreen title={pending ? "Finish signing out" : "Sign in to Cosmas"}
+  return <StatusScreen role={pending ? "alert" : "status"} title={pending ? "Finish signing out" : "Sign in to CosmaBot"}
     detail={pending ? "Your workspace is closed. Reconnect and finish signing out before continuing." :
-      "Use your invited account to open your private workspace."}>
+      "Sign in with your invited account to start a private note and meet your team."}>
     <button className="button" onClick={() => void act(pending ? "signOut" : "signIn")}>
       {pending ? "Retry sign-out" : "Sign in"}
     </button>

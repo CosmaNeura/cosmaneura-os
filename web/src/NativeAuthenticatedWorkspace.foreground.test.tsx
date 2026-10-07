@@ -70,7 +70,7 @@ it('rejects stale generation and unexpected payload without refreshing authentic
 it('failed state verification closes access and never announces work resumed',async()=>{
   plugin.getState.mockRejectedValueOnce(new Error('private provider detail'));
   await scene(false);await scene(true);expect(resumed).not.toHaveBeenCalled();
-  expect(host.textContent).toContain('Secure session is unavailable');expect(host.textContent).not.toContain('private provider detail');
+  expect(host.textContent).toContain('Sign-in needs attention');expect(host.textContent).not.toContain('private provider detail');
 });
 it('a late read cannot notify an unmounted subscriber or replaced session',async()=>{
   const held=deferred<NativeAuthState>();plugin.getState.mockReturnValueOnce(held.promise);
