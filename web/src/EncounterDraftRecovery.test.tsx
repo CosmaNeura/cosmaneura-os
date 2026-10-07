@@ -16,7 +16,7 @@ vi.mock("./team-setup-api", async () => {
 
 vi.mock("./workspace-api", async original => {
   const actual = await original<typeof import("./workspace-api")>();
-  return { ...actual, workspaceApi: { ...actual.workspaceApi, practiceWorkItem:vi.fn().mockRejectedValue(new Error("Unavailable fixture")), open: vi.fn(), catalog: vi.fn(), team: vi.fn(),
+  return { ...actual, workspaceApi: { ...actual.workspaceApi, privateDrafts:vi.fn(), practiceWorkItem:vi.fn().mockRejectedValue(new Error("Unavailable fixture")), open: vi.fn(), catalog: vi.fn(), team: vi.fn(),
     read: vi.fn(), append: vi.fn(), saveTeam: vi.fn(), saveNote: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn() } };
 });
 // Namespace hashing and encryption are exercised by private-drafts.test.ts and
@@ -24,7 +24,7 @@ vi.mock("./workspace-api", async original => {
 vi.mock("./draft-store", async original => ({...await original<typeof import("./draft-store")>(),
   privateDraftScope: async (scope: string) => scope}));
 const access = { mode: "clerk_jwt" as const, getToken: async () => "invented-token-never-stored" };
-const workspace: Workspace = { id: "00000000-0000-4000-8000-000000000021", appointment_id: "00000000-0000-4000-8000-000000000022",
+const workspace: Workspace & {appointment_id:string} = { id: "00000000-0000-4000-8000-000000000021", appointment_id: "00000000-0000-4000-8000-000000000022",
   label: "Invented recovery encounter", revision: 1, entries: [], work_candidates: [] };
 const team: ProviderTeam = teamFixture();
 let root: Root, element: HTMLDivElement;
@@ -41,7 +41,7 @@ const factory = async ({scope}:{scope:string}): Promise<DraftStore> => {
     }};
 };
 async function click(text:string) {
-  const button=[...element.querySelectorAll("button")].find(b=>b.textContent?.replace("↗","").trim()===text||[...b.querySelectorAll("strong")].some(label=>label.textContent?.trim()===text));
+  const button=[...element.querySelectorAll("button")].find(b=>!b.closest('[hidden]')&&(b.textContent?.replace("↗","").trim()===text||[...b.querySelectorAll("strong")].some(label=>label.textContent?.trim()===text)));
   expect(button, text).toBeTruthy();expect(button!.disabled,text).toBe(false);
   await act(async()=>{button!.click();});
 }
@@ -52,7 +52,7 @@ async function input(selector:string,value:string) {
     field.dispatchEvent(new Event("input",{bubbles:true}));});
 }
 async function mount() {root=createRoot(element);await act(async()=>root.render(<EncounterWorkspace authenticated={access} draftStorage={factory}/>));}
-async function open() {await click("Choose an encounter");await act(async()=>element.querySelector<HTMLButtonElement>(".team-encounter-option")!.click());}
+async function open() {await click("Visits and notes");await act(async()=>element.querySelector<HTMLButtonElement>(".team-encounter-option")!.click());}
 async function restart() {await act(async()=>root.unmount());await mount();}
 const notebookRecord=()=>[...records.entries()].find(([key])=>key.endsWith(`workspace:${workspace.id}`))?.[1];
 function savedNote(content:string): Workspace { return {...workspace,revision:2,entries:[{id:"invented-entry",revision:2,kind:"scratchpad",content,source_label:null,origin:"human",ticket:null,created_at:"2026-09-21T12:00:00Z"}]}; }
@@ -63,6 +63,7 @@ beforeEach(async()=>{
   vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:workspace.appointment_id,workspace_id:workspace.id,label:workspace.label}]);
   vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team});
   vi.mocked(workspaceApi.team).mockResolvedValue(team);vi.mocked(workspaceApi.read).mockResolvedValue(workspace);
+  vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
   await mount();
 });
 afterEach(async()=>{await act(async()=>root.unmount());element.remove();vi.unstubAllGlobals();});
@@ -128,7 +129,10 @@ it("clears the view on access loss and cannot recover another owner's drafts",as
   await open();await input("#team-notebook","Private invented owner A text");
   vi.mocked(workspaceApi.read).mockRejectedValueOnce(new WorkspaceApiError(403));
   await click("Refresh encounter");expect(element.textContent).toContain("Private content has been cleared");
-  vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team:{...team,recovery_scope:"b".repeat(64)}});
+  const newOwnerTeam={...team,recovery_scope:"b".repeat(64)};
+  vi.mocked(workspaceApi.team).mockResolvedValue(newOwnerTeam);
+  vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team:newOwnerTeam});
+  await restart();
   await open();expect(element.textContent).not.toContain("Restore notebook draft");
   expect(element.querySelector<HTMLTextAreaElement>("#team-notebook")!.value).toBe("");
   expect(JSON.stringify([...records.values()])).not.toContain("invented-token-never-stored");
@@ -146,7 +150,7 @@ it("rechecks encounter access when restoring an offered draft",async()=>{
 });
 
 it("recovers private editor text and its parent save as one exact retry after remount",async()=>{
-  await open();await input("#private-note-text","Invented clinical editor recovery");
+  await open();await click("Review");await input("#private-note-text","Invented clinical editor recovery");
   vi.mocked(workspaceApi.saveNote).mockRejectedValueOnce(new WorkspaceApiError(503));
   await click("Save note version");const body=structuredClone(vi.mocked(workspaceApi.saveNote).mock.calls[0][2]);
   await restart();await open();expect(workspaceApi.saveNote).toHaveBeenCalledTimes(1);
@@ -162,8 +166,8 @@ it("recovers private editor text and its parent save as one exact retry after re
 });
 
 it("clears all private editor content if access is revoked after an editor recovery offer",async()=>{
-  await open();await input("#private-note-text","Keep private after revocation");
-  await restart();await open();vi.mocked(workspaceApi.read).mockRejectedValueOnce(new WorkspaceApiError(403));
+  await open();await click("Review");await input("#private-note-text","Keep private after revocation");
+  await restart();await open();await click("Review");vi.mocked(workspaceApi.read).mockRejectedValueOnce(new WorkspaceApiError(403));
   await click("Restore private note draft");expect(element.querySelector("#private-note-text")).toBeNull();
   expect(element.textContent).toContain("Private content has been cleared");
   expect(element.textContent).not.toContain("Keep private after revocation");
@@ -180,16 +184,19 @@ it("refuses an older backend without recovery scope and never opens unjournaled 
 
 it("retains notebook and clinical drafts when recovery scope disappears, then restores after recheck",async()=>{
   await open();await input("#team-notebook","Retained notebook while the backend is older");
+  await click("Review");
   await input("#private-note-text","Retained clinical draft while the backend is older");
   const before=structuredClone([...records]);
   vi.mocked(workspaceApi.team).mockResolvedValue({...team,recovery_scope:undefined});
   await click("Refresh encounter");
+  await click("Notebook");
   expect(element.querySelector<HTMLTextAreaElement>("#team-notebook")!.disabled).toBe(true);
   expect(element.querySelector<HTMLTextAreaElement>("#private-note-text")!.disabled).toBe(true);
   expect([...records]).toEqual(before);
   vi.mocked(workspaceApi.team).mockResolvedValue(team);
-  await click("Recheck draft recovery");await click("Restore notebook draft");await click("Restore private note draft");
+  await click("Recheck draft recovery");await click("Restore notebook draft");
   expect(element.querySelector<HTMLTextAreaElement>("#team-notebook")!.value).toContain("Retained notebook");
+  await click("Review");await click("Restore private note draft");
   expect(element.querySelector<HTMLTextAreaElement>("#private-note-text")!.value).toContain("Retained clinical draft");
   expect(workspaceApi.append).not.toHaveBeenCalled();expect(workspaceApi.saveNote).not.toHaveBeenCalled();
 });
@@ -309,6 +316,7 @@ it("withholds private views after an unsupported new pending request without dow
   const pending={expected_revision:1,idempotency_key:'new-reviewed-pending',configuration,setup_review:{catalog_version:1 as const,configuration_sha256:'c'.repeat(64),prerequisites_sha256:'d'.repeat(64)}};
   const value={schema:1 as const,updatedAt:'2026-09-21T12:00:00Z',body:{kind:'team',baseRevision:1,configuration,pending}};
   records.set('a'.repeat(64)+'team',{revision:'1',value});
+  await restart();
   await settingsNavigation(element).practice();await click('Restore team draft');vi.mocked(workspaceApi.saveTeam).mockRejectedValue(new WorkspaceApiError(426));await click('Retry same save');
   expect(vi.mocked(workspaceApi.saveTeam).mock.calls[0][1]).toEqual(pending);expect(element.querySelector('.team-settings')).toBeNull();expect(element.textContent).toContain('Update required');
   expect(records.get('a'.repeat(64)+'team')?.value).toEqual(value);

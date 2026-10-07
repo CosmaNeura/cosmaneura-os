@@ -1,0 +1,8 @@
+import {CONNECTION_IDS,type ConnectionCatalog,type ConnectionId,type ConnectionReadiness} from './connection-catalog-api';
+/** Test-only shape shared by current source catalog checks. */
+export const readinessFixture=(states:Partial<Record<ConnectionId,ConnectionReadiness['state']>>={}):ConnectionCatalog=>{
+ const ids:Record<ConnectionId,string[]>={core:['practice_connection','visit_discovery','athena_schedule','ehr_write'],google:['mail_headers','reviewed_email_source','calendar_source','email_send','calendar_write'],microsoft:['mail_headers','calendar_summaries','full_email_source','email_send'],scheduling:['availability','appointment_proposals','live_booking'],messaging:['spruce_administrative_message','fax_delivery','reviewed_received_fax'],payments:['sandbox_payment_request','live_payment_collection'],portals:['named_portal_work','arbitrary_portal_connection']};
+ const catalog={} as ConnectionCatalog,readiness={} as Record<ConnectionId,ConnectionReadiness>;
+ for(const id of CONNECTION_IDS){const state=states[id]??(id==='portals'||id==='payments'?'coming_soon':id==='google'||id==='microsoft'?'user_connectable':'practice_setup');catalog[id]=state==='user_connectable';readiness[id]={state,supported:id!=='portals',setup_allowed:true,runtime_available:catalog[id],installed_account:['messaging','payments','portals'].includes(id)?'missing':'not_checked',client_status:'not_checked',account_status:'not_checked',operation_status:'not_checked',actions:ids[id].map(name=>({id:name,supported:!['ehr_write','email_send','calendar_write','full_email_source','live_booking','live_payment_collection','named_portal_work','arbitrary_portal_connection'].includes(name),runtime_available:false}))};}
+ return {...catalog,readiness};
+};

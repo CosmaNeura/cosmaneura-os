@@ -12,14 +12,14 @@ const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(s:string)=>s}));
 vi.mock('./workspace-api',async original=>{const actual=await original<typeof import('./workspace-api')>();return {...actual,workspaceApi:{...actual.workspaceApi,
-  open:vi.fn(),catalog:vi.fn(),team:vi.fn(),read:vi.fn(),ask:vi.fn(),append:vi.fn(),retryHandoff:vi.fn()}};});
+  open:vi.fn(),catalog:vi.fn(),team:vi.fn(),privateDrafts:vi.fn(),read:vi.fn(),ask:vi.fn(),append:vi.fn(),retryHandoff:vi.fn()}};});
 const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const time='2026-10-02T14:00:00Z',identity={mode:'clerk_jwt' as const,getToken:async()=> 'invented-owner'},team=teamFixture();
 team.capture={enabled:false};team.scheduling={enabled:false};
-let root:Root,host:HTMLDivElement,current:Workspace,storage:ReturnType<typeof memoryDraftStorage>,fetcher:ReturnType<typeof vi.fn>;
+let root:Root,host:HTMLDivElement,current:Workspace&{appointment_id:string},storage:ReturnType<typeof memoryDraftStorage>,fetcher:ReturnType<typeof vi.fn>;
 const reviews:HandoffReviewInput[]=[],revisions:HandoffRevisionInput[]=[];
 const hash=async(content:string)=>[...new Uint8Array(await webcrypto.subtle.digest('SHA-256',new TextEncoder().encode(content)))].map(n=>n.toString(16).padStart(2,'0')).join('');
-async function fixture():Promise<Workspace> {
+async function fixture():Promise<Workspace&{appointment_id:string}> {
   const content='Invented Scribe summary: Shawn describes heart issues. DOB unavailable. Confirm diagnosis and current medicines.\nResearch should find candidate clinical trials and preserve eligibility uncertainty.';
   const handoff:ReviewableHandoff={id:uuid(701),origin_entry_id:uuid(600),recipient_role:'follow_up',recipient_name:'follow up',recipient_agent_id:uuid(102),
     brief:'Prepare an administrative follow-up draft',context_revision:1,status:'completed',attempt_id:uuid(702),attempt_count:1,result_entry_id:uuid(601),
@@ -58,10 +58,11 @@ async function click(label:string){await wait(()=>{expect(button(label),label).t
 async function input(selector:string,value:string){const field=host.querySelector<HTMLTextAreaElement>(selector)!;expect(field).toBeTruthy();await act(async()=>{
   Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function mount(){root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));}
-async function open(){await click('Choose an encounter');await wait(()=>expect(host.querySelector('.team-encounter-option')).toBeTruthy());await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await wait(()=>expect(button('Review result')).toBeTruthy());}
+async function open(){await click('Visits and notes');await wait(()=>expect(host.querySelector('.team-encounter-option')).toBeTruthy());await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await wait(()=>expect(button('Review result')).toBeTruthy());}
 async function review(){await click('Review result');await wait(()=>expect(host.querySelector('[aria-label="Complete saved draft"]')?.textContent).toBe(current.entries.find(e=>e.id===current.handoffs![0].result_entry_id)!.reply!.content));}
 beforeEach(async()=>{vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE','http://127.0.0.1:8018');
   current=await fixture();reviews.splice(0);revisions.splice(0);storage=memoryDraftStorage();fetcher=vi.fn(wire);vi.stubGlobal('fetch',fetcher);
+  vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
   vi.mocked(workspaceApi.team).mockResolvedValue(structuredClone(team));vi.mocked(workspaceApi.open).mockImplementation(async()=>({identity,workspace:structuredClone(current),team:structuredClone(team)}));
   vi.mocked(workspaceApi.read).mockImplementation(async()=>structuredClone(current));vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:current.appointment_id,workspace_id:current.id,label:current.label}]);
   host=document.createElement('div');document.body.append(host);await mount();});

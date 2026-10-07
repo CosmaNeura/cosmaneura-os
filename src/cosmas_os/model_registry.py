@@ -23,6 +23,7 @@ from cosmas_os import (  # noqa: F401 -- imports register declarative models
     portal_models,
     portal_work_models,
     practice_access_models,
+    practice_setup_models,
     research_models,
     scheduling_enrollment_models,
     scheduling_login_models,

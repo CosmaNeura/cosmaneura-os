@@ -139,7 +139,7 @@ def prepare_tool_selection(
     status_rows = []
     if settings.get("role") == "chief" and supports_skill(settings, "work_status"):
         snapshot = work.project_workspace(s, ws.read(s, box, owner, workspace_id))
-        for row in operations.linked(s, box, owner, workspace_id, snapshot, settings):
+        for row in ([] if snapshot["appointment_id"] is None else operations.linked(s, box, owner, workspace_id, snapshot, settings)):
             if row["kind"] in operations.KINDS and row["record_id"] and row["evidence"]["commitment"]:
                 status_rows.append({"kind": row["kind"], "record_id": row["record_id"],
                     "commitment": row["evidence"]["commitment"]})

@@ -327,6 +327,12 @@ def workspace_catalog(session: Session = Depends(get_session), identity: Request
     return ws.catalog(session, identity.box_id, identity.principal_id)
 
 
+from cosmas_os.api.private_draft_routes import router as private_draft_router  # noqa: E402
+
+app.include_router(private_draft_router(workspace_gate=_workspace_gate, get_session=get_session, identity=_identity,
+    fence=lambda request, session, identity: _refresh_model_identity(request, session, identity)))
+
+
 def _capture_gate() -> None:
     if not settings.workspace_capture_available:
         raise HTTPException(404, "not found", headers={"Cache-Control": "no-store"})
@@ -2074,7 +2080,7 @@ app.include_router(core_connection_router(settings=lambda: settings, session_fac
 from cosmas_os.api.connection_catalog import router as connection_catalog_router  # noqa: E402
 
 app.include_router(connection_catalog_router(settings=lambda: settings, runtime=lambda: app.state,
-    identity_dependency=_identity, workspace_gate=_workspace_gate))
+    identity_dependency=_identity, workspace_gate=_workspace_gate, session_factory=lambda: SessionLocal()))
 install_record_boundary(app)
 install_core_connection_boundary(app)
 

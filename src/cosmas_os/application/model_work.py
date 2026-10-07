@@ -147,6 +147,8 @@ def read_workspace(s, box, owner, wid, external_identity_id=None):
     )
     if workspace is None:
         raise ws.WorkspaceError("workspace_unavailable", 404)
+    if workspace.appointment_id is None and workspace.patient_link_id is None and workspace.draft_title:
+        return workspace
     encounter = s.scalar(
         select(AppointmentObservation.id)
         .join(PatientLink, PatientLink.id == AppointmentObservation.patient_link_id)
@@ -535,6 +537,10 @@ def _context_for(
 ):
     from cosmas_os.application import conversation
 
+    if workspace.appointment_id is None and any(key in command for key in (
+            "research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")):
+        raise ws.WorkspaceError("encounter_required", 409)
+
     if "session_prep_analysis" in command:
         from cosmas_os.application import session_prep_analysis
 
@@ -669,6 +675,8 @@ def _selected_google_passages(s, workspace, settings):
 
 
 def _selected_connector_passages(s, workspace, settings):
+    if workspace.appointment_id is None:
+        return ()
     sources = _selected_google_passages(s, workspace, settings)
     from cosmas_os.application import efax_inbound_source, fax_inbound_source
     from cosmas_os.ports.bot_capabilities import SourcePassage
@@ -726,12 +734,12 @@ def _new_admission(
                 context_revision=context.context_revision, settings=settings, context=context)
             from cosmas_os.application.agent_connector_tools import prepare_connector_intents
             from cosmas_os.ports.agent_connectors import ToolSelectionV2
-            connector_selection = prepare_connector_intents(s, box=workspace.box_id, owner=workspace.owner_id,
+            connector_selection = {"connector_capabilities": [], "connector_intents": []} if workspace.appointment_id is None else prepare_connector_intents(s, box=workspace.box_id, owner=workspace.owner_id,
                 workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
                 context=context, settings=settings, external_identity_id=external_identity_id)
             from cosmas_os.application.agent_delivery_tools import prepare_delivery_intents
             from cosmas_os.ports.agent_delivery_tools import ToolSelectionV3
-            delivery_selection = prepare_delivery_intents(s, box=workspace.box_id, owner=workspace.owner_id,
+            delivery_selection = {"delivery_intents": []} if workspace.appointment_id is None else prepare_delivery_intents(s, box=workspace.box_id, owner=workspace.owner_id,
                 workspace_id=workspace.id, agent_id=bot.agent_id, team_revision_id=version.id,
                 context=context, settings=settings, external_identity_id=external_identity_id)
             if delivery_selection["delivery_intents"] and attempt is None and not context.draft_only:
@@ -823,7 +831,7 @@ def reserve_conversation(
     lock_owner(s, box, owner)
     if reauthenticate:
         reauthenticate()
-    workspace = ws._workspace(s, box, owner, wid, writing=True)
+    workspace = ws._workspace(s, box, owner, wid, writing=True, allow_private=True)
     _identity(s, box, owner, external_identity_id)
     request_hash = conversation_request_hash(
         expected=expected, team_revision=team_revision, role=role, content=content,
@@ -961,7 +969,7 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
     if reauthenticate:
         reauthenticate()
     _identity(s, row.box_id, row.owner_id, row.external_identity_id)
-    workspace = ws._workspace(s, row.box_id, row.owner_id, row.workspace_id, writing=True)
+    workspace = ws._workspace(s, row.box_id, row.owner_id, row.workspace_id, writing=True, allow_private=True)
     command = row.request_body
     version, bot, settings = team.active_bot(
         s, row.box_id, row.owner_id, command["role"], command["team_revision"]
@@ -1809,7 +1817,7 @@ def reserve_retry(
     if reauthenticate:
         reauthenticate()
     _identity(s, box, owner, external_identity_id)
-    workspace = ws._workspace(s, box, owner, wid, writing=True)
+    workspace = ws._workspace(s, box, owner, wid, writing=True, allow_private=True)
     at = now(s, clock)
     prior = retry_observation(
         s, workspace, hid, expected=expected, previous_attempt=previous_attempt, key=key, as_of=at

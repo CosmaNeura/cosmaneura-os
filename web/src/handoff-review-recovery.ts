@@ -6,7 +6,7 @@ import {handoffReviewHash,validHandoffReviewInput,validHandoffRevisionInput,vali
   type HandoffReviewInput,type HandoffRevisionInput,type HandoffReviewReceipt} from './handoff-review-api';
 import type {DraftHandoff,Workspace} from './workspace-api';
 
-export type HandoffRecoveryAnchor={workspace_id:string;appointment_id:string;handoff_id:string;origin_entry_id:string;context_revision:number;
+export type HandoffRecoveryAnchor={workspace_id:string;appointment_id:string|null;handoff_id:string;origin_entry_id:string;context_revision:number;
   recipient:{role:DraftHandoff['recipient_role'];name:string;agent_id:string|null;key:string|null};
   result:{attempt_id:string;result_entry_id:string;result_sha256:string}};
 export type HandoffRecoveryPending={kind:'review';body:HandoffReviewInput;request_sha256:string}|
@@ -20,7 +20,7 @@ const roles=['scribe','visit_prep','follow_up','research','custom'];
 /** Account scope is authenticated by the existing encrypted journal. This adds exact encounter/result custody. */
 export async function validateHandoffReviewRecovery(value:unknown,workspaceId:string,handoffId:string):Promise<HandoffReviewRecovery>{
   if(!teamClosed(value,'version,workspace_id,appointment_id,handoff_id,origin_entry_id,context_revision,recipient,result,feedback,asking_changes,pending')||
-    value.version!==1||value.workspace_id!==workspaceId||value.handoff_id!==handoffId||!teamUuid(value.workspace_id)||!teamUuid(value.appointment_id)||
+    value.version!==1||value.workspace_id!==workspaceId||value.handoff_id!==handoffId||!teamUuid(value.workspace_id)||value.appointment_id!==null&&!teamUuid(value.appointment_id)||
     !teamUuid(value.handoff_id)||!teamUuid(value.origin_entry_id)||!teamNatural(value.context_revision)||value.context_revision>2147483646||
     !teamClosed(value.recipient,'role,name,agent_id,key')||!roles.includes(String(value.recipient.role))||!teamText(value.recipient.name,40,1)||
     value.recipient.agent_id!==null&&!teamUuid(value.recipient.agent_id)||value.recipient.key!==null&&(!teamText(value.recipient.key,100,1)||value.recipient.key.includes('\0'))||

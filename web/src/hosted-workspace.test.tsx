@@ -29,7 +29,8 @@ beforeEach(()=>{
   vi.stubGlobal("fetch",vi.fn<typeof fetch>(async url=>{
     const body=url===api+"/practice-access/compatibility"
       ? {contract_version:1,workspace_protocol:1,requests_require_protocol:true,contracts:{...REQUIRED_WORKSPACE_CONTRACTS}}
-      : url===api+"/practice-access"?accessConnected:null;
+      : url===api+"/practice-access"?accessConnected
+      :url===api+"/practice-access/setup"?{contract_version:1,state:"member_ready",practice:{display_name:"Invented practice",specialty:null},display_name:"Invented member",can_start_practice:false}:null;
     if(!body)throw new Error("Unexpected hosted workspace request");
     return new Response(JSON.stringify(body),{headers:{"Content-Type":"application/json","Cache-Control":"no-store","X-Cosmas-Workspace-Protocol":"1"}});
   }));
@@ -40,8 +41,8 @@ async function render(){await act(async()=>root.render(createElement(RuntimeApp,
   authenticatedWorkspace:true,workspaceEnabled:true,clerkPublishableKey:"pk_test_offline",apiBase:import.meta.env.VITE_API_BASE})));}
 
 it("opens the shared workspace after sign in and sends a fresh token only to the configured service",async()=>{
-  await render();expect(vi.mocked(fetch).mock.calls.map(([url])=>url)).toEqual([api+"/practice-access/compatibility",api+"/practice-access"]);expect(container.textContent).toContain("Connected private workspace");expect(container.textContent).toContain("invented data only");
-  expect(harness.tokens).toHaveBeenCalledTimes(2);expect(harness.identity).not.toBeNull();
+  await render();expect(vi.mocked(fetch).mock.calls.map(([url])=>url)).toEqual([api+"/practice-access/compatibility",api+"/practice-access",api+"/practice-access/setup"]);expect(container.textContent).toContain("Connected private workspace");expect(container.textContent).toContain("invented data only");
+  expect(harness.tokens).toHaveBeenCalledTimes(3);expect(harness.identity).not.toBeNull();
   for(const [,options] of vi.mocked(fetch).mock.calls){
     expect(new Headers(options?.headers).get("X-Cosmas-Workspace-Protocol")).toBe("1");
     expect(new Headers(options?.headers).get("Authorization")).toBe("Bearer invented.hosted.token");
@@ -52,7 +53,7 @@ it("opens the shared workspace after sign in and sends a fresh token only to the
   const call=fetcher.mock.calls[0] as unknown as [string,RequestInit];
   expect(call[0]).toBe(api+"/workspaces");expect(new Headers(call[1].headers).get("Authorization")).toBe("Bearer invented.hosted.token");
   expect(harness.tokens).toHaveBeenCalledWith({skipCache:true});
-  expect(harness.tokens).toHaveBeenCalledTimes(3);
+  expect(harness.tokens).toHaveBeenCalledTimes(4);
   expect(call[1]).toMatchObject({credentials:"omit",redirect:"error",cache:"no-store"});
 });
 it("a mismatched hosted page cannot initialize login or acquire credentials",async()=>{

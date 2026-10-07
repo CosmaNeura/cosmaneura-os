@@ -377,7 +377,7 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
             )
         with pytest.raises(
             RuntimeError,
-            match="Retain selected calendar source lineage and human reviews",
+            match="Retain private drafts, history and human appointment-link receipts",
         ):
             migrate("0002_external_identities", downgrade=True)
         with Session(target) as s:

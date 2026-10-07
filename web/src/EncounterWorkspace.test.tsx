@@ -31,7 +31,7 @@ vi.mock("./workspace-api", async importOriginal => {
   return { ...actual, workspaceApi: { practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn() } };
 });
 
-const fixture: Workspace = {
+const fixture: Workspace & {appointment_id:string} = {
   id: "00000000-0000-4000-8000-000000000071", appointment_id: "appointment-invented", label: "Invented person", revision: 1,
   entries: [{ id: "source-invented", revision: 1, kind: "synthetic_source", content: "Invented prep",
     source_label: "Fixture v1", origin: "synthetic_fixture", ticket: null, created_at: "2026-09-16T00:00:00Z" }],
@@ -62,7 +62,11 @@ describe("private encounter workspace", () => {
   });
   afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); });
   async function click(text: string) {
-    const button = [...container.querySelectorAll("button")].find(b => b.textContent?.replace(/\s*↗$/, "").trim() === text || b.getAttribute("aria-label") === text || [...b.querySelectorAll("strong")].some(label => label.textContent?.trim() === text));
+    const visits = () => [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace navigation"] button')].find(button=>button.textContent==='Visits and notes')!;
+    if(text==='Choose an encounter'){await act(async()=>visits().click());return;}
+    if(['Start with Chief','Record a visit','Use an existing recording','🌱 Try a sample'].includes(text)&&
+      ![...container.querySelectorAll('button')].some(button=>!button.closest('[hidden]')&&(button.textContent?.trim()===text||[...button.querySelectorAll('strong')].some(label=>label.textContent===text))))await act(async()=>visits().click());
+    const button = [...container.querySelectorAll("button")].find(b => !b.closest("[hidden]") && (b.textContent?.replace(/\s*↗$/, "").trim() === text || b.getAttribute("aria-label") === text || [...b.querySelectorAll("strong")].some(label => label.textContent?.trim() === text)));
     expect(button, text).toBeTruthy();
     await act(async () => button!.click());
   }
@@ -278,7 +282,7 @@ describe("private encounter workspace", () => {
     const access = {mode:"clerk_jwt" as const,getToken:vi.fn()};
     vi.mocked(workspaceApi.team).mockResolvedValue({...team,revision:0});
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
-    expect(workspaceApi.team).not.toHaveBeenCalled();
+    expect(workspaceApi.team).toHaveBeenCalledWith(access);
     await settings().practice(); await input("Practice context","Invented independent practice");
     vi.mocked(workspaceApi.saveTeam).mockRejectedValueOnce(new WorkspaceApiError(503));
     await settings().save();
@@ -365,7 +369,8 @@ describe("private encounter workspace", () => {
     expect(container.textContent).not.toContain("Former account private settings");
     expect(container.textContent).not.toContain("Team settings saved");
     expect(container.querySelector(".team-settings")).toBeNull();
-    expect(container.querySelector(".team-roster")!.textContent).toBe("");
+    expect(container.querySelector(".team-roster")!.textContent).not.toContain("Former account");
+    expect(container.querySelector('[aria-label="Workspace navigation"] [aria-current="page"]')?.textContent).toBe('Home');
   });
 
   it("clears private setup when the signed-in binding is revoked", async () => {

@@ -18,7 +18,7 @@ import {editorDraft} from './editor-recovery';
 vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404)),rehearse:vi.fn()}};});
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const identity={mode:'clerk_jwt' as const,getToken:async()=>'invented-activity-owner'};
-let host:HTMLDivElement,root:Root,team:ReturnType<typeof teamFixture>,first:Workspace,second:Workspace,selected:Workspace;
+let host:HTMLDivElement,root:Root,team:ReturnType<typeof teamFixture>,first:Workspace&{appointment_id:string},second:Workspace&{appointment_id:string},selected:Workspace&{appointment_id:string};
 let storage:ReturnType<typeof memoryDraftStorage>,factory:(options:{scope:string;native:boolean})=>Promise<DraftStore>,failTargetReads:number,failEditorWrites:number;
 const visible=(e:Element)=>!e.closest('[hidden]');
 const text=(e:Element)=>e.textContent?.replace(/[←→›↗]/g,'').trim();
@@ -31,7 +31,7 @@ function page(){const p=activityPage(),e=selected.entries[0];p.rows[0]={...p.row
 async function mount(auth:typeof identity|null=identity){await act(async()=>root.render(<EncounterWorkspace authenticated={auth??undefined} draftStorage={factory}/>));}
 async function settings(){await click('Team settings');await click('Your team');}
 async function activity(){await settings();await click('Team preferences');await click('AI activity');await wait(()=>expect(button('Refresh activity')?.matches(':disabled')).toBe(false));}
-async function openFirst(){await click('Choose an encounter');await click(first.label);await wait(()=>expect(notebook()?.matches(':disabled')).toBe(false));}
+async function openFirst(){await click('Visits and notes');await click(first.label);await wait(()=>expect(notebook()?.matches(':disabled')).toBe(false));}
 function noCommands(){expect(modelWorkApi.submit).not.toHaveBeenCalled();expect(modelWorkApi.resolve).not.toHaveBeenCalled();expect(workspaceApi.saveTeam).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();}
 beforeEach(async()=>{
  vi.mocked(teamSetupApi.read).mockRejectedValue(new WorkspaceApiError(404));

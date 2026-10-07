@@ -14,6 +14,10 @@ const access={role:'owner' as const,onAccessLost:vi.fn()};
 beforeEach(()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});container=document.createElement('div');document.body.append(container);root=createRoot(container);
   vi.spyOn(practiceAccessApi,'read').mockResolvedValue(accessRequired);vi.spyOn(practiceAccessApi,'request').mockResolvedValue(accessPending);
+  vi.spyOn(practiceAccessApi,'setup').mockImplementation(async()=>vi.mocked(practiceAccessApi.read).mock.results.at(-1)?.type==='return'&&
+    (await vi.mocked(practiceAccessApi.read).mock.results.at(-1)!.value).state==='connected'
+    ?{contract_version:1,state:'member_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Ada Beta',can_start_practice:false}
+    :{contract_version:1,state:'join_existing',practice:null,display_name:null,can_start_practice:false});
   vi.spyOn(practiceAccessApi,'cancel').mockResolvedValue({...accessPending,state:'cancelled',request:{...row,state:'cancelled'}});
   vi.spyOn(practiceAccessApi,'pending').mockResolvedValue([row]);vi.spyOn(practiceAccessApi,'decide').mockResolvedValue({...row,state:'approved'});access.onAccessLost.mockClear();
 });
@@ -21,7 +25,7 @@ afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.res
 const button=(text:string)=>[...container.querySelectorAll('button')].find(item=>!item.closest('[hidden]')&&item.textContent===text)!;
 const click=async(text:string)=>{expect(button(text)).toBeDefined();await act(async()=>button(text).click());};
 async function name(value:string){await act(async()=>{const input=container.querySelector('input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
-async function gate(id=identity){await act(async()=>root.render(<PracticeAccessGate identity={id} accountControls={<button>Account</button>}>{context=><p>Private workspace: {context.role}</p>}</PracticeAccessGate>));}
+async function gate(id=identity){await act(async()=>root.render(<PracticeAccessGate identity={id} accountControls={<button>Account</button>}>{context=><p>Private workspace: {context.role}</p>}</PracticeAccessGate>));if(button('Join an existing practice'))await click('Join an existing practice');}
 async function owner(){await act(async()=>root.render(<PracticeAccessPanel identity={identity} access={access} onBusyChange={()=>{}}/>));}
 
 it('holds the workspace closed until approved and shows the matching code after requesting',async()=>{

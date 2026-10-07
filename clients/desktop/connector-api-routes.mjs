@@ -18,10 +18,11 @@ const inboxProposal = new RegExp(`^/workspaces/${ID}/inbox-handoffs/(propose|res
 const coreRecordLocation = new RegExp(`^/workspaces/${ID}/cosmaneura-record/location$`);
 const research = new RegExp(`^/workspaces/${ID}/research(?:/(saved|search|resolve|${ID}/save(?:/resolve)?))?$`);
 const agentResearch = new RegExp(`^/workspaces/${ID}/agent-research(?:/(${ID})/review)?$`);
+const privateDraft = new RegExp(`^/workspaces/(?:private-drafts(?:/resolve)?|${ID}/appointment-link(?:/resolve)?)$`);
 const googleCalendarReview = new RegExp(`^/workspaces/${ID}/google-calendar/review$`);
 const googleMessageReview = new RegExp(`^/workspaces/${ID}/google-messages/review$`);
 const schedulingPatientSetup = new RegExp(`^/workspaces/${ID}/scheduling-patient/setup$`);
-export const CONNECTOR_HEADERS = ['X-Cosmas-Vendor-Contract','X-Cosmas-Finance-Contract','X-Cosmas-Portal-Contract','X-Cosmas-Portal-Work-Contract','X-Cosmas-Finance-Setup-Contract','X-Cosmas-Membership-Contract','X-Cosmas-Vendor-Setup-Contract','X-Cosmas-Inbox-Contract','X-Cosmas-Inbox-Handoff-Contract','X-Cosmas-Record-Contract','X-Cosmas-Research-Contract','X-Cosmas-Connection-Contract','X-Cosmas-Scheduling-Login','X-Cosmas-Microsoft-Connection','X-Cosmas-Google-Connection','X-Cosmas-Practice-Access-Contract','X-Cosmas-Google-Messages','X-Cosmas-Google-Calendar','X-Cosmas-Scheduling-Patient'];
+export const CONNECTOR_HEADERS = ['X-Cosmas-Vendor-Contract','X-Cosmas-Finance-Contract','X-Cosmas-Portal-Contract','X-Cosmas-Portal-Work-Contract','X-Cosmas-Finance-Setup-Contract','X-Cosmas-Membership-Contract','X-Cosmas-Vendor-Setup-Contract','X-Cosmas-Inbox-Contract','X-Cosmas-Inbox-Handoff-Contract','X-Cosmas-Record-Contract','X-Cosmas-Research-Contract','X-Cosmas-Connection-Contract','X-Cosmas-Scheduling-Login','X-Cosmas-Microsoft-Connection','X-Cosmas-Google-Connection','X-Cosmas-Practice-Access-Contract','X-Cosmas-Google-Messages','X-Cosmas-Google-Calendar','X-Cosmas-Scheduling-Patient','X-Cosmas-Private-Draft'];
 
 /** Closed method/path/query classification, shared by admission and byte budgets. */
 export function connectorApiRoute(target, method) {
@@ -29,6 +30,8 @@ export function connectorApiRoute(target, method) {
   const query = question < 0 ? '' : target.slice(question);
   const plan = (header,input,output,extra={}) => ({header,input,output,seconds:30,...extra});
   const incoming = (header,input,output) => plan(header,input,output,{seconds:15,strictResponse:true,errorOutput:2048});
+  if(privateDraft.test(path)) return !query && (method==='POST' || method==='GET'&&path==='/workspaces/private-drafts')
+    ? incoming('X-Cosmas-Private-Draft',method==='POST'?4096:0,method==='GET'?65536:12000000) : null;
   if(schedulingPatientSetup.test(path)) return method === 'POST' && !query
     ? plan('X-Cosmas-Scheduling-Patient',4096,16384,{seconds:45,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/google/calendar-summaries' || googleCalendarReview.test(path)) return method === 'POST' && !query
@@ -36,7 +39,7 @@ export function connectorApiRoute(target, method) {
   if(path === '/connections/google/messages' || googleMessageReview.test(path)) return method === 'POST' && !query
     ? plan('X-Cosmas-Google-Messages',4096,googleMessageReview.test(path)?12000000:131072,{seconds:50,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/catalog') return method === 'GET' && !query
-    ? incoming(CONNECTOR_HEADERS[11],0,4096) : null;
+    ? incoming(CONNECTOR_HEADERS[11],0,32768) : null;
   if(path === '/connections/plugins') return method === 'GET' && !query
     ? incoming(CONNECTOR_HEADERS[11],0,1048576) : null;
   if(path === '/vendor-settings/readiness') return method === 'GET' && !query
@@ -44,9 +47,9 @@ export function connectorApiRoute(target, method) {
   if(vendorPreparation.test(path)) return method==='POST'&&!query ? plan(CONNECTOR_HEADERS[0],33792,16384) : null;
   if(path==='/practice-access/compatibility')
     return method==='GET' && !query ? incoming(CONNECTOR_HEADERS[15],0,4096) : null;
-  if(path==='/practice-access' || path==='/practice-access/requests')
+  if(path==='/practice-access' || path==='/practice-access/requests' || path==='/practice-access/setup')
     return method==='GET' && !query ? incoming(CONNECTOR_HEADERS[15],0,131072) : null;
-  if(['/practice-access/request','/practice-access/cancel','/practice-access/decide','/practice-access/members','/practice-access/member-change'].includes(path))
+  if(['/practice-access/request','/practice-access/cancel','/practice-access/decide','/practice-access/members','/practice-access/member-change','/practice-access/setup/complete'].includes(path))
     return method==='POST' && !query ? incoming(CONNECTOR_HEADERS[15],4096,131072) : null;
   if(path === '/connections/google/session') return method === 'POST' && !query
     ? plan(CONNECTOR_HEADERS[14],1024,131072,{seconds:50,strictResponse:true,errorOutput:2048}) : null;

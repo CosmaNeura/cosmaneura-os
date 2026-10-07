@@ -42,6 +42,7 @@ it('rejects the older signed observation and accepts only current required contr
 
 it('checks compatibility before onboarding and uses the existing signed bounded API',async()=>{
   const id=identity(),check=vi.spyOn(practiceAccessApi,'read').mockResolvedValue({contract_version:1,state:'request_required',role:null,request:null});
+  vi.spyOn(practiceAccessApi,'setup').mockResolvedValue({contract_version:1,state:'join_existing',practice:null,display_name:null,can_start_practice:false});
   vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()));
   await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={<button>Account</button>}>
     <PracticeAccessGate identity={id} accountControls={null}>{()=> <p>Private workspace</p>}</PracticeAccessGate>
@@ -50,7 +51,7 @@ it('checks compatibility before onboarding and uses the existing signed bounded 
   expect(url).toBe(api+'/practice-access/compatibility');expect(init).toMatchObject({method:'GET',credentials:'omit',redirect:'error',cache:'no-store'});
   expect(new Headers(init?.headers).get('X-Cosmas-Workspace-Protocol')).toBe('1');
   expect(new Headers(init?.headers).get('Authorization')).toBe('Bearer invented.fresh.token');
-  expect(check).toHaveBeenCalledOnce();expect(container.textContent).toContain('Join your practice');
+  expect(check).toHaveBeenCalledOnce();expect(container.textContent).toContain('Join an existing practice');
 });
 
 it('holds children closed for legacy servers and outages, then retries without reloading or clearing drafts',async()=>{
@@ -114,6 +115,7 @@ it('refuses an oversized or duplicate-key handshake and never dispatches ordinar
 
 
 it('keeps a real owner approval and its exact recovery command mounted through a protocol pause',async()=>{
+  vi.spyOn(practiceAccessApi,'setup').mockResolvedValue({contract_version:1,state:'owner_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Invented owner',can_start_practice:false});
   const id=identity();
   vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()))
     .mockResolvedValueOnce(response({...accessConnected,role:'owner'}))

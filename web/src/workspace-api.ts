@@ -10,7 +10,7 @@ import type {BlockedCapability, BotResources, ModelWorkPolicy, PresetBinding, Se
 import type {EntryModelRequest} from "./model-work-request";
 import type {InboxAnalysis} from "./inbox-analysis-contract";
 import type {ResearchAnalysis} from "./research-analysis-contract";
-import {TEAM_REQUEST_BYTES, TEAM_RESPONSE_BYTES, normalizeTeamConfiguration, teamCanonical, validTeamSave} from "./team-setup-request";
+import {TEAM_REQUEST_BYTES, TEAM_RESPONSE_BYTES, normalizeTeamConfiguration, teamCanonical, validTeamSave, teamClosed, teamUuid, teamText} from "./team-setup-request";
 import {validProviderTeam} from "./team-setup-validators";
 import {modelWorkApi} from "./model-work-api";
 import { readVendorPracticeCatalog } from "./vendor-api";
@@ -136,7 +136,8 @@ export type FollowUpOperation = { type: "followUpPropose"; body: FollowUpPropose
   { type: "followUpDecision"; ticketId: string; body: FollowUpDecisionInput } |
   { type: "followUpComplete"; ticketId: string; body: FollowUpCompleteInput };
 export type Workspace = {
-  id: string; appointment_id: string; label: string; revision: number;
+  id: string; appointment_id: string | null; label: string; revision: number;
+  private_draft?: {title:string;state:'unlinked'|'linked';link_receipt_id:string|null;linked_at:string|null};
   entries: WorkspaceEntry[]; work_candidates: WorkReference[];
   handoffs?: DraftHandoff[];
   note?: { latest: PrivateNote | null; history: PrivateNote[] };
@@ -144,6 +145,67 @@ export type Workspace = {
   model_contract_version?: 1;
   model_observed_at?: string;
 };
+export type PrivateDraftCreateInput={title:string;idempotency_key:string};
+export type PrivateDraftLinkInput={expected_revision:number;idempotency_key:string;appointment_id:string;appointment_link_confirmed:true};
+export type PrivateDraftCatalog={contract_version:1;drafts:{workspace_id:string;title:string;revision:number;created_at:string;link_state:'unlinked'|'linked';appointment_id:string|null}[];has_more:boolean};
+export type PrivateDraftResolution={contract_version:1;outcome:'saved'|'not_found';workspace:Workspace|null};
+export type PrivateDraftLinkResolution=PrivateDraftResolution&{link_receipt_id:string|null};
+export const validPrivateDraftCreate=(value:PrivateDraftCreateInput)=>teamClosed(value,'title,idempotency_key')&&
+  teamText(value.title,160,1)&&value.title===value.title.trim()&&/^[A-Za-z0-9:_-]{8,100}$/.test(value.idempotency_key);
+export const validPrivateDraftLink=(value:PrivateDraftLinkInput)=>teamClosed(value,'expected_revision,idempotency_key,appointment_id,appointment_link_confirmed')&&
+  Number.isSafeInteger(value.expected_revision)&&value.expected_revision>=1&&teamUuid(value.appointment_id)&&
+  /^[A-Za-z0-9:_-]{8,100}$/.test(value.idempotency_key)&&value.appointment_link_confirmed===true;
+export function validPrivateWorkspace(value:unknown,workspaceId?:string):value is Workspace {
+  if(!value||typeof value!=='object'||Array.isArray(value))return false;
+  const w=value as Workspace,d=w.private_draft;
+  return teamUuid(w.id)&&(!workspaceId||workspaceId===w.id)&&Number.isSafeInteger(w.revision)&&w.revision>=1&&
+    teamText(w.label,200,1)&&Array.isArray(w.entries)&&w.entries.length<=500&&Array.isArray(w.work_candidates)&&
+    !!d&&teamClosed(d,'title,state,link_receipt_id,linked_at')&&teamText(d.title,160,1)&&
+    (d.state==='unlinked'?w.appointment_id===null&&d.link_receipt_id===null&&d.linked_at===null:
+      d.state==='linked'&&teamUuid(w.appointment_id)&&teamUuid(d.link_receipt_id)&&typeof d.linked_at==='string'&&Number.isFinite(Date.parse(d.linked_at)));
+}
+
+async function privateDraftRequest<T>(identity:AuthenticatedWorkspaceIdentity,path:string,body:unknown|undefined,validate:(value:unknown)=>value is T):Promise<T> {
+  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),15000);
+  let reader:ReadableStreamDefaultReader<Uint8Array>|undefined;
+  const abort=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(new WorkspaceApiError(503)),{once:true}));
+  const wait=<V,>(value:Promise<V>)=>Promise.race([value,abort]);
+  try {
+    const base=import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/,'')||'http://127.0.0.1:8000';
+    if(!permittedWorkspaceApi(base,import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED==='true',window.location.href))throw new WorkspaceApiError(503);
+    const encoded=body===undefined?undefined:JSON.stringify(body);
+    if(encoded&&new TextEncoder().encode(encoded).length>4096)throw new WorkspaceApiError(422);
+    const headers=await wait(workspaceAuthHeaders(identity,base));headers.set('X-Cosmas-Private-Draft','1');
+    assertCurrentDesktopSession(identity);
+    const response=await wait(workspaceFetch(identity,base+path,{method:body===undefined?'GET':'POST',headers,
+      body:encoded,signal:controller.signal,cache:'no-store',credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'}));
+    assertCurrentDesktopSession(identity);
+    if(response.headers.get('content-type')?.split(';',1)[0].trim()!=='application/json'||
+      !response.headers.get('cache-control')?.split(',').some(v=>v.trim()==='no-store'))throw new WorkspaceApiError(503);
+    reader=response.body?.getReader();if(!reader)throw new WorkspaceApiError(503);
+    const chunks:Uint8Array[]=[];let size=0;
+    while(true){const part=await wait(reader.read());if(part.done)break;size+=part.value.length;
+      if(size>(response.ok?(body===undefined?65536:12000000):2048))throw new WorkspaceApiError(503);chunks.push(part.value);}
+    const bytes=new Uint8Array(size);let offset=0;for(const part of chunks){bytes.set(part,offset);offset+=part.length;}
+    const value:unknown=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+    assertCurrentDesktopSession(identity);
+    if(!response.ok){const codes=['workspace_already_exists','workspace_already_linked','workspace_appointment_required','idempotency_conflict','workspace_revision_conflict','private_draft_limit','encounter_unavailable'];
+      throw new WorkspaceApiError(response.status,teamClosed(value,'detail')&&typeof value.detail==='string'&&codes.includes(value.detail)?value.detail:undefined);}
+    if(!validate(value))throw new WorkspaceApiError(503);return value;
+  }catch(error){if(error instanceof WorkspaceApiError)throw error;throw new WorkspaceApiError(503);}
+  finally{clearTimeout(timer);try{void reader?.cancel().catch(()=>{});}catch{/* Cancellation does not change a saved outcome. */}controller.abort();}
+}
+
+function privateResolution(value:unknown):value is PrivateDraftResolution {
+  return teamClosed(value,'contract_version,outcome,workspace')&&value.contract_version===1&&
+    (value.outcome==='not_found'?value.workspace===null:value.outcome==='saved'&&validPrivateWorkspace(value.workspace));
+}
+function privateLinkResolution(value:unknown):value is PrivateDraftLinkResolution {
+  return teamClosed(value,'contract_version,outcome,workspace,link_receipt_id')&&value.contract_version===1&&
+    (value.outcome==='not_found'?value.workspace===null&&value.link_receipt_id===null:
+      value.outcome==='saved'&&validPrivateWorkspace(value.workspace)&&value.workspace.private_draft?.state==='linked'&&
+      value.link_receipt_id===value.workspace.private_draft.link_receipt_id);
+}
 export type AppendInput = {
   expected_revision: number; idempotency_key: string;
   kind: "scratchpad" | "conversation" | "evidence"; content: string; source_label?: string;
@@ -310,6 +372,38 @@ function legacyPracticeWork(value: PracticeWorkEntry): PracticeWorkItem {
 }
 
 export const workspaceApi = {
+  privateDrafts: (identity:AuthenticatedWorkspaceIdentity)=>privateDraftRequest<PrivateDraftCatalog>(identity,'/workspaces/private-drafts',undefined,
+    (v):v is PrivateDraftCatalog=>teamClosed(v,'contract_version,drafts,has_more')&&v.contract_version===1&&typeof v.has_more==='boolean'&&Array.isArray(v.drafts)&&v.drafts.length<=50&&
+      new Set(v.drafts.map(row=>row.workspace_id)).size===v.drafts.length&&v.drafts.every(row=>teamClosed(row,'workspace_id,title,revision,created_at,link_state,appointment_id')&&
+        teamUuid(row.workspace_id)&&teamText(row.title,160,1)&&typeof row.revision==='number'&&Number.isSafeInteger(row.revision)&&row.revision>=1&&typeof row.created_at==='string'&&Number.isFinite(Date.parse(row.created_at))&&
+        (row.link_state==='unlinked'?row.appointment_id===null:row.link_state==='linked'&&teamUuid(row.appointment_id)))),
+  async createPrivateDraft(identity:AuthenticatedWorkspaceIdentity,body:PrivateDraftCreateInput) {
+    if(!validPrivateDraftCreate(body))throw new WorkspaceApiError(422);
+    const team=await requestTeam(identity);
+    const workspace=await privateDraftRequest<Workspace>(identity,'/workspaces/private-drafts',body,(v):v is Workspace=>validPrivateWorkspace(v)&&v.private_draft?.title===body.title);
+    return {identity,workspace,team};
+  },
+  resolvePrivateDraft: (identity:AuthenticatedWorkspaceIdentity,body:PrivateDraftCreateInput)=>{
+    if(!validPrivateDraftCreate(body))throw new WorkspaceApiError(422);
+    return privateDraftRequest(identity,'/workspaces/private-drafts/resolve',body,(v):v is PrivateDraftResolution=>privateResolution(v)&&(v.workspace===null||v.workspace.private_draft?.title===body.title));
+  },
+  async openPrivateDraft(identity:AuthenticatedWorkspaceIdentity,workspaceId:string) {
+    if(!teamUuid(workspaceId))throw new WorkspaceApiError(422);
+    const team=await requestTeam(identity),workspace=await modelWorkApi.readWorkspace(identity,workspaceId);
+    if(!validPrivateWorkspace(workspace,workspaceId))throw new WorkspaceApiError(503);
+    return {identity,workspace,team};
+  },
+  linkAppointment: (identity:AuthenticatedWorkspaceIdentity,workspaceId:string,body:PrivateDraftLinkInput)=>{
+    if(!teamUuid(workspaceId)||!validPrivateDraftLink(body))throw new WorkspaceApiError(422);
+    return privateDraftRequest<{entry_revision:number;link_receipt_id:string;workspace:Workspace}>(identity,`/workspaces/${workspaceId}/appointment-link`,body,
+      (v):v is {entry_revision:number;link_receipt_id:string;workspace:Workspace}=>teamClosed(v,'entry_revision,link_receipt_id,workspace')&&validPrivateWorkspace(v.workspace,workspaceId)&&
+        v.workspace.appointment_id===body.appointment_id&&v.workspace.private_draft?.link_receipt_id===v.link_receipt_id&&v.entry_revision===v.workspace.revision);
+  },
+  resolveAppointmentLink: (identity:AuthenticatedWorkspaceIdentity,workspaceId:string,body:PrivateDraftLinkInput)=>{
+    if(!teamUuid(workspaceId)||!validPrivateDraftLink(body))throw new WorkspaceApiError(422);
+    return privateDraftRequest(identity,`/workspaces/${workspaceId}/appointment-link/resolve`,body,
+      (v):v is PrivateDraftLinkResolution=>privateLinkResolution(v)&&(v.workspace===null||v.workspace.id===workspaceId&&v.workspace.appointment_id===body.appointment_id));
+  },
   practiceWork: (identity: WorkspaceIdentity, cursor?: string) =>
     readVendorPracticeCatalog(identity, cursor, value => validatePracticeWorkPage(value, identity)),
   practiceWorkItem: (identity: WorkspaceIdentity, id: string, signal?:AbortSignal) =>

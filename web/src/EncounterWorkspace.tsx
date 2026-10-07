@@ -11,6 +11,8 @@ import {subscribeNativeWorkspaceForeground} from './native-workspace-foreground'
 import {validActivityContext,type AiActivityContext,type AiActivitySelection} from "./model-activity-contract";
 import { SettingsHub } from "./SettingsHub";
 import { WelcomeActions } from './WelcomeActions';
+import {PracticeHome} from './PracticeHome';
+import {PrivateDraftLinkPanel} from './PrivateDraftLinkPanel';
 import {ChiefStartActions,InitialTeamAction} from './ChiefStartActions';
 import {coreConnectionApi} from './core-connection-api';
 import type {CoreConnectionCommand} from './core-connection-contract';
@@ -111,6 +113,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [setupProjection, setSetupProjection] = useState<SetupProjection | null>(null);
   const [setupEpoch, setSetupEpoch] = useState(0);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [practicePage,setPracticePage]=useState<"home"|"visits"|"notebook">(authenticated?"home":"visits");
+  const [homeBusy,setHomeBusy]=useState(false);
+  const [privateLinkBusy,setPrivateLinkBusy]=useState(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
   const [faxSourceOffer,setFaxSourceOffer]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null>(null);
@@ -135,7 +140,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
   const [agentResearchBusy,setAgentResearchBusy]=useState(false);
   const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
-  const connectionNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy;
+  const connectionNavigationLocked = privateLinkBusy || homeBusy || connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
@@ -273,7 +278,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   useEffect(()=>{let cancelled=false;if(pending?.type==='ask')void modelRequestHash(pending.body).then(hash=>{if(!cancelled)setModelHashes({[pending.body.idempotency_key]:hash});}).catch(()=>{if(!cancelled)setModelHashes({});});
     else setModelHashes({});return()=>{cancelled=true;};},[pending]);
   useEffect(() => {
-    if (!practiceOpen || !authenticated || team) return;
+    if (!authenticated || team) return;
     let cancelled = false;
     const current = generation.current;
     void workspaceApi.team(authenticated).then(value => {
@@ -283,7 +288,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       }
     }).catch(cause => { if (!cancelled && current === generation.current) failure(cause); });
     return () => { cancelled = true; };
-  }, [practiceOpen, authenticated, team]);
+  }, [authenticated, team]);
   useLayoutEffect(()=>{
     const element=materialRef.current;if(!element||!workspace)return;
     const key=`${workspace.id}:${panel}`;
@@ -431,7 +436,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         if (draft.pending) setPending({ type: "team", body: draft.pending });
         else if (latestTeam.revision !== draft.baseRevision) setConflict(true);
       } else if (latest && workspace?.id === draft.workspaceId) {
-        setWorkspace(latest); setNote(draft.note); setThought(draft.thought); setEvidence(draft.evidence); setSource(draft.source);
+        setPracticePage("notebook");setWorkspace(latest); setNote(draft.note); setThought(draft.thought); setEvidence(draft.evidence); setSource(draft.source);
         const material = isFollowUpRecovery(draft) ? "Work" : draft.pending && ["note","review","coreNoteLink"].includes(draft.pending.type) ? "Review" : "Notebook";
         setSettingsOpen(false); setPracticeOpen(false); setPanel(material); setMobilePanel(material);
         if (draft.pending) setPending(draft.pending);
@@ -480,7 +485,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
-    setSchedulingPatientBusy(false);setAgentResearchBusy(false);
+    setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPrivateLinkBusy(false);setPracticePage(authenticated?"home":"visits");
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
@@ -505,12 +510,29 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       if (cause instanceof WorkspaceApiError && [400, 422].includes(cause.status)) setPending(null);
     }
   }
+  function goHome(){
+    if(connectionNavigationLocked||busy||pending||captureNavigationLocked||captureDraftLocked)return;
+    setSettingsOpen(false);setPracticeOpen(false);setPracticePage('home');
+  }
+  async function openPrivateNotebook(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam}){
+    if(result.identity!==authenticated)throw new WorkspaceApiError(403);
+    const preserveTeamDraft=!!team&&!!teamDraft&&JSON.stringify(teamDraft)!==JSON.stringify(team.configuration);
+    const current=++generation.current;checkRecoveryOwner(result.team);
+    setIdentity(result.identity);setWorkspace(result.workspace);setTeam(result.team);if(!preserveTeamDraft)setTeamDraft(structuredClone(result.team.configuration));
+    setNote(result.workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'');
+    setThought('');setEvidence('');setSource('');setPreviousModelRequest(null);setModelObservation(null);setReplacementDraft(null);setModelHashes({});
+    setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(0);setRecordingSourceRequest(0);
+    setSelected(botAddress(result.team.configuration.bots.find(bot=>bot.role==='chief'&&!bot.retired)??result.team.configuration.bots[0]));
+    setPanel('Notebook');setMobilePanel('Notebook');setStage('Before');setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');
+    chiefNotebookFocus.current={workspace:result.workspace.id,generation:current};
+    await recoverAfterRead(result.team,result.workspace,current);
+  }
   async function loadEncounters() {
     if (!authenticated || pending || busy) return;
     const current = ++generation.current; setBusy(true); setError("");
     try {
       const result = await workspaceApi.catalog(authenticated);
-      if (current === generation.current) setEncounters(result);
+      if (current === generation.current) {setEncounters(result);setPracticePage("visits");setSettingsOpen(false);setPracticeOpen(false);}
     } catch (cause) { if (current === generation.current) failure(cause); }
     finally { if (current === generation.current) setBusy(false); }
   }
@@ -545,7 +567,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         if(coworker)setSelected(botAddress(coworker));
         setPracticeOpen(false);setMobilePanel('Conversation');
       }
-      setIdentity(result.identity); setWorkspace(result.workspace); setTeam(result.team);
+      setIdentity(result.identity); setWorkspace(result.workspace); setTeam(result.team);setPracticePage("notebook");
       setPreviousModelRequest(null);
       setThought('');setEvidence('');setSource('');setModelObservation(null);setReplacementDraft(null);setModelHashes({});
       setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(recordVisit ? 1 : 0);setRecordingSourceRequest(useRecording?1:0);setEntryIntent(null);setStage('Before');setPanel('Notebook');
@@ -890,7 +912,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   function openMessagingWork(){
     if(connectionNavigationLocked||locked||captureNavigationLocked||captureDraftLocked||!authenticated)return;
     setPracticeOpen(false);setSettingsOpen(false);setResearchEntry(false);
-    if(workspace){setPanel('Work');setMobilePanel('Work');setFocusFaxWork(true);}
+    if(visitLinked&&workspace){setPracticePage('notebook');setPanel('Work');setMobilePanel('Work');setFocusFaxWork(true);}
     else {setEntryIntent('fax');void loadEncounters();}
   }
   useEffect(()=>{
@@ -900,19 +922,20 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[focusFaxWork,workspace,settingsOpen,practiceOpen,panel]);
   const recoveryBlocked = !!authenticated && (!validRecoveryScope(team?.recovery_scope) ||
     !journal.current || journal.current.serverScope !== team?.recovery_scope || recoveryState === "failed");
-  const baseLocked = busy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
+  const baseLocked = busy || homeBusy || privateLinkBusy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
   const actionLocked = baseLocked || scribeSourceBusy;
   const lockedWithoutAgentResearch = actionLocked || handoffReviewPending || schedulingPatientBusy;
   const locked = lockedWithoutAgentResearch || agentResearchBusy;
   const reviewWorkspace = workspace ? withObservedCaptureDraft(workspace, observedCaptureDraft) : null;
   const bot = team?.configuration.bots.find(b => botAddress(b) === selected);
   const template = team?.members.find(b => botAddress(b) === selected);
-  const prepAvailable=!!(bot&&supportsSkill(bot,"encounter_prep")&&ENCOUNTER_PREP_BUILD&&authenticated&&team?.capture?.prep_enabled&&
+  const visitLinked=!!workspace?.appointment_id;
+  const prepAvailable=!!(visitLinked&&bot&&supportsSkill(bot,"encounter_prep")&&ENCOUNTER_PREP_BUILD&&authenticated&&team?.capture?.prep_enabled&&
     template?.capabilities.some(capability=>capability.key==="core.session_prep.read"&&capability.state==="enabled"&&capability.contract==="core.session-prep.brief.v1"));
   const prepScope=useMemo(()=>Symbol(),[workspace?.id,authenticated,selected,team?.revision,bot?.enabled,bot?.include_evidence,prepAvailable,prepEpoch]);
   const selectedPrep=prepAvailable&&prepSelection?.scope===prepScope?prepSelection.selection:null;
   useEffect(()=>{if(selectedPrep)questionRef.current?.focus();},[selectedPrep]);
-  const visitPrepReader = bot?.role === "visit_prep" && ENCOUNTER_PREP_BUILD && !!authenticated && !!team?.capture?.prep_enabled;
+  const visitPrepReader = visitLinked && bot?.role === "visit_prep" && ENCOUNTER_PREP_BUILD && !!authenticated && !!team?.capture?.prep_enabled;
   const scribe = bot?.role === "scribe" ? bot : team?.configuration.bots.find(b => b.role === "scribe" && !b.instance_id);
   useEffect(() => {
     // Explicit fax navigation wins when settings closes. Completing that focus
@@ -1065,7 +1088,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         if(savedBefore!==savedAfter && activityLive.current.note!==savedBefore)setConflict(true);
         else if(activityLive.current.note===savedBefore)setNote(savedAfter);
       }
-      setWorkspace(latest);setSelected(address);if(entry.reply?.role==='research'||entry.model_request?.bot.role==='research')setSavedResearchChat(true);setSelectedResult(entry.id);setMobilePanel('Conversation');setSettingsOpen(false);setPracticeOpen(false);setError('');
+      setWorkspace(latest);setSelected(address);if(entry.reply?.role==='research'||entry.model_request?.bot.role==='research')setSavedResearchChat(true);setSelectedResult(entry.id);setMobilePanel('Conversation');setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');setError('');
     }catch(cause){
       if(sameAccount() && cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status))failure(cause);
       else if(sameAccount() && cause instanceof DraftStoreError)setRecoveryState('failed');
@@ -1249,13 +1272,20 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     <aside className="team-sidebar">
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span></div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
-      <button className={`team-nav-item ${!settingsOpen ? "active" : ""}`} disabled={connectionNavigationLocked} onClick={closeSettings}><span aria-hidden="true">▤</span> Encounter</button>
+      <nav className="practice-navigation" aria-label="Workspace navigation">
+        <button className={`team-nav-item ${practicePage==='home'&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={practicePage==='home'&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={connectionNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={goHome}>Home</button>
+        <button className={`team-nav-item ${practicePage==='visits'&&!settingsOpen&&!practiceOpen?'active':''}`} disabled={connectionNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>void (authenticated?loadEncounters():open())}>Visits and notes</button>
+        {workspace&&<button className={`team-nav-item ${practicePage==='notebook'&&!settingsOpen&&!practiceOpen?'active':''}`} disabled={connectionNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>{setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');}}>Current notebook</button>}
+        <button className={`team-nav-item ${practiceOpen?'active':''}`} disabled={connectionNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>{setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);}}>Practice work</button>
+        {authenticated&&CONNECTION_ONBOARDING_BUILD&&<button className="team-nav-item" disabled={connectionNavigationLocked||busy||!!pending} onClick={()=>void openSettings('connections')}>Connections</button>}
+        <button className="team-nav-item" disabled={connectionNavigationLocked||busy||!!pending} onClick={()=>void openSettings()}>Settings</button>
+      </nav>
       <div className="team-roster-heading"><p className="team-sidebar-label">PROVIDER TEAM</p>
         {team && <button className="team-icon-button" disabled={connectionNavigationLocked || busy || !!pending && pending.type !== "team"} onClick={() => void openSettings()} aria-label="Configure Provider Team">⚙</button>}</div>
       <nav aria-label="Provider Team" className="team-roster">{team?.members.map(member => {
         const address = botAddress(member);
         const config = team.configuration.bots.find(b => botAddress(b) === address)!;
-        return <button key={address} disabled={connectionNavigationLocked} aria-pressed={selected === address} onClick={() => { setPracticeOpen(false); setSelectedResult(null); setSelected(address); setSettingsOpen(false); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); }}>
+        return <button key={address} disabled={connectionNavigationLocked||!workspace} aria-pressed={selected === address} onClick={() => { setPracticeOpen(false); setSelectedResult(null); setSelected(address); setSettingsOpen(false);setPracticePage("notebook"); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); }}>
           <BotAvatar role={member.role} /><span><strong>{config.name}</strong>
             <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{config.retired ? "Retired · history kept" : !team.revision ? "Set up your team" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : "On"}</small></span>
         </button>;
@@ -1263,8 +1293,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>Invented data · private to you</small></div>
     </aside>
     <div className="team-main">
-      <header className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Team settings" : "Encounter"}</span>
-        <div className="row"><button className="team-subtle" onClick={() => void exitWorkspace(false)}>{onExit ? "Open execution proof" : "Close notebook"}</button>
+      <header className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Settings" : practicePage==="home"?"Home":practicePage==="visits"?"Visits and notes":"Notebook"}</span>
+        <div className="row">{(workspace||onExit||settingsOpen||practiceOpen)&&<button className="team-subtle" onClick={() => void exitWorkspace(false)}>{onExit ? "Open execution proof" : "Close notebook"}</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked || busy || !!pending && pending.type !== "team"} onClick={() => void openSettings()}>Team settings</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked || !practiceOpen && (busy || !!pending || captureDraftLocked || captureNavigationLocked)}
           onClick={() => { setPracticeOpen(!practiceOpen); setPracticeOpened(true); }}>{practiceOpen ? "Back to notebook" : "Practice work"}</button>}
@@ -1330,8 +1360,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub key={generation.current} open={settingsOpen} navigationLocked={connectionNavigationLocked}
         onOpenMessagingWork={authenticated?openMessagingWork:undefined} messagingWorkLabel={workspace?'Open fax work for this visit':'Choose a visit for fax work'}
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
-        onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&workspace?receiveFaxDocument:undefined}
-        onReviewProviderFaxDocument={FAX_INBOUND_SOURCE_BUILD&&workspace?receiveProviderFaxDocument:undefined}
+        onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveFaxDocument:undefined}
+        onReviewProviderFaxDocument={FAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveProviderFaxDocument:undefined}
         initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
         google={GOOGLE_CONNECTION_BUILD&&authenticated?<AccountRecoveryContext.Provider value={accountAccess}>
@@ -1341,7 +1371,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             calendarWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.googleCalendar||connectionLocks.googleMessages}
             onOpenCalendarWork={GOOGLE_CALENDAR_BUILD?()=>{setGoogleMessageOpen(false);setGoogleCalendarOpen(true);}:undefined}
             messageWork={GOOGLE_MESSAGE_BUILD&&googleMessageOpen?controls=><GoogleMessageMount identity={authenticated}
-              workspace={workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
+              workspace={visitLinked&&workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
               currentSources={workspace?.entries.filter(entry=>entry.kind==='google_message'&&!!entry.google_source_state)
                 .map(entry=>({entry_id:entry.id,state:entry.google_source_state!}))}
               locked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleCalendar}
@@ -1351,7 +1381,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareGoogleChief(source)}
               onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current='message';setSettingsOpen(false);void loadEncounters();}}/>:undefined}
             calendarWork={GOOGLE_CALENDAR_BUILD&&googleCalendarOpen?controls=><GoogleCalendarMount identity={authenticated}
-              workspace={workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
+              workspace={visitLinked&&workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
               currentSources={workspace?.entries.filter(entry=>entry.kind==='google_calendar'&&!!entry.calendar_source_state).map(entry=>({entry_id:entry.id,state:entry.calendar_source_state!}))}
               locked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleMessages}
               recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleMessages}
@@ -1389,7 +1419,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </fieldset>
         </AccountRecoveryContext.Provider> : undefined}
       /></AccountRecoveryContext.Provider>}
-      {!workspace ? <section hidden={settingsOpen} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
+      {authenticated&&<div hidden={settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
+        locked={busy||!!pending||conflict||!!recoveryOffers.length||recoveryState==="failed"||recoveryBlocked||captureNavigationLocked||captureDraftLocked||!!workspace&&(note!==latestNote||!!thought||!!evidence||!!source)} onBusyChange={setHomeBusy} onAccessLost={failure}
+        onUseTeam={()=>{if(initialTeamUnchanged)saveTeam();else void openSettings();}} onSettings={()=>void openSettings()} onVisits={()=>void loadEncounters()}
+        onConnections={()=>void openSettings('connections')} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}}
+        onOpened={openPrivateNotebook}/></div>}
+      <section hidden={settingsOpen||practicePage!=='visits'} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
         <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="fax" ? "Choose a visit for fax work" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='fax' ? "Keep the fax document, recipient and delivery status with the right visit." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
@@ -1412,31 +1447,35 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </article>) : <p>No confirmed encounters are available for this account. Connect your practice to find its appointments.</p>}
         </section>}
         <p className="team-fine">Notes and private drafts do not need email or calendar setup.</p>
-      </section> : <>
-        <section hidden={settingsOpen} className="team-encounter-heading"><div><p className="team-kicker">ENCOUNTER NOTEBOOK</p><h1>{workspace.label}</h1>
-          <p>Private encounter notebook</p>
+      </section>
+      {workspace&&<div hidden={practicePage!=="notebook"}>
+        <section hidden={settingsOpen} className="team-encounter-heading"><div><p className="team-kicker">{workspace.private_draft?.state==='unlinked'?'PRIVATE NOTE':'ENCOUNTER NOTEBOOK'}</p><h1>{workspace.label}</h1>
+          <p>{workspace.private_draft?.state==='unlinked'?'Private notebook · not linked to a visit':'Private encounter notebook'}</p>
           <button className="team-subtle" disabled={busy || !!pending || handoffReviewPending} onClick={() => void refresh()}>Refresh encounter</button>
-          {import.meta.env.VITE_COSMANEURA_RECORD_ENABLED === "true" && authenticated && team?.capture?.enabled &&
+          {import.meta.env.VITE_COSMANEURA_RECORD_ENABLED === "true" && authenticated && visitLinked && team?.capture?.enabled &&
             <CoreRecordLink key={workspace.id} identity={authenticated} workspaceId={workspace.id}
               locked={busy || !!pending || captureNavigationLocked || recoveryBlocked} onDenied={failure} />}</div>
           {bot?.role !== "scribe" && <nav aria-label="Encounter stage" className="team-stages">{["Before", "During", "After"].map(value => <button key={value} aria-pressed={stage === value} onClick={() => { setStage(value); if (value === "After") { setPanel("Review"); setMobilePanel("Review"); } }}>{value}</button>)}</nav>}
         </section>
+        {authenticated&&workspace.private_draft&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null}
+          locked={busy||homeBusy||!!pending||conflict||!!recoveryOffers.length||recoveryBlocked||captureNavigationLocked||captureDraftLocked||note!==latestNote} onBusyChange={setPrivateLinkBusy}
+          onAccessLost={failure} onSaved={latest=>{setWorkspace(latest);setMessage('Private draft linked to the confirmed visit. Your saved history is retained.');}}/>}
         {team?.revision===0&&<div hidden={settingsOpen} className="team-initial-action"><InitialTeamAction
           names={team.configuration.bots.filter(item=>item.enabled&&!item.retired).map(item=>item.name)}
           locked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} unchanged={initialTeamUnchanged}
           onUse={()=>{if(initialTeamUnchanged&&!locked&&!connectionNavigationLocked&&!captureNavigationLocked&&!captureDraftLocked)saveTeam();}}
           onSettings={()=>void openSettings()}/></div>}
-        {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled &&
+        {CAPTURE_WORKSPACE_BUILD && authenticated && visitLinked && team?.capture?.enabled &&
           <CapturePanel key={workspace.id} workspaceId={workspace.id} identity={authenticated} encounterLabel={workspace.label}
             notesEnabled={CAPTURE_NOTES_BUILD && team.capture.notes_enabled === true} onDraftLock={setCaptureDraftLocked} onNavigationLock={setCaptureNavigationLocked}
             correctionsEnabled={CAPTURE_CORRECTIONS_BUILD && team.capture.corrections_enabled === true}
             scratchpad={workspace.entries.filter(e => e.kind === "scratchpad").at(-1)} notebookDirty={note !== latestNote}
             taskBot={scribe ? {selection: {address: botAddress(scribe), team_revision: team.revision},
               name: scribe.name, enabled: scribe.enabled && team.revision > 0, includeNotebook: scribe.include_notebook} : undefined}
-            openRequest={locked || settingsOpen || practiceOpen ? 0 : captureRequest} preferencesScope={team.recovery_scope}
+            openRequest={locked || settingsOpen || practiceOpen || practicePage!=="notebook" ? 0 : captureRequest} preferencesScope={team.recovery_scope}
             onNotebook={() => { setPanel("Notebook"); setMobilePanel("Notebook"); }}
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} reviewLocked={locked} />}
-        {CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled && !settingsOpen && !practiceOpen &&
+        {CAPTURE_WORKSPACE_BUILD && authenticated && visitLinked && team?.capture?.enabled && !settingsOpen && !practiceOpen &&
           <ExistingScribeSourcePanel key={`scribe-source:${workspace.id}`} workspace={workspace} identity={authenticated}
             openRequest={settingsOpen||practiceOpen?0:recordingSourceRequest}
             locked={baseLocked || captureNavigationLocked || captureDraftLocked || note !== latestNote}
@@ -1446,7 +1485,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
                 setNote(latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'');
               setPanel('Sources');setMobilePanel('Sources');
             }}/>}
-        {bot?.role === "scribe" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && !settingsOpen &&
+        {visitLinked && bot?.role === "scribe" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && !settingsOpen &&
           <section className="capture-panel" aria-label="Scribe recording"><header>
             <div className="capture-heading"><h2><span aria-hidden="true">🎙️</span> {bot.name} recording</h2>
               <p className="capture-description">Record a visit here and review Scribe’s draft afterward.</p>
@@ -1486,24 +1525,24 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               onBriefViewed={at=>setBriefViewed(at?{workspace:workspace.id,owner:authenticated,teamRevision:team.revision,at}:null)}
               selected={!!selectedPrep} onSelect={team.llm.enabled&&!bot.blocked_capabilities?.includes("model_answer")?
                 selection=>setPrepSelection(selection?{scope:prepScope,selection}:null):undefined} />}
-          {bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
+          {visitLinked && bot && supportsSkill(bot, "encounter_prep") && ENCOUNTER_PREP_BUILD && authenticated && team?.capture?.prep_enabled &&
             <details className={prepAvailable?"team-additional-prep":undefined} open={prepAvailable?undefined:true}>
             <summary hidden={!prepAvailable}>Other saved visit context</summary><EncounterPrepPanel workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}} name={bot.name}
               enabled={bot.enabled && bot.include_evidence && team.revision > 0} locked={locked}
               entryRevision={workspace.revision} workEnabled={team.capture.prep_work_enabled===true} onAccessLost={failure}
               onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}} /></details>}
-          {bot && supportsSkill(bot,"calendar_availability") && SCHEDULING_PATIENT_BUILD && authenticated && team &&
+          {visitLinked && bot && supportsSkill(bot,"calendar_availability") && SCHEDULING_PATIENT_BUILD && authenticated && team &&
             <SchedulingPatientPanel key={`${workspace.id}:${connectionGeneration}`} workspace={workspace} identity={authenticated} observationStamp={schedulingObservation}
               enabled={!!team.scheduling?.enabled && bot.enabled && team.revision>0}
               locked={actionLocked||handoffReviewPending||connectionEditorsLocked||captureNavigationLocked||captureDraftLocked}
               recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||handoffReviewPending||connectionEditorsLocked||captureNavigationLocked||captureDraftLocked}
               onBusyChange={reportSchedulingPatientBusy} onAccessLost={failure}/>}
-          {bot && supportsSkill(bot, "calendar_availability") && SCHEDULING_BUILD && authenticated && team && (team.scheduling?.enabled || APPOINTMENTS_BUILD) &&
+          {visitLinked && bot && supportsSkill(bot, "calendar_availability") && SCHEDULING_BUILD && authenticated && team && (team.scheduling?.enabled || APPOINTMENTS_BUILD) &&
             <SchedulingPanel workspaceId={workspace.id} identity={authenticated}
               bot={{address: botAddress(bot), team_revision: team.revision}} name={bot.name}
               enabled={!!team.scheduling?.enabled && bot.enabled && bot.include_evidence && team.revision > 0} locked={locked} onAccessLost={failure} />}
-          {bot&&supportsSkill(bot,"membership_review")&&authenticated&&team&&<MembershipAnalysisPanel
+          {visitLinked&&bot&&supportsSkill(bot,"membership_review")&&authenticated&&team&&<MembershipAnalysisPanel
             key={`${workspace.id}:${workspace.revision}:${team.revision}:${selected}`} identity={authenticated} workspaceId={workspace.id} workspaceRevision={workspace.revision}
             teamRevision={team.revision} botAddress={botAddress(bot)} enabled={bot.enabled&&!bot.retired&&team.revision>0}
             modelEnabled={team.llm.enabled&&!bot.blocked_capabilities?.includes('model_answer')} locked={locked||captureNavigationLocked||captureDraftLocked}
@@ -1585,12 +1624,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               onReview={()=>{setPanel('Review');setMobilePanel('Review');}} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}} onAccessLost={failure}/>}
             <div hidden={panel !== "Review"}><NoteReview key={workspace.id} active={panel === "Review"} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
               onSave={operation => void save(operation)} onSources={() => { setPanel("Sources"); setMobilePanel("Sources"); }} /></div>
-            <div hidden={panel !== "Work"}><FollowUpWork key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
-              onSave={operation => void save(operation)} onReview={() => {setPanel("Review");setMobilePanel("Review");}} /></div>
+            {visitLinked&&<div hidden={panel !== "Work"}><FollowUpWork key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
+              onSave={operation => void save(operation)} onReview={() => {setPanel("Review");setMobilePanel("Review");}} /></div>}
             {panel === "Notebook" && <>
               <div className="team-task-actions"><div className="team-notebook-title"><h2>Jotted notes</h2><span className="team-pill">{note === latestNote ? "Saved" : "Not saved to notebook"}</span></div>
                 <button className="team-primary" disabled={locked || !note.trim()} onClick={()=>append("scratchpad",note)}>Save notebook revision</button></div>
-              {stage === "During" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && <div className="team-capture"><span>Recording awaits Scribe connection</span><button disabled>Start recording</button><button disabled>Voice instruction</button></div>}
+              {visitLinked && stage === "During" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && <div className="team-capture"><span>Recording awaits Scribe connection</span><button disabled>Start recording</button><button disabled>Voice instruction</button></div>}
               <p className="team-fine">Your working notebook. Shape the visit note in Review when you are ready.</p>
               <form onSubmit={event => { event.preventDefault(); append("scratchpad", note); }}><label className="team-sr-only" htmlFor="team-notebook">Jotted notes</label>
                 <textarea ref={notebookRef} id="team-notebook" className="workspace-notepad team-notepad" rows={14} maxLength={20000} value={note} disabled={locked} onChange={e => setNote(e.target.value)} placeholder="Type or paste intake details, visit notes, or questions…" />
@@ -1608,16 +1647,16 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               <h2>Linked work</h2><p className="team-fine">Existing work and approvals stay together. Private notes are not copied.</p>
               {workspace.entries.filter(e => e.kind === "work_link").map(e => <article className="team-work-card" key={e.id}>{e.ticket ? <><span className="team-kicker">EXISTING WORK</span><h3>{e.ticket.lane.replaceAll("_", " ")}</h3><span className="team-pill">{e.ticket.state.replaceAll("_", " ")}</span></> : "Linked work is no longer available in this encounter."}</article>)}
               {workspace.work_candidates.filter(t => !workspace.follow_ups?.some(f => f.ticket_id === t.id) && !workspace.entries.some(e => e.ticket?.id === t.id)).map(t => <button className="team-link-work" key={t.id} disabled={locked} onClick={() => void save({ type: "link", body: { expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(), ticket_id: t.id } })}>Link existing {t.lane.replaceAll("_", " ")} work</button>)}
-              {authenticated && <div ref={faxWorkRef} tabIndex={-1} aria-label="Messaging and fax work"><VendorWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked}
+              {authenticated && visitLinked && <div ref={faxWorkRef} tabIndex={-1} aria-label="Messaging and fax work"><VendorWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked}
                 followUpBots={team?.members.filter(bot=>bot.role==='follow_up'&&bot.agent_id&&team.configuration.bots.some(settings=>settings.role==='follow_up'&&(settings.instance_id??null)===(bot.instance_id??null)&&settings.enabled&&!settings.retired&&!settings.blocked_capabilities?.includes('model_answer'))).map(bot=>({agent_id:bot.agent_id!,name:bot.name}))}
                 onChanged={()=>{setConflict(true);void refresh();}} /></div>}
-              {authenticated && FINANCE_WORK_BUILD && <FinanceWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked} />}
-              {authenticated && PORTAL_WORK_BUILD && <PortalWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked} />}
-              {authenticated && MEMBERSHIP_WORK_BUILD && <MembershipWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked} />}
+              {authenticated && visitLinked && FINANCE_WORK_BUILD && <FinanceWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked} />}
+              {authenticated && visitLinked && PORTAL_WORK_BUILD && <PortalWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked} />}
+              {authenticated && visitLinked && MEMBERSHIP_WORK_BUILD && <MembershipWorkspaceMount identity={authenticated} workspaceId={workspace.id} locked={locked} />}
               {!authenticated && <p className="team-fine">Open a signed workspace to prepare and review messages and faxes.</p>}</>}
           </div>
         </aside></div></div>
-      </>}
+      </div>}
       </div>
     </div>
   </main></EditorRecoveryContext.Provider>;

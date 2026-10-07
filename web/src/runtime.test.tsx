@@ -1,5 +1,6 @@
 import { StrictMode, act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
+import {teamFixture} from "./team-setup-test-fixture";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const clerkHarness = vi.hoisted(() => ({
@@ -417,27 +418,27 @@ describe("beta runtime", () => {
     },
   );
 
-  it("opens the encounter chooser after sign-in and clears private labels on sign-out", async () => {
+  it("opens Home after sign-in, selects visits explicitly and clears private labels on sign-out", async () => {
     vi.stubEnv("VITE_API_BASE", "http://127.0.0.1:8018");
-    const fetchMock = vi.fn<typeof fetch>().mockResolvedValue(jsonResponse([
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async url=>jsonResponse(String(url).endsWith("/provider-team")?teamFixture():[
       { appointment_id: "invented-appointment", workspace_id: null, label: "Private invented label" },
     ]));
     vi.stubGlobal("fetch", fetchMock);
     clerkHarness.auth = { isLoaded: true, isSignedIn: true, orgId: "org_invented",
       userId: "user_invented", sessionId: "session_invented", getToken: vi.fn().mockResolvedValue("fresh-token") };
     await act(async () => root.render(workspaceApp()));
-    expect(fetchMock).not.toHaveBeenCalled();
-    const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Choose an encounter"));
+    expect(fetchMock.mock.calls.map(([url])=>url)).toEqual(["http://127.0.0.1:8018/provider-team"]);
+    const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Visits and notes"));
     await act(async () => choose!.click());
     expect(container.textContent).toContain("Private invented label");
-    expect(fetchMock.mock.calls[0][0]).toBe("http://127.0.0.1:8018/workspaces");
-    expect(requestHeaders(fetchMock, 0).get("Authorization")).toBe("Bearer fresh-token");
+    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8018/workspaces");
+    expect(requestHeaders(fetchMock, 1).get("Authorization")).toBe("Bearer fresh-token");
     clerkHarness.auth = { ...clerkHarness.auth, getToken: vi.fn().mockResolvedValue("refreshed-token") };
     await act(async () => root.render(workspaceApp()));
     expect(container.textContent).toContain("Private invented label");
-    const refresh = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Refresh encounters"));
+    const refresh = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Visits and notes"));
     await act(async () => refresh!.click());
-    expect(requestHeaders(fetchMock, 1).get("Authorization")).toBe("Bearer refreshed-token");
+    expect(requestHeaders(fetchMock, 2).get("Authorization")).toBe("Bearer refreshed-token");
     clerkHarness.auth = { ...clerkHarness.auth, isSignedIn: false };
     await act(async () => root.render(workspaceApp()));
     expect(container.textContent).not.toContain("Private invented label");
@@ -462,12 +463,13 @@ describe("beta runtime", () => {
     clerkHarness.auth = { isLoaded: true, isSignedIn: true, orgId: "org_invented",
       userId: "user_invented", sessionId: "session_invented", getToken };
     await act(async () => root.render(workspaceApp()));
-    const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Choose an encounter"));
+    const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Visits and notes"));
     await act(async () => choose!.click());
-    expect(getToken).toHaveBeenCalledTimes(1);
+    expect(getToken).toHaveBeenCalledTimes(2);
+    const resolveOldToken=resolveToken;
     clerkHarness.auth = { ...clerkHarness.auth, [field]: `${field === "orgId" ? "org" : field}_changed` };
     await act(async () => root.render(workspaceApp()));
-    await act(async () => resolveToken("obsolete-token"));
+    await act(async () => resolveOldToken("obsolete-token"));
     expect(fetchMock).not.toHaveBeenCalled();
     expect(container.textContent).toContain("Choose an encounter");
     expect(container.textContent).not.toContain("Workspace access is unavailable");

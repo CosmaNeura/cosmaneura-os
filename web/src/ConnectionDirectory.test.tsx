@@ -152,12 +152,12 @@ it('clears abandoned loading flags when entering fax setup interrupts another ac
   vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:true,messaging:true});
   await act(async()=>retry.click());expect(overview.textContent).toContain('available for preparing a fax draft');
 });
-it('uses Available only for enabled setup and Not checked when there is no account check',async()=>{
+it('keeps legacy setup unqualified when current action and account readiness were not checked',async()=>{
  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,payments:true});
  await mount(<p>Google</p>);
  const payments=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Payments'))!;
- expect(payments.querySelector('.connection-badge')?.textContent).toBe('Available');
- expect(payments.textContent).toContain('Its account and task results have not been checked');
+ expect(payments.querySelector('.connection-badge')?.textContent).toBe('Not checked');
+ expect(payments.textContent).toContain('Supported actions and installed accounts have not been checked');
  expect(payments.textContent).toContain('Next: Review accounts and permissions');
  expect(readConnectionSummary).not.toHaveBeenCalled();
  await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} google={<p>Google editor</p>} teamSummary="Team" teamDirty={false} onClose={()=>{}}/>));

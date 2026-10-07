@@ -2,6 +2,12 @@ import {act, useEffect, useState} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {SettingsHub} from './SettingsHub';
+import {readConnectionCatalog} from './connection-catalog-api';
+import {readConnectionSummary} from './connection-summary';
+import {readinessFixture} from './connection-readiness-fixture';
+import {WorkspaceApiError} from './workspace-api';
+vi.mock('./connection-catalog-api',async original=>({...await original<typeof import('./connection-catalog-api')>(),readConnectionCatalog:vi.fn()}));
+vi.mock('./connection-summary',async original=>({...await original<typeof import('./connection-summary')>(),readConnectionSummary:vi.fn()}));
 
 let container: HTMLDivElement, root: Root;
 beforeEach(() => { Object.assign(globalThis, {IS_REACT_ACT_ENVIRONMENT: true}); container = document.createElement('div'); document.body.append(container); root = createRoot(container); });
@@ -89,4 +95,49 @@ it('keeps recovery available while preventing navigation during an undurable edi
   expect(container.querySelector('[data-settings-screen="messaging"]')?.hasAttribute('hidden')).toBe(false);
   await click('Retry local save'); await click('All connections'); await click('Done');
   expect(close).toHaveBeenCalledOnce();
+});
+
+it('keeps user OAuth actionable and puts unsupported portals and uninstalled practice services outside onboarding setup',async()=>{
+ const catalog=readinessFixture();vi.mocked(readConnectionCatalog).mockResolvedValue(catalog);
+ vi.mocked(readConnectionSummary).mockResolvedValue({label:'Needs setup',reason:'Sign in to connect your account.',action:'Connect account',tone:'attention'});
+ const mounted=vi.fn();function Portal(){useEffect(()=>{mounted();},[]);return <button>Connect portal</button>;}
+ await act(async()=>root.render(<SettingsHub open initialScreen="connections" guidedConnections connectionIdentity={{mode:'clerk_jwt',getToken:async()=>null}}
+   team={<p>Team</p>} google={<button>Connect Google</button>} messaging={<button>Configure account</button>} portals={<Portal/>} payments={<button>Connect Stripe</button>}
+   teamSummary="5 coworkers" teamDirty={false} onClose={()=>{}}/>));
+ expect(container.querySelector('[aria-label="Coming soon"]')?.textContent).toContain('Patient portals');
+ expect(container.querySelector('[aria-label="Managed by your practice"]')?.textContent).toContain('Messaging & fax');
+ expect(visibleButtons().some(b=>b.textContent?.includes('Open portals')||b.textContent?.includes('Connect Stripe')||b.textContent?.includes('Configure account'))).toBe(false);
+ expect(mounted).not.toHaveBeenCalled();await click('Google email & calendar');
+ expect(visibleButtons().some(b=>b.textContent==='Connect Google')).toBe(true);
+ expect(container.textContent).toContain('Send email · Coming soon');
+});
+
+it('retains a visited recovery editor when a supported installation is removed without showing a new Connect action',async()=>{
+ const available=readinessFixture({portals:'practice_setup'});available.portals=true;available.readiness!.portals.supported=true;available.readiness!.portals.installed_account='installed';
+ vi.mocked(readConnectionCatalog).mockResolvedValue(available);const mounted=vi.fn();
+ function Portal(){useEffect(()=>{mounted();},[]);return <button>Resolve exact saved request</button>;}
+ await act(async()=>root.render(<SettingsHub open initialScreen="connections" guidedConnections connectionIdentity={{mode:'clerk_jwt',getToken:async()=>null}}
+   team={<p>Team</p>} portals={<Portal/>} teamSummary="5 coworkers" teamDirty={false} onClose={()=>{}}/>));
+ await click('Patient portals');await click('All connections');
+ vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture());await click('Refresh connections');
+ expect(visibleButtons().some(b=>b.textContent?.includes('Open portals'))).toBe(false);
+ await click('Review saved Patient portals work');expect(visibleButtons().some(b=>b.textContent==='Resolve exact saved request')).toBe(true);
+ expect(mounted).toHaveBeenCalledOnce();
+});
+it('can deliberately open private recovery on a fresh coming-soon service without treating it as connectable',async()=>{
+ vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture());const mounted=vi.fn();
+ function Portal(){useEffect(()=>{mounted();},[]);return <button>Resolve exact retained request</button>;}
+ await act(async()=>root.render(<SettingsHub open initialScreen="connections" guidedConnections connectionIdentity={{mode:'clerk_jwt',getToken:async()=>null}}
+   team={<p>Team</p>} portals={<Portal/>} teamSummary="5 coworkers" teamDirty={false} onClose={()=>{}}/>));
+ expect(mounted).not.toHaveBeenCalled();await click('Review saved Patient portals work');
+ expect(mounted).toHaveBeenCalledOnce();expect(visibleButtons().some(b=>b.textContent==='Resolve exact retained request')).toBe(true);
+ expect(container.textContent).toContain('Current access is still required');
+});
+it('directs an unsupported catalog contract to an app update and preserves a deliberately opened recovery editor',async()=>{
+ vi.mocked(readConnectionCatalog).mockRejectedValue(new WorkspaceApiError(426));
+ await act(async()=>root.render(<SettingsHub open initialScreen="connections" connectionIdentity={{mode:'clerk_jwt',getToken:async()=>null}}
+   team={<p>Team</p>} google={<button>Check exact saved request</button>} teamSummary="5 coworkers" teamDirty={false} onClose={()=>{}}/>));
+ expect(container.textContent).toContain('CosmaBot → Update CosmaBot…');
+ await click('Google email & calendar');expect(container.textContent).toContain('Your saved work and unresolved requests are retained');
+ expect(visibleButtons().some(b=>b.textContent==='Check exact saved request')).toBe(true);
 });

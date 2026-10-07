@@ -189,6 +189,14 @@ export function validateOperationalReleaseProfile(config, manifest, info) {
   return identity;
 }
 
+export function validateSourceProvenance(provenance) {
+  if (!provenance || typeof provenance!=='object' || Array.isArray(provenance) ||
+      Object.keys(provenance).sort().join(',')!=='commit,dirty,tree,version' || provenance.version!==1 ||
+      provenance.dirty!==false || typeof provenance.commit!=='string' || typeof provenance.tree!=='string' ||
+      !/^[a-f0-9]{40}$/.test(provenance.commit) || !/^[a-f0-9]{40}$/.test(provenance.tree)) fail();
+  return provenance;
+}
+
 export async function packageRelease({application,inputManifest,toolsDirectory,output}) {
   for (const path of [application,inputManifest,toolsDirectory,output]) if (!isAbsolute(path) || resolve(path)!==path) fail();
   if (!application.endsWith('.app') || !output.endsWith('.app') || inside(application,output) || inside(output,application) ||
@@ -204,6 +212,7 @@ export async function packageRelease({application,inputManifest,toolsDirectory,o
   if (Object.values(appFiles).some(item=>item.link)) fail();
   const staticAssets=await verifyStaticAssetInventory(app,appFiles);
   const config=JSON.parse(await readFile(join(app,'synthetic-build.json'),'utf8'));
+  const provenance=validateSourceProvenance(config.sourceProvenance);
   const identity=validateOperationalReleaseProfile(config,
     JSON.parse(await readFile(join(app,'public/cosmas-beta-features.json'),'utf8')),info);
   const pkg=JSON.parse(await readFile(join(app,'package.json'),'utf8'));
@@ -249,7 +258,7 @@ export async function packageRelease({application,inputManifest,toolsDirectory,o
     equal(final[name],item);
   }
   const receipt={...intent,completed:true,archive:verified,staticAssets,fuses:wire,changedFramework,replacedElectronDefaultArchive:templateArchive,
-    buildToolsLockSHA256:tools.lockSHA256,bundleIdentifier:info.CFBundleIdentifier,appVersion:config.appVersion,buildNumber:config.buildNumber,
+    buildToolsLockSHA256:tools.lockSHA256,bundleIdentifier:info.CFBundleIdentifier,appVersion:config.appVersion,buildNumber:config.buildNumber,sourceProvenance:provenance,
     files:final,sourcePreserved:true,signed:false,notarized:false,installedOrLaunched:false,distributionAllowed:false};
   await writeFile(output+'.receipt.json',JSON.stringify(receipt,null,2)+'\n',{flag:'wx',mode:0o600});
   await rm(output+'.incomplete.json');

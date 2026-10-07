@@ -17,7 +17,7 @@ vi.mock("./team-setup-api", async () => {
 vi.mock("./draft-store", async original => ({...await original<typeof import("./draft-store")>(), privateDraftScope:async (scope:string)=>scope}));
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>("node:crypto");
 const identity={mode:"clerk_jwt" as const, getToken:async()=>"invented-owner"};
-const workspace:Workspace={id:"00000000-0000-4000-8000-000000000071", appointment_id:"invented-visit",
+const workspace:Workspace&{appointment_id:string}={id:"00000000-0000-4000-8000-000000000071", appointment_id:"invented-visit",
   label:"Invented preparation encounter", revision:1, entries:[], work_candidates:[]};
 const receipt:EncounterPrep={appointment_ref:"a".repeat(64), snapshot_sha256:"b".repeat(64), display_sha256:"c".repeat(64),
   additional_notes_available:false, sources:[{source_id:"d".repeat(64), appointment_ref:"e".repeat(64),

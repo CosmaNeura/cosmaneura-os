@@ -182,7 +182,7 @@ def ask(
     if reauthenticate:
         reauthenticate()
     model_work._identity(s, box, owner, external_identity_id)
-    w = ws._workspace(s, box, owner, wid, writing=True)
+    w = ws._workspace(s, box, owner, wid, writing=True, allow_private=True)
     digest = model_work.conversation_request_hash(
         expected=expected, team_revision=team_revision, role=role, content=content,
         research_analysis=research_analysis, inbox_analysis=inbox_analysis, membership_analysis=membership_analysis,
@@ -244,7 +244,7 @@ def ask(
         from cosmas_os.adapters.chief_review import review
         from cosmas_os.application.operations_status import linked
 
-        reply = review(context, operational_rows=linked(s, box, owner, wid, snapshot, settings))
+        reply = review(context, operational_rows=[] if w.appointment_id is None else linked(s, box, owner, wid, snapshot, settings))
     else:
         reply = generate_reply(context)
     w.revision += 1

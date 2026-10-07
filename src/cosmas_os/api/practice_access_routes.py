@@ -9,6 +9,7 @@ from starlette.requests import Request
 
 from cosmas_os.api.auth import AccessDenied, AuthenticationFailed, _organization_id
 from cosmas_os.api.practice_access_schemas import (
+    CompletePracticeSetup,
     DecideAccess,
     MemberChange,
     MembersPage,
@@ -17,7 +18,7 @@ from cosmas_os.api.practice_access_schemas import (
 )
 from cosmas_os.api.workspace_protocol import compatibility
 from cosmas_os.application import practice_access as access
-from cosmas_os.application import practice_members
+from cosmas_os.application import practice_members, practice_setup
 from cosmas_os.application.beta_identity_admin import BetaIdentityAdminError
 from cosmas_os.application.capture_deadline import (
     CaptureBudget,
@@ -29,6 +30,8 @@ from cosmas_os.domain.rules import AuthorizationError
 
 PATHS = {"/practice-access/compatibility": ("GET", None, compatibility),
          "/practice-access": ("GET", None, access.status),
+         "/practice-access/setup": ("GET", None, practice_setup.status),
+         "/practice-access/setup/complete": ("POST", CompletePracticeSetup, practice_setup.complete),
          "/practice-access/request": ("POST", SubmitAccess, access.submit),
          "/practice-access/cancel": ("POST", ReviewAccess, access.cancel),
          "/practice-access/requests": ("GET", None, access.pending),

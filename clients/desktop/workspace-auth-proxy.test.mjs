@@ -7,6 +7,25 @@ const ready = {phase: 'ready', revision: id, identity: {userId: 'user_one', sess
 const response = value => Response.json(value, {headers: {'Cache-Control': 'no-store'}});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('private drafts admit exact owner-bound create/link/recovery routes and enforce header and byte limits', async () => {
+  const paths = ['/workspaces/private-drafts', '/workspaces/private-drafts/resolve', `/workspaces/${id}/appointment-link`, `/workspaces/${id}/appointment-link/resolve`];
+  for (const path of paths) {
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path, 'POST'), path);
+    for (const suffix of ['?owner=' + id, '/send', '/capture'])
+      assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path + suffix, 'POST'), null);
+    assert.equal((await proxyAuthenticatedWorkspaceRequest(request(path, {method:'POST', body:'{}'}), fixture(), () => assert.fail('missing contract never dispatches'))).status, 426);
+    const accepted = await proxyAuthenticatedWorkspaceRequest(request(path, {method:'POST', body:'{}', headers:{'X-Cosmas-Private-Draft':'1'}}), fixture(), async(_url, options) => {
+      assert.equal(options.headers['X-Cosmas-Private-Draft'], '1');
+      return response({saved:true});
+    });
+    assert.equal(accepted.status, 200);
+  }
+  assert.equal(permittedAuthenticatedApiPath('app://cosmas/api/workspaces/private-drafts', 'GET'), '/workspaces/private-drafts');
+  assert.equal(permittedAuthenticatedApiPath('app://cosmas/api/workspaces/private-drafts/resolve', 'GET'), null);
+  const oversized = await proxyAuthenticatedWorkspaceRequest(request(paths[0], {method:'POST', body:' '.repeat(4097), headers:{'X-Cosmas-Private-Draft':'1'}}), fixture(), () => assert.fail('oversize never dispatches'));
+  assert.equal(oversized.status, 503);
+});
+
 test('capture operation transport carries long corrections/reviews with finite bounds', async () => {
   const path=`/workspaces/${id}/capture/operations`;
   const body=JSON.stringify({content:'🩺'.repeat(500_000)});

@@ -60,6 +60,7 @@ def info() -> None:
 def bootstrap_beta_identity_cmd(
     manifest_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
     confirm_reviewed_human_deploy: bool = typer.Option(False, "--confirm-reviewed-human-deploy"),
+    reserve_first_owner: bool = typer.Option(False, "--reserve-first-owner"),
 ) -> None:
     """Human-only bootstrap from an untracked, protected manifest file."""
 
@@ -85,8 +86,13 @@ def bootstrap_beta_identity_cmd(
         raise typer.BadParameter("bootstrap manifest is invalid") from None
     session = _session()
     try:
-        bootstrap_beta_identity(session, settings, manifest)
-        typer.echo("beta identity bootstrap complete")
+        if reserve_first_owner:
+            from cosmas_os.application.practice_setup import reserve_first_owner as reserve
+            reserve(session, settings, manifest)
+            typer.echo("reviewed first-owner reservation complete; no owner access granted")
+        else:
+            bootstrap_beta_identity(session, settings, manifest)
+            typer.echo("beta identity bootstrap complete")
     finally:
         session.close()
 

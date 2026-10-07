@@ -110,9 +110,12 @@ def test_discovery_never_loads_unknown_or_external_operations(operation):
 
 def test_mutating_a_returned_schema_does_not_change_future_discovery():
     first = plugin_catalog(SimpleNamespace(), SimpleNamespace())
-    first["tools"][0]["inputSchema"]["properties"]["request"]["properties"]["action"]["const"] = "send"
+    def mail_tool(value):
+        return next(tool for tool in value["tools"] if tool["name"] == "google_mail_headers")
+
+    mail_tool(first)["inputSchema"]["properties"]["request"]["properties"]["action"]["const"] = "send"
     next_catalog = plugin_catalog(SimpleNamespace(), SimpleNamespace())
-    assert next_catalog["tools"][0]["inputSchema"]["properties"]["request"]["properties"]["action"]["const"] == "mail"
+    assert mail_tool(next_catalog)["inputSchema"]["properties"]["request"]["properties"]["action"]["const"] == "mail"
 
 
 @pytest.mark.parametrize("provider", DELIVERY_FIELDS)

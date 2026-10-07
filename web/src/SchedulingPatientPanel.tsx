@@ -11,6 +11,10 @@ import {emptySchedulingPatientRecovery,validateSchedulingPatientRecovery,schedul
 export type SchedulingPatientPanelProps={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;enabled:boolean;locked:boolean;recoveryLocked?:boolean;observationStamp?:number;
  onBusyChange?:(busy:boolean)=>void;onLinked?:(receipt:SchedulingPatientReceipt)=>void;onAccessLost?:(error:WorkspaceApiError)=>void};
 export function SchedulingPatientPanel({identity,workspace,enabled,locked,recoveryLocked,observationStamp=0,onBusyChange,onLinked,onAccessLost}:SchedulingPatientPanelProps){
+ if(workspace.appointment_id===null)return <p>Link an appointment before connecting its patient to Scheduling.</p>;
+ return <LinkedSchedulingPatientPanel {...{identity,workspace:{...workspace,appointment_id:workspace.appointment_id},enabled,locked,recoveryLocked,observationStamp,onBusyChange,onLinked,onAccessLost}}/>;
+}
+function LinkedSchedulingPatientPanel({identity,workspace,enabled,locked,recoveryLocked,observationStamp=0,onBusyChange,onLinked,onAccessLost}:Omit<SchedulingPatientPanelProps,'workspace'>&{workspace:Workspace&{appointment_id:string}}){
  const [record,setRecord]=useState(()=>emptySchedulingPatientRecovery(workspace.id,workspace.appointment_id)),[status,setStatus]=useState<SchedulingPatientStatus|null>(null);
  const [busy,setBusy]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState(''),[samePatient,setSamePatient]=useState(false),[exactIdentity,setExactIdentity]=useState(false);
  const [authorityLost,setAuthorityLost]=useState(false),[verifiedPreview,setVerifiedPreview]=useState(false),[verifiedSaved,setVerifiedSaved]=useState(false),[notFound,setNotFound]=useState(false),[now,setNow]=useState(Date.now);

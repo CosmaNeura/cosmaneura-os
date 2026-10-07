@@ -436,15 +436,52 @@ class EncounterWorkspace(Base):
         UniqueConstraint("owner_id", "appointment_id", name="uq_workspace_owner_encounter"),
         UniqueConstraint("owner_id", "create_key", name="uq_workspace_create_key"),
         CheckConstraint("revision >= 1", name="ck_workspace_revision"),
+        CheckConstraint("(appointment_id IS NULL) = (patient_link_id IS NULL)", name="ck_workspace_encounter_pair"),
+        CheckConstraint("(draft_title IS NULL AND create_request_hash IS NULL AND appointment_id IS NOT NULL) OR "
+                        "(draft_title IS NOT NULL AND char_length(draft_title) BETWEEN 1 AND 160 "
+                        "AND create_request_hash IS NOT NULL AND create_request_hash ~ '^[0-9a-f]{64}$')",
+                        name="ck_workspace_private_draft"),
     )
 
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     box_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("box_contexts.id"))
     owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
-    appointment_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
-    patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    appointment_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    patient_link_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
+    draft_title: Mapped[str | None] = mapped_column(String(160), nullable=True)
+    create_request_hash: Mapped[str | None] = mapped_column(String(64), nullable=True)
     create_key: Mapped[str] = mapped_column(String(100))
     revision: Mapped[int] = mapped_column(Integer, default=1)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class WorkspaceAppointmentLink(Base):
+    """Immutable human selection of an existing local encounter; no upstream write."""
+
+    __tablename__ = "workspace_appointment_links"
+    __table_args__ = (
+        ForeignKeyConstraint(["workspace_id", "box_id", "owner_id"],
+                             ["encounter_workspaces.id", "encounter_workspaces.box_id", "encounter_workspaces.owner_id"]),
+        ForeignKeyConstraint(["appointment_id", "box_id", "patient_link_id"],
+                             ["appointment_observations.id", "appointment_observations.box_id", "appointment_observations.patient_link_id"]),
+        UniqueConstraint("workspace_id", name="uq_workspace_appointment_link"),
+        CheckConstraint("expected_revision >= 1 AND workspace_revision = expected_revision + 1", name="ck_workspace_link_revision"),
+        CheckConstraint("request_hash ~ '^[0-9a-f]{64}$' AND appointment_sha256 ~ '^[0-9a-f]{64}$' "
+                        "AND draft_sha256 ~ '^[0-9a-f]{64}$'", name="ck_workspace_link_hashes"),
+    )
+
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    appointment_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    expected_revision: Mapped[int] = mapped_column(Integer)
+    workspace_revision: Mapped[int] = mapped_column(Integer)
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    appointment_sha256: Mapped[str] = mapped_column(String(64))
+    draft_sha256: Mapped[str] = mapped_column(String(64))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

@@ -30,7 +30,7 @@ it('moves from guided account setup into its existing private notebook without c
   const wait=async(check:()=>void)=>{for(let i=0;i<100;i++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));try{check();done=true;}catch{}});if(done)return;}check();};
   const click=async(label:string)=>{await wait(()=>{expect(button(label),label).toBeTruthy();expect(button(label)!.matches(':disabled'),label).toBe(false);});await act(async()=>button(label)!.click());};
   await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
-  await click('Connect your practice');await click('Cosmaneura account & appointments');
+  await click('Connect an account later');await click('Cosmaneura account & appointments');
   await click('Check connection status');await click('View appointments');await click('Open notebook');
   await wait(()=>expect(existing).toHaveBeenCalledWith(identity,selection));
   await wait(()=>expect(host.querySelector('.settings-hub')?.hasAttribute('hidden')).toBe(true));
