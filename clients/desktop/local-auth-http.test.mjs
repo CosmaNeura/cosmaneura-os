@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {createServer,request as httpRequest} from 'node:http';
-import {once} from 'node:events';
+import {once,EventEmitter} from 'node:events';
+import {PassThrough} from 'node:stream';
 import test from 'node:test';
 import {fetchLocalAuthenticatedWorkspace as transport} from './local-auth-http.mjs';
 
@@ -45,10 +46,27 @@ test('actual loopback transport bounds its response surface and survives failed 
       assert.equal(observed[0].headers.cookie,undefined);
       assert.equal(observed[0].headers.origin,'app://cosmas');
       assert.equal(observed[0].body,options.body);
+      assert.equal(observed[0].headers['content-length'],String(Buffer.byteLength(options.body)));
+      assert.equal(observed[0].headers['transfer-encoding'],undefined);
+    });
+    await t.test('UTF-8 JSON, sliced PDF bytes and GET retain exact actual socket framing',async()=>{
+      const body='{"display_name":"Jos\u00e9 \ud83e\ude7a"}';
+      await (await local(origin+'/practice-access/setup/complete',{...options,body})).text();
+      const unicode=observed.at(-1);
+      assert.equal(unicode.headers['content-length'],String(Buffer.byteLength(body)));
+      assert.equal(unicode.headers['transfer-encoding'],undefined);assert.equal(unicode.body,body);
+      const bytes=Buffer.from('prefix%PDF-1.7\nreviewedsuffix'),pdf=bytes.subarray(6,bytes.length-6);
+      await (await local(origin+'/workspaces/00000000-0000-4000-8000-000000000001/vendor-artifacts/00000000-0000-4000-8000-000000000002/content',{
+        method:'PUT',headers:{'Content-Type':'application/pdf','X-Cosmas-Vendor-Contract':'1'},body:pdf})).text();
+      const binary=observed.at(-1);
+      assert.equal(binary.headers['content-length'],String(pdf.byteLength));
+      assert.equal(binary.headers['transfer-encoding'],undefined);assert.equal(binary.body,pdf.toString());
+      await (await local(origin+'/workspaces',{...options,method:'GET',body:undefined})).text();
+      assert.equal(observed.at(-1).body,'');assert.equal(observed.at(-1).headers['transfer-encoding'],undefined);
     });
     await t.test('redirects fail without following the external location',async () => {
       mode='redirect'; await assert.rejects(local(origin+'/workspaces',options));
-      assert.equal(observed.length,2);
+      assert.equal(observed.length,5);
     });
     await t.test('unexpected bodyless status rejects instead of crashing the main process',async () => {
       mode='empty'; await assert.rejects(local(origin+'/workspaces',options));
@@ -61,4 +79,25 @@ test('actual loopback transport bounds its response surface and survives failed 
       controller.abort();await rejected;
     });
   } finally {server.closeAllConnections();await new Promise(resolve=>server.close(resolve));}
+});
+
+test('frames UTF-8, empty JSON and binary bytes exactly without caller framing or mutation',async()=>{
+  const inputs=['{"name":"Jos\u00e9 \ud83e\ude7a"}','',new Uint8Array([0,128,255])];
+  for(const body of inputs){
+    let address,sent;
+    const headers={'Content-Type':'application/json'};
+    const expected=Buffer.from(body);
+    const pending=transport(origin+'/workspaces',{method:'POST',headers,body},(value,reply)=>{
+      address=value;const request=new EventEmitter();
+      request.write=value=>{sent=Buffer.from(value);if(body instanceof Uint8Array)body.fill(0);};
+      request.end=()=>{const response=new PassThrough();response.statusCode=200;response.headers={'content-type':'application/json','cache-control':'no-store'};reply(response);response.end('{}');};
+      return request;
+    });
+    await pending;
+    assert.equal(address.headers['Content-Length'],String(expected.byteLength));
+    assert.deepEqual(sent??Buffer.alloc(0),expected);
+    assert.deepEqual(headers,{'Content-Type':'application/json'});
+  }
+  for(const bad of [{headers:{'Transfer-Encoding':'chunked'}},{headers:{'content-length':'1'}},{body:{private:'unsupported'}},{method:'GET',body:'{}'}])
+    await assert.rejects(transport(origin+'/workspaces',{...options,...bad},()=>assert.fail('no socket on invalid framing')));
 });
