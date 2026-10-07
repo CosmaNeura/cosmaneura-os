@@ -4,7 +4,7 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {EncounterWorkspace} from './EncounterWorkspace';
-import {memoryDraftStorage} from './draft-test-fixture';
+import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 const environment=(globalThis as typeof globalThis&{process?:{env:Record<string,string|undefined>}}).process?.env;
 const base=environment?.COSMAS_HOME_LAB_URL,realFetch=globalThis.fetch.bind(globalThis);
 let root:Root|undefined;
@@ -13,6 +13,9 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   const util='node:util';const {transferableAbortController}=await import(/* @vite-ignore */util) as {transferableAbortController:()=>AbortController};
   const abort=transferableAbortController();vi.stubGlobal('AbortController',abort.constructor);vi.stubGlobal('AbortSignal',abort.signal.constructor);
   const cryptoModule='node:crypto';const {webcrypto}=await import(/* @vite-ignore */cryptoModule) as {webcrypto:Crypto};vi.stubGlobal('crypto',webcrypto);
+  vi.stubGlobal('indexedDB',new IDBFactory());
+  // Match the binary-object realm used by fake-indexeddb and Node WebCrypto.
+  vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
   const logical='https://api.example.invalid';
   const originalWindow=window;vi.stubGlobal('window',new Proxy(originalWindow,{get(target,key){return key==='location'?new URL('https://workspace.example.invalid/'):Reflect.get(target,key);}}));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',logical);vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_HOSTED_ENABLED','true');
@@ -22,9 +25,9 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
     if(!url.startsWith(logical+'/')&&url!==base+'/lab/identity')throw new Error('Unexpected external request');const target=url.startsWith(logical+'/')?base+url.slice(logical.length):url;const response=await realFetch(target,init);calls.push({method:init?.method??'GET',path:new URL(url).pathname,status:response.status});
     return new Response(await response.arrayBuffer(),{status:response.status,headers:response.headers});});
   const packet=await(await fetch(base+'/lab/identity')).json() as {token:string};
-  const identity={mode:'clerk_jwt' as const,getToken:async()=>packet.token},storage=memoryDraftStorage();
+  const identity={mode:'clerk_jwt' as const,getToken:async()=>packet.token};
   const container=document.createElement('div');document.body.append(container);root=createRoot(container);
-  const render=()=>root!.render(<WorkspaceCompatibilityGate identity={identity} accountControls={null}><PracticeAccessGate identity={identity} accountControls={null}>{access=><EncounterWorkspace authenticated={identity} practiceAccess={access} draftStorage={storage}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>);
+  const render=()=>root!.render(<WorkspaceCompatibilityGate identity={identity} accountControls={null}><PracticeAccessGate identity={identity} accountControls={null}>{access=><EncounterWorkspace authenticated={identity} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>);
   async function wait(check:()=>void){const end=performance.now()+15000;while(performance.now()<end){let passed=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10));try{check();passed=true;}catch{}});if(passed)return;}check();}
   const visible=(element:Element)=>!element.closest('[hidden]');
   const button=(label:string)=>[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&b.textContent?.trim()===label)!;

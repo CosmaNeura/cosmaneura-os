@@ -2,6 +2,7 @@ import { webcrypto } from "node:crypto";
 import { IDBFactory } from "fake-indexeddb";
 import { describe, expect, it } from "vitest";
 import { openDraftStore, privateDraftScope, type DraftValue } from "../../../../web/src/draft-store";
+import { DraftJournal, accountEditorAddress, editorAddress, type RecoveredDraft } from "../../../../web/src/draft-journal";
 import type { BotSettings, TeamConfiguration, TeamSaveInput } from "../../../../web/src/workspace-api";
 
 const crypto = webcrypto as unknown as Crypto;
@@ -67,7 +68,69 @@ async function raw(indexedDB: IDBFactory, edit?: (tx: IDBTransaction) => void) {
   });db.close();return result;
 }
 
+const workspaceId = "00000000-0000-4000-8000-000000000021";
+const requestId = "00000000-0000-4000-8000-000000000031";
+const newEditors: {address: string; draft: RecoveredDraft}[] = [
+  {address: accountEditorAddress("private-draft"), draft: {kind: "account-editor", editor: "private-draft",
+    data: {contract: "private-draft-recovery.v1", title: "Invented private note 🩺", pending: {title: "Invented private note 🩺", idempotency_key: requestId}}, pending: requestId}},
+  {address: editorAddress(workspaceId, "private-draft-link"), draft: {kind: "editor", workspaceId, editor: "private-draft-link",
+    data: {contract: "private-draft-link-recovery.v1", workspace_id: workspaceId, pending: {expected_revision: 1, idempotency_key: requestId,
+      appointment_id: "00000000-0000-4000-8000-000000000041", appointment_link_confirmed: true}}, pending: requestId}},
+  {address: editorAddress(workspaceId, "agent-research-review"), draft: {kind: "editor", workspaceId, editor: "agent-research-review",
+    data: {contract: "agent-research-review-recovery.v1", workspace_id: workspaceId, pending: {ticket_id: requestId,
+      revision_id: "00000000-0000-4000-8000-000000000032", payload_hash: "c".repeat(64), public_query_confirmed: true}}, pending: "00000000-0000-4000-8000-000000000032"}},
+];
+
 describe("private draft custody", () => {
+  it.each([false,true])("round-trips the three registered recovery editors through the production store and journal (native=%s)", async native => {
+    const fixture=nativeFixture(true),indexedDB=new IDBFactory();
+    const options={scope,native,indexedDB,crypto,...(native?{plugin:fixture.plugin}:{})};
+    const journal=new DraftJournal(await openDraftStore(options));
+    for(const item of newEditors){expect(await journal.load(item.address)).toBeNull();await journal.persist(item.address,item.draft);}
+    journal.close();
+    if(!native){
+      const sealed=await raw(indexedDB);
+      expect(sealed.records).toHaveLength(3);expect(sealed.key.extractable).toBe(false);
+      await expect(crypto.subtle.exportKey("raw",sealed.key)).rejects.toThrow();
+      for(const row of sealed.records)expect(Object.keys(row as object).sort()).toEqual(["address","ciphertext","nonce","revision"]);
+      expect(JSON.stringify(sealed.records)).not.toContain("Invented private note");
+      expect(JSON.stringify(sealed.records)).not.toContain(requestId);
+    }
+    const reopened=new DraftJournal(await openDraftStore(options)),stale=new DraftJournal(await openDraftStore(options));
+    for(const item of newEditors){expect(await reopened.load(item.address)).toEqual(item.draft);expect(await stale.load(item.address)).toEqual(item.draft);}
+    await reopened.persist(newEditors[0].address,null);
+    await expect(stale.persist(newEditors[0].address,{kind:"account-editor",editor:"private-draft",pending:requestId,
+      data:{contract:"private-draft-recovery.v1",title:"Different title",pending:{title:"Different title",idempotency_key:requestId}}})).rejects.toMatchObject({code:"conflict"});
+    reopened.close();stale.close();
+    const foreign=new DraftJournal(await openDraftStore({...options,scope:other}));
+    for(const item of newEditors)expect(await foreign.load(item.address)).toBeNull();foreign.close();
+    if(native)expect(fixture.counts()).toEqual({creates:3,swaps:1});
+    await expect(openDraftStore({...options,native:!native})).rejects.toMatchObject({code:"profile"});
+  });
+  it.each([false,true])("rejects unregistered recovery aliases before any native IPC or record write (native=%s)", async native => {
+    const fixture=nativeFixture(),get=fixture.plugin.get;
+    let reads=0;fixture.plugin.get=async input=>{reads++;return get(input);};
+    const store=await openDraftStore({scope,native,indexedDB:new IDBFactory(),crypto,...(native?{plugin:fixture.plugin}:{})});
+    for(const id of ["account-editor:private-draft:other", "account-editor:private-draft-link", `editor:${workspaceId}:private-draft`,
+      `editor:${workspaceId}:private-draft-link:other`, `editor:${workspaceId}:agent-research-review:other`, "editor:not-a-workspace:private-draft-link"]){
+      await expect(store.read(id)).rejects.toMatchObject({code:"invalid"});
+      await expect(store.write(id,null,value)).rejects.toMatchObject({code:"invalid"});
+    }
+    expect(reads).toBe(0);expect(fixture.counts()).toEqual({creates:0,swaps:0});store.close();
+  });
+  it("retains the new encrypted editors when their key is missing and refuses substituted ciphertext addresses", async () => {
+    const indexedDB=new IDBFactory(),options={scope,native:false,indexedDB,crypto};
+    const journal=new DraftJournal(await openDraftStore(options));
+    for(const item of newEditors){await journal.load(item.address);await journal.persist(item.address,item.draft);}
+    journal.close();
+    await raw(indexedDB,tx=>{const request=tx.objectStore("sealed-drafts").get(newEditors[1].address);request.onsuccess=()=>{
+      tx.objectStore("sealed-drafts").put({...request.result,address:newEditors[2].address});
+    };});
+    const changed=await openDraftStore(options);await expect(changed.read(newEditors[2].address)).rejects.toMatchObject({code:"integrity"});changed.close();
+    const before=await raw(indexedDB,tx=>tx.objectStore("metadata").delete("draft-key-v1"));
+    await expect(openDraftStore(options)).rejects.toMatchObject({code:"key_missing"});
+    expect((await raw(indexedDB)).records).toEqual(before.records);
+  });
   it.each([false,true])("bounds portal actions to 64 KiB and preserves them across reopen and stale writers (native=%s)", async native => {
     const fixture=nativeFixture(true),options={scope,native,indexedDB:new IDBFactory(),crypto,...(native?{plugin:fixture.plugin}:{})};
     const id="editor:00000000-0000-4000-8000-000000000021:portal-work",maximum=exactValueBytes(65536),store=await openDraftStore(options);
