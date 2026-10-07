@@ -20,10 +20,20 @@ export function fetchAuthenticatedWorkspaceAtOrigin(origin, url, options, reques
       new Headers(options.headers).get('X-Cosmas-Team-Contract') !== '2' ||
       new Headers(options.headers).get('X-Cosmas-Draft-Recovery') !== '2'))
     return Promise.reject(new Error('Local workspace unavailable'));
+  // The receiving API rejects transfer-encoded requests. Freeze the bounded
+  // caller's bytes and frame them explicitly; Node otherwise sends chunked POSTs.
+  const headers = {...options.headers};
+  if (Object.keys(headers).some(name => ['content-length','transfer-encoding'].includes(name.toLowerCase())) ||
+      options.body != null && typeof options.body !== 'string' && !(options.body instanceof Uint8Array))
+    return Promise.reject(new Error('Local workspace unavailable'));
+  const body = options.body == null ? undefined : Buffer.from(options.body);
+  if (options.method === 'GET' && body?.byteLength)
+    return Promise.reject(new Error('Local workspace unavailable'));
+  if (options.method !== 'GET') headers['Content-Length'] = String(body?.byteLength ?? 0);
   return new Promise((resolve, reject) => {
     const request = requestImplementation({host: parsed.hostname, port: Number(parsed.port) || 443, path: target,
       ...(parsed.protocol === 'https:' ? {servername: parsed.hostname, rejectUnauthorized: true, minVersion: 'TLSv1.2'} : {}),
-      method: options.method, headers: options.headers, signal: options.signal, agent: false}, response => {
+      method: options.method, headers, signal: options.signal, agent: false}, response => {
       if (!response.statusCode || response.statusCode >= 300 && response.statusCode < 400) {
         response.destroy(); reject(new Error('Local workspace unavailable')); return;
       }
@@ -42,7 +52,7 @@ export function fetchAuthenticatedWorkspaceAtOrigin(origin, url, options, reques
       }
     });
     request.on('error', () => reject(new Error('Local workspace unavailable')));
-    if (options.body) request.write(options.body);
+    if (body?.byteLength) request.write(body);
     request.end();
   });
 }
