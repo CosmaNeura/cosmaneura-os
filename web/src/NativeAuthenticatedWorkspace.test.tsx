@@ -93,6 +93,10 @@ describe("native workspace session", () => {
   });
   it("signs in explicitly and acquires a fresh token for every request", async () => {
     const native = harness(signedOut); await render(native); expect(fetchMock).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Sign in to CosmaBot");
+    expect(container.textContent).not.toContain("Cosmas OS");
+    expect(container.textContent).not.toContain("Sign-in needs attention");
+    expect(container.querySelector(".apple-hosted-card")?.getAttribute("role")).toBe("status");
     await click("Sign in"); await click("Visits and notes"); await click("Visits and notes");
     expect(native.plugin.signIn).toHaveBeenCalledTimes(1); expect(native.plugin.getToken).toHaveBeenCalledTimes(3);
     expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: first.revision }], [{ expectedRevision: first.revision }], [{ expectedRevision: first.revision }]]);
@@ -120,13 +124,13 @@ describe("native workspace session", () => {
     const native = harness(); native.plugin.getState.mockRejectedValue(new Error("private provider detail"));
     native.plugin.signIn.mockRejectedValue(new Error("private provider detail"));
     await render(native); await click("Sign in again");
-    expect(container.textContent).toContain("Secure session is unavailable");
+    expect(container.textContent).toContain("Sign-in needs attention");
     expect(container.textContent).not.toContain("private provider detail");
     expect(container.textContent).not.toContain("Choose an encounter");
     expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
     native.plugin.getState.mockResolvedValue(signedOut); await click("Sign out");
     expect(native.plugin.signOut).toHaveBeenCalledOnce();
-    expect(container.textContent).toContain("Sign in to Cosmas");
+    expect(container.textContent).toContain("Sign in to CosmaBot");
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("discards private labels and a pending token when identity changes", async () => {
@@ -157,7 +161,7 @@ describe("native workspace session", () => {
     expect(container.textContent).not.toContain("Choose an encounter"); expect(fetchMock).toHaveBeenCalledTimes(2);
     native.set(pending); await act(async () => logout.reject(new Error("secret provider detail")));
     expect(container.textContent).toContain("Retry sign-out"); expect(container.textContent).not.toContain("secret provider detail");
-    await click("Retry sign-out"); expect(container.textContent).toContain("Sign in to Cosmas");
+    await click("Retry sign-out"); expect(container.textContent).toContain("Sign in to CosmaBot");
   });
   it("does not let an old state read undo a newer event", async () => {
     const native = harness(); const read = deferred<unknown>(); native.plugin.getState.mockReturnValueOnce(read.promise);
@@ -171,7 +175,7 @@ describe("native workspace session", () => {
     expect(container.textContent).toContain("Private invented label");
     await act(async () => native.emit({ ...first, identity: second.identity }));
     expect(container.textContent).not.toContain("Private invented label");
-    expect(container.textContent).toContain("Secure session is unavailable");
+    expect(container.textContent).toContain("Sign-in needs attention");
   });
   it("ignores pending actions and tokens from a replaced adapter", async () => {
     const old = harness(); await render(old); const late = deferred<unknown>(); old.plugin.getToken.mockReturnValueOnce(late.promise);
