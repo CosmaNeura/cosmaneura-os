@@ -80,7 +80,7 @@ it('immediately masks native suspension, resets review and resumes only after ex
 });
 it('retains exact pending journal and fences late native save response',async()=>{
  props.identity={mode:'clerk_jwt',getToken:async()=>null,nativeSession:{revision:uuid(90),isCurrent:()=>true}};await mount();await enter();await ack();let finish!:(r:FaxSourceReceipt)=>void;vi.mocked(faxSourceApi.review).mockReturnValueOnce(new Promise(r=>{finish=r;}));
- await act(async()=>button('Save reviewed fax passage for this visit')!.click());await wait(()=>expect(saved?.pending).not.toBeNull());const request=structuredClone(saved!.pending!.request);
+ await act(async()=>button('Save reviewed fax passage for this visit')!.click());await wait(()=>expect(saved?.pending).toBeTruthy());const request=structuredClone(saved!.pending!.request);
  await act(async()=>notifyNativeWorkspaceForeground(props.identity,false));await act(async()=>notifyNativeWorkspaceForeground(props.identity,true));await act(async()=>finish(await receipt(request)));
  await wait(()=>expect(button('Restore saved fax passage')).toBeDefined());expect(saved!.pending!.request).toEqual(request);expect(props.onSaved).not.toHaveBeenCalled();expect(workspaceApi.read).not.toHaveBeenCalled();
 });
@@ -92,7 +92,7 @@ it('absence of document revalidation keeps restored passage masked and prevents 
  saved={...emptyFaxSourceRecovery(scope,props.offered,props.visit),passage,page_numbers:[1,3]};props={...props,onRefreshDocument:undefined};await mount();await click('Restore saved fax passage');await click('Check exact acquired PDF');expect(host.querySelector('textarea')).toBeNull();expect(faxSourceApi.review).not.toHaveBeenCalled();
 });
 it('does not adopt late response after identity replacement or expose prior passage',async()=>{
- await mount();await enter();await ack();let finish!:(r:FaxSourceReceipt)=>void;vi.mocked(faxSourceApi.review).mockReturnValueOnce(new Promise(r=>{finish=r;}));await act(async()=>button('Save reviewed fax passage for this visit')!.click());await wait(()=>expect(saved?.pending).not.toBeNull());const request=structuredClone(saved!.pending!.request);
+ await mount();await enter();await ack();let finish!:(r:FaxSourceReceipt)=>void;vi.mocked(faxSourceApi.review).mockReturnValueOnce(new Promise(r=>{finish=r;}));await act(async()=>button('Save reviewed fax passage for this visit')!.click());await wait(()=>expect(saved?.pending).toBeTruthy());const request=structuredClone(saved!.pending!.request);
  props={...props,identity:{mode:'clerk_jwt',getToken:async()=>null},scope:{...scope,owner_id:uuid(99)},recovery:{authorize:async()=>{},load:async()=>null,persist:async()=>{}}};await act(async()=>root.render(<FaxSourceReviewPanel {...props}/>));await act(async()=>finish(await receipt(request)));
  expect(host.textContent).not.toContain(passage);expect(props.onSaved).not.toHaveBeenCalled();expect(workspaceApi.read).not.toHaveBeenCalled();
 });
