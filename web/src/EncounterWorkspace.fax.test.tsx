@@ -28,7 +28,7 @@ vi.mock('./connection-summary', async original => ({
 }));
 const {webcrypto} = await vi.importActual<{webcrypto: Crypto}>('node:crypto');
 const identity = {mode: 'clerk_jwt' as const, getToken: async () => null};
-const workspace: Workspace = {
+const workspace: Workspace & {appointment_id:string} = {
   id: '00000000-0000-4000-8000-000000000071', appointment_id: 'invented-fax-visit',
   label: 'Invented fax visit', revision: 1, entries: [], work_candidates: [],
 };
@@ -66,6 +66,7 @@ describe('Settings fax navigation in an encounter', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Unexpected HTTP in navigation test')));
     scroll = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {configurable: true, value: scroll});
+    vi.spyOn(workspaceApi, 'privateDrafts').mockResolvedValue({contract_version:1,drafts:[],has_more:false});
     vi.spyOn(workspaceApi, 'catalog').mockResolvedValue([{
       appointment_id: workspace.appointment_id, workspace_id: workspace.id, label: workspace.label,
     }]);
@@ -144,7 +145,7 @@ describe('Settings fax navigation in an encounter', () => {
   }
 
   it('keeps fax work as the final focus and scroll destination when leaving Settings with Scribe selected', async () => {
-    await click('Choose an encounter'); await chooseVisit();
+    await click('Visits and notes'); await chooseVisit();
     const scribe = [...host.querySelectorAll<HTMLButtonElement>('.team-roster button')]
       .find(button => button.querySelector('strong')?.textContent === 'Scribe')!;
     await act(async () => scribe.click());

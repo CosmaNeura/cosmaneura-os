@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from cosmas_os.application.encounter_access import patient_visible
@@ -15,6 +15,7 @@ from cosmas_os.models import (
     PatientLink,
     Principal,
     Ticket,
+    WorkspaceAppointmentLink,
     WorkspaceEntry,
     WorkspaceReply,
 )
@@ -77,7 +78,7 @@ def _encounter(s: Session, box: str, appointment: str, link_id: str | None = Non
     return a
 
 
-def _workspace(s: Session, box: str, actor: str, wid: str, *, writing: bool = False):
+def _workspace(s: Session, box: str, actor: str, wid: str, *, writing: bool = False, allow_private: bool = False):
     _human(s, box, actor)
     w = s.scalar(
         select(EncounterWorkspace)
@@ -91,11 +92,17 @@ def _workspace(s: Session, box: str, actor: str, wid: str, *, writing: bool = Fa
     )
     if w is None:
         raise WorkspaceError("workspace_unavailable", 404)
-    _encounter(s, box, w.appointment_id, w.patient_link_id, owner=actor)
+    if w.appointment_id is None:
+        if not allow_private or w.patient_link_id is not None or w.draft_title is None:
+            raise WorkspaceError("workspace_appointment_required")
+    else:
+        _encounter(s, box, w.appointment_id, w.patient_link_id, owner=actor)
     return w
 
 
 def _ticket(s: Session, w: EncounterWorkspace, tid: str):
+    if w.appointment_id is None:
+        return None
     return s.scalar(
         select(Ticket)
         .where(
@@ -210,12 +217,139 @@ def create(s: Session, box: str, actor: str, appointment: str, key: str, *, init
     return read(s, box, actor, w.id)
 
 
+def _draft_request(title, key):
+    import re
+
+    if (not isinstance(title, str) or not title.strip() or title != title.strip() or len(title) > 160
+            or not isinstance(key, str) or re.fullmatch(r"[A-Za-z0-9:_-]{8,100}", key) is None):
+        raise WorkspaceError("invalid_private_draft_request", 422)
+    return payload_hash({"contract": "private-workspace-create.v1", "title": title})
+
+
+def resolve_private_draft(s: Session, box: str, actor: str, title: str, key: str):
+    _human(s, box, actor, creating=True)  # Wait behind an in-flight exact-owner create before not_found.
+    digest = _draft_request(title, key)
+    row = s.scalar(select(EncounterWorkspace).where(
+        EncounterWorkspace.owner_id == actor, EncounterWorkspace.create_key == key))
+    if row is None:
+        return {"contract_version": 1, "outcome": "not_found", "workspace": None}
+    if row.box_id != box or row.create_request_hash != digest or row.draft_title != title:
+        raise WorkspaceError("idempotency_conflict")
+    return {"contract_version": 1, "outcome": "saved", "workspace": read(s, box, actor, row.id)}
+
+
+def create_private_draft(s: Session, box: str, actor: str, title: str, key: str, *, fence=None):
+    _human(s, box, actor, creating=True)  # Same-owner creates serialize, including exact-key races.
+    found = resolve_private_draft(s, box, actor, title, key)
+    if fence:
+        fence()
+    if found["outcome"] == "saved":
+        return found["workspace"]
+    count = s.scalar(select(func.count()).select_from(EncounterWorkspace).where(
+        EncounterWorkspace.box_id == box, EncounterWorkspace.owner_id == actor,
+        EncounterWorkspace.draft_title.is_not(None)))
+    if count is not None and count >= 100:
+        raise WorkspaceError("private_draft_limit")
+    row = EncounterWorkspace(box_id=box, owner_id=actor, appointment_id=None, patient_link_id=None,
+        draft_title=title, create_request_hash=_draft_request(title, key), create_key=key, revision=1)
+    s.add(row)
+    s.flush()
+    _audit(s, row, "private_draft_created")
+    s.flush()
+    if fence:
+        fence()
+    s.commit()
+    return read(s, box, actor, row.id)
+
+
+def private_drafts(s: Session, box: str, actor: str):
+    _human(s, box, actor)
+    rows = s.scalars(select(EncounterWorkspace).where(
+        EncounterWorkspace.box_id == box, EncounterWorkspace.owner_id == actor,
+        EncounterWorkspace.draft_title.is_not(None)).order_by(
+        EncounterWorkspace.created_at.desc(), EncounterWorkspace.id.desc()).limit(100))
+    items = []
+    for row in rows:
+        if row.appointment_id is not None:
+            try:
+                _encounter(s, box, row.appointment_id, row.patient_link_id, owner=actor)
+            except WorkspaceError:
+                continue  # Revocation withholds both linked content and identifying catalog metadata.
+        items.append({"workspace_id": row.id, "title": row.draft_title, "revision": row.revision,
+            "created_at": row.created_at.isoformat(), "link_state": "unlinked" if row.appointment_id is None else "linked",
+            "appointment_id": row.appointment_id})
+    return {"contract_version": 1, "drafts": items[:50], "has_more": len(items) > 50}
+
+
+def _link_digest(expected, appointment, confirmed):
+    if confirmed is not True or isinstance(expected, bool) or not isinstance(expected, int) or expected < 1:
+        raise WorkspaceError("invalid_private_draft_request", 422)
+    return payload_hash({"contract": "private-workspace-link.v1", "expected_revision": expected,
+        "appointment_id": appointment, "appointment_link_confirmed": True})
+
+
+def resolve_appointment_link(s: Session, box: str, actor: str, wid: str, *, expected: int,
+                             key: str, appointment: str, confirmed: bool):
+    _human(s, box, actor, creating=True)  # Serialize against the original one-way link transaction.
+    w = _workspace(s, box, actor, wid, allow_private=True)
+    digest = _link_digest(expected, appointment, confirmed)
+    row = s.scalar(select(WorkspaceAppointmentLink).where(WorkspaceAppointmentLink.workspace_id == wid))
+    if row is None:
+        return {"contract_version": 1, "outcome": "not_found", "link_receipt_id": None, "workspace": None}
+    if row.idempotency_key != key or row.request_hash != digest:
+        raise WorkspaceError("idempotency_conflict")
+    return {"contract_version": 1, "outcome": "saved", "link_receipt_id": row.id,
+            "workspace": read(s, box, actor, w.id)}
+
+
+def link_appointment(s: Session, box: str, actor: str, wid: str, *, expected: int,
+                     key: str, appointment: str, confirmed: bool, fence=None):
+    _human(s, box, actor, creating=True)
+    w = _workspace(s, box, actor, wid, writing=True, allow_private=True)
+    found = resolve_appointment_link(s, box, actor, wid, expected=expected, key=key,
+        appointment=appointment, confirmed=confirmed)
+    if fence:
+        fence()
+    if found["outcome"] == "saved":
+        return {"entry_revision": found["workspace"]["revision"],
+                "link_receipt_id": found["link_receipt_id"], "workspace": found["workspace"]}
+    if w.draft_title is None or w.appointment_id is not None:
+        raise WorkspaceError("workspace_already_linked")
+    if expected != w.revision or w.revision >= 500:
+        raise WorkspaceError("workspace_revision_conflict")
+    a = _encounter(s, box, appointment, owner=actor)
+    if s.scalar(select(EncounterWorkspace.id).where(EncounterWorkspace.owner_id == actor,
+            EncounterWorkspace.appointment_id == appointment)):
+        raise WorkspaceError("workspace_already_exists")
+    entries = list(s.scalars(select(WorkspaceEntry).where(WorkspaceEntry.workspace_id == wid)
+        .order_by(WorkspaceEntry.revision)))
+    row = WorkspaceAppointmentLink(workspace_id=wid, box_id=box, owner_id=actor,
+        appointment_id=a.id, patient_link_id=a.patient_link_id, expected_revision=expected,
+        workspace_revision=expected + 1, idempotency_key=key,
+        request_hash=_link_digest(expected, appointment, confirmed),
+        appointment_sha256=payload_hash({"appointment_id": a.id, "patient_link_id": a.patient_link_id,
+            "source": a.source, "source_sha256": a.source_sha256, "label": a.patient_label,
+            "start_at": a.start_at.isoformat() if a.start_at else None}),
+        draft_sha256=payload_hash({"workspace_id": wid, "title": w.draft_title, "revision": expected,
+            "entries": [{"id": e.id, "revision": e.revision, "request_hash": e.request_hash} for e in entries]}))
+    s.add(row)
+    s.flush()  # The immutable receipt must exist before the one-way association update.
+    w.appointment_id, w.patient_link_id, w.revision = a.id, a.patient_link_id, expected + 1
+    _audit(s, w, "appointment_linked")
+    s.flush()
+    if fence:
+        fence()
+    s.commit()
+    return {"entry_revision": w.revision, "link_receipt_id": row.id, "workspace": read(s, box, actor, wid)}
+
+
 def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None = None):
     from cosmas_os.application import follow_up, handoffs, note_review
 
-    w = _workspace(s, box, actor, wid)
+    w = _workspace(s, box, actor, wid, allow_private=True)
     revision = w.revision if at_revision is None else min(at_revision, w.revision)
-    a = _encounter(s, box, w.appointment_id, w.patient_link_id, owner=actor)
+    a = _encounter(s, box, w.appointment_id, w.patient_link_id, owner=actor) if w.appointment_id is not None else None
+    link = s.scalar(select(WorkspaceAppointmentLink).where(WorkspaceAppointmentLink.workspace_id == wid))
     entries = []
     from cosmas_os.models import (
         ModelWorkAdmission,
@@ -302,7 +436,7 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
                 if reply else None,
             }
         )
-    candidates = s.scalars(
+    candidates = [] if a is None else s.scalars(
         select(Ticket)
         .where(
             Ticket.box_id == box,
@@ -316,13 +450,16 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
     return {
         "id": w.id,
         "appointment_id": w.appointment_id,
-        "label": a.patient_label,
+        "label": a.patient_label if a else w.draft_title,
         "revision": revision,
         "entries": entries,
         "handoffs": handoffs.read(s, w, revision),
         "note": note_review.read(s, w, revision),
         "follow_ups": follow_up.read(s, w, revision),
         "work_candidates": [{"id": t.id, "state": t.state, "lane": t.lane} for t in candidates],
+        **({"private_draft": {"title": w.draft_title, "state": "linked" if a else "unlinked",
+            "link_receipt_id": link.id if link else None, "linked_at": link.created_at.isoformat() if link else None}}
+            if w.draft_title is not None else {}),
     }
 
 
@@ -339,7 +476,7 @@ def append(
     source_label: str | None = None,
     ticket_id: str | None = None,
 ):
-    w = _workspace(s, box, actor, wid, writing=True)
+    w = _workspace(s, box, actor, wid, writing=True, allow_private=True)
     request_hash = payload_hash(
         {
             "expected": expected,

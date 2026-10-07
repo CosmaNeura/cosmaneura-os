@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NativeAuthenticatedWorkspace } from "./NativeAuthenticatedWorkspace";
 import { parseNativeAuthState, parseNativeToken, type NativeAuthState } from "./native-auth";
 import { accessPending } from "./practice-access-test-fixture";
+import {teamFixture} from "./team-setup-test-fixture";
 import { REQUIRED_WORKSPACE_CONTRACTS } from "./workspace-protocol";
 
 const first: NativeAuthState = { phase: "ready", revision: "00000000-0000-4000-8000-000000000001",
@@ -42,7 +43,7 @@ describe("native workspace session", () => {
   beforeEach(() => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     vi.stubEnv("VITE_API_BASE", "http://127.0.0.1:8018");
-    fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => new Response(JSON.stringify([
+    fetchMock = vi.fn<typeof fetch>().mockImplementation(async url => new Response(JSON.stringify(String(url).endsWith("/provider-team")?teamFixture():[
       { appointment_id: "invented_visit", workspace_id: null, label: "Private invented label" },
     ]), { headers: { "Content-Type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
@@ -68,14 +69,15 @@ describe("native workspace session", () => {
     fetchMock.mockImplementation(async url=>{
       const body=url==="https://api.example.invalid/practice-access/compatibility"
         ? {contract_version:1,workspace_protocol:1,requests_require_protocol:true,contracts:{...REQUIRED_WORKSPACE_CONTRACTS}}
-        : url==="https://api.example.invalid/practice-access"?accessPending:null;
+        : url==="https://api.example.invalid/practice-access"?accessPending
+        : url==="https://api.example.invalid/practice-access/setup"?{contract_version:1,state:"join_existing",practice:null,display_name:null,can_start_practice:false}:null;
       if(!body)throw new Error("Unexpected hosted workspace request");
       return new Response(JSON.stringify(body),{headers:{"Content-Type":"application/json","Cache-Control":"no-store","X-Cosmas-Workspace-Protocol":"1"}});
     });
     const native=harness();await render(native);expect(container.textContent).toContain("Waiting for your practice owner");
     expect(container.textContent).not.toContain("Choose an encounter");
-    expect(fetchMock.mock.calls.map(([url])=>url)).toEqual(["https://api.example.invalid/practice-access/compatibility","https://api.example.invalid/practice-access"]);
-    expect(native.plugin.getToken).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.map(([url])=>url)).toEqual(["https://api.example.invalid/practice-access/compatibility","https://api.example.invalid/practice-access","https://api.example.invalid/practice-access/setup"]);
+    expect(native.plugin.getToken).toHaveBeenCalledTimes(3);
     for(const [,options] of fetchMock.mock.calls){
       expect(new Headers(options?.headers).get("X-Cosmas-Workspace-Protocol")).toBe("1");
       expect(new Headers(options?.headers).get("Authorization")).toBe(`Bearer ${token}`);
@@ -91,9 +93,9 @@ describe("native workspace session", () => {
   });
   it("signs in explicitly and acquires a fresh token for every request", async () => {
     const native = harness(signedOut); await render(native); expect(fetchMock).not.toHaveBeenCalled();
-    await click("Sign in"); await click("Choose an encounter"); await click("Refresh encounters");
-    expect(native.plugin.signIn).toHaveBeenCalledTimes(1); expect(native.plugin.getToken).toHaveBeenCalledTimes(2);
-    expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: first.revision }], [{ expectedRevision: first.revision }]]);
+    await click("Sign in"); await click("Visits and notes"); await click("Visits and notes");
+    expect(native.plugin.signIn).toHaveBeenCalledTimes(1); expect(native.plugin.getToken).toHaveBeenCalledTimes(3);
+    expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: first.revision }], [{ expectedRevision: first.revision }], [{ expectedRevision: first.revision }]]);
     for (const [, options] of fetchMock.mock.calls) {
       expect(new Headers(options?.headers).get("Authorization")).toBe(`Bearer ${token}`);
       expect(options?.credentials).toBe("omit");
@@ -109,9 +111,9 @@ describe("native workspace session", () => {
     expect(container.textContent).not.toContain("Choose an encounter");
     expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
     native.set(second); await act(async () => signin.resolve());
-    await click("Choose an encounter");
+    await click("Visits and notes");
     expect(native.plugin.signIn).toHaveBeenCalledOnce();
-    expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: second.revision }]]);
+    expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: second.revision }], [{ expectedRevision: second.revision }]]);
     expect(container.textContent).toContain("Private invented label");
   });
   it("keeps a failed recovery closed and allows sign-out when session reads recover", async () => {
@@ -128,30 +130,31 @@ describe("native workspace session", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
   it("discards private labels and a pending token when identity changes", async () => {
-    const native = harness(); await render(native); await click("Choose an encounter");
+    const native = harness(); await render(native); await click("Visits and notes");
     const late = deferred<unknown>(); native.plugin.getToken.mockReturnValueOnce(late.promise);
-    await click("Refresh encounters"); await act(async () => native.emit(second));
+    await click("Visits and notes"); await act(async () => native.emit(second));
     expect(container.textContent).not.toContain("Private invented label");
+    const beforeLate=fetchMock.mock.calls.length;
     await act(async () => late.resolve({ token, revision: first.revision }));
-    expect(fetchMock).toHaveBeenCalledTimes(1); expect(container.textContent).toContain("Choose an encounter");
+    expect(fetchMock).toHaveBeenCalledTimes(beforeLate); expect(container.textContent).toContain("Choose an encounter");
   });
   it("keeps the current workspace through same-account parent renders and native checks", async () => {
     vi.useFakeTimers();
-    const native = harness(); await render(native); await click("Choose an encounter");
+    const native = harness(); await render(native); await click("Visits and notes");
     await render(native); await act(async()=>native.emit({...first}));
     await act(async()=>vi.advanceTimersByTimeAsync(5_000));
     expect(container.textContent).toContain("Private invented label");
-    expect(fetchMock).toHaveBeenCalledOnce();
-    await click("Refresh encounters");
-    expect(native.plugin.getToken).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    await click("Visits and notes");
+    expect(native.plugin.getToken).toHaveBeenCalledTimes(3);
   });
   it("closes on logout, rejects late tokens, and offers a safe retry after failure", async () => {
-    const native = harness(); await render(native); await click("Choose an encounter");
+    const native = harness(); await render(native); await click("Visits and notes");
     const late = deferred<unknown>(); native.plugin.getToken.mockReturnValueOnce(late.promise);
-    await click("Refresh encounters"); const logout = deferred<void>(); native.plugin.signOut.mockReturnValueOnce(logout.promise);
+    await click("Visits and notes"); const logout = deferred<void>(); native.plugin.signOut.mockReturnValueOnce(logout.promise);
     await click("Sign out"); expect(container.textContent).not.toContain("Private invented label");
     await act(async () => { native.emit(first); late.resolve({ token, revision: first.revision }); });
-    expect(container.textContent).not.toContain("Choose an encounter"); expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(container.textContent).not.toContain("Choose an encounter"); expect(fetchMock).toHaveBeenCalledTimes(2);
     native.set(pending); await act(async () => logout.reject(new Error("secret provider detail")));
     expect(container.textContent).toContain("Retry sign-out"); expect(container.textContent).not.toContain("secret provider detail");
     await click("Retry sign-out"); expect(container.textContent).toContain("Sign in to Cosmas");
@@ -163,7 +166,7 @@ describe("native workspace session", () => {
     expect(container.textContent).not.toContain("Choose an encounter");
   });
   it("preserves private UI on an unchanged poll and closes it on malformed state", async () => {
-    vi.useFakeTimers(); const native = harness(); await render(native); await click("Choose an encounter");
+    vi.useFakeTimers(); const native = harness(); await render(native); await click("Visits and notes");
     await act(async () => { await vi.advanceTimersByTimeAsync(5_000); });
     expect(container.textContent).toContain("Private invented label");
     await act(async () => native.emit({ ...first, identity: second.identity }));
@@ -172,23 +175,23 @@ describe("native workspace session", () => {
   });
   it("ignores pending actions and tokens from a replaced adapter", async () => {
     const old = harness(); await render(old); const late = deferred<unknown>(); old.plugin.getToken.mockReturnValueOnce(late.promise);
-    await click("Choose an encounter"); const logout = deferred<void>(); old.plugin.signOut.mockReturnValueOnce(logout.promise);
-    await click("Sign out"); const fresh = harness(second); await render(fresh); await click("Choose an encounter");
+    await click("Visits and notes"); const logout = deferred<void>(); old.plugin.signOut.mockReturnValueOnce(logout.promise);
+    await click("Sign out"); const fresh = harness(second); await render(fresh); await click("Visits and notes");
     await act(async () => { logout.resolve(); late.resolve({ token, revision: first.revision }); old.emit(pending); });
-    expect(fetchMock).toHaveBeenCalledTimes(1); expect(container.textContent).toContain("Private invented label");
+    expect(fetchMock).toHaveBeenCalledTimes(3); expect(container.textContent).toContain("Private invented label");
     expect(fresh.plugin.getState).toHaveBeenCalledTimes(1); expect(old.listeners.size).toBe(0);
   });
   it("cleans up strict-mode subscriptions and denies tokens after unmount", async () => {
     const native = harness(); await act(async () => root.render(createElement(StrictMode, null,
       createElement(NativeAuthenticatedWorkspace, { plugin: native.plugin, available: true }))));
     expect(native.listeners.size).toBe(1); const late = deferred<unknown>(); native.plugin.getToken.mockReturnValueOnce(late.promise);
-    await click("Choose an encounter"); await act(async () => root.render(null));
+    await click("Visits and notes"); const beforeUnmount=fetchMock.mock.calls.length; await act(async () => root.render(null));
     await act(async () => late.resolve({ token, revision: first.revision }));
-    expect(fetchMock).not.toHaveBeenCalled(); expect(native.listeners.size).toBe(0);
+    expect(fetchMock).toHaveBeenCalledTimes(beforeUnmount); expect(native.listeners.size).toBe(0);
   });
   it.each([null, { token, revision: second.revision }, { token: "opaque-capture-grant", revision: first.revision }])(
     "never submits malformed or mismatched token replies", async reply => {
-      const native = harness(); native.plugin.getToken.mockResolvedValue(reply); await render(native); await click("Choose an encounter");
+      const native = harness(); native.plugin.getToken.mockResolvedValue(reply); await render(native); await click("Visits and notes");
       expect(fetchMock).not.toHaveBeenCalled();
     });
 });

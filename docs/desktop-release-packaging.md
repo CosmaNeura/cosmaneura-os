@@ -51,3 +51,12 @@ install, launch, publish an update or authorize distribution. Signing must follo
 the archive/fuse changes. Installed Electron/ASAR startup and native login still
 require the deferred device acceptance; byte verification does not replace it.
 The current iPhone device compiler product is unaffected by this desktop change.
+
+First-use desktop releases now record `sourceProvenance` (the CosmasOS Git
+commit, tree and clean-state flag) in the application configuration and hardened
+package receipt. This is separate from the pinned Scribe `source_ref` used to
+compose the shell. Operational composition refuses uncommitted OS source.
+`CosmaBot → About CosmaBot` identifies the installed version; `CosmaBot → Update
+CosmaBot…` explains the manual matching-package update path. Automatic downloads
+are not implemented. A client/service contract mismatch keeps saved editors and
+recording Stop available while new dispatch is paused.

@@ -8,6 +8,8 @@ export type AccessRequest = {
 export type AccessStatus = {contract_version:1; state:'connected'|'request_required'|AccessRequest['state']; role:'owner'|'member'|null; request:AccessRequest|null};
 export type AccessReview = {request_id:string; review_sha256:string; confirm:true};
 export type AccessDecision = AccessReview & {decision:'approve'|'decline'};
+export type PracticeSetupStatus = {contract_version:1;state:'owner_setup'|'owner_ready'|'member_ready'|'join_existing'|'solo_setup_available';practice:{display_name:string;specialty:string|null}|null;display_name:string|null;can_start_practice:boolean};
+export type CompletePracticeSetup = {idempotency_key:string;display_name:string;practice_name:string;specialty:string|null;confirm:true};
 export const invalidAccess = ():never => {throw new WorkspaceApiError(502);};
 export function accessObject(value:unknown, keys:string):value is Record<string,unknown> {
   return vendorObject(value) && Object.keys(value).sort().join(',')===keys &&
@@ -17,6 +19,23 @@ export function accessObject(value:unknown, keys:string):value is Record<string,
 export const accessName = (value:unknown):value is string => typeof value==='string' && value.length>0 &&
   [...value].length<=120 && value===value.trim() && !/[\u0000-\u001f\u007f]/.test(value) &&
   new TextDecoder().decode(new TextEncoder().encode(value))===value;
+export function validatePracticeSetup(value:unknown):PracticeSetupStatus {
+  if(!accessObject(value,'can_start_practice,contract_version,display_name,practice,state')||value.contract_version!==1||
+    !['owner_setup','owner_ready','member_ready','join_existing','solo_setup_available'].includes(value.state as string)||
+    typeof value.can_start_practice!=='boolean'||value.can_start_practice!==(value.state==='solo_setup_available'))return invalidAccess();
+  const hasPractice=['owner_setup','owner_ready','member_ready'].includes(value.state as string);
+  if(hasPractice?typeof value.display_name!=='string'||!value.display_name.trim()||value.display_name.length>200:value.display_name!==null)return invalidAccess();
+  if(hasPractice? !accessObject(value.practice,'display_name,specialty')||typeof value.practice.display_name!=='string'||
+    !value.practice.display_name.trim()||value.practice.display_name.length>200||
+    value.practice.specialty!==null&&!accessName(value.practice.specialty):value.practice!==null)return invalidAccess();
+  return value as PracticeSetupStatus;
+}
+export function validateCompletePracticeSetup(value:unknown):CompletePracticeSetup {
+  if(!accessObject(value,'confirm,display_name,idempotency_key,practice_name,specialty')||
+    !vendorUuid(value.idempotency_key)||!accessName(value.display_name)||!accessName(value.practice_name)||
+    value.specialty!==null&&!accessName(value.specialty)||value.confirm!==true)throw new WorkspaceApiError(422,'invalid_practice_access_request');
+  return {...value} as CompletePracticeSetup;
+}
 const digest = (value:unknown):value is string => typeof value==='string' && /^[a-f0-9]{64}$/.test(value);
 function timestamp(value:unknown):value is string {
   if(typeof value!=='string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?\+00:00$/.test(value))return false;

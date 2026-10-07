@@ -1,4 +1,5 @@
-import {app, BrowserWindow, dialog, ipcMain, protocol, session, shell, safeStorage, powerMonitor} from 'electron';
+import {app, BrowserWindow, dialog, ipcMain, protocol, session, shell, safeStorage, powerMonitor, Menu} from 'electron';
+import {desktopMenuTemplate} from './desktop-update-guidance.mjs';
 import {readFile, mkdir} from 'node:fs/promises';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
@@ -74,6 +75,8 @@ cleanupOnConfirmedQuit(app,cleanup,{beforeCleanup:()=>captureHost?.close(),onFai
 }});
 
 async function bootstrap() {
+  app.setAboutPanelOptions({applicationName:'CosmaBot',applicationVersion:config.appVersion,version:config.buildNumber});
+  Menu.setApplicationMenu(Menu.buildFromTemplate(desktopMenuTemplate({app,dialog,config})));
   await mkdir(stateDirectory, {recursive: true, mode: 0o700});
   const createHelper = async options => (await preparePackagedAuthHelper(root, app.getPath('temp')))(options);
   auth = await createDesktopAuthSession({enabled: true, createHelper, accessStore: createAuthAccessStore(stateDirectory)});

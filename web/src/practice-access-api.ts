@@ -5,7 +5,7 @@ import {WorkspaceApiError,type WorkspaceIdentity,type AuthenticatedWorkspaceIden
 import {assertCurrentDesktopSession,workspaceAuthHeaders} from './workspace-auth-headers';
 import {permittedWorkspaceApi} from './workspace-origin';
 import {parseVendorJson,vendorUuid} from './vendor-contract';
-import {accessName,accessObject,invalidAccess,validateAccessStatus,validateAccessList,validateAccessDecision,validateAccessReview,type AccessReview,type AccessDecision} from './practice-access-contract';
+import {accessName,accessObject,invalidAccess,validateAccessStatus,validateAccessList,validateAccessDecision,validateAccessReview,validatePracticeSetup,validateCompletePracticeSetup,type CompletePracticeSetup,type AccessReview,type AccessDecision} from './practice-access-contract';
 
 const deadlineMs=15000;
 const invalid=invalidAccess;
@@ -105,6 +105,8 @@ async function send<T>(identity:WorkspaceIdentity,path:string,validate:(value:un
 }
 
 export const practiceAccessApi={
+  setup:(identity:WorkspaceIdentity,signal?:AbortSignal)=>send(identity,'/practice-access/setup',validatePracticeSetup,undefined,signal),
+  confirmSetup:(identity:WorkspaceIdentity,command:CompletePracticeSetup,signal?:AbortSignal)=>send(identity,'/practice-access/setup/complete',validatePracticeSetup,validateCompletePracticeSetup(command),signal),
   compatibility:(identity:WorkspaceIdentity,signal?:AbortSignal)=>send(identity,'/practice-access/compatibility',validateWorkspaceCompatibility,undefined,signal,true),
   members:(identity:WorkspaceIdentity,after:string|null,signal?:AbortSignal)=>{
     if(after!==null&&!vendorUuid(after))throw new WorkspaceApiError(422,'invalid_practice_access_request');

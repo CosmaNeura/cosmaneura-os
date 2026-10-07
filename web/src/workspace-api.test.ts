@@ -12,6 +12,45 @@ describe("signed workspace transport", () => {
   beforeEach(() => vi.stubEnv("VITE_API_BASE", "http://127.0.0.1:8018"));
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+  it('creates and resolves an exact private draft through the signed bounded contract',async()=>{
+    const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>'invented-token'};
+    const body={title:'Private note',idempotency_key:'private-create-key'};
+    const draft={id:workspace,appointment_id:null,label:body.title,revision:1,entries:[],work_candidates:[],
+      private_draft:{title:body.title,state:'unlinked',link_receipt_id:null,linked_at:null}};
+    const fetchMock=vi.fn<typeof fetch>().mockResolvedValueOnce(json(teamFixture())).mockResolvedValueOnce(json(draft))
+      .mockResolvedValueOnce(json({contract_version:1,outcome:'saved',workspace:draft}));
+    vi.stubGlobal('fetch',fetchMock);
+    expect((await workspaceApi.createPrivateDraft(identity,body)).workspace).toEqual(draft);
+    expect((await workspaceApi.resolvePrivateDraft(identity,body)).workspace).toEqual(draft);
+    const create=fetchMock.mock.calls[1],resolve=fetchMock.mock.calls[2];
+    expect(create[0]).toBe('http://127.0.0.1:8018/workspaces/private-drafts');
+    expect(resolve[0]).toBe('http://127.0.0.1:8018/workspaces/private-drafts/resolve');
+    expect(create[1]?.body).toBe(resolve[1]?.body);
+    expect(new Headers(create[1]?.headers).get('X-Cosmas-Private-Draft')).toBe('1');
+    expect(new Headers(create[1]?.headers).get('Authorization')).toBe('Bearer invented-token');
+  });
+
+  it('refuses half-linked or foreign private-draft receipts and patient authority on create',async()=>{
+    const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>'invented-token'};
+    const fetchMock=vi.fn<typeof fetch>().mockResolvedValue(json({contract_version:1,outcome:'saved',workspace:{
+      id:workspace,appointment_id:appointment,label:'Private note',revision:1,entries:[],work_candidates:[],
+      private_draft:{title:'Private note',state:'unlinked',link_receipt_id:null,linked_at:null}}}));
+    vi.stubGlobal('fetch',fetchMock);
+    await expect(workspaceApi.resolvePrivateDraft(identity,{title:'Private note',idempotency_key:'private-create-key'})).rejects.toMatchObject({status:503});
+    await expect(workspaceApi.createPrivateDraft(identity,{title:'Private note',idempotency_key:'private-create-key',appointment_id:appointment} as never)).rejects.toMatchObject({status:422});
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('bounds uncertain private-draft responses and never retries them automatically',async()=>{
+    vi.useFakeTimers();
+    const fetchMock=vi.fn<typeof fetch>(()=>new Promise(()=>{}));vi.stubGlobal('fetch',fetchMock);
+    const pending=workspaceApi.resolvePrivateDraft({mode:'clerk_jwt',getToken:async()=>'invented-token'},
+      {title:'Private note',idempotency_key:'private-create-key'});
+    const rejected=expect(pending).rejects.toMatchObject({status:503});
+    await vi.advanceTimersByTimeAsync(15000);await rejected;
+    expect(fetchMock).toHaveBeenCalledOnce();expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
+  });
+
   it("bounds a stalled team read and aborts its request", async () => {
     vi.useFakeTimers();
     const fetchMock = vi.fn<typeof fetch>(() => new Promise(() => {})); vi.stubGlobal("fetch", fetchMock);

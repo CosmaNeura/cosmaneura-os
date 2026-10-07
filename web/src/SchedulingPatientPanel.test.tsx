@@ -14,7 +14,7 @@ import {validateSchedulingPatientRecovery,type SchedulingPatientRecovery} from '
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const identity={mode:'clerk_jwt' as const,getToken:async()=> 'invented-patient-token'},address=editorAddress(uuid(1),'scheduling-patient');
-let root:Root,host:HTMLDivElement,idb:IDBFactory,journal:DraftJournal,access:EditorRecoveryAccess|null,workspace:Workspace,scope:string,failWrites:number,requests:SchedulingPatientCommand[],afterWrite:((value:DraftValue|null)=>Promise<void>)|null;
+let root:Root,host:HTMLDivElement,idb:IDBFactory,journal:DraftJournal,access:EditorRecoveryAccess|null,workspace:Workspace&{appointment_id:string},scope:string,failWrites:number,requests:SchedulingPatientCommand[],afterWrite:((value:DraftValue|null)=>Promise<void>)|null;
 const linked=vi.fn(),denied=vi.fn(),busyChanged=vi.fn();
 const json=(v:unknown)=>new Response(JSON.stringify(v),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 async function choice(n=1):Promise<SchedulingPatientChoice>{const fields={choice_ref:uuid(10+n),display_name:n===1?'Shawn Café':'Shawn Other',birth_date:n===1?null:'1980-04-12',subject_revision:1};return {...fields,identity_sha256:await schedulingPatientDigest('cosmas-scheduling-patient-identity.v1',fields)};}

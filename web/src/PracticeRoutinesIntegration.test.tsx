@@ -28,7 +28,7 @@ it("opens private briefs before selecting or writing any encounter",async()=>{
     await act(async()=>[...container.querySelectorAll("button")].find(b=>b.textContent==="Practice work")!.click());
     await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.textContent).toContain("Private work briefs");});expect(container.textContent).toContain("Work observed on 2026-09-21");
     expect(container.querySelector('[aria-label="Configure Provider Team"]')).not.toBeNull();
-    expect(workspaceApi.team).toHaveBeenCalledTimes(2);expect(workspaceApi.open).not.toHaveBeenCalled();expect(workspaceApi.catalog).not.toHaveBeenCalled();
+    expect(workspaceApi.team).toHaveBeenCalledTimes(3);expect(workspaceApi.open).not.toHaveBeenCalled();expect(workspaceApi.catalog).not.toHaveBeenCalled();
   }finally{await act(async()=>root.unmount());container.remove();}
 });
 

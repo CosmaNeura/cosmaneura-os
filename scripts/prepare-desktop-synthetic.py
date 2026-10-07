@@ -12,6 +12,10 @@ import shutil
 import subprocess
 from pathlib import Path
 
+_source_spec = importlib.util.spec_from_file_location("desktop_source_provenance", Path(__file__).with_name("desktop_source_provenance.py"))
+_source_module = importlib.util.module_from_spec(_source_spec)
+_source_spec.loader.exec_module(_source_module)
+
 _beta_spec = importlib.util.spec_from_file_location("beta_profile_build", Path(__file__).with_name("beta_profile_build.py"))
 if _beta_spec is None or _beta_spec.loader is None:
     raise ValueError("Beta profile validator is unavailable.")
@@ -165,6 +169,7 @@ def main():
             parser.error("The web bundle must contain only deployable static assets.")
         if path.is_file():
             files.append(path)
+    source_provenance = _source_module.provenance(root, require_clean=operational)
     output.mkdir(parents=True)
     app = output / "app"
     app.mkdir()
@@ -221,6 +226,7 @@ def main():
             shutil.copyfile(root / "clients/desktop" / filename, app / filename)
         shutil.copyfile(root / "clients/desktop/cosmaneura-navigation.mjs", app / "cosmaneura-navigation.mjs")
         shutil.copyfile(root / "clients/desktop/native-identity-config.mjs", app / "native-identity-config.mjs")
+        shutil.copyfile(root / "clients/desktop/desktop-update-guidance.mjs", app / "desktop-update-guidance.mjs")
         shutil.copyfile(root / 'clients/desktop/scheduling-navigation.mjs', app / 'scheduling-navigation.mjs')
         shutil.copyfile(root / 'clients/desktop/google-navigation.mjs', app / 'google-navigation.mjs')
         shutil.copyfile(root / 'clients/desktop/microsoft-navigation.mjs', app / 'microsoft-navigation.mjs')
@@ -241,6 +247,7 @@ def main():
         **({"nativeCaptureEnabled": native_capture} if operational else {}),
         "appVersion": args.app_version,
         "buildNumber": args.build_number,
+        "sourceProvenance": source_provenance,
         "cosmaneuraWebOrigin": args.cosmaneura_web_origin,
         "googleConnectionClientId": args.google_connection_client_id,
         "googleConnectionCallbackUri": args.google_connection_callback_uri,
@@ -264,6 +271,7 @@ def main():
     shutil.copytree(web, app / "public")
     (output / "composition.json").write_text(json.dumps({
         "source_ref": SOURCE_REF, "source_sha256": hashes,
+        "os_source_provenance": source_provenance,
         "purpose": "operational-beta-build-input" if operational else "local-synthetic-unsigned", "electron_version": "43.4.1",
         "composed_sha256": {str(path.relative_to(output)): hashlib.sha256(path.read_bytes()).hexdigest()
                             for path in sorted(output.rglob("*")) if path.is_file()},

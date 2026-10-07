@@ -25,6 +25,7 @@ from cosmas_os.config import Settings
 from cosmas_os.db import Base
 from cosmas_os.models import AuditEvent, BoxContext, ExternalIdentity, Principal
 from cosmas_os.practice_access_models import PracticeAccessRequest
+from cosmas_os.practice_setup_models import PracticeOwnerReservation, PracticeSetupProfile
 
 
 @pytest.fixture
@@ -46,7 +47,7 @@ def case(engine):
 
 def _practice_access_case(engine):
     tables = [BoxContext.__table__, Principal.__table__, ExternalIdentity.__table__,
-              AuditEvent.__table__, PracticeAccessRequest.__table__]
+              AuditEvent.__table__, PracticeAccessRequest.__table__, PracticeOwnerReservation.__table__, PracticeSetupProfile.__table__]
     Base.metadata.create_all(engine, tables=tables)
     factory = sessionmaker(engine, autoflush=False)
     values = json.loads((Path(__file__).parents[1] / "fixtures/hosted-workspace-settings.json").read_text())

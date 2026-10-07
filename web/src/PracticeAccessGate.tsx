@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {practiceAccessApi} from './practice-access-api';
-import {accessCode,accessName,type AccessStatus} from './practice-access-contract';
+import {accessCode,accessName,type AccessStatus,type PracticeSetupStatus,type CompletePracticeSetup} from './practice-access-contract';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import './practice-access.css';
 
@@ -37,6 +37,10 @@ export function usePracticeAccessTask(identity:AuthenticatedWorkspaceIdentity) {
 export function PracticeAccessGate({identity,accountControls,children}:{identity:AuthenticatedWorkspaceIdentity;accountControls:ReactNode;children:(access:PracticeAccessContext)=>ReactNode}) {
   const [observed,setObserved]=useState<{identity:AuthenticatedWorkspaceIdentity;status:AccessStatus}|null>(null);
   const [name,setName]=useState(''),[error,setError]=useState(''),[uncertain,setUncertain]=useState(false);
+  const [setup,setSetup]=useState<{identity:AuthenticatedWorkspaceIdentity;value:PracticeSetupStatus}|null>(null);
+  const [practiceName,setPracticeName]=useState(''),[specialty,setSpecialty]=useState('');
+  const [entry,setEntry]=useState<'choose'|'solo'|'join'>('choose');
+  const setupCommand=useRef<CompletePracticeSetup|null>(null);
   const requestKey=useRef<{name:string;key:string}|null>(null);
   const {busy,run}=usePracticeAccessTask(identity);
   const status=observed?.identity===identity?observed.status:null;
@@ -44,17 +48,29 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
     if(['cancelled','declined','expired','connected'].includes(value.state))requestKey.current=null;
     setObserved({identity,status:value});setUncertain(false);setError('');
   },[identity]);
-  const fail=useCallback((cause:unknown)=>{if(accessDenied(cause))setObserved(null);setError(accessFailure(cause));},[]);
-  const check=useCallback(()=>run(signal=>practiceAccessApi.read(identity,signal),accept,fail),[identity,run,accept,fail]);
-  useEffect(()=>{setObserved(null);setName('');setError('');setUncertain(false);requestKey.current=null;void check();},[check]);
+  const fail=useCallback((cause:unknown)=>{if(accessDenied(cause)){setObserved(null);setSetup(null);}setError(accessFailure(cause));},[]);
+  const acceptSetup=useCallback((value:PracticeSetupStatus)=>{
+    const pending=value.state==='owner_ready'?null:setupCommand.current;
+    setSetup({identity,value});setPracticeName(pending?.practice_name??value.practice?.display_name??'My practice');
+    if(pending?.display_name??value.display_name)setName(pending?.display_name??value.display_name??'');
+    setSpecialty(pending?.specialty??value.practice?.specialty??'');
+    if(value.state==='owner_ready'){setupCommand.current=null;setUncertain(false);}
+    else if(setupCommand.current)setUncertain(false);
+  },[identity]);
+  const check=useCallback(()=>run(async signal=>{
+    const [status,profile]=await Promise.all([practiceAccessApi.read(identity,signal),practiceAccessApi.setup(identity,signal)]);
+    return {status,profile};
+  },value=>{accept(value.status);acceptSetup(value.profile);},fail),[identity,run,accept,acceptSetup,fail]);
+  useEffect(()=>{setObserved(null);setSetup(null);setName('');setPracticeName('');setSpecialty('');setEntry('choose');setError('');setUncertain(false);requestKey.current=null;setupCommand.current=null;void check();},[check]);
   useEffect(()=>{
     if(status?.state!=='pending')return;
     const refresh=()=>{if(document.visibilityState==='visible')void check();};
     const timer=window.setInterval(refresh,15000);document.addEventListener('visibilitychange',refresh);
     return ()=>{clearInterval(timer);document.removeEventListener('visibilitychange',refresh);};
   },[status?.state,check]);
-  const onAccessLost=useCallback(()=>{setObserved(null);setError('Practice access changed. Check your access to continue.');},[]);
-  if(status?.state==='connected' && status.role)return children({role:status.role,onAccessLost});
+  const onAccessLost=useCallback(()=>{setObserved(null);setSetup(null);setError('Practice access changed. Check your access to continue.');},[]);
+  const profile=setup?.identity===identity?setup.value:null;
+  if(status?.state==='connected' && status.role&&profile&&(profile.state==='owner_ready'||profile.state==='member_ready'))return children({role:status.role,onAccessLost});
   const request=status?.request;
   const mayRequest=status && ['request_required','cancelled','declined','expired'].includes(status.state);
   async function submit(){
@@ -70,10 +86,40 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
     setError('');setUncertain(true);
     await run(signal=>practiceAccessApi.cancel(identity,{request_id:request.request_id,review_sha256:request.review_sha256,confirm:true},signal),accept,fail);
   }
+  async function finishSetup(){
+    if(busy||uncertain||!profile||!['owner_setup','solo_setup_available'].includes(profile.state))return;
+    const practice=practiceName.trim(),display=name.trim(),choice=specialty.trim()||null;
+    if(!accessName(practice)||!accessName(display)||choice!==null&&!accessName(choice))return;
+    const command=setupCommand.current??{idempotency_key:crypto.randomUUID(),practice_name:practice,display_name:display,specialty:choice,confirm:true};
+    setupCommand.current=command;setUncertain(true);setError('');
+    await run(signal=>practiceAccessApi.confirmSetup(identity,command,signal),value=>{
+      acceptSetup(value);setObserved({identity,status:{contract_version:1,state:'connected',role:'owner',request:null}});
+    },fail);
+  }
+  const showSetup=profile?.state==='owner_setup'||entry==='solo'&&profile?.can_start_practice;
+  if(showSetup)return <main className="practice-access-gate practice-quick-setup">
+    <nav aria-label="Account and organization">{accountControls}</nav>
+    <p className="practice-setup-kicker">YOUR PRACTICE · QUICK SETUP</p><h1>Let's get you ready.</h1>
+    <p>Confirm your practice. Your provider team and first private note are next.</p>
+    {error&&<p role="alert">{error}</p>}
+    <div className="practice-setup-fields">
+      <label>Practice name<input maxLength={120} value={practiceName} disabled={busy||uncertain||setupCommand.current!==null} onChange={event=>setPracticeName(event.target.value)}/></label>
+      <label>Your name<input autoComplete="name" maxLength={120} value={name} disabled={busy||uncertain||setupCommand.current!==null} onChange={event=>setName(event.target.value)}/></label>
+      <label>Specialty <span>optional</span><input maxLength={120} value={specialty} disabled={busy||uncertain||setupCommand.current!==null} placeholder="General practice" onChange={event=>setSpecialty(event.target.value)}/></label>
+    </div>
+    <p>No email, calendar or patient portal is needed to start a private note.</p>
+    <button className="practice-setup-primary" disabled={busy||uncertain||!accessName(practiceName.trim())||!accessName(name.trim())} onClick={()=>void finishSetup()}>Continue to my workspace</button>
+    {uncertain&&<p role="status">Setup may have finished. Check setup before trying again.</p>}
+    <button disabled={busy} onClick={()=>void check()}>Check setup</button>
+  </main>;
   return <main className="practice-access-gate">
     <nav aria-label="Account and organization">{accountControls}</nav>
-    <h1>Join your practice</h1>
-    <p>Your practice owner approves access to this workspace.</p>
+    <h1>{entry==='join'||request?'Join your practice':'Welcome to your practice workspace'}</h1>
+    {entry==='choose'&&!request&&profile&&<div className="practice-entry-choices">
+      <button onClick={()=>setEntry('solo')}>Set up my practice</button><button onClick={()=>setEntry('join')}>Join an existing practice</button>
+    </div>}
+    {entry==='solo'&&!profile?.can_start_practice&&<section><h2>Set up my practice</h2><p>This sign-in belongs to an existing practice or has no reserved owner workspace. A new practice must be authorized before setup; joining this practice does not make you its owner.</p><button onClick={()=>setEntry('choose')}>Back</button></section>}
+    {(entry==='join'||request)&&<p>Your practice owner approves access to this workspace.</p>}
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">Checking practice access…</p>}
     {request && <section aria-label="Your access request">
@@ -87,7 +133,7 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
       {status?.state==='cancelled' && <p>This request was cancelled.</p>}
       {status?.state==='approved' && <p>Your request was approved. Check access to open the workspace.</p>}
     </section>}
-    {mayRequest && <form onSubmit={event=>{event.preventDefault();void submit();}}>
+    {mayRequest&&entry==='join' && <form onSubmit={event=>{event.preventDefault();void submit();}}>
       <label>Your name<input autoComplete="name" maxLength={120} value={name} disabled={busy||uncertain} onChange={event=>setName(event.target.value)}/></label>
       <p>Use the name your practice owner knows. They will see this name and your matching code.</p>
       <button type="submit" disabled={busy||uncertain||!accessName(name.trim())}>Request practice access</button>

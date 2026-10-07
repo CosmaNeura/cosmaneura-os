@@ -21,7 +21,7 @@ it.skipIf(!base)('joins through signed real UI, owner approves, pauses/restores 
   const button=(host:HTMLElement,label:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===label)!;
   async function click(host:HTMLElement,label:string){await wait(()=>{expect(button(host,label)).toBeTruthy();expect(button(host,label).disabled).toBe(false);});await act(async()=>button(host,label).click());}
   const gate=()=>ar.render(<PracticeAccessGate identity={applicant} accountControls={<button>Account</button>}>{context=><p>Private workspace: {context.role}</p>}</PracticeAccessGate>);
-  await act(gate);await wait(()=>expect(button(a,'Request practice access'),a.textContent??'').toBeTruthy());expect(a.textContent).not.toContain('Private workspace');
+  await act(gate);await click(a,'Join an existing practice');await wait(()=>expect(button(a,'Request practice access'),a.textContent??'').toBeTruthy());expect(a.textContent).not.toContain('Private workspace');
   await act(async()=>{const input=a.querySelector('input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Invented nurse applicant');input.dispatchEvent(new Event('input',{bubbles:true}));});
   await click(a,'Request practice access');await wait(()=>expect(a.textContent).toContain('Waiting for your practice owner'));
   const code=a.querySelector('.practice-access-code')!.textContent;expect(code).toBeTruthy();

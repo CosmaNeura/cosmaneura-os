@@ -7,8 +7,8 @@ const ready={phase:'ready',revision:id,identity:{userId:'invented',sessionId:'in
 const auth=()=>({getState:async()=>ready,snapshot:()=>ready,getToken:async()=> 'invented.local.token',subscribe:()=>()=>{}});
 const request=(path,method='GET',headers={[header]:'1'},body)=>new Request('app://cosmas/api'+path,{method,headers:{'Content-Type':'application/json','X-Cosmas-Desktop-Session':id,...headers},...(body===undefined?{}:{body})});
 const json=(body='{}',extra={})=>new Response(body,{headers:{'Content-Type':'application/json','Cache-Control':'no-store',...extra}});
-test('admits only the seven exact access routes, without general identity administration',async()=>{
-  for(const [path,method] of [['/practice-access','GET'],['/practice-access/requests','GET'],['/practice-access/request','POST'],['/practice-access/cancel','POST'],['/practice-access/decide','POST'],['/practice-access/members','POST'],['/practice-access/member-change','POST']]){
+test('admits exact access and quick-setup routes, without general identity administration',async()=>{
+  for(const [path,method] of [['/practice-access','GET'],['/practice-access/requests','GET'],['/practice-access/setup','GET'],['/practice-access/setup/complete','POST'],['/practice-access/request','POST'],['/practice-access/cancel','POST'],['/practice-access/decide','POST'],['/practice-access/members','POST'],['/practice-access/member-change','POST']]){
     assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,method),path);
     assert.deepEqual(connectorApiRoute(path,method),{header,input:method==='GET'?0:4096,output:131072,seconds:15,strictResponse:true,errorOutput:2048});
     let calls=0;assert.equal((await proxy(request(path,method,undefined,method==='POST'?'{}':undefined),auth(),async(url,options)=>{

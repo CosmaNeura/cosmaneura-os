@@ -11,7 +11,7 @@ vi.hoisted(() => {vi.stubEnv('VITE_COSMAS_ENV', 'synth_os'); vi.stubEnv('VITE_WO
 vi.mock('./team-setup-api', async () => {const {WorkspaceApiError} = await import('./workspace-api'); return {teamSetupApi: {read: vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 vi.mock('./draft-store', async original => ({...await original<typeof import('./draft-store')>(), privateDraftScope: async (s: string) => s}));
 vi.mock('./workspace-api', async original => {const actual = await original<typeof import('./workspace-api')>(); return {...actual,
-  workspaceApi: {...actual.workspaceApi, team: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), ask: vi.fn()}};});
+  workspaceApi: {...actual.workspaceApi, team: vi.fn(), privateDrafts:vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), ask: vi.fn()}};});
 vi.mock('./ResearchPanelLoader', () => ({ResearchPanelLoader: () => <p>Controlled public research boundary</p>}));
 const identity = {mode: 'clerk_jwt' as const, getToken: async () => 'invented-signed-current-session'};
 const baseTeam = teamFixture(), researchId = uuid(105);
@@ -19,7 +19,7 @@ baseTeam.configuration.bots.push({role: 'research', name: 'Research', instance_i
   response_style: 'brief', include_notebook: true, include_evidence: true});
 const team = teamFixture(baseTeam.configuration); team.capture = {enabled: false}; team.scheduling = {enabled: false};
 let root: Root, host: HTMLDivElement, storage: ReturnType<typeof memoryDraftStorage>, approved: boolean, reads: number, approvals: unknown[], lostApproval: boolean;
-const current: Workspace = {id: uuid(71), appointment_id: uuid(72), label: 'Invented connector review visit', revision: 1,
+const current: Workspace & {appointment_id:string} = {id: uuid(71), appointment_id: uuid(72), label: 'Invented connector review visit', revision: 1,
   entries: [], handoffs: [], work_candidates: [], model_contract_version: 1, model_observed_at: '2026-10-06T15:00:00Z'};
 const row = () => ({contract: 'agent-research.review.v1', workspace_id: current.id, ticket_id: uuid(81), revision_id: uuid(82),
   payload_hash: 'b'.repeat(64), query: 'Evidence on dust exposure and cough in adults', topic: 'literature', sources: ['pubmed'],
@@ -31,12 +31,13 @@ const button = (name: string) => [...host.querySelectorAll<HTMLButtonElement>('b
 async function wait(check: () => void) {for (let i = 0; i < 200; i++) {let passed = false; await act(async () => {await new Promise(r => setTimeout(r, 2)); try {check(); passed = true;} catch {}}); if (passed) return;} check();}
 async function click(name: string) {await wait(() => {expect(button(name), name).toBeTruthy(); expect(button(name)!.disabled, name).toBe(false);}); await act(async () => button(name)!.click());}
 const mount = async () => {root = createRoot(host); await act(async () => root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));};
-const open = async () => {await click('Choose an encounter'); await wait(() => expect(host.querySelector('.team-encounter-option')).toBeTruthy());
+const open = async () => {await click('Visits and notes'); await wait(() => expect(host.querySelector('.team-encounter-option')).toBeTruthy());
   await act(async () => host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
   await wait(() => expect([...host.querySelectorAll('.team-roster button')].find(e => e.querySelector('strong')?.textContent === 'Research')).toBeTruthy());
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(e => e.querySelector('strong')?.textContent === 'Research')!.click());};
 beforeEach(async () => {vi.clearAllMocks(); vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubEnv('VITE_API_BASE', 'http://127.0.0.1:8000');
   storage = memoryDraftStorage(); approved = false; reads = 0; approvals = []; lostApproval = false;
+  vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
   vi.mocked(workspaceApi.team).mockResolvedValue(team); vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id: current.appointment_id, label: current.label, workspace_id: current.id}]);
   vi.mocked(workspaceApi.open).mockResolvedValue({identity, workspace: current, team}); vi.mocked(workspaceApi.read).mockResolvedValue(current);
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {

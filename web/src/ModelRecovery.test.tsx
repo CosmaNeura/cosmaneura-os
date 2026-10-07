@@ -17,7 +17,7 @@ vi.mock('./draft-store',async original=>({...await original<typeof import('./dra
 vi.mock('./model-work-api',async original=>({...await original<typeof import('./model-work-api')>(),modelWorkApi:{resolve:vi.fn()}}));
 vi.mock('./workspace-api',async original=>{const actual=await original<typeof import('./workspace-api')>();return {...actual,workspaceApi:{...actual.workspaceApi,open:vi.fn(),catalog:vi.fn(),team:vi.fn(),read:vi.fn(),ask:vi.fn(),retryHandoff:vi.fn()}};});
 const access={mode:'clerk_jwt' as const,getToken:async()=> 'invented-token'},team=teamFixture(),id=modelUuid(71),address=`workspace:${id}`;
-const original:Workspace={id,appointment_id:modelUuid(72),label:'Invented recovery visit',revision:1,entries:[],work_candidates:[],model_contract_version:1,model_observed_at:modelTimestamp};
+const original:Workspace&{appointment_id:string}={id,appointment_id:modelUuid(72),label:'Invented recovery visit',revision:1,entries:[],work_candidates:[],model_contract_version:1,model_observed_at:modelTimestamp};
 let records:Map<string,DraftRecord>,root:Root,element:HTMLDivElement,failReplacement:boolean,replacementWrites:number;
 const factory=async({scope}:{scope:string}):Promise<DraftStore>=>{let closed=false;return {close(){closed=true;},async read(key){if(closed)throw new DraftStoreError('unavailable');return structuredClone(records.get(scope+key)??{revision:null,value:null});},async write(key,expected,value){
   if(closed)throw new DraftStoreError('unavailable');if((value?.body as NotebookDraft)?.pending&&'previous_model_request' in (value!.body as NotebookDraft).pending!){replacementWrites++;if(failReplacement)throw new DraftStoreError('conflict');}

@@ -20,6 +20,26 @@ class SubmitAccess(BaseModel):
         return value
 
 
+class CompletePracticeSetup(SubmitAccess):
+    practice_name: str = Field(min_length=1, max_length=120, strict=True)
+    specialty: str | None = Field(default=None, max_length=120, strict=True)
+    confirm: bool = Field(strict=True)
+
+    @field_validator("practice_name", "specialty")
+    @classmethod
+    def setup_text(cls, value):
+        if value == "":
+            raise ValueError("setup text must not be empty")
+        return SubmitAccess.name(value) if value is not None else None
+
+    @field_validator("confirm")
+    @classmethod
+    def confirm_setup(cls, value):
+        if value is not True:
+            raise ValueError("confirmation required")
+        return value
+
+
 class ReviewAccess(BaseModel):
     model_config = ConfigDict(extra="forbid")
     request_id: UUID

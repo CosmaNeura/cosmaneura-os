@@ -1,4 +1,4 @@
-.practice-access-gate { max-width: 42rem; margin: 0 auto; padding: max(1.25rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) max(2rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left)); }
+.practice-access-gate { font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; max-width: 42rem; margin: 0 auto; padding: max(1.25rem, env(safe-area-inset-top)) max(1.25rem, env(safe-area-inset-right)) max(2rem, env(safe-area-inset-bottom)) max(1.25rem, env(safe-area-inset-left)); }
 .practice-access-gate nav { display: flex; justify-content: flex-end; gap: .75rem; flex-wrap: wrap; margin-bottom: 2rem; }
 .practice-access-gate form, .practice-access-gate label { display: grid; gap: .75rem; }
 .practice-access-gate form { margin: 1.5rem 0; }
@@ -16,3 +16,8 @@
 .practice-access-actions { display: flex; flex-wrap: wrap; gap: .75rem; }
 .practice-access-code { font-family: ui-monospace, monospace; letter-spacing: .04em; white-space: nowrap; }
 .practice-access-gate [role=alert], .practice-access-panel [role=alert] { padding: .75rem; border: 1px solid #98674a; border-radius: .5rem; }
+.practice-setup-kicker { font-size: .75rem; letter-spacing: .08em; margin-bottom: .75rem; }
+.practice-setup-fields { display: grid; gap: 1rem; margin: 1.5rem 0; }
+.practice-setup-fields label span { font-weight: normal; opacity: .7; }
+.practice-entry-choices { display: flex; flex-wrap: wrap; gap: .75rem; margin: 1.5rem 0; }
+.practice-quick-setup .practice-setup-primary { color: white; background: #244eb0; border: 1px solid #244eb0; border-radius: .5rem; }

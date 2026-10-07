@@ -4,10 +4,19 @@ import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,realpath,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory} from './package-desktop-release.mjs';
+import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory,validateSourceProvenance} from './package-desktop-release.mjs';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
 const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
+
+test('release provenance refuses uncommitted, missing or ambiguous source identity',()=>{
+  const clean={version:1,commit:'a'.repeat(40),tree:'b'.repeat(40),dirty:false};
+  assert.deepEqual(validateSourceProvenance(clean),clean);
+  for(const candidate of [null,[],{}, {...clean,dirty:true},{...clean,version:2},
+    {...clean,commit:[clean.commit]},{...clean,tree:clean.tree.toUpperCase()},
+    {...clean,commit:'missing'},{...clean,extra:true}])
+    assert.throws(()=>validateSourceProvenance(candidate));
+});
 
 async function rendererFixture(t) {
   const app=await realpath(await mkdtemp(join(tmpdir(),'cosmas-renderer-routing-')));

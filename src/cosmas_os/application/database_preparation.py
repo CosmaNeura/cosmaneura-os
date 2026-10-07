@@ -250,6 +250,8 @@ def _apply_runtime_privileges(connection: Connection, runtime: URL) -> None:
         f"GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO {quoted_role}",
         f"GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO {quoted_role}",
         f"REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.audit_events FROM {quoted_role}",
+        f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.practice_owner_reservations FROM {quoted_role}",
+        f"GRANT UPDATE (consumed_at) ON TABLE public.practice_owner_reservations TO {quoted_role}",
         f"REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.alembic_version FROM {quoted_role}",
         f"GRANT SELECT ON TABLE public.alembic_version TO {quoted_role}",
         f"ALTER DEFAULT PRIVILEGES FOR ROLE {quoted_admin} IN SCHEMA public "
@@ -334,9 +336,19 @@ def _verify_runtime_role(runtime_url: str, runtime: URL) -> dict[str, Any]:
                     "NOT has_table_privilege(current_user, format('%I.%I', schemaname, tablename), 'TRIGGER')"
                     "), false) "
                     "FROM pg_tables WHERE schemaname = 'public' "
-                    "AND tablename NOT IN ('alembic_version', 'audit_events')"
+                    "AND tablename NOT IN ('alembic_version', 'audit_events', 'practice_owner_reservations')"
                 )
             ).scalar_one()
+            runtime_dml = runtime_dml and connection.execute(text(
+                "SELECT has_table_privilege(current_user,'public.practice_owner_reservations','SELECT') "
+                "AND has_column_privilege(current_user,'public.practice_owner_reservations','consumed_at','UPDATE') "
+                "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','INSERT') "
+                "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','DELETE') "
+                "AND NOT has_table_privilege(current_user,'public.practice_owner_reservations','UPDATE') "
+                "AND NOT EXISTS (SELECT 1 FROM pg_attribute WHERE attrelid='public.practice_owner_reservations'::regclass "
+                "AND attnum>0 AND NOT attisdropped AND attname<>'consumed_at' "
+                "AND has_column_privilege(current_user,attrelid,attname,'UPDATE'))"
+            )).scalar_one()
             runtime_sequences = connection.execute(
                 text(
                     "SELECT coalesce(bool_and("

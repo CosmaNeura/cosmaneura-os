@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { DesktopAuthenticatedWorkspace } from "./DesktopAuthenticatedWorkspace";
 import { workspaceAuthHeaders } from "./workspace-auth-headers";
 import { request as captureRequest } from "./capture-api";
+import {teamFixture} from "./team-setup-test-fixture";
 import type { NativeAuthState } from "./native-auth";
 
 const id = "00000000-0000-4000-8000-000000000001";
@@ -43,16 +44,17 @@ describe("desktop native workspace", () => {
   }
   it("uses only the native state/session handle for workspace requests and clears labels on logout", async () => {
     const native = fixture(); window.cosmasDesktopAuth = native.port;
-    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async () => Response.json([
+    const fetchMock = vi.fn<typeof fetch>().mockImplementation(async url => Response.json(String(url).endsWith("/provider-team")?teamFixture():[
       { appointment_id: "invented", workspace_id: null, label: "Private desktop encounter" },
     ])); vi.stubGlobal("fetch", fetchMock);
     await act(async () => root.render(createElement(DesktopAuthenticatedWorkspace)));
-    expect(fetchMock).not.toHaveBeenCalled(); await click("Sign in"); await click("Choose an encounter");
+    expect(fetchMock).not.toHaveBeenCalled(); await click("Sign in"); await click("Visits and notes");
     expect(container.textContent).toContain("Private desktop encounter");
-    const headers = new Headers(fetchMock.mock.calls[0][1]?.headers);
+    const catalogCall=fetchMock.mock.calls.find(([url])=>url==="app://cosmas/api/workspaces")!;
+    const headers = new Headers(catalogCall[1]?.headers);
     expect(headers.get("X-Cosmas-Desktop-Session")).toBe(id);
     expect(headers.has("Authorization")).toBe(false); expect(headers.has("X-Box-Id")).toBe(false);
-    expect(fetchMock.mock.calls[0][0]).toBe("app://cosmas/api/workspaces");
+    expect(catalogCall[0]).toBe("app://cosmas/api/workspaces");
     await click("Sign out"); expect(container.textContent).not.toContain("Private desktop encounter");
     expect(container.textContent).toContain("Sign in to Cosmas");
   });
@@ -60,7 +62,7 @@ describe("desktop native workspace", () => {
     const native = fixture(ready); window.cosmasDesktopAuth = native.port;
     let release!: (response: Response) => void;
     vi.stubGlobal("fetch", vi.fn(() => new Promise<Response>(resolve => { release = resolve; })));
-    await act(async () => root.render(createElement(DesktopAuthenticatedWorkspace))); await click("Choose an encounter");
+    await act(async () => root.render(createElement(DesktopAuthenticatedWorkspace))); await click("Visits and notes");
     await act(async () => native.emit(signedOut));
     await act(async () => release(Response.json([{ appointment_id: "invented", workspace_id: null, label: "Old private label" }])));
     expect(container.textContent).not.toContain("Old private label"); expect(container.textContent).toContain("Sign in to Cosmas");

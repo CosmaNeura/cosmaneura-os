@@ -20,7 +20,7 @@ export function WorkspaceCompatibilityGate({identity,accountControls,children}:{
     return run(async signal=>{
       await practiceAccessApi.compatibility(identity,signal);
     },()=>{admitWorkspaceProtocol(identity,generation);setAdmitted(identity);},cause=>setError(cause instanceof WorkspaceApiError && cause.status===426
-      ? 'An update is needed before this workspace can connect. Contact your practice administrator for a compatible app and service.'
+      ? 'An update is needed before this workspace can connect. On desktop, use CosmaBot → Update CosmaBot for installation steps. If the app is current, the practice service needs a compatible update. Then check the connection again.'
       : cause instanceof WorkspaceApiError && [401,403].includes(cause.status)
       ? 'Your secure session could not be checked. Sign in again to continue.'
       : 'The workspace connection could not be checked. Reconnect and try again.'));

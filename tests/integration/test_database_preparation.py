@@ -8,6 +8,7 @@ from uuid import uuid4
 import pytest
 from sqlalchemy import Connection, create_engine, text
 from sqlalchemy.engine import make_url
+from sqlalchemy.exc import DBAPIError
 
 from cosmas_os.application import database_preparation
 from cosmas_os.application.database_preparation import (
@@ -49,6 +50,22 @@ def test_database_preparation_is_idempotent_and_proves_denials() -> None:
         admin_host = make_url(admin_url).host
         assert admin_host is not None
         assert admin_host not in serialized
+        runtime_engine = create_engine(runtime_url)
+        try:
+            with runtime_engine.connect() as connection:
+                permissions = connection.execute(text("SELECT "
+                    "has_table_privilege(current_user,'public.practice_owner_reservations','SELECT') AS read, "
+                    "has_table_privilege(current_user,'public.practice_owner_reservations','INSERT') AS insert, "
+                    "has_table_privilege(current_user,'public.practice_owner_reservations','DELETE') AS delete, "
+                    "has_column_privilege(current_user,'public.practice_owner_reservations','consumed_at','UPDATE') AS consume, "
+                    "has_column_privilege(current_user,'public.practice_owner_reservations','subject','UPDATE') AS subject_update" )).mappings().one()
+                assert dict(permissions) == {"read": True, "insert": False, "delete": False, "consume": True, "subject_update": False}
+            for statement in ("DELETE FROM public.practice_owner_reservations WHERE false",
+                              "UPDATE public.practice_owner_reservations SET subject='forged' WHERE false"):
+                with pytest.raises(DBAPIError), runtime_engine.begin() as connection:
+                    connection.execute(text(statement))
+        finally:
+            runtime_engine.dispose()
     finally:
         engine = create_engine(admin_url)
         try:

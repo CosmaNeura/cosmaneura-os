@@ -87,14 +87,16 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   if (routineContract !== null && (routineContract !== '2' || !routineRun ||
       request.url !== 'app://cosmas/api' + path)) return unavailable(426);
   let connector = connectorApiRoute(path,request.method);
+  const catalogV2 = path === '/connections/catalog' && request.method === 'GET';
   for (const header of CONNECTOR_HEADERS) {
     const value = request.headers.get(header);
-    if (value !== null && (value !== '1' || connector?.header !== header)) return unavailable(426);
+    if (value !== null && (value !== '1' && !(catalogV2 && value === '2') || connector?.header !== header)) return unavailable(426);
   }
   if (connector && !request.headers.has(connector.header)) {
     if (connector.optional) connector = null;
     else return unavailable(426);
   }
+  if (catalogV2 && request.headers.get(connector?.header) === '1') connector = {...connector,output:4096};
   const writeKey = request.headers.get('X-Cosmas-Artifact-Write-Key');
   if (connector?.binaryRequest ? !writeKey || !/^[A-Za-z0-9:_-]{8,100}$/.test(writeKey) : writeKey !== null) return unavailable(400);
   const revision = request.headers.get('X-Cosmas-Desktop-Session');
@@ -167,7 +169,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
         ...(modelContract ? {'X-Cosmas-Model-Contract': modelContract} : {}),
         ...(handoffContract ? {'X-Cosmas-Handoff-Review': handoffContract} : {}),
         ...(routineContract ? {'X-Cosmas-Routine-Contract': routineContract} : {}),
-        ...(connector ? {[connector.header]:'1'} : {}),
+        ...(connector ? {[connector.header]:catalogV2 ? request.headers.get(connector.header) : '1'} : {}),
         ...(writeKey ? {'X-Cosmas-Artifact-Write-Key':writeKey} : {})}, body: request.method === 'POST' || request.method === 'PUT' ? body : undefined,
       redirect: 'error', credentials: 'omit', cache: 'no-store', signal,
     })).then(value => {

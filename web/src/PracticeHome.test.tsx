@@ -1,0 +1,63 @@
+import {act} from 'react';
+import {createRoot,type Root} from 'react-dom/client';
+import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
+import {PracticeHome} from './PracticeHome';
+import {DraftJournal,accountEditorAddress,editorAddress} from './draft-journal';
+import {memoryDraftStorage} from './draft-test-fixture';
+import type {AccountRecoveryAccess} from './account-recovery';
+import {workspaceApi,WorkspaceApiError,type ProviderTeam,type Workspace} from './workspace-api';
+import {validatePrivateDraftRecovery,validatePrivateDraftLinkRecovery} from './private-draft-recovery';
+const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+const team:ProviderTeam={revision:1,recovery_scope:'a'.repeat(64),template_version:'provider-team-v1',llm:{enabled:false,model:'gpt-4.1'},configuration:{practice_context:'',bots:[{role:'chief',name:'Chief',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}]},members:[{role:'chief',agent_id:id(10),name:'Chief',initials:'Ch',description:'Prepare private drafts',prompt:'Saved context',capabilities:[]}]};
+const workspace:Workspace={id:id(1),appointment_id:null,label:'Private note',revision:0,entries:[],work_candidates:[],private_draft:{title:'Private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
+describe('practice Quick start recovery',()=>{
+  let root:Root,container:HTMLDivElement,recovery:AccountRecoveryAccess;
+  const identity={mode:'clerk_jwt' as const,getToken:vi.fn()},opened=vi.fn(),useTeam=vi.fn(),settings=vi.fn();
+  beforeEach(async()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.stubGlobal('crypto',webcrypto);vi.clearAllMocks();
+    recovery={journal:new DraftJournal(await memoryDraftStorage()({scope:'a'.repeat(64)})),authorize:vi.fn().mockResolvedValue(undefined)};
+    vi.spyOn(workspaceApi,'privateDrafts').mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+    vi.spyOn(workspaceApi,'createPrivateDraft').mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
+    vi.spyOn(workspaceApi,'resolvePrivateDraft').mockResolvedValue({contract_version:1,outcome:'saved',workspace:structuredClone(workspace)});
+    vi.spyOn(workspaceApi,'openPrivateDraft').mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
+    container=document.createElement('div');document.body.append(container);root=createRoot(container);
+  });
+  afterEach(async()=>{await act(async()=>root.unmount());recovery.journal.close();container.remove();vi.restoreAllMocks();});
+  async function render(member=identity,configured=team){await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));}
+  async function click(label:string){const button=[...container.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button,label).toBeTruthy();expect(button.disabled).toBe(false);await act(async()=>button.click());}
+  it('opens an actual API-backed private notebook without an appointment or provider read',async()=>{
+    await render();expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();await click('Start a private note');
+    const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];expect(body).toMatchObject({title:'Private note'});
+    expect(opened).toHaveBeenCalledExactlyOnceWith({identity,workspace,team});expect(await recovery.journal.load(accountEditorAddress('private-draft'))).toBeNull();
+  });
+  it('retains a lost reply through remount and resolves the same request without another create',async()=>{
+    vi.mocked(workspaceApi.createPrivateDraft).mockRejectedValueOnce(new WorkspaceApiError(503));await render();await click('Start a private note');
+    const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];expect(container.textContent).toContain('unconfirmed');
+    await act(async()=>root.unmount());root=createRoot(container);await render();await click('Check saved note creation');
+    expect(workspaceApi.resolvePrivateDraft).toHaveBeenCalledExactlyOnceWith(identity,body);expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();expect(opened).toHaveBeenCalledOnce();
+  });
+  it('keeps the original creation after not_found and requires an explicit same-key retry',async()=>{
+    vi.mocked(workspaceApi.createPrivateDraft).mockRejectedValueOnce(new WorkspaceApiError(503));
+    vi.mocked(workspaceApi.resolvePrivateDraft).mockResolvedValueOnce({contract_version:1,outcome:'not_found',workspace:null});
+    await render();await click('Start a private note');const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];
+    await click('Check saved note creation');expect(opened).not.toHaveBeenCalled();expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
+    expect((await recovery.journal.load(accountEditorAddress('private-draft')))?.pending).toBe(body.idempotency_key);
+    await click('Retry same note creation');expect(workspaceApi.createPrivateDraft).toHaveBeenLastCalledWith(identity,body);expect(opened).toHaveBeenCalledOnce();
+  });
+  it('withholds former-account late results and never opens their notebook',async()=>{
+    let finish!:(value:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>void;
+    vi.mocked(workspaceApi.createPrivateDraft).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));await render();await click('Start a private note');
+    const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await render(next);await act(async()=>finish({identity,workspace,team}));expect(opened).not.toHaveBeenCalled();
+  });
+  it('offers safe team activation without per-bot forms or automatic save',async()=>{await render(identity,{...team,revision:0});expect(useTeam).not.toHaveBeenCalled();await click('Use this team');expect(useTeam).toHaveBeenCalledOnce();expect(container.querySelectorAll('input').length).toBe(1);});
+  it('refuses added authority fields and mismatched encrypted request keys',async()=>{
+    const body={title:'Private note',idempotency_key:id(5)},data={contract:'private-draft-recovery.v1' as const,title:'Private note',pending:body};
+    expect(()=>validatePrivateDraftRecovery({...data,patient_id:id(9)})).toThrow();expect(()=>validatePrivateDraftRecovery({...data,pending:{...body,title:'Other'}})).toThrow();
+    await recovery.journal.load(accountEditorAddress('private-draft'));
+    await expect(recovery.journal.persist(accountEditorAddress('private-draft'),{kind:'account-editor',editor:'private-draft',data,pending:id(6)})).rejects.toMatchObject({code:'integrity'});
+    const link={contract:'private-draft-link-recovery.v1',workspace_id:id(1),pending:{expected_revision:1,idempotency_key:id(6),appointment_id:id(7),appointment_link_confirmed:true}};
+    expect(()=>validatePrivateDraftLinkRecovery({...link,pending:{...link.pending,appointment_link_confirmed:false}},id(1))).toThrow();
+    await recovery.journal.load(editorAddress(id(1),'private-draft-link'));
+    await expect(recovery.journal.persist(editorAddress(id(1),'private-draft-link'),{kind:'editor',workspaceId:id(1),editor:'private-draft-link',data:link,pending:id(8)})).rejects.toMatchObject({code:'integrity'});
+  });
+});

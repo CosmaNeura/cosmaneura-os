@@ -3,13 +3,23 @@ import {googleConnectionRequest,type GoogleStatus} from './google-connection-api
 import {microsoftConnectionRequest} from './microsoft-connection-api';
 import {schedulingLoginRequest} from './scheduling-login-api';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
-import type {ConnectionId} from './connection-catalog-api';
+import type {ConnectionCatalog,ConnectionId} from './connection-catalog-api';
 import {observeConnectionStatus,connectionHealth,connectionServices,type ConnectionHealth,type ConnectionService,type PersonalConnection} from './connection-operation-health';
 import {readFaxReadiness,type FaxReadiness} from './fax-readiness-api';
 
 export type ConnectionSummary = {
   label:string; reason:string; action:string; proof?:string; tone:'neutral'|'ready'|'attention'; checkedAt?:number;checkKind?:'account'|'availability';services?:ConnectionService[];accountVersion?:number|null;faxReadiness?:FaxReadiness;
 };
+export function connectionSetupSummary(catalog:ConnectionCatalog,id:ConnectionId):ConnectionSummary|null{
+  const detail=catalog.readiness?.[id];
+  if(detail?.state==='coming_soon')return {label:'Coming soon',reason:id==='payments'?'Live payment collection is not available in this beta.':'A supported production portal has not been installed for this practice.',action:'Check availability later',tone:'neutral',checkKind:'availability'};
+  if(detail?.state==='practice_setup'&&!catalog[id])return {label:'Practice setup required',reason:detail.installed_account==='sandbox_only'?'Only a test account is installed. Your practice needs a supported account before use.':'Your practice administrator needs to finish the supported account setup.',action:'Contact your practice administrator',tone:'attention',checkKind:'availability'};
+  if(!catalog[id])return {label:'Needs setup',reason:'Your practice administrator needs to finish setup.',action:'View requirements',tone:'attention',checkKind:'availability'};
+  if(!detail)return {label:'Not checked',reason:'Setup is enabled. Supported actions and installed accounts have not been checked.',action:'Review accounts and permissions',tone:'neutral'};
+  if(detail.installed_account==='installed')return {label:'Account installed',reason:'A practice account is installed. Review its permissions and each task result separately.',action:'Review installed account',tone:'neutral'};
+  if(detail.installed_account==='sandbox_only')return {label:'Test account only',reason:'This connection is available for sandbox work only.',action:'Review test account',tone:'neutral'};
+  return null;
+}
 export function personalConnectionSummary(provider:PersonalConnection,health:ConnectionHealth,accountLabel:string):ConnectionSummary{
   const services=connectionServices(provider,health),missing=services.find(row=>row.label==='Permission needed'),failed=services.find(row=>row.label==='Last read failed');
   const verified=services.every(row=>row.tone==='ready'),next=services.find(row=>row.tone!=='ready');
