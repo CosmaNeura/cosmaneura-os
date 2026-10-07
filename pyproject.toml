@@ -16,6 +16,7 @@ dependencies = [
     "pydantic-settings>=2.6.0",
     "typer>=0.14.0",
     "httpx>=0.28.0",
+    "jsonschema==4.25.1",
     "python-multipart>=0.0.12",
     "pyjwt[crypto]>=2.15.1",
     "cryptography>=44",
@@ -29,7 +30,6 @@ efax-inbound = [
 ]
 mcp = [
     "mcp==2.2.0",
-    "jsonschema==4.25.1",
 ]
 dev = [
     "pytest>=8.3.0",

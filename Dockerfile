@@ -12,13 +12,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 COPY pyproject.toml uv.lock README.md ./
 RUN printf '%s\n' 'uv==0.12.5 --hash=sha256:3e195ccf1ed60c8bb24a6447ce306441a4181d54b602407e09bc56e963911c15' >/tmp/uv-bootstrap.lock \
     && python -m pip install --no-cache-dir --require-hashes --only-binary=:all: --requirement /tmp/uv-bootstrap.lock \
-    && uv export --offline --frozen --extra efax-inbound --no-dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.lock \
+    && uv export --offline --locked --extra efax-inbound --no-dev --no-emit-project --format requirements-txt --output-file /tmp/requirements.lock \
     && mkdir -p /wheels \
     && python -m pip download --require-hashes --only-binary=:all: --dest /wheels --requirement /tmp/requirements.lock
 COPY src ./src
 COPY migrations ./migrations
 COPY alembic.ini ./
 RUN --network=none python -m pip install --no-index --find-links=/wheels --require-hashes --requirement /tmp/requirements.lock \
+    && python -B -c "import cosmas_os.api.app; from cosmas_os.plugins.runtime import PluginRuntime; from jsonschema import Draft202012Validator; Draft202012Validator.check_schema({'type': 'object'})" \
     && rm -rf /wheels /tmp/requirements.lock /tmp/uv-bootstrap.lock /root/.cache/uv \
     && /usr/local/bin/python -m pip uninstall --yes uv setuptools pip
 COPY fixtures ./fixtures
