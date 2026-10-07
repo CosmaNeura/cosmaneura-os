@@ -3,7 +3,8 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {PracticeHome} from './PracticeHome';
 import {DraftJournal,accountEditorAddress,editorAddress} from './draft-journal';
-import {memoryDraftStorage} from './draft-test-fixture';
+import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
+import {openDraftStore} from './draft-store';
 import type {AccountRecoveryAccess} from './account-recovery';
 import {workspaceApi,WorkspaceApiError,type ProviderTeam,type Workspace} from './workspace-api';
 import {validatePrivateDraftRecovery,validatePrivateDraftLinkRecovery} from './private-draft-recovery';
@@ -15,16 +16,32 @@ describe('practice Quick start recovery',()=>{
   let root:Root,container:HTMLDivElement,recovery:AccountRecoveryAccess;
   const identity={mode:'clerk_jwt' as const,getToken:vi.fn()},opened=vi.fn(),useTeam=vi.fn(),settings=vi.fn();
   beforeEach(async()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.stubGlobal('crypto',webcrypto);vi.clearAllMocks();
-    recovery={journal:new DraftJournal(await memoryDraftStorage()({scope:'a'.repeat(64)})),authorize:vi.fn().mockResolvedValue(undefined)};
+    // fake-indexeddb and Node WebCrypto return Node-realm binary objects.
+    vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
+    recovery={journal:new DraftJournal(await openDraftStore({scope:'a'.repeat(64),native:false,indexedDB:new IDBFactory(),crypto:webcrypto})),authorize:vi.fn().mockResolvedValue(undefined)};
     vi.spyOn(workspaceApi,'privateDrafts').mockResolvedValue({contract_version:1,drafts:[],has_more:false});
     vi.spyOn(workspaceApi,'createPrivateDraft').mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
     vi.spyOn(workspaceApi,'resolvePrivateDraft').mockResolvedValue({contract_version:1,outcome:'saved',workspace:structuredClone(workspace)});
     vi.spyOn(workspaceApi,'openPrivateDraft').mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
     container=document.createElement('div');document.body.append(container);root=createRoot(container);
   });
-  afterEach(async()=>{await act(async()=>root.unmount());recovery.journal.close();container.remove();vi.restoreAllMocks();});
-  async function render(member=identity,configured=team){await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));}
-  async function click(label:string){const button=[...container.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button,label).toBeTruthy();expect(button.disabled).toBe(false);await act(async()=>button.click());}
+  afterEach(async()=>{await act(async()=>root.unmount());recovery.journal.close();container.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+  async function render(member=identity,configured=team){
+    const reads=vi.mocked(workspaceApi.privateDrafts).mock.calls.length;
+    await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    for(let attempt=0;attempt<100&&vi.mocked(workspaceApi.privateDrafts).mock.calls.length===reads;attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+    expect(vi.mocked(workspaceApi.privateDrafts).mock.calls.length).toBeGreaterThan(reads);
+  }
+  async function click(label:string,heldReply=false){
+    const button=[...container.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button,label).toBeTruthy();expect(button.disabled).toBe(false);
+    const calls=vi.mocked(workspaceApi.createPrivateDraft).mock.calls.length;
+    await act(async()=>button.click());
+    if(label==='Start a private note'||label==='Retry same note creation'){
+      for(let attempt=0;attempt<100&&vi.mocked(workspaceApi.createPrivateDraft).mock.calls.length===calls;attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+      expect(vi.mocked(workspaceApi.createPrivateDraft).mock.calls.length).toBe(calls+1);
+    }
+    if(!heldReply)for(let attempt=0;attempt<100&&container.textContent?.includes('Checking…');attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+  }
   it('opens an actual API-backed private notebook without an appointment or provider read',async()=>{
     await render();expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();await click('Start a private note');
     const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];expect(body).toMatchObject({title:'Private note'});
@@ -46,7 +63,7 @@ describe('practice Quick start recovery',()=>{
   });
   it('withholds former-account late results and never opens their notebook',async()=>{
     let finish!:(value:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>void;
-    vi.mocked(workspaceApi.createPrivateDraft).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));await render();await click('Start a private note');
+    vi.mocked(workspaceApi.createPrivateDraft).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));await render();await click('Start a private note',true);
     const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await render(next);await act(async()=>finish({identity,workspace,team}));expect(opened).not.toHaveBeenCalled();
   });
   it('offers safe team activation without per-bot forms or automatic save',async()=>{await render(identity,{...team,revision:0});expect(useTeam).not.toHaveBeenCalled();await click('Use this team');expect(useTeam).toHaveBeenCalledOnce();expect(container.querySelectorAll('input').length).toBe(1);});
