@@ -7,7 +7,7 @@ export function AppleHostedStatus({title,detail,role='alert',children}:{
 }) {
   return <main className="apple-hosted-status">
     <header className="apple-hosted-brand" aria-label="CosmaBot">
-      <span className="apple-hosted-mark" aria-hidden="true">✳</span><span>CosmaBot</span>
+      <svg className="apple-hosted-mark" aria-hidden="true" viewBox="0 0 32 32"><path d="M16 3v26M3 16h26M7 7l18 18M7 25L25 7"/></svg><span>CosmaBot</span>
     </header>
     <section className="apple-hosted-card" role={role} aria-labelledby="apple-hosted-title">
       <p className="apple-hosted-kicker">YOUR PRIVATE PRACTICE WORKSPACE</p>
