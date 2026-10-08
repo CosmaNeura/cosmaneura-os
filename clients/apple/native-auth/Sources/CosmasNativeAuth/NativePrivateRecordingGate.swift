@@ -10,7 +10,7 @@ public struct NativePrivateRecordingConsent: Equatable, Sendable {
               value["method"] as? String == "verbal_attestation",
               let modality = value["modality"] as? String, ["in_person", "virtual", "phone"].contains(modality),
               let language = value["language"] as? String, ["en-US", "en-US+es-US"].contains(language),
-              let regions = value["participant_regions"] as? [String], (1...16).contains(regions.count), Set(regions).count == regions.count,
+              let regions = value["participant_regions"] as? [String], (0...16).contains(regions.count), Set(regions).count == regions.count,
               regions.allSatisfy({ $0.range(of: "^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$", options: .regularExpression) != nil }),
               let raw = value["granted_at"] as? String, raw.range(of: "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}\\.\\d{3}Z$", options: .regularExpression) != nil else { throw NativeAuthError.unavailable }
         let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]

@@ -1,7 +1,14 @@
 import {afterEach, expect, it} from 'vitest';
-import {readRecordingPreferences, recordingRegions, saveRecordingPreferences} from './recording-preferences';
+import {readRecordingPreferences, recordingRegions, saveRecordingPreferences, readPrivateRecordingLanguage, savePrivateRecordingLanguage} from './recording-preferences';
 const owner = 'a'.repeat(64), other = 'b'.repeat(64);
 afterEach(() => localStorage.clear());
+it('remembers private recording language without requiring or changing location', () => {
+  savePrivateRecordingLanguage(owner, 'en-US+es-US');
+  expect(readPrivateRecordingLanguage(owner)).toBe('en-US+es-US');
+  expect(readPrivateRecordingLanguage(other)).toBe('en-US');
+  expect(readRecordingPreferences(owner).regions).toBe('');
+  expect(localStorage.getItem(`cosmas.recording-preferences.v1.${owner}.private-language`)).toBe('en-US+es-US');
+});
 it('remembers only explicit location and language choices in the current owner scope', () => {
   saveRecordingPreferences(owner, {regions:'us-ny, US-NJ',language:'en-US+es-US'});
   expect(readRecordingPreferences(owner)).toEqual({regions:'US-NY, US-NJ',language:'en-US+es-US'});

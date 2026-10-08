@@ -39,17 +39,16 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
   afterEach(async()=>{sources.forEach(s=>s.rejectStop=false);await act(async()=>root.unmount());for(const runtime of runtimes)await runtime.close().catch(()=>{});container.remove();vi.unstubAllGlobals();});
   async function wait(check:()=>boolean){for(let n=0;n<200&&!check();n++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(check()).toBe(true);}
   const status=()=>container.querySelector('.private-recording-status strong')?.textContent;
-  async function render(){await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>['Ready for consent','Saved on this device'].includes(container.querySelector('.private-recording-status strong')?.textContent??''));}
+  async function render(){await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>['Ready for consent','Checking this device’s recording access','Saved on this device'].includes(container.querySelector('.private-recording-status strong')?.textContent??''));}
   function button(name:string){const value=[...container.querySelectorAll('button')].find(b=>b.textContent===name);expect(value,name).toBeTruthy();return value!;}
   async function click(name:string){await act(async()=>button(name).click());}
   async function consent(){
-    const regions=[...container.querySelectorAll('input')].find(input=>input.placeholder==='For example: NY, NJ')!;
-    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(regions,'NY');regions.dispatchEvent(new Event('input',{bubbles:true}));});
     const check=container.querySelector<HTMLInputElement>('input[type=checkbox]')!;await act(async()=>check.click());
   }
   it('prewarms without microphone or HTTP and starts before a held notebook response, then saves/reopens verified PCM',async()=>{
     let release!:(value:PrivateNotebookResult)=>void;props.prepareNotebook=vi.fn(()=>new Promise<PrivateNotebookResult>(resolve=>release=resolve));
     await render();expect(sources).toHaveLength(0);expect(runtimes).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();expect(button('Start recording').disabled).toBe(true);
+    expect(container.textContent).not.toContain('Where everyone is located');
     await consent();await click('Start recording');await wait(()=>status()==='Recording');
     expect(sources[0].starts).toBe(1);expect(opened).not.toHaveBeenCalled();expect(button('Close recording').disabled).toBe(true);
     await act(async()=>sources[0].chunk());await act(async()=>release(notebook));await wait(()=>runtimes[0].snapshot.workspaceId===id);
@@ -113,5 +112,14 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     const receiptId='00000000-0000-4000-8000-000000000011';await act(async()=>finish({receiptId,revision,expiresAt:new Date(Date.now()+60000).toISOString()}));await click('Start recording');await wait(()=>status()==='Recording');
     expect(receipts).toEqual([{receiptId,revision}]);expect(native).toHaveBeenCalledOnce();await click('Pause recording');await wait(()=>native.mock.calls.length===2);expect(button('Resume recording').disabled).toBe(true);
     await consent();const secondId='00000000-0000-4000-8000-000000000012';await act(async()=>finish({receiptId:secondId,revision,expiresAt:new Date(Date.now()+60000).toISOString()}));await click('Resume recording');await wait(()=>status()==='Recording');expect(receipts).toEqual([{receiptId,revision},{receiptId:secondId,revision}]);expect(native).toHaveBeenCalledTimes(2);expect(consume).toHaveBeenCalledTimes(2);expect(fetch).not.toHaveBeenCalled();
+  });
+  it('shows failed device preparation and retries without location input or starting a microphone',async()=>{
+    const revision='00000000-0000-4000-8000-000000000010';
+    const native=vi.fn().mockRejectedValueOnce(new Error('Device setup unavailable')).mockResolvedValue({receiptId:'00000000-0000-4000-8000-000000000011',revision,expiresAt:new Date(Date.now()+60000).toISOString()});
+    props={...props,identity:{mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision,isCurrent:()=>true}},platform:'ios',prepareNative:native};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>status()==='Recording not ready');
+    expect(container.textContent).toContain('this device’s recording access could not be checked');expect(button('Start recording').disabled).toBe(true);expect(sources).toHaveLength(0);
+    await click('Try preparing recording again');await wait(()=>status()==='Ready for consent');
+    expect(container.textContent).not.toContain('Where everyone is located');await consent();expect(button('Start recording').disabled).toBe(false);expect(sources).toHaveLength(0);
   });
 });

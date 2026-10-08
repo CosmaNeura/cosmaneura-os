@@ -225,6 +225,15 @@ def simulator_custody_identity(verification_variant: str | None) -> dict[str, ob
     }
 
 
+def source_access_group(bundle_id: str, explicit: str | None) -> str:
+    if explicit is None:
+        return "$(AppIdentifierPrefix)" + bundle_id
+    suffix = "." + bundle_id
+    if not explicit.endswith(suffix) or not re.fullmatch(r"[A-Z0-9]{10}", explicit[:-len(suffix)]):
+        raise ValueError("Source access group must be the signing team's exact private bundle group.")
+    return explicit
+
+
 def prepare(
     source: Path, web: Path, output: Path, verification_variant: str | None = None,
     native_auth_clerk_archive: Path | None = None,
@@ -241,6 +250,7 @@ def prepare(
     google_connection_client_id: str = "", google_connection_callback_uri: str = "",
     native_identity_config: Path | None = None,
     data_mode: str | None = None,
+    native_source_access_group: str | None = None,
 ) -> Path:
     identity = _identity.load(native_identity_config, "apple", workspace_api_origin)
     operational = identity is not None
@@ -298,6 +308,9 @@ def prepare(
             or not re.fullmatch(r"[1-9][0-9]{0,3}", build_number)):
         raise ValueError("Use a numeric three-part app version and a build number from 1 to 9999.")
     bundle_id, display_name = (identity["bundle"], "CosmaBot") if operational else build_identity(verification_variant)
+    if native_source_access_group is not None and not operational:
+        raise ValueError("An explicit source access group requires operational device custody.")
+    configured_source_group = source_access_group(bundle_id, native_source_access_group)
     simulator_identity = simulator_custody_identity(verification_variant) if simulator_custody else None
     source, web, output = source.resolve(), web.resolve(), output.resolve()
     if output.exists():
@@ -471,7 +484,7 @@ def prepare(
         if operational:
             info["CosmasNativeIdentity"] = identity["identity"]
             info["CosmasConfiguredCapture"] = {"enabled": False} if staging else {"enabled": True, "apiOrigin": workspace_api_origin}
-            info["CosmasSourceAccessGroup"] = "$(AppIdentifierPrefix)" + bundle_id
+            info["CosmasSourceAccessGroup"] = configured_source_group
             info["CFBundleURLTypes"] = [{"CFBundleURLName": bundle_id, "CFBundleURLSchemes": [bundle_id]}]
         info["CosmaneuraWebOrigin"] = cosmaneura_web_origin
         info["GoogleConnectionClientID"] = google_connection_client_id
@@ -551,6 +564,7 @@ def main() -> None:
     parser.add_argument("--hosted-workspace", action="store_true",
                         help="Use HTTPS service policy matching the hosted synthetic Apple web build")
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; stages a device-only project")
+    parser.add_argument("--native-source-access-group", help="Exact signing-team private bundle Keychain group for builds compiled without provisioning")
     parser.add_argument("--data-mode", choices=("synthetic", "authorized_beta"), help="Explicit hosted data classification; synthetic for staging with a real identity")
     args = parser.parse_args()
     try:
@@ -561,7 +575,8 @@ def main() -> None:
                           args.cosmaneura_web_origin, args.hosted_workspace,
                           args.scheduling_google_client_id, args.scheduling_google_callback_uri,
                           args.microsoft_connection_tenant_id, args.microsoft_connection_client_id, args.microsoft_connection_callback_uri,
-                          args.google_connection_client_id, args.google_connection_callback_uri, args.native_identity_config, args.data_mode)
+                          args.google_connection_client_id, args.google_connection_callback_uri, args.native_identity_config, args.data_mode,
+                          args.native_source_access_group)
     except ValueError as error:
         parser.exit(2, f"{error}\n")
     print(f"Prepared synthetic Apple project: {project}")

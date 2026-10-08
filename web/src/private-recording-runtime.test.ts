@@ -84,7 +84,7 @@ it('preserves original attestation and requires new explicit full consent for ev
 });
 
 it.each([
-  {all_parties_consented:false},{method:'implicit'},{language:'fr-FR'},{participant_regions:[]},{participant_regions:['US-NY','US-NY']},{granted_at:'2026-10-08T12:00:00Z'},{granted_at:new Date(Date.now()+3600000).toISOString()},{extra:'unreviewed'}
+  {all_parties_consented:false},{method:'implicit'},{language:'fr-FR'},{participant_regions:['invalid']},{participant_regions:['US-NY','US-NY']},{granted_at:'2026-10-08T12:00:00Z'},{granted_at:new Date(Date.now()+3600000).toISOString()},{extra:'unreviewed'}
 ])('refuses incomplete or broadened consent before creating an audio source: %j',async changed=>{
   const source=new ControlledSource(),runtime=await open(source);expect(()=>validatePrivateRecordingConsent({...consent(),...changed})).toThrow();await expect(runtime.start({...consent(),...changed} as never)).rejects.toThrow();expect(source.starts).toBe(0);
 });

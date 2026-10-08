@@ -5,6 +5,8 @@ import XCTest
 @MainActor final class NativePrivateRecordingGateTests: XCTestCase {
     func testNamespaceMatchesPortableOriginBoundDerivation() throws {
         XCTAssertEqual(try NativePrivateRecordingGate.scope(apiBase: "https://api.example.invalid/", recoveryScope: String(repeating: "a", count: 64)), "902cbb366b70f1c28742fa300ef257e48f73aa8216ce08bfb3379e22607a5c7c")
+        // JSON.stringify's exact UTF-8 array for the shipped native/renderer origin.
+        XCTAssertEqual(try NativePrivateRecordingGate.scope(apiBase: "https://api.staging.cosmas.ai", recoveryScope: String(repeating: "a", count: 64)), "ba04ba2ba2c52b8a3e346c8879df71f8298b3677ef3742e71f7ab3a6ac4bad57")
     }
     func testPrivateProofConsentOneUseAndSharedExclusion() async throws {
         let h = try PrivateGateHarness(); defer { h.cleanup() }
@@ -87,10 +89,28 @@ import XCTest
         do { _ = try await h.prepare(); XCTFail("Stale read must not prepare") } catch {}
         try await NativeCaptureStartGate.recoverWhileIdle {}
     }
+    func testUnavailableAccountReadCannotInstallProofAndFreshReadCanRecover() async throws {
+        let h = try PrivateGateHarness(); defer { h.cleanup() }
+        NativePrivateRecordingGate.configure(auth: h.auth) { _ in throw NativeAuthError.unavailable }
+        do { _ = try await h.prepare(); XCTFail("Missing account route must not prepare") } catch {}
+        XCTAssertThrowsError(try NativePrivateRecordingGate.begin(proofID: UUID(), scope: h.scope,
+            revision: h.auth.state().revision, recordingID: UUID(), intent: UUID(),
+            consent: NativePrivateRecordingConsent(privateConsent()), maximumChunks: 90))
+        NativePrivateRecordingGate.configure(auth: h.auth) { revision in
+            (h.scope, try h.auth.recordingAccountDigest(expectedRevision: revision))
+        }
+        let permit = try h.begin(await h.prepare())
+        var starts = 0
+        _ = try NativePrivateRecordingGate.consume(permit, foreground: true) { starts += 1 }
+        try NativePrivateRecordingGate.finish(permit)
+        XCTAssertEqual(starts, 1)
+    }
     func testConsentClosedSchemaBooleanFreshnessLanguageAndRegions() throws {
         let valid = privateConsent()
         _ = try NativePrivateRecordingConsent(valid)
-        for changed: [String: Any] in [["all_parties_consented": false], ["all_parties_consented": 1], ["language": "fr-FR"], ["method": "implicit"], ["participant_regions": []], ["participant_regions": ["US-NY", "US-NY"]], ["granted_at": "2026-01-01T00:00:00.000Z"], ["extra": true]] {
+        let unspecified = try NativePrivateRecordingConsent(valid.merging(["participant_regions": [String]()]) { _, new in new })
+        XCTAssertEqual(unspecified.regions, [])
+        for changed: [String: Any] in [["all_parties_consented": false], ["all_parties_consented": 1], ["language": "fr-FR"], ["method": "implicit"], ["participant_regions": ["New York"]], ["participant_regions": ["US-NY", "US-NY"]], ["participant_regions": (1...17).map { "US-\($0)" }], ["granted_at": "2026-01-01T00:00:00.000Z"], ["extra": true]] {
             XCTAssertThrowsError(try NativePrivateRecordingConsent(valid.merging(changed) { _, new in new }))
         }
     }
