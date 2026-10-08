@@ -5,6 +5,7 @@ action and current ticket version. This surface never returns private provenance
 """
 
 from sqlalchemy import exists, or_, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import Session
 
 from cosmas_os.application import follow_up as follow
@@ -47,6 +48,12 @@ def _read_connection(s, routine):
         from cosmas_os.application.routines import _local
 
         _local(s)
+    elif follow.settings.workspace_hosted_enabled:
+        # Owner-scoped saved projections may use the already approved synthetic
+        # hosted database. This grants no delivery or responsibility mutation.
+        if (not follow.settings.workspace_available or follow.settings.data_mode != "synthetic"
+                or s.get_bind().engine.url != make_url(follow.settings.database_url)):
+            raise ws.WorkspaceError("shared_work_connection_required", 403)
     else:
         follow._local(s)
 
@@ -54,7 +61,10 @@ def _read_connection(s, routine):
 def _target(s, box, actor, tid, *, writing=False, recipient=None, _routine_read=False):
     if _routine_read and (writing or recipient is not None):
         raise ws.WorkspaceError("routine_read_only", 403)
-    _read_connection(s, _routine_read)
+    if writing or recipient is not None:
+        follow._local(s)
+    else:
+        _read_connection(s, _routine_read)
     for pid in sorted({actor, recipient} - {None}):
         try:
             ws._human(s, box, pid)
@@ -121,8 +131,7 @@ def _view(s, actor, ticket, revision, records):
 
 
 def read(s, box, actor, tid, *, vendor=False, _routine_read=False):
-    if _routine_read:
-        _read_connection(s, True)
+    _read_connection(s, _routine_read)
     source = s.get(FollowUpSource, tid)
     if source is not None and source.source_kind == "incoming_message":
         raise ws.WorkspaceError("inbox_handoff_contract_required", 426)

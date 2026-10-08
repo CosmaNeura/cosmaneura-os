@@ -20,6 +20,8 @@
       CAPPluginMethod(name: "getCaptureCapabilities", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "extend", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
+      CAPPluginMethod(name: "preparePrivate", returnType: CAPPluginReturnPromise),
+      CAPPluginMethod(name: "startPrivate", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "ready", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "heartbeat", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
@@ -31,6 +33,8 @@
     private let recoveryLock = NSLock()
     private var rendererLost = false
     @MainActor private var providerOwner: (token: String, owner: UUID)?
+    @MainActor private var privateOwner: (token: String, permit: NativePrivateRecordingPermit)?
+    @MainActor private var privateTokens: [String: NativePrivateRecordingPermit] = [:]
 
     public override func load() {
       let native = recoveryLock.withLock { () -> IOSPCMCapacitorTransport? in
@@ -54,6 +58,9 @@
         return transport
       }
       try await retained?.fenceAndStopForRendererLoss()
+      try await MainActor.run {
+        if let selected = privateOwner { try NativePrivateRecordingGate.finish(selected.permit); privateOwner = nil }
+      }
     }
 
     /// Includes pending permission and failed closure in every bridge instance.
@@ -126,6 +133,63 @@
       } catch {
         reject(call, error: error)
        }
+      }
+    }
+
+    @objc public func preparePrivate(_ call: CAPPluginCall) {
+      guard Set(call.options.keys) == ["scope", "revision"], let scope = call.getString("scope"), let revision = call.getString("revision") else {
+        reject(call, error: IOSPCMCapacitorErrorCode.invalidArguments); return
+      }
+      Task { @MainActor in
+        do {
+          guard Bundle.main.bundleIdentifier == "com.cosmasos.beta.ios", let transport,
+                await transport.getAppState() == "foreground" else { throw IOSPCMCapacitorErrorCode.captureFailed }
+          let proof = try await NativePrivateRecordingGate.prepare(scope: scope, revision: revision)
+          let format = ISO8601DateFormatter(); format.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+          call.resolve(["receiptId": proof.id.uuidString.lowercased(), "revision": proof.revision, "expiresAt": format.string(from: proof.expiresAt)])
+        } catch { reject(call, error: error) }
+      }
+    }
+
+    @objc public func startPrivate(_ call: CAPPluginCall) {
+      guard Set(call.options.keys) == ["receiptId", "scope", "revision", "recordingId", "startIntent", "consent", "encoding", "channels", "sampleRateHz", "targetFramesPerChunk", "maximumChunks"],
+            let receipt = call.getString("receiptId"), let receiptID = UUID(uuidString: receipt), receiptID.uuidString.lowercased() == receipt,
+            let recording = call.getString("recordingId"), let recordingID = UUID(uuidString: recording), recordingID.uuidString.lowercased() == recording,
+            let intent = call.getString("startIntent"), let intentID = UUID(uuidString: intent), intentID.uuidString.lowercased() == intent,
+            let scope = call.getString("scope"), let revision = call.getString("revision"), let consent = call.getObject("consent"),
+            call.getString("encoding") == "pcm_s16le", Self.exactInteger(call.options["channels"]) == 1,
+            Self.exactInteger(call.options["sampleRateHz"]) == 16000, Self.exactInteger(call.options["targetFramesPerChunk"]) == 160000,
+            let maximum = Self.exactInteger(call.options["maximumChunks"]), (1...90).contains(maximum) else {
+        reject(call, error: IOSPCMCapacitorErrorCode.invalidArguments); return
+      }
+      Task { @MainActor in
+        var permit: NativePrivateRecordingPermit?
+        do {
+          guard Bundle.main.bundleIdentifier == "com.cosmasos.beta.ios", let transport,
+                privateOwner == nil, privateTokens.count < 10000, await transport.getAppState() == "foreground" else { throw IOSPCMCapacitorErrorCode.captureFailed }
+          let checked = try NativePrivateRecordingConsent(consent)
+          let selected = try NativePrivateRecordingGate.begin(proofID: receiptID, scope: scope, revision: revision,
+              recordingID: recordingID, intent: intentID, consent: checked, maximumChunks: maximum)
+          permit = selected
+          guard await AVAudioApplication.requestRecordPermission() else { throw IOSPCMCapacitorErrorCode.microphonePermissionDenied }
+          let foreground = await transport.getAppState() == "foreground"
+          let token = try NativePrivateRecordingGate.consume(selected, foreground: foreground) {
+            let authority = try PCMSourceAuthority(runID: selected.runID.uuidString.lowercased(), generation: 1,
+                expiresAtMilliseconds: Int64(selected.captureExpiresAt.timeIntervalSince1970 * 1000), hardMaximumChunks: selected.maximumChunks)
+            return try transport.start(configuration: IOSPCMCapacitorConfiguration(encoding: "pcm_s16le", channels: 1,
+                sampleRateHz: 16000, targetFramesPerChunk: 160000, maximumChunks: maximum, authority: authority))
+          }
+          privateOwner = (token, selected)
+          privateTokens[token] = selected
+          try NativePrivateRecordingGate.retainStop(selected) { [weak self] in
+            _ = try await transport.stop(sessionToken: token, mode: .discard)
+            if self?.privateOwner?.token == token { self?.privateOwner = nil }
+          }
+          call.resolve(["sessionToken": token])
+        } catch {
+          if let permit { try? NativePrivateRecordingGate.finish(permit) }
+          reject(call, error: error)
+        }
       }
     }
 
@@ -235,11 +299,17 @@
         reject(call, error: IOSPCMCapacitorErrorCode.invalidArguments)
         return
       }
-      perform(call) { transport in
+      Task { @MainActor in
+       do {
+        guard let transport else { throw IOSPCMCapacitorErrorCode.stopFailed }
+        let privateSelected = privateOwner?.token == sessionToken ? privateOwner : nil
+        let privatePermit = privateTokens[sessionToken]
+        let allowFinal = privatePermit.map { NativePrivateRecordingGate.accountCurrent($0) } ?? true
         let result = try await transport.stop(sessionToken: sessionToken, mode: mode)
-        return [
-          "finalPcmPacket": result.finalPcmPacket.map(Self.packetObject) ?? NSNull()
-        ]
+        if let privateSelected { try NativePrivateRecordingGate.finish(privateSelected.permit); privateOwner = nil }
+        let stillCurrent = privatePermit.map { NativePrivateRecordingGate.accountCurrent($0) } ?? true
+        call.resolve(["finalPcmPacket": allowFinal && stillCurrent ? result.finalPcmPacket.map(Self.packetObject) ?? NSNull() : NSNull()])
+       } catch { reject(call, error: error) }
       }
     }
 
@@ -280,8 +350,17 @@
     }
 
     public func emit(_ event: IOSPCMCapacitorEvent) throws {
-      DispatchQueue.main.async { [weak self] in
-        self?.notifyListeners("iosNativePcmEvent", data: Self.eventObject(event))
+      Task { @MainActor [weak self] in
+        guard let self else { return }
+        let token: String
+        switch event {
+        case .packet(let packet): token = packet.sessionToken
+        case .interruption(let sessionToken, _), .terminal(let sessionToken, _), .windowClosed(let sessionToken, _): token = sessionToken
+        }
+        if let permit = privateTokens[token], !NativePrivateRecordingGate.accountCurrent(permit) {
+          NativePrivateRecordingGate.retire(); return
+        }
+        notifyListeners("iosNativePcmEvent", data: Self.eventObject(event))
       }
     }
 

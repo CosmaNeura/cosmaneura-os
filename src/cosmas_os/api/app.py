@@ -333,6 +333,12 @@ app.include_router(private_draft_router(workspace_gate=_workspace_gate, get_sess
     fence=lambda request, session, identity: _refresh_model_identity(request, session, identity)))
 
 
+from cosmas_os.api.private_recording_routes import router as private_recording_router  # noqa: E402
+
+app.include_router(private_recording_router(workspace_gate=_workspace_gate, get_session=get_session, identity=_identity,
+    fence=lambda request, session, identity: _refresh_model_identity(request, session, identity)))
+
+
 def _capture_gate() -> None:
     if not settings.workspace_capture_available:
         raise HTTPException(404, "not found", headers={"Cache-Control": "no-store"})
@@ -2102,6 +2108,7 @@ app.include_router(scheduling_patient_router(
     workspace_gate=_workspace_gate, fence=_refresh_model_identity))
 app.add_middleware(SchedulingPatientBoundary)
 allowed_headers.append("X-Cosmas-Scheduling-Patient")
+allowed_headers.extend(["X-Cosmas-Private-Draft", "X-Cosmas-Private-Recording"])
 
 app.include_router(scheduling_login_router(
     runtime=lambda: getattr(app.state, "scheduling_google_login", None),

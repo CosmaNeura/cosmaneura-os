@@ -141,11 +141,12 @@ def test_local_rehearsal_pass_and_revocation_remain_supported(monkeypatch):
     assert len(session.statements) == 1
 
 
-def test_hosted_routine_gate_does_not_open_shared_work_or_delivery(configuration):
+def test_hosted_read_gate_does_not_open_responsibility_changes_or_delivery(configuration):
     session = EmptySession(configuration.database_url)
     routines._local(session)
+    shared_work._read_connection(session, False)
     with pytest.raises(ws.WorkspaceError, match="follow_up_connection_required"):
-        shared_work.catalog(session, "invented-box", "invented-owner", vendor=True)
+        shared_work._target(session, "invented-box", "invented-owner", "invented-ticket", writing=True)
     with pytest.raises(ws.WorkspaceError, match="follow_up_connection_required"):
         follow_up.deliver(
             session,

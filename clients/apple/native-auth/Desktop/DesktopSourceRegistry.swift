@@ -22,6 +22,10 @@ import CosmasNativeAuth
     private var retiredSources: Set<String> = []
     private var closed = false
 
+    func requireIdle() throws {
+        guard !closed, entries.isEmpty else { throw ProviderNativeError.unavailable }
+    }
+
     func prepare(id: UUID, preparation: NativeSourcePreparation,
                  makeOwner: () throws -> NativeSourceStartOwner) async throws -> NativeSourceGrant {
         guard !closed, !retiredPreparations.contains(id),

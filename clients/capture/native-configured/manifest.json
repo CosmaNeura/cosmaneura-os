@@ -51,7 +51,7 @@
     },
     "ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift": {
       "source_sha256": "bf083158f9cd74fcecb74ce0c07daa7e18fd3a1e706df5c578b8729d4552a353",
-      "sha256": "3f6554a7627dba79055c65ba084a088ae16f21cea4fc13b62026b851b0ae8911"
+      "sha256": "23c7bdf10909962ffcb62f50bb938b18165d261aa3ea8c0d2d9c5a48b4d3b405"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AppleInputRouteEvents.swift": {
       "source_ref": "ca8c70840b312c5ca21c0f143f32a943e62ec1f7",

@@ -9,6 +9,9 @@ export {
 } from "./definitions.js";
 export type {
   IOSPCMPlugin,
+  IosPrivateRecordingConsent,
+  IosPrivateRecordingReceipt,
+  IosPrivateRecordingStart,
   IosPcmAcknowledgementResult,
   IosPcmAppState,
   IosPcmConfiguration,

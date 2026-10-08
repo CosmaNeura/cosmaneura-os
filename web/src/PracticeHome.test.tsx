@@ -1,7 +1,7 @@
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
-import {PracticeHome} from './PracticeHome';
+import {PracticeHome,type StartPrivateRecording} from './PracticeHome';
 import {DraftJournal,accountEditorAddress,editorAddress} from './draft-journal';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import {openDraftStore} from './draft-store';
@@ -53,6 +53,16 @@ describe('practice Quick start recovery',()=>{
     await act(async()=>root.unmount());root=createRoot(container);await render();await click('Check saved note creation');
     expect(workspaceApi.resolvePrivateDraft).toHaveBeenCalledExactlyOnceWith(identity,body);expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();expect(opened).toHaveBeenCalledOnce();
   });
+  it('retains the exact encrypted create when fresh post-create authority is denied',async()=>{
+    await render();
+    vi.mocked(recovery.authorize).mockResolvedValueOnce(undefined).mockRejectedValueOnce(new WorkspaceApiError(403));
+    await click('Start a private note');
+    const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];
+    const saved=await recovery.journal.load(accountEditorAddress('private-draft'));
+    expect(saved).toMatchObject({kind:'account-editor',editor:'private-draft',pending:body.idempotency_key,data:{pending:body}});
+    expect(opened).not.toHaveBeenCalled();expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
+    expect(workspaceApi.resolvePrivateDraft).not.toHaveBeenCalled();
+  });
   it('keeps the original creation after not_found and requires an explicit same-key retry',async()=>{
     vi.mocked(workspaceApi.createPrivateDraft).mockRejectedValueOnce(new WorkspaceApiError(503));
     vi.mocked(workspaceApi.resolvePrivateDraft).mockResolvedValueOnce({contract_version:1,outcome:'not_found',workspace:null});
@@ -67,6 +77,31 @@ describe('practice Quick start recovery',()=>{
     const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await render(next);await act(async()=>finish({identity,workspace,team}));expect(opened).not.toHaveBeenCalled();
   });
   it('offers safe team activation without per-bot forms or automatic save',async()=>{await render(identity,{...team,revision:0});expect(useTeam).not.toHaveBeenCalled();await click('Use this team');expect(useTeam).toHaveBeenCalledOnce();expect(container.querySelectorAll('input').length).toBe(1);});
+  it('opens Scribe before catalog readiness and caches the background exact create without navigating',async()=>{
+    const record=vi.fn();let finish!:(value:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>void;
+    vi.mocked(workspaceApi.createPrivateDraft).mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    await click('Start recording');expect(record).toHaveBeenCalledOnce();expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
+    const input=record.mock.calls[0][0] as StartPrivateRecording;expect(input.title).toBe('Private recording');let first!:Promise<Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>>;
+    await act(async()=>{first=input.prepareNotebook();expect(input.prepareNotebook()).toBe(first);});
+    for(let n=0;n<100&&!vi.mocked(workspaceApi.createPrivateDraft).mock.calls.length;n++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+    expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];expect(body.title).toBe('Private recording');
+    expect((await recovery.journal.load(accountEditorAddress('private-draft')))?.pending).toBe(body.idempotency_key);
+    await act(async()=>{finish({identity,workspace,team});await first;});expect(opened).not.toHaveBeenCalled();expect(await recovery.journal.load(accountEditorAddress('private-draft'))).toBeNull();
+  });
+  it('allows local Scribe entry while retaining an earlier uncertain note without a duplicate create',async()=>{
+    vi.mocked(workspaceApi.createPrivateDraft).mockRejectedValueOnce(new WorkspaceApiError(503));await render();await click('Start a private note');
+    const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1],record=vi.fn();
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    await click('Start recording');const input=record.mock.calls[0][0] as StartPrivateRecording;
+    await act(async()=>{await expect(input.prepareNotebook()).rejects.toMatchObject({status:503});});expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
+    expect((await recovery.journal.load(accountEditorAddress('private-draft')))?.pending).toBe(body.idempotency_key);expect(workspaceApi.resolvePrivateDraft).not.toHaveBeenCalled();
+  });
+  it('consumes sidebar Scribe requests once, waits for unlock and does not replay a former identity request',async()=>{
+    const record=vi.fn();async function request(number:number,locked:boolean,member=identity){await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={team} locked={locked} openRecordingRequest={number} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));}
+    await request(0,false);expect(record).not.toHaveBeenCalled();await request(1,true);expect(record).not.toHaveBeenCalled();await request(1,false);expect(record).toHaveBeenCalledOnce();
+    await request(1,false);expect(record).toHaveBeenCalledOnce();const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await request(1,false,next);expect(record).toHaveBeenCalledOnce();await request(2,false,next);expect(record).toHaveBeenCalledTimes(2);expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
+  });
   it('refuses added authority fields and mismatched encrypted request keys',async()=>{
     const body={title:'Private note',idempotency_key:id(5)},data={contract:'private-draft-recovery.v1' as const,title:'Private note',pending:body};
     expect(()=>validatePrivateDraftRecovery({...data,patient_id:id(9)})).toThrow();expect(()=>validatePrivateDraftRecovery({...data,pending:{...body,title:'Other'}})).toThrow();

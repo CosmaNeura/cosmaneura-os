@@ -118,7 +118,7 @@ import Foundation
                 case .getToken:
                     guard let revision = request.revision else { throw NativeAuthError.unavailable }
                     result = ["token": try await auth.token(expectedRevision: revision), "revision": revision]
-                case .sourcePrepare, .sourceAuthorize, .sourceExtend, .sourceRelease, .sourceStopped, .sourcePreparationRelease:
+                case .sourceIdle, .sourcePrepare, .sourceAuthorize, .sourceExtend, .sourceRelease, .sourceStopped, .sourcePreparationRelease:
                     guard let payload = request.payload else { throw NativeAuthError.unavailable }
                     if sourceHost == nil { sourceHost = try DesktopSourceHost(auth: auth) }
                     guard let sourceHost else { throw NativeAuthError.unavailable }

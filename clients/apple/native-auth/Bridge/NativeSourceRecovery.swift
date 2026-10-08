@@ -113,6 +113,18 @@ extension NativeSourceProofRecord {
         ready = true
     }
     func requireReady() throws { guard ready else { throw ProviderNativeError.unavailable }; try journal.requireUsable() }
+    func reserveWhileIdle() throws {
+        try requireReady()
+        guard !recovering, journal.pending.isEmpty, let coordinator else { throw ProviderNativeError.unavailable }
+        try coordinator.reserveCaptureWhileIdle()
+        try journal.reloadWhileExclusive(expectedAnchor: journal.anchor)
+        guard journal.pending.isEmpty else { throw ProviderNativeError.unavailable }
+    }
+    func releaseIdleReservationBeforePreparation() throws {
+        try requireReady()
+        guard journal.pending.isEmpty, let coordinator else { throw ProviderNativeError.unavailable }
+        try coordinator.allowCaptureAfterConfirmedRecovery()
+    }
     var processFence: [String: Any] {
         get throws {
             try requireReady()

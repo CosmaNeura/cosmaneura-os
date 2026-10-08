@@ -4,7 +4,7 @@ import Foundation
 public struct DesktopAuthRequest: Sendable {
     public enum Method: String, Sendable {
         case getState, signIn, signOut, getToken
-        case sourcePrepare, sourceAuthorize, sourceExtend, sourceRelease, sourceStopped, sourcePreparationRelease
+        case sourceIdle, sourcePrepare, sourceAuthorize, sourceExtend, sourceRelease, sourceStopped, sourcePreparationRelease
         public var isSource: Bool { rawValue.hasPrefix("source") }
     }
     public let id: String

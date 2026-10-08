@@ -84,6 +84,7 @@ async function fixture(){
   const authListeners=new Set<(value:typeof state)=>void>();
   let grant:Record<string,unknown>={};
   const sourceRequest=vi.fn(async(method:string,payload:Record<string,unknown>,publicRevision?:string)=>{
+    if(method==='sourceIdle'){expect(publicRevision).toBe(revision);expect(payload).toEqual({});return {idle:true};}
     if(method==='sourcePrepare'){
       expect(publicRevision).toBe(revision);
       grant={captureSessionId:session.id,actorId:person.practitioner_id,consentRecordId:consent.id,consentStatus:'granted',
@@ -118,10 +119,56 @@ async function fixture(){
   const view=()=>connectDesktopRecorderView({request:value=>handlers.get(DESKTOP_RECORDER_CHANNELS.request)!(event,structuredClone(value)),
     subscribe:listener=>{listeners.add(listener);return()=>listeners.delete(listener);}},session.id,new AbortController().signal);
   return {open,view,start,extensions,selectWindow,calls,sourceRequest,indicator,dispose,messages,permissions,availability,emit:()=>emit(),host:()=>host,
+    sessionId:session.id,markBrowserStopped:()=>{physicalStops.push('browser-tracks-stopped');},
+    privateInvoke:(channel:string,value:unknown)=>handlers.get(channel)!(event,value),
     denyStop:(value:boolean)=>{denyStop=value;},reopen:async()=>{await host.close();host=installWorkspaceDesktopCapture(options);},
     loseAuth:()=>{state={phase:'signed_out',revision:crypto.randomUUID()};authListeners.forEach(fn=>fn(state));},
     saved:async()=>{const dir=join(directory,'native-recordings');return Promise.all((await readdir(dir)).filter(n=>n.endsWith('.sqlite')).map(n=>readFile(join(dir,n))));}};
 }
+
+const privateConsent=()=>({modality:'in_person',participant_regions:['US-NY'],method:'verbal_attestation',all_parties_consented:true,granted_at:new Date(Date.now()-1000).toISOString(),language:'en-US'});
+it('private microphone admission excludes clinical open and requires exact physical-source release',async()=>{
+  const f=await fixture(),requestId=crypto.randomUUID(),recordingId=crypto.randomUUID();
+  const command={requestId,recordingId,revision,consent:privateConsent()};
+  expect(f.host().allowsRendererMicrophone()).toBe(false);
+  const permit=await f.privateInvoke('cosmas:private-capture:acquire:v1',command) as {permitId:string};
+  expect(f.host().allowsRendererMicrophone()).toBe(true);expect(f.calls).toEqual([]);expect(f.start).not.toHaveBeenCalled();
+  expect(await f.privateInvoke('cosmas:private-capture:acquire:v1',command)).toEqual(permit);
+  await expect(f.privateInvoke('cosmas:private-capture:acquire:v1',{...command,recordingId:crypto.randomUUID()})).rejects.toThrow();
+  await expect(f.open()).rejects.toThrow();
+  await expect(f.privateInvoke('cosmas:private-capture:release:v1',{requestId:crypto.randomUUID(),permitId:crypto.randomUUID()})).rejects.toThrow();
+  const release={requestId:crypto.randomUUID(),permitId:permit.permitId};await f.privateInvoke('cosmas:private-capture:release:v1',release);
+  await f.privateInvoke('cosmas:private-capture:release:v1',release);expect(f.host().allowsRendererMicrophone()).toBe(false);
+  await f.open();await expect(f.privateInvoke('cosmas:private-capture:acquire:v1',{...command,requestId:crypto.randomUUID()})).rejects.toThrow();
+  expect(f.host().allowsRendererMicrophone()).toBe(false); // Native meeting does not grant renderer audio.
+});
+it('unknown native journal and authentication loss never establish microphone admission',async()=>{
+  const f=await fixture(),command={requestId:crypto.randomUUID(),recordingId:crypto.randomUUID(),revision,consent:privateConsent()};
+  f.sourceRequest.mockRejectedValueOnce(Error('Unknown native journal'));
+  await expect(f.privateInvoke('cosmas:private-capture:acquire:v1',command)).rejects.toThrow();expect(f.host().allowsRendererMicrophone()).toBe(false);
+  const permit=await f.privateInvoke('cosmas:private-capture:acquire:v1',{...command,requestId:crypto.randomUUID()}) as {permitId:string};f.loseAuth();expect(f.host().allowsRendererMicrophone()).toBe(false);
+  expect(f.messages).toContainEqual({permitId:permit.permitId});
+  await expect(f.host().close()).rejects.toThrow();
+  await f.privateInvoke('cosmas:private-capture:release:v1',{requestId:crypto.randomUUID(),permitId:permit.permitId});
+});
+it('configured browser microphone obtains native authority and retains exact stop custody on a lost reply',async()=>{
+  const f=await fixture(),command={requestId:crypto.randomUUID(),revision,workspaceId,sessionId:f.sessionId,leaseId:crypto.randomUUID(),leaseReceiptId:crypto.randomUUID(),leaseGeneration:1,captureAuthorizedUntil:new Date(Date.now()+90000).toISOString(),firstSequenceNumber:0};
+  const permit=await f.privateInvoke('cosmas:clinical-microphone:acquire:v1',command) as {permitId:string;admitted:boolean};
+  expect(permit.admitted).toBe(true);expect(f.host().allowsRendererMicrophone()).toBe(true);expect(f.selectWindow).not.toHaveBeenCalled();expect(f.start).not.toHaveBeenCalled();
+  await f.privateInvoke('cosmas:clinical-microphone:active:v1',{requestId:crypto.randomUUID(),permitId:permit.permitId});
+  expect(JSON.stringify(permit)).not.toMatch(/secret|capability|grant|processFence/);await expect(f.open()).rejects.toThrow();
+  f.markBrowserStopped();f.denyStop(true);const release={requestId:crypto.randomUUID(),permitId:permit.permitId};
+  await expect(f.privateInvoke('cosmas:clinical-microphone:release:v1',release)).rejects.toThrow();expect(f.host().allowsRendererMicrophone()).toBe(false);
+  f.denyStop(false);await f.privateInvoke('cosmas:clinical-microphone:release:v1',release);expect(f.sourceRequest.mock.calls.filter(c=>c[0]==='sourceStopped')).toHaveLength(2);
+});
+it('a clinical browser permit whose native Start deadline elapsed denies media before and after the active acknowledgment',async()=>{
+  vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date());
+  const f=await fixture(),command={requestId:crypto.randomUUID(),revision,workspaceId,sessionId:f.sessionId,leaseId:crypto.randomUUID(),leaseReceiptId:crypto.randomUUID(),leaseGeneration:1,captureAuthorizedUntil:new Date(Date.now()+90000).toISOString(),firstSequenceNumber:0};
+  const permit=await f.privateInvoke('cosmas:clinical-microphone:acquire:v1',command) as {permitId:string};expect(f.host().allowsRendererMicrophone()).toBe(true);
+  vi.setSystemTime(Date.now()+16000);expect(f.host().allowsRendererMicrophone()).toBe(false);
+  await expect(f.privateInvoke('cosmas:clinical-microphone:active:v1',{requestId:crypto.randomUUID(),permitId:permit.permitId})).rejects.toThrow();
+  f.markBrowserStopped();await f.privateInvoke('cosmas:clinical-microphone:release:v1',{requestId:crypto.randomUUID(),permitId:permit.permitId});
+});
 
 it('runs the combined desktop recording controls, explicit continuation and saved upload recovery',async()=>{
   const f=await fixture();await f.open();const view=await f.view();

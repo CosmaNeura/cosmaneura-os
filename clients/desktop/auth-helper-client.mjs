@@ -3,7 +3,7 @@ import {randomUUID} from 'node:crypto';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const PHASES = new Set(['disabled', 'loading', 'signedOut', 'signingIn', 'ready', 'signOutPending', 'unavailable']);
 const ERROR = () => new Error('Native session unavailable');
-const SOURCE_METHODS = new Set(['sourcePrepare', 'sourceAuthorize', 'sourceExtend', 'sourceRelease', 'sourceStopped', 'sourcePreparationRelease']);
+const SOURCE_METHODS = new Set(['sourceIdle', 'sourcePrepare', 'sourceAuthorize', 'sourceExtend', 'sourceRelease', 'sourceStopped', 'sourcePreparationRelease']);
 function object(value, fields) {
   if (!value || typeof value !== 'object' || Array.isArray(value) ||
       Object.keys(value).length !== fields.length || !fields.every(key => Object.hasOwn(value, key))) throw ERROR();
@@ -89,7 +89,10 @@ export function createAuthHelperClient(child, {interactiveStartup = false,
       } else if (SOURCE_METHODS.has(request.method)) {
         // Main-only caller validates the exact grant/decision before use. Source
         // secrets never enter the auth-state/preload API.
-        if (['sourcePrepare', 'sourceAuthorize', 'sourceExtend'].includes(request.method)) {
+        if (request.method === 'sourceIdle') {
+          object(value.result, ['idle', 'revision']);
+          if (value.result.idle !== true || value.result.revision !== request.revision) throw ERROR();
+        } else if (['sourcePrepare', 'sourceAuthorize', 'sourceExtend'].includes(request.method)) {
           if (!value.result || typeof value.result !== 'object' || Array.isArray(value.result)) throw ERROR();
         } else if (value.result !== null) throw ERROR();
         result = value.result;
@@ -147,7 +150,8 @@ export function createAuthHelperClient(child, {interactiveStartup = false,
     getToken: revision => call('getToken', revision), snapshot: () => current,
     sourceRequest: (method, payload) => {
       if (!SOURCE_METHODS.has(method) || !payload || typeof payload !== 'object' || Array.isArray(payload)) return Promise.reject(ERROR());
-      return call(method, undefined, payload);
+      if (method === 'sourceIdle' && (Object.keys(payload).length !== 1 || !UUID.test(payload.revision))) return Promise.reject(ERROR());
+      return call(method, method === 'sourceIdle' ? payload.revision : undefined, payload);
     },
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
     close: fail,

@@ -21,7 +21,8 @@ import Foundation
     auth.onChange = { [weak self] state in
       guard let self else { return }
       self.retainedResources?.connection.authChanged(state)
-      self.recording.authChanged(state)
+            self.recording.authChanged(state)
+            NativePrivateRecordingGate.authChanged(state)
       self.observer?(state)
     }
   }

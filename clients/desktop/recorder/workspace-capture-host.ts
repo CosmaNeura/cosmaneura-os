@@ -12,10 +12,13 @@ import {DurableDesktopFlowStore} from './durable-flow-store';
 import {DurableDesktopQueueStorage} from './durable-queue-store';
 import {DurableDesktopCoverage} from './durable-provider-records';
 import {openDeviceCustody, type DeviceProtection} from './device-custody';
-import {parseBackendCaptureGrant} from './protocol';
+import {parseBackendCaptureGrant,parseStartAuthorityDecision} from './protocol';
 import {parseNativeProcessFence, type NativeProcessFence} from './native-process-fence';
+import {processRecordingLease,createRecordingLeaseOwner,type RecordingLeaseOwner} from './recording-lease';
 
 const OPEN = 'cosmas:workspace-capture:open:v1';
+const PRIVATE_ACQUIRE='cosmas:private-capture:acquire:v1',PRIVATE_RELEASE='cosmas:private-capture:release:v1',PRIVATE_IDLE='cosmas:private-capture:idle:v1',PRIVATE_REVOKED='cosmas:private-capture:revoked:v1';
+const CLINICAL_ACQUIRE='cosmas:clinical-microphone:acquire:v1',CLINICAL_RELEASE='cosmas:clinical-microphone:release:v1',CLINICAL_ACTIVE='cosmas:clinical-microphone:active:v1';
 const serviceCodes=new Set(['capture_consent_required','capture_consent_unavailable','capture_request_conflict',
   'capture_in_progress','capture_session_changed','capture_context_changed','capture_connection_required',
   'core_capture_access_unavailable','capture_source_unavailable']);
@@ -28,7 +31,7 @@ interface Auth {
 type Ipc = ConstructorParameters<typeof DesktopProviderRecorderIpc>[0];
 type Renderer = ConstructorParameters<typeof DesktopProviderRecorderIpc>[1];
 interface Options {
-  auth:Auth;ipc:Ipc;renderer:Renderer;directory:string;apiOrigin:string;
+  auth:Auth;ipc:Ipc;renderer:Renderer&{forcefullyCrashRenderer?():void};directory:string;apiOrigin:string;
   protection:DeviceProtection;uploadOrigins:readonly string[];
   audio:{helperPath:string;helperSha256:string};presentation:{helperPath:string;helperSha256:string};
   /** Existing main-process proxy supplies fresh native auth and bounded HTTP. */
@@ -46,9 +49,23 @@ interface Owned {
 
 /** One recorder for the authenticated combined desktop workspace. Opening
  * checks OS ownership before private storage; only Start can acquire audio. */
-export function installWorkspaceDesktopCapture(options:Options):{close():Promise<void>} {
+export function installWorkspaceDesktopCapture(options:Options):{close():Promise<void>;allowsRendererMicrophone():boolean} {
   if(typeof window!=='undefined'||process.platform!=='darwin')throw unavailable();
   let owner:Owned|undefined,opening:Promise<unknown>|undefined,closed=false;
+  type PrivateOwner={requestId:string;command:string;permitId:string;revision:string;lease:RecordingLeaseOwner;expiresAt:number;admitted:boolean;retiring:boolean;clinical?:{preparationId:string;sourceLeaseId?:string;authorizationRequested:boolean;startExpiresAt?:number;started?:boolean};timer?:ReturnType<typeof setTimeout>;crash?:ReturnType<typeof setTimeout>};
+  let privateOwner:PrivateOwner|undefined;
+  const releasedPrivate=new Set<string>();
+  const usedPrivateRequests=new Set<string>();
+  const privateCurrent=(p:PrivateOwner)=>!closed&&privateOwner===p&&!p.retiring&&p.admitted&&p.expiresAt>Date.now()&&(!p.clinical||p.clinical.started===true||(p.clinical.startExpiresAt??0)>Date.now())&&!options.renderer.isDestroyed()&&options.renderer.mainFrame.url==='app://cosmas/index.html'&&options.auth.snapshot().phase==='ready'&&options.auth.snapshot().revision===p.revision;
+  const releasePrivate=(p:PrivateOwner)=>{if(privateOwner!==p)return;clearTimeout(p.timer);clearTimeout(p.crash);processRecordingLease.release(p.lease);releasedPrivate.add(p.permitId);privateOwner=undefined;};
+  const revokePrivate=()=>{const p=privateOwner;if(!p||p.retiring)return;p.retiring=true;
+    if(options.renderer.isDestroyed()){releasePrivate(p);return;}
+    options.renderer.send(PRIVATE_REVOKED as Parameters<Renderer['send']>[0],{permitId:p.permitId});
+    // Auth loss/deadline cannot depend indefinitely on a responsive renderer.
+    // Destroying its process closes its OS microphone tracks; keep the permit
+    // until that closure event or the exact source's confirmed release.
+    p.crash=setTimeout(()=>{if(privateOwner===p&&!options.renderer.isDestroyed())options.renderer.forcefullyCrashRenderer?.();},2000);p.crash.unref?.();
+  };
   const frame=(event:{sender:{id:number;mainFrame:unknown};senderFrame:unknown})=>{
     if(closed||options.renderer.isDestroyed()||event.sender.id!==options.renderer.id||
       event.senderFrame!==event.sender.mainFrame||options.renderer.mainFrame.url!=='app://cosmas/index.html')throw unavailable();
@@ -117,10 +134,11 @@ export function installWorkspaceDesktopCapture(options:Options):{close():Promise
     return {grant,status:'created' as const};
   };
   const open=async(payload:unknown)=>{
+    if(privateOwner)throw unavailable();
     const value=exact(payload,['workspaceId','sessionId','revision','requestId']);
     const workspaceId=uuid(value.workspaceId as string),sessionId=uuid(value.sessionId as string),revision=uuid(value.revision as string);
     const requestId=uuid(value.requestId as string),state=await options.auth.getState();
-    if(closed||state.phase!=='ready'||state.revision!==revision)throw unavailable();
+    if(closed||privateOwner||state.phase!=='ready'||state.revision!==revision)throw unavailable();
     if(owner?.workspaceId===workspaceId&&owner.sessionId===sessionId&&owner.revision===revision&&owner.recorder?.availableForView)
       return {requestId,workspaceId,sessionId};
     await closeOwner();
@@ -188,14 +206,81 @@ export function installWorkspaceDesktopCapture(options:Options):{close():Promise
     }catch(error){constructed();await closeOwner(o);throw error;}finally{constructed();}
   };
   options.ipc.handle(OPEN as Parameters<Ipc['handle']>[0],async(event,payload)=>{
-    frame(event);if(opening)throw unavailable();
+    frame(event);if(opening||privateOwner)throw unavailable();
     opening=open(payload);try{const result=await opening;frame(event);return result;}finally{opening=undefined;}
   });
+  options.ipc.handle(PRIVATE_ACQUIRE as Parameters<Ipc['handle']>[0],async(event,payload)=>{
+    frame(event);const value=exact(payload,['requestId','revision','recordingId','consent']);
+    const requestId=uuid(value.requestId as string),revision=uuid(value.revision as string);uuid(value.recordingId as string);privateConsent(value.consent);
+    const command=createHash('sha256').update(JSON.stringify([requestId,revision,value.recordingId,value.consent])).digest('hex');
+    if(privateOwner){if(privateOwner.requestId===requestId&&privateOwner.command===command&&privateCurrent(privateOwner))return {requestId,permitId:privateOwner.permitId,revision,expiresAt:new Date(privateOwner.expiresAt).toISOString()};throw unavailable();}
+    if(owner||opening||usedPrivateRequests.has(requestId)||usedPrivateRequests.size>=10000)throw unavailable();
+    const state=options.auth.snapshot();if(state.phase!=='ready'||state.revision!==revision)throw unavailable();
+    const p:PrivateOwner={requestId,command,permitId:crypto.randomUUID(),revision,lease:createRecordingLeaseOwner(),expiresAt:Date.now()+900000,admitted:false,retiring:false};
+    processRecordingLease.acquire(p.lease);privateOwner=p;usedPrivateRequests.add(requestId);
+    try{const proof=exact(await options.auth.sourceRequest('sourceIdle',{},revision),['idle']);frame(event);
+      if(proof.idle!==true||closed||privateOwner!==p||p.retiring||owner||opening||options.auth.snapshot().phase!=='ready'||options.auth.snapshot().revision!==revision)throw unavailable();
+      p.admitted=true;p.timer=setTimeout(revokePrivate,Math.max(1,p.expiresAt-Date.now()));p.timer.unref?.();
+      return {requestId,permitId:p.permitId,revision,expiresAt:new Date(p.expiresAt).toISOString()};
+    }catch(error){releasePrivate(p);throw error;}
+  });
+  options.ipc.handle(PRIVATE_RELEASE as Parameters<Ipc['handle']>[0],async(event,payload)=>{
+    frame(event);const value=exact(payload,['requestId','permitId']);uuid(value.requestId as string);const permitId=uuid(value.permitId as string);
+    if(privateOwner){if(privateOwner.permitId!==permitId||privateOwner.clinical)throw unavailable();releasePrivate(privateOwner);}else if(!releasedPrivate.has(permitId))throw unavailable();return {requestId:value.requestId,released:true};
+  });
+  options.ipc.handle(CLINICAL_ACQUIRE as Parameters<Ipc['handle']>[0],async(event,payload)=>{
+    frame(event);const value=exact(payload,['requestId','revision','workspaceId','sessionId','leaseId','leaseReceiptId','leaseGeneration','captureAuthorizedUntil','firstSequenceNumber']);
+    for(const k of ['requestId','revision','workspaceId','sessionId','leaseId','leaseReceiptId'])uuid(value[k] as string);
+    const requestId=value.requestId as string,revision=value.revision as string,deadline=Date.parse(value.captureAuthorizedUntil as string);
+    if(!Number.isSafeInteger(value.leaseGeneration)||Number(value.leaseGeneration)<1||!Number.isSafeInteger(value.firstSequenceNumber)||Number(value.firstSequenceNumber)<0||Number(value.firstSequenceNumber)>=360||!Number.isFinite(deadline)||deadline<=Date.now()||deadline>Date.now()+900000||owner||opening)throw unavailable();
+    const command=createHash('sha256').update(JSON.stringify(value)).digest('hex');
+    if(privateOwner){if(privateOwner.command===command&&privateOwner.clinical)return {requestId,permitId:privateOwner.permitId,revision,expiresAt:new Date(privateOwner.expiresAt).toISOString(),admitted:privateCurrent(privateOwner)};throw unavailable();}
+    if(usedPrivateRequests.has(requestId)||usedPrivateRequests.size>=10000||options.auth.snapshot().phase!=='ready'||options.auth.snapshot().revision!==revision)throw unavailable();
+    const p:PrivateOwner={requestId,command,permitId:crypto.randomUUID(),revision,lease:createRecordingLeaseOwner(),expiresAt:deadline,admitted:false,retiring:false,clinical:{preparationId:crypto.randomUUID(),authorizationRequested:false}};
+    processRecordingLease.acquire(p.lease);privateOwner=p;usedPrivateRequests.add(requestId);
+    try{const {requestId:_,revision:__,...metadata}=value;
+      const prepared=exact(await options.auth.sourceRequest('sourcePrepare',{...metadata,preparationId:p.clinical!.preparationId},revision),['grant','processFence']);frame(event);
+      const grant=parseBackendCaptureGrant(prepared.grant);if(grant.captureSessionId!==value.sessionId)throw unavailable();p.clinical!.sourceLeaseId=grant.sourceLeaseId;
+      if(privateOwner!==p||p.retiring||options.auth.snapshot().revision!==revision)throw unavailable();p.clinical!.authorizationRequested=true;
+      const decision=parseStartAuthorityDecision(await options.auth.sourceRequest('sourceAuthorize',{sourceLeaseId:grant.sourceLeaseId},revision));frame(event);
+      if(decision.decision!=='authorized'||decision.captureSessionId!==grant.captureSessionId||decision.sourceLeaseId!==grant.sourceLeaseId||decision.actorId!==grant.actorId||decision.consentRecordId!==grant.consentRecordId||Date.parse(decision.expiresAt)<=Date.now()||Date.parse(decision.expiresAt)>Date.now()+15000||privateOwner!==p||p.retiring||options.auth.snapshot().phase!=='ready'||options.auth.snapshot().revision!==revision)throw unavailable();
+      decision.captureCapability.secret='';p.clinical!.startExpiresAt=Date.parse(decision.expiresAt);p.admitted=true;p.timer=setTimeout(revokePrivate,Math.max(1,p.expiresAt-Date.now()));p.timer.unref?.();
+      return {requestId,permitId:p.permitId,revision,expiresAt:new Date(p.expiresAt).toISOString(),admitted:true};
+    }catch{p.retiring=true;/* Native journal/owner stays until exact source closure retry. */return {requestId,permitId:p.permitId,revision,expiresAt:new Date(p.expiresAt).toISOString(),admitted:false};}
+  });
+  options.ipc.handle(CLINICAL_ACTIVE as Parameters<Ipc['handle']>[0],async(event,payload)=>{
+    frame(event);const value=exact(payload,['requestId','permitId']);uuid(value.requestId as string);const id=uuid(value.permitId as string),p=privateOwner;
+    if(!p?.clinical||p.permitId!==id||!privateCurrent(p)||!p.clinical.started&&(p.clinical.startExpiresAt??0)<=Date.now())throw unavailable();p.clinical.started=true;
+    return {requestId:value.requestId,active:true};
+  });
+  options.ipc.handle(CLINICAL_RELEASE as Parameters<Ipc['handle']>[0],async(event,payload)=>{
+    frame(event);const value=exact(payload,['requestId','permitId']);uuid(value.requestId as string);const permitId=uuid(value.permitId as string),p=privateOwner;
+    if(p){if(p.permitId!==permitId||!p.clinical)throw unavailable();p.retiring=true;
+      if(p.clinical.sourceLeaseId&&p.clinical.authorizationRequested)await options.auth.sourceRequest('sourceStopped',{sourceLeaseId:p.clinical.sourceLeaseId});
+      else await options.auth.sourceRequest('sourcePreparationRelease',{preparationId:p.clinical.preparationId});releasePrivate(p);
+    }else if(!releasedPrivate.has(permitId))throw unavailable();return {requestId:value.requestId,released:true};
+  });
+  options.ipc.handle(PRIVATE_IDLE as Parameters<Ipc['handle']>[0],async(event,payload)=>{
+    frame(event);const value=exact(payload,['requestId','revision']),revision=uuid(value.revision as string);uuid(value.requestId as string);
+    if(owner||opening||privateOwner||options.auth.snapshot().phase!=='ready'||options.auth.snapshot().revision!==revision)throw unavailable();
+    const proof=exact(await options.auth.sourceRequest('sourceIdle',{},revision),['idle']);frame(event);
+    if(proof.idle!==true||owner||opening||privateOwner||options.auth.snapshot().revision!==revision)throw unavailable();return {requestId:value.requestId,idle:true};
+  });
+  const rendererClosed=()=>{if(privateOwner)releasePrivate(privateOwner);};
+  const rendererLeaving=()=>revokePrivate();
+  options.renderer.on('destroyed',rendererClosed);options.renderer.on('render-process-gone',rendererClosed);options.renderer.on('will-navigate',rendererLeaving);
   const removeAuth=options.auth.subscribe(state=>{
+    if(privateOwner&&(state.phase!=='ready'||state.revision!==privateOwner.revision))revokePrivate();
     if(owner&&(state.phase!=='ready'||state.revision!==owner.revision))void closeOwner().catch(()=>{});
   });
-  return {close:async()=>{closed=true;options.ipc.removeHandler(OPEN as Parameters<Ipc['removeHandler']>[0]);removeAuth();
-    await opening?.catch(()=>{});await closeOwner();}};
+  return {allowsRendererMicrophone:()=>!!privateOwner&&privateCurrent(privateOwner),
+    close:async()=>{revokePrivate();if(privateOwner&&!options.renderer.isDestroyed())throw unavailable();closed=true;
+      for(const channel of [OPEN,PRIVATE_ACQUIRE,PRIVATE_RELEASE,PRIVATE_IDLE,CLINICAL_ACQUIRE,CLINICAL_RELEASE,CLINICAL_ACTIVE])options.ipc.removeHandler(channel as Parameters<Ipc['removeHandler']>[0]);removeAuth();
+      options.renderer.removeListener('destroyed',rendererClosed);options.renderer.removeListener('render-process-gone',rendererClosed);options.renderer.removeListener('will-navigate',rendererLeaving);
+      await opening?.catch(()=>{});await closeOwner();}};
+}
+function privateConsent(value:unknown){const v=exact(value,['modality','participant_regions','method','all_parties_consented','granted_at','language']);
+  if(v.all_parties_consented!==true||v.method!=='verbal_attestation'||!['in_person','virtual','phone'].includes(String(v.modality))||!['en-US','en-US+es-US'].includes(String(v.language))||!Array.isArray(v.participant_regions)||!v.participant_regions.length||v.participant_regions.length>16||new Set(v.participant_regions).size!==v.participant_regions.length||!v.participant_regions.every(r=>typeof r==='string'&&/^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$/.test(r))||typeof v.granted_at!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(v.granted_at)||new Date(v.granted_at).toISOString()!==v.granted_at||Date.parse(v.granted_at)>Date.now()||Date.now()-Date.parse(v.granted_at)>300000)throw unavailable();
 }
 function exact(value:unknown,keys:string[]):Record<string,unknown>{
   if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).sort().join(',')!==keys.sort().join(','))throw unavailable();

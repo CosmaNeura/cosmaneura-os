@@ -5,6 +5,7 @@ const captureUuid = value => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a
 const captureFields = (value, fields) => value && typeof value === 'object' && !Array.isArray(value) &&
   Object.keys(value).sort().join(',') === fields.sort().join(',');
 const captureListeners = new Set();
+const privateCaptureListeners = new Set();
 contextBridge.exposeInMainWorld('cosmasDesktopCapture', Object.freeze({
   enabled: captureEnabled,
   open(value) {
@@ -18,6 +19,35 @@ contextBridge.exposeInMainWorld('cosmasDesktopCapture', Object.freeze({
         !['read','start','stop','pause','continue','permissions','resume','release','deactivate'].includes(value.kind))
       return Promise.reject(new Error('Desktop recording unavailable'));
     return ipcRenderer.invoke(captureRequest, value);
+  },
+  privateAcquire(value) {
+    if(!captureEnabled||!captureFields(value,['requestId','revision','recordingId','consent'])||![value.requestId,value.revision,value.recordingId].every(captureUuid)||!captureFields(value.consent,['modality','participant_regions','method','all_parties_consented','granted_at','language']))return Promise.reject(new Error('Desktop recording unavailable'));
+    return ipcRenderer.invoke('cosmas:private-capture:acquire:v1',value);
+  },
+  privateRelease(value) {
+    if(!captureEnabled||!captureFields(value,['requestId','permitId'])||!Object.values(value).every(captureUuid))return Promise.reject(new Error('Desktop recording unavailable'));
+    return ipcRenderer.invoke('cosmas:private-capture:release:v1',value);
+  },
+  clinicalAcquire(value) {
+    if(!captureEnabled||!captureFields(value,['requestId','revision','workspaceId','sessionId','leaseId','leaseReceiptId','leaseGeneration','captureAuthorizedUntil','firstSequenceNumber'])||![value.requestId,value.revision,value.workspaceId,value.sessionId,value.leaseId,value.leaseReceiptId].every(captureUuid))return Promise.reject(new Error('Desktop recording unavailable'));
+    return ipcRenderer.invoke('cosmas:clinical-microphone:acquire:v1',value);
+  },
+  clinicalRelease(value) {
+    if(!captureEnabled||!captureFields(value,['requestId','permitId'])||!Object.values(value).every(captureUuid))return Promise.reject(new Error('Desktop recording unavailable'));
+    return ipcRenderer.invoke('cosmas:clinical-microphone:release:v1',value);
+  },
+  clinicalActive(value) {
+    if(!captureEnabled||!captureFields(value,['requestId','permitId'])||!Object.values(value).every(captureUuid))return Promise.reject(new Error('Desktop recording unavailable'));
+    return ipcRenderer.invoke('cosmas:clinical-microphone:active:v1',value);
+  },
+  privateIdle(value) {
+    if(!captureEnabled||!captureFields(value,['requestId','revision'])||!Object.values(value).every(captureUuid))return Promise.reject(new Error('Desktop recording unavailable'));
+    return ipcRenderer.invoke('cosmas:private-capture:idle:v1',value);
+  },
+  onPrivateRevoked(callback) {
+    if(!captureEnabled||typeof callback!=='function'||privateCaptureListeners.size>=32)throw new Error('Desktop recording unavailable');
+    const listener=(_event,value)=>{if(captureFields(value,['permitId'])&&captureUuid(value.permitId))callback(value);};privateCaptureListeners.add(listener);ipcRenderer.on('cosmas:private-capture:revoked:v1',listener);
+    return()=>{privateCaptureListeners.delete(listener);ipcRenderer.removeListener('cosmas:private-capture:revoked:v1',listener);};
   },
   subscribe(callback) {
     if (!captureEnabled || typeof callback !== 'function' || captureListeners.size >= 32) throw new Error('Desktop recording unavailable');
