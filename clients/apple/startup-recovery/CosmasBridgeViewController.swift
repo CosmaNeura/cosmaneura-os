@@ -76,6 +76,14 @@ import CosmasWorkspaceAuthPlugin
 
     required init?(coder: NSCoder) { fatalError("Use the native workspace container") }
 
+    override func instanceDescriptor() -> InstanceDescriptor {
+        // Capacitor 8.5.0 otherwise installs a scroll delegate that disables
+        // the pinch recognizer when zooming begins. Keep WebKit's zoom behavior.
+        let descriptor = super.instanceDescriptor()
+        descriptor.zoomingEnabled = true
+        return descriptor
+    }
+
     private func installLifecycle(on webView: WKWebView) {
         // Capacitor replaces the configuration's content controller while building
         // the WebView, so install on the finished instance before loadWebView.
