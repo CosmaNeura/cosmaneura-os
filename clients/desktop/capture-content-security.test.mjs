@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {captureContentSecurityPolicy, privateDocumentContentSecurityPolicy, installCaptureContentSecurityPolicy} from './capture-content-security.mjs';
+import {captureContentSecurityPolicy, privateDocumentContentSecurityPolicy, privateRecordingContentSecurityPolicy, installCaptureContentSecurityPolicy} from './capture-content-security.mjs';
 
 const base = "default-src 'none'; connect-src 'self'; script-src 'self'; media-src 'none'; object-src 'none'";
 test('private PDF frames allow only local blobs and preserve all other retained restrictions', () => {
@@ -20,6 +20,28 @@ test('upload access is absent by default and changes only connect-src for exact 
   assert.equal(captureContentSecurityPolicy(base, ['https://storage.invalid', 'https://storage.invalid']),
     base.replace("connect-src 'self'", "connect-src 'self' https://storage.invalid"));
 });
+test('authenticated private WAV playback permits only blob media while preserving every other directive', () => {
+  const capture = privateDocumentContentSecurityPolicy(captureContentSecurityPolicy(base, ['https://storage.invalid']));
+  const policy = privateRecordingContentSecurityPolicy(capture);
+  assert.equal(policy, capture.replace("media-src 'none'", 'media-src blob:'));
+  const directives = value => value.split('; ').filter(directive => !directive.startsWith('media-src '));
+  assert.deepEqual(directives(policy), directives(capture));
+  assert.equal(policy.split('; ').find(directive => directive.startsWith('media-src ')), 'media-src blob:');
+  // The base remains denied; only the authenticated composition opts in to local blobs.
+  assert.equal(captureContentSecurityPolicy(base), base);
+  assert.equal(privateDocumentContentSecurityPolicy(base), base + '; frame-src blob:');
+});
+test('private playback refuses missing, duplicate or already broadened media and retained safety directives', () => {
+  for (const invalid of [null, {}, base.replace("media-src 'none'; ", ''),
+    ...["'self'", 'https:', 'http:', 'data:', 'file:', 'app:', '*', 'blob:', 'blob: https:'].map(value => base.replace("media-src 'none'", 'media-src ' + value)),
+    base + "; media-src 'none'", base + '; MEDIA-SRC https:',
+    base.replace("media-src 'none'", "MEDIA-SRC 'none'"),
+    base.replace("default-src 'none'", "default-src 'self'"),
+    base.replace("object-src 'none'", 'object-src *'),
+    base + "; default-src 'none'", base + "; OBJECT-SRC 'none'"]) {
+    assert.throws(() => privateRecordingContentSecurityPolicy(invalid));
+  }
+});
 test('unbounded origins, schemes, credentials, paths and directive injection fail closed', () => {
   for (const origins of [null, {}, 'https://storage.invalid', Array(5).fill('https://storage.invalid'),
     ...['*', 'https:', 'http://storage.invalid', 'https://*.invalid', 'https://user@storage.invalid',
@@ -35,7 +57,7 @@ test('unbounded origins, schemes, credentials, paths and directive injection fai
 });
 test('the installed header preserves other restrictions and removes differently cased duplicate CSP', () => {
   let handler;
-  const policy = captureContentSecurityPolicy(base, ['https://storage.invalid']);
+  const policy = privateRecordingContentSecurityPolicy(privateDocumentContentSecurityPolicy(captureContentSecurityPolicy(base, ['https://storage.invalid'])));
   installCaptureContentSecurityPolicy({onHeadersReceived: value => { handler = value; }}, policy);
   let result;
   handler({responseHeaders: {'content-security-policy': ['connect-src *'], 'Cache-Control': ['no-store']}}, value => { result = value; });
