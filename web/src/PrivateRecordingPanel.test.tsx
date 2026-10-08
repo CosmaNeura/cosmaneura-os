@@ -122,4 +122,30 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     await click('Try preparing recording again');await wait(()=>status()==='Ready for consent');
     expect(container.textContent).not.toContain('Where everyone is located');await consent();expect(button('Start recording').disabled).toBe(false);expect(sources).toHaveLength(0);
   });
+  it('offers a fresh access check after expiry without starting the microphone',async()=>{
+    vi.useFakeTimers();
+    try{
+      const revision='00000000-0000-4000-8000-000000000010';
+      const native=vi.fn(async()=>({receiptId:'00000000-0000-4000-8000-000000000011',revision,expiresAt:new Date(Date.now()+60000).toISOString()}));
+      props={...props,identity:{mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision,isCurrent:()=>true}},platform:'ios',prepareNative:native};
+      await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+      for(let n=0;n<100&&status()!=='Ready for consent';n++)await act(async()=>vi.advanceTimersByTimeAsync(5));
+      expect(status()).toBe('Ready for consent');
+      await act(async()=>vi.advanceTimersByTimeAsync(60000));
+      expect(status()).toBe('Recording not ready');expect(button('Start recording').disabled).toBe(true);
+      await click('Try preparing recording again');expect(status()).toBe('Ready for consent');expect(native).toHaveBeenCalledTimes(2);expect(sources).toHaveLength(0);
+    }finally{vi.useRealTimers();}
+  });
+  it('retries recovery of the exact saved recording and retains its verified audio',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));
+    await click('Stop and save recording');await wait(()=>status()==='Saved on this device');const recordingId=runtimes[0].snapshot.recordingId;
+    await act(async()=>root.unmount());root=createRoot(container);
+    const original=props.runtimeFactory!,recovery=vi.fn().mockRejectedValueOnce(new Error('Recovery temporarily unavailable')).mockImplementation(original);
+    props={...props,recordingId,runtimeFactory:recovery};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>status()==='Recording not ready');
+    await click('Try preparing recording again');await wait(()=>status()==='Saved on this device');
+    expect(recovery.mock.calls.map(([,input])=>input.recordingId)).toEqual([recordingId,recordingId]);expect(runtimes.at(-1)!.snapshot).toMatchObject({recordingId,recordedChunks:1,phase:'sealed'});expect(sources).toHaveLength(1);
+    await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);
+    expect(new DataView(await (createUrl.mock.calls[0][0] as Blob).arrayBuffer()).getInt16(44,true)).toBe(84);
+  });
 });

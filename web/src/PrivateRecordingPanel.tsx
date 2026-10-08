@@ -77,7 +77,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       if(!active||owner.current!==selected||!current())return;
       if(receipt.revision!==revision||Date.parse(receipt.expiresAt)<=Date.now())throw new WorkspaceApiError(403);
       nativeReceipt.current=receipt;setNativeReady(true);
-      timer=setTimeout(()=>{nativeReceipt.current=null;setNativeReady(false);},Math.max(0,Date.parse(receipt.expiresAt)-Date.now()));
+      timer=setTimeout(()=>{nativeReceipt.current=null;setNativeReady(false);if(!nativeConsumed.current)setNativeError('Recording access check expired. Try preparing recording again.');},Math.max(0,Date.parse(receipt.expiresAt)-Date.now()));
     }).catch(()=>{if(active&&owner.current===selected)setNativeError('Recording is not ready: this device’s recording access could not be checked. Try preparing recording again.');});
     return()=>{active=false;if(timer)clearTimeout(timer);};
   },[identity,scope,platform,nativeEpoch]);
@@ -91,7 +91,13 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       if(authority.status==='rejected'){if(storage.status==='fulfilled')storage.value.close();throw authority.reason;}
       if(storage.status==='rejected')throw storage.reason;
       if(owner.current!==selected||!current()){storage.value.close();return;}
-      selected.store?.close();selected.store=storage.value;setPrepared(true);
+      selected.store?.close();selected.store=storage.value;
+      if(recordingId){
+        const runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>storage.value,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{recordingId,title});
+        if(owner.current!==selected||!current()){await runtime.close();return;}
+        selected.runtime=runtime;selected.unsubscribe=runtime.subscribe(value=>{if(selected.alive&&owner.current===selected)setSnapshot(value);});
+      }
+      setPrepared(true);
       if(platform==='ios'&&!nativeReady)setNativeEpoch(value=>value+1);
     }catch(cause){if(owner.current===selected&&current()){setPreparationError('Recording is not ready: current access or encrypted storage could not be prepared. Check your connection and try again.');if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))live.current.onAccessLost?.(cause);}}
     finally{preparationRetry.current=false;}
