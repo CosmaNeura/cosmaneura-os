@@ -51,21 +51,71 @@ const stable = value => Array.isArray(value) ? value.map(stable) : value && type
 const canonical = object => JSON.stringify(stable(object));
 const equal = (a,b) => { if (canonical(a) !== canonical(b)) fail(); };
 
-/** The source-owner journal uses only this helper's signing-team private group. */
+/** Closed macOS auth claims. Their presence alone does not authorize a Keychain group. */
 export function desktopAuthSigningEntitlements(teamIdentifier, bundleIdentifier) {
   if (typeof teamIdentifier !== 'string' || !/^[A-Z0-9]{10}$/.test(teamIdentifier) ||
       bundleIdentifier !== 'com.cosmasos.beta.desktop.auth') fail();
-  return Object.freeze({'keychain-access-groups': Object.freeze([`${teamIdentifier}.${bundleIdentifier}`])});
+  return Object.freeze({'com.apple.application-identifier': `${teamIdentifier}.${bundleIdentifier}`,
+    'com.apple.developer.team-identifier': teamIdentifier,
+    'keychain-access-groups': Object.freeze([`${teamIdentifier}.${bundleIdentifier}`])});
 }
 
 /** Apply to the claims read from the final signed helper, never the signing request alone. */
 export function validateDesktopAuthSigningEntitlements(actual, teamIdentifier, bundleIdentifier) {
   const expected = desktopAuthSigningEntitlements(teamIdentifier, bundleIdentifier);
   if (!actual || typeof actual !== 'object' || Array.isArray(actual) ||
-      Object.keys(actual).length !== 1 || !Object.hasOwn(actual, 'keychain-access-groups') ||
+      Object.keys(actual).sort().join(',') !== Object.keys(expected).sort().join(',') ||
+      actual['com.apple.application-identifier'] !== expected['com.apple.application-identifier'] ||
+      actual['com.apple.developer.team-identifier'] !== teamIdentifier ||
       !Array.isArray(actual['keychain-access-groups']) || actual['keychain-access-groups'].length !== 1 ||
       actual['keychain-access-groups'][0] !== expected['keychain-access-groups'][0]) fail();
   return expected;
+}
+
+/** Validate decoded profile authorization only. The caller must first validate the
+ * exact profile's Apple CMS signature and the selected Developer ID certificate's
+ * trust/validity. This guard neither performs CMS crypto nor proves runtime/hardware.
+ * plist Data may arrive as bytes or canonical base64; dates must identify UTC.
+ */
+export function validateDesktopAuthProvisioningProfile(profile, teamIdentifier, bundleIdentifier,
+    selectedDeveloperIDCertificateSHA1, observedAt) {
+  const claims=desktopAuthSigningEntitlements(teamIdentifier,bundleIdentifier);
+  const date=value=>{
+    if(value instanceof Date){if(!Number.isFinite(value.getTime()))fail();return value.getTime();}
+    if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(value))fail();
+    const time=Date.parse(value);if(!Number.isFinite(time)||new Date(time).toISOString().slice(0,19)!==value.slice(0,19))fail();return time;
+  };
+  const data=value=>{
+    if(value instanceof Uint8Array){if(!value.length||value.length>65536)fail();return Buffer.from(value);}
+    if(typeof value!=='string'||value.length>87384||!value.length||!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value))fail();
+    const bytes=Buffer.from(value,'base64');if(!bytes.length||bytes.length>65536||bytes.toString('base64')!==value)fail();return bytes;
+  };
+  if(!profile||typeof profile!=='object'||Array.isArray(profile)||
+      typeof selectedDeveloperIDCertificateSHA1!=='string'||!/^[a-fA-F0-9]{40}$/.test(selectedDeveloperIDCertificateSHA1)||
+      typeof profile.UUID!=='string'||!/^[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$/.test(profile.UUID)||
+      !Array.isArray(profile.Platform)||profile.Platform.length!==1||profile.Platform[0]!=='OSX'||
+      !Array.isArray(profile.TeamIdentifier)||profile.TeamIdentifier.length!==1||profile.TeamIdentifier[0]!==teamIdentifier||
+      !Array.isArray(profile.ApplicationIdentifierPrefix)||profile.ApplicationIdentifierPrefix.length!==1||profile.ApplicationIdentifierPrefix[0]!==teamIdentifier||
+      profile.ProvisionsAllDevices!==true||Object.hasOwn(profile,'ProvisionedDevices'))fail();
+  const now=date(observedAt),creation=date(profile.CreationDate),expiration=date(profile.ExpirationDate);
+  if(creation>now||expiration<=now||creation>=expiration)fail();
+  const authorization=profile.Entitlements;
+  if(!authorization||typeof authorization!=='object'||Array.isArray(authorization)||
+      authorization['com.apple.application-identifier']!==claims['com.apple.application-identifier']||
+      authorization['com.apple.developer.team-identifier']!==teamIdentifier||
+      (Object.hasOwn(authorization,'get-task-allow')&&authorization['get-task-allow']!==false)||
+      (Object.hasOwn(authorization,'com.apple.security.get-task-allow')&&authorization['com.apple.security.get-task-allow']!==false)||
+      !Array.isArray(authorization['keychain-access-groups'])||!authorization['keychain-access-groups'].length||authorization['keychain-access-groups'].length>32||
+      authorization['keychain-access-groups'].some(group=>typeof group!=='string')||
+      !authorization['keychain-access-groups'].some(group=>group===claims['keychain-access-groups'][0]||group===teamIdentifier+'.*'))fail();
+  if(!Array.isArray(profile.DeveloperCertificates)||!profile.DeveloperCertificates.length||profile.DeveloperCertificates.length>32)fail();
+  const certificateSHA1=selectedDeveloperIDCertificateSHA1.toLowerCase();
+  const certificateHashes=profile.DeveloperCertificates.map(value=>createHash('sha1').update(data(value)).digest('hex'));
+  if(!certificateHashes.includes(certificateSHA1))fail();
+  return Object.freeze({profileUUID:profile.UUID,teamIdentifier,bundleIdentifier,certificateSHA1,
+    creationDate:new Date(creation).toISOString(),expirationDate:new Date(expiration).toISOString(),
+    observedAt:new Date(now).toISOString(),claims,decodedAuthorizationValidated:true,
+    cmsSignatureValidatedByThisGuard:false,certificateTrustValidatedByThisGuard:false,runtimeQualified:false});
 }
 
 /** Refuse stale renderer routing before copying or sealing a release. Do not execute candidate code. */

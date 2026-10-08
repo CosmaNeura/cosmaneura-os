@@ -4,15 +4,16 @@ import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,realpath,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory,validateSourceProvenance,desktopAuthSigningEntitlements,validateDesktopAuthSigningEntitlements} from './package-desktop-release.mjs';
+import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory,validateSourceProvenance,desktopAuthSigningEntitlements,validateDesktopAuthSigningEntitlements,validateDesktopAuthProvisioningProfile} from './package-desktop-release.mjs';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
 const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
 
-test('desktop source-owner helper has exactly its signing-team private Keychain group',()=>{
+test('desktop source-owner helper has only its macOS App ID, team and private Keychain group',()=>{
   const team='JVV65668U6',bundle='com.cosmasos.beta.desktop.auth';
   const claims=desktopAuthSigningEntitlements(team,bundle);
-  assert.deepEqual(claims,{'keychain-access-groups':['JVV65668U6.com.cosmasos.beta.desktop.auth']});
+  assert.deepEqual(claims,{'com.apple.application-identifier':team+'.'+bundle,
+    'com.apple.developer.team-identifier':team,'keychain-access-groups':[team+'.'+bundle]});
   assert.ok(Object.isFrozen(claims));assert.ok(Object.isFrozen(claims['keychain-access-groups']));
   assert.deepEqual(validateDesktopAuthSigningEntitlements(structuredClone(claims),team,bundle),claims);
   // Installed 1044 was signed with {}, which cannot open the source-owner journal.
@@ -20,8 +21,59 @@ test('desktop source-owner helper has exactly its signing-team private Keychain 
     {'keychain-access-groups':['JVV65668U6.*']}, {'keychain-access-groups':[team+'.com.cosmasos.beta.desktop']},
     {'keychain-access-groups':['OTHERTEAM1.'+bundle]}, {'keychain-access-groups':claims['keychain-access-groups'][0]},
     {'keychain-access-groups':[...claims['keychain-access-groups'],'com.apple.token']},
-    {...claims,'com.apple.security.device.audio-input':true}, {...claims,'application-identifier':team+'.'+bundle}])
+    {...claims,'com.apple.security.device.audio-input':true}, {...claims,'application-identifier':team+'.'+bundle},
+    {...claims,'com.apple.application-identifier':team+'.*'}, {...claims,'com.apple.developer.team-identifier':'OTHERTEAM1'},
+    Object.fromEntries(Object.entries(claims).filter(([key])=>key!=='com.apple.application-identifier')),
+    {...claims,'keychain-access-groups':[team+'.*']}])
     assert.throws(()=>validateDesktopAuthSigningEntitlements(actual,team,bundle));
+});
+
+const profileTeam='JVV65668U6',profileBundle='com.cosmasos.beta.desktop.auth';
+// Invented bytes prove certificate membership hashing only, never X.509 trust or Apple CMS.
+const certificate=Buffer.from('invented selected corporate certificate DER fixture');
+const selectedCertificateSHA1=createHash('sha1').update(certificate).digest('hex');
+const profileNow='2026-10-08T20:00:00Z';
+function profileFixture(){return {UUID:'00000000-0000-4000-8000-000000000001',Platform:['OSX'],
+  TeamIdentifier:[profileTeam],ApplicationIdentifierPrefix:[profileTeam],ProvisionsAllDevices:true,
+  CreationDate:new Date('2026-10-01T00:00:00Z'),ExpirationDate:new Date('2027-10-01T00:00:00Z'),
+  DeveloperCertificates:[certificate],Entitlements:{...desktopAuthSigningEntitlements(profileTeam,profileBundle),
+    'keychain-access-groups':[profileTeam+'.*'],'get-task-allow':false}};}
+const checkProfile=(profile,sha=selectedCertificateSHA1,now=profileNow)=>
+  validateDesktopAuthProvisioningProfile(profile,profileTeam,profileBundle,sha,now);
+
+test('decoded Developer ID profile permits its exact helper claims and selected certificate',()=>{
+  const result=checkProfile(profileFixture());assert.ok(Object.isFrozen(result));
+  assert.deepEqual(result.claims,desktopAuthSigningEntitlements(profileTeam,profileBundle));
+  assert.equal(result.certificateSHA1,selectedCertificateSHA1);assert.equal(result.decodedAuthorizationValidated,true);
+  assert.equal(result.cmsSignatureValidatedByThisGuard,false);assert.equal(result.certificateTrustValidatedByThisGuard,false);
+  assert.equal(result.runtimeQualified,false);
+  const exact=profileFixture();exact.Entitlements['keychain-access-groups']=[profileTeam+'.'+profileBundle];
+  exact.DeveloperCertificates=[certificate.toString('base64')];exact.CreationDate='2026-10-01T00:00:00Z';
+  assert.deepEqual(checkProfile(exact).claims,result.claims);
+});
+
+test('decoded profile absence, expired/future dates and malformed certificate binding refuse',()=>{
+  for(const p of [null,[],{}, {...profileFixture(),ExpirationDate:profileNow},
+    {...profileFixture(),CreationDate:'2026-10-09T00:00:00Z'},
+    {...profileFixture(),ExpirationDate:'2027-02-30T00:00:00Z'},
+    {...profileFixture(),ExpirationDate:'2027-10-01T00:00:00-04:00'},
+    {...profileFixture(),DeveloperCertificates:[]}, {...profileFixture(),DeveloperCertificates:['not-base64']},
+    {...profileFixture(),DeveloperCertificates:[Buffer.from('another certificate')]}])assert.throws(()=>checkProfile(p));
+  assert.throws(()=>checkProfile(profileFixture(),'f'.repeat(40)));
+  assert.throws(()=>checkProfile(profileFixture(),'unbound'));
+  assert.throws(()=>checkProfile(profileFixture(),selectedCertificateSHA1,'not a UTC date'));
+});
+
+test('profile authority refuses another App ID/team/platform and development-only scope',()=>{
+  for(const change of [p=>p.Platform=['iOS'],p=>p.Platform=['OSX','iOS'],p=>p.TeamIdentifier=['OTHERTEAM1'],
+    p=>p.ApplicationIdentifierPrefix=['OTHERTEAM1'],p=>p.Entitlements['com.apple.application-identifier']=profileTeam+'.*',
+    p=>p.Entitlements['com.apple.application-identifier']=profileTeam+'.com.cosmasos.beta.desktop',
+    p=>p.Entitlements['com.apple.developer.team-identifier']='OTHERTEAM1',p=>p.ProvisionsAllDevices=false,
+    p=>p.ProvisionedDevices=['invented-device'],p=>p.Entitlements['get-task-allow']=true,
+    p=>p.Entitlements['com.apple.security.get-task-allow']=true,p=>p.Entitlements['keychain-access-groups']=['*'],
+    p=>p.Entitlements['keychain-access-groups']=['OTHERTEAM1.*'],p=>delete p.Entitlements['keychain-access-groups']]){
+    const profile=profileFixture();change(profile);assert.throws(()=>checkProfile(profile));
+  }
 });
 
 test('desktop auth signing claims refuse unbound teams and other helper identities',()=>{
