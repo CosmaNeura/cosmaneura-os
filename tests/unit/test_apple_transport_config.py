@@ -61,6 +61,16 @@ def test_verification_variant_has_a_distinct_app_identity():
     assert script.build_identity("w8m") == ("com.cosmasos.synthetic.w8m", "CosmasOS Synth W8M")
 
 
+def test_source_journal_group_can_be_bound_before_unsigned_compilation():
+    script = composition_module()
+    bundle = "com.cosmasos.beta.ios"
+    assert script.source_access_group(bundle, "JVV65668U6." + bundle) == "JVV65668U6." + bundle
+    assert script.source_access_group(bundle, None) == "$(AppIdentifierPrefix)" + bundle
+    for invalid in [bundle, "other." + bundle, "JVV65668U6.com.other", "JVV65668U6.*", " JVV65668U6." + bundle]:
+        with pytest.raises(ValueError):
+            script.source_access_group(bundle, invalid)
+
+
 @pytest.mark.parametrize("variant", ["", "com.cosmaneura.capture", "../w8m", "w8m.other", "W8M", "w0"])
 def test_verification_variant_cannot_select_an_existing_product_or_path(variant):
     with pytest.raises(ValueError):

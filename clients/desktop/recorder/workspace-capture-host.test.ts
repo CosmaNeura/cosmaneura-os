@@ -127,6 +127,25 @@ async function fixture(){
 }
 
 const privateConsent=()=>({modality:'in_person',participant_regions:['US-NY'],method:'verbal_attestation',all_parties_consented:true,granted_at:new Date(Date.now()-1000).toISOString(),language:'en-US'});
+it('admits private-only consent without collecting a jurisdiction while preserving explicit consent and native idle proof',async()=>{
+  const f=await fixture(),command={requestId:crypto.randomUUID(),recordingId:crypto.randomUUID(),revision,consent:{...privateConsent(),participant_regions:[]}};
+  const permit=await f.privateInvoke('cosmas:private-capture:acquire:v1',command) as {permitId:string};
+  expect(f.host().allowsRendererMicrophone()).toBe(true);
+  expect(f.sourceRequest.mock.calls).toEqual([['sourceIdle',{},revision]]);
+  expect(f.calls).toEqual([]);expect(f.start).not.toHaveBeenCalled();
+  await f.privateInvoke('cosmas:private-capture:release:v1',{requestId:crypto.randomUUID(),permitId:permit.permitId});
+  expect(f.host().allowsRendererMicrophone()).toBe(false);
+});
+it('still rejects missing, malformed, stale or unconfirmed private consent before any native admission',async()=>{
+  const f=await fixture(),consent={...privateConsent(),participant_regions:[]};
+  const {participant_regions:_,...missingRegions}=consent;
+  for(const invalidConsent of [missingRegions,{...consent,participant_regions:null},{...consent,participant_regions:['New York']},
+    {...consent,participant_regions:['US-NY','US-NY']},{...consent,all_parties_consented:false},
+    {...consent,granted_at:new Date(Date.now()-300001).toISOString()}]){
+    await expect(f.privateInvoke('cosmas:private-capture:acquire:v1',{requestId:crypto.randomUUID(),recordingId:crypto.randomUUID(),revision,consent:invalidConsent})).rejects.toThrow();
+  }
+  expect(f.sourceRequest).not.toHaveBeenCalled();expect(f.host().allowsRendererMicrophone()).toBe(false);
+});
 it('private microphone admission excludes clinical open and requires exact physical-source release',async()=>{
   const f=await fixture(),requestId=crypto.randomUUID(),recordingId=crypto.randomUUID();
   const command={requestId,recordingId,revision,consent:privateConsent()};

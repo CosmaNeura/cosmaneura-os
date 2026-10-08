@@ -47,7 +47,7 @@ export async function invalidatePrivateRecordingNativeReceipt():Promise<void>{
 export function validatePrivateRecordingConsent(value:unknown):asserts value is CaptureAttestation&{language:CaptureLanguage} {
   need(closed(value,'modality,participant_regions,method,all_parties_consented,granted_at,language')&&value.all_parties_consented===true&&value.method==='verbal_attestation'&&['in_person','virtual','phone'].includes(String(value.modality))&&['en-US','en-US+es-US'].includes(String(value.language)));
   need(typeof value.granted_at==='string'&&/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/.test(value.granted_at)&&new Date(value.granted_at).toISOString()===value.granted_at&&Date.parse(value.granted_at)<=Date.now());
-  need(Array.isArray(value.participant_regions)&&value.participant_regions.length>0&&value.participant_regions.length<=16&&new Set(value.participant_regions).size===value.participant_regions.length&&value.participant_regions.every(r=>typeof r==='string'&&/^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$/.test(r)));
+  need(Array.isArray(value.participant_regions)&&value.participant_regions.length<=16&&new Set(value.participant_regions).size===value.participant_regions.length&&value.participant_regions.every(r=>typeof r==='string'&&/^[A-Z]{2}(?:-[A-Z0-9]{1,3})?$/.test(r)));
 }
 
 function manifest(value:unknown,scope:string,id:string):PrivateRecordingManifest {

@@ -24,6 +24,20 @@ export function readRecordingPreferences(scope?: string): RecordingPreferences {
         ? {captureMode: value.captureMode} : {}) };
   } catch { return { ...empty }; }
 }
+export function readPrivateRecordingLanguage(scope: string): CaptureLanguage {
+  try {
+    const address = key(scope), value = address && localStorage.getItem(address + '.private-language');
+    if (value === 'en-US' || value === 'en-US+es-US') return value;
+  } catch { /* Preferences never block recording. */ }
+  return readRecordingPreferences(scope).language;
+}
+/** Private recording remembers language only; no location or consent is inferred. */
+export function savePrivateRecordingLanguage(scope: string, language: CaptureLanguage): void {
+  try {
+    const address = key(scope);
+    if (address && ['en-US', 'en-US+es-US'].includes(language)) localStorage.setItem(address + '.private-language', language);
+  } catch { /* Preferences never block recording. */ }
+}
 export function saveRecordingPreferences(scope: string | undefined, preferences: RecordingPreferences): void {
   try {
     const address = key(scope), regions = recordingRegions(preferences.regions);
