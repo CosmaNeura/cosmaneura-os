@@ -340,6 +340,19 @@ describe("BrowserMicrophoneCaptureSource", () => {
     await expect(source.stop()).resolves.toBeUndefined();
   });
 
+  it("reports real permission and worklet waits without letting a throwing observer interrupt capture", async () => {
+    const harness = createHarness();
+    let resolveStream!: (stream: MediaStream) => void, resolveModule!: () => void;
+    harness.getUserMedia.mockReturnValueOnce(new Promise(resolve => { resolveStream = resolve; }));
+    harness.addModule.mockReturnValueOnce(new Promise<void>(resolve => { resolveModule = resolve; }));
+    const source = new BrowserMicrophoneCaptureSource(harness.dependencies), stages:string[]=[];
+    const starting = source.start({capabilities,onChunk:async()=>{},onStartupStage:stage=>{stages.push(stage);throw Error("Synthetic observer failure");}});
+    expect(stages).toEqual(["microphone_permission"]);expect(harness.addModule).not.toHaveBeenCalled();
+    resolveStream(harness.stream);await vi.waitFor(()=>expect(harness.addModule).toHaveBeenCalledOnce());
+    expect(stages).toEqual(["microphone_permission","audio_engine"]);expect(harness.context.state).toBe('suspended');
+    resolveModule();await starting;expect(harness.track.stopped).toBe(false);await source.stop();expect(harness.track.stopped).toBe(true);
+  });
+
   it.each([false, true])("stops a late permission result after shutdown (authority revoked: %s)", async (revoke) => {
     const harness = createHarness();
     let resolveStream!: (stream: MediaStream) => void;

@@ -16,6 +16,12 @@ it('uses exact main-process consent/revision admission before audio and releases
   expect(f.port.privateRelease).not.toHaveBeenCalled();await f.result.stop();expect(f.source.stop).toHaveBeenCalledOnce();expect(f.port.privateRelease).toHaveBeenCalledOnce();
   expect(f.source.stop.mock.invocationCallOrder[0]).toBeLessThan(f.port.privateRelease.mock.invocationCallOrder[0]!);
 });
+it('reports native waits without allowing progress observers to prevent admission or audio',async()=>{
+  const f=fixture(),complete=f.deferStart(),stages:string[]=[];
+  const starting=f.result.start({...options,onStartupStage:stage=>{stages.push(stage);throw Error('Synthetic observer failure');}});
+  await vi.waitFor(()=>expect(f.source.start).toHaveBeenCalledOnce());expect(stages).toEqual(['native_session','physical_exclusion']);
+  expect(f.port.privateRelease).not.toHaveBeenCalled();complete();await starting;await f.result.stop();expect(f.port.privateRelease).toHaveBeenCalledOnce();
+});
 it('refuses unknown native admission before microphone access',async()=>{
   const f=fixture();f.port.privateAcquire.mockRejectedValueOnce(Error('Retained native owner'));
   await expect(f.result.start(options)).rejects.toThrow();expect(f.source.start).not.toHaveBeenCalled();expect(f.port.privateRelease).not.toHaveBeenCalled();

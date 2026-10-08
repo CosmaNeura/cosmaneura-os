@@ -125,6 +125,7 @@ export class BrowserMicrophoneCaptureSource implements CaptureSource {
         throw new AudioCaptureError("audio_capture_unavailable");
       }
 
+      try { options.onStartupStage?.("microphone_permission"); } catch { /* Progress observer isolation. */ }
       const stream = await this.#requestMicrophone(profile);
       // Permission may finish after Stop/sign-out has already completed cleanup.
       // Dispose that late stream before attaching it to this source's state.
@@ -174,6 +175,7 @@ export class BrowserMicrophoneCaptureSource implements CaptureSource {
         throw new AudioCaptureError("audio_capture_unavailable");
       }
 
+      try { options.onStartupStage?.("audio_engine"); } catch { /* Progress observer isolation. */ }
       const context = this.#dependencies.createAudioContext({
         latencyHint: "interactive",
         sampleRate: profile.sampleRateHz,

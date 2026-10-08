@@ -67,6 +67,21 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     props.prepareNotebook=vi.fn().mockRejectedValue(new WorkspaceApiError(503));await render();await consent();await click('Start recording');await wait(()=>sources.length===1);await act(async()=>sources[0].chunk());await click('Stop and save recording');
     await wait(()=>status()==='Saved on this device');expect(props.prepareNotebook).toHaveBeenCalledOnce();expect(container.textContent).toContain('exact request is retained');expect(container.textContent).not.toContain('Open private notebook');expect(fetch).not.toHaveBeenCalled();
   });
+  it('shows a pending microphone stage without claiming recording or polling idle notebook metadata',async()=>{
+    let finish!:()=>void;const pending=new Promise<void>(resolve=>finish=resolve);
+    props.prepareNotebook=async()=>notebook;
+    props.runtimeFactory=async(options,input)=>{
+      const source=new PcmSource();sources.push(source);
+      source.start=async value=>{source.options=value;source.starts++;value.onStartupStage?.('microphone_permission');await pending;};
+      const runtime=await PrivateRecordingRuntime.open({...options,createSource:async()=>source,acquireLock:async()=>async()=>{}},input);runtimes.push(runtime);return runtime;
+    };
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Requesting microphone access');
+    expect(button('Stop and save recording').disabled).toBe(false);
+    await wait(()=>container.textContent?.includes('Waiting for recording to start')===true);
+    expect(container.textContent).not.toContain('Checking notebook recording status');expect(status()).toBe('Requesting microphone access');
+    await click('Stop and save recording');await wait(()=>status()==='Stopped · no audio captured');
+    await act(async()=>finish());expect(status()).toBe('Stopped · no audio captured');
+  });
   it('withholds former-account audio and stops the producer before reporting changed access',async()=>{
     await render();await consent();await click('Start recording');await wait(()=>sources.length===1);await act(async()=>sources[0].chunk());
     props={...props,isCurrent:()=>false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>accessLost.mock.calls.length===1);
