@@ -133,6 +133,72 @@ describe("native workspace session", () => {
     expect(container.textContent).toContain("Sign in to CosmaBot");
     expect(fetchMock).not.toHaveBeenCalled();
   });
+  it.each(["failed", "cancelled"])("keeps %s sign-in recovery through native pending polls and retries via sign-in", async outcome => {
+    vi.useFakeTimers();
+    const native = harness(signedOut);
+    native.plugin.signIn.mockImplementationOnce(async () => {
+      native.set(pending);
+      throw outcome === "cancelled" ? new DOMException("private provider detail", "AbortError") : new Error("private provider detail");
+    });
+    await render(native); await click("Sign in");
+    expect(container.textContent).toContain("Sign-in didn’t finish");
+    expect(container.textContent).not.toContain("Finish signing out");
+    expect(container.textContent).not.toContain("expired");
+    expect(container.textContent).not.toContain("private provider detail");
+    expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
+    const reads = native.plugin.getState.mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(15_000); });
+    expect(native.plugin.getState.mock.calls.length).toBeGreaterThan(reads);
+    expect(container.textContent).toContain("Sign-in didn’t finish");
+    vi.useRealTimers();
+    const retry = deferred<void>();
+    native.plugin.signIn.mockImplementationOnce(() => retry.promise);
+    await click("Try signing in again");
+    expect(native.plugin.signIn).toHaveBeenCalledTimes(2);
+    expect(native.plugin.signOut).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Updating your secure session");
+    await act(async () => native.emit(first));
+    expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
+    native.set(first); await act(async () => retry.resolve());
+    expect(container.textContent).not.toContain("Sign-in didn’t finish");
+    expect(container.textContent).toContain("Sign out");
+  });
+  it("keeps unknown restored pending state on the existing sign-out recovery path", async () => {
+    const native = harness(pending); await render(native);
+    expect(container.textContent).toContain("Finish signing out");
+    expect(container.textContent).not.toContain("Sign-in didn’t finish");
+    await click("Retry sign-out");
+    expect(native.plugin.signOut).toHaveBeenCalledOnce(); expect(native.plugin.signIn).not.toHaveBeenCalled();
+    expect(container.textContent).toContain("Sign in to CosmaBot");
+  });
+  it("uses explicit sign-out wording after a recovered sign-in", async () => {
+    const native = harness(signedOut);
+    native.plugin.signIn.mockImplementationOnce(async () => { native.set(pending); throw new Error("private detail"); });
+    await render(native); await click("Sign in");
+    await click("Try signing in again");
+    native.plugin.signOut.mockImplementationOnce(async () => { native.set(pending); throw new Error("private detail"); });
+    await click("Sign out");
+    expect(container.textContent).toContain("Finish signing out");
+    expect(container.textContent).not.toContain("Sign-in didn’t finish");
+    await click("Retry sign-out");
+    expect(native.plugin.signOut).toHaveBeenCalledTimes(2);
+    expect(container.textContent).toContain("Sign in to CosmaBot");
+  });
+  it("does not carry sign-in recovery or late replies into a replacement adapter", async () => {
+    const old = harness(signedOut), delayed = deferred<void>();
+    old.plugin.signIn.mockImplementationOnce(() => delayed.promise);
+    await render(old); await click("Sign in");
+    const replacement = harness(pending); await render(replacement);
+    expect(container.textContent).toContain("Finish signing out");
+    old.set(pending); await act(async () => delayed.reject(new Error("private old-adapter detail")));
+    await act(async () => old.emit(first));
+    expect(container.textContent).toContain("Finish signing out");
+    expect(container.textContent).not.toContain("Sign-in didn’t finish");
+    expect(replacement.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
+    await click("Retry sign-out");
+    expect(replacement.plugin.signOut).toHaveBeenCalledOnce();
+    expect(old.plugin.signOut).not.toHaveBeenCalled();
+  });
   it("discards private labels and a pending token when identity changes", async () => {
     const native = harness(); await render(native); await click("Visits and notes");
     const late = deferred<unknown>(); native.plugin.getToken.mockReturnValueOnce(late.promise);
