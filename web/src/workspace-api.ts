@@ -379,9 +379,18 @@ export const workspaceApi = {
         (row.link_state==='unlinked'?row.appointment_id===null:row.link_state==='linked'&&teamUuid(row.appointment_id)))),
   async createPrivateDraft(identity:AuthenticatedWorkspaceIdentity,body:PrivateDraftCreateInput) {
     if(!validPrivateDraftCreate(body))throw new WorkspaceApiError(422);
-    const team=await requestTeam(identity);
-    const workspace=await privateDraftRequest<Workspace>(identity,'/workspaces/private-drafts',body,(v):v is Workspace=>validPrivateWorkspace(v)&&v.private_draft?.title===body.title);
-    return {identity,workspace,team};
+    // Both requests independently verify current authority. The caller has
+    // already retained this exact create command before dispatch; a failed team
+    // read cannot cancel or conceal a create which may have committed.
+    const [team,workspace]=await Promise.allSettled([
+      requestTeam(identity),
+      privateDraftRequest<Workspace>(identity,'/workspaces/private-drafts',body,(v):v is Workspace=>validPrivateWorkspace(v)&&v.private_draft?.title===body.title),
+    ]);
+    if(team.status==='rejected')throw team.reason;
+    if(workspace.status==='rejected')throw workspace.reason;
+    try{assertCurrentDesktopSession(identity);}catch{throw new WorkspaceApiError(401);}
+    if(identity.mode==='clerk_jwt'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);
+    return {identity,workspace:workspace.value,team:team.value};
   },
   resolvePrivateDraft: (identity:AuthenticatedWorkspaceIdentity,body:PrivateDraftCreateInput)=>{
     if(!validPrivateDraftCreate(body))throw new WorkspaceApiError(422);

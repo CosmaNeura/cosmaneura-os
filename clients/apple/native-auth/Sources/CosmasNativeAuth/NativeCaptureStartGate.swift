@@ -68,7 +68,7 @@ public struct NativeCaptureExtensionPermit: Sendable {
 /// The standalone native microphone and authenticated provider bridge share this
 /// in-process gate. JavaScript can neither install a handler nor supply a permit.
 @MainActor public enum NativeCaptureStartGate {
-    public enum Consumer { case renderer, nativeEncryptedMicrophone }
+    public enum Consumer { case renderer, nativeEncryptedMicrophone, privateLocalMicrophone }
     private static var owner: UUID?
     private static var consumer: Consumer = .renderer
     private static var nativeIdle: (@MainActor () -> Bool)?
@@ -113,6 +113,26 @@ public struct NativeCaptureExtensionPermit: Sendable {
         self.authorize = authorize; self.renew = renew; retiring = false
     }
 
+    /// Local private audio uses the same physical exclusion, with no provider grant.
+    public static func reservePrivate(owner: UUID) throws {
+        guard self.owner == nil, !recovering, !authorizing, !extending,
+              let idle, idle() else { throw NativeAuthError.busy }
+        self.owner = owner; consumer = .privateLocalMicrophone; retiring = false
+        authorize = nil; renew = nil; activePermit = nil; nativeIdle = nil
+    }
+
+    public static func consumePrivate<T>(owner expected: UUID, start: @MainActor () throws -> T) throws -> T {
+        guard owner == expected, consumer == .privateLocalMicrophone, !retiring,
+              !recovering, !authorizing, !extending else { throw NativeAuthError.unavailable }
+        return try start()
+    }
+
+    public static func finishPrivate(owner expected: UUID) throws {
+        guard owner == expected, consumer == .privateLocalMicrophone,
+              !authorizing, !extending, let idle, idle() else { throw NativeAuthError.busy }
+        owner = nil; authorize = nil; renew = nil; activePermit = nil; nativeIdle = nil; retiring = true
+    }
+
     public static func requireActiveEncryptedOwner(_ expected: UUID) throws {
         guard owner == expected, consumer == .nativeEncryptedMicrophone,
               !retiring, !recovering, activePermit != nil, nativeIdle != nil else {
@@ -135,6 +155,9 @@ public struct NativeCaptureExtensionPermit: Sendable {
 
     public static func clear(owner: UUID) {
         if self.owner == owner {
+            // A generic provider cleanup cannot retire a private physical run.
+            // Its exact owner must use finishPrivate after native idle proof.
+            if consumer == .privateLocalMicrophone { return }
             if consumer == .nativeEncryptedMicrophone {
                 retiring = true
                 guard !authorizing, !extending, let idle, idle(), nativeIdle?() == true else { return }

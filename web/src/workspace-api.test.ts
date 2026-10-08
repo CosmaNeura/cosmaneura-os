@@ -17,17 +17,71 @@ describe("signed workspace transport", () => {
     const body={title:'Private note',idempotency_key:'private-create-key'};
     const draft={id:workspace,appointment_id:null,label:body.title,revision:1,entries:[],work_candidates:[],
       private_draft:{title:body.title,state:'unlinked',link_receipt_id:null,linked_at:null}};
-    const fetchMock=vi.fn<typeof fetch>().mockResolvedValueOnce(json(teamFixture())).mockResolvedValueOnce(json(draft))
-      .mockResolvedValueOnce(json({contract_version:1,outcome:'saved',workspace:draft}));
+    const fetchMock=vi.fn<typeof fetch>((url)=>Promise.resolve(json(String(url).endsWith('/provider-team')?teamFixture():
+      String(url).endsWith('/resolve')?{contract_version:1,outcome:'saved',workspace:draft}:draft)));
     vi.stubGlobal('fetch',fetchMock);
     expect((await workspaceApi.createPrivateDraft(identity,body)).workspace).toEqual(draft);
     expect((await workspaceApi.resolvePrivateDraft(identity,body)).workspace).toEqual(draft);
-    const create=fetchMock.mock.calls[1],resolve=fetchMock.mock.calls[2];
+    const create=fetchMock.mock.calls.find(([url])=>String(url).endsWith('/private-drafts'))!,
+      resolve=fetchMock.mock.calls.find(([url])=>String(url).endsWith('/private-drafts/resolve'))!;
     expect(create[0]).toBe('http://127.0.0.1:8018/workspaces/private-drafts');
     expect(resolve[0]).toBe('http://127.0.0.1:8018/workspaces/private-drafts/resolve');
     expect(create[1]?.body).toBe(resolve[1]?.body);
     expect(new Headers(create[1]?.headers).get('X-Cosmas-Private-Draft')).toBe('1');
     expect(new Headers(create[1]?.headers).get('Authorization')).toBe('Bearer invented-token');
+  });
+
+  it('dispatches one exact create without waiting for the independent fresh team response',async()=>{
+    let finishTeam!:(value:Response)=>void;
+    const teamResponse=new Promise<Response>(resolve=>{finishTeam=resolve;});
+    const body={title:'Private note',idempotency_key:'concurrent-create-key'};
+    const draft={id:workspace,appointment_id:null,label:body.title,revision:1,entries:[],work_candidates:[],
+      private_draft:{title:body.title,state:'unlinked',link_receipt_id:null,linked_at:null}};
+    const fetchMock=vi.fn<typeof fetch>((url)=>String(url).endsWith('/provider-team')?teamResponse:Promise.resolve(json(draft)));
+    vi.stubGlobal('fetch',fetchMock);
+    let settled=false;
+    const result=workspaceApi.createPrivateDraft({mode:'clerk_jwt',getToken:async()=>'invented-token'},body).finally(()=>{settled=true;});
+    await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(settled).toBe(false);
+    const create=fetchMock.mock.calls.find(([,request])=>request?.method==='POST')!;
+    expect(create[1]?.body).toBe(JSON.stringify(body));
+    finishTeam(json(teamFixture()));
+    await expect(result).resolves.toMatchObject({workspace:draft,team:teamFixture()});
+    expect(fetchMock.mock.calls.filter(([,request])=>request?.method==='POST')).toHaveLength(1);
+  });
+
+  it('settles a possibly committed create after the concurrent team read fails without retrying it',async()=>{
+    let finishCreate!:(value:Response)=>void;
+    const createResponse=new Promise<Response>(resolve=>{finishCreate=resolve;});
+    const body={title:'Private note',idempotency_key:'uncertain-create-key'};
+    const draft={id:workspace,appointment_id:null,label:body.title,revision:1,entries:[],work_candidates:[],
+      private_draft:{title:body.title,state:'unlinked',link_receipt_id:null,linked_at:null}};
+    const fetchMock=vi.fn<typeof fetch>((url)=>String(url).endsWith('/provider-team')?Promise.reject(new Error('unavailable')):createResponse);
+    vi.stubGlobal('fetch',fetchMock);
+    let settled=false;
+    const result=workspaceApi.createPrivateDraft({mode:'clerk_jwt',getToken:async()=>'invented-token'},body);
+    const rejected=expect(result.finally(()=>{settled=true;})).rejects.toMatchObject({status:503});
+    await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
+    expect(settled).toBe(false);
+    finishCreate(json(draft));await rejected;
+    expect(fetchMock.mock.calls.filter(([,request])=>request?.method==='POST')).toHaveLength(1);
+    expect(fetchMock.mock.calls.find(([,request])=>request?.method==='POST')![1]?.body).toBe(JSON.stringify(body));
+  });
+
+  it('withholds a concurrent create when the native session changes before both reads finish',async()=>{
+    let current=true,finishTeam!:(value:Response)=>void;
+    const body={title:'Private note',idempotency_key:'changed-session-key'};
+    const draft={id:workspace,appointment_id:null,label:body.title,revision:1,entries:[],work_candidates:[],
+      private_draft:{title:body.title,state:'unlinked',link_receipt_id:null,linked_at:null}};
+    const teamResponse=new Promise<Response>(resolve=>{finishTeam=resolve;});
+    const fetchMock=vi.fn<typeof fetch>((url)=>String(url).endsWith('/provider-team')?teamResponse:Promise.resolve(json(draft)));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=workspaceApi.createPrivateDraft({mode:'clerk_jwt',getToken:async()=>'invented-token',
+      nativeSession:{revision:'00000000-0000-4000-8000-000000000010',isCurrent:()=>current}},body);
+    const rejected=expect(result).rejects.toMatchObject({status:401});
+    await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2));
+    current=false;finishTeam(json(teamFixture()));await rejected;
+    expect(fetchMock.mock.calls.filter(([,request])=>request?.method==='POST')).toHaveLength(1);
   });
 
   it('refuses half-linked or foreign private-draft receipts and patient authority on create',async()=>{

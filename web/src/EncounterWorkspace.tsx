@@ -12,6 +12,8 @@ import {validActivityContext,type AiActivityContext,type AiActivitySelection} fr
 import { SettingsHub } from "./SettingsHub";
 import { WelcomeActions } from './WelcomeActions';
 import {PracticeHome} from './PracticeHome';
+import {PrivateRecordingPanel,type PrivateNotebookResult} from './PrivateRecordingPanel';
+import {PrivateRecordingRuntime,listPrivateRecordings,prewarmPrivateRecordingNative,type PrivateRecordingSnapshot} from './private-recording-runtime';
 import {PrivateDraftLinkPanel} from './PrivateDraftLinkPanel';
 import {ChiefStartActions,InitialTeamAction} from './ChiefStartActions';
 import {coreConnectionApi} from './core-connection-api';
@@ -115,6 +117,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [practicePage,setPracticePage]=useState<"home"|"visits"|"notebook">(authenticated?"home":"visits");
   const [homeBusy,setHomeBusy]=useState(false);
+  const [privateRecordingBusy,setPrivateRecordingBusy]=useState(false);
+  const [privateRecordingEntry,setPrivateRecordingEntry]=useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;scope:string;serverScope:string;generation:number;title:string;recordingId?:string;prepareNotebook?:()=>Promise<PrivateNotebookResult>;authorize:()=>Promise<void>}|null>(null);
+  const [privateRecordings,setPrivateRecordings]=useState<{identity:AuthenticatedWorkspaceIdentity;scope:string;generation:number;rows:PrivateRecordingSnapshot[]}|null>(null);
+  const [privateRecordingListEpoch,setPrivateRecordingListEpoch]=useState(0);
+  const [privateRecordingRequest,setPrivateRecordingRequest]=useState(0);
   const [privateLinkBusy,setPrivateLinkBusy]=useState(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
@@ -140,7 +147,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
   const [agentResearchBusy,setAgentResearchBusy]=useState(false);
   const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
-  const connectionNavigationLocked = privateLinkBusy || homeBusy || connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy;
+  const connectionNavigationLocked = !!privateRecordingEntry || privateRecordingBusy || privateLinkBusy || homeBusy || connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
@@ -960,7 +967,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,workspace?.id,bot?.role,settingsOpen,practiceOpen,panel,mobilePanel]);
   // Activity is read-only: its own busy navigation lock is excluded here so the
   // final selection can still inspect independently retained unsaved work.
-  useUnsavedWork(agentResearchBusy || handoffReviewPending || accessBusy || connectionEditorsLocked || !!pending || !!recoveryOffers.length || recoveryState === "saving" || captureNavigationLocked || note !== latestNote || !!thought || !!evidence || !!source ||
+  useUnsavedWork(privateRecordingBusy || !!privateRecordingEntry || agentResearchBusy || handoffReviewPending || accessBusy || connectionEditorsLocked || !!pending || !!recoveryOffers.length || recoveryState === "saving" || captureNavigationLocked || note !== latestNote || !!thought || !!evidence || !!source ||
     !!team && !!teamDraft && JSON.stringify(teamDraft) !== JSON.stringify(team.configuration));
   useEffect(()=>{
     if(!inboxNavigation||inboxNavigationConsumed.current===inboxNavigation)return;
@@ -986,6 +993,47 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           journal.current?.value !== editorJournal) throw new WorkspaceApiError(403);
     }};
   }, [authenticated, editorJournal, editorScope, accountScopeReady]);
+  const privateRecordingPlatform = authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?'ios':'desktop';
+  const privateRecordingLive = useRef({authenticated,editorJournal,editorScope,generation:generation.current});
+  privateRecordingLive.current={authenticated,editorJournal,editorScope,generation:generation.current};
+  const recordingCurrent=(entry:NonNullable<typeof privateRecordingEntry>)=>{
+    const live=privateRecordingLive.current;
+    return live.authenticated===entry.identity&&live.editorJournal===entry.journal&&live.editorScope===entry.serverScope&&live.generation===entry.generation&&
+      (entry.identity.mode==='desktop_native'?entry.identity.isCurrent():!entry.identity.nativeSession||entry.identity.nativeSession.isCurrent());
+  };
+  useEffect(()=>{
+    if(!CAPTURE_WORKSPACE_BUILD||!authenticated||!accountScopeReady||!journal.current||
+        authenticated.mode!=='clerk_jwt'||!authenticated.nativeSession?.isCurrent())return;
+    const {scope}=journal.current,revision=authenticated.nativeSession.revision;
+    // This prepares account-bound native admission while Home is usable. It
+    // requests neither microphone access nor consent and starts no recording.
+    void prewarmPrivateRecordingNative({scope,revision}).catch(()=>{});
+  },[authenticated,accountScopeReady,editorJournal,editorScope]);
+  useEffect(()=>{
+    if(!authenticated||!accountAccess||!accountScopeReady||!journal.current)return;
+    const {scope,value:currentJournal,serverScope}=journal.current,currentGeneration=generation.current;let active=true;
+    void listPrivateRecordings(scope,privateRecordingPlatform).then(rows=>{
+      const live=privateRecordingLive.current;
+      if(active&&live.authenticated===authenticated&&live.generation===currentGeneration&&
+          live.editorJournal===currentJournal&&live.editorScope===serverScope&&journal.current?.scope===scope)
+        setPrivateRecordings({identity:authenticated,scope,generation:currentGeneration,rows});
+    }).catch(()=>{if(active)setPrivateRecordings(null);});
+    return()=>{active=false;};
+  },[authenticated,accountAccess,accountScopeReady,privateRecordingPlatform,privateRecordingListEpoch]);
+  function startPrivateRecording(input:{title:string;prepareNotebook:()=>Promise<PrivateNotebookResult>}){
+    if(!authenticated||!accountAccess||!journal.current||privateRecordingEntry||connectionNavigationLocked||busy||captureNavigationLocked||captureDraftLocked)return;
+    const current=journal.current;
+    setPrivateRecordingEntry({identity:authenticated,journal:current.value,scope:current.scope,serverScope:current.serverScope,generation:generation.current,title:input.title,prepareNotebook:input.prepareNotebook,authorize:accountAccess.authorize});
+  }
+  function reopenPrivateRecording(recordingId:string){
+    if(!authenticated||!accountAccess||!journal.current||connectionNavigationLocked||busy||captureNavigationLocked||captureDraftLocked)return;
+    const current=journal.current;
+    const row=privateRecordings?.identity===authenticated&&privateRecordings.generation===generation.current&&privateRecordings.scope===current.scope?privateRecordings.rows.find(value=>value.recordingId===recordingId):undefined;
+    if(!row)return;
+    const owner=authenticated;
+    setPrivateRecordingEntry({identity:owner,journal:current.value,scope:current.scope,serverScope:current.serverScope,generation:generation.current,title:row.title,recordingId,
+      authorize:accountAccess.authorize,...(row.workspaceId?{prepareNotebook:()=>workspaceApi.openPrivateDraft(owner,row.workspaceId!)}:{})});
+  }
   const activityContext = activityEnabled && authenticated && activityProof?.identity === authenticated &&
     activityProof.journal === editorJournal && activityProof.generation === generation.current &&
     activityProof.context.recovery_scope === editorScope && accountScopeReady ? activityProof.context : null;
@@ -1285,7 +1333,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       <nav aria-label="Provider Team" className="team-roster">{team?.members.map(member => {
         const address = botAddress(member);
         const config = team.configuration.bots.find(b => botAddress(b) === address)!;
-        return <button key={address} disabled={connectionNavigationLocked||!workspace} aria-pressed={selected === address} onClick={() => { setPracticeOpen(false); setSelectedResult(null); setSelected(address); setSettingsOpen(false);setPracticePage("notebook"); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); }}>
+        const privateScribe=member.role==='scribe'&&CAPTURE_WORKSPACE_BUILD&&!!authenticated&&config.enabled&&!config.retired&&!!team.revision;
+        return <button key={address} disabled={connectionNavigationLocked||!workspace&&!privateScribe} aria-pressed={selected === address} onClick={() => {
+          if(privateScribe&&(!workspace||practicePage==='home')){setSettingsOpen(false);setPracticeOpen(false);setPracticePage('home');setPrivateRecordingRequest(value=>value+1);return;}
+          setPracticeOpen(false); setSelectedResult(null); setSelected(address); setSettingsOpen(false);setPracticePage("notebook"); setMobilePanel(member.role === "scribe" ? "Notebook" : "Conversation"); if (member.role === "scribe") setPanel("Notebook"); }}>
           <BotAvatar role={member.role} /><span><strong>{config.name}</strong>
             <small><i className={config.enabled && team.revision ? "ready" : "paused"} />{config.retired ? "Retired · history kept" : !team.revision ? "Set up your team" : !config.enabled ? "Paused" : config.blocked_capabilities?.includes("model_answer") ? "AI answers blocked" : "On"}</small></span>
         </button>;
@@ -1419,10 +1470,30 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </fieldset>
         </AccountRecoveryContext.Provider> : undefined}
       /></AccountRecoveryContext.Provider>}
-      {authenticated&&<div hidden={settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
+      {privateRecordingEntry&&<PrivateRecordingPanel identity={privateRecordingEntry.identity} scope={privateRecordingEntry.scope}
+        platform={privateRecordingEntry.identity.mode==='clerk_jwt'&&privateRecordingEntry.identity.nativeSession?'ios':'desktop'}
+        isCurrent={()=>recordingCurrent(privateRecordingEntry)} authorize={privateRecordingEntry.authorize}
+        title={privateRecordingEntry.title} recordingId={privateRecordingEntry.recordingId} prepareNotebook={privateRecordingEntry.prepareNotebook}
+        onBusyChange={setPrivateRecordingBusy} onSaved={()=>setPrivateRecordingListEpoch(value=>value+1)} onAccessLost={failure}
+        onNotebookPrepared={async (result,recordingId)=>{
+          const entry=privateRecordingEntry;
+          if(!recordingId||!recordingCurrent(entry)||result.identity!==entry.identity)return;
+          await entry.authorize();if(!recordingCurrent(entry))return;
+          const saved=await PrivateRecordingRuntime.open({scope:entry.scope,platform:entry.identity.mode==='clerk_jwt'&&entry.identity.nativeSession?'ios':'desktop',isCurrent:()=>recordingCurrent(entry)},
+            {recordingId,title:entry.title});
+          try{await saved.attachWorkspace(result.workspace.id,true);}finally{await saved.close();}
+          if(recordingCurrent(entry))setPrivateRecordingListEpoch(value=>value+1);
+        }}
+        onClose={()=>{setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setPrivateRecordingListEpoch(value=>value+1);}}
+        onNotebook={async result=>{if(!recordingCurrent(privateRecordingEntry))throw new WorkspaceApiError(403);
+          setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);await openPrivateNotebook(result);setPrivateRecordingListEpoch(value=>value+1);}}/>}
+      {authenticated&&<div hidden={!!privateRecordingEntry||settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
         locked={busy||!!pending||conflict||!!recoveryOffers.length||recoveryState==="failed"||recoveryBlocked||captureNavigationLocked||captureDraftLocked||!!workspace&&(note!==latestNote||!!thought||!!evidence||!!source)} onBusyChange={setHomeBusy} onAccessLost={failure}
         onUseTeam={()=>{if(initialTeamUnchanged)saveTeam();else void openSettings();}} onSettings={()=>void openSettings()} onVisits={()=>void loadEncounters()}
         onConnections={()=>void openSettings('connections')} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}}
+        onRecord={CAPTURE_WORKSPACE_BUILD?startPrivateRecording:undefined}
+        openRecordingRequest={privateRecordingRequest}
+        recordings={privateRecordings&&privateRecordings.identity===authenticated&&privateRecordings.generation===generation.current&&privateRecordings.scope===journal.current?.scope?privateRecordings.rows:undefined} onReopenRecording={reopenPrivateRecording}
         onOpened={openPrivateNotebook}/></div>}
       <section hidden={settingsOpen||practicePage!=='visits'} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
         <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="fax" ? "Choose a visit for fax work" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='fax' ? "Keep the fax document, recipient and delivery status with the right visit." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>

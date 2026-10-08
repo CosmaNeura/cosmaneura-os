@@ -7,6 +7,20 @@ const ready = {phase: 'ready', revision: id, identity: {userId: 'user_one', sess
 const response = value => Response.json(value, {headers: {'Cache-Control': 'no-store'}});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+test('private recording admits metadata only with exact paths, version and byte bounds',async()=>{
+  const base=`/workspaces/${id}/private-recordings`;
+  for(const [path,method] of [[base,'POST'],[base+'/resolve','POST'],[base+'/'+id,'GET'],[base+'/'+id+'/finish','POST'],[base+'/'+id+'/link','POST']]){
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,method),path);
+    const options={method,headers:{'X-Cosmas-Private-Recording':'1'},...(method==='POST'?{body:'{}'}:{})};
+    const result=await proxyAuthenticatedWorkspaceRequest(request(path,options),fixture(),async(_url,input)=>{assert.equal(input.headers['X-Cosmas-Private-Recording'],'1');return response({metadata:true});});
+    assert.equal(result.status,200);
+  }
+  for(const [path,method] of [[base,'GET'],[base+'/'+id,'POST'],[base+'/resolve/finish','POST'],[base+'/'+id+'/upload','POST'],[base+'/'+id+'/execute','POST'],[base+'?owner='+id,'POST'],[base+'/'+id+'/finish','GET']])assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,method),null);
+  assert.equal((await proxyAuthenticatedWorkspaceRequest(request(base,{method:'POST',body:'{}'}),fixture(),()=>assert.fail('missing version'))).status,426);
+  assert.equal((await proxyAuthenticatedWorkspaceRequest(request(base,{method:'POST',body:' '.repeat(4097),headers:{'X-Cosmas-Private-Recording':'1'}}),fixture(),()=>assert.fail('oversize'))).status,503);
+  assert.equal((await proxyAuthenticatedWorkspaceRequest(request('/provider-team',{headers:{'X-Cosmas-Private-Recording':'1'}}),fixture(),()=>assert.fail('wrong path'))).status,426);
+});
+
 test('private drafts admit exact owner-bound create/link/recovery routes and enforce header and byte limits', async () => {
   const paths = ['/workspaces/private-drafts', '/workspaces/private-drafts/resolve', `/workspaces/${id}/appointment-link`, `/workspaces/${id}/appointment-link/resolve`];
   for (const path of paths) {

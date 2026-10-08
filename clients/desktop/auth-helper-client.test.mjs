@@ -35,6 +35,29 @@ function fixture(options) {
   return {child, client, requests, send};
 }
 
+test('source idle returns only a true proof for its exact native revision', async () => {
+  const f=fixture(); f.send({event:'ready',version:1}); f.send({event:'authStateChanged',state:ready});
+  try {
+    const pending=f.client.sourceRequest('sourceIdle',{revision}); await tick();
+    assert.deepEqual(f.requests[0].payload,{revision});
+    f.send({id:f.requests[0].id,ok:true,result:{idle:true,revision}});
+    assert.deepEqual(await pending,{idle:true,revision});
+    await assert.rejects(f.client.sourceRequest('sourceIdle',{revision,owner:'forged'}),/unavailable/);
+    await assert.rejects(f.client.sourceRequest('sourceIdle',{}),/unavailable/);
+    assert.equal(f.requests.length,1);
+  } finally {f.client.close();}
+});
+
+for(const result of [null,{idle:false,revision},{idle:1,revision},{idle:true},
+  {idle:true,revision:'00000000-0000-4000-8000-000000000002'}, {idle:true,revision,owner:'hidden'}]) {
+  test('malformed source idle proof closes its dedicated helper pipe: '+JSON.stringify(result),async()=>{
+    const f=fixture(); f.send({event:'ready',version:1});
+    const pending=f.client.sourceRequest('sourceIdle',{revision}),denied=assert.rejects(pending,/unavailable/);
+    await tick(); f.send({id:f.requests[0].id,ok:true,result}); await denied;
+    assert.equal(f.child.kills,1);
+  });
+}
+
 test('waits for exact handshake, correlates requests, and returns tokens only through the main client', async () => {
   const f = fixture();
   try {

@@ -120,9 +120,10 @@ struct NativeProviderRecordingAccount: Equatable, Sendable {
     let actorID: UUID
     let accountDigest: String
     let recoveryScope: UUID
+    let serverRecoveryScope: String
 
     fileprivate init(boxID: UUID, actorID: UUID, accountDigest: String, recovery: String) {
-        self.boxID = boxID; self.actorID = actorID; self.accountDigest = accountDigest
+        self.boxID = boxID; self.actorID = actorID; self.accountDigest = accountDigest; serverRecoveryScope = recovery
         var bytes = Array(SHA256.hash(data: Data(
             ("cosmas-native-recording-recovery-v1\u{0}" + accountDigest + "\u{0}" + recovery).utf8)).prefix(16))
         // RFC 9562 UUIDv8: a stable application-defined digest, not a random ID.

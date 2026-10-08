@@ -126,10 +126,44 @@ final class NativeCaptureProcessCoordinator {
         captureReleased = true
     }
 
+    /// Only a native owner with an empty usable journal may reserve the
+    /// physical fence for a private browser recording. This writes no epoch.
+    func reserveCaptureWhileIdle() throws {
+        try coordinator.verifyPath()
+        try capture.verifyPath()
+        guard captureReleased else { return }
+        try capture.lock(LOCK_EX)
+        captureReleased = false
+    }
+
     var wireValue: [String: Any] {
         ["epoch": epoch, "coordinatorDevice": String(anchor.coordinator.device),
          "coordinatorInode": String(anchor.coordinator.inode), "captureDevice": String(anchor.capture.device),
          "captureInode": String(anchor.capture.inode)]
+    }
+}
+
+/// Read-only idle admission before any configured source has been prepared.
+/// Holding both locks prevents an old audio process or another auth helper
+/// from coexisting with the main process's private microphone admission.
+final class NativeCaptureIdleReservation {
+    private let coordinator: NativeFenceFile
+    private let capture: NativeFenceFile
+    init(privateDirectory: String, expectedAnchor: NativeFenceAnchor?) throws {
+        coordinator = try NativeFenceFile(directoryPath: privateDirectory, name: "coordinator.lock", create: expectedAnchor == nil)
+        try coordinator.lock(LOCK_EX)
+        capture = try NativeFenceFile(directoryPath: privateDirectory, name: "capture.lock", create: expectedAnchor == nil)
+        try capture.lock(LOCK_EX)
+        let anchor = NativeFenceAnchor(coordinator: coordinator.identity, capture: capture.identity)
+        if let expectedAnchor {
+            guard anchor == expectedAnchor else { throw NativeFenceError.unavailable }
+        } else {
+            guard try coordinator.isEmpty(), try capture.isEmpty() else { throw NativeFenceError.unavailable }
+        }
+    }
+    func requireHeld() throws {
+        try coordinator.verifyPath()
+        try capture.verifyPath()
     }
 }
 

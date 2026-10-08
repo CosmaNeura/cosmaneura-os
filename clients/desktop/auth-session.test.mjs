@@ -40,6 +40,41 @@ for (const method of ['sourcePrepare','sourceExtend']) test(`${method} binds the
   } finally {session.close();}
 });
 
+test('sourceIdle binds current auth and strips the native revision from its main-only proof',async()=>{
+  const f=fixture('allowed'),session=await f.create(),revision=session.snapshot().revision,calls=[];
+  f.helper.sourceRequest=async(method,payload)=>{calls.push({method,payload});return {idle:true,revision:nativeReady.revision};};
+  try {
+    assert.deepEqual(await session.sourceRequest('sourceIdle',{},revision),{idle:true});
+    assert.deepEqual(calls,[{method:'sourceIdle',payload:{revision:nativeReady.revision}}]);
+    await assert.rejects(session.sourceRequest('sourceIdle',{},nativeReady.revision),/unavailable/);
+    await assert.rejects(session.sourceRequest('sourceIdle',{owner:'forged'},revision),/unavailable/);
+    await assert.rejects(session.sourceRequest('sourceIdle',{revision:nativeReady.revision},revision),/unavailable/);
+    assert.equal(calls.length,1);
+  } finally {session.close();}
+});
+
+test('sourceIdle rejects a late proof after auth loss or helper disposal',async()=>{
+  for(const retire of ['auth','close']) {
+    const f=fixture('allowed'),session=await f.create(),revision=session.snapshot().revision,result=deferred();
+    f.helper.sourceRequest=()=>result.promise;
+    const pending=session.sourceRequest('sourceIdle',{},revision),denied=assert.rejects(pending,/unavailable/);
+    await tick();
+    if(retire==='auth')f.emit(nativeOut);else session.close();
+    result.resolve({idle:true,revision:nativeReady.revision}); await denied;session.close();
+  }
+});
+
+test('sourceIdle rejects malformed helper proofs without granting microphone admission',async()=>{
+  const f=fixture('allowed'),session=await f.create(),revision=session.snapshot().revision;
+  try {
+    for(const result of [null,{idle:false,revision:nativeReady.revision},{idle:true},
+      {idle:true,revision:nativeOut.revision},{idle:true,revision:nativeReady.revision,extra:true}]) {
+      f.helper.sourceRequest=async()=>result;
+      await assert.rejects(session.sourceRequest('sourceIdle',{},revision),/unavailable/);
+    }
+  } finally {session.close();}
+});
+
 test('disabled desktop auth constructs neither helper nor storage', async () => {
   const session = await createDesktopAuthSession({createHelper: () => assert.fail('helper'),
     accessStore: {read: () => assert.fail('storage')}});

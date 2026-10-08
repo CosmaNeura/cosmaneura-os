@@ -54,6 +54,16 @@ export interface IosPcmConfiguration {
   authority?: IosPcmSourceAuthority;
 }
 
+export interface IosPrivateRecordingReceipt { receiptId: string; revision: string; expiresAt: string }
+export interface IosPrivateRecordingConsent {
+  modality: 'in_person'|'virtual'|'phone'; participant_regions: string[]; method: 'verbal_attestation';
+  all_parties_consented: true; granted_at: string; language: 'en-US'|'en-US+es-US';
+}
+export interface IosPrivateRecordingStart extends Omit<IosPcmConfiguration,'authority'> {
+  receiptId: string; scope: string; revision: string; recordingId: string; startIntent: string;
+  consent: IosPrivateRecordingConsent;
+}
+
 export interface IosPcmSessionOptions {
   sessionToken: string;
 }
@@ -98,6 +108,8 @@ export interface IosPcmStopResult {
 }
 
 export interface IOSPCMPlugin {
+  preparePrivate?(options: {scope:string;revision:string}): Promise<IosPrivateRecordingReceipt>;
+  startPrivate?(options: IosPrivateRecordingStart): Promise<{sessionToken:string}>;
   /** Process-wide ownership check; does not start or stop any producer. */
   confirmCaptureIdle?(): Promise<{ version: 1; idle: boolean }>;
   getCaptureCapabilities?(): Promise<{ version: 1; renewableAuthority: boolean }>;

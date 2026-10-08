@@ -127,17 +127,25 @@ export async function createDesktopAuthSession({enabled = false, createHelper, a
   }
   /** Trusted recorder only. The renderer auth surface never forwards this API. */
   async function sourceRequest(method, payload, revision) {
-    if (!['sourcePrepare','sourceAuthorize','sourceExtend','sourceRelease','sourceStopped','sourcePreparationRelease'].includes(method) ||
+    if (!['sourceIdle','sourcePrepare','sourceAuthorize','sourceExtend','sourceRelease','sourceStopped','sourcePreparationRelease'].includes(method) ||
         !payload || typeof payload !== 'object' || Array.isArray(payload) || Object.hasOwn(payload,'revision')) throw unavailable();
-    const start = ['sourcePrepare','sourceAuthorize','sourceExtend'].includes(method);
+    if (method === 'sourceIdle' && Object.keys(payload).length !== 0) throw unavailable();
+    const start = ['sourceIdle','sourcePrepare','sourceAuthorize','sourceExtend'].includes(method);
     const expected = await getState();
     if (!helper || disposed || storageFailed || pending || access !== 'allowed' ||
         expected.phase !== 'ready' || !native || start && expected.revision !== revision) throw unavailable();
     const nativeRevision = native.revision;
-    const result = await helper.sourceRequest(method, {...payload, ...(['sourcePrepare','sourceExtend'].includes(method) ? {revision:nativeRevision} : {})});
+    const candidate = helper;
+    const result = await candidate.sourceRequest(method, {...payload, ...(['sourceIdle','sourcePrepare','sourceExtend'].includes(method) ? {revision:nativeRevision} : {})});
     // A stop reply remains useful after same-account reauthentication; its
     // native owner checks original identity and never creates a fresh start.
-    if (start && (disposed || pending || !sameAuthState(state,expected) || native?.revision !== nativeRevision)) throw unavailable();
+    if (start && (disposed || storageFailed || pending || access !== 'allowed' || helper !== candidate ||
+        !sameAuthState(state,expected) || native?.revision !== nativeRevision)) throw unavailable();
+    if (method === 'sourceIdle') {
+      if (!result || typeof result !== 'object' || Array.isArray(result) ||
+          Object.keys(result).length !== 2 || result.idle !== true || result.revision !== nativeRevision) throw unavailable();
+      return Object.freeze({idle:true});
+    }
     return result;
   }
   if (enabled) {

@@ -41,6 +41,9 @@ export async function openConfiguredWorkspaceRuntime(options:{workspaceId:string
         import("../../clients/capture/src/configured/native/workspace-source"),
       ]);
       source=ownedWorkspaceSource(createCapacitorIosNativeMicrophoneCaptureSource(),flow,workspaceId,sessionId,identity.nativeSession);
+    }else if(identity.mode==='desktop_native'&&source.kind==='microphone'){
+      const {desktopClinicalMicrophone}=await import('./desktop-clinical-microphone');
+      source=desktopClinicalMicrophone(source,flow,workspaceId,sessionId,identity);
     }
     const bff=workspaceCaptureBff(workspaceId,sessionId,identity,abort.signal);
     const createController=()=>new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:new CaptureQueue(queue.storage),source,

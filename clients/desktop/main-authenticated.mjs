@@ -101,7 +101,7 @@ async function bootstrap() {
   installElectronRendererSecurity(window.webContents, 'app://cosmas/index.html');
   installDesktopCloseProtection(window, dialog);
   installCaptureContentSecurityPolicy(rendererSession.webRequest, contentSecurityPolicy);
-  installMicrophonePermissions(window.webContents, auth, config.microphoneCaptureEnabled);
+  installMicrophonePermissions(window.webContents, auth, config.microphoneCaptureEnabled,()=>captureHost?.allowsRendererMicrophone()===true);
   disposeIpc = installAuthIpc(ipcMain, window.webContents, auth);
   disposeSignInPresentation = installSignInPresentation(auth, window);
   if(config.nativeCaptureEnabled===true){

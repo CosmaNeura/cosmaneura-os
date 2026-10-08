@@ -19,10 +19,11 @@ const coreRecordLocation = new RegExp(`^/workspaces/${ID}/cosmaneura-record/loca
 const research = new RegExp(`^/workspaces/${ID}/research(?:/(saved|search|resolve|${ID}/save(?:/resolve)?))?$`);
 const agentResearch = new RegExp(`^/workspaces/${ID}/agent-research(?:/(${ID})/review)?$`);
 const privateDraft = new RegExp(`^/workspaces/(?:private-drafts(?:/resolve)?|${ID}/appointment-link(?:/resolve)?)$`);
+const privateRecording = new RegExp(`^/workspaces/${ID}/private-recordings(?:/(resolve|${ID})(?:/(finish|link))?)?$`);
 const googleCalendarReview = new RegExp(`^/workspaces/${ID}/google-calendar/review$`);
 const googleMessageReview = new RegExp(`^/workspaces/${ID}/google-messages/review$`);
 const schedulingPatientSetup = new RegExp(`^/workspaces/${ID}/scheduling-patient/setup$`);
-export const CONNECTOR_HEADERS = ['X-Cosmas-Vendor-Contract','X-Cosmas-Finance-Contract','X-Cosmas-Portal-Contract','X-Cosmas-Portal-Work-Contract','X-Cosmas-Finance-Setup-Contract','X-Cosmas-Membership-Contract','X-Cosmas-Vendor-Setup-Contract','X-Cosmas-Inbox-Contract','X-Cosmas-Inbox-Handoff-Contract','X-Cosmas-Record-Contract','X-Cosmas-Research-Contract','X-Cosmas-Connection-Contract','X-Cosmas-Scheduling-Login','X-Cosmas-Microsoft-Connection','X-Cosmas-Google-Connection','X-Cosmas-Practice-Access-Contract','X-Cosmas-Google-Messages','X-Cosmas-Google-Calendar','X-Cosmas-Scheduling-Patient','X-Cosmas-Private-Draft'];
+export const CONNECTOR_HEADERS = ['X-Cosmas-Vendor-Contract','X-Cosmas-Finance-Contract','X-Cosmas-Portal-Contract','X-Cosmas-Portal-Work-Contract','X-Cosmas-Finance-Setup-Contract','X-Cosmas-Membership-Contract','X-Cosmas-Vendor-Setup-Contract','X-Cosmas-Inbox-Contract','X-Cosmas-Inbox-Handoff-Contract','X-Cosmas-Record-Contract','X-Cosmas-Research-Contract','X-Cosmas-Connection-Contract','X-Cosmas-Scheduling-Login','X-Cosmas-Microsoft-Connection','X-Cosmas-Google-Connection','X-Cosmas-Practice-Access-Contract','X-Cosmas-Google-Messages','X-Cosmas-Google-Calendar','X-Cosmas-Scheduling-Patient','X-Cosmas-Private-Draft','X-Cosmas-Private-Recording'];
 
 /** Closed method/path/query classification, shared by admission and byte budgets. */
 export function connectorApiRoute(target, method) {
@@ -30,6 +31,9 @@ export function connectorApiRoute(target, method) {
   const query = question < 0 ? '' : target.slice(question);
   const plan = (header,input,output,extra={}) => ({header,input,output,seconds:30,...extra});
   const incoming = (header,input,output) => plan(header,input,output,{seconds:15,strictResponse:true,errorOutput:2048});
+  const recording = privateRecording.exec(path);
+  if(recording) return !query && (method==='POST'&&(recording[1]===undefined||recording[1]==='resolve'&&!recording[2]||recording[1]!=='resolve'&&!!recording[2])||method==='GET'&&recording[1]!==undefined&&recording[1]!=='resolve'&&!recording[2])
+    ? incoming('X-Cosmas-Private-Recording',method==='POST'?4096:0,16384) : null;
   if(privateDraft.test(path)) return !query && (method==='POST' || method==='GET'&&path==='/workspaces/private-drafts')
     ? incoming('X-Cosmas-Private-Draft',method==='POST'?4096:0,method==='GET'?65536:12000000) : null;
   if(schedulingPatientSetup.test(path)) return method === 'POST' && !query

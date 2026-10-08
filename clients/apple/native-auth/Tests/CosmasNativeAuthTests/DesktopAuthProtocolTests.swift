@@ -13,6 +13,10 @@ private let requestID = "00000000-0000-4000-8000-000000000001"
         }
         let request = try DesktopAuthRequest(frame: Data("{\"id\":\"\(requestID)\",\"method\":\"getToken\",\"revision\":\"\(requestID)\"}".utf8))
         #expect(request.revision == requestID)
+        let idle = try DesktopAuthRequest(frame: Data("{\"id\":\"\(requestID)\",\"method\":\"sourceIdle\",\"payload\":{\"revision\":\"\(requestID)\"}}".utf8))
+        #expect(idle.method == .sourceIdle)
+        #expect(idle.revision == nil)
+        #expect(idle.payload != nil)
     }
 
     @Test(arguments: [

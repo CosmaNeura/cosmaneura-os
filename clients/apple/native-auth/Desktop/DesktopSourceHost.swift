@@ -9,6 +9,9 @@ import Security
     private let connection: NativeProviderConnection
     private let sources = DesktopSourceRegistry()
     private var recovery: NativeSourceRecovery?
+    private var idleReservation: NativeCaptureIdleReservation?
+    private var sourceRequests = 0
+    private var recoveryIdleReserved = false
     private var revision: String
 
     init(auth: NativeWorkspaceAuth) throws {
@@ -30,6 +33,9 @@ import Security
         guard let value = try JSONSerialization.jsonObject(with: payload) as? [String: Any] else {
             throw ProviderNativeError.invalidRequest
         }
+        if method == "sourceIdle" { return try requireIdle(value) }
+        sourceRequests += 1
+        defer { sourceRequests -= 1 }
         switch method {
         case "sourcePrepare":
             guard Set(value.keys.filter { $0 != "firstSequenceNumber" }) == ["revision", "preparationId", "workspaceId", "sessionId",
@@ -43,6 +49,11 @@ import Security
                   generation.doubleValue > 0, generation.doubleValue < 2_147_483_648,
                   let deadline = value["captureAuthorizedUntil"] as? String else {
                 throw ProviderNativeError.invalidRequest
+            }
+            idleReservation = nil
+            if recoveryIdleReserved {
+                try recovery?.releaseIdleReservationBeforePreparation()
+                recoveryIdleReserved = false
             }
             try await recoverSources()
             guard auth.state().phase == .ready, auth.state().revision == revision, let recovery else {
@@ -96,12 +107,45 @@ import Security
         }
     }
 
+    /// No provider request, stop/recovery, or journal write is issued here.
+    /// An unresolved saved owner stays blocked until normal stop-only recovery.
+    private func requireIdle(_ value: [String: Any]) throws -> [String: Any] {
+        guard Set(value.keys) == ["revision"], let revision = value["revision"] as? String,
+              DesktopAuthRequest.isRevision(revision), auth.state().phase == .ready,
+              auth.state().revision == revision, sourceRequests == 0 else { throw ProviderNativeError.unavailable }
+        try sources.requireIdle()
+        if let recovery {
+            try recovery.reserveWhileIdle()
+            recoveryIdleReserved = true
+        } else if let idleReservation {
+            try idleReservation.requireHeld()
+            let journal = try makeJournal()
+            try journal.requireUsable()
+            guard journal.pending.isEmpty else { throw ProviderNativeError.unavailable }
+        } else {
+            let journal = try makeJournal()
+            try journal.requireUsable()
+            guard journal.pending.isEmpty else { throw ProviderNativeError.unavailable }
+            let expected = journal.anchor
+            let reservation = try NativeCaptureIdleReservation(privateDirectory: nativeDesktopFenceDirectory(), expectedAnchor: expected)
+            try journal.reloadWhileExclusive(expectedAnchor: expected)
+            guard journal.pending.isEmpty else { throw ProviderNativeError.unavailable }
+            idleReservation = reservation
+        }
+        guard auth.state().phase == .ready, auth.state().revision == revision else { throw ProviderNativeError.unavailable }
+        return ["idle": true, "revision": revision]
+    }
+
+    private func makeJournal() throws -> NativeSourceProofJournal {
+        let bundle = Bundle.main.bundleIdentifier ?? ""
+        return try NativeSourceProofJournal(platform: .desktop,
+            backing: KeychainNativeSourceJournal(platform: .desktop, bundleIdentifier: bundle,
+                accessGroup: Self.signedAccessGroup(bundle)))
+    }
+
     private func recoverSources() async throws {
         if recovery == nil {
-            let bundle = Bundle.main.bundleIdentifier ?? ""
-            let journal = try NativeSourceProofJournal(platform: .desktop,
-                backing: KeychainNativeSourceJournal(platform: .desktop, bundleIdentifier: bundle,
-                    accessGroup: Self.signedAccessGroup(bundle)))
+            let journal = try makeJournal()
             recovery = NativeSourceRecovery(journal: journal, desktopDirectory: try nativeDesktopFenceDirectory())
         }
         guard let recovery else { throw ProviderNativeError.unavailable }
@@ -124,7 +168,7 @@ import Security
         return groups[0]
     }
 
-    func close() { connection.close(); sources.close() }
+    func close() { connection.close(); sources.close(); idleReservation = nil }
     private static func integer(_ value: Any?) throws -> Int {
         guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID(),
               number.doubleValue > 0, number.doubleValue < 2_147_483_648,

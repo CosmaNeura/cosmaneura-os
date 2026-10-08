@@ -117,6 +117,13 @@ public final class CosmasWorkspaceAuthPlugin: CAPPlugin, @preconcurrency CAPBrid
             return (connection, NativeSourceRecovery(journal: journal))
         }
         Self.processRuntime = runtime; self.runtime = runtime
+        NativePrivateRecordingGate.configure(auth: auth) { [weak runtime] revision in
+            guard let runtime,
+                  let settings = Bundle.main.object(forInfoDictionaryKey: "CosmasConfiguredCapture") as? [String: Any],
+                  let apiBase = settings["apiOrigin"] as? String else { throw NativeAuthError.unavailable }
+            let account = try await runtime.resources().connection.recordingAccount(revision: revision)
+            return (try NativePrivateRecordingGate.scope(apiBase: apiBase, recoveryScope: account.serverRecoveryScope), account.accountDigest)
+        }
         attachRuntimeObserver(runtime)
     }
 
