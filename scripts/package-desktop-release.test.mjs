@@ -4,10 +4,33 @@ import {createHash} from 'node:crypto';
 import {mkdtemp,mkdir,readFile,realpath,rm,writeFile} from 'node:fs/promises';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory,validateSourceProvenance} from './package-desktop-release.mjs';
+import {inventory,loadBuildTools,verifyArchive,fuseConfiguration,validateTemplateIntegrity,validateOperationalReleaseProfile,verifyStaticAssetInventory,validateSourceProvenance,desktopAuthSigningEntitlements,validateDesktopAuthSigningEntitlements} from './package-desktop-release.mjs';
 import {resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 import {CAPTURE_HELPERS,verifyDesktopCapturePackage} from '../clients/desktop/native-capture-package.mjs';
 const tools=await loadBuildTools(process.env.COSMAS_RELEASE_TOOLS);
+
+test('desktop source-owner helper has exactly its signing-team private Keychain group',()=>{
+  const team='JVV65668U6',bundle='com.cosmasos.beta.desktop.auth';
+  const claims=desktopAuthSigningEntitlements(team,bundle);
+  assert.deepEqual(claims,{'keychain-access-groups':['JVV65668U6.com.cosmasos.beta.desktop.auth']});
+  assert.ok(Object.isFrozen(claims));assert.ok(Object.isFrozen(claims['keychain-access-groups']));
+  assert.deepEqual(validateDesktopAuthSigningEntitlements(structuredClone(claims),team,bundle),claims);
+  // Installed 1044 was signed with {}, which cannot open the source-owner journal.
+  for(const actual of [null,[],{}, {'keychain-access-groups':[]},
+    {'keychain-access-groups':['JVV65668U6.*']}, {'keychain-access-groups':[team+'.com.cosmasos.beta.desktop']},
+    {'keychain-access-groups':['OTHERTEAM1.'+bundle]}, {'keychain-access-groups':claims['keychain-access-groups'][0]},
+    {'keychain-access-groups':[...claims['keychain-access-groups'],'com.apple.token']},
+    {...claims,'com.apple.security.device.audio-input':true}, {...claims,'application-identifier':team+'.'+bundle}])
+    assert.throws(()=>validateDesktopAuthSigningEntitlements(actual,team,bundle));
+});
+
+test('desktop auth signing claims refuse unbound teams and other helper identities',()=>{
+  for(const team of [null,'','JVV65668U6.*','jvv65668u6',' JVV65668U6','JVV65668U60'])
+    assert.throws(()=>desktopAuthSigningEntitlements(team,'com.cosmasos.beta.desktop.auth'));
+  for(const bundle of [null,'','com.cosmasos.beta.desktop','com.cosmasos.beta.ios',
+    'com.cosmasos.synthetic.desktop.auth.w35','com.cosmasos.beta.desktop.auth.extra'])
+    assert.throws(()=>desktopAuthSigningEntitlements('JVV65668U6',bundle));
+});
 
 test('release provenance refuses uncommitted, missing or ambiguous source identity',()=>{
   const clean={version:1,commit:'a'.repeat(40),tree:'b'.repeat(40),dirty:false};

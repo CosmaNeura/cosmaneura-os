@@ -51,6 +51,23 @@ const stable = value => Array.isArray(value) ? value.map(stable) : value && type
 const canonical = object => JSON.stringify(stable(object));
 const equal = (a,b) => { if (canonical(a) !== canonical(b)) fail(); };
 
+/** The source-owner journal uses only this helper's signing-team private group. */
+export function desktopAuthSigningEntitlements(teamIdentifier, bundleIdentifier) {
+  if (typeof teamIdentifier !== 'string' || !/^[A-Z0-9]{10}$/.test(teamIdentifier) ||
+      bundleIdentifier !== 'com.cosmasos.beta.desktop.auth') fail();
+  return Object.freeze({'keychain-access-groups': Object.freeze([`${teamIdentifier}.${bundleIdentifier}`])});
+}
+
+/** Apply to the claims read from the final signed helper, never the signing request alone. */
+export function validateDesktopAuthSigningEntitlements(actual, teamIdentifier, bundleIdentifier) {
+  const expected = desktopAuthSigningEntitlements(teamIdentifier, bundleIdentifier);
+  if (!actual || typeof actual !== 'object' || Array.isArray(actual) ||
+      Object.keys(actual).length !== 1 || !Object.hasOwn(actual, 'keychain-access-groups') ||
+      !Array.isArray(actual['keychain-access-groups']) || actual['keychain-access-groups'].length !== 1 ||
+      actual['keychain-access-groups'][0] !== expected['keychain-access-groups'][0]) fail();
+  return expected;
+}
+
 /** Refuse stale renderer routing before copying or sealing a release. Do not execute candidate code. */
 export async function verifyStaticAssetInventory(app, files) {
   const code=await readFile(join(app,'static-assets.mjs'),'utf8');
