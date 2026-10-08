@@ -16,7 +16,7 @@ import {installCosmaneuraNavigation} from './cosmaneura-navigation.mjs';
 import {proxyAuthenticatedWorkspaceRequest} from './workspace-auth-proxy.mjs';
 import {fetchLocalAuthenticatedWorkspace} from './local-auth-http.mjs';
 import {createHostedWorkspaceTransport, exactHostedApiOrigin} from './hosted-auth-http.mjs';
-import {captureContentSecurityPolicy, privateDocumentContentSecurityPolicy, installCaptureContentSecurityPolicy} from './capture-content-security.mjs';
+import {captureContentSecurityPolicy, privateDocumentContentSecurityPolicy, privateRecordingContentSecurityPolicy, installCaptureContentSecurityPolicy} from './capture-content-security.mjs';
 import {installMicrophonePermissions} from './microphone-permissions.mjs';
 import {prepareDesktopState} from './installation-state.mjs';
 import {installDesktopCloseProtection, cleanupOnConfirmedQuit} from './close-protection.mjs';
@@ -57,7 +57,7 @@ try {
       config.nativeAuthEnabled !== true) throw new Error('Invalid desktop build');
   workspaceTransport = hosted ? createHostedWorkspaceTransport(config.apiOrigin) : fetchLocalAuthenticatedWorkspace;
   enforceNoPhiDiagnosticPolicy(app.commandLine, process.argv, process.execArgv);
-  contentSecurityPolicy = privateDocumentContentSecurityPolicy(captureContentSecurityPolicy(RENDERER_CONTENT_SECURITY_POLICY, config.captureUploadOrigins));
+  contentSecurityPolicy = privateRecordingContentSecurityPolicy(privateDocumentContentSecurityPolicy(captureContentSecurityPolicy(RENDERER_CONTENT_SECURITY_POLICY, config.captureUploadOrigins)));
   // Validate compatibility before Electron opens a persistent session or native helper.
   stateDirectory = await prepareDesktopState(config, app.getPath('appData'), process.versions.electron);
   app.setName(config.nativeIdentity ? 'CosmaBot' : hosted ? 'CosmasOS Beta' : 'CosmasOS Synth');app.setPath('userData',stateDirectory);app.setPath('sessionData',stateDirectory);

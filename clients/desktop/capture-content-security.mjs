@@ -36,6 +36,18 @@ export function privateDocumentContentSecurityPolicy(base) {
   return [...directives.filter(value => !value.startsWith('frame-src ')), 'frame-src blob:'].join('; ');
 }
 
+/** The authenticated UI verifies encrypted private PCM before creating its local WAV blob. */
+export function privateRecordingContentSecurityPolicy(base) {
+  if (typeof base !== 'string') throw new Error('Invalid private recording policy');
+  const directives = base.split(';').map(value => value.trim()).filter(Boolean);
+  const values = name => directives.filter(value => value.split(/\s/)[0].toLowerCase() === name);
+  for (const name of ['default-src', 'object-src', 'media-src']) {
+    const found = values(name);
+    if (found.length !== 1 || found[0] !== `${name} 'none'`) throw new Error('Unexpected retained recording policy');
+  }
+  return directives.map(value => value === "media-src 'none'" ? 'media-src blob:' : value).join('; ');
+}
+
 /** Electron supports one response-header handler. Replace only its CSP value after Scribe setup. */
 export function installCaptureContentSecurityPolicy(webRequest, policy) {
   webRequest.onHeadersReceived((details, callback) => {
