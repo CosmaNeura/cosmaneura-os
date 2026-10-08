@@ -6,6 +6,12 @@ export interface CapturedWavChunk {
   readonly wavBytes: Uint8Array<ArrayBuffer>;
 }
 
+export type CaptureSourceStartupStage =
+  | "native_session"
+  | "physical_exclusion"
+  | "microphone_permission"
+  | "audio_engine";
+
 export interface CaptureSourceStartOptions {
   /** Optional renewable authority, granted only after durable server receipts. */
   readonly authority?: CaptureSourceAuthority;
@@ -13,6 +19,8 @@ export interface CaptureSourceStartOptions {
   readonly onChunk: (chunk: CapturedWavChunk) => Promise<void>;
   readonly onInterruption?: (code: CaptureSourceInterruptionCode) => void;
   readonly onError?: (code: CaptureSourceErrorCode) => void;
+  /** Transient progress only; observers cannot grant authority or affect capture. */
+  readonly onStartupStage?: (stage: CaptureSourceStartupStage) => void;
   readonly signal?: AbortSignal;
   /** Called after accepted audio is drained and the producer has stopped. */
   readonly onWindowClosed?: (reason: "authority_expired" | "frame_limit") => void;

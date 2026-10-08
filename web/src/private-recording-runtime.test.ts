@@ -95,6 +95,50 @@ it('stops while microphone permission is pending and rejects late Start completi
   const late=wav();await expect(source.emit(late)).rejects.toThrow();expect(late.wavBytes.every(v=>v===0)).toBe(true);
 });
 
+it('reports only current startup progress, isolates observers and never persists stages',async()=>{
+  const source=new ControlledSource(),gate=deferred();source.gate=gate.promise;
+  let current=true;const runtime=await open(source,{isCurrent:()=>current});
+  const observed:string[]=[];runtime.subscribe(value=>{if(value.startupStage)observed.push(value.startupStage);});
+  const unsubscribe=runtime.subscribe(value=>{if(value.startupStage)throw Error('Synthetic observer failure');});
+  const starting=runtime.start(consent());await vi.waitFor(()=>expect(source.starts).toBe(1));
+  const first=source.options!;first.onStartupStage?.('microphone_permission');
+  expect(runtime.snapshot).toMatchObject({phase:'starting',startupStage:'microphone_permission'});
+  current=false;first.onStartupStage?.('audio_engine');expect(runtime.snapshot.startupStage).toBe('microphone_permission');current=true;
+  await runtime.pause();expect(runtime.snapshot.startupStage).toBeNull();
+  first.onStartupStage?.('audio_engine');expect(runtime.snapshot.startupStage).toBeNull();gate.resolve();await starting;
+  source.gate=null;await runtime.start(consent());first.onStartupStage?.('native_session');
+  expect(runtime.snapshot).toMatchObject({phase:'recording',startupStage:null});
+  source.options!.onStartupStage?.('audio_engine');expect(runtime.snapshot.startupStage).toBeNull();
+  expect(observed).toContain('physical_exclusion');expect(observed).toContain('preparing_storage');expect(observed).toContain('microphone_permission');
+  await runtime.stop();unsubscribe();
+  const saved=await store();expect(await saved.read('manifest:'+runtime.snapshot.recordingId)).not.toHaveProperty('startupStage');saved.close();
+  expect((await listPrivateRecordings(scope,'desktop',store))[0].startupStage).toBeNull();
+});
+
+it('stops physical input before a held encrypted status write while retaining exclusion',async()=>{
+  const encrypted=await store(),gate=deferred();let writing=false;
+  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),close:()=>encrypted.close(),write:async(key,expected,value)=>{
+    if((value as PrivateRecordingManifest).phase==='stopping'){writing=true;await gate.promise;}await encrypted.write(key,expected,value);
+  }};
+  const source=new ControlledSource(),release=vi.fn(async()=>{}),runtime=await open(source,{openStore:async()=>guarded,acquireLock:async()=>release});
+  await runtime.start(consent());const stopping=runtime.stop();
+  expect(source.stops).toBe(1);await vi.waitFor(()=>expect(writing).toBe(true));expect(release).not.toHaveBeenCalled();
+  const other=new ControlledSource(),second=await open(other);await expect(second.start(consent())).rejects.toThrow();expect(other.starts).toBe(0);
+  gate.resolve();await stopping;expect(runtime.snapshot.phase).toBe('sealed');expect(release).toHaveBeenCalledOnce();
+});
+
+it('observes immediate stop rejection while a status write is held and retains its exact owner',async()=>{
+  const encrypted=await store(),gate=deferred();let writing=false;
+  const guarded:PrivateRecordingStore={read:key=>encrypted.read(key),keys:()=>encrypted.keys(),close:()=>encrypted.close(),write:async(key,expected,value)=>{
+    if((value as PrivateRecordingManifest).phase==='stopping'&&!writing){writing=true;await gate.promise;}await encrypted.write(key,expected,value);
+  }};
+  const source=new ControlledSource(),release=vi.fn(async()=>{}),runtime=await open(source,{openStore:async()=>guarded,acquireLock:async()=>release});
+  await runtime.start(consent());source.stopFailures=1;const stopping=runtime.stop(),rejected=expect(stopping).rejects.toThrow('Simulated OS stop failure');
+  await vi.waitFor(()=>expect(writing).toBe(true));expect(source.stops).toBe(1);expect(release).not.toHaveBeenCalled();
+  gate.resolve();await rejected;expect(runtime.snapshot.phase).toBe('stop_unconfirmed');expect(release).not.toHaveBeenCalled();
+  await runtime.stop();expect(source.stops).toBe(2);expect(release).toHaveBeenCalledOnce();
+});
+
 it('holds the single capture owner after unconfirmed physical stop and retries the exact producer',async()=>{
   const source=new ControlledSource(),release=vi.fn(async()=>{}),runtime=await open(source,{acquireLock:async()=>release});await runtime.start(consent());source.stopFailures=1;
   await expect(runtime.stop()).rejects.toThrow();expect(runtime.snapshot.phase).toBe('stop_unconfirmed');expect(release).not.toHaveBeenCalled();

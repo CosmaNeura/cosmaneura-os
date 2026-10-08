@@ -1,4 +1,4 @@
-import type {CaptureSource, CapturedWavChunk} from '../../clients/capture/src/capture/source';
+import type {CaptureSource, CaptureSourceStartupStage, CapturedWavChunk} from '../../clients/capture/src/capture/source';
 import type {CaptureCapabilities} from '../../clients/capture/src/bff/contracts';
 import {acquireCaptureFlowLock,type ReleaseCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
 import type {CaptureAttestation,CaptureLanguage} from './capture-api';
@@ -16,11 +16,12 @@ const closed=(value:unknown,keys:string):value is Record<string,unknown>=>!!valu
 let owner:PrivateRecordingRuntime|null=null;
 
 export type PrivateRecordingPhase='ready'|'starting'|'recording'|'pausing'|'paused'|'stopping'|'sealed'|'interrupted'|'stop_unconfirmed';
+export type PrivateRecordingStartupStage=CaptureSourceStartupStage|'preparing_storage';
 export type PrivateRecordingManifest={contract:'cosmabot.private-recording.v1';recordingId:string;scope:string;title:string;
   consent:CaptureAttestation&{language:CaptureLanguage};consentIntervals:(CaptureAttestation&{language:CaptureLanguage})[];workspaceId:string|null;createdAt:string;updatedAt:string;phase:PrivateRecordingPhase;
   chunks:{sequence:number;sha256:string;bytes:number;durationMs:number}[]};
 export type PrivateRecordingSnapshot={recordingId:string;title:string;phase:PrivateRecordingPhase;elapsedSeconds:number;recordedChunks:number;
-  recordedBytes:number;workspaceId:string|null;busy:boolean;localOnly:true;transcription:'not_requested';failure:string|null};
+  recordedBytes:number;workspaceId:string|null;busy:boolean;localOnly:true;transcription:'not_requested';failure:string|null;startupStage:PrivateRecordingStartupStage|null};
 export interface PrivateRecordingStore {
   read(key:string):Promise<unknown|null>;
   keys():Promise<string[]>;
@@ -85,6 +86,7 @@ export class PrivateRecordingRuntime {
   private storageFailed=false;
   private intervalSequence=0;
   private failure:string|null=null;
+  private startupStage:PrivateRecordingStartupStage|null=null;
   private constructor(private options:PrivateRecordingOptions,private store:PrivateRecordingStore,private saved:PrivateRecordingManifest){options.signal?.addEventListener('abort',this.onAbort,{once:true});}
   static async open(options:PrivateRecordingOptions,input:{recordingId?:string;title:string;consent?:CaptureAttestation&{language:CaptureLanguage}}):Promise<PrivateRecordingRuntime>{
     need(HASH.test(options.scope)&&options.isCurrent()&&!options.signal?.aborted);
@@ -107,9 +109,13 @@ export class PrivateRecordingRuntime {
   }
   get snapshot():PrivateRecordingSnapshot{return {recordingId:this.saved.recordingId,title:this.saved.title,phase:this.saved.phase,
     elapsedSeconds:this.saved.chunks.reduce((sum,c)=>sum+c.durationMs,0)/1000,recordedChunks:this.saved.chunks.length,
-    recordedBytes:this.saved.chunks.reduce((sum,c)=>sum+c.bytes,0),workspaceId:this.saved.workspaceId,busy:['starting','pausing','stopping'].includes(this.saved.phase),localOnly:true,transcription:'not_requested',failure:this.failure};}
+    recordedBytes:this.saved.chunks.reduce((sum,c)=>sum+c.bytes,0),workspaceId:this.saved.workspaceId,busy:['starting','pausing','stopping'].includes(this.saved.phase),localOnly:true,transcription:'not_requested',failure:this.failure,startupStage:this.startupStage};}
   subscribe(listener:(snapshot:PrivateRecordingSnapshot)=>void):()=>void{this.current();this.listeners.add(listener);listener(this.snapshot);return()=>this.listeners.delete(listener);}
   private publish(){for(const listener of this.listeners)try{listener(this.snapshot);}catch{/* Observer isolation. */}}
+  private reportStartup(stage:PrivateRecordingStartupStage,ticket:number,source?:CaptureSource){
+    if(!this.active||!this.options.isCurrent()||this.options.signal?.aborted||ticket!==this.generation||this.stopFlight||source&&(this.source!==source||this.startupStage===null))return;
+    this.startupStage=stage;this.publish();
+  }
   private current(){need(this.active&&this.options.isCurrent()&&!this.options.signal?.aborted);}
   private async makeSource(consent:CaptureAttestation&{language:CaptureLanguage}){const context={recordingId:this.saved.recordingId,scope:this.saved.scope,consent};
     const source=await(this.options.createSource?.(context)??privateRecordingSource(this.options.platform,context,this.options.nativePreparation?.()??null));need(source.kind==='microphone');return source;}
@@ -120,8 +126,10 @@ export class PrivateRecordingRuntime {
     this.current();need(!this.storageFailed&&!this.source&&!this.stopFlight&&(!owner||owner===this)&&['ready','paused','interrupted'].includes(this.saved.phase)&&this.saved.chunks.length<MAX_CHUNKS);
     owner=this;const ticket=++this.generation;
     try{
+      this.reportStartup('physical_exclusion',ticket);
       const release=await(this.options.acquireLock?.()??acquireCaptureFlowLock());
       if(ticket!==this.generation){await release();return;}this.releaseLock=release;this.current();
+      this.reportStartup('preparing_storage',ticket);
       await this.enqueue(async()=>{const next={...this.saved,consentIntervals:[...this.saved.consentIntervals,structuredClone(consent)],phase:'starting' as const,updatedAt:new Date().toISOString()};need(next.consentIntervals.length<=1000);await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();});this.intervalSequence=0;
       const source=await this.makeSource(consent);this.current();need(ticket===this.generation);this.source=source;
       const remaining=Math.min(90,MAX_CHUNKS-this.saved.chunks.length);
@@ -130,10 +138,12 @@ export class PrivateRecordingRuntime {
         target_chunk_duration_ms:10000,max_chunks:remaining,max_envelope_bytes:320044,remaining_aggregate_plaintext_bytes:remaining*320044,
         capture_lease_ttl_seconds:900,reservation_window_seconds:900,max_reservations_per_batch:1,upload_concurrency:1};
       await source.start({capabilities:limits,onChunk:chunk=>this.acceptChunk(chunk,ticket),
+        onStartupStage:stage=>{if(['native_session','physical_exclusion','microphone_permission','audio_engine'].includes(stage)&&this.saved.phase==='starting')this.reportStartup(stage,ticket,source);},
         onInterruption:()=>{void this.pause().catch(()=>{});},onError:()=>{this.failure='audio_source_failed';void this.pause().catch(()=>{});},
         onWindowClosed:()=>{void this.pause().catch(()=>{});}});
-      this.current();if(ticket!==this.generation||this.stopFlight)return;await this.update('recording');
+      this.current();if(ticket!==this.generation||this.stopFlight)return;this.startupStage=null;await this.update('recording');
     }catch(error){
+      if(ticket===this.generation)this.startupStage=null;
       this.failure='recording_start_unconfirmed';
       if(this.source)await this.halt(false).catch(()=>{});
       else if(ticket===this.generation){await this.release();await this.update('interrupted');}
@@ -159,14 +169,17 @@ export class PrivateRecordingRuntime {
   pause():Promise<void>{return this.halt(false);}
   stop():Promise<void>{return this.halt(true);}
   private halt(seal:boolean):Promise<void>{
+    if(this.startupStage!==null){this.startupStage=null;this.publish();}
     if(this.stopFlight)return this.stopFlight.then(()=>seal&&this.saved.phase!=='sealed'?this.halt(true):undefined);
     if(!this.source){need(this.active);if(this.saved.phase==='sealed')return Promise.resolve();++this.generation;return this.release().then(()=>this.update(seal?'sealed':'paused'));}
     const source=this.source;
     const task=(async()=>{
       // Stop is usable during permission/start and never waits for Start to settle.
+      // Observe rejection immediately, while durable status writes may still be pending.
+      const stopped=(()=>{try{return source.stop().then(()=>({ok:true as const}),error=>({ok:false as const,error}));}catch(error){return Promise.resolve({ok:false as const,error});}})();
       await this.update(seal?'stopping':'pausing').catch(()=>{this.storageFailed=true;this.failure='audio_storage_unconfirmed';});
-      try{await source.stop();}
-      catch(error){this.failure='physical_stop_unconfirmed';await this.update('stop_unconfirmed').catch(()=>{});throw error;}
+      const result=await stopped;
+      if(!result.ok){this.failure='physical_stop_unconfirmed';await this.update('stop_unconfirmed').catch(()=>{});throw result.error;}
       await this.chain.catch(()=>{});this.source=null;await this.release();++this.generation;
       try{await this.update(this.storageFailed?'interrupted':seal?'sealed':'paused');}
       catch(error){this.storageFailed=true;this.failure='audio_storage_unconfirmed';throw error;}
@@ -260,7 +273,7 @@ export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop
   const store=await(openStore?.()??openPrivateRecordingStore(scope,platform));
   try{const keys=(await store.keys()).filter(k=>k.startsWith('manifest:'));need(keys.length<=1000);
     const rows:PrivateRecordingSnapshot[]=[];
-    for(const key of keys){const row=manifest(await store.read(key),scope,key.slice('manifest:'.length));rows.push({recordingId:row.recordingId,title:row.title,phase:row.phase,elapsedSeconds:row.chunks.reduce((n,c)=>n+c.durationMs,0)/1000,recordedChunks:row.chunks.length,recordedBytes:row.chunks.reduce((n,c)=>n+c.bytes,0),workspaceId:row.workspaceId,busy:false,localOnly:true,transcription:'not_requested',failure:null});}
+    for(const key of keys){const row=manifest(await store.read(key),scope,key.slice('manifest:'.length));rows.push({recordingId:row.recordingId,title:row.title,phase:row.phase,elapsedSeconds:row.chunks.reduce((n,c)=>n+c.durationMs,0)/1000,recordedChunks:row.chunks.length,recordedBytes:row.chunks.reduce((n,c)=>n+c.bytes,0),workspaceId:row.workspaceId,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null});}
     return rows;
   }finally{store.close();}
 }
