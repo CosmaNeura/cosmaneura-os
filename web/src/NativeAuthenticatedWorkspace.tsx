@@ -12,7 +12,7 @@ import {nativeSceneSignal,notifyNativeWorkspaceForeground} from './native-worksp
 type Session = {
   plugin: WorkspaceAuthPlugin; active: boolean; epoch: number; pending: boolean;
   current: NativeAuthState | null; refresh: () => Promise<void>;
-  foreground:boolean;
+  foreground:boolean; lastAction:"signIn"|"signOut"|null;
 };
 
 export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available = nativeWorkspaceAuthAvailable(), createIdentity }: {
@@ -50,7 +50,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   },[identity]);
 
   useLayoutEffect(() => {
-    const scope: Session = { plugin, active: true, epoch: 0, pending: false, current: null, refresh: async () => {},foreground:true };
+    const scope: Session = { plugin, active: true, epoch: 0, pending: false, current: null, refresh: async () => {},foreground:true,lastAction:null };
     session.current = scope;
     setState(null); setFailed(false); setBusy(false);
     let remove: (() => Promise<void>) | undefined;
@@ -68,6 +68,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
         }
         scope.epoch++;
         scope.current = next;
+        if (!scope.pending && (next.phase === "ready" || next.phase === "signedOut")) scope.lastAction = null;
         setState(previous => previous && sameNativeState(previous, next) ? previous : next);
         setFailed(false);
       } catch { invalidate(); }
@@ -143,6 +144,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     const scope = session.current;
     if (!scope?.active || scope.pending || !available || scope.plugin !== plugin) return;
     // Close access synchronously, including token promises already in flight.
+    scope.lastAction = action;
     scope.pending = true; scope.epoch++; scope.current = null;
     setState(null); setFailed(false); setBusy(true);
     try { await plugin[action](); }
@@ -174,11 +176,13 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   if (!state || state.phase === "loading") return <StatusScreen title="Checking your session"
     detail="Your workspace will open after your account is verified." role="status" />;
   const pending = state.phase === "signOutPending";
-  return <StatusScreen role={pending ? "alert" : "status"} title={pending ? "Finish signing out" : "Sign in to CosmaBot"}
-    detail={pending ? "Your workspace is closed. Reconnect and finish signing out before continuing." :
+  const signInRecovery = pending && session.current?.plugin === plugin && session.current.lastAction === "signIn";
+  return <StatusScreen role={pending ? "alert" : "status"} title={signInRecovery ? "Sign-in didn’t finish" : pending ? "Finish signing out" : "Sign in to CosmaBot"}
+    detail={signInRecovery ? "Your workspace stays closed. Try signing in again to safely clear the unfinished attempt and verify your account." :
+      pending ? "Your workspace is closed. Reconnect and finish signing out before continuing." :
       "Sign in with your invited account to start a private note and meet your team."}>
-    <button className="button" onClick={() => void act(pending ? "signOut" : "signIn")}>
-      {pending ? "Retry sign-out" : "Sign in"}
+    <button className="button" onClick={() => void act(pending && !signInRecovery ? "signOut" : "signIn")}>
+      {signInRecovery ? "Try signing in again" : pending ? "Retry sign-out" : "Sign in"}
     </button>
   </StatusScreen>;
 }
