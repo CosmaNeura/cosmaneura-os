@@ -8,6 +8,7 @@ import {openDraftStore} from './draft-store';
 import type {AccountRecoveryAccess} from './account-recovery';
 import {workspaceApi,WorkspaceApiError,type ProviderTeam,type Workspace} from './workspace-api';
 import {validatePrivateDraftRecovery,validatePrivateDraftLinkRecovery} from './private-draft-recovery';
+import type {PrivateRecordingSnapshot} from './private-recording-runtime';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const team:ProviderTeam={revision:1,recovery_scope:'a'.repeat(64),template_version:'provider-team-v1',llm:{enabled:false,model:'gpt-4.1'},configuration:{practice_context:'',bots:[{role:'chief',name:'Chief',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}]},members:[{role:'chief',agent_id:id(10),name:'Chief',initials:'Ch',description:'Prepare private drafts',prompt:'Saved context',capabilities:[]}]};
@@ -101,6 +102,14 @@ describe('practice Quick start recovery',()=>{
     const record=vi.fn();async function request(number:number,locked:boolean,member=identity){await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={team} locked={locked} openRecordingRequest={number} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));}
     await request(0,false);expect(record).not.toHaveBeenCalled();await request(1,true);expect(record).not.toHaveBeenCalled();await request(1,false);expect(record).toHaveBeenCalledOnce();
     await request(1,false);expect(record).toHaveBeenCalledOnce();const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await request(1,false,next);expect(record).toHaveBeenCalledOnce();await request(2,false,next);expect(record).toHaveBeenCalledTimes(2);expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
+  });
+  it('distinguishes same-title audio and empty stops while preserving uncertain stop recovery',async()=>{
+    const saved:PrivateRecordingSnapshot={recordingId:id(101),title:'Private recording',phase:'sealed',elapsedSeconds:18.704,recordedChunks:2,recordedBytes:598616,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};
+    const rows=[saved,{...saved,recordingId:id(102),elapsedSeconds:96.5},{...saved,recordingId:id(103),elapsedSeconds:0,recordedChunks:0,recordedBytes:0},{...saved,recordingId:id(104),phase:'stop_unconfirmed' as const,elapsedSeconds:0,recordedChunks:0,recordedBytes:0}],reopen=vi.fn();
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} recordings={rows} onReopenRecording={reopen} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
+    const buttons=[...container.querySelectorAll<HTMLButtonElement>('[aria-label="Saved private recordings"] button')];
+    expect(buttons.map(button=>button.textContent)).toEqual(['Private recordingSaved on this device; not yet synced · 0:18 · Private','Private recordingSaved on this device; not yet synced · 1:36 · Private','Private recordingStopped · no audio captured · 0:00 · Private','Private recordingCheck recording status · 0:00 · Private']);
+    await act(async()=>buttons[1].click());expect(reopen).toHaveBeenCalledExactlyOnceWith(id(102));expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
   });
   it('refuses added authority fields and mismatched encrypted request keys',async()=>{
     const body={title:'Private note',idempotency_key:id(5)},data={contract:'private-draft-recovery.v1' as const,title:'Private note',pending:body};

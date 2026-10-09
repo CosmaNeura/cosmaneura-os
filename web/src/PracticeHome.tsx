@@ -6,6 +6,12 @@ import type {PrivateNotebookResult} from './PrivateRecordingPanel';
 import type {PrivateRecordingSnapshot} from './private-recording-runtime';
 import './practice-home.css';
 
+function recordingDetails(recording:PrivateRecordingSnapshot):string {
+  const status=recording.phase==='sealed'?(recording.recordedChunks?'Saved on this device; not yet synced':'Stopped · no audio captured'):recording.phase==='paused'?'Paused · not yet synced':recording.phase==='interrupted'?'Interrupted · check retained audio':'Check recording status';
+  const seconds=Math.floor(recording.elapsedSeconds),duration=`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
+  return `${status} · ${duration} · Private`;
+}
+
 export type StartPrivateRecording={title:string;prepareNotebook:()=>Promise<PrivateNotebookResult>};
 export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0}:{
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
@@ -130,7 +136,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
       {drafts?.drafts.map(draft=><button className="practice-home-note" disabled={!ready||busy||locked||!!pending} key={draft.workspace_id} onClick={()=>void reopen(draft.workspace_id)}><strong>{draft.title}</strong><span>{draft.link_state==='linked'?'Linked to a visit':'Private draft'} · Open saved notes</span></button>)}
       {drafts&&!drafts.drafts.length&&<p>No private notes yet.</p>}{drafts?.has_more&&<p>The latest 50 private notes are shown.</p>}
     </section>
-    {recordings&&onReopenRecording&&<section className="practice-home-notes" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong><span>{recording.phase==='sealed'?'Saved on this device; not yet synced':recording.phase==='paused'?'Paused · not yet synced':recording.phase==='interrupted'?'Interrupted · check retained audio':'Check recording status'} · Private</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>}
+    {recordings&&onReopenRecording&&<section className="practice-home-notes" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong><span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>}
     <nav className="practice-home-next" aria-label="Other ways to start"><button disabled={locked||busy} onClick={onVisits}>Visits and notes</button><button disabled={locked||busy} onClick={onPracticeWork}>Practice work</button><button disabled={locked||busy} onClick={onConnections}>Connect an account later</button></nav>
   </section>;
 }
