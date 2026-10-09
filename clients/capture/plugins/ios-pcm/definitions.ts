@@ -108,6 +108,8 @@ export interface IosPcmStopResult {
 }
 
 export interface IOSPCMPlugin {
+  /** Read-only, ephemeral levels for the current account's private microphone. */
+  privateInputSignal?(): Promise<unknown>;
   preparePrivate?(options: {scope:string;revision:string}): Promise<IosPrivateRecordingReceipt>;
   startPrivate?(options: IosPrivateRecordingStart): Promise<{sessionToken:string}>;
   /** Process-wide ownership check; does not start or stop any producer. */

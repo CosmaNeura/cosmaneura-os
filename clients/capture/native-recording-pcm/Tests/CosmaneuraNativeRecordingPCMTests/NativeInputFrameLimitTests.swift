@@ -75,6 +75,23 @@ private final class FixtureEvents: IOSPCMBridgeEventPublishing, @unchecked Senda
 
 @Suite(.serialized)
 struct NativeInputFrameLimitTests {
+  @Test(arguments: [Float(0), Float(0.125)])
+  func bridgeReportsConvertedSignalBeforeTheFirstSavedPacket(sample: Float) async throws {
+    let encounter = ConsentedSyntheticEncounter(), audio = InjectedAudioDriver(), events = FixtureEvents()
+    let signal = PCMSignalMonitor()
+    let bridge = IOSPCMBridgeCore(permission: FixturePermission(encounter: encounter),
+      audio: audio, foreground: FixtureForeground(), events: events, signalMonitor: signal)
+    let token = try bridge.begin(configuration: configuration())
+    try await bridge.ready(token)
+    try await audio.offer(OwnedAudioFrames(sampleRateHz: 48_000, channels: [Array(repeating: sample, count: 8192)]))
+    #expect(signal.snapshot().convertedBuffers == 1)
+    #expect(signal.snapshot().convertedEverNonzero == (sample != 0))
+    #expect(events.fullPacketCount == 0)
+    let result = try await bridge.stop(token, mode: .drain)
+    result.finalPacket?.bytes.zeroize()
+    #expect(bridge.confirmCaptureIdle())
+  }
+
   @Test func acceptsLargerNativeTapBufferAndDrainsResampledAudio() async throws {
     let encounter = ConsentedSyntheticEncounter()
     let audio = InjectedAudioDriver(), events = FixtureEvents()

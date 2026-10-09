@@ -20,9 +20,12 @@ public struct AVFoundationMicrophonePermissionAdapter:
   MicrophonePermissionAuthorizing, Sendable
 {
   private let provider: any AppleMicrophonePermissionProviding
+  private let foreground: (any AppleApplicationForegroundProviding)?
 
-  public init(provider: any AppleMicrophonePermissionProviding) {
+  public init(provider: any AppleMicrophonePermissionProviding,
+    foreground: (any AppleApplicationForegroundProviding)? = nil) {
     self.provider = provider
+    self.foreground = foreground
   }
 
   public func requestPermission(
@@ -40,7 +43,21 @@ public struct AVFoundationMicrophonePermissionAdapter:
       await cancellation.waitUntilCancelled()
       first.resolve(.unavailable)
     }
-    return await first.wait()
+    let result = await first.wait()
+    // iOS can finish the permission callback before dismissing its modal and
+    // restoring application activity. Keep this same cancellable Start owned;
+    // never open the engine while inactive or restart after Stop.
+    if result == .granted, let foreground {
+      for _ in 0..<30 {
+        if cancellation.isCancelled { return .unavailable }
+        if await foreground.isForegroundActive() {
+          return cancellation.isCancelled ? .unavailable : result
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+      }
+      return .unavailable
+    }
+    return cancellation.isCancelled ? .unavailable : result
   }
 
   private static func map(
@@ -70,6 +87,8 @@ public enum AppleAudioSessionProfile: Equatable, Sendable {
   /// Existing foreground speakerphone speech: automatic input, play-and-record
   /// and voice-chat mode. This profile grants no background execution.
   case foregroundTwoPartySpeech
+  /// Private in-person microphone input; foreground-only and no playback graph.
+  case foregroundPrivateSpeech
   /// Measurement input, owned by a native encrypted recorder. The host
   /// must provide audio background mode and native authority/watchdog renewal.
   case nativeEncryptedSpeech
@@ -77,6 +96,7 @@ public enum AppleAudioSessionProfile: Equatable, Sendable {
 
 public enum AppleRecordingLifecycle: Equatable, Sendable {
   case foregroundOnly
+  case foregroundPrivate
   /// Native code only. Never expose this choice through the PCM JavaScript API.
   case nativeEncrypted
 }
@@ -161,7 +181,11 @@ public actor AVFoundationPCMDriver: PCMAudioDriving {
     self.system = system
     self.foreground = foreground
     callbackGate = DriverCallbackGate(continueInBackground: lifecycle == .nativeEncrypted)
-    profile = lifecycle == .nativeEncrypted ? .nativeEncryptedSpeech : .foregroundTwoPartySpeech
+    switch lifecycle {
+    case .foregroundOnly: profile = .foregroundTwoPartySpeech
+    case .foregroundPrivate: profile = .foregroundPrivateSpeech
+    case .nativeEncrypted: profile = .nativeEncryptedSpeech
+    }
     self.frameCapacity = min(
       max(frameCapacity, 1),
       UInt32(PCMConfiguration.maximumFramesPerInputBuffer)

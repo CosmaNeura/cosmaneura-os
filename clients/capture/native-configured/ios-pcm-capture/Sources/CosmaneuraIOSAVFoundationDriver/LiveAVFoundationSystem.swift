@@ -167,10 +167,11 @@
     }
 
     public func configureAndActivate(profile: AppleAudioSessionProfile) throws {
-      // Preserve the existing renderer recording route. Only the native
-      // encrypted graph selects measurement input and background lifecycle.
+      // Select input processing separately from lifecycle. Private foreground
+      // and native encrypted capture use measurement input; only the driver
+      // lifecycle can authorize continued background capture.
       switch profile {
-      case .foregroundTwoPartySpeech, .nativeEncryptedSpeech: break
+      case .foregroundTwoPartySpeech, .foregroundPrivateSpeech, .nativeEncryptedSpeech: break
       }
       lock.withLock { activationAttempted = true }
       do {

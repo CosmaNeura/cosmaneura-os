@@ -5,6 +5,8 @@ import {readPrivateRecordingLanguage,savePrivateRecordingLanguage} from './recor
 import type {CaptureAttestation,CaptureLanguage} from './capture-api';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
 import './practice-home.css';
+import {IOSPCM} from '../../clients/capture/plugins/ios-pcm';
+import {parseInputSignal,presentInputSignal} from '../../clients/capture/src/native/ios-input-signal';
 
 export type PrivateNotebookResult={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam};
 type Consent=CaptureAttestation&{language:CaptureLanguage};
@@ -19,6 +21,7 @@ export type PrivateRecordingPanelProps={
   runtimeFactory?:(options:PrivateRecordingOptions,input:{recordingId?:string;title:string;consent?:Consent})=>Promise<Controller>;
   prepareStore?:()=>Promise<PrivateRecordingStore>;prepareNative?:(input:{scope:string;revision:string})=>Promise<PrivateRecordingNativeReceipt>;
   consumeNative?:(receipt:PrivateRecordingNativeReceipt)=>Promise<Pick<PrivateRecordingNativeReceipt,'receiptId'|'revision'>|null>;
+  readInputSignal?:()=>Promise<unknown>;
 };
 const elapsed=(seconds:number)=>`${Math.floor(seconds/60)}:${String(Math.floor(seconds%60)).padStart(2,'0')}`;
 const startupLabels={native_session:'Checking your session',physical_exclusion:'Checking for another recording',microphone_permission:'Requesting microphone access',audio_engine:'Starting audio',preparing_storage:'Preparing encrypted recording'} as const;
@@ -34,6 +37,8 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const preparationRetry=useRef(false);
   const [snapshot,setSnapshot]=useState<PrivateRecordingSnapshot|null>(null),[error,setError]=useState(''),[notebookError,setNotebookError]=useState('');
   const [notebook,setNotebook]=useState<PrivateNotebookResult|null>(null),[audio,setAudio]=useState<string|null>(null);
+  const [liveSeconds,setLiveSeconds]=useState(0),[inputSignal,setInputSignal]=useState<ReturnType<typeof presentInputSignal>|null>(null);
+  const [playbackWarning,setPlaybackWarning]=useState('');
   const live=useRef(props);live.current=props;
   const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;scope:string;store:PrivateRecordingStore|null;runtime:Controller|null;closed:Promise<void>|null;unsubscribe?:()=>void}|null>(null);
   const audioRef=useRef<string|null>(null),notebookRef=useRef<PrivateNotebookResult|null>(null);
@@ -44,7 +49,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const consumedReceipt=useRef<Pick<PrivateRecordingNativeReceipt,'receiptId'|'revision'>|null>(null);
   const accessStopped=useRef(false);
   const current=()=>!!owner.current?.alive&&owner.current.identity===live.current.identity&&owner.current.scope===live.current.scope&&live.current.isCurrent();
-  const clearAudio=()=>{if(audioRef.current)URL.revokeObjectURL(audioRef.current);audioRef.current=null;setAudio(null);};
+  const clearAudio=()=>{if(audioRef.current)URL.revokeObjectURL(audioRef.current);audioRef.current=null;setAudio(null);setPlaybackWarning('');};
   function closeRuntime(selected:NonNullable<typeof owner.current>):Promise<void>{return selected.closed??(selected.closed=selected.runtime?.close()??Promise.resolve());}
   useEffect(()=>{
     const selected={alive:true,identity,scope,store:null as PrivateRecordingStore|null,runtime:null as Controller|null,closed:null as Promise<void>|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;
@@ -178,6 +183,27 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   }
   useEffect(()=>{synchronizeLedger();},[notebook,snapshot?.recordingId,snapshot?.phase]);
   const activeAudio=!!snapshot&&['starting','recording','pausing','stopping','stop_unconfirmed'].includes(snapshot.phase);
+  useEffect(()=>{
+    setInputSignal(null);
+    if(snapshot?.phase!=='recording')return;
+    const selected=owner.current,start=performance.now(),base=snapshot.elapsedSeconds;
+    let alive=true,reading=false,lastReply=0;
+    const tick=async()=>{
+      if(!alive||owner.current!==selected||!current())return;
+      setLiveSeconds(base+(performance.now()-start)/1000);
+      if(platform==='ios'&&performance.now()-lastReply>1500)setInputSignal(presentInputSignal(null,0));
+      if(platform!=='ios'||reading)return;
+      reading=true;
+      try{
+        const read=live.current.readInputSignal??IOSPCM.privateInputSignal?.bind(IOSPCM);
+        const signal=read?parseInputSignal(await read()):null;
+        if(alive&&owner.current===selected&&current()){lastReply=performance.now();setInputSignal(presentInputSignal(signal,0));}
+      }catch{if(alive&&owner.current===selected&&current())setInputSignal(presentInputSignal(null,0));}
+      finally{reading=false;}
+    };
+    void tick();const timer=setInterval(()=>void tick(),500);
+    return()=>{alive=false;clearInterval(timer);};
+  },[snapshot?.recordingId,snapshot?.phase,platform]);
   useEffect(()=>{live.current.onBusyChange?.(working||activeAudio);},[working,activeAudio]);
   useEffect(()=>{if(snapshot&&['sealed','paused','interrupted'].includes(snapshot.phase))live.current.onSaved?.(snapshot);},[snapshot]);
   useEffect(()=>{if(platform==='ios'&&nativeConsumed.current&&snapshot&&['paused','interrupted'].includes(snapshot.phase)){nativeConsumed.current=false;setNativeEpoch(value=>value+1);}},[snapshot?.phase,platform]);
@@ -211,7 +237,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   }
   async function playback(){
     const selected=owner.current;if(!selected?.runtime||working||activeAudio||!current())return;setWorking(true);setError('');clearAudio();
-    try{const saved=await selected.runtime.exportWav();if(!current())return;const url=URL.createObjectURL(saved.blob);audioRef.current=url;setAudio(url);}
+    try{const saved=await selected.runtime.exportWav();if(!current())return;const url=URL.createObjectURL(saved.blob);audioRef.current=url;setAudio(url);if(!saved.hasNonzeroAudio)setPlaybackWarning('This recording contains no microphone signal. The saved clip is retained; check the microphone before recording again.');}
     catch{setError('Saved audio could not be verified for playback. The encrypted recording is retained.');}
     finally{if(selected.alive&&owner.current===selected)setWorking(false);}
   }
@@ -238,8 +264,12 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   return <section className="private-recording-panel" aria-label="Private Scribe recording">
     <header><div><p className="team-kicker">SCRIBE</p><h1>{snapshot?'Private recording':'Start a private recording'}</h1></div><button className="team-subtle" disabled={activeAudio||working} onClick={()=>void close()}>Close recording</button></header>
     <p>Record now. Choose a patient or confirmed visit later. This recording stays encrypted on this device and is not synced to another device.</p>
-    <div role="status" className="private-recording-status"><strong>{snapshot?.phase==='recording'?'Recording':snapshot?.phase==='sealed'?snapshot.recordedChunks?'Saved on this device':'Stopped · no audio captured':snapshot?.phase==='paused'?'Paused':snapshot?.phase==='interrupted'?'Interrupted · retained audio':snapshot?.phase==='stop_unconfirmed'?'Microphone stop unconfirmed':snapshot?.startupStage?startupLabels[snapshot.startupStage]:snapshot?.phase==='stopping'?'Stopping audio and saving on this device':snapshot?.phase==='pausing'?'Pausing audio and saving on this device':snapshot?.busy?'Updating recording':preparationError||nativeError?'Recording not ready':!prepared?'Checking access and encrypted storage':!nativeReady?'Checking this device’s recording access':'Ready for consent'}</strong>
-      {snapshot&&<span>{elapsed(snapshot.elapsedSeconds)} · {snapshot.recordedChunks} saved audio chunks</span>}<span>{snapshot?.recordedChunks?'Saved on this device; not yet synced':'Private · not synced'} · transcription not requested</span></div>
+    <div className="private-recording-status"><strong role="status">{snapshot?.phase==='recording'?'Recording':snapshot?.phase==='sealed'?snapshot.recordedChunks?'Saved on this device':'Stopped · no audio captured':snapshot?.phase==='paused'?'Paused':snapshot?.phase==='interrupted'?'Interrupted · retained audio':snapshot?.phase==='stop_unconfirmed'?'Microphone stop unconfirmed':snapshot?.startupStage?startupLabels[snapshot.startupStage]:snapshot?.phase==='stopping'?'Stopping audio and saving on this device':snapshot?.phase==='pausing'?'Pausing audio and saving on this device':snapshot?.busy?'Updating recording':preparationError||nativeError?'Recording not ready':!prepared?'Checking access and encrypted storage':!nativeReady?'Checking this device’s recording access':'Ready for consent'}</strong>
+      {snapshot&&<span>{snapshot.phase==='recording'?`${elapsed(Math.max(snapshot.elapsedSeconds,liveSeconds))} recording · ${elapsed(snapshot.elapsedSeconds)} saved`:elapsed(snapshot.elapsedSeconds)} · {snapshot.recordedChunks} saved audio chunks</span>}<span>{snapshot?.recordedChunks?'Saved on this device; not yet synced':'Private · not synced'} · transcription not requested</span>
+      {snapshot?.phase==='recording'&&<span>Microphone on · audio saves in chunks while you record.</span>}
+      {snapshot?.phase==='recording'&&inputSignal&&<><meter min="0" max="1" value={inputSignal.level} aria-label="Microphone activity"/><span>{inputSignal.route} · {inputSignal.message}</span></>}
+      {snapshot&&['paused','interrupted'].includes(snapshot.phase)&&<span>{snapshot.failure==='capture_backgrounded'?'Recording paused when the app became inactive.':snapshot.failure==='audio_route_changed'?'Recording paused because the microphone route changed.':snapshot.failure==='audio_session_interrupted'?'Recording paused because iOS interrupted the audio session.':snapshot.failure?'Recording paused because microphone startup or capture was interrupted.':'Microphone off.'} Select consent and Resume recording when ready.</span>}
+      </div>
     {(!snapshot||mayResume||snapshot.phase==='ready')&&<div className="private-recording-consent">
       <details><summary>Recording options · {language==='en-US'?'English':'English and Spanish'} · {modality==='in_person'?'In person':modality==='virtual'?'Video visit':'Phone'}</summary>
       <label>Title <span>optional</span><input maxLength={160} value={title} disabled={working||!!snapshot} onChange={event=>setTitle(event.target.value)}/></label>
@@ -261,6 +291,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       {ledger?.retry_ready&&<button disabled={ledgerBusy} onClick={()=>synchronizeLedger('retry')}>Retry original recording request</button>}
       {ledgerError&&<p role="status">{ledgerError}</p>}</aside>}
     {audio&&current()&&<audio controls src={audio} aria-label="Saved private recording playback"/>}
+    {playbackWarning&&<p role="status">{playbackWarning}</p>}
     {preparationError&&<p role="alert">{preparationError}</p>}{nativeError&&<p role="alert">{nativeError}</p>}{error&&<p role="alert">{error}</p>}{notebookError&&<p role="status">{notebookError}</p>}
   </section>;
 }

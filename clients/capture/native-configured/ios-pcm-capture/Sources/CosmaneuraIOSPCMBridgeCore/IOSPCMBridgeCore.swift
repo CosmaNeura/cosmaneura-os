@@ -306,6 +306,7 @@ public final class IOSPCMBridgeCore: @unchecked Sendable {
   private let permission: any MicrophonePermissionAuthorizing
   private let audio: any PCMAudioDriving
   private let foreground: any AppleApplicationForegroundProviding
+  private let signalMonitor: PCMSignalMonitor?
   private let events: any IOSPCMBridgeEventPublishing
   private let clock: any PCMClock
   private let sourceClock: any PCMSourceClock
@@ -325,6 +326,7 @@ public final class IOSPCMBridgeCore: @unchecked Sendable {
     events: any IOSPCMBridgeEventPublishing,
     clock: any PCMClock = ContinuousPCMClock(),
     sourceClock: any PCMSourceClock = ContinuousPCMSourceClock(),
+    signalMonitor: PCMSignalMonitor? = nil,
     tokenSource: @escaping @Sendable () -> String = {
       UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
     }
@@ -332,6 +334,7 @@ public final class IOSPCMBridgeCore: @unchecked Sendable {
     self.permission = permission
     self.audio = audio
     self.foreground = foreground
+    self.signalMonitor = signalMonitor
     self.events = events
     self.clock = clock
     self.sourceClock = sourceClock
@@ -340,18 +343,20 @@ public final class IOSPCMBridgeCore: @unchecked Sendable {
 
   #if os(iOS)
     /// Dormant live composition. No app target imports or selects this module.
-    public convenience init(events: any IOSPCMBridgeEventPublishing) {
+    public convenience init(events: any IOSPCMBridgeEventPublishing, signalMonitor: PCMSignalMonitor? = nil,
+      lifecycle: AppleRecordingLifecycle = .foregroundOnly) {
       let foreground = LiveAppleApplicationForegroundProvider()
       self.init(
         permission: AVFoundationMicrophonePermissionAdapter(
-          provider: LiveAppleMicrophonePermissionProvider()
+          provider: LiveAppleMicrophonePermissionProvider(), foreground: foreground
         ),
         audio: AVFoundationPCMDriver(
-          system: LiveAppleAudioSystem(),
-          foreground: foreground
+          system: LiveAppleAudioSystem(signalMonitor: signalMonitor),
+          foreground: foreground,
+          lifecycle: lifecycle
         ),
         foreground: foreground,
-        events: events
+        events: events, signalMonitor: signalMonitor
       )
     }
   #endif
@@ -431,7 +436,8 @@ public final class IOSPCMBridgeCore: @unchecked Sendable {
       audio: audio,
       sink: sink,
       clock: clock,
-      sourceClock: sourceClock
+      sourceClock: sourceClock,
+      signalMonitor: signalMonitor
     )
     let ownershipID = CaptureProcessOwnership.shared.claim()
     do {

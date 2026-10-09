@@ -118,6 +118,7 @@ export class IosNativeMicrophoneCaptureSource implements CaptureSource {
 
     let appState: unknown;
     try {
+      options.onStartupStage?.('native_session');
       this.#assertStartingRun(run, "checking_foreground");
       appState = await Promise.race([
         this.#bridge.getAppState(),
@@ -151,6 +152,7 @@ export class IosNativeMicrophoneCaptureSource implements CaptureSource {
     const nativeHandle = deferred<IosNativeMicrophoneSession>();
     run.nativeHandlePromise = nativeHandle.promise;
     try {
+      options.onStartupStage?.('microphone_permission');
       nativeHandle.resolve(this.#bridge.start(configuration, {
         onPcmPacket: (packet) => this.#receivePcmPacket(run, generation, packet),
         onInterruption: (code) => this.#receiveInterruption(run, generation, code),
