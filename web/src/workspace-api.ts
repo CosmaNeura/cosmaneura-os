@@ -1,6 +1,7 @@
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import type {MembershipAnalysis} from "./membership-analysis-contract";
 import {workspaceFetch} from './workspace-protocol';
+import {readWorkspaceTeam} from './workspace-team-read';
 import { permittedWorkspaceApi } from "./workspace-origin";
 import {hostedWorkspaceConfiguration} from "./hosted-workspace";
 import { assertCurrentDesktopSession, workspaceAuthHeaders } from "./workspace-auth-headers";
@@ -449,7 +450,7 @@ export const workspaceApi = {
     if (workspace.id !== selection.workspace_id || workspace.appointment_id !== selection.appointment_id) throw new WorkspaceApiError(403);
     return {identity,workspace,team};
   },
-  team: (identity: WorkspaceIdentity, signal?: AbortSignal) => requestTeam(identity, undefined, signal),
+  team: (identity: WorkspaceIdentity, signal?: AbortSignal) => readWorkspaceTeam(identity, signal=>requestTeam(identity, undefined, signal), signal),
   saveTeam: (identity: WorkspaceIdentity, body: TeamSaveInput, signal?: AbortSignal) => requestTeam(identity, body, signal),
   ask: (identity: WorkspaceIdentity, id: string, body: ConversationInput) =>
     modelWorkApi.submit(identity,id,{type:"ask",body}),

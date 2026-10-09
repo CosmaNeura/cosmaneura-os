@@ -1,10 +1,12 @@
 import {useCallback,useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {practiceAccessApi} from './practice-access-api';
 import {accessCode,accessName,type AccessStatus,type PracticeSetupStatus,type CompletePracticeSetup} from './practice-access-contract';
-import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
+import {workspaceProtocolGeneration} from './workspace-protocol';
+import type {WorkspaceStartupTeam} from './workspace-team-read';
 import './practice-access.css';
 
-export type PracticeAccessContext={role:'owner'|'member';onAccessLost:()=>void};
+export type PracticeAccessContext={role:'owner'|'member';onAccessLost:()=>void;startupTeam?:WorkspaceStartupTeam};
 export const accessDenied=(error:unknown)=>error instanceof WorkspaceApiError && [401,403,404,426].includes(error.status);
 export const accessFailure=(error:unknown)=>error instanceof WorkspaceApiError && error.status===426
   ? 'Update CosmasOS before continuing.' : accessDenied(error)
@@ -34,12 +36,13 @@ export function usePracticeAccessTask(identity:AuthenticatedWorkspaceIdentity) {
   return {busy,run};
 }
 
-export function PracticeAccessGate({identity,accountControls,children}:{identity:AuthenticatedWorkspaceIdentity;accountControls:ReactNode;children:(access:PracticeAccessContext)=>ReactNode}) {
+export function PracticeAccessGate({identity,accountControls,children,prefetchTeam=false}:{identity:AuthenticatedWorkspaceIdentity;accountControls:ReactNode;children:(access:PracticeAccessContext)=>ReactNode;prefetchTeam?:boolean}) {
   const [observed,setObserved]=useState<{identity:AuthenticatedWorkspaceIdentity;status:AccessStatus}|null>(null);
   const [name,setName]=useState(''),[error,setError]=useState(''),[uncertain,setUncertain]=useState(false);
   const [setup,setSetup]=useState<{identity:AuthenticatedWorkspaceIdentity;value:PracticeSetupStatus}|null>(null);
   const [practiceName,setPracticeName]=useState(''),[specialty,setSpecialty]=useState('');
   const [entry,setEntry]=useState<'choose'|'solo'|'join'>('choose');
+  const [startupTeam,setStartupTeam]=useState<WorkspaceStartupTeam>();
   const setupCommand=useRef<CompletePracticeSetup|null>(null);
   const requestKey=useRef<{name:string;key:string}|null>(null);
   const {busy,run}=usePracticeAccessTask(identity);
@@ -48,7 +51,7 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
     if(['cancelled','declined','expired','connected'].includes(value.state))requestKey.current=null;
     setObserved({identity,status:value});setUncertain(false);setError('');
   },[identity]);
-  const fail=useCallback((cause:unknown)=>{if(accessDenied(cause)){setObserved(null);setSetup(null);}setError(accessFailure(cause));},[]);
+  const fail=useCallback((cause:unknown)=>{if(accessDenied(cause)){setObserved(null);setSetup(null);setStartupTeam(undefined);}setError(accessFailure(cause));},[]);
   const acceptSetup=useCallback((value:PracticeSetupStatus)=>{
     const pending=value.state==='owner_ready'?null:setupCommand.current;
     setSetup({identity,value});setPracticeName(pending?.practice_name??value.practice?.display_name??'My practice');
@@ -58,19 +61,33 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
     else if(setupCommand.current)setUncertain(false);
   },[identity]);
   const check=useCallback(()=>run(async signal=>{
-    const [status,profile]=await Promise.all([practiceAccessApi.read(identity,signal),practiceAccessApi.setup(identity,signal)]);
-    return {status,profile};
-  },value=>{accept(value.status);acceptSetup(value.profile);},fail),[identity,run,accept,acceptSetup,fail]);
-  useEffect(()=>{setObserved(null);setSetup(null);setName('');setPracticeName('');setSpecialty('');setEntry('choose');setError('');setUncertain(false);requestKey.current=null;setupCommand.current=null;void check();},[check]);
+    // This gate mounts below accepted compatibility. The team read uses the normal protocol guard.
+    const controller=new AbortController(),abort=()=>controller.abort();signal.addEventListener('abort',abort,{once:true});
+    if(signal.aborted)abort();
+    const generation=workspaceProtocolGeneration(identity),expiresAt=performance.now()+15000;
+    const timer=setTimeout(abort,15000);
+    const team=prefetchTeam?workspaceApi.team(identity,controller.signal):undefined;
+    // A denied/pending practice can reject the speculative read; it must still show its access gate.
+    void team?.catch(()=>{});
+    try{
+      const [status,profile]=await Promise.all([practiceAccessApi.read(identity,signal),practiceAccessApi.setup(identity,signal)]);
+      const ready=status.state==='connected'&&!!status.role&&['owner_ready','member_ready'].includes(profile.state);
+      const value=ready?await team:undefined;
+      signal.throwIfAborted();
+      if(performance.now()>=expiresAt||workspaceProtocolGeneration(identity)!==generation)throw new WorkspaceApiError(503);
+      return {status,profile,team:value?{identity,protocolGeneration:generation,expiresAt,value}:undefined};
+    }finally{clearTimeout(timer);signal.removeEventListener('abort',abort);controller.abort();}
+  },value=>{setStartupTeam(value.team);accept(value.status);acceptSetup(value.profile);},fail),[identity,run,accept,acceptSetup,fail,prefetchTeam]);
+  useEffect(()=>{setObserved(null);setSetup(null);setStartupTeam(undefined);setName('');setPracticeName('');setSpecialty('');setEntry('choose');setError('');setUncertain(false);requestKey.current=null;setupCommand.current=null;void check();},[check]);
   useEffect(()=>{
     if(status?.state!=='pending')return;
     const refresh=()=>{if(document.visibilityState==='visible')void check();};
     const timer=window.setInterval(refresh,15000);document.addEventListener('visibilitychange',refresh);
     return ()=>{clearInterval(timer);document.removeEventListener('visibilitychange',refresh);};
   },[status?.state,check]);
-  const onAccessLost=useCallback(()=>{setObserved(null);setSetup(null);setError('Practice access changed. Check your access to continue.');},[]);
+  const onAccessLost=useCallback(()=>{setObserved(null);setSetup(null);setStartupTeam(undefined);setError('Practice access changed. Check your access to continue.');},[]);
   const profile=setup?.identity===identity?setup.value:null;
-  if(status?.state==='connected' && status.role&&profile&&(profile.state==='owner_ready'||profile.state==='member_ready'))return children({role:status.role,onAccessLost});
+  if(status?.state==='connected' && status.role&&profile&&(profile.state==='owner_ready'||profile.state==='member_ready'))return children({role:status.role,onAccessLost,...(startupTeam?.identity===identity?{startupTeam}:{})});
   const request=status?.request;
   const mayRequest=status && ['request_required','cancelled','declined','expired'].includes(status.state);
   async function submit(){

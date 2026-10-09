@@ -1,3 +1,4 @@
+import {consumeWorkspaceStartupTeam} from './workspace-team-read';
 import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
@@ -288,13 +289,15 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     if (!authenticated || team) return;
     let cancelled = false;
     const current = generation.current;
-    void workspaceApi.team(authenticated).then(value => {
+    const controller=new AbortController();
+    const startup=consumeWorkspaceStartupTeam(practiceAccess?.startupTeam,authenticated);
+    void (startup?Promise.resolve(startup):workspaceApi.team(authenticated,controller.signal)).then(value => {
       if (!cancelled && current === generation.current) {
         setTeam(value); setTeamDraft(previous => previous ?? structuredClone(value.configuration));
         void recoverAfterRead(value, null, current);
       }
     }).catch(cause => { if (!cancelled && current === generation.current) failure(cause); });
-    return () => { cancelled = true; };
+    return () => { cancelled = true;controller.abort(); };
   }, [authenticated, team]);
   useLayoutEffect(()=>{
     const element=materialRef.current;if(!element||!workspace)return;
