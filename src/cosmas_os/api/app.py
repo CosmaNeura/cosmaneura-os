@@ -595,6 +595,7 @@ async def _execute_workspace_capture(request: Request, workspace_id: UUID, sessi
         attestation=body.attestation if isinstance(body, CaptureAdmissionRequest) else None,
         idempotency_key=body.idempotency_key,
         configured_capture=body.configured_capture if isinstance(body, CaptureAdmissionRequest) else None,
+        saved_recording=body.saved_recording if isinstance(body, CaptureAdmissionRequest) else None,
         operation=body.operation if isinstance(body, CaptureOperationRequest) else None,
         expected_session_id=body.session_id if isinstance(body, (CaptureOperationRequest, CaptureNoteRequest)) else None,
         note_selection=body.note if isinstance(body, CaptureNoteRequest) else None,

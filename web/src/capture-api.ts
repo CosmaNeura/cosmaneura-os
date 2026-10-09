@@ -30,6 +30,8 @@ export type CaptureAttestation = {
   granted_at: string;
 };
 export type CaptureLanguage = "en-US" | "en-US+es-US";
+export type SavedRecordingSelection={recording_id:string;link_receipt_id:string;source_sha256:string;
+  manifest_sha256:string;chunks:number;frames:number};
 export type PreparedCapture = {
   configured_capture?: {schema_version: "1.0"; language_mode: CaptureLanguage};
   status: "prepared"; workspace_id: string; session_id: string; consent_record_id: string;
@@ -38,7 +40,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const SAFE_CODES = new Set(["capture_consent_required", "capture_consent_unavailable",
   "capture_request_conflict", "capture_in_progress", "capture_session_changed",
   "capture_context_changed", "capture_connection_required", "core_capture_access_unavailable",
-  "capture_note_conflict", "capture_source_unavailable", "capture_notes_unavailable", "capture_notebook_changed",
+  "capture_note_conflict", "capture_source_unavailable", "capture_notes_unavailable", "capture_notebook_changed", "capture_saved_recording_changed",
   "bot_paused", "team_revision_conflict", "bot_source_unavailable", "scribe_source_changed",
   "scribe_source_packet_too_large", "scribe_source_already_saved", "workspace_revision_conflict", "workspace_history_limit", "idempotency_conflict"]);
 
@@ -121,9 +123,9 @@ export async function request(workspaceId: string, action: "admission" | "operat
 }
 
 export async function prepareCapture(workspaceId: string, identity: AuthenticatedWorkspaceIdentity,
-  attestation: CaptureAttestation | null, idempotencyKey: string, signal?: AbortSignal, bot?: CaptureBotSelection, language?: CaptureLanguage): Promise<PreparedCapture> {
+  attestation: CaptureAttestation | null, idempotencyKey: string, signal?: AbortSignal, bot?: CaptureBotSelection, language?: CaptureLanguage, savedRecording?:SavedRecordingSelection): Promise<PreparedCapture> {
   const result = await request(workspaceId, "admission", identity,
-    { attestation, idempotency_key: idempotencyKey, ...(bot ? {bot} : {}),
+    { attestation, idempotency_key: idempotencyKey, ...(bot ? {bot} : {}), ...(savedRecording?{saved_recording:savedRecording}:{}),
       ...(attestation && language ? {configured_capture: {schema_version: "1.0", language_mode: language}} : {}) }, signal);
   if (!isRecord(result) || Object.keys(result).sort().join(",") !== (("configured_capture" in result ? "configured_capture," : "") + "consent_record_id,session_id,status,workspace_id") ||
       result.status !== "prepared" || result.workspace_id !== workspaceId ||

@@ -187,9 +187,10 @@ export class PrivateRecordingRuntime {
     })();this.stopFlight=task;void task.finally(()=>{if(this.stopFlight===task)this.stopFlight=null;}).catch(()=>{});return task;
   }
   /** Inspect saved audio locally; callers must perform a separate explicit patient-link workflow before transfer. */
-  async *savedChunks():AsyncGenerator<{sequence:number;sha256:string;wavBytes:Uint8Array<ArrayBuffer>},void,unknown> {
+  async *savedChunks(first=0):AsyncGenerator<{sequence:number;sha256:string;wavBytes:Uint8Array<ArrayBuffer>},void,unknown> {
     this.current();need(!this.source&&['sealed','paused','interrupted'].includes(this.saved.phase));
-    for(const expected of this.saved.chunks){this.current();const row=await this.store.read('chunk:'+this.saved.recordingId+':'+expected.sequence);
+    need(Number.isSafeInteger(first)&&first>=0&&first<=this.saved.chunks.length);
+    for(const expected of this.saved.chunks.slice(first)){this.current();const row=await this.store.read('chunk:'+this.saved.recordingId+':'+expected.sequence);
       need(closed(row,'contract,recordingId,scope,sequence,sha256,durationMs,data')&&row.contract==='cosmabot.private-pcm.v1'&&row.recordingId===this.saved.recordingId&&row.scope===this.saved.scope&&row.sequence===expected.sequence&&row.sha256===expected.sha256&&row.durationMs===expected.durationMs);
       const bytes=decode(row.data,320044);try{pcm(bytes,expected.durationMs);need(bytes.length===expected.bytes&&await hash(bytes)===expected.sha256);this.current();yield {sequence:expected.sequence,sha256:expected.sha256,wavBytes:bytes};}finally{bytes.fill(0);}}
   }
@@ -234,7 +235,7 @@ export async function openPrivateRecordingStore(scope:string,platform:'ios'|'des
   need(HASH.test(scope));
   const crypt=deps.crypto??globalThis.crypto;need(crypt?.subtle);
   const name='cosmas-private-recording:v1:'+scope;
-  const validKey=(key:string)=>/^(?:(?:manifest|ledger):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
+  const validKey=(key:string)=>/^(?:(?:manifest|ledger|transfer):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
   const serialize=(value:unknown)=>{const bytes=encode(value);need(bytes.length<=450000);return bytes;};
   if(platform==='ios'){
     const plugin=deps.native??(await import('../../clients/capture/plugins/secure-queue')).SecureQueue;

@@ -7,7 +7,7 @@ import type { SavedScratchpad } from "./notebook-source";
 import { EditorRecoveryContext } from "./editor-recovery";
 import { editorAddress, type EditorDraft } from "./draft-journal";
 
-export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, onDraftLock, onReviewDraft, onCurrentDraft, reviewLocked, sourceLocked = false, scratchpad, notebookDirty = false, onNotebook, taskBot }: {
+export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, onDraftLock, onReviewDraft, onCurrentDraft, reviewLocked, sourceLocked = false, scratchpad, notebookDirty = false, onNotebook, taskBot, simpleFlow=false }: {
   workspaceId: string; sessionId: string; sourceId: string; identity: AuthenticatedWorkspaceIdentity;
   onDraftLock?: (locked: boolean) => void;
   onReviewDraft?: (draft: CaptureDraft) => void; reviewLocked?: boolean;
@@ -15,6 +15,7 @@ export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, 
   sourceLocked?: boolean;
   scratchpad?: SavedScratchpad; notebookDirty?: boolean; onNotebook?: () => void;
   taskBot?: CaptureTaskBot;
+  simpleFlow?: boolean;
 }) {
   const [templates, setTemplates] = useState<CaptureNoteTemplate[] | null>(null);
   const [selected, setSelected] = useState("");
@@ -63,18 +64,18 @@ export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, 
 
   return <section className="capture-note" aria-label="Recorded visit draft">
     <h3>Visit note</h3>
-    <p className="team-fine">Choose your Core template to prepare a draft from this recording{scratchpad ? ` and saved scratch notes (revision ${scratchpad.revision})` : ""}.</p>
+    <p className="team-fine">{simpleFlow?'Choose a note template, then create and review your visit note.':`Choose your Core template to prepare a draft from this recording${scratchpad ? ` and saved scratch notes (revision ${scratchpad.revision})` : ""}.`}</p>
     {notebookDirty && <p role="status">Save your scratch notes before preparing the draft. Unsaved typing is not included.</p>}
     {taskBot && (!taskBot.enabled || scratchpad && !taskBot.includeNotebook) && <p role="status">Enable {taskBot.name} and its saved-notebook source in team settings before preparing this draft.</p>}
-    {onNotebook && <button className="team-subtle" onClick={onNotebook}>Open scratch notes</button>}
+    {onNotebook && (!simpleFlow||scratchpad||notebookDirty) && <button className="team-subtle" onClick={onNotebook}>Open scratch notes</button>}
     {templates !== null && templates.length === 0 && <p>No note templates are available for your account. Add a template in Core to prepare this draft.</p>}
     {!!templates?.length && <label>Note template<select value={selected} disabled={!!busy || editorLocked || sourceLocked} onChange={event => setSelected(event.target.value)}>
       <option value="">Choose a template</option>{templates.map(item => <option key={item.schema_ref} value={item.schema_ref}>{item.note_type}</option>)}
     </select></label>}
     <div className="capture-actions">
       {templates === null && !busy && <button disabled={sourceLocked} onClick={() => void loadTemplates()}>Retry templates</button>}
-      {selected && draft?.status !== "draft" && <button disabled={!!busy || sourceLocked} onClick={() => void loadDraft("read")}>Check saved draft</button>}
-      {selected && (draft?.status === "not_prepared" || notebookChanged) && <button className="team-primary" disabled={!!busy || sourceLocked || notebookDirty || reviewLocked || editorLocked || !!taskBot && (!taskBot.enabled || !!scratchpad && !taskBot.includeNotebook)} onClick={() => void loadDraft("prepare")}>{notebookChanged ? "Prepare new draft from saved notes" : "Prepare draft note"}</button>}
+      {selected && draft?.status !== "draft" && (!simpleFlow||error) && <button disabled={!!busy || sourceLocked} onClick={() => void loadDraft("read")}>Check saved draft</button>}
+      {selected && (draft?.status === "not_prepared" || notebookChanged) && <button className="team-primary" disabled={!!busy || sourceLocked || notebookDirty || reviewLocked || editorLocked || !!taskBot && (!taskBot.enabled || !!scratchpad && !taskBot.includeNotebook)} onClick={() => void loadDraft("prepare")}>{notebookChanged ? "Prepare new draft from saved notes" : simpleFlow?'Create visit note':"Prepare draft note"}</button>}
     </div>
     {busy && <p role="status">{busy === "prepare" ? "Preparing your draft…" : busy === "templates" ? "Loading your templates…" : "Checking for a saved draft…"}</p>}
     {error && <p className="capture-error" role="alert">{error}</p>}
@@ -82,7 +83,7 @@ export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, 
     {storedSchema && templates && !templates.some(item=>item.schema_ref === storedSchema) && <p role="status">An earlier Core editor is retained on this device. Its template is not currently available; restore that template's access to recover it.</p>}
     {draft && (draft.status === "draft" || storedEditor) && <CaptureDraftEditor key={selected} initial={draft}
       workspaceId={workspaceId} identity={identity} onLock={setEditorLocked} onReviewDraft={onReviewDraft} onCurrentDraft={onCurrentDraft}
-      onReloadSource={() => void loadDraft("read")} reviewLocked={reviewLocked || notebookChanged || notebookDirty} sourceLocked={sourceLocked} />}
+      onReloadSource={() => void loadDraft("read")} reviewLocked={reviewLocked || notebookChanged || notebookDirty} sourceLocked={sourceLocked} simpleFlow={simpleFlow} />}
     {notebookChanged && <p role="status">Saved scratch notes changed. The earlier draft is retained; prepare a new version before review.</p>}
     {sourceLocked && <p className="team-fine">Finish checking or saving the transcript before preparing or changing its note.</p>}
   </section>;

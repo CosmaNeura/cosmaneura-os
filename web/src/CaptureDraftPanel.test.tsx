@@ -49,6 +49,18 @@ it("reopens an existing draft without regeneration", async () => {
   expect(vi.mocked(captureDraft).mock.calls.map(call => call[5])).toEqual(["read"]);
 });
 
+it('opens the simple saved-recording note ready to edit and preserves explicit preparation',async()=>{
+  await act(async()=>root.render(<CaptureDraftPanel workspaceId={workspace} sessionId={session} sourceId={source} identity={identity} simpleFlow/>));
+  expect(vi.mocked(captureDraft).mock.calls.map(call=>call[5])).toEqual(['read']);
+  expect(button('Create visit note')).toBeDefined();
+  vi.mocked(captureDraft).mockResolvedValueOnce(saved);
+  await click('Create visit note');
+  expect(container.querySelectorAll('textarea')).toHaveLength(2);
+  expect(button('Save visit note').disabled).toBe(true);
+  expect(button('Edit draft')).toBeUndefined();
+  expect(button('Check saved draft')).toBeUndefined();
+});
+
 it("checks saved work after a lost response before offering generation again", async () => {
   await mount();
   vi.mocked(captureDraft).mockRejectedValueOnce(new Error("private upstream detail"));
