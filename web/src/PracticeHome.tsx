@@ -119,6 +119,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
     <p className="team-kicker">YOUR PRACTICE</p><h1>{team?.revision?'Your workspace':'Let’s get you ready.'}</h1>
     <p className="practice-home-lead">Record with Scribe or start a private note. Choose a patient or visit later.</p>
     {onRecord&&<section className="practice-home-scribe" aria-label="Start with Scribe"><div><p className="team-kicker">SCRIBE</p><h2>Record first. Organize later.</h2><p>Private audio stays encrypted on this device. Everyone’s consent is required before the microphone starts.</p></div><button className="team-primary" disabled={!recovery||busy||locked} onClick={record}>Start recording</button></section>}
+    {recordings&&onReopenRecording&&<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong><span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>}
     <form className="practice-quick-start" onSubmit={event=>{event.preventDefault();void create();}}>
       <label>Note title<input maxLength={160} value={title} disabled={!ready||busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>
       <div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):'Checking your team…'}</p>
@@ -136,7 +137,6 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
       {drafts?.drafts.map(draft=><button className="practice-home-note" disabled={!ready||busy||locked||!!pending} key={draft.workspace_id} onClick={()=>void reopen(draft.workspace_id)}><strong>{draft.title}</strong><span>{draft.link_state==='linked'?'Linked to a visit':'Private draft'} · Open saved notes</span></button>)}
       {drafts&&!drafts.drafts.length&&<p>No private notes yet.</p>}{drafts?.has_more&&<p>The latest 50 private notes are shown.</p>}
     </section>
-    {recordings&&onReopenRecording&&<section className="practice-home-notes" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong><span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>}
     <nav className="practice-home-next" aria-label="Other ways to start"><button disabled={locked||busy} onClick={onVisits}>Visits and notes</button><button disabled={locked||busy} onClick={onPracticeWork}>Practice work</button><button disabled={locked||busy} onClick={onConnections}>Connect an account later</button></nav>
   </section>;
 }

@@ -123,6 +123,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [privateRecordings,setPrivateRecordings]=useState<{identity:AuthenticatedWorkspaceIdentity;scope:string;generation:number;rows:PrivateRecordingSnapshot[]}|null>(null);
   const [privateRecordingListEpoch,setPrivateRecordingListEpoch]=useState(0);
   const [privateRecordingRequest,setPrivateRecordingRequest]=useState(0);
+  const recordingHome=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
   const [privateLinkBusy,setPrivateLinkBusy]=useState(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
@@ -151,6 +152,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const connectionNavigationLocked = !!privateRecordingEntry || privateRecordingBusy || privateLinkBusy || homeBusy || connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy;
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [practiceOpened, setPracticeOpened] = useState(false);
+  useEffect(()=>{
+    const closed=previousRecordingOpen.current&&!privateRecordingEntry;previousRecordingOpen.current=!!privateRecordingEntry;
+    if(closed&&authenticated&&practicePage==='home'&&!settingsOpen&&!practiceOpen){
+      const target=recordingHome.current?.querySelector<HTMLElement>('[aria-label="Saved private recordings"]')??recordingHome.current;
+      target?.focus({preventScroll:true});target?.scrollIntoView?.({block:'start'});
+    }
+  },[privateRecordingEntry,authenticated,practicePage,settingsOpen,practiceOpen]);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
   const [selected, setSelected] = useState<string>("visit_prep");
   const [researchEntry,setResearchEntry]=useState(false);
@@ -1319,8 +1327,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     finally{if(current===generation.current)setBusy(false);}
   }
 
-  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
-    <aside className="team-sidebar">
+  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-recording-open={!!privateRecordingEntry} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
+    <aside className="team-sidebar" hidden={!!privateRecordingEntry}>
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span></div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
       <nav className="practice-navigation" aria-label="Workspace navigation">
@@ -1347,7 +1355,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>Invented data · private to you</small></div>
     </aside>
     <div className="team-main">
-      <header className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Settings" : practicePage==="home"?"Home":practicePage==="visits"?"Visits and notes":"Notebook"}</span>
+      <header hidden={!!privateRecordingEntry} className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Settings" : practicePage==="home"?"Home":practicePage==="visits"?"Visits and notes":"Notebook"}</span>
         <div className="row">{(workspace||onExit||settingsOpen||practiceOpen)&&<button className="team-subtle" onClick={() => void exitWorkspace(false)}>{onExit ? "Open execution proof" : "Close notebook"}</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked || busy || !!pending && pending.type !== "team"} onClick={() => void openSettings()}>Team settings</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked || !practiceOpen && (busy || !!pending || captureDraftLocked || captureNavigationLocked)}
@@ -1368,7 +1376,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       {recoveryState === "failed" && <div className="team-recovery" role="alert"><p>This device's draft storage could not be checked. Existing drafts are retained. Recheck recovery before editing or saving.</p>
         <button disabled={busy} onClick={() => void recheckRecovery()}>Recheck draft recovery</button></div>}
       {recoveryState === "saving" && <p className="team-fine" role="status">Saving notebook and team drafts on this device…</p>}
-      {recoveryState === "saved" && <p className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
+      {recoveryState === "saved" && <p hidden={!!privateRecordingEntry} className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
       {practiceOpen && error && <div className="team-banner error" role="alert">{error}</div>}
       {practiceOpened && (authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><fieldset disabled={recoveryBlocked} hidden={!practiceOpen} style={{border:0,padding:0,margin:0,minWidth:0}}><PracticeHub identity={(authenticated || identity)!} onDenied={failure} onBusyChange={reportInboxBusy} onDraftInbox={authenticated?selection=>{setInboxNavigation({selection,identity:authenticated,generation:generation.current});}:undefined}><PracticeWork identity={(authenticated || identity)!}
         onChanged={() => { if (workspace) setConflict(true); }} onAccessLost={failure} />
@@ -1487,10 +1495,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           try{await saved.attachWorkspace(result.workspace.id,true);}finally{await saved.close();}
           if(recordingCurrent(entry))setPrivateRecordingListEpoch(value=>value+1);
         }}
-        onClose={()=>{setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setPrivateRecordingListEpoch(value=>value+1);}}
+        onClose={()=>{setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setSettingsOpen(false);setPracticeOpen(false);setPracticePage('home');setPrivateRecordingListEpoch(value=>value+1);}}
         onNotebook={async result=>{if(!recordingCurrent(privateRecordingEntry))throw new WorkspaceApiError(403);
           setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);await openPrivateNotebook(result);setPrivateRecordingListEpoch(value=>value+1);}}/>}
-      {authenticated&&<div hidden={!!privateRecordingEntry||settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
+      {authenticated&&<div ref={recordingHome} tabIndex={-1} hidden={!!privateRecordingEntry||settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
         locked={busy||!!pending||conflict||!!recoveryOffers.length||recoveryState==="failed"||recoveryBlocked||captureNavigationLocked||captureDraftLocked||!!workspace&&(note!==latestNote||!!thought||!!evidence||!!source)} onBusyChange={setHomeBusy} onAccessLost={failure}
         onUseTeam={()=>{if(initialTeamUnchanged)saveTeam();else void openSettings();}} onSettings={()=>void openSettings()} onVisits={()=>void loadEncounters()}
         onConnections={()=>void openSettings('connections')} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}}

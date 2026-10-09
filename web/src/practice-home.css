@@ -5,3 +5,8 @@
 .private-recording-consent details summary{cursor:pointer;min-height:32px;font-size:14px;color:var(--team-muted)}.private-recording-consent details[open]{display:grid;gap:16px}.private-recording-consent details[open]>label{margin:14px 0}.private-recording-panel [role=status]{line-height:1.5}
 
 .private-recording-status meter{width:100%;height:18px;accent-color:#357447}
+.team-workspace .private-recording-close{flex:none;min-height:48px;border:2px solid #687a70;background:#fff;color:#253d34;font-weight:600;padding:10px 14px;white-space:nowrap}
+.private-recording-panel>header{position:sticky;top:0;z-index:3;background:#fcfcfb;padding:10px 0}
+.private-recording-panel>header h1{margin-bottom:0}
+.private-recording-panel>.private-recording-return{font-size:13px;margin:8px 0 16px}
+@media(max-width:600px){.private-recording-panel>header{flex-wrap:wrap}.private-recording-panel>header>.private-recording-close{width:100%}.private-recording-panel{padding-top:12px}}

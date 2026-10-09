@@ -37,7 +37,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     container=document.createElement('div');document.body.append(container);root=createRoot(container);
   });
   afterEach(async()=>{sources.forEach(s=>s.rejectStop=false);await act(async()=>root.unmount());for(const runtime of runtimes)await runtime.close().catch(()=>{});container.remove();vi.unstubAllGlobals();});
-  async function wait(check:()=>boolean){for(let n=0;n<200&&!check();n++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(check()).toBe(true);}
+  async function wait(check:()=>boolean,timeout=1000){const end=performance.now()+timeout;while(!check()&&performance.now()<end)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(check()).toBe(true);}
   const status=()=>container.querySelector('.private-recording-status strong')?.textContent;
   async function render(){await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>['Ready for consent','Checking this device’s recording access','Saved on this device'].includes(container.querySelector('.private-recording-status strong')?.textContent??''));}
   function button(name:string){const value=[...container.querySelectorAll('button')].find(b=>b.textContent===name);expect(value,name).toBeTruthy();return value!;}
@@ -67,7 +67,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     let reply!:(v:unknown)=>void;
     const read=vi.fn(()=>new Promise<unknown>(resolve=>reply=resolve));props.readInputSignal=read;
     await render();await wait(()=>button('Start recording').disabled===true&&status()==='Ready for consent');
-    await consent();await click('Start recording');await wait(()=>status()==='Recording'&&read.mock.calls.length===1);
+    await consent();await click('Start recording');await wait(()=>status()==='Recording'&&read.mock.calls.length===1&&!!container.querySelector('meter'),3000);
     expect(container.querySelector('meter')?.value).toBe(0);
     await click('Stop and save recording');await wait(()=>status()==='Stopped · no audio captured');
     await act(async()=>reply({version:2,signal:{inputBuffers:2,convertedBuffers:2,inputEverNonzero:true,convertedEverNonzero:true,inputLevel:.1,convertedLevel:.1,inputAgeMs:0,convertedAgeMs:0,zeroInputMs:0,inputMuted:false,route:'built_in'}}));
