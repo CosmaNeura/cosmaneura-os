@@ -36,6 +36,18 @@ async function open(source:CaptureSource,options:Partial<PrivateRecordingOptions
 async function blobBytes(blob:Blob):Promise<Uint8Array<ArrayBuffer>>{return new Uint8Array(await new Promise<ArrayBuffer>((yes,no)=>{const r=new FileReader();r.onload=()=>yes(r.result as ArrayBuffer);r.onerror=no;r.readAsArrayBuffer(blob);}));}
 const sha=async(bytes:Uint8Array<ArrayBuffer>)=>Array.from(new Uint8Array(await webcrypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
 
+it.each([0,1234])('checks saved PCM signal without counting the WAV header as audio (%s)',async sample=>{
+  const source=new ControlledSource(),runtime=await open(source);await runtime.start(consent());await source.emit(wav(16,sample));await runtime.stop();
+  const exported=await runtime.exportWav();expect(exported.hasNonzeroAudio).toBe(sample!==0);
+  expect(exported.durationMs).toBe(1);expect(exported.bytes).toBe(76);expect(fetch).not.toHaveBeenCalled();
+});
+
+it('retains the actual interruption reason and clears it on explicit Resume',async()=>{
+  const source=new ControlledSource(),runtime=await open(source);await runtime.start(consent());source.options!.onInterruption!('capture_backgrounded');
+  await vi.waitFor(()=>expect(runtime.snapshot.phase).toBe('paused'));expect(runtime.snapshot.failure).toBe('capture_backgrounded');
+  await runtime.start(consent());expect(runtime.snapshot.phase).toBe('recording');expect(runtime.snapshot.failure).toBeNull();
+});
+
 it('prewarms encrypted custody without consent, microphone, manifest or network',async()=>{
   const prepared=await store();expect(await prepared.keys()).toEqual([]);prepared.close();
   const {records,key}=await inspect();expect(records).toEqual([]);expect(key).toMatchObject({type:'secret',extractable:false,algorithm:{name:'AES-GCM',length:256}});

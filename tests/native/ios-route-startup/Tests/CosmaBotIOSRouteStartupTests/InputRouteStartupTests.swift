@@ -5,6 +5,15 @@ import Testing
 @testable import CosmaneuraIOSPCMCore
 
 struct InputRouteStartupTests {
+  @Test func privateMicrophoneUsesMeasurementProfileAndStillPausesInBackground() async throws {
+    let system = RouteSystem(), events = CapturedEvents()
+    let driver = AVFoundationPCMDriver(system: system, foreground: Foreground(), lifecycle: .foregroundPrivate)
+    try await driver.start(sessionID: 1, callbacks: events.callbacks, cancellation: StartupCancellation())
+    #expect(system.profile == .foregroundPrivateSpeech)
+    system.emit(.backgrounded)
+    try await driver.freezeInput(sessionID: 1); try await driver.release(sessionID: 1)
+    #expect(events.count == 1)
+  }
   @Test func repeatedPauseResumeAcceptsActivationRoutesBeforeInputSelection() async throws {
     let system = RouteSystem()
     let events = CapturedEvents()
@@ -90,6 +99,7 @@ private final class RouteSystem: AppleAudioSystem, @unchecked Sendable {
   let activationEvent: AppleAudioSystemEvent?
   let changeAfterSelection: Bool
   private(set) var tapInstalled = false
+  private(set) var profile: AppleAudioSessionProfile?
   private var handler: (@Sendable (AppleAudioSystemEvent) -> Void)?
 
   init(
@@ -108,6 +118,7 @@ private final class RouteSystem: AppleAudioSystem, @unchecked Sendable {
   func clearEventHandler() { handler = nil }
   func emit(_ event: AppleAudioSystemEvent) { handler?(event) }
   func configureAndActivate(profile: AppleAudioSessionProfile) throws {
+    self.profile = profile
     try routes.withInputConfiguration {
       // Reproduce the phone trace: the route notification arrives before the
       // requested input has been selected, while activation is in progress.

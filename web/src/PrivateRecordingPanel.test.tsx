@@ -45,6 +45,34 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
   async function consent(){
     const check=container.querySelector<HTMLInputElement>('input[type=checkbox]')!;await act(async()=>check.click());
   }
+  it('shows microphone state before the first saved chunk and reports exact-zero saved audio',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    expect(container.textContent).toContain('Microphone on');expect(container.textContent).toContain('0:00 saved');expect(sources[0].stops).toBe(0);
+    await act(async()=>sources[0].chunk(0));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    expect(container.textContent).not.toContain('Microphone on');await click('Play saved recording');
+    await wait(()=>container.textContent?.includes('contains no microphone signal')===true);
+    expect(container.querySelector('audio')).not.toBeNull();expect(fetch).not.toHaveBeenCalled();
+  });
+  it('explains an inactive-app pause and requires consent before Resume',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].options!.onInterruption!('capture_backgrounded'));await wait(()=>status()==='Paused');
+    expect(container.textContent).toContain('Recording paused when the app became inactive.');
+    expect(button('Resume recording').disabled).toBe(true);expect(sources[0].stops).toBe(1);
+  });
+  it('uses the current private iPhone signal meter and discards late replies after Stop',async()=>{
+    const revision='00000000-0000-4000-8000-000000000010';
+    props={...props,platform:'ios',identity:{mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision,isCurrent:()=>true}},
+      prepareNative:async()=>({receiptId:id,revision,expiresAt:new Date(Date.now()+60000).toISOString()}),
+      consumeNative:async()=>({receiptId:id,revision})};
+    let reply!:(v:unknown)=>void;
+    const read=vi.fn(()=>new Promise<unknown>(resolve=>reply=resolve));props.readInputSignal=read;
+    await render();await wait(()=>button('Start recording').disabled===true&&status()==='Ready for consent');
+    await consent();await click('Start recording');await wait(()=>status()==='Recording'&&read.mock.calls.length===1);
+    expect(container.querySelector('meter')?.value).toBe(0);
+    await click('Stop and save recording');await wait(()=>status()==='Stopped · no audio captured');
+    await act(async()=>reply({version:2,signal:{inputBuffers:2,convertedBuffers:2,inputEverNonzero:true,convertedEverNonzero:true,inputLevel:.1,convertedLevel:.1,inputAgeMs:0,convertedAgeMs:0,zeroInputMs:0,inputMuted:false,route:'built_in'}}));
+    expect(container.querySelector('meter')).toBeNull();expect(read).toHaveBeenCalledOnce();expect(fetch).not.toHaveBeenCalled();
+  });
   it('prewarms without microphone or HTTP and starts before a held notebook response, then saves/reopens verified PCM',async()=>{
     let release!:(value:PrivateNotebookResult)=>void;props.prepareNotebook=vi.fn(()=>new Promise<PrivateNotebookResult>(resolve=>release=resolve));
     await render();expect(sources).toHaveLength(0);expect(runtimes).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();expect(button('Start recording').disabled).toBe(true);

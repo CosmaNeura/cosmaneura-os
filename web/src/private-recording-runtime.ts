@@ -125,6 +125,7 @@ export class PrivateRecordingRuntime {
     validatePrivateRecordingConsent(consent);need(Date.now()-Date.parse(consent.granted_at)<=300000);
     this.current();need(!this.storageFailed&&!this.source&&!this.stopFlight&&(!owner||owner===this)&&['ready','paused','interrupted'].includes(this.saved.phase)&&this.saved.chunks.length<MAX_CHUNKS);
     owner=this;const ticket=++this.generation;
+    this.failure=null;
     try{
       this.reportStartup('physical_exclusion',ticket);
       const release=await(this.options.acquireLock?.()??acquireCaptureFlowLock());
@@ -139,12 +140,12 @@ export class PrivateRecordingRuntime {
         capture_lease_ttl_seconds:900,reservation_window_seconds:900,max_reservations_per_batch:1,upload_concurrency:1};
       await source.start({capabilities:limits,onChunk:chunk=>this.acceptChunk(chunk,ticket),
         onStartupStage:stage=>{if(['native_session','physical_exclusion','microphone_permission','audio_engine'].includes(stage)&&this.saved.phase==='starting')this.reportStartup(stage,ticket,source);},
-        onInterruption:()=>{void this.pause().catch(()=>{});},onError:()=>{this.failure='audio_source_failed';void this.pause().catch(()=>{});},
+        onInterruption:code=>{this.failure=code;void this.pause().catch(()=>{});},onError:()=>{this.failure='audio_source_failed';void this.pause().catch(()=>{});},
         onWindowClosed:()=>{void this.pause().catch(()=>{});}});
       this.current();if(ticket!==this.generation||this.stopFlight)return;this.startupStage=null;await this.update('recording');
     }catch(error){
       if(ticket===this.generation)this.startupStage=null;
-      this.failure='recording_start_unconfirmed';
+      this.failure??='recording_start_unconfirmed';
       if(this.source)await this.halt(false).catch(()=>{});
       else if(ticket===this.generation){await this.release();await this.update('interrupted');}
       throw error;
@@ -199,12 +200,12 @@ export class PrivateRecordingRuntime {
       const next={...this.saved,workspaceId,updatedAt:new Date().toISOString()};await this.store.write('manifest:'+this.saved.recordingId,this.saved,next);this.saved=next;this.publish();});
   }
   /** Build a verified private WAV for local playback/download. No network or automatic transfer. */
-  async exportWav():Promise<{blob:Blob;sha256:string;bytes:number;durationMs:number}>{
+  async exportWav():Promise<{blob:Blob;sha256:string;bytes:number;durationMs:number;hasNonzeroAudio:boolean}>{
     this.current();need(!this.source&&this.saved.chunks.length>0&&['sealed','paused','interrupted'].includes(this.saved.phase));
     const length=this.saved.chunks.reduce((sum,c)=>sum+c.bytes-44,0),out=new Uint8Array(44+length),view=new DataView(out.buffer);
     const put=(offset:number,text:string)=>{for(let i=0;i<text.length;i++)out[offset+i]=text.charCodeAt(i);};
     put(0,'RIFF');view.setUint32(4,out.length-8,true);put(8,'WAVE');put(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,16000,true);view.setUint32(28,32000,true);view.setUint16(32,2,true);view.setUint16(34,16,true);put(36,'data');view.setUint32(40,length,true);
-    try{let offset=44;for await(const chunk of this.savedChunks()){out.set(chunk.wavBytes.subarray(44),offset);offset+=chunk.wavBytes.length-44;}this.current();need(offset===out.length);const sha256=await hash(out);return {blob:new Blob([out],{type:'audio/wav'}),sha256,bytes:out.length,durationMs:length/32};}
+    try{let offset=44;for await(const chunk of this.savedChunks()){out.set(chunk.wavBytes.subarray(44),offset);offset+=chunk.wavBytes.length-44;}this.current();need(offset===out.length);const sha256=await hash(out),hasNonzeroAudio=out.subarray(44).some(value=>value!==0);return {blob:new Blob([out],{type:'audio/wav'}),sha256,bytes:out.length,durationMs:length/32,hasNonzeroAudio};}
     finally{out.fill(0);}
   }
   async close():Promise<void>{await this.stop();this.active=false;this.options.signal?.removeEventListener('abort',this.onAbort);this.listeners.clear();this.store.close();}

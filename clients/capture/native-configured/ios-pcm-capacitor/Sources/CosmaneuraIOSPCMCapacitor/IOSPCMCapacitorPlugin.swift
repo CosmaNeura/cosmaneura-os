@@ -22,6 +22,7 @@
       CAPPluginMethod(name: "start", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "preparePrivate", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "startPrivate", returnType: CAPPluginReturnPromise),
+      CAPPluginMethod(name: "privateInputSignal", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "ready", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "heartbeat", returnType: CAPPluginReturnPromise),
       CAPPluginMethod(name: "stop", returnType: CAPPluginReturnPromise),
@@ -30,6 +31,7 @@
     ]
 
     private var transport: IOSPCMCapacitorTransport?
+    private let privateSignal = PCMSignalMonitor()
     private let recoveryLock = NSLock()
     private var rendererLost = false
     @MainActor private var providerOwner: (token: String, owner: UUID)?
@@ -40,7 +42,8 @@
       let native = recoveryLock.withLock { () -> IOSPCMCapacitorTransport? in
         guard !rendererLost, transport == nil else { return nil }
         let publisher = IOSPCMCapacitorEventPublisher(emitter: self)
-        let native = IOSPCMCapacitorTransport(bridge: IOSPCMBridgeCore(events: publisher))
+        let native = IOSPCMCapacitorTransport(bridge: IOSPCMBridgeCore(events: publisher, signalMonitor: privateSignal,
+          lifecycle: .foregroundPrivate))
         transport = native
         return native
       }
@@ -171,11 +174,13 @@
           let selected = try NativePrivateRecordingGate.begin(proofID: receiptID, scope: scope, revision: revision,
               recordingID: recordingID, intent: intentID, consent: checked, maximumChunks: maximum)
           permit = selected
-          guard await AVAudioApplication.requestRecordPermission() else { throw IOSPCMCapacitorErrorCode.microphonePermissionDenied }
+          // The owned Core handle requests permission. Return its token before
+          // the modal awaits, so Stop can cancel this exact pending Start.
           let foreground = await transport.getAppState() == "foreground"
           let token = try NativePrivateRecordingGate.consume(selected, foreground: foreground) {
             let authority = try PCMSourceAuthority(runID: selected.runID.uuidString.lowercased(), generation: 1,
                 expiresAtMilliseconds: Int64(selected.captureExpiresAt.timeIntervalSince1970 * 1000), hardMaximumChunks: selected.maximumChunks)
+            privateSignal.reset()
             return try transport.start(configuration: IOSPCMCapacitorConfiguration(encoding: "pcm_s16le", channels: 1,
                 sampleRateHz: 16000, targetFramesPerChunk: 160000, maximumChunks: maximum, authority: authority))
           }
@@ -190,6 +195,23 @@
           if let permit { try? NativePrivateRecordingGate.finish(permit) }
           reject(call, error: error)
         }
+      }
+    }
+
+    @objc public func privateInputSignal(_ call: CAPPluginCall) {
+      guard call.options.isEmpty else { reject(call, error: IOSPCMCapacitorErrorCode.invalidArguments); return }
+      Task { @MainActor in
+        guard let owner = privateOwner, NativePrivateRecordingGate.current(owner.permit) else {
+          call.resolve(["version": 2, "signal": NSNull()]); return
+        }
+        let s = privateSignal.snapshot()
+        call.resolve(["version": 2, "signal": [
+          "inputBuffers": s.inputBuffers, "convertedBuffers": s.convertedBuffers,
+          "inputEverNonzero": s.inputEverNonzero, "convertedEverNonzero": s.convertedEverNonzero,
+          "inputLevel": s.inputLevel, "convertedLevel": s.convertedLevel,
+          "inputAgeMs": s.inputAgeMs as Any? ?? NSNull(), "convertedAgeMs": s.convertedAgeMs as Any? ?? NSNull(),
+          "zeroInputMs": s.zeroInputMs, "route": s.route.rawValue, "inputMuted": AVAudioApplication.shared.isInputMuted
+        ]])
       }
     }
 

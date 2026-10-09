@@ -9,13 +9,13 @@
       "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
       "source_git_blob": "ae8df46c94352b455796caa7e8b4d9458f9cafc5",
       "source_sha256": "911b2b74eeb4d79a1cf3b7877cf4cec8e80cb4293b6d8c3e6f34fa9503436cb5",
-      "sha256": "7cab2d999d5b25c94575013f84c417f9b64cfb1d7f94c73a73781e9b945c966a"
+      "sha256": "8a16ff1283d0c8c9e2ee339ee6c445b04d220d1442b644e8fdfeb0dda2c7fbc9"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AVFoundationPCMDriver.swift": {
       "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
       "source_git_blob": "75b4aed3982577e706a149c685e3e89f9e9b5618",
       "source_sha256": "e25c89ef4059d3af0a9e32ea87b15edc8049b3c08472112b991325b207fd4c05",
-      "sha256": "36b13abdbc517938602d58eedf0f785307a5a3a211f21e632397b7d4dac60951"
+      "sha256": "4d274e92a316772d67b0b3fe3658c1cf55f7155bfde2e01610e152989431e395"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSPCMCore/IOSPCMCore.swift": {
       "source_ref": "ec511ff1c3b979901e80f5033c1f02a05f65c4b3",
@@ -39,7 +39,7 @@
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSPCMBridgeCore/IOSPCMBridgeCore.swift": {
       "source_sha256": "366188f58b78a24c083853296a97f1bf3d2387243a42c966f4db4c0f19435f7e",
-      "sha256": "4779785788be46d539979ae85ce2f5fdaeab43d8c6524e17f066472614495061"
+      "sha256": "b56a62d07edfccacfcbadea85272a7360dca22c0fdf3a148262f331a5ab67577"
     },
     "ios-pcm-capacitor/Package.swift": {
       "source_sha256": "24087efa8db58e9988ec9de919d9eda46660bbf1392a3fd84da04dd2ef219251",
@@ -51,7 +51,7 @@
     },
     "ios-pcm-capacitor/Sources/CosmaneuraIOSPCMCapacitor/IOSPCMCapacitorPlugin.swift": {
       "source_sha256": "bf083158f9cd74fcecb74ce0c07daa7e18fd3a1e706df5c578b8729d4552a353",
-      "sha256": "23c7bdf10909962ffcb62f50bb938b18165d261aa3ea8c0d2d9c5a48b4d3b405"
+      "sha256": "83303f4afed47e59c24ab50c362096163f62c917457d93a4bfea7213102f5c10"
     },
     "ios-pcm-capture/Sources/CosmaneuraIOSAVFoundationDriver/AppleInputRouteEvents.swift": {
       "source_ref": "ca8c70840b312c5ca21c0f143f32a943e62ec1f7",
