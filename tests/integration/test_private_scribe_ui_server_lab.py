@@ -130,11 +130,11 @@ def test_private_scribe_starts_before_slow_notebook_and_reopens_encrypted_audio(
         assert ui["recording"]["wav_sha256"] == ui["reopened_wav_sha256"]
         assert ui["hardware_simulated"] is True
         assert ui["actual_browser_capture_adapter"] is True
-        assert counts[PrivateRecording.__tablename__] == counts[PrivateRecordingFinish.__tablename__] == 1
+        assert counts[PrivateRecording.__tablename__] == counts[PrivateRecordingFinish.__tablename__] == 2
         assert counts[PrivateRecordingLink.__tablename__] == 0
-        assert recordings[0].local_recording_id == ui["recording"]["recording_id"]
-        assert recordings[0].workspace_id == ui["recording"]["workspace_id"]
-        assert finishes[0].capture_state == "finished" and finishes[0].chunks == 1 and finishes[0].frames == 1600
+        assert any(recording.local_recording_id == ui["recording"]["recording_id"] for recording in recordings)
+        assert all(recording.workspace_id == ui["recording"]["workspace_id"] for recording in recordings)
+        assert all(finish.capture_state == "finished" and finish.chunks == 1 and finish.frames == 1600 for finish in finishes)
         assert not any("/capture/" in call["path"] for call in calls)
         assert all(counts[model.__tablename__] == 1 for model in
                    (ExternalIdentity, PracticeSetupProfile, ProviderTeamRevision, EncounterWorkspace))
