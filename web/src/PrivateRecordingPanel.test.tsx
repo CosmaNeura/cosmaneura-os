@@ -226,4 +226,41 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     props={...props,isCurrent:()=>false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await act(async()=>finish(notebook));
     expect(runtimes[0].snapshot.workspaceId).toBeNull();expect(container.textContent).not.toContain('Open private notebook');expect(sources).toHaveLength(1);expect(opened).not.toHaveBeenCalled();
   });
+  async function reopenMappedClip(){
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>{await sources[0].chunk(84);await runtimes[0].attachWorkspace(id,true);});
+    await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    const recordingId=runtimes[0].snapshot.recordingId;
+    await act(async()=>root.unmount());root=createRoot(container);
+    props={...props,recordingId,prepareNotebook:vi.fn().mockRejectedValue(new WorkspaceApiError(503))};
+    await render();await wait(()=>container.textContent?.includes('Retry opening private notebook')===true);
+    return recordingId;
+  }
+  it('recovers the same mapped notebook after a failed read without changing audio or dispatching metadata',async()=>{
+    const recordingId=await reopenMappedClip();
+    const open=vi.spyOn(workspaceApi,'openPrivateDraft').mockRejectedValueOnce(new WorkspaceApiError(503))
+      .mockResolvedValueOnce({...notebook,workspace:{...notebook.workspace,id:'00000000-0000-4000-8000-000000000002'}}).mockResolvedValueOnce(notebook);
+    const attach=vi.spyOn(privateRecordingApi,'attach'),finish=vi.spyOn(privateRecordingApi,'finish');
+    expect(container.textContent).not.toContain('Choose private notebook');
+    await click('Retry opening private notebook');await wait(()=>container.textContent?.includes('its notebook link are retained')===true);
+    expect(runtimes.at(-1)!.snapshot.workspaceId).toBe(id);expect(button('Close recording').disabled).toBe(false);
+    await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);
+    expect(new DataView(await (createUrl.mock.calls[0][0] as Blob).arrayBuffer()).getInt16(44,true)).toBe(84);
+    await click('Retry opening private notebook');await wait(()=>container.textContent?.includes('its notebook link are retained')===true);
+    expect(container.textContent).not.toContain('Open private notebook');expect(runtimes.at(-1)!.snapshot.workspaceId).toBe(id);
+    await click('Retry opening private notebook');await wait(()=>container.textContent?.includes('Open private notebook')===true);
+    expect(open.mock.calls).toEqual([[identity,id],[identity,id],[identity,id]]);expect(props.prepareNotebook).toHaveBeenCalledOnce();
+    expect(runtimes.at(-1)!.snapshot).toMatchObject({recordingId,workspaceId:id,recordedChunks:1,phase:'sealed'});
+    expect(attach).not.toHaveBeenCalled();expect(finish).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();expect(sources).toHaveLength(1);
+    await click('Open private notebook');expect(opened).toHaveBeenCalledExactlyOnceWith(notebook);
+  });
+  it('withholds a late mapped-notebook recovery after account access changes',async()=>{
+    await reopenMappedClip();let resolve!:(value:PrivateNotebookResult)=>void;
+    vi.spyOn(workspaceApi,'openPrivateDraft').mockImplementation(()=>new Promise(done=>resolve=done));
+    await click('Retry opening private notebook');
+    props={...props,isCurrent:()=>false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await act(async()=>resolve(notebook));
+    expect(container.textContent).toContain('Recording access changed');expect(container.textContent).not.toContain('Open private notebook');
+    expect(runtimes.at(-1)!.snapshot.workspaceId).toBe(id);expect(sources).toHaveLength(1);expect(opened).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+  });
 });

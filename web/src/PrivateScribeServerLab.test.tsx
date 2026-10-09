@@ -5,7 +5,7 @@ import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {PrivateRecordingRuntime} from './private-recording-runtime';
 import {PrivateRecordingPanel} from './PrivateRecordingPanel';
-import {workspaceApi} from './workspace-api';
+import {workspaceApi,WorkspaceApiError} from './workspace-api';
 import type {PrivateRecordingReceipt} from './private-recording-api';
 import {BrowserMicrophoneCaptureSource} from '../../clients/capture/src/audio/browser-microphone-source';
 import {EncounterWorkspace} from './EncounterWorkspace';
@@ -139,6 +139,18 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   await click('Save recording details to notebook');await wait(()=>expect(container.textContent).toContain('Recording details saved to your private notebook'));
   await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(3));
   expect(new DataView(await playbacks[2].arrayBuffer()).getInt16(44,true)).toBe(8192);
+  expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
+  expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(2);
+  expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings\/[^/]+\/finish$/.test(call.path))).toHaveLength(2);
+  // A failed notebook read on a mapped clip keeps a read-only recovery action.
+  await act(async()=>root!.unmount());root=createRoot(container);
+  await act(async()=>root!.render(<PrivateRecordingPanel {...panelProps} recordingId={orphan.recordingId}
+    prepareNotebook={async()=>{throw new WorkspaceApiError(503);}}/>));
+  await click('Retry opening private notebook');
+  await wait(()=>expect(container.textContent).toContain('Recording details saved to your private notebook'));
+  expect(runtimes.at(-1)!.snapshot.workspaceId).toBe(workspaceId);
+  await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(4));
+  expect(await sha(new Uint8Array(await playbacks[3].arrayBuffer()))).toBe(await sha(new Uint8Array(await playbacks[2].arrayBuffer())));
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(2);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings\/[^/]+\/finish$/.test(call.path))).toHaveLength(2);
