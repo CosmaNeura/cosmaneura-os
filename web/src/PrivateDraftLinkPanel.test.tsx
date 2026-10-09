@@ -13,7 +13,7 @@ const draft:Workspace={id:id(1),appointment_id:null,label:'Private note',revisio
 const linked:Workspace={...draft,appointment_id:id(2),revision:2,private_draft:{title:'Private note',state:'linked',link_receipt_id:id(3),linked_at:'2026-10-07T14:00:00Z'}};
 const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn()};
 let host:HTMLDivElement,root:Root,recovery:EditorRecoveryAccess;
-const saved=vi.fn(),denied=vi.fn();
+const saved=vi.fn(),denied=vi.fn(),busyChanged=vi.fn(),pendingChanged=vi.fn();
 beforeEach(async()=>{vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
  recovery={workspaceId:draft.id,journal:new DraftJournal(await memoryDraftStorage()({scope:'a'.repeat(64)})),authorize:vi.fn().mockResolvedValue(draft),denied};
  vi.spyOn(workspaceApi,'catalog').mockResolvedValue([{appointment_id:id(2),workspace_id:null,label:'Invented confirmed visit'}]);
@@ -22,7 +22,7 @@ beforeEach(async()=>{vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);vi.stu
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{await act(async()=>root.unmount());recovery.journal.close();host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
-async function mount(account=identity){await act(async()=>root.render(<PrivateDraftLinkPanel identity={account} workspace={draft} recovery={recovery} locked={false} onSaved={saved} onAccessLost={denied}/>));}
+async function mount(account=identity){await act(async()=>root.render(<PrivateDraftLinkPanel identity={account} workspace={draft} recovery={recovery} locked={false} onSaved={saved} onAccessLost={denied} onBusyChange={busyChanged} onPendingChange={pendingChanged}/>));}
 async function click(label:string){const button=[...host.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button,label).toBeTruthy();expect(button.disabled).toBe(false);await act(async()=>button.click());}
 async function choose(){await click('Load available visits');await act(async()=>{const select=host.querySelector('select')!;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,id(2));select.dispatchEvent(new Event('change',{bubbles:true}));});
  expect([...host.querySelectorAll('button')].find(b=>b.textContent==='Link this visit')!.disabled).toBe(true);await act(async()=>host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());}
@@ -30,12 +30,39 @@ it('retains an uncertain reviewed link across remount, then retries only the ori
  await mount();expect(workspaceApi.catalog).not.toHaveBeenCalled();await choose();await click('Link this visit');
  const body=vi.mocked(workspaceApi.linkAppointment).mock.calls[0][2];expect(body).toMatchObject({expected_revision:1,appointment_id:id(2),appointment_link_confirmed:true});
  const prior=await recovery.journal.load(editorAddress(draft.id,'private-draft-link'));expect(prior?.pending).toBe(body.idempotency_key);
+ expect(busyChanged).toHaveBeenLastCalledWith(false);expect(pendingChanged).toHaveBeenLastCalledWith(true);
+ expect(host.textContent).toContain('You can return Home and reopen this notebook to continue.');
  await act(async()=>root.unmount());root=createRoot(host);await mount();expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();
  await click('Check saved visit link');expect(workspaceApi.resolveAppointmentLink).toHaveBeenCalledExactlyOnceWith(identity,draft.id,body);
  expect(await recovery.journal.load(editorAddress(draft.id,'private-draft-link'))).toEqual(prior);expect(saved).not.toHaveBeenCalled();
  vi.mocked(workspaceApi.linkAppointment).mockResolvedValue({entry_revision:2,link_receipt_id:id(3),workspace:linked});await click('Retry same visit link');
  expect(workspaceApi.linkAppointment).toHaveBeenLastCalledWith(identity,draft.id,body);expect(workspaceApi.linkAppointment).toHaveBeenCalledTimes(2);
  expect(saved).toHaveBeenCalledExactlyOnceWith(linked);expect(await recovery.journal.load(editorAddress(draft.id,'private-draft-link'))).toBeNull();
+ expect(pendingChanged).toHaveBeenLastCalledWith(false);
+});
+it('marks occupied visits unavailable and refuses selecting them even through a synthetic change event',async()=>{
+ vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:id(2),workspace_id:id(20),label:'Occupied visit'},{appointment_id:id(5),workspace_id:null,label:'Available visit'}]);
+ await mount();await click('Load available visits');
+ const select=host.querySelector('select')!,occupied=select.querySelector<HTMLOptionElement>(`option[value="${id(2)}"]`)!;
+ expect(occupied.disabled).toBe(true);expect(occupied.textContent).toContain('already has a notebook');
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,id(2));select.dispatchEvent(new Event('change',{bubbles:true}));});
+ expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')!.disabled).toBe(true);
+ expect([...host.querySelectorAll('button')].find(button=>button.textContent==='Link this visit')!.disabled).toBe(true);
+ expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
+ await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,id(5));select.dispatchEvent(new Event('change',{bubbles:true}));});
+ expect(host.querySelector<HTMLInputElement>('input[type=checkbox]')!.disabled).toBe(false);
+});
+it('explains an all-occupied catalog and a raced conflict without trapping navigation or discarding the request',async()=>{
+ vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:id(2),workspace_id:id(20),label:'Occupied visit'}]);
+ await mount();await click('Load available visits');expect(host.textContent).toContain('No visits are available for this notebook. Return Home');
+ await act(async()=>root.unmount());root=createRoot(host);
+ vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:id(2),workspace_id:null,label:'Initially available visit'}]);
+ vi.mocked(workspaceApi.linkAppointment).mockRejectedValue(new WorkspaceApiError(409,'workspace_already_exists'));
+ await mount();await choose();await click('Link this visit');
+ expect(host.textContent).toContain('This visit already has a notebook.');expect(busyChanged).toHaveBeenLastCalledWith(false);
+ const retained=await recovery.journal.load(editorAddress(draft.id,'private-draft-link'));expect(retained?.pending).toBeTruthy();
+ await act(async()=>root.unmount());root=createRoot(host);expect(busyChanged).toHaveBeenLastCalledWith(false);expect(pendingChanged).toHaveBeenLastCalledWith(false);
+ await mount();expect(pendingChanged).toHaveBeenLastCalledWith(true);expect(await recovery.journal.load(editorAddress(draft.id,'private-draft-link'))).toEqual(retained);
 });
 it('withholds an old account’s late link result while preserving its exact pending request',async()=>{
  let finish!:(value:Awaited<ReturnType<typeof workspaceApi.linkAppointment>>)=>void;

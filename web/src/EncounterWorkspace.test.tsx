@@ -29,7 +29,7 @@ vi.mock('./VendorWorkMount',async original=>({...await original<typeof import('.
 let draftStorage: ReturnType<typeof memoryDraftStorage>;
 vi.mock("./workspace-api", async importOriginal => {
   const actual = await importOriginal<typeof import("./workspace-api")>();
-  return { ...actual, workspaceApi: { practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn() } };
+  return { ...actual, workspaceApi: { practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn(), privateDrafts:vi.fn(),createPrivateDraft:vi.fn(),linkAppointment:vi.fn(),resolveAppointmentLink:vi.fn() } };
 });
 
 const fixture: Workspace & {appointment_id:string} = {
@@ -72,6 +72,29 @@ describe("private encounter workspace", () => {
     await act(async () => button!.click());
   }
   const settings = () => settingsNavigation(container);
+  it('lets Home navigation escape a retained visit-link conflict while keeping the original request and blocking notebook actions',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()},privateWorkspace:Workspace={id:modelUuid(701),appointment_id:null,label:'Private synthetic recording',revision:1,entries:[],work_candidates:[],private_draft:{title:'Private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
+    vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.createPrivateDraft).mockResolvedValue({identity:access,workspace:privateWorkspace,team});
+    vi.mocked(workspaceApi.read).mockResolvedValue(privateWorkspace);
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:modelUuid(702),workspace_id:null,label:'Synthetic available visit'}]);
+    vi.mocked(workspaceApi.linkAppointment).mockRejectedValue(new WorkspaceApiError(409,'workspace_already_exists'));
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    await vi.waitFor(async()=>{await act(async()=>{});expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Start a private note')?.disabled).toBe(false);});
+    await click('Start a private note');
+    await vi.waitFor(async()=>{await act(async()=>{});expect([...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Load available visits')?.disabled).toBe(false);});
+    await click('Load available visits');
+    const select=container.querySelector<HTMLSelectElement>('.private-draft-link select')!;
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,modelUuid(702));select.dispatchEvent(new Event('change',{bubbles:true}));container.querySelector<HTMLInputElement>('.private-draft-link input[type=checkbox]')!.click();});
+    await click('Link this visit');
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain('This visit already has a notebook.');});
+    const home=()=>[...container.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace navigation"] button')].find(b=>b.textContent==='Home')!;
+    expect(home().disabled).toBe(false);
+    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(true);
+    await click('Home');expect(container.querySelector('[aria-label="Practice Home"]')?.closest('[hidden]')).toBeNull();
+    await click('Current notebook');expect(container.textContent).toContain('The earlier visit link is unconfirmed. Its exact request is retained.');
+    expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();expect(workspaceApi.resolveAppointmentLink).not.toHaveBeenCalled();
+  });
   it('uses the admitted startup team once without another initial team read',async()=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
     const startup={identity:access,protocolGeneration:workspaceProtocolGeneration(access),expiresAt:performance.now()+15000,value:structuredClone(team)};
