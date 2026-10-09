@@ -226,6 +226,39 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     props={...props,isCurrent:()=>false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await act(async()=>finish(notebook));
     expect(runtimes[0].snapshot.workspaceId).toBeNull();expect(container.textContent).not.toContain('Open private notebook');expect(sources).toHaveLength(1);expect(opened).not.toHaveBeenCalled();
   });
+  it('keeps playback and Close available during a held notebook catalog and discards its late result',async()=>{
+    const busy=vi.fn();props.onBusyChange=busy;
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    const recordingId=runtimes[0].snapshot.recordingId;
+    let resolve!:(value:Awaited<ReturnType<typeof workspaceApi.privateDrafts>>)=>void;
+    vi.spyOn(workspaceApi,'privateDrafts').mockImplementation(()=>new Promise(done=>resolve=done));
+    await click('Choose private notebook');expect(button('Choose private notebook').disabled).toBe(true);
+    expect(button('Close recording').disabled).toBe(false);expect(button('Play saved recording').disabled).toBe(false);expect(busy.mock.calls.at(-1)).toEqual([false]);
+    await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);
+    expect(new DataView(await (createUrl.mock.calls[0][0] as Blob).arrayBuffer()).getInt16(44,true)).toBe(84);
+    await click('Close recording');expect(close).toHaveBeenCalledOnce();
+    // Deliberately leave React mounted: completion must be invalidated by Close itself.
+    await act(async()=>resolve({contract_version:1,has_more:false,drafts:[{workspace_id:id,title:'Late notebook',revision:1,created_at:new Date().toISOString(),link_state:'unlinked',appointment_id:null}]}));
+    expect(container.textContent).not.toContain('Use notebook: Late notebook');expect(opened).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+    await act(async()=>root.unmount());root=createRoot(container);props={...props,recordingId};await render();
+    await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===2);
+    expect(new DataView(await (createUrl.mock.calls[1][0] as Blob).arrayBuffer()).getInt16(44,true)).toBe(84);expect(sources).toHaveLength(1);
+  });
+  it('closes while a notebook selection is held without mapping its late response or changing saved audio',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    const recordingId=runtimes[0].snapshot.recordingId;
+    vi.spyOn(workspaceApi,'privateDrafts').mockResolvedValue({contract_version:1,has_more:false,drafts:[{workspace_id:id,title:'Synthetic test notebook',revision:1,created_at:new Date().toISOString(),link_state:'unlinked',appointment_id:null}]});
+    let resolve!:(value:PrivateNotebookResult)=>void;vi.spyOn(workspaceApi,'openPrivateDraft').mockImplementation(()=>new Promise(done=>resolve=done));
+    const attach=vi.spyOn(privateRecordingApi,'attach'),finish=vi.spyOn(privateRecordingApi,'finish');
+    await click('Choose private notebook');await click('Use notebook: Synthetic test notebook');
+    expect(button('Close recording').disabled).toBe(false);await click('Close recording');expect(close).toHaveBeenCalledOnce();
+    await act(async()=>resolve(notebook));
+    expect(runtimes[0].snapshot.workspaceId).toBeNull();expect(opened).not.toHaveBeenCalled();expect(attach).not.toHaveBeenCalled();expect(finish).not.toHaveBeenCalled();
+    const rows=await listPrivateRecordings(scope,'desktop',()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:factory,crypto:webcrypto}));
+    expect(rows[0]).toMatchObject({recordingId,workspaceId:null,phase:'sealed',recordedChunks:1});expect(sources).toHaveLength(1);
+  });
   async function reopenMappedClip(){
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
     await act(async()=>{await sources[0].chunk(84);await runtimes[0].attachWorkspace(id,true);});
@@ -262,5 +295,16 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     await act(async()=>resolve(notebook));
     expect(container.textContent).toContain('Recording access changed');expect(container.textContent).not.toContain('Open private notebook');
     expect(runtimes.at(-1)!.snapshot.workspaceId).toBe(id);expect(sources).toHaveLength(1);expect(opened).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+  });
+  it('closes and plays saved audio during a held mapped-notebook retry without opening its late result',async()=>{
+    const recordingId=await reopenMappedClip();let resolve!:(value:PrivateNotebookResult)=>void;
+    vi.spyOn(workspaceApi,'openPrivateDraft').mockImplementation(()=>new Promise(done=>resolve=done));
+    const attach=vi.spyOn(privateRecordingApi,'attach'),finish=vi.spyOn(privateRecordingApi,'finish');
+    await click('Retry opening private notebook');expect(button('Retry opening private notebook').disabled).toBe(true);
+    expect(button('Close recording').disabled).toBe(false);expect(button('Play saved recording').disabled).toBe(false);
+    await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);
+    await click('Close recording');expect(close).toHaveBeenCalledOnce();await act(async()=>resolve(notebook));
+    expect(opened).not.toHaveBeenCalled();expect(attach).not.toHaveBeenCalled();expect(finish).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+    expect(runtimes.at(-1)!.snapshot).toMatchObject({recordingId,workspaceId:id,recordedChunks:1,phase:'sealed'});expect(sources).toHaveLength(1);
   });
 });
