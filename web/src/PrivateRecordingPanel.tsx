@@ -43,6 +43,8 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;scope:string;store:PrivateRecordingStore|null;runtime:Controller|null;closed:Promise<void>|null;unsubscribe?:()=>void}|null>(null);
   const audioRef=useRef<string|null>(null),notebookRef=useRef<PrivateNotebookResult|null>(null);
   const starting=useRef(false);
+  const heading=useRef<HTMLHeadingElement|null>(null);
+  useEffect(()=>{heading.current?.focus({preventScroll:true});heading.current?.scrollIntoView?.({block:'start'});},[identity,scope,recordingId]);
   const [ledger,setLedger]=useState<PrivateRecordingLedger|null>(null),[ledgerBusy,setLedgerBusy]=useState(false),[ledgerError,setLedgerError]=useState('');
   const ledgerOwner=useRef<{selected:NonNullable<typeof owner.current>;id:string;store:PrivateRecordingStore|null;controller:PrivateRecordingLedgerController|null;chain:Promise<void>;attachAttempted:boolean;finishAttempted:boolean;loaded:boolean}|null>(null);
   const nativeReceipt=useRef<PrivateRecordingNativeReceipt|null>(null),nativeConsumed=useRef(false);
@@ -259,10 +261,11 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     <h1>Recording access changed</h1><p>Private recording details are hidden. Retained audio remains encrypted for its original account.</p>
     <p role="status">{activeAudio?'Checking microphone stop':'Microphone stopped'}</p>
     {activeAudio&&<button className="team-primary" onClick={()=>void halt(true)}>Stop and save recording</button>}
-    {!activeAudio&&<button disabled={working} onClick={()=>void close()}>Close recording</button>}
+    {!activeAudio&&<button className="private-recording-close" disabled={working} onClick={()=>void close()}>Close recording</button>}
   </section>;
   return <section className="private-recording-panel" aria-label="Private Scribe recording">
-    <header><div><p className="team-kicker">SCRIBE</p><h1>{snapshot?'Private recording':'Start a private recording'}</h1></div><button className="team-subtle" disabled={activeAudio||working} onClick={()=>void close()}>Close recording</button></header>
+    <header><div><p className="team-kicker">SCRIBE</p><h1 ref={heading} tabIndex={-1}>{snapshot?'Private recording':'Start a private recording'}</h1></div><button className="private-recording-close" disabled={activeAudio||working} onClick={()=>void close()}>Close recording</button></header>
+    <p className="private-recording-return">Close recording to return Home and find your saved recordings.{activeAudio?' Stop and save before closing.':''}</p>
     <p>Record now. Choose a patient or confirmed visit later. This recording stays encrypted on this device and is not synced to another device.</p>
     <div className="private-recording-status"><strong role="status">{snapshot?.phase==='recording'?'Recording':snapshot?.phase==='sealed'?snapshot.recordedChunks?'Saved on this device':'Stopped · no audio captured':snapshot?.phase==='paused'?'Paused':snapshot?.phase==='interrupted'?'Interrupted · retained audio':snapshot?.phase==='stop_unconfirmed'?'Microphone stop unconfirmed':snapshot?.startupStage?startupLabels[snapshot.startupStage]:snapshot?.phase==='stopping'?'Stopping audio and saving on this device':snapshot?.phase==='pausing'?'Pausing audio and saving on this device':snapshot?.busy?'Updating recording':preparationError||nativeError?'Recording not ready':!prepared?'Checking access and encrypted storage':!nativeReady?'Checking this device’s recording access':'Ready for consent'}</strong>
       {snapshot&&<span>{snapshot.phase==='recording'?`${elapsed(Math.max(snapshot.elapsedSeconds,liveSeconds))} recording · ${elapsed(snapshot.elapsedSeconds)} saved`:elapsed(snapshot.elapsedSeconds)} · {snapshot.recordedChunks} saved audio chunks</span>}<span>{snapshot?.recordedChunks?'Saved on this device; not yet synced':'Private · not synced'} · transcription not requested</span>

@@ -85,6 +85,7 @@
 .team-handoff summary { cursor: pointer; padding: 5px 0; }
 .team-mobile-tabs { display: none; }
 .team-workspace [hidden] { display: none !important; }
+.team-workspace[data-recording-open=true] { display: block; }
 .team-note-review > label { display: block; margin: 16px 0 8px; font-size: 12px; }
 .team-note-review > textarea { width: 100%; min-height: 320px; resize: vertical; border: 1px solid var(--team-line); border-radius: 8px; padding: 12px; line-height: 1.65; background: white; color: var(--team-ink); }
 .team-note-review > button { margin: 8px 6px 8px 0; padding: 8px 12px; font-size: 12px; }

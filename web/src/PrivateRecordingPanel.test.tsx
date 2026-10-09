@@ -67,7 +67,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     let reply!:(v:unknown)=>void;
     const read=vi.fn(()=>new Promise<unknown>(resolve=>reply=resolve));props.readInputSignal=read;
     await render();await wait(()=>button('Start recording').disabled===true&&status()==='Ready for consent');
-    await consent();await click('Start recording');await wait(()=>status()==='Recording'&&read.mock.calls.length===1);
+    await consent();await click('Start recording');await wait(()=>status()==='Recording'&&read.mock.calls.length===1&&!!container.querySelector('meter'));
     expect(container.querySelector('meter')?.value).toBe(0);
     await click('Stop and save recording');await wait(()=>status()==='Stopped · no audio captured');
     await act(async()=>reply({version:2,signal:{inputBuffers:2,convertedBuffers:2,inputEverNonzero:true,convertedEverNonzero:true,inputLevel:.1,convertedLevel:.1,inputAgeMs:0,convertedAgeMs:0,zeroInputMs:0,inputMuted:false,route:'built_in'}}));
