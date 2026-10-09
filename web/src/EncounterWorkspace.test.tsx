@@ -14,6 +14,7 @@ import {modelWorkApi} from './model-work-api';
 import {modelReceipt,modelUuid,retryReceipt} from './model-work-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 import { workspaceApi, WorkspaceApiError, type Workspace, type ProviderTeam, type BotRole } from "./workspace-api";
+import {workspaceProtocolGeneration} from './workspace-protocol';
 
 vi.mock("./team-setup-api", async () => {
   const {WorkspaceApiError}=await import("./workspace-api");
@@ -71,6 +72,20 @@ describe("private encounter workspace", () => {
     await act(async () => button!.click());
   }
   const settings = () => settingsNavigation(container);
+  it('uses the admitted startup team once without another initial team read',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    const startup={identity:access,protocolGeneration:workspaceProtocolGeneration(access),expiresAt:performance.now()+15000,value:structuredClone(team)};
+    const practiceAccess={role:'owner' as const,onAccessLost:vi.fn(),startupTeam:startup};
+    vi.mocked(workspaceApi.team).mockClear();
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access} practiceAccess={practiceAccess}/>));
+    expect(container.querySelector('[aria-label="Practice Home"]')).toBeTruthy();
+    // Home still performs its fresh private-note authorization. The initial
+    // workspace bootstrap is the read with its owned cancellation signal.
+    expect(vi.mocked(workspaceApi.team).mock.calls.filter(call=>call[1] instanceof AbortSignal)).toHaveLength(0);
+    await act(async()=>root.unmount());root=createRoot(container);
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access} practiceAccess={practiceAccess}/>));
+    expect(vi.mocked(workspaceApi.team).mock.calls.filter(call=>call[1] instanceof AbortSignal)).toHaveLength(1);
+  });
   async function chooseBot(name: string) {
     const button = [...container.querySelectorAll<HTMLButtonElement>(".team-roster button")].find(b => b.textContent?.startsWith(name));
     expect(button).toBeTruthy(); await act(async () => button!.click());

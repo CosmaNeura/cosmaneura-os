@@ -345,7 +345,7 @@ function SignedInWorkspace({ getToken }: { getToken: BetaTokenGetter }) {
   const controls=<div className="row account-controls" aria-label="Account and organization">
     <OrganizationSwitcher hidePersonal /><UserButton /></div>;
   return hostedWorkspaceRequested()
-    ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls}>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
+    ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
     : <EncounterWorkspace authenticated={identity} accountControls={controls}/>;
 }
 

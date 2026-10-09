@@ -1,11 +1,11 @@
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {PracticeAccessGate} from './PracticeAccessGate';
+import {PracticeAccessGate,type PracticeAccessContext} from './PracticeAccessGate';
 import {PracticeAccessPanel} from './PracticeAccessPanel';
 import {SettingsHub} from './SettingsHub';
 import {practiceAccessApi} from './practice-access-api';
-import {WorkspaceApiError} from './workspace-api';
+import {workspaceApi,WorkspaceApiError,type ProviderTeam} from './workspace-api';
 import {accessFixture as row,accessRequired,accessPending,accessConnected} from './practice-access-test-fixture';
 
 let root:Root,container:HTMLDivElement;
@@ -65,4 +65,23 @@ it('puts people access in its own Settings screen and returns to All settings',a
   const card=[...container.querySelectorAll('button')].find(item=>item.textContent?.includes('Practice access'))!;await act(async()=>card.click());
   expect(practiceAccessApi.pending).toHaveBeenCalledOnce();expect(button('← All settings')).toBeDefined();await click('← All settings');
   expect(document.activeElement?.textContent).toBe('Settings');
+});
+it('overlaps the team read with access and hands it off only after both practice reads accept',async()=>{
+  let ready!:(value:typeof accessConnected)=>void;
+  vi.mocked(practiceAccessApi.read).mockImplementationOnce(()=>new Promise(resolve=>{ready=resolve;}));
+  vi.mocked(practiceAccessApi.setup).mockResolvedValue({contract_version:1,state:'member_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Ada Beta',can_start_practice:false});
+  const team:ProviderTeam={revision:1,template_version:'provider-team-v1',recovery_scope:'a'.repeat(64),configuration:{practice_context:'Invented',bots:[]},members:[],llm:{enabled:false,model:'offline'}};
+  vi.spyOn(workspaceApi,'team').mockResolvedValue(team);let admitted:PracticeAccessContext|undefined;
+  await act(async()=>root.render(<PracticeAccessGate identity={identity} accountControls={null} prefetchTeam>{context=>{admitted=context;return <p>Ready</p>;}}</PracticeAccessGate>));
+  expect(workspaceApi.team).toHaveBeenCalledOnce();expect(admitted).toBeUndefined();
+  await act(async()=>ready(accessConnected));expect(admitted?.startupTeam?.value).toEqual(team);expect(admitted?.startupTeam?.identity).toBe(identity);
+});
+it('bounds a slow speculative team read by the same15second startup window',async()=>{
+  vi.useFakeTimers();vi.mocked(practiceAccessApi.read).mockResolvedValue(accessConnected);
+  vi.mocked(practiceAccessApi.setup).mockResolvedValue({contract_version:1,state:'member_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Ada Beta',can_start_practice:false});
+  let signal!:AbortSignal;
+  vi.spyOn(workspaceApi,'team').mockImplementation(async(_,value)=>{signal=value!;return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new WorkspaceApiError(503)),{once:true}));});
+  await act(async()=>root.render(<PracticeAccessGate identity={identity} accountControls={null} prefetchTeam>{()=> <p>Private workspace</p>}</PracticeAccessGate>));
+  expect(container.textContent).not.toContain('Private workspace');
+  await act(async()=>vi.advanceTimersByTime(15000));expect(signal.aborted).toBe(true);expect(container.textContent).not.toContain('Private workspace');expect(container.textContent).toContain('could not be confirmed');
 });

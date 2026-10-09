@@ -163,7 +163,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
   if (state?.phase === "ready" && identity) {
     const controls=<button className="button secondary" onClick={() => void act("signOut")}>Sign out</button>;
     return hostedWorkspaceRequested()
-      ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls}>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
+      ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;
   }
   if (state?.phase === "unavailable" || failed) return <StatusScreen title="Sign-in needs attention"
