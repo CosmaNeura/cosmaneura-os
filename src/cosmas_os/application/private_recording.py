@@ -8,7 +8,6 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import AuditEvent, ExternalIdentity, WorkspaceAppointmentLink
 from cosmas_os.ports.private_recording import (
-    MAX_SECONDS,
     AttachRecording,
     FinishRecording,
     LinkRecording,
@@ -151,7 +150,10 @@ def finish(s, box, owner, wid, rid, command, *, external, fence):
     if command.ended_at is not None:
         elapsed = (command.ended_at - row.started_at).total_seconds()
         now = s.scalar(select(func.clock_timestamp()))
-        if not 0 < elapsed <= MAX_SECONDS or command.ended_at > now + timedelta(seconds=5):
+        # A saved clip may be mapped or finalized hours after capture, or span
+        # pauses. Frames bound audio duration; metadata update time is not it.
+        if (elapsed <= 0 or command.frames / 16000 > elapsed
+                or command.ended_at > now + timedelta(seconds=5)):
             raise ws.WorkspaceError("invalid_private_recording_timestamp", 422)
     values = command.model_dump(exclude={"idempotency_key"})
     outcome = PrivateRecordingFinish(recording_id=rid, request_key=str(command.idempotency_key),

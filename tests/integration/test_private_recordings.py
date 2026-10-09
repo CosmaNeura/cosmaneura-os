@@ -172,6 +172,43 @@ def test_finish_exact_replay_and_changed_manifest_refusal(recording, session):
     assert session.scalar(select(func.count()).select_from(PrivateRecordingFinish)) == 1
 
 
+def test_saved_clip_completion_uses_audio_length_after_delayed_notebook_mapping(recording, session):
+    f, draft, command = recording
+    earlier = datetime.now(UTC) - timedelta(hours=6)
+    command = {**command, "started_at": earlier.isoformat(),
+        "consent": {**command["consent"], "granted_at": earlier.isoformat()}}
+    attached = post(f, base(draft), command)
+    assert attached.status_code == 200, attached.text
+    path = base(draft) + "/" + attached.json()["recording_id"]
+    completion = {**finish_body(), "frames": 8 * 16000}
+    response = post(f, path + "/finish", completion)
+    assert response.status_code == 200, response.text
+    row = response.json()
+    assert row["state"] == "finished" and row["finish"]["frames"] == 8 * 16000
+    assert row["audio_uploaded"] is False and row["transcription_started"] is False
+    assert post(f, path + "/finish", completion).json() == row
+    assert f.client.get(path, headers=headers(f)).json() == row
+    assert session.scalar(select(func.count()).select_from(PrivateRecordingFinish)) == 1
+
+
+@pytest.mark.parametrize("invalid", ["too_much_audio", "future", "before_capture", "audio_limit"])
+def test_delayed_completion_retains_audio_and_timestamp_bounds(recording, session, invalid):
+    f, draft, command, row = attached(recording)
+    completion = finish_body()
+    started = datetime.fromisoformat(command["started_at"])
+    if invalid == "too_much_audio":
+        completion.update(ended_at=(started + timedelta(seconds=1)).isoformat(), frames=2 * 16000)
+    elif invalid == "future":
+        completion["ended_at"] = (datetime.now(UTC) + timedelta(minutes=1)).isoformat()
+    elif invalid == "before_capture":
+        completion["ended_at"] = (started - timedelta(seconds=1)).isoformat()
+    else:
+        completion["frames"] = 7200 * 16000 + 1
+    response = post(f, base(draft) + "/" + row["recording_id"] + "/finish", completion)
+    assert response.status_code == 422
+    assert session.scalar(select(func.count()).select_from(PrivateRecordingFinish)) == 0
+
+
 def test_unknown_remains_explicit_and_never_becomes_linked(recording, session):
     f, draft, _, row = attached(recording)
     path = base(draft) + "/" + row["recording_id"]
