@@ -64,10 +64,19 @@ export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, o
       },
     };
     const api = creatorReviewApi(workspaceId, sessionId, identity, controller.signal);
+    let refreshTimer:ReturnType<typeof setTimeout>|undefined;
+    const scheduleRefresh=()=>{refreshTimer=setTimeout(()=>{
+      if(!current||controller.signal.aborted)return;
+      if(document.hidden||callbacks.current.locked){scheduleRefresh();return;}
+      root.current?.querySelector<HTMLButtonElement>('[data-review-action="refresh"]')?.click();
+    },5000);};
     const dispose = mountCreatorReview(root.current, {
       read: async () => {
         working++; report(); callbacks.current.onSource(null);
-        try { const view = await api.read(); requireCurrent(); callbacks.current.onSource(view); return view; }
+        try { const view = await api.read(); requireCurrent(); callbacks.current.onSource(view);
+          if(refreshTimer)clearTimeout(refreshTimer);
+          if(['uploaded','processing','translation_pending'].includes(view.status))scheduleRefresh();
+          return view; }
         finally { working--; report(); }
       },
       decide: async (decision, key) => {
@@ -83,7 +92,7 @@ export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, o
       await callbacks.current.onContinue();
     }});
     return () => {
-      current = false; controller.abort(); dispose(); callbacks.current.onLock(false);
+      current = false;if(refreshTimer)clearTimeout(refreshTimer); controller.abort(); dispose(); callbacks.current.onLock(false);
     };
   }, [access, workspaceId, sessionId, identity]);
   return <fieldset disabled={locked} className="capture-creator-review" aria-label="Recorded transcript review">

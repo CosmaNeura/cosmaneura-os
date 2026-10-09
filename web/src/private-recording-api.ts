@@ -12,6 +12,7 @@ export type PrivateRecordingIntent={contract:'cosmas.private-recording.intent.v1
 export type PrivateRecordingFinish={idempotency_key:string;capture_state:'finished'|'interrupted'|'unknown';
   manifest_sha256:string|null;chunks:number|null;frames:number|null;ended_at:string|null};
 export type PrivateRecordingFinishIntent={request:PrivateRecordingFinish;request_sha256:string};
+export type PrivateRecordingLinkRequest={idempotency_key:string;expected_workspace_revision:number;workspace_link_receipt_id:string};
 export type PrivateRecordingReceipt={contract:'cosmas.private-recording.v1';custody:'local_device_metadata';
   recording_id:string;local_recording_id:string;workspace_id:string;workspace_revision:number;owner_id:string;box_id:string;
   agent_id:string;team_revision_id:string;recovery_scope:string;attach_sha256:string;started_at:string;created_at:string;
@@ -118,6 +119,11 @@ async function request(identity:AuthenticatedWorkspaceIdentity,path:string,body:
 }
 const root=(v:PrivateRecordingIntent)=>'/workspaces/'+v.workspace_id+'/private-recordings';
 export const privateRecordingApi={
+  async link(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,recordingId:string,body:PrivateRecordingLinkRequest,signal?:AbortSignal){
+    await validatePrivateRecordingIntent(v,team);need(vendorUuid(recordingId)&&closed(body,'idempotency_key,expected_workspace_revision,workspace_link_receipt_id')&&vendorUuid(body.idempotency_key)&&vendorUuid(body.workspace_link_receipt_id)&&integer(body.expected_workspace_revision,2147483647));
+    const result=await parsePrivateRecordingReceipt(await request(identity,root(v)+'/'+recordingId+'/link',body,signal),v);
+    need(result.recording_id===recordingId&&result.link?.request_sha256===await digest('link',body)&&result.link.workspace_link_receipt_id===body.workspace_link_receipt_id);return result;
+  },
   async attach(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,signal?:AbortSignal){await validatePrivateRecordingIntent(v,team);return parsePrivateRecordingReceipt(await request(identity,root(v),v.request,signal),v);},
   async resolve(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,signal?:AbortSignal):Promise<PrivateRecordingResolution>{
     await validatePrivateRecordingIntent(v,team);const value=await request(identity,root(v)+'/resolve',v.request,signal);need(closed(value,'outcome,recording'));

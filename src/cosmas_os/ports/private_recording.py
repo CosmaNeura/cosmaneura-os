@@ -12,6 +12,15 @@ MAX_SECONDS = 7200
 MAX_FRAMES = MAX_SECONDS * 16000
 
 
+class SavedRecordingSelection(ProtectedContract):
+    recording_id: UUID
+    link_receipt_id: UUID
+    source_sha256: Digest
+    manifest_sha256: Digest
+    chunks: int = Field(ge=1, le=360, strict=True)
+    frames: int = Field(ge=1, le=57_600_000, strict=True)
+
+
 class RecordingBot(ProtectedContract):
     address: str = Field(min_length=1, max_length=36)
     team_revision: int = Field(strict=True, ge=1)

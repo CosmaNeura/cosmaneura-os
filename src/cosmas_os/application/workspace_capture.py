@@ -16,7 +16,14 @@ from cosmas_os.application.capture_deadline import (
     core_phase,
     current_budget,
 )
-from cosmas_os.models import AuditEvent, CoreCaptureAccount, ExternalIdentity, WorkspaceEntry
+from cosmas_os.domain.hashing import payload_hash
+from cosmas_os.models import (
+    AuditEvent,
+    CoreCaptureAccount,
+    ExternalIdentity,
+    WorkspaceAppointmentLink,
+    WorkspaceEntry,
+)
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable, supports_skill
 from cosmas_os.ports.capture_protocol import (
     CaptureOperation,
@@ -32,6 +39,10 @@ from cosmas_os.ports.core_capture import (
 )
 from cosmas_os.ports.core_notes import CoreNoteSelection
 from cosmas_os.ports.notebook_source import NotebookSource, ScratchNotes
+from cosmas_os.private_recording_models import (
+    PrivateRecordingTransfer,
+    PrivateRecordingTransferSession,
+)
 
 
 def notebook_snapshot(session, workspace_id, entry_id):
@@ -66,6 +77,7 @@ def admit(
     attestation: CoreConsentAttestation | None,
     idempotency_key: str,
     configured_capture: ConfiguredCaptureSelection | None = None,
+    saved_recording=None,
     operation: CaptureOperation | None = None,
     expected_session_id: UUID | None = None,
     note_selection: CoreNoteSelection | None = None,
@@ -81,12 +93,17 @@ def admit(
     if current_budget() is not None:
         port = DeadlineCorePort(port)
 
+    transfer_id = None
+    transfer_sha = None
     def selection(*, finalizing: bool = False):
+        nonlocal transfer_id, transfer_sha
         check_capture_deadline()
         # Auth's identity map must not hide a revocation committed during I/O.
         session.expire_all()
         reauthenticate()
         w = ws._workspace(session, box, actor, workspace_id, writing=finalizing)
+        if w.appointment_id is None:
+            raise ws.WorkspaceError("capture_connection_required", 409)
         appointment = ws._encounter(session, box, w.appointment_id, w.patient_link_id, owner=w.owner_id)
         identity = session.scalar(
             select(ExternalIdentity)
@@ -130,7 +147,62 @@ def admit(
                 resource_ref = team_resources.reference(box, actor, external_identity_id, "core_preparation", account)
                 team_resources.require(settings, "core_preparation", resource_ref)
             agent_id = bot.agent_id
-        result = account.id, value, notebook, agent_id
+        selected_source = saved_recording
+        transfer = None if prep or binding_only or existing_recording else session.scalar(select(PrivateRecordingTransfer).where(PrivateRecordingTransfer.workspace_id == workspace_id).with_for_update())
+        transfer_session = session.get(PrivateRecordingTransferSession, transfer.id) if transfer is not None else None
+        if transfer is not None and selected_source is None:
+            if expected_session_id is None or transfer_session is None or str(transfer_session.session_id) != str(expected_session_id):
+                raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+            from cosmas_os.ports.private_recording import SavedRecordingSelection
+            selected_source = SavedRecordingSelection.model_validate(transfer.request["source"])
+        if selected_source is not None:
+            from cosmas_os.application import private_recording
+            from cosmas_os.private_recording_models import (
+                PrivateRecordingFinish,
+                PrivateRecordingLink,
+            )
+            _, recording = private_recording.checked(session, box, actor, workspace_id,
+                external_identity_id, str(selected_source.recording_id))
+            finish = session.scalar(select(PrivateRecordingFinish).where(PrivateRecordingFinish.recording_id == recording.id))
+            link = session.scalar(select(PrivateRecordingLink).where(PrivateRecordingLink.recording_id == recording.id))
+            # Validate immutable receipts, then require the currently selected
+            # patient/visit and source on every side of remote admission I/O.
+            private_recording.view(session, recording)
+            if (finish is None or link is None or finish.capture_state != "finished" or finish.chunks is None
+                or str(link.id) != str(selected_source.link_receipt_id)
+                or link.source_sha256 != selected_source.source_sha256
+                or finish.manifest_sha256 != selected_source.manifest_sha256
+                or finish.chunks != selected_source.chunks or finish.frames != selected_source.frames
+                or bot_selection is not None and agent_id != recording.agent_id):
+                raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+            if operation is not None and operation.kind in {"source_start", "source_extend", "native_recording_context"}:
+                raise ws.WorkspaceError("capture_source_unavailable", 409)
+            if operation is not None and operation.kind == "complete":
+                channels = operation.payload.channels
+                if len(channels) != 1 or channels[0].channel != "microphone" or channels[0].final_sequence_number != finish.chunks - 1:
+                    raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+            if saved_recording is not None:
+                if attestation is None or configured_capture is None or bot_selection is None:
+                    raise ws.WorkspaceError("invalid_capture_request", 422)
+                document = {"source": saved_recording.model_dump(mode="json"),
+                    "attestation": attestation.model_dump(mode="json"), "configured": configured_capture.model_dump(mode="json"),
+                    "bot": bot_selection.model_dump(mode="json")}
+                sha = payload_hash(document)
+                if transfer is None:
+                    transfer = PrivateRecordingTransfer(recording_id=recording.id, workspace_id=workspace_id,
+                        request=document, request_sha256=sha)
+                    session.add(transfer)
+                    session.flush()
+                if transfer.recording_id != recording.id or transfer.request_sha256 != sha or payload_hash(transfer.request) != sha:
+                    raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+            if transfer is None or payload_hash(transfer.request) != transfer.request_sha256:
+                raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+            transfer_id, transfer_sha = transfer.id, transfer.request_sha256
+            appointment_link = session.get(WorkspaceAppointmentLink, link.workspace_link_receipt_id)
+            if (appointment_link is None or appointment_link.appointment_id != w.appointment_id
+                or appointment_link.patient_link_id != w.patient_link_id):
+                raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+        result = account.id, value, notebook, agent_id, transfer_sha
         if prep and bot_selection is not None:
             result = (*result, resource_ref)
         if not finalizing:
@@ -139,6 +211,9 @@ def admit(
 
     try:
         using_admission = operation is not None or note_selection is not None
+        if saved_recording is not None and (using_admission or prep or binding_only or existing_recording
+                or attestation is None or configured_capture is None or bot_selection is None):
+            raise ws.WorkspaceError("invalid_capture_request", 422)
         if existing_recording and (configured_capture is not None or using_admission or prep or binding_only
             or attestation is not None or expected_session_id is not None or scratchpad_entry_id is not None
             or bot_selection is not None or finalize_note is not None or finalize_prep is not None):
@@ -224,12 +299,24 @@ def admit(
             binding,
             credential,
             attestation,
-            f"verify:{expected_session_id}" if using_admission else idempotency_key,
+            f"verify:{expected_session_id}" if using_admission else
+                f"saved:{saved_recording.recording_id}:{saved_recording.source_sha256}" if saved_recording is not None else idempotency_key,
             expected_session_id=expected_session_id if using_admission else None,
             configured_capture=None if using_admission else configured_capture,
         )
         if selection() != expected:
             raise ws.WorkspaceError("capture_context_changed", 409)
+        if (receipt.workspace_id != binding.workspace_id or receipt.binding_ref != binding.binding_ref
+            or receipt.appointment_ref != binding.appointment_ref):
+            raise ws.WorkspaceError("capture_context_changed", 409)
+        if transfer_id is not None:
+            prior = session.get(PrivateRecordingTransferSession, transfer_id)
+            if (prior is not None and (str(prior.session_id) != str(receipt.session_id)
+                or prior.receipt["consent_record_id"] != str(receipt.consent_record_id)
+                or prior.receipt["operation_ref"] != receipt.operation_ref
+                or prior.receipt.get("configured_capture") != (receipt.configured_capture.model_dump(mode="json") if receipt.configured_capture else None))
+                or configured_capture is not None and receipt.configured_capture != configured_capture):
+                raise ws.WorkspaceError("capture_saved_recording_changed", 409)
         if using_admission:
             if receipt.session_id != expected_session_id:
                 raise ws.WorkspaceError("capture_session_changed", 409)
@@ -294,6 +381,17 @@ def admit(
         if bot_selection is not None:
             if selection(finalizing=True) != expected:
                 raise ws.WorkspaceError("capture_context_changed", 409)
+            if saved_recording is not None:
+                prior = session.get(PrivateRecordingTransferSession, transfer_id)
+                document = receipt.model_dump(mode="json")
+                if prior is None:
+                    session.add(PrivateRecordingTransferSession(transfer_id=transfer_id, session_id=str(receipt.session_id), receipt=document))
+                    session.flush()
+                elif str(prior.session_id) != str(receipt.session_id) or prior.receipt != document:
+                    # Volatile checked_at/nonces may change on a verified resume;
+                    # the immutable session and consent must remain the same.
+                    if str(prior.session_id) != str(receipt.session_id) or prior.receipt["consent_record_id"] != str(receipt.consent_record_id):
+                        raise ws.WorkspaceError("capture_saved_recording_changed", 409)
             session.add(AuditEvent(box_id=box, aggregate_type="workspace", aggregate_id=workspace_id,
                 event_type="workspace.bot_capture_prepared", actor_principal_id=expected[3],
                 initiated_by_principal_id=actor, outcome="prepared",

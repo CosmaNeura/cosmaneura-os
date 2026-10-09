@@ -9,16 +9,17 @@ import { DraftStoreError } from "./draft-store";
 const sameFields = (left: Record<string, string>, right: Record<string, string> | null) => !!right &&
   Object.keys(left).length === Object.keys(right).length && Object.keys(left).every(key => left[key] === right[key]);
 
-export function CaptureDraftEditor({ initial, workspaceId, identity, onLock, onReviewDraft, onCurrentDraft, onReloadSource, reviewLocked = false, sourceLocked = false }: {
+export function CaptureDraftEditor({ initial, workspaceId, identity, onLock, onReviewDraft, onCurrentDraft, onReloadSource, reviewLocked = false, sourceLocked = false, simpleFlow=false }: {
   initial: CaptureDraft; workspaceId: string; identity: AuthenticatedWorkspaceIdentity; onLock: (locked: boolean) => void;
   onReviewDraft?: (draft: CaptureDraft) => void; reviewLocked?: boolean;
   onCurrentDraft?: (draft: CaptureDraft) => void;
   onReloadSource?: () => void;
   sourceLocked?: boolean;
+  simpleFlow?: boolean;
 }) {
   const [base, setBase] = useState(initial);
   const [fields, setFields] = useState(initial.fields ?? {});
-  const [editing, setEditing] = useState(false);
+  const [editing, setEditing] = useState(simpleFlow);
   const [busy, setBusy] = useState("");
   const [uncertain, setUncertain] = useState(false);
   const [error, setError] = useState("");
@@ -143,10 +144,10 @@ export function CaptureDraftEditor({ initial, workspaceId, identity, onLock, onR
       setConflict(!draft.pending && !changed && (latest.note_ref !== restored.note_ref || latest.note_sha256 !== restored.note_sha256) ? latest : null);
       setError(changed ? "The recording source changed. Your recovered text is retained; compare it before discarding or preparing a new source." : "");
     }} />
-    {base.status === "draft" && <p className="team-fine">Saved in Core · clinical review required</p>}
+    {base.status === "draft" && <p className="team-fine">{simpleFlow?'Draft saved · review the text before using it':'Saved in Core · clinical review required'}</p>}
     {base.reviewed_source?.capture_continuity && <p role="status">Recording continuity is unconfirmed. Check this draft for missing speech; gap lengths are unknown.</p>}
     <p className="team-fine">Sources: recorded transcript{base.notebook_source ? ` + saved scratch notes (revision ${base.notebook_source.revision})` : ""}.</p>
-    {editing && <p className="team-fine">Saving keeps the previous Core version. It does not sign the note or authorize follow-up.</p>}
+    {editing && <p className="team-fine">{simpleFlow?'Review and correct each section below. Saving keeps a draft; signing remains a separate step.':'Saving keeps the previous Core version. It does not sign the note or authorize follow-up.'}</p>}
     {(base.field_order ?? []).map(field => <section key={field}><h4>{field}</h4>{editing
       ? <textarea aria-label={`Draft ${field}`} rows={4} maxLength={262144} value={fields[field]}
         disabled={!!busy || uncertain || !!conflict || blocked} onChange={event => {
@@ -162,18 +163,18 @@ export function CaptureDraftEditor({ initial, workspaceId, identity, onLock, onR
     <div className="capture-actions">
       {sourceChanged && onReloadSource && <button disabled={!!busy || blocked || !!key.current && recovery.access !== undefined} onClick={()=>void recovery.commit(null).then(()=>onReloadSource()).catch(()=>{})}>Discard local edits and reload source</button>}
       {!editing && base.status === "draft" && <button disabled={!!busy || blocked} onClick={() => setEditing(true)}>Edit draft</button>}
-      {editing && <button className="team-primary" disabled={!dirty || !valid || !!busy || uncertain || !!conflict || blocked} onClick={() => void save()}>Save draft edits</button>}
+      {editing && <button className="team-primary" disabled={!dirty || !valid || !!busy || uncertain || !!conflict || blocked} onClick={() => void save()}>{simpleFlow?'Save visit note':'Save draft edits'}</button>}
       {uncertain && key.current && <button disabled={!!busy || blocked || sourceChanged} onClick={()=>void save()}>Retry Core note save</button>}
       {uncertain && key.current && <button disabled={!!busy || blocked} onClick={()=>void resolve()}>Resolve original save</button>}
-      <button disabled={!!busy || blocked} onClick={() => void check()}>Check saved draft</button>
+      {(!simpleFlow||uncertain||error)&&<button disabled={!!busy || blocked} onClick={() => void check()}>Check saved draft</button>}
       {onReviewDraft && base.status === "draft" && <button className="team-primary" disabled={dirty || !!busy || uncertain || !!conflict || reviewLocked || blocked}
-        onClick={() => onReviewDraft(base)}>Use saved draft for review</button>}
+        onClick={() => onReviewDraft(base)}>{simpleFlow?'Continue to clinical review':'Use saved draft for review'}</button>}
     </div>
     {uncertain && key.current && <p className="team-fine">Resolve checks whether the original save committed and closes that request if it did not. Your editor text is retained.</p>}
     {busy && <p role="status">{busy === "save" ? "Saving a new Core version…" : busy === "resolve" ? "Resolving the original save…" : "Checking the saved draft…"}</p>}
     {dirty && !busy && <p className="team-fine">Unsaved edits</p>}
     {base.status === "draft" && !valid && <p role="alert">Shorten the note to fit the supported saved-note size before saving. Your local text is retained.</p>}
-    {saved && !dirty && <p role="status">Your text is saved in Core. Clinical review is still required.</p>}
+    {saved && !dirty && <p role="status">{simpleFlow?'Your visit note edits are saved. You can continue to clinical review or return Home.':'Your text is saved in Core. Clinical review is still required.'}</p>}
     {error && <p role="alert" className="capture-error">{error}</p>}
   </div>;
 }

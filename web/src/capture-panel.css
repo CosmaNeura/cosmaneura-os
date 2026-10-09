@@ -11,6 +11,13 @@
 .capture-consent-hint { margin: -5px 18px 14px; font-size: 13px; color: #526459; }
 .capture-panel strong, .capture-panel small { display: block; }
 .capture-panel small { color: #69776d; font-size: 12px; line-height: 1.5; }
+.saved-transcription { padding: 18px; }
+.saved-transcription h2 { margin: 0 0 12px; }
+.saved-transcription p, .saved-transcription li { line-height: 1.5; }
+.saved-transcription > button { min-height: 44px; margin: 14px 0; }
+.saved-transcription .private-recording-check { display: flex; align-items: flex-start; gap: 10px; line-height: 1.5; }
+.saved-transcription .private-recording-check input { width: 22px; height: 22px; flex: 0 0 22px; }
+.saved-transcription .capture-creator-review { min-width: 0; }
 .capture-indicator { width: 9px; height: 9px; border-radius: 50%; background: #92a88a; flex: 0 0 auto; }
 .capture-indicator.recording { background: #b34136; box-shadow: 0 0 0 5px #b3413615; }
 .capture-details { padding: 0 18px 16px; }
@@ -70,3 +77,12 @@
 .capture-options select { box-sizing: border-box; min-width: 0; max-width: 100%; padding: 10px; color: inherit; border: 1px solid #cbd5c8; border-radius: 7px; background: white; font: inherit; }
 @media (max-width: 700px) { .capture-options input, .capture-options select { font-size: 16px; } .capture-details form > .team-primary { width: 100%; } }
 .team-workspace .capture-stop { background: #9f3c31; color: white; border: 0; min-height: 48px; }
+.saved-transcription[data-english-only="true"] .creator-help { display: none; }
+.saved-transcript-review > summary { min-height: 44px; cursor: pointer; padding: 12px 0; font-weight: 650; }
+.saved-transcription textarea { width: 100%; box-sizing: border-box; font-size: 16px; }
+.saved-visit-selection label { display: block; margin: 14px 0; }
+.saved-visit-selection label:has(input[type="checkbox"]) { display: flex; align-items: flex-start; gap: 10px; }
+.saved-visit-selection input[type="checkbox"] { width: 22px; height: 22px; flex: 0 0 22px; margin: 0; }
+.saved-visit-selection select { display: block; width: 100%; min-height: 44px; font-size: 16px; margin-top: 6px; }
+.saved-visit-selection button { min-height: 44px; font-size: 16px; }
+.saved-transcription .capture-note button, .saved-transcription .capture-note select { min-height: 44px; }

@@ -16,6 +16,7 @@ import {PracticeHome} from './PracticeHome';
 import {PrivateRecordingPanel,type PrivateNotebookResult} from './PrivateRecordingPanel';
 import {PrivateRecordingRuntime,listPrivateRecordings,prewarmPrivateRecordingNative,type PrivateRecordingSnapshot} from './private-recording-runtime';
 import {PrivateDraftLinkPanel} from './PrivateDraftLinkPanel';
+import {SavedRecordingTranscriptionPanel,type SavedRecordingEntry} from './SavedRecordingTranscriptionPanel';
 import {ChiefStartActions,InitialTeamAction} from './ChiefStartActions';
 import {coreConnectionApi} from './core-connection-api';
 import type {CoreConnectionCommand} from './core-connection-contract';
@@ -120,6 +121,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [homeBusy,setHomeBusy]=useState(false);
   const [privateRecordingBusy,setPrivateRecordingBusy]=useState(false);
   const [privateRecordingEntry,setPrivateRecordingEntry]=useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;scope:string;serverScope:string;generation:number;title:string;recordingId?:string;prepareNotebook?:()=>Promise<PrivateNotebookResult>;authorize:()=>Promise<void>}|null>(null);
+  const [savedRecordingEntry,setSavedRecordingEntry]=useState<(SavedRecordingEntry&{workspaceId:string;identity:AuthenticatedWorkspaceIdentity})|null>(null);
   const [privateRecordings,setPrivateRecordings]=useState<{identity:AuthenticatedWorkspaceIdentity;scope:string;generation:number;rows:PrivateRecordingSnapshot[]}|null>(null);
   const [privateRecordingListEpoch,setPrivateRecordingListEpoch]=useState(0);
   const [privateRecordingRequest,setPrivateRecordingRequest]=useState(0);
@@ -498,6 +500,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   }
 
   function clear() {
+    setSavedRecordingEntry(null);
     generation.current++;activityNavigation.current?.abort();activityNavigation.current=null;
     journal.current?.value.close(); journal.current = null; setRecoveryOffers([]); setRecoveryState("");
     setSetupApproval(null); setSetupProjection(null);
@@ -533,6 +536,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSettingsOpen(false);setPracticeOpen(false);setPracticePage('home');
   }
   async function openPrivateNotebook(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam}){
+    setSavedRecordingEntry(null);
     if(result.identity!==authenticated)throw new WorkspaceApiError(403);
     const preserveTeamDraft=!!team&&!!teamDraft&&JSON.stringify(teamDraft)!==JSON.stringify(team.configuration);
     const current=++generation.current;checkRecoveryOwner(result.team);
@@ -1485,6 +1489,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         platform={privateRecordingEntry.identity.mode==='clerk_jwt'&&privateRecordingEntry.identity.nativeSession?'ios':'desktop'}
         isCurrent={()=>recordingCurrent(privateRecordingEntry)} authorize={privateRecordingEntry.authorize}
         title={privateRecordingEntry.title} recordingId={privateRecordingEntry.recordingId} prepareNotebook={privateRecordingEntry.prepareNotebook}
+        onTranscribe={CAPTURE_WORKSPACE_BUILD?async(result,recordingId)=>{
+          const entry=privateRecordingEntry;if(!recordingCurrent(entry))throw new WorkspaceApiError(403);
+          setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);await openPrivateNotebook(result);
+          if(authenticated===entry.identity&&journal.current?.scope===entry.scope)
+            setSavedRecordingEntry({recordingId,scope:entry.scope,platform:entry.identity.mode==='clerk_jwt'&&entry.identity.nativeSession?'ios':'desktop',workspaceId:result.workspace.id,identity:entry.identity});
+        }:undefined}
         onBusyChange={setPrivateRecordingBusy} onSaved={()=>setPrivateRecordingListEpoch(value=>value+1)} onAccessLost={failure}
         onNotebookPrepared={async (result,recordingId)=>{
           const entry=privateRecordingEntry;
@@ -1539,7 +1549,14 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               locked={busy || !!pending || captureNavigationLocked || recoveryBlocked} onDenied={failure} />}</div>
           {bot?.role !== "scribe" && <nav aria-label="Encounter stage" className="team-stages">{["Before", "During", "After"].map(value => <button key={value} aria-pressed={stage === value} onClick={() => { setStage(value); if (value === "After") { setPanel("Review"); setMobilePanel("Review"); } }}>{value}</button>)}</nav>}
         </section>
-        {authenticated&&workspace.private_draft&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null}
+        {practicePage==='notebook'&&CAPTURE_WORKSPACE_BUILD&&authenticated&&team&&savedRecordingEntry?.identity===authenticated&&savedRecordingEntry.workspaceId===workspace.id&&
+          <SavedRecordingTranscriptionPanel key={savedRecordingEntry.recordingId} entry={savedRecordingEntry} identity={authenticated} workspace={workspace} team={team}
+            isCurrent={()=>authenticated===privateRecordingLive.current.authenticated&&journal.current?.scope===savedRecordingEntry.scope}
+            locked={locked} notesEnabled={CAPTURE_NOTES_BUILD&&team.capture?.notes_enabled===true} onDraftLock={setCaptureDraftLocked}
+            onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} scratchpad={workspace.entries.filter(e=>e.kind==='scratchpad').at(-1)}
+            notebookDirty={note!==latestNote} onNotebook={()=>{setPanel('Notebook');setMobilePanel('Notebook');}}
+            taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}/>}
+        {authenticated&&workspace.private_draft&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry}
           locked={busy||homeBusy||!!pending||conflict||!!recoveryOffers.length||recoveryBlocked||captureNavigationLocked||captureDraftLocked||note!==latestNote} onBusyChange={setPrivateLinkBusy}
           onAccessLost={failure} onSaved={latest=>{setWorkspace(latest);setMessage('Private draft linked to the confirmed visit. Your saved history is retained.');}}/>}
         {team?.revision===0&&<div hidden={settingsOpen} className="team-initial-action"><InitialTeamAction
@@ -1547,7 +1564,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           locked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} unchanged={initialTeamUnchanged}
           onUse={()=>{if(initialTeamUnchanged&&!locked&&!connectionNavigationLocked&&!captureNavigationLocked&&!captureDraftLocked)saveTeam();}}
           onSettings={()=>void openSettings()}/></div>}
-        {CAPTURE_WORKSPACE_BUILD && authenticated && visitLinked && team?.capture?.enabled &&
+        {!savedRecordingEntry && CAPTURE_WORKSPACE_BUILD && authenticated && visitLinked && team?.capture?.enabled &&
           <CapturePanel key={workspace.id} workspaceId={workspace.id} identity={authenticated} encounterLabel={workspace.label}
             notesEnabled={CAPTURE_NOTES_BUILD && team.capture.notes_enabled === true} onDraftLock={setCaptureDraftLocked} onNavigationLock={setCaptureNavigationLocked}
             correctionsEnabled={CAPTURE_CORRECTIONS_BUILD && team.capture.corrections_enabled === true}

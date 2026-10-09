@@ -54,7 +54,7 @@ The product can guide supported setup; it cannot build, install, deploy or
 provision a missing connector inside chat.
 
 Release service and desktop together after the normal migration/release gates.
-The required schema head is `f96b1c4d2357`; the client requires `practice_setup:1`
+The required schema head is `f97c2d5e3468`; the client requires `practice_setup:1`
 and `private_draft:1`. A clean committed source and its tree are bound into the
 packaged desktop provenance. Updating the package alone cannot update the service.
 

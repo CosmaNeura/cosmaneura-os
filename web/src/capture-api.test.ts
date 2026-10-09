@@ -38,6 +38,16 @@ it("uses fresh signed requests for admission and recorder operations without cli
   }
 });
 
+it('sends the immutable saved source with explicit fresh transcription consent and configured language',async()=>{
+  const access=identity(),configured_capture={schema_version:'1.0',language_mode:'en-US'};
+  const fetcher=vi.fn<typeof fetch>(async()=>json({status:'prepared',workspace_id:workspace,session_id:session,consent_record_id:consent,configured_capture}));
+  vi.stubGlobal('fetch',fetcher);
+  const attestation={modality:'in_person' as const,participant_regions:[],method:'verbal_attestation' as const,all_parties_consented:true as const,granted_at:new Date().toISOString()};
+  const source={recording_id:workspace,link_receipt_id:session,source_sha256:'a'.repeat(64),manifest_sha256:'b'.repeat(64),chunks:2,frames:304000};
+  await prepareCapture(workspace,access,attestation,'saved-original-key',undefined,{address:'scribe',team_revision:1},'en-US',source);
+  expect(JSON.parse(String(fetcher.mock.calls[0][1]?.body))).toEqual({attestation,idempotency_key:'saved-original-key',bot:{address:'scribe',team_revision:1},configured_capture,saved_recording:source});
+});
+
 it.each(["https://remote.invalid", "app://cosmas/api", "http://user@127.0.0.1:8018"])(
   "does not fetch a token for an unqualified capture origin %s", async origin => {
     vi.stubEnv("VITE_API_BASE", origin);
