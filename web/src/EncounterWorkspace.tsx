@@ -127,6 +127,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [privateRecordingRequest,setPrivateRecordingRequest]=useState(0);
   const recordingHome=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
   const [privateLinkBusy,setPrivateLinkBusy]=useState(false);
+  const [privateLinkPending,setPrivateLinkPending]=useState(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
   const [faxSourceOffer,setFaxSourceOffer]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null>(null);
@@ -506,7 +507,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
-    setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPrivateLinkBusy(false);setPracticePage(authenticated?"home":"visits");
+    setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPrivateLinkBusy(false);setPrivateLinkPending(false);setPracticePage(authenticated?"home":"visits");
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
@@ -944,7 +945,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[focusFaxWork,workspace,settingsOpen,practiceOpen,panel]);
   const recoveryBlocked = !!authenticated && (!validRecoveryScope(team?.recovery_scope) ||
     !journal.current || journal.current.serverScope !== team?.recovery_scope || recoveryState === "failed");
-  const baseLocked = busy || homeBusy || privateLinkBusy || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
+  const baseLocked = busy || homeBusy || privateLinkBusy || privateLinkPending || !!pending || conflict || !!recoveryOffers.length || recoveryState === "failed" || recoveryBlocked;
   const actionLocked = baseLocked || scribeSourceBusy;
   const lockedWithoutAgentResearch = actionLocked || handoffReviewPending || schedulingPatientBusy;
   const locked = lockedWithoutAgentResearch || agentResearchBusy;
@@ -1557,7 +1558,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             notebookDirty={note!==latestNote} onNotebook={()=>{setPanel('Notebook');setMobilePanel('Notebook');}}
             taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}/>}
         {authenticated&&workspace.private_draft&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry}
-          locked={busy||homeBusy||!!pending||conflict||!!recoveryOffers.length||recoveryBlocked||captureNavigationLocked||captureDraftLocked||note!==latestNote} onBusyChange={setPrivateLinkBusy}
+          locked={busy||homeBusy||!!pending||conflict||!!recoveryOffers.length||recoveryBlocked||captureNavigationLocked||captureDraftLocked||note!==latestNote} onBusyChange={setPrivateLinkBusy} onPendingChange={setPrivateLinkPending}
           onAccessLost={failure} onSaved={latest=>{setWorkspace(latest);setMessage('Private draft linked to the confirmed visit. Your saved history is retained.');}}/>}
         {team?.revision===0&&<div hidden={settingsOpen} className="team-initial-action"><InitialTeamAction
           names={team.configuration.bots.filter(item=>item.enabled&&!item.retired).map(item=>item.name)}
