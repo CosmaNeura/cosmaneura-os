@@ -14,6 +14,9 @@ import {modelWorkApi} from './model-work-api';
 import {modelReceipt,modelUuid,retryReceipt} from './model-work-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 import { workspaceApi, WorkspaceApiError, type Workspace, type ProviderTeam, type BotRole } from "./workspace-api";
+import {listPrivateRecordings,type PrivateRecordingSnapshot} from "./private-recording-runtime";
+vi.mock("./private-recording-runtime",async original=>({...await original<typeof import("./private-recording-runtime")>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
+
 import {workspaceProtocolGeneration} from './workspace-protocol';
 
 vi.mock("./team-setup-api", async () => {
@@ -72,6 +75,30 @@ describe("private encounter workspace", () => {
     await act(async () => button!.click());
   }
   const settings = () => settingsNavigation(container);
+  it('keeps saved recordings available on Home after visit catalog navigation and withholds stale list completions',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    const recording:PrivateRecordingSnapshot={recordingId:modelUuid(901),title:'Invented saved recording',phase:'sealed',elapsedSeconds:19,recordedChunks:2,recordedBytes:608088,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};
+    let stale!:(rows:PrivateRecordingSnapshot[])=>void;
+    vi.mocked(listPrivateRecordings).mockResolvedValueOnce([recording]).mockResolvedValueOnce([recording]).mockImplementationOnce(()=>new Promise(resolve=>{stale=resolve;})).mockResolvedValue([recording]);
+    vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([]);
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    const saved=()=>container.querySelector('[aria-label="Saved private recordings"]');
+    await vi.waitFor(async()=>{await act(async()=>{});expect(saved()?.textContent).toContain('Invented saved recording');});
+    await click('Visits and notes');
+    await vi.waitFor(()=>expect(listPrivateRecordings).toHaveBeenCalledTimes(2));
+    await click('Home');
+    await vi.waitFor(async()=>{await act(async()=>{});expect(saved()?.textContent).toContain('Invented saved recording');});
+    await click('Visits and notes');
+    await vi.waitFor(()=>expect(listPrivateRecordings).toHaveBeenCalledTimes(3));
+    await click('Home');
+    await click('Visits and notes');
+    await vi.waitFor(()=>expect(listPrivateRecordings).toHaveBeenCalledTimes(4));
+    await act(async()=>stale([{...recording,title:'Obsolete recording list'}]));
+    await click('Home');
+    expect(saved()?.textContent).toContain('Invented saved recording');
+    expect(saved()?.textContent).not.toContain('Obsolete recording list');
+  });
   it('lets Home navigation escape a retained visit-link conflict while keeping the original request and blocking notebook actions',async()=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()},privateWorkspace:Workspace={id:modelUuid(701),appointment_id:null,label:'Private synthetic recording',revision:1,entries:[],work_candidates:[],private_draft:{title:'Private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
     vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
