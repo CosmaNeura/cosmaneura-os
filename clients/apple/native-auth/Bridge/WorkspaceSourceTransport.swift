@@ -54,6 +54,7 @@ final class WorkspaceSourceTransport: NSObject, ProviderNativeWire, URLSessionTa
         request.setValue("capacitor://localhost", forHTTPHeaderField: "Origin")
         #endif
         request.setValue("application/json", forHTTPHeaderField: "Accept")
+        request.setValue("1", forHTTPHeaderField: "X-Cosmas-Workspace-Protocol")
         request.setValue("2", forHTTPHeaderField: "X-Cosmas-Draft-Recovery")
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
         request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization")

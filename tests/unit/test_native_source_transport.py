@@ -102,11 +102,14 @@ def test_native_context_rejects_unbound_receipts_and_authority_changes(native_re
     }
 
 
-@pytest.mark.parametrize("omit", [None, "x-cosmas-team-contract", "x-cosmas-draft-recovery"])
+@pytest.mark.parametrize("omit", [None, "x-cosmas-team-contract", "x-cosmas-draft-recovery",
+                                  "x-cosmas-workspace-protocol"])
 def test_native_account_get_passes_actual_identity_boundary(native_requests, omit):
     wire = native_requests["native_recording_account"]
     assert wire["method"] == "GET" and wire["body_base64"] == ""
     assert wire["url"] == "https://api.example.invalid/provider-team/identity"
+    assert {key.lower(): value for key, value in wire["headers"].items()}[
+        "x-cosmas-workspace-protocol"] == "1"
     called = []
 
     def authenticate():
@@ -114,6 +117,8 @@ def test_native_account_get_passes_actual_identity_boundary(native_requests, omi
         raise HTTPException(401, "synthetic authentication boundary")
 
     app = FastAPI()
+    runtime = SimpleNamespace(workspace_hosted_enabled=True, workspace_draft_recovery_required=True)
+    app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: runtime)
     provider_identity_routes.register(app, lambda: None, authenticate, gate=lambda *args: None,
                                       reauthenticate=lambda *args: None, recovery_scope=lambda *args: None)
     headers = {key: value for key, value in wire["headers"].items() if key.lower() != omit}
