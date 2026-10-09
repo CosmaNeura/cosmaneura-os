@@ -38,6 +38,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const [snapshot,setSnapshot]=useState<PrivateRecordingSnapshot|null>(null),[error,setError]=useState(''),[notebookError,setNotebookError]=useState('');
   const [notebook,setNotebook]=useState<PrivateNotebookResult|null>(null),[audio,setAudio]=useState<string|null>(null);
   const [notebookChoices,setNotebookChoices]=useState<PrivateDraftCatalog|null>(null);
+  const [notebookWorking,setNotebookWorking]=useState(false);
   const [liveSeconds,setLiveSeconds]=useState(0),[inputSignal,setInputSignal]=useState<ReturnType<typeof presentInputSignal>|null>(null);
   const [playbackWarning,setPlaybackWarning]=useState('');
   const live=useRef(props);live.current=props;
@@ -52,10 +53,11 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const consumedReceipt=useRef<Pick<PrivateRecordingNativeReceipt,'receiptId'|'revision'>|null>(null);
   const accessStopped=useRef(false);
   const current=()=>!!owner.current?.alive&&owner.current.identity===live.current.identity&&owner.current.scope===live.current.scope&&live.current.isCurrent();
+  const notebookCurrent=(selected:NonNullable<typeof owner.current>)=>owner.current===selected&&current()&&!selected.closed;
   const clearAudio=()=>{if(audioRef.current)URL.revokeObjectURL(audioRef.current);audioRef.current=null;setAudio(null);setPlaybackWarning('');};
   function closeRuntime(selected:NonNullable<typeof owner.current>):Promise<void>{return selected.closed??(selected.closed=selected.runtime?.close()??Promise.resolve());}
   useEffect(()=>{
-    setNotebookChoices(null);
+    setNotebookChoices(null);setNotebookWorking(false);
     const selected={alive:true,identity,scope,store:null as PrivateRecordingStore|null,runtime:null as Controller|null,closed:null as Promise<void>|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;
     setPrepared(false);setPreparationError('');setSnapshot(null);setConsented(false);setError('');setNotebookError('');setNotebook(null);setLedger(null);setLedgerError('');setLedgerBusy(false);clearAudio();setTitle(props.title?.trim()||'Private recording');setLanguage(readPrivateRecordingLanguage(scope));notebookRef.current=null;accessStopped.current=false;nativeReceipt.current=null;consumedReceipt.current=null;nativeConsumed.current=false;setNativeReady(platform!=='ios');
     void(async()=>{
@@ -250,52 +252,56 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   async function close(){
     const selected=owner.current;if(activeAudio||working)return;
     setWorking(true);
-    if(selected?.runtime)try{await closeRuntime(selected);}catch{selected.closed=null;setError('The microphone stop remains unconfirmed. Keep the recording open.');setWorking(false);return;}
+    if(selected?.runtime)try{await closeRuntime(selected);}catch{selected.closed=null;setNotebookWorking(false);setError('The microphone stop remains unconfirmed. Keep the recording open.');setWorking(false);return;}
+    if(selected)selected.alive=false;
     clearAudio();props.onClose();
   }
   async function openNotebook(){
-    if(!notebook||!props.onNotebook||working||activeAudio||!current())return;
+    const selected=owner.current;
+    if(!selected||!notebook||!props.onNotebook||working||notebookWorking||activeAudio||!notebookCurrent(selected))return;
+    // Local mapping/navigation must finish before another microphone action.
+    // Catalog and notebook reads below have independent busy state.
     setWorking(true);setError('');
-    try{await owner.current?.runtime?.attachWorkspace(notebook.workspace.id,true);if(!current())return;await props.onNotebook(notebook);}
-    catch(cause){setError('The private notebook could not be opened. Your local recording is retained.');if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))props.onAccessLost?.(cause);}
-    finally{if(owner.current?.alive)setWorking(false);}
+    try{await selected.runtime?.attachWorkspace(notebook.workspace.id,true);if(!notebookCurrent(selected))return;await props.onNotebook(notebook);}
+    catch(cause){if(notebookCurrent(selected)){setError('The private notebook could not be opened. Your local recording is retained.');if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))props.onAccessLost?.(cause);}}
+    finally{if(notebookCurrent(selected))setWorking(false);}
   }
   async function chooseNotebook(workspaceId?:string){
     const selected=owner.current;
-    if(!selected?.runtime||!prepared||working||activeAudio||!current()||notebook||snapshot?.workspaceId||!snapshot?.recordedChunks)return;
-    setWorking(true);setNotebookError('');
+    if(!selected?.runtime||!prepared||working||notebookWorking||activeAudio||!notebookCurrent(selected)||notebook||snapshot?.workspaceId||!snapshot?.recordedChunks)return;
+    setNotebookWorking(true);setNotebookError('');
     try{
       if(!workspaceId){
         const choices=await workspaceApi.privateDrafts(identity);
-        if(owner.current===selected&&current())setNotebookChoices(choices);
+        if(notebookCurrent(selected))setNotebookChoices(choices);
       }else{
         if(!notebookChoices?.drafts.some(row=>row.workspace_id===workspaceId&&row.link_state==='unlinked'))throw new WorkspaceApiError(403);
         const value=await workspaceApi.openPrivateDraft(identity,workspaceId);
-        if(owner.current!==selected||!current())return;
+        if(!notebookCurrent(selected))return;
         if(value.identity!==identity||value.workspace.id!==workspaceId||value.workspace.appointment_id!==null||value.workspace.private_draft?.state!=='unlinked')throw new WorkspaceApiError(403);
         if(notebookRef.current&&notebookRef.current.workspace.id!==workspaceId)throw new WorkspaceApiError(503);
         await selected.runtime.attachWorkspace(workspaceId,true);
-        if(owner.current!==selected||!current())return;
+        if(!notebookCurrent(selected))return;
         notebookRef.current=value;setNotebook(value);setNotebookChoices(null);
       }
-    }catch(cause){if(owner.current===selected&&current()){
+    }catch(cause){if(notebookCurrent(selected)){
       setNotebookError('The private notebook could not be checked. Your saved audio is retained. Try again when your connection is ready.');
       if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))props.onAccessLost?.(cause);
-    }}finally{if(owner.current===selected&&selected.alive)setWorking(false);}
+    }}finally{if(notebookCurrent(selected))setNotebookWorking(false);}
   }
   async function retrySavedNotebook(){
     const selected=owner.current,runtime=selected?.runtime,workspaceId=runtime?.snapshot.workspaceId;
-    if(!selected?.alive||!runtime||!workspaceId||!recordingId||!prepared||working||activeAudio||!current()||notebookRef.current)return;
-    setWorking(true);setNotebookError('');
+    if(!selected?.alive||!runtime||!workspaceId||!recordingId||!prepared||working||notebookWorking||activeAudio||!notebookCurrent(selected)||notebookRef.current)return;
+    setNotebookWorking(true);setNotebookError('');
     try{
       const value=await workspaceApi.openPrivateDraft(identity,workspaceId);
-      if(owner.current!==selected||!current())return;
+      if(!notebookCurrent(selected))return;
       if(value.identity!==identity||value.workspace.id!==workspaceId||!value.workspace.private_draft||runtime.snapshot.workspaceId!==workspaceId)throw new WorkspaceApiError(503);
       notebookRef.current=value;setNotebook(value);
-    }catch(cause){if(owner.current===selected&&current()){
+    }catch(cause){if(notebookCurrent(selected)){
       setNotebookError('The saved notebook could not be opened. Try again when your connection is ready; your recording and its notebook link are retained.');
       if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))props.onAccessLost?.(cause);
-    }}finally{if(owner.current===selected&&selected.alive)setWorking(false);}
+    }}finally{if(notebookCurrent(selected))setNotebookWorking(false);}
   }
   const mayResume=snapshot&&['paused','interrupted'].includes(snapshot.phase);
   if(owner.current&&!current())return <section className="private-recording-panel" aria-label="Private Scribe recording">
@@ -328,17 +334,17 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     </div>}
     {activeAudio&&<div className="private-recording-actions"><button disabled={snapshot?.phase!=='recording'} onClick={()=>void halt(false)}>Pause recording</button><button className="team-primary" onClick={()=>void halt(true)}>Stop and save recording</button></div>}
     {snapshot&&!activeAudio&&<div className="private-recording-actions">{snapshot.phase!=='sealed'&&<button disabled={working} onClick={()=>void halt(true)}>Finish and save recording</button>}<button disabled={working||!snapshot.recordedChunks||!current()} onClick={()=>void playback()}>Play saved recording</button>
-      {notebook&&props.onNotebook&&<button disabled={working||!current()} onClick={()=>void openNotebook()}>Open private notebook</button>}</div>}
+      {notebook&&props.onNotebook&&<button disabled={working||notebookWorking||!current()} onClick={()=>void openNotebook()}>Open private notebook</button>}</div>}
     {snapshot&&!activeAudio&&!notebook&&!snapshot.workspaceId&&snapshot.recordedChunks>0&&props.onNotebook&&<aside className="private-recording-notebook" aria-label="Connect saved recording to notebook">
       <p>This recording has no confirmed notebook link. Choose an existing private notebook; saved audio stays on this device.</p>
-      <button disabled={working||!prepared} onClick={()=>void chooseNotebook()}>Choose private notebook</button>
-      {notebookChoices&&<div>{notebookChoices.drafts.filter(row=>row.link_state==='unlinked').map(row=><button key={row.workspace_id} disabled={working} onClick={()=>void chooseNotebook(row.workspace_id)}>Use notebook: {row.title}</button>)}
+      <button disabled={working||notebookWorking||!prepared} onClick={()=>void chooseNotebook()}>Choose private notebook</button>
+      {notebookChoices&&<div>{notebookChoices.drafts.filter(row=>row.link_state==='unlinked').map(row=><button key={row.workspace_id} disabled={working||notebookWorking} onClick={()=>void chooseNotebook(row.workspace_id)}>Use notebook: {row.title}</button>)}
         {!notebookChoices.drafts.some(row=>row.link_state==='unlinked')&&<p>No available private notebooks. Close recording and check any earlier note creation on Home.</p>}
       </div>}
     </aside>}
-    {recordingId&&snapshot&&!activeAudio&&!notebook&&notebookError&&snapshot.workspaceId&&props.onNotebook&&<aside className="private-recording-notebook" aria-label="Recover saved recording notebook">
+    {recordingId&&snapshot&&!activeAudio&&!notebook&&(notebookError||notebookWorking)&&snapshot.workspaceId&&props.onNotebook&&<aside className="private-recording-notebook" aria-label="Recover saved recording notebook">
       <p>Your recording is linked to a private notebook. Its notebook could not yet be opened; saved audio remains available on this device.</p>
-      <button disabled={working||!prepared} onClick={()=>void retrySavedNotebook()}>Retry opening private notebook</button>
+      <button disabled={working||notebookWorking||!prepared} onClick={()=>void retrySavedNotebook()}>Retry opening private notebook</button>
     </aside>}
     {notebook&&<aside className="private-recording-notebook" aria-label="Notebook recording status"><p role="status">{ledger?.state==='finished'?'Recording details saved to your private notebook':ledger?.state==='attached'?'Recording linked to your private notebook':ledger?'Notebook recording status unconfirmed':ledgerBusy?'Checking notebook recording status':snapshot&&['recording','paused','sealed','interrupted'].includes(snapshot.phase)?'Recording details not yet saved to your notebook':'Waiting for recording to start'} · audio remains on this device; not synced or transcribed.</p>
       {recordingId&&!ledger&&snapshot&&['sealed','interrupted'].includes(snapshot.phase)&&snapshot.recordedChunks>0&&<button disabled={ledgerBusy} onClick={()=>synchronizeLedger('save')}>Save recording details to notebook</button>}
@@ -346,6 +352,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       {ledger&&['attach_pending','finish_pending'].includes(ledger.state)&&<button disabled={ledgerBusy} onClick={()=>synchronizeLedger('check')}>Check saved recording result</button>}
       {ledger?.retry_ready&&<button disabled={ledgerBusy} onClick={()=>synchronizeLedger('retry')}>Retry original recording request</button>}
       {ledgerError&&<p role="status">{ledgerError}</p>}</aside>}
+    {notebookWorking&&<p role="status">Checking private notebook…{!activeAudio&&!working?' You can play this recording or close it while you wait.':''}</p>}
     {audio&&current()&&<audio controls src={audio} aria-label="Saved private recording playback"/>}
     {playbackWarning&&<p role="status">{playbackWarning}</p>}
     {preparationError&&<p role="alert">{preparationError}</p>}{nativeError&&<p role="alert">{nativeError}</p>}{error&&<p role="alert">{error}</p>}{notebookError&&<p role="status">{notebookError}</p>}
