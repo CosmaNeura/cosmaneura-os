@@ -1025,9 +1025,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     // requests neither microphone access nor consent and starts no recording.
     void prewarmPrivateRecordingNative({scope,revision}).catch(()=>{});
   },[authenticated,accountScopeReady,editorJournal,editorScope]);
+  const privateRecordingGeneration=generation.current;
   useEffect(()=>{
     if(!authenticated||!accountAccess||!accountScopeReady||!journal.current)return;
-    const {scope,value:currentJournal,serverScope}=journal.current,currentGeneration=generation.current;let active=true;
+    const {scope,value:currentJournal,serverScope}=journal.current,currentGeneration=privateRecordingGeneration;let active=true;
     void listPrivateRecordings(scope,privateRecordingPlatform).then(rows=>{
       const live=privateRecordingLive.current;
       if(active&&live.authenticated===authenticated&&live.generation===currentGeneration&&
@@ -1035,7 +1036,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         setPrivateRecordings({identity:authenticated,scope,generation:currentGeneration,rows});
     }).catch(()=>{if(active)setPrivateRecordings(null);});
     return()=>{active=false;};
-  },[authenticated,accountAccess,accountScopeReady,privateRecordingPlatform,privateRecordingListEpoch]);
+  },[authenticated,accountAccess,accountScopeReady,privateRecordingPlatform,privateRecordingListEpoch,privateRecordingGeneration]);
   function startPrivateRecording(input:{title:string;prepareNotebook:()=>Promise<PrivateNotebookResult>}){
     if(!authenticated||!accountAccess||!journal.current||privateRecordingEntry||connectionNavigationLocked||busy||captureNavigationLocked||captureDraftLocked)return;
     const current=journal.current;
