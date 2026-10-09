@@ -4,6 +4,8 @@ import {afterEach,expect,it,vi} from 'vitest';
 import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {PrivateRecordingRuntime} from './private-recording-runtime';
+import {PrivateRecordingPanel} from './PrivateRecordingPanel';
+import {workspaceApi} from './workspace-api';
 import type {PrivateRecordingReceipt} from './private-recording-api';
 import {BrowserMicrophoneCaptureSource} from '../../clients/capture/src/audio/browser-microphone-source';
 import {EncounterWorkspace} from './EncounterWorkspace';
@@ -120,6 +122,26 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings\/[^/]+\/finish$/.test(call.path))).toHaveLength(1);
   expect(metadataReceipts.at(-1)).toMatchObject({workspace_id:workspaceId,local_recording_id:saved.recordingId,state:'finished',audio_uploaded:false,transcription_started:false,upstream_capture_admitted:false});
+  // A second actual PCM clip has no automatic notebook preparation. Recover
+  // it by explicitly selecting the existing notebook and saving its metadata.
+  await act(async()=>root!.unmount());root=createRoot(container);
+  const recoveredNotebook=await workspaceApi.openPrivateDraft(identity,workspaceId);
+  const panelProps={identity,scope:recoveredNotebook.team.recovery_scope!,platform:'desktop' as const,isCurrent:()=>true,onClose:()=>{},onNotebook:async()=>{}};
+  await act(async()=>root!.render(<PrivateRecordingPanel {...panelProps}/>));
+  await act(async()=>container.querySelector<HTMLInputElement>('.private-recording-check input')!.click());await click('Start recording');
+  await wait(()=>expect(container.querySelector('.private-recording-status strong')?.textContent).toBe('Recording'));
+  hardware.worklet.emit(new Float32Array(1600).fill(0.25));await click('Stop and save recording');
+  await wait(()=>expect(container.querySelector('.private-recording-status strong')?.textContent).toBe('Saved on this device'));
+  const orphan=runtimes.at(-1)!.snapshot;expect(orphan.workspaceId).toBeNull();expect(orphan.recordedChunks).toBe(1);
+  await act(async()=>root!.unmount());root=createRoot(container);await act(async()=>root!.render(<PrivateRecordingPanel {...panelProps} recordingId={orphan.recordingId}/>));
+  await click('Choose private notebook');await click('Use notebook: Private recording');
+  expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(1);
+  await click('Save recording details to notebook');await wait(()=>expect(container.textContent).toContain('Recording details saved to your private notebook'));
+  await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(3));
+  expect(new DataView(await playbacks[2].arrayBuffer()).getInt16(44,true)).toBe(8192);
+  expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
+  expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(2);
+  expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings\/[^/]+\/finish$/.test(call.path))).toHaveLength(2);
   const elapsed=performance.now()-started;
   const fs='node:fs/promises';const {writeFile}=await import(/* @vite-ignore */fs) as {writeFile:(path:string,text:string)=>Promise<void>};
   await writeFile(environment!.COSMAS_PRIVATE_SCRIBE_LAB_REPORT!,JSON.stringify({completed:true,synthetic_only:true,actual_signed_api:true,actual_DOM_controls:true,hardware_simulated:true,actual_browser_capture_adapter:true,production_encrypted_indexeddb:true,microphone_started_before_create_response:microphoneStartedBeforeCreateResponse,recording:{recording_id:saved.recordingId,workspace_id:workspaceId,chunks:saved.recordedChunks,wav_sha256:wavSha},reopened_wav_sha256:reopenedSha,timings:{ready_to_select_ms:selectedAt-readyAt,select_to_adapter_start_ms:adapterStartedAt-selectedAt,consent_to_adapter_start_ms:adapterStartedAt-consentAt,private_create_complete_ms:calls.find(c=>c.method==='POST'&&c.path==='/workspaces/private-drafts')!.completed_at_ms-selectedAt},automated_elapsed_ms:elapsed,real_users_tested:false,physical_devices_tested:false,phone_visual_or_native_qualified:false,provider_io_performed:false,calls},null,2)+'\n');

@@ -5,7 +5,9 @@ import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import type {CaptureSource,CaptureSourceStartOptions} from '../../clients/capture/src/capture/source';
 import {PrivateRecordingPanel,type PrivateRecordingPanelProps,type PrivateNotebookResult} from './PrivateRecordingPanel';
 import {PrivateRecordingRuntime,openPrivateRecordingStore,listPrivateRecordings,type PrivateRecordingNativeReceipt} from './private-recording-runtime';
-import {WorkspaceApiError} from './workspace-api';
+import {workspaceApi,WorkspaceApiError} from './workspace-api';
+import {privateRecordingApi,type PrivateRecordingReceipt,type PrivateRecordingIntent} from './private-recording-api';
+import {vendorCanonical,vendorSha256} from './vendor-contract';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const {Blob:NodeBlob}=await vi.importActual<{Blob:typeof Blob}>('node:buffer');
 const scope='b'.repeat(64),id='00000000-0000-4000-8000-000000000001';
@@ -36,7 +38,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
       runtimeFactory:async(options,input)=>{const runtime=await PrivateRecordingRuntime.open({...options,createSource:async()=>{const source=new PcmSource();sources.push(source);return source;},acquireLock:async()=>async()=>{}},input);runtimes.push(runtime);return runtime;}};
     container=document.createElement('div');document.body.append(container);root=createRoot(container);
   });
-  afterEach(async()=>{sources.forEach(s=>s.rejectStop=false);await act(async()=>root.unmount());for(const runtime of runtimes)await runtime.close().catch(()=>{});container.remove();vi.unstubAllGlobals();});
+  afterEach(async()=>{sources.forEach(s=>s.rejectStop=false);await act(async()=>root.unmount());for(const runtime of runtimes)await runtime.close().catch(()=>{});container.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
   async function wait(check:()=>boolean,timeout=1000){const end=performance.now()+timeout;while(!check()&&performance.now()<end)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});expect(check()).toBe(true);}
   const status=()=>container.querySelector('.private-recording-status strong')?.textContent;
   async function render(){await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>['Ready for consent','Checking this device’s recording access','Saved on this device'].includes(container.querySelector('.private-recording-status strong')?.textContent??''));}
@@ -190,5 +192,38 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(recovery.mock.calls.map(([,input])=>input.recordingId)).toEqual([recordingId,recordingId]);expect(runtimes.at(-1)!.snapshot).toMatchObject({recordingId,recordedChunks:1,phase:'sealed'});expect(sources).toHaveLength(1);
     await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);
     expect(new DataView(await (createUrl.mock.calls[0][0] as Blob).arrayBuffer()).getInt16(44,true)).toBe(84);
+  });
+  it('connects an unlinked saved clip by explicit selection and saves metadata without rerecording or automatic POST on reopen',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));
+    await click('Stop and save recording');await wait(()=>status()==='Saved on this device');const recordingId=runtimes[0].snapshot.recordingId;
+    await act(async()=>root.unmount());root=createRoot(container);props={...props,recordingId};
+    const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+    const serverScope=await vendorSha256(new TextEncoder().encode(vendorCanonical({contract:'cosmas-private-drafts-v1',box_id:uuid(10),owner_id:uuid(11)})));
+    const linked={...notebook,workspace:{...notebook.workspace,revision:1},team:{...notebook.team,recovery_scope:serverScope,
+      configuration:{practice_context:'',bots:[{role:'scribe' as const,name:'Scribe',enabled:true,response_style:'brief' as const,include_notebook:true,include_evidence:true}]},
+      members:[{role:'scribe' as const,agent_id:uuid(12),name:'Scribe',initials:'S',description:'',prompt:'',capabilities:[]}]}};
+    const catalog=vi.spyOn(workspaceApi,'privateDrafts').mockResolvedValue({contract_version:1,has_more:false,drafts:[{workspace_id:id,title:'Synthetic test notebook',revision:1,created_at:new Date().toISOString(),link_state:'unlinked',appointment_id:null}]});
+    const open=vi.spyOn(workspaceApi,'openPrivateDraft').mockResolvedValue(linked);
+    let receipt!:PrivateRecordingReceipt;
+    const attach=vi.spyOn(privateRecordingApi,'attach').mockImplementation(async(_identity,v:PrivateRecordingIntent)=>receipt={contract:'cosmas.private-recording.v1',custody:'local_device_metadata',recording_id:uuid(3),local_recording_id:recordingId,workspace_id:id,workspace_revision:1,owner_id:uuid(11),box_id:uuid(10),agent_id:uuid(12),team_revision_id:uuid(13),recovery_scope:serverScope,attach_sha256:v.request_sha256,started_at:v.request.started_at,created_at:new Date().toISOString(),state:'unfinished',finish:null,link:null,upstream_capture_admitted:false,audio_uploaded:false,transcription_started:false});
+    const finish=vi.spyOn(privateRecordingApi,'finish').mockImplementation(async(_identity,_v,_team,_id,f)=>receipt={...receipt,state:'finished',finish:{receipt_id:uuid(4),request_sha256:f.request_sha256,manifest_sha256:f.request.manifest_sha256,chunks:f.request.chunks,frames:f.request.frames,ended_at:f.request.ended_at}});
+    await render();expect(catalog).not.toHaveBeenCalled();expect(attach).not.toHaveBeenCalled();
+    await click('Choose private notebook');await wait(()=>container.textContent?.includes('Use notebook: Synthetic test notebook')===true);
+    expect(open).not.toHaveBeenCalled();await click('Use notebook: Synthetic test notebook');await wait(()=>container.textContent?.includes('Save recording details to notebook')===true);
+    expect(open).toHaveBeenCalledExactlyOnceWith(identity,id);expect(runtimes.at(-1)!.snapshot.workspaceId).toBe(id);expect(attach).not.toHaveBeenCalled();await wait(()=>!button('Save recording details to notebook').disabled);
+    await click('Save recording details to notebook');await wait(()=>finish.mock.calls.length>0);expect(container.textContent).toContain('Recording details saved to your private notebook');
+    expect(attach).toHaveBeenCalledOnce();expect(finish).toHaveBeenCalledOnce();expect(sources).toHaveLength(1);
+    await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);expect(new DataView(await (createUrl.mock.calls[0][0] as Blob).arrayBuffer()).getInt16(44,true)).toBe(84);
+    await act(async()=>root.unmount());root=createRoot(container);props={...props,prepareNotebook:async()=>linked};await render();
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true);expect(attach).toHaveBeenCalledOnce();expect(finish).toHaveBeenCalledOnce();expect(sources).toHaveLength(1);
+  });
+  it('withholds a saved-notebook selection result after account access changes',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk());await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    let finish!:(value:PrivateNotebookResult)=>void;
+    vi.spyOn(workspaceApi,'privateDrafts').mockResolvedValue({contract_version:1,has_more:false,drafts:[{workspace_id:id,title:'Synthetic test notebook',revision:1,created_at:new Date().toISOString(),link_state:'unlinked',appointment_id:null}]});
+    vi.spyOn(workspaceApi,'openPrivateDraft').mockImplementation(()=>new Promise(resolve=>finish=resolve));
+    await click('Choose private notebook');await wait(()=>container.textContent?.includes('Use notebook: Synthetic test notebook')===true);await click('Use notebook: Synthetic test notebook');
+    props={...props,isCurrent:()=>false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await act(async()=>finish(notebook));
+    expect(runtimes[0].snapshot.workspaceId).toBeNull();expect(container.textContent).not.toContain('Open private notebook');expect(sources).toHaveLength(1);expect(opened).not.toHaveBeenCalled();
   });
 });
