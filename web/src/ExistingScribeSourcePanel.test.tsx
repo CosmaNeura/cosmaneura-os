@@ -79,6 +79,14 @@ it('keeps unavailable recording and unavailable recovery distinct',async()=>{
   vi.mocked(readExistingScribeSource).mockResolvedValue({contract_version:1,workspace_id:wid,status:'not_prepared',review:null,selection:null});
   await mount();await click('Use a Scribe recording');expect(host.textContent).toContain('No Scribe recording is linked');expect(button('Use this version with my team')).toBeUndefined();
 });
+it('explains a conflicting visit connection without suggesting another blind retry',async()=>{
+  vi.mocked(readExistingScribeSource).mockRejectedValue(new BffResponseError(409,'capture_request_conflict',null));
+  await mount();await click('Use a Scribe recording');
+  expect(host.textContent).toContain('saved recording connection for this visit needs attention');
+  expect(host.textContent).toContain('Reference: capture_request_conflict');
+  expect(host.textContent).not.toContain('The recording could not be loaded. Check');
+  expect(saveScribeSourcePacket).not.toHaveBeenCalled();
+});
 it('explains an already-shared transcript without inventing a second save',async()=>{
   vi.mocked(saveScribeSourcePacket).mockRejectedValueOnce(new BffResponseError(409,'scribe_source_already_saved',null));
   await mount();await click('Use a Scribe recording');await act(async()=>host.querySelector<HTMLInputElement>('input')!.click());await click('Use this version with my team');

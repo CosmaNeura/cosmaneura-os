@@ -1563,6 +1563,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             locked={locked} notesEnabled={CAPTURE_NOTES_BUILD&&team.capture?.notes_enabled===true} onDraftLock={setCaptureDraftLocked}
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} scratchpad={workspace.entries.filter(e=>e.kind==='scratchpad').at(-1)}
             notebookDirty={note!==latestNote} onNotebook={()=>{setPanel('Notebook');setMobilePanel('Notebook');}}
+            onRecordings={goHome} onNavigationLock={setCaptureNavigationLocked}
             taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}/>}
         {authenticated&&workspace.private_draft&&!savedRecordingEntry&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry}
           locked={busy||homeBusy||!!pending||conflict||!!recoveryOffers.length||recoveryBlocked||captureNavigationLocked||captureDraftLocked||note!==latestNote} onBusyChange={setPrivateLinkBusy} onPendingChange={setPrivateLinkPending}
