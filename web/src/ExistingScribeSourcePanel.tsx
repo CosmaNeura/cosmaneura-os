@@ -45,6 +45,7 @@ export function ExistingScribeSourcePanel({workspace,identity,locked,onSaved,onB
     else if(code==='scribe_source_changed')setMessage('Scribe has a newer version. Check the recording again and review that version before sharing.');
     else if(code==='workspace_revision_conflict')setMessage('The encounter changed. Refresh the encounter, then check the recording again.');
     else if(code==='workspace_history_limit')setMessage('This encounter’s saved-source limit has been reached. Keep the transcript in Scribe and ask your practice administrator for help.');
+    else if(code==='capture_request_conflict')setMessage('Scribe’s saved recording connection for this visit needs attention. Your saved audio and visit notes are retained. Ask for help with this visit’s recording connection. Reference: capture_request_conflict.');
     else if(cause instanceof DraftStoreError)setMessage('The request could not be saved securely on this device. Recheck recovery before continuing.');
     else setMessage(saveUnconfirmed?'The save could not be confirmed. Keep this screen open and check the saved result.':'The recording could not be loaded. Check the Scribe recording again.');
   }
