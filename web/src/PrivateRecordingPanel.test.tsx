@@ -47,6 +47,15 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
   async function consent(){
     const check=container.querySelector<HTMLInputElement>('input[type=checkbox]')!;await act(async()=>check.click());
   }
+  it('shows saved-recording recovery without new-recording consent while access is pending',async()=>{
+    let release!:()=>void;props={...props,recordingId:id,authorize:()=>new Promise<void>(resolve=>release=resolve)};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    expect(status()).toBe('Opening saved recording…');expect(container.querySelector('h1')?.textContent).toBe('Private recording');
+    expect(container.querySelector('input[type=checkbox]')).toBeNull();expect(container.textContent).not.toContain('Start recording');
+    expect(container.textContent).toContain('Play your saved recording');expect(sources).toHaveLength(0);expect(fetch).not.toHaveBeenCalled();
+    await click('Close recording');expect(close).toHaveBeenCalledOnce();
+    await act(async()=>root.unmount());root=createRoot(container);await act(async()=>release());
+  });
   it('shows microphone state before the first saved chunk and reports exact-zero saved audio',async()=>{
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
     expect(container.textContent).toContain('Microphone on');expect(container.textContent).toContain('0:00 saved');expect(sources[0].stops).toBe(0);
