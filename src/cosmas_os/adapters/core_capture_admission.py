@@ -198,6 +198,7 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
                         (503, "CAPTURE_NOTES_UNAVAILABLE"): "capture_notes_unavailable",
                         (409, "CAPTURE_OPERATION_UNAVAILABLE"): "capture_source_unavailable",
                         (409, "CAPTURE_OPERATION_CONFLICT"): "capture_request_conflict",
+                        (409, "UPLOAD_AUTHORIZATION_EXPIRED"): "upload_authorization_expired",
                     }
                     raise CoreAdmissionUnavailable(
                         known.get((response.status_code, code), "core_capture_request_unconfirmed")

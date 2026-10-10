@@ -36,6 +36,18 @@ KINDS = [
 ]
 
 
+def test_closed_upload_expiry_is_preserved_without_exposing_details():
+    def handler(request):
+        return httpx.Response(409, json={"code": "UPLOAD_AUTHORIZATION_EXPIRED"}, headers={"Cache-Control": "no-store", "X-Cosmaneura-Capture-Version": "1"})
+
+    adapter = HttpCoreCaptureAdmission("https://core.test.invalid", lambda: "synthetic", now=lambda: NOW)
+    adapter._client.close()
+    adapter._client = httpx.Client(transport=httpx.MockTransport(handler))
+    with pytest.raises(ConnectorUnavailable, match="^upload_authorization_expired$"):
+        adapter._request("/service/v1/agent/scribe/capture-operations", {}, {}, 200, ("X-Cosmaneura-Capture-Version", "1"))
+    adapter._client.close()
+
+
 def packet(kind, session):
     if kind in {"creator_review", "decide_translation"}:
         golden = json.loads((Path(__file__).parents[1] / "fixtures/creator_review.json").read_text())
