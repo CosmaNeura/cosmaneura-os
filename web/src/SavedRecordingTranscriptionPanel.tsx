@@ -63,6 +63,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const origin=entry.originWorkspace??workspace;
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[consented,setConsented]=useState(false),[error,setError]=useState('');
   const [renewConsent,setRenewConsent]=useState(false);
+  const [uploadProgress,setUploadProgress]=useState<Awaited<ReturnType<Runtime['uploadProgress']>>|null>(null);
   const [clipDate,setClipDate]=useState<string|null>(null);
   const [recovery,setRecovery]=useState<ReturnType<typeof savedTranscriptionRecovery>>(null);
   const [transfer,setTransfer]=useState<Transfer|null>(null),[snapshot,setSnapshot]=useState<Runtime['controller']['snapshot']|null>(null);
@@ -105,7 +106,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     if(opened.reviewOnly)setSnapshot({...opened.controller.snapshot,state:'processing',sessionId:admitted.session_id});
   }
   async function transcribe(){if(!ready||flight.current||locked||recovery?.retry===false||!workspace.appointment_id||!taskBot?.enabled||(!saved.current?.admission||renewConsent)&&!consented)return;
-    flight.current=true;setBusy(true);setError('');
+    flight.current=true;setBusy(true);setError('');setUploadProgress(null);
     try{
       need(current()&&owner.current);const selected=owner.current;
       const ledger=new PrivateRecordingLedgerController({identity,team,workspace:origin,store:selected.store,scope:entry.scope,isCurrent:current});
@@ -157,6 +158,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
         if(current())setSnapshot(null);
       }
       if(current()){
+      if(selected?.runtime){const progress=await selected.runtime.uploadProgress().catch(()=>null);if(current())setUploadProgress(progress);}
       const code=cause&&typeof cause==='object'&&'code'in cause?cause.code:'';
       if(code==='capture_recording_consent_required'&&!saved.current?.admitted){
         setRenewConsent(true);setConsented(false);setRecovery(null);
@@ -181,7 +183,8 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       {!processing&&recovery?.retry!==false&&<button className="team-primary" disabled={!ready||busy||locked||!taskBot?.enabled||(!transfer?.admission||renewConsent)&&!consented} onClick={()=>void transcribe()}>{busy?'Sending saved recording…':renewConsent?'Send recording with confirmed consent':transfer?.admission?'Continue transcription':'Transcribe recording'}</button>}
       {!taskBot?.enabled&&<p role="status">Enable Scribe in team settings to transcribe this recording. Your audio is saved.</p>}
     </>}
-    {snapshot&&<p role="status">{showDraft?'Review and edit your visit note below.':review?.working?.note_ready?'Transcript ready. Review it, then continue to your note.':processing?'Audio uploaded. Scribe is preparing your transcript.':`Preparing your saved recording… ${Math.floor(snapshot.recordedChunks/Math.max(1,transfer?.admission?.source.chunks??1)*100)}%`}</p>}
+    {snapshot&&<p role="status">{showDraft?'Review and edit your visit note below.':review?.working?.note_ready?'Transcript ready. Review it, then continue to your note.':processing?'Audio uploaded. Scribe is preparing your transcript.':uploadProgress?`${uploadProgress.confirmed} of ${uploadProgress.total} audio parts confirmed by Scribe. Your recording is saved.`:snapshot.recordedChunks===(transfer?.admission?.source.chunks??0)?'Audio prepared. Sending it securely to Scribe…':`Preparing your saved recording… ${Math.floor(snapshot.recordedChunks/Math.max(1,transfer?.admission?.source.chunks??1)*100)}%`}</p>}
+    {error&&uploadProgress?.reference&&<details><summary>Support details</summary><p>Upload status: <code>{uploadProgress.reference}</code></p></details>}
     {error&&<p role="alert">{error}</p>}
     {recovery&&<div className="capture-actions">
       {onRecordings&&<button className="team-primary" disabled={busy||locked} onClick={onRecordings}>Return to recordings</button>}

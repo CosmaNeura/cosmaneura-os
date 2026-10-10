@@ -5,7 +5,8 @@ import {SavedRecordingTranscriptionPanel} from './SavedRecordingTranscriptionPan
 import {prepareCapture} from './capture-api';
 import {BffResponseError} from '../../clients/capture/src/bff/http-client';
 import type {ProviderTeam,Workspace} from './workspace-api';
-const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn()}));
+const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn()}));
+vi.mock('./saved-recording-runtime',()=>({openSavedRecordingRuntime:mocks.savedRuntime}));
 vi.mock('./private-recording-runtime',()=>({openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close}),PrivateRecordingRuntime:{open:mocks.open}}));
 vi.mock('./private-recording-ledger',()=>({PrivateRecordingLedgerController:class{readCurrent=mocks.ledger;}}));
 vi.mock('./private-recording-api',()=>({parsePrivateRecordingReceipt:async()=>{},parseRecordingVisitBinding:async()=>{},privateRecordingApi:{read:async()=>receipt}}));
@@ -51,6 +52,20 @@ it('keeps the exact retry for an uncertain response without exposing private err
   expect(button('Continue transcription')?.disabled).toBe(false);expect(host.textContent).not.toContain('private-response-must-not-appear');
   await act(async()=>button('Continue transcription')!.click());
   expect(vi.mocked(prepareCapture).mock.calls[0]).toEqual(vi.mocked(prepareCapture).mock.calls[1]);
+});
+
+it('distinguishes prepared audio from confirmed upload and shows only the support reference',async()=>{
+  (stored as {admitted:unknown}).admitted={status:'prepared',workspace_id:id(1),session_id:id(7),consent_record_id:id(8),configured_capture:{schema_version:'1.0',language_mode:'en-US'}};
+  const snapshot={state:'uploading',recordedChunks:1};
+  mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},
+    transcribe:vi.fn().mockRejectedValue(new Error('private error content')),
+    uploadProgress:async()=>({confirmed:0,total:1,reference:'chunk_receipt_response_503'}),close:async()=>{}});
+  await mount();expect(host.textContent).toContain('Audio prepared. Sending it securely');
+  await act(async()=>button('Continue transcription')!.click());
+  expect(host.textContent).toContain('0 of 1 audio parts confirmed by Scribe');
+  expect(host.textContent).toContain('chunk_receipt_response_503');
+  expect(host.textContent).not.toContain('private error content');
+  expect(button('Continue transcription')?.disabled).toBe(false);
 });
 
 it('requires fresh explicit consent only after a definite no-admission result and retains earlier intent across reopen',async()=>{

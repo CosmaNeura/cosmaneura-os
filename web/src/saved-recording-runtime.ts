@@ -42,6 +42,7 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
   scope:string;recording:PrivateRecordingRuntime;chunks:number;platform:'ios'|'desktop';isCurrent:()=>boolean}){
   const {workspaceId,admitted,identity}=options,sessionId=admitted.session_id;
   const abort=new AbortController();let active=true,task:Promise<void>|null=null;
+  let reference:string|null=null;
   const current=()=>active&&!abort.signal.aborted&&options.isCurrent();
   const unlock=await acquireCaptureFlowLock();
   let flow:EncryptedIndexedDbFlowStore;
@@ -56,10 +57,18 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     queue=await openCaptureQueueStorage(sessionId,sessionId,options.platform==='ios');
     await profiles.claimQueueStorageKind(sessionId,queue.kind);
     const source=new SavedRecordingSource(options.recording,current);
-    const bff=workspaceCaptureBff(workspaceId,sessionId,identity,abort.signal);
+    const bff=workspaceCaptureBff(workspaceId,sessionId,identity,abort.signal,(kind,status)=>{
+      // Both values come from this closed operation adapter, never a response body.
+      reference=`${kind}_response_${status}`;
+    });
     const origins=String(import.meta.env.VITE_CAPTURE_UPLOAD_ORIGINS??'').split(',').map(v=>v.trim()).filter(Boolean);
-    const upload=new HttpCiphertextUploadTarget(origins,(input,init)=>fetch(input,{...init,
-      signal:init?.signal?AbortSignal.any([init.signal,abort.signal]):abort.signal}));
+    const upload=new HttpCiphertextUploadTarget(origins,async(input,init)=>{
+      try{
+        const response=await fetch(input,{...init,signal:init?.signal?AbortSignal.any([init.signal,abort.signal]):abort.signal});
+        if(response.status!==201)reference=`audio_upload_response_${response.status}`;
+        return response;
+      }catch(error){reference='audio_upload_response_unconfirmed';throw error;}
+    });
     controller=new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:new CaptureQueue(queue.storage),source,
       queueTransport:new BffCaptureQueueTransport(bff,upload)});
     const view=await creatorReviewApi(workspaceId,sessionId,identity,abort.signal).read();
@@ -73,8 +82,17 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     const selected=controller;
     return {controller:selected,reviewOnly,transcribe:()=>{
       if(reviewOnly)return Promise.resolve();
+      if(!task)reference=null;
       return task??=(importSavedChunks(selected,source,options.chunks,current).finally(()=>{task=null;}));
     },releaseUploadedCapture:()=>reviewOnly?Promise.resolve():selected.releaseUploadedCapture(),
+    uploadProgress:async()=>{
+      const rows=await queue!.storage.listMetadata();
+      if(!current())throw new QueueInvariantError('capture_access_unavailable');
+      const terminal=rows.flatMap(row=>[row.retry.upload.terminalCode,row.retry.registration.terminalCode])
+        .find(code=>code==='upload_rejected'||code==='upload_target_rejected'||code==='chunk_receipt_reservation_mismatch'||code==='registration_receipt_mismatch');
+      return {confirmed:rows.filter(row=>row.reservation.sessionId===sessionId&&(row.state==='registered'||row.state==='purged')).length,
+        total:options.chunks,reference:reference??terminal??null};
+    },
     close:async()=>{if(!active)return;active=false;abort.abort();await source.stop();await task?.catch(()=>{});
       try{await selected.deactivate();}finally{flow.close();profiles.close();queue?.close();await unlock();}}};
   }catch(error){active=false;abort.abort();try{await controller?.deactivate();}finally{flow.close();profiles.close();queue?.close();await unlock();}throw error;}
