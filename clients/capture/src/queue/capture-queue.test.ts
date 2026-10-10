@@ -28,6 +28,48 @@ const TENANT_ID = "20000000-0000-4000-8000-000000000002";
 const REGISTERED_AT = "2026-08-17T12:00:00.000Z";
 
 describe("CaptureQueue", () => {
+  it.each(['retry', 'registered', 'read_failure', 'mismatched_receipt', 'foreign_session', 'policy_rejection', 'registration_blocked'] as const)(
+    'reconciles explicit repaired-upload recovery without changing custody: %s', async kind => {
+      const h = await createHarness(), reservation = makeReservation(0);
+      await h.queue.reserve(reservation, 'retained-reservation');
+      await h.queue.encrypt(reservation.objectId, makeEnvelope(7));
+      await h.queue.drainOnce(successfulTransport(() => h.now.value, {
+        ...(kind === 'registration_blocked'
+          ? { register: async () => { throw new QueueTransportError('terminal', 'registration_receipt_mismatch'); } }
+          : { upload: async () => { throw new QueueTransportError('terminal', kind === 'policy_rejection' ? 'upload_target_rejected' : 'upload_rejected'); } }),
+      }));
+      const before = await h.queue.get(reservation.objectId);
+      if (!before || !('envelope' in before)) throw Error('retained envelope required');
+      const receipt = { chunkId: '30000000-0000-4000-8000-000000000001', sha256: before.sha256,
+        byteLength: before.byteLength, registeredAt: REGISTERED_AT };
+      const transport = successfulTransport(() => h.now.value, { receipt: async () => {
+        if (kind === 'read_failure') throw new QueueTransportError('retryable', 'bff_temporarily_unavailable');
+        if (kind === 'registered' || kind === 'mismatched_receipt') return { state: 'registered',
+          registration: { ...receipt, ...(kind === 'mismatched_receipt' ? { sha256: 'f'.repeat(64) } : {}) } };
+        return { state: 'reserved' };
+      } });
+      const recovery = h.queue.retryRejectedUploads(kind === 'foreign_session' ? '90000000-0000-4000-8000-000000000001' : SESSION_ID, transport);
+      if (kind === 'read_failure' || kind === 'mismatched_receipt') await expect(recovery).rejects.toMatchObject({
+        code: kind === 'read_failure' ? 'bff_temporarily_unavailable' : 'registration_receipt_mismatch' });
+      else await recovery;
+      const after = await h.queue.get(reservation.objectId);
+      if (kind === 'retry' || kind === 'registered') {
+        expect(after).toMatchObject({ reservation: before.reservation, idempotencyKeys: before.idempotencyKeys,
+          envelope: before.envelope, sha256: before.sha256, byteLength: before.byteLength });
+        expect(after?.retry.upload.terminalCode).toBeNull();
+        expect(after?.state).toBe(kind === 'registered' ? 'registered' : 'uploading');
+      } else expect(after).toEqual(before);
+      expect(transport.upload).not.toHaveBeenCalled(); expect(transport.register).not.toHaveBeenCalled();
+      expect(transport.authorizeUpload).not.toHaveBeenCalled();
+      if (kind === 'retry') {
+        await h.queue.drainOnce(transport);
+        expect(await h.queue.get(reservation.objectId)).toMatchObject({ state: 'registered', idempotencyKeys: before.idempotencyKeys });
+        expect(transport.upload).toHaveBeenCalledWith(expect.any(String), before.envelope);
+        expect(transport.authorizeUpload).toHaveBeenCalledWith(SESSION_ID, reservation.objectId, before.idempotencyKeys.uploadAuthorization);
+      }
+      h.storage.close();
+    });
+
   it("reopens 1080 retained chunks and retries an unknown registration without bulk payload reads", async () => {
     const options = { indexedDB: new IDBFactory(), databaseName: TEST_CRYPTO.randomUUID(), crypto: TEST_CRYPTO };
     let storage = await EncryptedIndexedDbQueueStorage.open(options), now = 0;
