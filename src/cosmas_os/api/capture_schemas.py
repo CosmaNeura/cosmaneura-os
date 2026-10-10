@@ -15,7 +15,7 @@ from cosmas_os.application.workspace import WorkspaceError
 from cosmas_os.ports.capture_protocol import CaptureOperation
 from cosmas_os.ports.core_capture import ConfiguredCaptureSelection, CoreConsentAttestation
 from cosmas_os.ports.core_notes import CoreNoteSelection
-from cosmas_os.ports.private_recording import SavedRecordingSelection
+from cosmas_os.ports.private_recording import SavedRecordingSelection, VisitBoundRecordingSelection
 from cosmas_os.ports.scribe_capture import ProtectedModel
 
 
@@ -30,7 +30,7 @@ class CaptureAdmissionRequest(ProtectedModel):
     attestation: CoreConsentAttestation | None = None
     configured_capture: ConfiguredCaptureSelection | None = None
     bot: CaptureBotSelection | None = None
-    saved_recording: SavedRecordingSelection | None = None
+    saved_recording: SavedRecordingSelection | VisitBoundRecordingSelection | None = None
 
     @model_validator(mode="after")
     def saved_audio_consent(self):

@@ -235,7 +235,7 @@ export async function openPrivateRecordingStore(scope:string,platform:'ios'|'des
   need(HASH.test(scope));
   const crypt=deps.crypto??globalThis.crypto;need(crypt?.subtle);
   const name='cosmas-private-recording:v1:'+scope;
-  const validKey=(key:string)=>/^(?:(?:manifest|ledger|transfer):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
+  const validKey=(key:string)=>/^(?:(?:manifest|ledger|transfer|visit-binding):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
   const serialize=(value:unknown)=>{const bytes=encode(value);need(bytes.length<=450000);return bytes;};
   if(platform==='ios'){
     const plugin=deps.native??(await import('../../clients/capture/plugins/secure-queue')).SecureQueue;

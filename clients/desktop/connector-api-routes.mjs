@@ -19,7 +19,7 @@ const coreRecordLocation = new RegExp(`^/workspaces/${ID}/cosmaneura-record/loca
 const research = new RegExp(`^/workspaces/${ID}/research(?:/(saved|search|resolve|${ID}/save(?:/resolve)?))?$`);
 const agentResearch = new RegExp(`^/workspaces/${ID}/agent-research(?:/(${ID})/review)?$`);
 const privateDraft = new RegExp(`^/workspaces/(?:private-drafts(?:/resolve)?|${ID}/appointment-link(?:/resolve)?)$`);
-const privateRecording = new RegExp(`^/workspaces/${ID}/private-recordings(?:/(resolve|${ID})(?:/(finish|link))?)?$`);
+const privateRecording = new RegExp(`^/workspaces/${ID}/private-recordings(?:/(resolve|${ID})(?:/(finish|link|visit-binding))?)?$`);
 const googleCalendarReview = new RegExp(`^/workspaces/${ID}/google-calendar/review$`);
 const googleMessageReview = new RegExp(`^/workspaces/${ID}/google-messages/review$`);
 const schedulingPatientSetup = new RegExp(`^/workspaces/${ID}/scheduling-patient/setup$`);
@@ -32,7 +32,7 @@ export function connectorApiRoute(target, method) {
   const plan = (header,input,output,extra={}) => ({header,input,output,seconds:30,...extra});
   const incoming = (header,input,output) => plan(header,input,output,{seconds:15,strictResponse:true,errorOutput:2048});
   const recording = privateRecording.exec(path);
-  if(recording) return !query && (method==='POST'&&(recording[1]===undefined||recording[1]==='resolve'&&!recording[2]||recording[1]!=='resolve'&&!!recording[2])||method==='GET'&&recording[1]!==undefined&&recording[1]!=='resolve'&&!recording[2])
+  if(recording) return !query && (method==='POST'&&(recording[1]===undefined||recording[1]==='resolve'&&!recording[2]||recording[1]!=='resolve'&&!!recording[2])||method==='GET'&&recording[1]!==undefined&&recording[1]!=='resolve'&&(!recording[2]||recording[2]==='visit-binding'))
     ? incoming('X-Cosmas-Private-Recording',method==='POST'?4096:0,16384) : null;
   if(privateDraft.test(path)) return !query && (method==='POST' || method==='GET'&&path==='/workspaces/private-drafts')
     ? incoming('X-Cosmas-Private-Draft',method==='POST'?4096:0,method==='GET'?65536:12000000) : null;

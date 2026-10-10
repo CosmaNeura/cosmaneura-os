@@ -21,6 +21,32 @@ class SavedRecordingSelection(ProtectedContract):
     frames: int = Field(ge=1, le=57_600_000, strict=True)
 
 
+class VisitBoundRecordingSelection(ProtectedContract):
+    """Explicitly distinct from the original same-notebook link receipt."""
+    recording_id: UUID
+    origin_workspace_id: UUID
+    visit_binding_receipt_id: UUID
+    source_sha256: Digest
+    manifest_sha256: Digest
+    chunks: int = Field(ge=1, le=360, strict=True)
+    frames: int = Field(ge=1, le=57_600_000, strict=True)
+
+
+class BindRecordingVisit(ProtectedContract):
+    idempotency_key: UUID
+    target_workspace_id: UUID
+    appointment_id: UUID
+    expected_target_revision: int = Field(strict=True, ge=1)
+    visit_confirmed: Literal[True]
+
+    @field_validator("visit_confirmed", mode="before")
+    @classmethod
+    def explicit_confirmation(cls, value):
+        if value is not True:
+            raise ValueError("explicit visit confirmation required")
+        return value
+
+
 class RecordingBot(ProtectedContract):
     address: str = Field(min_length=1, max_length=36)
     team_revision: int = Field(strict=True, ge=1)

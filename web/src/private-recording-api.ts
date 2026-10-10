@@ -13,6 +13,10 @@ export type PrivateRecordingFinish={idempotency_key:string;capture_state:'finish
   manifest_sha256:string|null;chunks:number|null;frames:number|null;ended_at:string|null};
 export type PrivateRecordingFinishIntent={request:PrivateRecordingFinish;request_sha256:string};
 export type PrivateRecordingLinkRequest={idempotency_key:string;expected_workspace_revision:number;workspace_link_receipt_id:string};
+export type RecordingVisitRequest={idempotency_key:string;target_workspace_id:string;appointment_id:string;expected_target_revision:number;visit_confirmed:true};
+export type RecordingVisitBinding={contract:'cosmas.private-recording.visit-binding.v1';receipt_id:string;recording_id:string;
+  origin_workspace_id:string;target_workspace_id:string;appointment_id:string;request:RecordingVisitRequest;
+  request_sha256:string;appointment_sha256:string;source_sha256:string};
 export type PrivateRecordingReceipt={contract:'cosmas.private-recording.v1';custody:'local_device_metadata';
   recording_id:string;local_recording_id:string;workspace_id:string;workspace_revision:number;owner_id:string;box_id:string;
   agent_id:string;team_revision_id:string;recovery_scope:string;attach_sha256:string;started_at:string;created_at:string;
@@ -35,6 +39,25 @@ function utc(v:string):string {
 }
 const sha=(v:unknown)=>vendorSha256(new TextEncoder().encode(vendorCanonical(v)));
 const digest=(kind:string,request:unknown)=>sha({contract:'cosmas.private-recording.'+kind+'.v1',request});
+function visitRequest(v:unknown):asserts v is RecordingVisitRequest {
+  need(closed(v,'idempotency_key,target_workspace_id,appointment_id,expected_target_revision,visit_confirmed')&&
+    vendorUuid(v.idempotency_key)&&vendorUuid(v.target_workspace_id)&&vendorUuid(v.appointment_id)&&
+    integer(v.expected_target_revision,2147483647)&&v.visit_confirmed===true);
+}
+export async function parseRecordingVisitBinding(value:unknown,receipt:PrivateRecordingReceipt,command?:RecordingVisitRequest):Promise<RecordingVisitBinding>{
+  need(closed(value,'contract,receipt_id,recording_id,origin_workspace_id,target_workspace_id,appointment_id,request,request_sha256,appointment_sha256,source_sha256')&&
+    value.contract==='cosmas.private-recording.visit-binding.v1'&&vendorUuid(value.receipt_id)&&value.recording_id===receipt.recording_id&&
+    value.origin_workspace_id===receipt.workspace_id&&vendorUuid(value.target_workspace_id)&&vendorUuid(value.appointment_id)&&
+    hash(value.request_sha256)&&hash(value.appointment_sha256)&&hash(value.source_sha256)&&receipt.finish);
+  visitRequest(value.request);
+  need(value.request.target_workspace_id===value.target_workspace_id&&value.request.appointment_id===value.appointment_id&&
+    value.request_sha256===await digest('visit-binding',value.request)&&(!command||vendorCanonical(value.request)===vendorCanonical(command))&&
+    value.source_sha256===await sha({contract:'cosmas.private-recording.visit-source.v1',recording_id:receipt.recording_id,
+      origin_workspace_id:receipt.workspace_id,attach_sha256:receipt.attach_sha256,finish_sha256:receipt.finish.request_sha256,
+      manifest_sha256:receipt.finish.manifest_sha256,target_workspace_id:value.target_workspace_id,
+      appointment_sha256:value.appointment_sha256,binding_request_sha256:value.request_sha256}));
+  return value as RecordingVisitBinding;
+}
 function attachRequest(v:unknown):asserts v is PrivateRecordingAttach {
   need(closed(v,'idempotency_key,local_recording_id,expected_workspace_revision,bot,consent,started_at')&&
     vendorUuid(v.idempotency_key)&&vendorUuid(v.local_recording_id)&&integer(v.expected_workspace_revision,2147483647)&&
@@ -113,12 +136,21 @@ async function request(identity:AuthenticatedWorkspaceIdentity,path:string,body:
     while(true){const part=await wait(reader.read());check();if(part.done)break;size+=part.value.length;need(size<=(response.ok?16384:2048));parts.push(part.value);}
     const bytes=new Uint8Array(size);let offset=0;for(const part of parts){bytes.set(part,offset);offset+=part.length;}
     const value=parseVendorJson(new TextDecoder('utf-8',{fatal:true}).decode(bytes));check();
-    if(!response.ok)throw new WorkspaceApiError(response.status);return value;
+    if(!response.ok){const code=closed(value,'detail')&&typeof value.detail==='string'&&['private_recording_visit_changed','private_recording_visit_in_use','idempotency_conflict'].includes(value.detail)?value.detail:undefined;throw new WorkspaceApiError(response.status,code);}return value;
   }catch(error){if(error instanceof WorkspaceApiError)throw error;throw new WorkspaceApiError(503);}
   finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);try{void reader?.cancel().catch(()=>{});reader?.releaseLock();}catch{/* Retain exact requests on interrupted observation. */}controller.abort();}
 }
 const root=(v:PrivateRecordingIntent)=>'/workspaces/'+v.workspace_id+'/private-recordings';
 export const privateRecordingApi={
+  async readVisitBinding(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,receipt:PrivateRecordingReceipt,signal?:AbortSignal){
+    await validatePrivateRecordingIntent(v,team);await parsePrivateRecordingReceipt(receipt,v);
+    const value=await request(identity,root(v)+'/'+receipt.recording_id+'/visit-binding',undefined,signal);
+    return value===null?null:parseRecordingVisitBinding(value,receipt);
+  },
+  async bindVisit(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,receipt:PrivateRecordingReceipt,body:RecordingVisitRequest,signal?:AbortSignal){
+    await validatePrivateRecordingIntent(v,team);await parsePrivateRecordingReceipt(receipt,v);visitRequest(body);
+    return parseRecordingVisitBinding(await request(identity,root(v)+'/'+receipt.recording_id+'/visit-binding',body,signal),receipt,body);
+  },
   async link(identity:AuthenticatedWorkspaceIdentity,v:PrivateRecordingIntent,team:ProviderTeam,recordingId:string,body:PrivateRecordingLinkRequest,signal?:AbortSignal){
     await validatePrivateRecordingIntent(v,team);need(vendorUuid(recordingId)&&closed(body,'idempotency_key,expected_workspace_revision,workspace_link_receipt_id')&&vendorUuid(body.idempotency_key)&&vendorUuid(body.workspace_link_receipt_id)&&integer(body.expected_workspace_revision,2147483647));
     const result=await parsePrivateRecordingReceipt(await request(identity,root(v)+'/'+recordingId+'/link',body,signal),v);

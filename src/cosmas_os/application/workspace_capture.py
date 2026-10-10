@@ -5,7 +5,7 @@ from collections.abc import Callable
 from typing import Any
 from uuid import UUID
 
-from pydantic import BaseModel, SecretStr
+from pydantic import BaseModel, SecretStr, TypeAdapter
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -21,7 +21,6 @@ from cosmas_os.models import (
     AuditEvent,
     CoreCaptureAccount,
     ExternalIdentity,
-    WorkspaceAppointmentLink,
     WorkspaceEntry,
 )
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable, supports_skill
@@ -153,27 +152,16 @@ def admit(
         if transfer is not None and selected_source is None:
             if expected_session_id is None or transfer_session is None or str(transfer_session.session_id) != str(expected_session_id):
                 raise ws.WorkspaceError("capture_saved_recording_changed", 409)
-            from cosmas_os.ports.private_recording import SavedRecordingSelection
-            selected_source = SavedRecordingSelection.model_validate(transfer.request["source"])
+            from cosmas_os.ports.private_recording import (
+                SavedRecordingSelection,
+                VisitBoundRecordingSelection,
+            )
+            selected_source = TypeAdapter(SavedRecordingSelection | VisitBoundRecordingSelection).validate_python(transfer.request["source"])
         if selected_source is not None:
             from cosmas_os.application import private_recording
-            from cosmas_os.private_recording_models import (
-                PrivateRecordingFinish,
-                PrivateRecordingLink,
-            )
-            _, recording = private_recording.checked(session, box, actor, workspace_id,
-                external_identity_id, str(selected_source.recording_id))
-            finish = session.scalar(select(PrivateRecordingFinish).where(PrivateRecordingFinish.recording_id == recording.id))
-            link = session.scalar(select(PrivateRecordingLink).where(PrivateRecordingLink.recording_id == recording.id))
-            # Validate immutable receipts, then require the currently selected
-            # patient/visit and source on every side of remote admission I/O.
-            private_recording.view(session, recording)
-            if (finish is None or link is None or finish.capture_state != "finished" or finish.chunks is None
-                or str(link.id) != str(selected_source.link_receipt_id)
-                or link.source_sha256 != selected_source.source_sha256
-                or finish.manifest_sha256 != selected_source.manifest_sha256
-                or finish.chunks != selected_source.chunks or finish.frames != selected_source.frames
-                or bot_selection is not None and agent_id != recording.agent_id):
+            recording, finish = private_recording.capture_source(session, box, actor, w,
+                external_identity_id, selected_source)
+            if bot_selection is not None and agent_id != recording.agent_id:
                 raise ws.WorkspaceError("capture_saved_recording_changed", 409)
             if operation is not None and operation.kind in {"source_start", "source_extend", "native_recording_context"}:
                 raise ws.WorkspaceError("capture_source_unavailable", 409)
@@ -198,10 +186,6 @@ def admit(
             if transfer is None or payload_hash(transfer.request) != transfer.request_sha256:
                 raise ws.WorkspaceError("capture_saved_recording_changed", 409)
             transfer_id, transfer_sha = transfer.id, transfer.request_sha256
-            appointment_link = session.get(WorkspaceAppointmentLink, link.workspace_link_receipt_id)
-            if (appointment_link is None or appointment_link.appointment_id != w.appointment_id
-                or appointment_link.patient_link_id != w.patient_link_id):
-                raise ws.WorkspaceError("capture_saved_recording_changed", 409)
         result = account.id, value, notebook, agent_id, transfer_sha
         if prep and bot_selection is not None:
             result = (*result, resource_ref)
