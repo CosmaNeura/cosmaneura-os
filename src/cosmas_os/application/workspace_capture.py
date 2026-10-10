@@ -284,7 +284,9 @@ def admit(
             credential,
             attestation,
             f"verify:{expected_session_id}" if using_admission else
-                f"saved:{saved_recording.recording_id}:{saved_recording.source_sha256}" if saved_recording is not None else idempotency_key,
+                "saved:" + hashlib.sha256(
+                    f"{saved_recording.recording_id}:{saved_recording.source_sha256}".encode("ascii")
+                ).hexdigest() if saved_recording is not None else idempotency_key,
             expected_session_id=expected_session_id if using_admission else None,
             configured_capture=None if using_admission else configured_capture,
         )
