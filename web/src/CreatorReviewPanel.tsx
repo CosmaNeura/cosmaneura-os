@@ -75,7 +75,7 @@ export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, o
         working++; report(); callbacks.current.onSource(null);
         try { const view = await api.read(); requireCurrent(); callbacks.current.onSource(view);
           if(refreshTimer)clearTimeout(refreshTimer);
-          if(['uploaded','processing','translation_pending'].includes(view.status))scheduleRefresh();
+          if(['uploaded','processing','speech_retryable','translation_pending'].includes(view.status))scheduleRefresh();
           return view; }
         finally { working--; report(); }
       },

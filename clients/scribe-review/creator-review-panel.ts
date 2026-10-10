@@ -198,7 +198,13 @@ export function renderCreatorReview(state: CreatorReviewState): string {
       <strong>${escape(subtitle)}</strong>
       <p>${escape(state.notice || (ready
         ? "Review is complete. Your transcript is ready for note preparation."
-        : view?.status === "translation_pending"
+         : view?.status === "speech_retryable"
+          ? "Your audio is saved. Scribe could not finish transcription and will retry automatically. Choose Refresh to check its progress."
+          : view?.status === "speech_failed"
+            ? "Your audio is saved, but transcription could not finish after its recovery attempts. Return to your recording and contact support; your original audio is available for playback."
+          : view?.status === "uploaded" || view?.status === "processing"
+            ? "Your audio is uploaded. Scribe is preparing the transcript; it will appear here when ready."
+          : view?.status === "translation_pending"
           ? "The transcript is not ready for a note. Check the messages below for what is still needed."
           : "Review the proposed English before it is used for a note."))}</p>
     </div>

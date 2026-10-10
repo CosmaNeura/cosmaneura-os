@@ -1,11 +1,12 @@
-import {act} from 'react';
+import {act,useEffect} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {SavedRecordingTranscriptionPanel} from './SavedRecordingTranscriptionPanel';
 import {prepareCapture} from './capture-api';
 import {BffResponseError} from '../../clients/capture/src/bff/http-client';
 import type {ProviderTeam,Workspace} from './workspace-api';
-const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn()}));
+const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn(),review:null as unknown}));
+vi.mock('./CreatorReviewPanel',()=>({CreatorReviewPanel:({onSource}:{onSource:(view:unknown)=>void})=>{useEffect(()=>onSource(mocks.review),[onSource]);return null;}}));
 vi.mock('./saved-recording-runtime',()=>({openSavedRecordingRuntime:mocks.savedRuntime}));
 vi.mock('./private-recording-runtime',()=>({openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close}),PrivateRecordingRuntime:{open:mocks.open}}));
 vi.mock('./private-recording-ledger',()=>({PrivateRecordingLedgerController:class{readCurrent=mocks.ledger;}}));
@@ -19,7 +20,7 @@ const admission={key:id(6),language:'en-US',attestation:{modality:'in_person',pa
 let root:Root,host:HTMLDivElement,stored:unknown;
 const back=vi.fn(),navigation=vi.fn();
 beforeEach(()=>{
-  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();mocks.review=null;
   HTMLElement.prototype.scrollIntoView=vi.fn();
   stored={contract:'cosmas.saved-transfer.v1',recording_id:id(3),workspace_id:id(1),scope:'c'.repeat(64),link_request:null,receipt,admission:structuredClone(admission),admitted:null};
   mocks.read.mockImplementation(async()=>structuredClone(stored));
@@ -32,10 +33,10 @@ beforeEach(()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();});
 const button=(name:string)=>[...host.querySelectorAll('button')].find(b=>b.textContent===name);
-async function mount(){await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'desktop'}} identity={identity} workspace={workspace} team={{revision:1} as ProviderTeam}
+async function mount(processing=false){await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'desktop'}} identity={identity} workspace={workspace} team={{revision:1} as ProviderTeam}
   isCurrent={()=>true} locked={false} notesEnabled={false} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}} notebookDirty={false} onNotebook={()=>{}}
   onRecordings={back} onNavigationLock={navigation} taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}/>));
-  await vi.waitFor(()=>expect(button('Continue transcription')?.disabled).toBe(false));}
+  await vi.waitFor(()=>expect(processing?host.textContent?.includes('Review your transcript'):button('Continue transcription')?.disabled===false).toBe(true));}
 it.each(['capture_request_conflict','capture_consent_required','capture_consent_unavailable'])('retains exact intent and offers recordings rather than futile retry for %s',async code=>{
   const original=structuredClone(stored);
   vi.mocked(prepareCapture).mockRejectedValue(new BffResponseError(409,code,null));
@@ -60,12 +61,27 @@ it('distinguishes prepared audio from confirmed upload and shows only the suppor
   mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},
     transcribe:vi.fn().mockRejectedValue(new Error('private error content')),
     uploadProgress:async()=>({confirmed:0,total:1,reference:'chunk_receipt_response_503'}),close:async()=>{}});
-  await mount();expect(host.textContent).toContain('Audio prepared. Sending it securely');
+  await mount();expect(host.textContent).toContain('Your saved audio is ready. Choose Continue transcription');
   await act(async()=>button('Continue transcription')!.click());
   expect(host.textContent).toContain('0 of 1 audio parts confirmed by Scribe');
   expect(host.textContent).toContain('chunk_receipt_response_503');
   expect(host.textContent).not.toContain('private error content');
   expect(button('Continue transcription')?.disabled).toBe(false);
+});
+
+it('shows a finished transcription failure and a route back to the preserved recording',async()=>{
+  const original=structuredClone(stored);
+  (stored as {admitted:unknown}).admitted={status:'prepared',workspace_id:id(1),session_id:id(7),consent_record_id:id(8),configured_capture:{schema_version:'1.0',language_mode:'en-US'}};
+  mocks.review={status:'speech_failed',source:null,working:null};
+  const snapshot={state:'processing',recordedChunks:1};
+  mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},close:async()=>{}});
+  await mount(true);
+  expect(host.textContent).toContain('Scribe could not finish transcription. Your audio is saved');
+  expect(host.textContent).not.toContain('Scribe is preparing your transcript');
+  expect(button('Continue transcription')).toBeUndefined();
+  await act(async()=>button('Return to recordings')!.click());expect(back).toHaveBeenCalledOnce();
+  expect(mocks.write).not.toHaveBeenCalled();
+  expect((stored as {admission:unknown}).admission).toEqual((original as {admission:unknown}).admission);
 });
 
 it('requires fresh explicit consent only after a definite no-admission result and retains earlier intent across reopen',async()=>{
