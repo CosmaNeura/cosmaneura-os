@@ -1,7 +1,10 @@
 """Signed saved-source admission pins the source, consent and session."""
+import hashlib
+import json
 from datetime import UTC, datetime
 from uuid import uuid4
 
+import httpx
 import pytest
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import DBAPIError
@@ -12,6 +15,7 @@ from tests.integration.test_private_recordings import signed_workspace as _signe
 from tests.integration.test_private_workspace_drafts import appointment
 from tests.integration.test_workspace_capture import LocalCore, ref
 
+from cosmas_os.adapters.core_capture_admission import HttpCoreCaptureAdmission
 from cosmas_os.api import app as api
 from cosmas_os.application import workspace as ws
 from cosmas_os.models import CoreCaptureAccount
@@ -30,6 +34,9 @@ class SavedCore(LocalCore):
         self.keys = []
 
     def admit_capture(self, binding, credential, attestation, key, **kwargs):
+        # Match the real Core adapter's boundary; a UUID plus a full source hash
+        # exceeded this limit even though the previous fake accepted it.
+        assert 8 <= len(key) <= 100 and key.isascii() and not any(c.isspace() for c in key)
         self.keys.append(key)
         receipt = super().admit_capture(binding, credential, attestation, key, **kwargs)
         self.saved = receipt.model_copy(update={"configured_capture": kwargs.get("configured_capture") or receipt.configured_capture})
@@ -82,6 +89,42 @@ def test_saved_source_retries_same_session_and_retains_exact_consent(saved_case,
     assert session.scalar(select(func.count()).select_from(PrivateRecordingTransferSession))==1
     row=session.scalar(select(PrivateRecordingTransfer))
     assert row.request["attestation"]["granted_at"]==saved_case[2]["attestation"]["granted_at"].replace('+00:00','Z')
+
+
+def test_saved_source_reaches_real_admission_adapter_with_bounded_stable_key(saved_case, monkeypatch):
+    port = saved_case[3]
+    selected_source = saved_case[2]['saved_recording']
+    keys = []
+    session_id, consent_id = uuid4(), uuid4()
+
+    def handler(request):
+        assert request.url.path == '/service/v1/agent/scribe/capture-admissions'
+        keys.append(request.headers['Idempotency-Key'])
+        body = json.loads(request.content)
+        return httpx.Response(200, headers={
+            'Cache-Control': 'no-store', 'X-Cosmaneura-Capture-Version': '1',
+        }, json={
+            'contract_version': '1', 'binding_ref': body['binding_ref'],
+            'workspace_id': body['workspace_id'], 'appointment_ref': ref('appointment'),
+            'operation_ref': ref('scribe_admission'), 'consent_record_id': str(consent_id),
+            'session_id': str(session_id), 'status': 'admitted',
+            'request_nonce': body['request_nonce'], 'checked_at': datetime.now(UTC).isoformat(),
+            'configured_capture': body['configured_capture'],
+        })
+
+    adapter = HttpCoreCaptureAdmission('https://core.example.invalid',
+        lambda: 'synthetic_workload', transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(port, 'admit_capture', adapter.admit_capture)
+    try:
+        first = submit(saved_case)
+        assert first.status_code == 200, first.text
+        assert submit(saved_case).json() == first.json()
+        expected = 'saved:' + hashlib.sha256(
+            f"{selected_source['recording_id']}:{selected_source['source_sha256']}".encode('ascii')
+        ).hexdigest()
+        assert keys == [expected, expected] and len(expected) == 70
+    finally:
+        adapter.close()
 
 
 @pytest.mark.parametrize("field",["recording_id","link_receipt_id","source_sha256","manifest_sha256","chunks","frames"])
@@ -137,6 +180,7 @@ def test_saved_import_rechecks_account_after_each_remote_phase(saved_case,sessio
         if observed==phase:
             with Session(session.get_bind()) as independent:
                 account=independent.scalar(select(CoreCaptureAccount))
+                assert account is not None
                 account.revoked_at=datetime.now(UTC)
                 independent.commit()
     saved_case[3].after=revoke
