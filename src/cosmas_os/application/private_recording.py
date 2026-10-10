@@ -286,8 +286,7 @@ def bind_visit(s, box, owner, wid, rid, command, *, external, fence):
         or finish_row is None or finish_row.capture_state != "finished"
         or origin.appointment_id is not None and origin.appointment_id != target.appointment_id):
         raise ws.WorkspaceError("private_recording_visit_changed", 409)
-    if s.scalar(select(PrivateRecordingTransfer.id).where(or_(
-        PrivateRecordingTransfer.recording_id == rid, PrivateRecordingTransfer.workspace_id == target.id))):
+    if s.scalar(select(PrivateRecordingTransfer.id).where(PrivateRecordingTransfer.recording_id == rid)):
         raise ws.WorkspaceError("private_recording_visit_in_use", 409)
     binding = PrivateRecordingVisitBinding(recording_id=rid, origin_workspace_id=wid,
         target_workspace_id=target.id, box_id=box, owner_id=owner, appointment_id=appointment.id,

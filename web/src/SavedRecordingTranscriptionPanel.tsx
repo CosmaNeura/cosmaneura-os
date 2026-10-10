@@ -16,14 +16,30 @@ import {savedTranscriptionRecovery} from './saved-transcription-recovery';
 import './capture-panel.css';
 
 export type SavedRecordingEntry={recordingId:string;scope:string;platform:'ios'|'desktop';originWorkspace?:Workspace;visitResolved?:boolean;binding?:RecordingVisitBinding};
-type Transfer={contract:'cosmas.saved-transfer.v1'|'cosmas.saved-transfer.v2';binding?:RecordingVisitBinding;recording_id:string;workspace_id:string;scope:string;
+type Transfer={contract:'cosmas.saved-transfer.v1'|'cosmas.saved-transfer.v2'|'cosmas.saved-transfer.v3';binding?:RecordingVisitBinding;recording_id:string;workspace_id:string;scope:string;
   link_request:PrivateRecordingLinkRequest|null;receipt:PrivateRecordingReceipt|null;
   admission:null|{key:string;attestation:CaptureAttestation;language:CaptureLanguage;source:SavedRecordingSelection};
-  admitted:PreparedCapture|null};
+  admitted:PreparedCapture|null;prior_admissions?:NonNullable<Transfer['admission']>[];renew_saved_consent?:true};
 type Runtime=Awaited<ReturnType<typeof openSavedRecordingRuntime>>;
 function need(v:unknown):asserts v{if(!v)throw new WorkspaceApiError(503,'capture_saved_recording_changed');}
 const closed=(v:unknown,keys:string):v is Record<string,unknown>=>!!v&&typeof v==='object'&&!Array.isArray(v)&&Object.keys(v).sort().join(',')===keys.split(',').sort().join(',');
 function validate(value:unknown,entry:SavedRecordingEntry,wid:string):Transfer{
+  if(value&&typeof value==='object'&&'contract'in value&&value.contract==='cosmas.saved-transfer.v3'){
+    const v=value as Transfer;
+    const fields=(entry.binding?'contract,recording_id,workspace_id,scope,link_request,receipt,admission,admitted,binding':'contract,recording_id,workspace_id,scope,link_request,receipt,admission,admitted')+',prior_admissions,renew_saved_consent';
+    need(closed(v,fields)&&v.renew_saved_consent===true&&Array.isArray(v.prior_admissions)&&v.prior_admissions.length>0&&v.prior_admissions.length<=20&&v.admission);
+    const {prior_admissions,renew_saved_consent,...base}=v;
+    const original={...base,contract:entry.binding?'cosmas.saved-transfer.v2' as const:'cosmas.saved-transfer.v1' as const};
+    validate(original,entry,wid);
+    for(const admission of prior_admissions) {
+      validate({...original,admission,admitted:null},entry,wid);
+      need(vendorCanonical(admission.source)===vendorCanonical(v.admission.source)&&admission.language===v.admission.language);
+      const {granted_at:priorTime,...priorConsent}=admission.attestation;
+      const {granted_at:currentTime,...currentConsent}=v.admission.attestation;
+      need(priorTime!==currentTime&&vendorCanonical(priorConsent)===vendorCanonical(currentConsent));
+    }
+    return v;
+  }
   need(closed(value,entry.binding?'contract,recording_id,workspace_id,scope,link_request,receipt,admission,admitted,binding':'contract,recording_id,workspace_id,scope,link_request,receipt,admission,admitted')&&value.contract===(entry.binding?'cosmas.saved-transfer.v2':'cosmas.saved-transfer.v1')&&value.recording_id===entry.recordingId&&value.workspace_id===wid&&value.scope===entry.scope);
   const v=value as Transfer;
   if(entry.binding)need(v.binding&&vendorCanonical(v.binding)===vendorCanonical(entry.binding)&&v.link_request===null);
@@ -46,6 +62,8 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   scratchpad?:SavedScratchpad;notebookDirty:boolean;onNotebook:()=>void;onRecordings?:()=>void;onNavigationLock?:(busy:boolean)=>void}){
   const origin=entry.originWorkspace??workspace;
   const [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[consented,setConsented]=useState(false),[error,setError]=useState('');
+  const [renewConsent,setRenewConsent]=useState(false);
+  const [clipDate,setClipDate]=useState<string|null>(null);
   const [recovery,setRecovery]=useState<ReturnType<typeof savedTranscriptionRecovery>>(null);
   const [transfer,setTransfer]=useState<Transfer|null>(null),[snapshot,setSnapshot]=useState<Runtime['controller']['snapshot']|null>(null);
   const [review,setReview]=useState<CreatorReviewView|null>(null),[reviewLock,setReviewLock]=useState(false),[showDraft,setShowDraft]=useState(false),[draftLocked,setDraftLocked]=useState(false);
@@ -53,8 +71,10 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const owner=useRef<{alive:boolean;store:PrivateRecordingStore;recording:PrivateRecordingRuntime;runtime:Runtime|null;unsubscribe?:()=>void}|null>(null);
   const saved=useRef<Transfer|null>(null),flight=useRef(false);
   const noteSection=useRef<HTMLDivElement>(null);
+  const transcriptionSection=useRef<HTMLElement>(null);
   const reportDraftLock=useCallback((value:boolean)=>{setDraftLocked(value);onDraftLock(value);},[onDraftLock]);
   useEffect(()=>{onNavigationLock?.(busy);return()=>onNavigationLock?.(false);},[busy,onNavigationLock]);
+  useEffect(()=>{if(ready){const heading=transcriptionSection.current?.querySelector<HTMLElement>('h2');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[ready]);
   useEffect(()=>{if(showDraft){const heading=noteSection.current?.querySelector<HTMLElement>('h3');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[showDraft]);
   const current=()=>!!owner.current?.alive&&live.current.identity===identity&&live.current.entry.scope===entry.scope&&live.current.entry.recordingId===entry.recordingId&&live.current.workspace.id===workspace.id&&live.current.isCurrent();
   useEffect(()=>{let alive=true;
@@ -65,6 +85,8 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       if(!alive){await recording.close();return;}
       const selected={alive:true,store,recording,runtime:null as Runtime|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;
       need(recording.snapshot.workspaceId===origin.id&&recording.snapshot.phase==='sealed'&&recording.snapshot.recordedChunks>0);
+      const audioDetails=await recording.snapshotForLedger();if(!current())return;
+      if(audioDetails.startedAt)setClipDate(audioDetails.startedAt);
       const value=await store.read('transfer:'+entry.recordingId);if(!current())return;
       saved.current=value===null?null:validate(value,entry,workspace.id);
       if(saved.current?.receipt){const ledger=new PrivateRecordingLedgerController({identity,team,workspace:origin,store,scope:entry.scope,isCurrent:current});const original=await ledger.readCurrent(entry.recordingId);need(original?.state==='finished');await parsePrivateRecordingReceipt(saved.current.receipt,original.attach);need(current());if(entry.binding)await parseRecordingVisitBinding(entry.binding,saved.current.receipt);}
@@ -82,7 +104,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     if(!current()){await opened.close();return;}selected.runtime=opened;selected.unsubscribe=opened.controller.subscribe(setSnapshot);
     if(opened.reviewOnly)setSnapshot({...opened.controller.snapshot,state:'processing',sessionId:admitted.session_id});
   }
-  async function transcribe(){if(!ready||flight.current||locked||recovery?.retry===false||!workspace.appointment_id||!taskBot?.enabled||!saved.current?.admission&&!consented)return;
+  async function transcribe(){if(!ready||flight.current||locked||recovery?.retry===false||!workspace.appointment_id||!taskBot?.enabled||(!saved.current?.admission||renewConsent)&&!consented)return;
     flight.current=true;setBusy(true);setError('');
     try{
       need(current()&&owner.current);const selected=owner.current;
@@ -109,6 +131,12 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       need(entry.binding||receipt.state==='linked_metadata'&&receipt.link?.workspace_link_receipt_id===workspace.private_draft?.link_receipt_id);
       if(next.receipt)need(vendorCanonical(next.receipt)===vendorCanonical(receipt));
       next={...next,receipt};await persist(next);
+      if(renewConsent){
+        need(consented&&next.admission&&!next.admitted&&(next.prior_admissions?.length??0)<20);
+        next={...next,contract:'cosmas.saved-transfer.v3',prior_admissions:[...(next.prior_admissions??[]),next.admission],
+          renew_saved_consent:true,admission:{...next.admission,key:crypto.randomUUID(),attestation:{...next.admission.attestation,granted_at:new Date().toISOString()}}};
+        await persist(next);setRenewConsent(false);
+      }
       if(!next.admission){
         need(consented&&(entry.binding||receipt.link)&&receipt.finish);
         const {language,...original}=audio.consent;
@@ -117,7 +145,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
             manifest_sha256:audio.manifestSHA256,chunks:audio.chunks,frames:audio.frames}}};await persist(next);
       }
       if(!next.admitted){const a=next.admission!;
-        const admitted=await prepareCapture(workspace.id,identity,a.attestation,a.key,undefined,taskBot.selection,a.language,a.source);need(current());
+        const admitted=await prepareCapture(workspace.id,identity,a.attestation,a.key,undefined,taskBot.selection,a.language,a.source,next.renew_saved_consent===true);need(current());
         next={...next,admitted};await persist(next);}
       if(!selected.runtime)await openRuntime(next.admitted!);need(current()&&selected.runtime);
       await selected.runtime.transcribe();
@@ -130,22 +158,27 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       }
       if(current()){
       const code=cause&&typeof cause==='object'&&'code'in cause?cause.code:'';
+      if(code==='capture_recording_consent_required'&&!saved.current?.admitted){
+        setRenewConsent(true);setConsented(false);setRecovery(null);
+        setError('Your earlier transcription request expired before Scribe accepted it. Confirm consent below, then send this saved recording. Your original audio and earlier request are retained.');
+      }else{
       const blocked=savedTranscriptionRecovery(code);setRecovery(blocked);
       if(blocked)setError(blocked.message);
       else
       setError(code==='saved_audio_silent'?'This recording contains no microphone signal. Play it from Home to check it, or make a new recording with the microphone available.':code==='capture_connection_required'?'Connect your Core account before transcribing. Your recording remains saved on this device.':code==='capture_saved_recording_changed'?'This recording or its visit connection changed. Return Home and reopen the original recording before continuing.':code==='capture_access_unavailable'||cause instanceof WorkspaceApiError&&[401,403].includes(cause.status)?'Sign in again to continue. Your recording and transfer are saved.':`Transcription could not continue. Your original audio and progress are saved. Choose ${saved.current?.admission?'Continue transcription':'Transcribe recording'} to retry.`);
-    }}
+    }}}
     finally{flight.current=false;if(current())setBusy(false);}
   }
   const processing=!!transfer?.admitted&&(snapshot?.state==='processing'||review!==null);
-  return <section className="capture-panel saved-transcription" aria-label="Saved recording transcription" data-english-only={transfer?.admission?.language==='en-US'}>
+  return <section ref={transcriptionSection} className="capture-panel saved-transcription" aria-label="Saved recording transcription" data-english-only={transfer?.admission?.language==='en-US'}>
     <h2>{showDraft?'Review your visit note':processing?'Review your transcript':'Transcribe your saved recording'}</h2>
     {workspace.appointment_id&&<><ol aria-label="Transcription steps"><li>Visit confirmed</li><li>{processing?'Audio uploaded':'Send recording to Scribe'}</li><li>Review transcript and save your note</li></ol>
     <p>Your original recording stays on this device. Find it under Home → Recordings on this device.</p></>}
     {!workspace.appointment_id?<p role="status">Choose a visit below, then send this recording to Scribe.</p>:<>
       <p><strong>{workspace.label}</strong> · {owner.current?.recording.snapshot.title}</p>
-      {!transfer?.admission&&!processing&&<label className="private-recording-check"><input type="checkbox" checked={consented} disabled={busy||locked} onChange={event=>setConsented(event.target.checked)}/>I confirm everyone agreed to transcription, and this recording belongs to the visit shown above.</label>}
-      {!processing&&recovery?.retry!==false&&<button className="team-primary" disabled={!ready||busy||locked||!taskBot?.enabled||!transfer?.admission&&!consented} onClick={()=>void transcribe()}>{busy?'Sending saved recording…':transfer?.admission?'Continue transcription':'Transcribe recording'}</button>}
+      {ready&&owner.current&&<p>{clipDate&&<time dateTime={clipDate}>{new Date(clipDate).toLocaleString()} · </time>}{Math.floor(owner.current.recording.snapshot.elapsedSeconds/60)}:{String(Math.floor(owner.current.recording.snapshot.elapsedSeconds%60)).padStart(2,'0')} saved recording</p>}
+      {(!transfer?.admission||renewConsent)&&!processing&&<label className="private-recording-check"><input type="checkbox" checked={consented} disabled={busy||locked} onChange={event=>setConsented(event.target.checked)}/>I confirm everyone agreed to transcription, and this recording belongs to the visit shown above.</label>}
+      {!processing&&recovery?.retry!==false&&<button className="team-primary" disabled={!ready||busy||locked||!taskBot?.enabled||(!transfer?.admission||renewConsent)&&!consented} onClick={()=>void transcribe()}>{busy?'Sending saved recording…':renewConsent?'Send recording with confirmed consent':transfer?.admission?'Continue transcription':'Transcribe recording'}</button>}
       {!taskBot?.enabled&&<p role="status">Enable Scribe in team settings to transcribe this recording. Your audio is saved.</p>}
     </>}
     {snapshot&&<p role="status">{showDraft?'Review and edit your visit note below.':review?.working?.note_ready?'Transcript ready. Review it, then continue to your note.':processing?'Audio uploaded. Scribe is preparing your transcript.':`Preparing your saved recording… ${Math.floor(snapshot.recordedChunks/Math.max(1,transfer?.admission?.source.chunks??1)*100)}%`}</p>}

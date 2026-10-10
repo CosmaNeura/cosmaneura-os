@@ -123,9 +123,9 @@ export async function request(workspaceId: string, action: "admission" | "operat
 }
 
 export async function prepareCapture(workspaceId: string, identity: AuthenticatedWorkspaceIdentity,
-  attestation: CaptureAttestation | null, idempotencyKey: string, signal?: AbortSignal, bot?: CaptureBotSelection, language?: CaptureLanguage, savedRecording?:SavedRecordingSelection): Promise<PreparedCapture> {
+  attestation: CaptureAttestation | null, idempotencyKey: string, signal?: AbortSignal, bot?: CaptureBotSelection, language?: CaptureLanguage, savedRecording?:SavedRecordingSelection, renewSavedConsent=false): Promise<PreparedCapture> {
   const result = await request(workspaceId, "admission", identity,
-    { attestation, idempotency_key: idempotencyKey, ...(bot ? {bot} : {}), ...(savedRecording?{saved_recording:savedRecording}:{}),
+    { attestation, idempotency_key: idempotencyKey, ...(bot ? {bot} : {}), ...(savedRecording?{saved_recording:savedRecording}:{}), ...(renewSavedConsent?{renew_saved_consent:true}:{}),
       ...(attestation && language ? {configured_capture: {schema_version: "1.0", language_mode: language}} : {}) }, signal);
   if (!isRecord(result) || Object.keys(result).sort().join(",") !== (("configured_capture" in result ? "configured_capture," : "") + "consent_record_id,session_id,status,workspace_id") ||
       result.status !== "prepared" || result.workspace_id !== workspaceId ||

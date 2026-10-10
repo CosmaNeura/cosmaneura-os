@@ -128,6 +128,7 @@ class CoreCaptureAdmissionPort(CoreCaptureBindingPort, Protocol):
         self, binding: CoreCaptureBindingSnapshot, credential: CoreInteractionCredential,
         attestation: CoreConsentAttestation | None, idempotency_key: str,
         *, configured_capture: ConfiguredCaptureSelection | None = None, expected_session_id: UUID | None = None,
+        recording_key_sha256: str | None = None, recover_legacy_request: bool = False,
     ) -> CoreCaptureAdmissionSnapshot: ...
     def perform_capture_operation(
         self, binding: CoreCaptureBindingSnapshot, credential: CoreInteractionCredential,

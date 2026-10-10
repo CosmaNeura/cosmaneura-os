@@ -40,6 +40,8 @@ from cosmas_os.ports.core_notes import CoreNoteSelection
 from cosmas_os.ports.notebook_source import NotebookSource, ScratchNotes
 from cosmas_os.private_recording_models import (
     PrivateRecordingTransfer,
+    PrivateRecordingTransferAttempt,
+    PrivateRecordingTransferRejection,
     PrivateRecordingTransferSession,
 )
 
@@ -77,6 +79,7 @@ def admit(
     idempotency_key: str,
     configured_capture: ConfiguredCaptureSelection | None = None,
     saved_recording=None,
+    renew_saved_consent: bool = False,
     operation: CaptureOperation | None = None,
     expected_session_id: UUID | None = None,
     note_selection: CoreNoteSelection | None = None,
@@ -147,7 +150,19 @@ def admit(
                 team_resources.require(settings, "core_preparation", resource_ref)
             agent_id = bot.agent_id
         selected_source = saved_recording
-        transfer = None if prep or binding_only or existing_recording else session.scalar(select(PrivateRecordingTransfer).where(PrivateRecordingTransfer.workspace_id == workspace_id).with_for_update())
+        transfer_query = select(PrivateRecordingTransfer).where(PrivateRecordingTransfer.workspace_id == workspace_id)
+        if saved_recording is not None:
+            transfer_query = transfer_query.where(PrivateRecordingTransfer.recording_id == str(saved_recording.recording_id))
+        elif expected_session_id is not None:
+            transfer_query = transfer_query.join(PrivateRecordingTransferSession).where(PrivateRecordingTransferSession.session_id == str(expected_session_id))
+        transfer = None if prep or binding_only or existing_recording or saved_recording is None and expected_session_id is None else session.scalar(transfer_query.with_for_update(of=PrivateRecordingTransfer))
+        if transfer is None and expected_session_id is not None and session.scalar(
+            select(PrivateRecordingTransfer.id).where(PrivateRecordingTransfer.workspace_id == workspace_id).limit(1)) is not None:
+            recorded_legacy = session.scalar(select(AuditEvent.id).where(
+                AuditEvent.aggregate_id == workspace_id, AuditEvent.event_type == "workspace.bot_capture_prepared",
+                AuditEvent.detail["session_id"].astext == str(expected_session_id)).limit(1))
+            if recorded_legacy is None:
+                raise ws.WorkspaceError("capture_saved_recording_changed", 409)
         transfer_session = session.get(PrivateRecordingTransferSession, transfer.id) if transfer is not None else None
         if transfer is not None and selected_source is None:
             if expected_session_id is None or transfer_session is None or str(transfer_session.session_id) != str(expected_session_id):
@@ -177,15 +192,39 @@ def admit(
                     "bot": bot_selection.model_dump(mode="json")}
                 sha = payload_hash(document)
                 if transfer is None:
+                    if renew_saved_consent:
+                        raise ws.WorkspaceError("capture_saved_recording_changed", 409)
                     transfer = PrivateRecordingTransfer(recording_id=recording.id, workspace_id=workspace_id,
                         request=document, request_sha256=sha)
                     session.add(transfer)
                     session.flush()
-                if transfer.recording_id != recording.id or transfer.request_sha256 != sha or payload_hash(transfer.request) != sha:
+                if transfer.recording_id != recording.id or payload_hash(transfer.request) != transfer.request_sha256:
                     raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+                if transfer.request_sha256 != sha:
+                    attempt = session.scalar(select(PrivateRecordingTransferAttempt).where(
+                        PrivateRecordingTransferAttempt.transfer_id == transfer.id,
+                        PrivateRecordingTransferAttempt.request_sha256 == sha))
+                    if attempt is None:
+                        last = session.scalar(select(PrivateRecordingTransferAttempt).where(
+                            PrivateRecordingTransferAttempt.transfer_id == transfer.id).order_by(
+                            PrivateRecordingTransferAttempt.created_at.desc(), PrivateRecordingTransferAttempt.id.desc()).limit(1))
+                        prior_sha = last.request_sha256 if last is not None else transfer.request_sha256
+                        prior_document = last.request if last is not None else transfer.request
+                        rejection = session.get(PrivateRecordingTransferRejection, (transfer.id, prior_sha))
+                        if (not renew_saved_consent or transfer_session is not None or rejection is None
+                            or payload_hash(prior_document) != prior_sha
+                            or any(document[k] != prior_document[k] for k in ("source", "configured", "bot"))
+                            or any(document["attestation"][k] != prior_document["attestation"][k] for k in document["attestation"] if k != "granted_at")):
+                            raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+                        attempt = PrivateRecordingTransferAttempt(transfer_id=transfer.id, prior_request_sha256=prior_sha,
+                            request_sha256=sha, request=document)
+                        session.add(attempt)
+                        session.flush()
+                    if payload_hash(attempt.request) != sha:
+                        raise ws.WorkspaceError("capture_saved_recording_changed", 409)
             if transfer is None or payload_hash(transfer.request) != transfer.request_sha256:
                 raise ws.WorkspaceError("capture_saved_recording_changed", 409)
-            transfer_id, transfer_sha = transfer.id, transfer.request_sha256
+            transfer_id, transfer_sha = transfer.id, sha if saved_recording is not None else transfer.request_sha256
         result = account.id, value, notebook, agent_id, transfer_sha
         if prep and bot_selection is not None:
             result = (*result, resource_ref)
@@ -194,6 +233,8 @@ def admit(
         return result
 
     try:
+        if type(renew_saved_consent) is not bool or renew_saved_consent and saved_recording is None:
+            raise ws.WorkspaceError("invalid_capture_request", 422)
         using_admission = operation is not None or note_selection is not None
         if saved_recording is not None and (using_admission or prep or binding_only or existing_recording
                 or attestation is None or configured_capture is None or bot_selection is None):
@@ -289,6 +330,9 @@ def admit(
                 ).hexdigest() if saved_recording is not None else idempotency_key,
             expected_session_id=expected_session_id if using_admission else None,
             configured_capture=None if using_admission else configured_capture,
+            **({"recording_key_sha256":hashlib.sha256(
+                f"{saved_recording.recording_id}:{saved_recording.source_sha256}".encode("ascii")
+            ).hexdigest(), "recover_legacy_request":True} if saved_recording is not None else {}),
         )
         if selection() != expected:
             raise ws.WorkspaceError("capture_context_changed", 409)
@@ -396,6 +440,15 @@ def admit(
             "capture_notes_unavailable": 503,
         }
         code = str(error)
+        if code == "capture_recording_consent_required" and saved_recording is not None:
+            if selection(finalizing=True) != expected or transfer_id is None or transfer_sha is None:
+                raise ws.WorkspaceError("capture_context_changed", 409) from None
+            if session.get(PrivateRecordingTransferSession, transfer_id) is not None:
+                raise ws.WorkspaceError("capture_saved_recording_changed", 409) from None
+            if session.get(PrivateRecordingTransferRejection, (transfer_id, transfer_sha)) is None:
+                session.add(PrivateRecordingTransferRejection(transfer_id=transfer_id, request_sha256=transfer_sha))
+                session.commit()
+            raise ws.WorkspaceError(code, 409) from None
         if code in known:
             raise ws.WorkspaceError(code, known[code]) from None
         raise ws.WorkspaceError("capture_request_unconfirmed", 503) from None
