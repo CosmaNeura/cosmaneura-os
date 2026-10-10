@@ -95,6 +95,41 @@ class PrivateRecordingLink(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class PrivateRecordingVisitBinding(Base):
+    """Append-only association; neither notebook nor audio origin is moved."""
+    __tablename__ = "private_recording_visit_bindings"
+    __table_args__ = (
+        ForeignKeyConstraint(["recording_id", "origin_workspace_id", "box_id", "owner_id"],
+            ["private_recordings.id", "private_recordings.workspace_id", "private_recordings.box_id", "private_recordings.owner_id"]),
+        ForeignKeyConstraint(["target_workspace_id", "box_id", "owner_id"],
+            ["encounter_workspaces.id", "encounter_workspaces.box_id", "encounter_workspaces.owner_id"]),
+        ForeignKeyConstraint(["appointment_id", "box_id", "patient_link_id"],
+            ["appointment_observations.id", "appointment_observations.box_id", "appointment_observations.patient_link_id"]),
+        ForeignKeyConstraint(["finish_id", "recording_id"],
+            ["private_recording_finishes.id", "private_recording_finishes.recording_id"]),
+        UniqueConstraint("recording_id", name="uq_private_recording_visit_binding"),
+        CheckConstraint("target_revision >= 1 AND request_sha256 ~ '^[a-f0-9]{64}$' "
+            "AND source_sha256 ~ '^[a-f0-9]{64}$' AND appointment_sha256 ~ '^[a-f0-9]{64}$'",
+            name="ck_private_recording_visit_binding_hash"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    recording_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    origin_workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    target_workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    appointment_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    finish_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    target_revision: Mapped[int] = mapped_column(Integer)
+    request_key: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    request_sha256: Mapped[str] = mapped_column(String(64))
+    source_sha256: Mapped[str] = mapped_column(String(64))
+    appointment_sha256: Mapped[str] = mapped_column(String(64))
+    request: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class PrivateRecordingTransfer(Base):
     """One exact admission intent per saved source and clinical workspace."""
     __tablename__ = "private_recording_transfers"

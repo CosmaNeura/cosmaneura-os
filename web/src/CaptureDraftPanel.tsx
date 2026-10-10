@@ -64,7 +64,7 @@ export function CaptureDraftPanel({ workspaceId, sessionId, sourceId, identity, 
 
   return <section className="capture-note" aria-label="Recorded visit draft">
     <h3>Visit note</h3>
-    <p className="team-fine">{simpleFlow?'Choose a note template, then create and review your visit note.':`Choose your Core template to prepare a draft from this recording${scratchpad ? ` and saved scratch notes (revision ${scratchpad.revision})` : ""}.`}</p>
+    <p className="team-fine">{simpleFlow?(draft?.status==='draft'?'Review each section below. Save any corrections before continuing.':'Choose a note template, then create and review your visit note.'):`Choose your Core template to prepare a draft from this recording${scratchpad ? ` and saved scratch notes (revision ${scratchpad.revision})` : ""}.`}</p>
     {notebookDirty && <p role="status">Save your scratch notes before preparing the draft. Unsaved typing is not included.</p>}
     {taskBot && (!taskBot.enabled || scratchpad && !taskBot.includeNotebook) && <p role="status">Enable {taskBot.name} and its saved-notebook source in team settings before preparing this draft.</p>}
     {onNotebook && (!simpleFlow||scratchpad||notebookDirty) && <button className="team-subtle" onClick={onNotebook}>Open scratch notes</button>}

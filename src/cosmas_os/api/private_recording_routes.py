@@ -11,7 +11,12 @@ from cosmas_os.api.capture_schemas import _unique_object
 from cosmas_os.application import private_recording as service
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.capture_deadline import CaptureBudget, capture_budget, run_in_threadpool
-from cosmas_os.ports.private_recording import AttachRecording, FinishRecording, LinkRecording
+from cosmas_os.ports.private_recording import (
+    AttachRecording,
+    BindRecordingVisit,
+    FinishRecording,
+    LinkRecording,
+)
 
 
 def router(*, workspace_gate, get_session, identity, fence):
@@ -89,4 +94,14 @@ def router(*, workspace_gate, get_session, identity, fence):
     async def link(wid: UUID, rid: UUID, request: Request, session=Depends(get_session), member=Depends(identity)):
         command = await body(request, LinkRecording)
         return await invoke(request, session, member, service.link, str(wid), str(rid), command, mutating=True)
+    @routes.get("/workspaces/{wid}/private-recordings/{rid}/visit-binding")
+    async def read_visit_binding(wid: UUID, rid: UUID, request: Request, session=Depends(get_session), member=Depends(identity)):
+        if request.headers.getlist("content-length") not in ([], ["0"]):
+            raise ws.WorkspaceError("invalid_private_recording_request", 422)
+        return await invoke(request, session, member, service.read_visit_binding, str(wid), str(rid))
+
+    @routes.post("/workspaces/{wid}/private-recordings/{rid}/visit-binding")
+    async def bind_visit(wid: UUID, rid: UUID, request: Request, session=Depends(get_session), member=Depends(identity)):
+        command = await body(request, BindRecordingVisit)
+        return await invoke(request, session, member, service.bind_visit, str(wid), str(rid), command, mutating=True)
     return routes

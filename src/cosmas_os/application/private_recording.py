@@ -9,13 +9,17 @@ from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import AuditEvent, ExternalIdentity, WorkspaceAppointmentLink
 from cosmas_os.ports.private_recording import (
     AttachRecording,
+    BindRecordingVisit,
     FinishRecording,
     LinkRecording,
+    VisitBoundRecordingSelection,
 )
 from cosmas_os.private_recording_models import (
     PrivateRecording,
     PrivateRecordingFinish,
     PrivateRecordingLink,
+    PrivateRecordingTransfer,
+    PrivateRecordingVisitBinding,
 )
 
 
@@ -206,3 +210,121 @@ def source_digest(recording, finish_row, appointment_link):
     return payload_hash({"recording_id": recording.id, "attach_sha256": recording.request_sha256,
         "finish_sha256": finish_row.request_sha256, "manifest_sha256": finish_row.manifest_sha256,
         "workspace_link_sha256": appointment_link.request_hash})
+
+
+def appointment_digest(appointment):
+    return payload_hash({"appointment_id": appointment.id, "patient_link_id": appointment.patient_link_id,
+        "source": appointment.source, "source_sha256": appointment.source_sha256,
+        "external_id": appointment.external_id, "label": appointment.patient_label,
+        "start_at": appointment.start_at.isoformat() if appointment.start_at else None,
+        "source_local_start": appointment.source_local_start.isoformat() if appointment.source_local_start else None})
+
+
+def visit_source_digest(recording, finish_row, binding):
+    return payload_hash({"contract": "cosmas.private-recording.visit-source.v1",
+        "recording_id": recording.id, "origin_workspace_id": recording.workspace_id,
+        "attach_sha256": recording.request_sha256, "finish_sha256": finish_row.request_sha256,
+        "manifest_sha256": finish_row.manifest_sha256, "target_workspace_id": binding.target_workspace_id,
+        "appointment_sha256": binding.appointment_sha256, "binding_request_sha256": binding.request_sha256})
+
+
+def checked_visit_binding(s, box, owner, wid, external, rid):
+    origin, row = checked(s, box, owner, wid, external, rid)
+    view(s, row)  # The original finish/link receipts must remain intact.
+    binding = s.scalar(select(PrivateRecordingVisitBinding).where(
+        PrivateRecordingVisitBinding.recording_id == rid))
+    if binding is None:
+        return row, None, None
+    target = ws._workspace(s, box, owner, binding.target_workspace_id)
+    if target.appointment_id is None:
+        raise ws.WorkspaceError("private_recording_visit_changed", 409)
+    appointment = ws._encounter(s, box, target.appointment_id, target.patient_link_id, owner=owner)
+    finish_row = s.scalar(select(PrivateRecordingFinish).where(PrivateRecordingFinish.recording_id == rid))
+    command = BindRecordingVisit.model_validate(binding.request)
+    if (binding.box_id != box or binding.owner_id != owner or binding.origin_workspace_id != wid
+        or finish_row is None or finish_row.id != binding.finish_id or finish_row.capture_state != "finished"
+        or binding.request_key != str(command.idempotency_key) or binding.request_sha256 != digest("visit-binding", command)
+        or str(command.target_workspace_id) != target.id or str(command.appointment_id) != appointment.id
+        or binding.target_revision != command.expected_target_revision
+        or binding.appointment_id != appointment.id or binding.patient_link_id != appointment.patient_link_id
+        or binding.appointment_sha256 != appointment_digest(appointment)
+        or binding.source_sha256 != visit_source_digest(row, finish_row, binding)
+        or origin.appointment_id is not None and origin.appointment_id != target.appointment_id):
+        raise ws.WorkspaceError("private_recording_visit_changed", 409)
+    return row, binding, target
+
+
+def visit_binding_view(binding):
+    return {"contract": "cosmas.private-recording.visit-binding.v1", "receipt_id": binding.id,
+        "recording_id": binding.recording_id, "origin_workspace_id": binding.origin_workspace_id,
+        "target_workspace_id": binding.target_workspace_id, "appointment_id": binding.appointment_id,
+        "request": binding.request, "request_sha256": binding.request_sha256,
+        "appointment_sha256": binding.appointment_sha256, "source_sha256": binding.source_sha256}
+
+
+def read_visit_binding(s, box, owner, wid, rid, *, external):
+    _, binding, _ = checked_visit_binding(s, box, owner, wid, external, rid)
+    return None if binding is None else visit_binding_view(binding)
+
+
+def bind_visit(s, box, owner, wid, rid, command, *, external, fence):
+    # identity() serializes human-owned metadata writes; this also fences a
+    # same-recording link/admission racing with the new association.
+    origin, row = checked(s, box, owner, wid, external, rid)
+    _, prior, _ = checked_visit_binding(s, box, owner, wid, external, rid)
+    sha = digest("visit-binding", command)
+    if prior is not None:
+        if prior.request_key != str(command.idempotency_key) or prior.request_sha256 != sha:
+            raise ws.WorkspaceError("idempotency_conflict", 409)
+        return visit_binding_view(prior)
+    target = ws._workspace(s, box, owner, str(command.target_workspace_id))
+    if target.appointment_id is None:
+        raise ws.WorkspaceError("private_recording_visit_changed", 409)
+    appointment = ws._encounter(s, box, target.appointment_id, target.patient_link_id, owner=owner)
+    finish_row = s.scalar(select(PrivateRecordingFinish).where(PrivateRecordingFinish.recording_id == rid))
+    if (target.revision != command.expected_target_revision or target.appointment_id != str(command.appointment_id)
+        or finish_row is None or finish_row.capture_state != "finished"
+        or origin.appointment_id is not None and origin.appointment_id != target.appointment_id):
+        raise ws.WorkspaceError("private_recording_visit_changed", 409)
+    if s.scalar(select(PrivateRecordingTransfer.id).where(or_(
+        PrivateRecordingTransfer.recording_id == rid, PrivateRecordingTransfer.workspace_id == target.id))):
+        raise ws.WorkspaceError("private_recording_visit_in_use", 409)
+    binding = PrivateRecordingVisitBinding(recording_id=rid, origin_workspace_id=wid,
+        target_workspace_id=target.id, box_id=box, owner_id=owner, appointment_id=appointment.id,
+        patient_link_id=appointment.patient_link_id, finish_id=finish_row.id, target_revision=target.revision,
+        request_key=str(command.idempotency_key), request_sha256=sha, appointment_sha256=appointment_digest(appointment),
+        request=command.model_dump(mode="json"))
+    binding.source_sha256 = visit_source_digest(row, finish_row, binding)
+    s.add(binding)
+    s.flush()
+    audit(s, row, "visit_bound", sha)
+    fence()
+    s.commit()
+    return visit_binding_view(binding)
+
+
+def capture_source(s, box, owner, target, external, selected):
+    if isinstance(selected, VisitBoundRecordingSelection):
+        row, binding, current_target = checked_visit_binding(s, box, owner,
+            str(selected.origin_workspace_id), external, str(selected.recording_id))
+        if (binding is None or current_target is None or current_target.id != target.id
+            or binding.id != str(selected.visit_binding_receipt_id)
+            or binding.source_sha256 != selected.source_sha256):
+            raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+    else:
+        _, row = checked(s, box, owner, target.id, external, str(selected.recording_id))
+        view(s, row)
+        link = s.scalar(select(PrivateRecordingLink).where(PrivateRecordingLink.recording_id == row.id))
+        appointment_link = s.get(WorkspaceAppointmentLink, link.workspace_link_receipt_id) if link else None
+        if (link is None or link.id != str(selected.link_receipt_id)
+            or link.source_sha256 != selected.source_sha256 or appointment_link is None
+            or appointment_link.appointment_id != target.appointment_id
+            or appointment_link.patient_link_id != target.patient_link_id
+            or s.scalar(select(PrivateRecordingVisitBinding.id).where(PrivateRecordingVisitBinding.recording_id == row.id))):
+            raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+    finish_row = s.scalar(select(PrivateRecordingFinish).where(PrivateRecordingFinish.recording_id == row.id))
+    if (finish_row is None or finish_row.capture_state != "finished"
+        or finish_row.manifest_sha256 != selected.manifest_sha256
+        or finish_row.chunks != selected.chunks or finish_row.frames != selected.frames):
+        raise ws.WorkspaceError("capture_saved_recording_changed", 409)
+    return row, finish_row

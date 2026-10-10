@@ -1,5 +1,5 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {createPrivateRecordingIntent,createPrivateRecordingFinishIntent,parsePrivateRecordingReceipt,privateRecordingApi,
+import {createPrivateRecordingIntent,createPrivateRecordingFinishIntent,parsePrivateRecordingReceipt,parseRecordingVisitBinding,privateRecordingApi,
   type PrivateRecordingIntent,type PrivateRecordingReceipt} from './private-recording-api';
 import {vendorCanonical,vendorSha256} from './vendor-contract';
 import type {ProviderTeam,Workspace} from './workspace-api';
@@ -18,10 +18,23 @@ beforeEach(async()=>{
 });
 afterEach(()=>{vi.useRealTimers();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 const intent=()=>createPrivateRecordingIntent(team,workspace,id(2),consent,'2026-10-08T00:00:01.123Z');
+const sha=(value:unknown)=>vendorSha256(new TextEncoder().encode(vendorCanonical(value)));
 function receipt(v:PrivateRecordingIntent):PrivateRecordingReceipt {
   return {contract:'cosmas.private-recording.v1',custody:'local_device_metadata',recording_id:id(3),local_recording_id:id(2),workspace_id:id(1),workspace_revision:1,
     owner_id:id(11),box_id:id(10),agent_id:id(12),team_revision_id:id(13),recovery_scope:scope,attach_sha256:v.request_sha256,started_at:v.request.started_at,created_at:'2026-10-08T00:00:02Z',state:'unfinished',finish:null,link:null,upstream_capture_admitted:false,audio_uploaded:false,transcription_started:false};
 }
+it('binds an existing visit with independently verified source hashes while retaining the origin',async()=>{
+  const v=await intent(),saved={...receipt(v),state:'finished' as const,finish:{receipt_id:id(4),request_sha256:'b'.repeat(64),manifest_sha256:'c'.repeat(64),chunks:2,frames:32000,ended_at:'2026-10-08T00:00:04Z'}};
+  const command={idempotency_key:id(40),target_workspace_id:id(41),appointment_id:id(42),expected_target_revision:3,visit_confirmed:true as const};
+  const request_sha256=await sha({contract:'cosmas.private-recording.visit-binding.v1',request:command});
+  const binding={contract:'cosmas.private-recording.visit-binding.v1' as const,receipt_id:id(43),recording_id:saved.recording_id,origin_workspace_id:v.workspace_id,target_workspace_id:id(41),appointment_id:id(42),request:command,request_sha256,appointment_sha256:'a'.repeat(64),source_sha256:await sha({contract:'cosmas.private-recording.visit-source.v1',recording_id:saved.recording_id,origin_workspace_id:v.workspace_id,attach_sha256:saved.attach_sha256,finish_sha256:saved.finish.request_sha256,manifest_sha256:saved.finish.manifest_sha256,target_workspace_id:id(41),appointment_sha256:'a'.repeat(64),binding_request_sha256:request_sha256})};
+  const fetcher=vi.fn(async(_input:unknown,_init?:RequestInit)=>json(binding));vi.stubGlobal('fetch',fetcher);
+  expect(await privateRecordingApi.bindVisit(identity,v,team,saved,command)).toEqual(binding);
+  expect(await privateRecordingApi.readVisitBinding(identity,v,team,saved)).toEqual(binding);
+  expect(fetcher.mock.calls[0][0]).toBe(`http://127.0.0.1:8018/workspaces/${id(1)}/private-recordings/${id(3)}/visit-binding`);
+  for(const altered of [{...binding,origin_workspace_id:id(99)},{...binding,target_workspace_id:id(99)},{...binding,source_sha256:'d'.repeat(64)},{...binding,request:{...command,appointment_id:id(99)}}])await expect(parseRecordingVisitBinding(altered,saved)).rejects.toThrow();
+  expect(saved.workspace_id).toBe(id(1));
+});
 it('matches actual Python canonical timestamp and SHA before any token or HTTP',async()=>{
   const v=await intent();v.request.idempotency_key=id(1);
   const canonical=vendorCanonical({contract:'cosmas.private-recording.attach.v1',request:v.request});

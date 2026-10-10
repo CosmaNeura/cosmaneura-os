@@ -30,7 +30,7 @@ export type CaptureAttestation = {
   granted_at: string;
 };
 export type CaptureLanguage = "en-US" | "en-US+es-US";
-export type SavedRecordingSelection={recording_id:string;link_receipt_id:string;source_sha256:string;
+export type SavedRecordingSelection=({link_receipt_id:string}|{origin_workspace_id:string;visit_binding_receipt_id:string})&{recording_id:string;source_sha256:string;
   manifest_sha256:string;chunks:number;frames:number};
 export type PreparedCapture = {
   configured_capture?: {schema_version: "1.0"; language_mode: CaptureLanguage};
