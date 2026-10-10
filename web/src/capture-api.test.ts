@@ -80,6 +80,21 @@ it("preserves known consent/recovery codes and sanitizes unexpected service erro
     .rejects.toMatchObject({ code: "capture_request_unconfirmed" });
 });
 
+it('preserves a definite saved-recording consent rejection without renewing or resending the request',async()=>{
+  const access=identity();
+  const fetchMock=vi.fn<typeof fetch>().mockResolvedValueOnce(json({detail:'capture_recording_consent_required'},409));
+  vi.stubGlobal('fetch',fetchMock);
+  const attestation={modality:'in_person' as const,participant_regions:[],method:'verbal_attestation' as const,all_parties_consented:true as const,granted_at:'2026-10-08T12:00:00Z'};
+  const saved={recording_id:workspace,link_receipt_id:session,source_sha256:'a'.repeat(64),manifest_sha256:'b'.repeat(64),chunks:5,frames:768000};
+  await expect(prepareCapture(workspace,access,attestation,'retained-request',undefined,{address:'scribe',team_revision:1},'en-US',saved))
+    .rejects.toMatchObject({status:409,code:'capture_recording_consent_required'});
+  expect(fetchMock).toHaveBeenCalledOnce();
+  const sent=JSON.parse(String(fetchMock.mock.calls[0][1]?.body));
+  expect(sent.idempotency_key).toBe('retained-request');
+  expect(sent.attestation).toEqual(attestation);
+  expect(sent).not.toHaveProperty('renew_saved_consent');
+});
+
 it("permits a bounded source transcript beyond the smaller control-response limit", async () => {
   const transcript = { session_id: session, segments: [{ content: "Invented speech. ".repeat(10000) }] };
   vi.stubGlobal("fetch", vi.fn().mockResolvedValue(json({ session_id: session, workspace_id: workspace,
