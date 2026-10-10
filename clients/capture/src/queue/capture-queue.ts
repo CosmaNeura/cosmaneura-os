@@ -161,6 +161,38 @@ export class CaptureQueue {
     return this.#storage.listMetadata();
   }
 
+  /** Explicit saved-recording recovery after a client upload repair. Reconcile
+   * each rejected PUT before making its unchanged envelope and keys eligible. */
+  async retryRejectedUploads(sessionId: string, transport: CaptureQueueTransport): Promise<void> {
+    await withOriginDrainLock(async () => {
+      if (this.#draining) throw new QueueInvariantError("queue_drain_in_progress");
+      this.#draining = true;
+      try {
+        const rows = (await this.#storage.listMetadata()).filter(row =>
+          row.reservation.sessionId === sessionId && row.state === "uploading"
+          && row.retry.upload.terminalCode === "upload_rejected"
+          && row.retry.registration.terminalCode === null);
+        for (const row of rows) {
+          const remote = await transport.getReceipt(row.reservation);
+          if (remote.state === "registered") {
+            await this.#reconcileRegistered(row.reservation.objectId, remote.registration);
+          } else if (remote.state === "reserved") {
+            await this.#mutate(row.reservation.objectId, current =>
+              current.revision === row.revision && current.state === "uploading"
+              && current.retry.upload.terminalCode === "upload_rejected"
+              && current.retry.registration.terminalCode === null
+                ? scheduleRetry(current, "upload", this.#now()) : current);
+          } else {
+            throw new QueueInvariantError("chunk_receipt_state_mismatch");
+          }
+        }
+        return true;
+      } finally {
+        this.#draining = false;
+      }
+    });
+  }
+
   /** Removes envelope bytes only after a matching server registration receipt. */
   async purge(objectId: string): Promise<CaptureChunkRecord> {
     const result = await this.#mutate(objectId, (current) => {

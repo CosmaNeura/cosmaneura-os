@@ -69,8 +69,9 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
         return response;
       }catch(error){reference='audio_upload_response_unconfirmed';throw error;}
     });
-    controller=new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:new CaptureQueue(queue.storage),source,
-      queueTransport:new BffCaptureQueueTransport(bff,upload)});
+    const captureQueue=new CaptureQueue(queue.storage),transport=new BffCaptureQueueTransport(bff,upload);
+    controller=new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:captureQueue,source,
+      queueTransport:transport});
     const view=await creatorReviewApi(workspaceId,sessionId,identity,abort.signal).read();
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
     let reviewOnly=false;
@@ -83,7 +84,13 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     return {controller:selected,reviewOnly,transcribe:()=>{
       if(reviewOnly)return Promise.resolve();
       if(!task)reference=null;
-      return task??=(importSavedChunks(selected,source,options.chunks,current).finally(()=>{task=null;}));
+      return task??=(async()=>{
+        if(!current())throw new QueueInvariantError('capture_access_unavailable');
+        if(selected.snapshot.state==='error'||selected.snapshot.state==='uploading'){
+          await captureQueue.retryRejectedUploads(sessionId,transport);
+        }
+        await importSavedChunks(selected,source,options.chunks,current);
+      })().finally(()=>{task=null;});
     },releaseUploadedCapture:()=>reviewOnly?Promise.resolve():selected.releaseUploadedCapture(),
     uploadProgress:async()=>{
       const rows=await queue!.storage.listMetadata();
