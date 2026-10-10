@@ -186,6 +186,21 @@ describe("BffCaptureQueueTransport", () => {
     expect(fetchImplementation).not.toHaveBeenCalled();
   });
 
+  it("creates an Azure block blob with the complete encrypted envelope", async () => {
+    const fetchImplementation = vi.fn<typeof fetch>(async (_url, options) =>
+      new Response(null, { status: new Headers(options?.headers).get("x-ms-blob-type") === "BlockBlob" ? 201 : 400 }));
+    const target = new HttpCiphertextUploadTarget(["https://synthetic.blob.core.windows.net"], fetchImplementation);
+    const envelope = new Uint8Array([1, 2, 3]);
+    await target.putCompleteEnvelope("https://synthetic.blob.core.windows.net/capture/fixture?sig=synthetic", envelope);
+    const options = fetchImplementation.mock.calls[0]![1]!;
+    expect(new Uint8Array(options.body as ArrayBuffer)).toEqual(envelope);
+    expect(options).toMatchObject({ method: "PUT", credentials: "omit", redirect: "error" });
+    expect(new Headers(options.headers).get("x-ms-blob-type")).toBe("BlockBlob");
+    const other = new HttpCiphertextUploadTarget(["https://upload.example.test"], fetchImplementation);
+    await expect(other.putCompleteEnvelope("https://upload.example.test/fixture", envelope)).rejects.toBeInstanceOf(UploadResponseError);
+    expect(new Headers(fetchImplementation.mock.calls[1]![1]?.headers).has("x-ms-blob-type")).toBe(false);
+  });
+
   it("treats unexpected successful upload status as unknown success", async () => {
     const transport = new BffCaptureQueueTransport(
       bffStub(),

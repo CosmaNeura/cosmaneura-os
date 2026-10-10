@@ -10,6 +10,14 @@ const legacyCapabilities = { protocol_version: "1.0", media: {
   remaining_aggregate_plaintext_bytes: 67108864, capture_lease_ttl_seconds: 900,
   reservation_window_seconds: 900, max_reservations_per_batch: 90, upload_concurrency: 2 };
 const identity = () => ({ mode: "clerk_jwt" as const, getToken: vi.fn().mockResolvedValue("synthetic-token") });
+
+it("reports only the closed operation and HTTP status on upload failure", async () => {
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({detail:"private response"}),
+    {status:503,headers:{"Content-Type":"application/json","Cache-Control":"no-store"}})));
+  const failure=vi.fn(),bff=workspaceCaptureBff(workspace,session,identity(),undefined,failure);
+  await expect(bff.getChunkReceipt(session,consent)).rejects.toMatchObject({status:503,code:"capture_request_unconfirmed"});
+  expect(failure.mock.calls).toEqual([["chunk_receipt",503]]);
+});
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
 });

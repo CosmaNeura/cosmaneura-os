@@ -62,6 +62,7 @@ export class HttpCiphertextUploadTarget implements CiphertextUploadTarget {
       body,
       headers: {
         "Content-Type": "application/octet-stream",
+        ...(target.hostname.endsWith(".blob.core.windows.net") ? { "x-ms-blob-type": "BlockBlob" } : {}),
         ...(receipt === null ? {} : { "X-Capture-Upload-Receipt": receipt }),
       },
       credentials: "omit",

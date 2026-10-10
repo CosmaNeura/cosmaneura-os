@@ -145,12 +145,15 @@ export async function prepareCapture(workspaceId: string, identity: Authenticate
 }
 
 export function workspaceCaptureBff(workspaceId: string, sessionId: string, identity: AuthenticatedWorkspaceIdentity,
-  scopeSignal?: AbortSignal) {
+  scopeSignal?: AbortSignal, onFailure?: (kind: string, status: number) => void) {
   return new WorkspaceCaptureBff(workspaceId, sessionId,
     (body, signal) => request(workspaceId, "operations", identity, body,
       signal && scopeSignal ? AbortSignal.any([signal, scopeSignal]) : signal ?? scopeSignal,
       ["transcript", "capture_source"].includes(body.operation.kind) ? MAX_CAPTURE_SOURCE_BYTES + 4096 :
-        body.operation.kind === "capture_recovery_state" ? 2_004_096 : 131072));
+        body.operation.kind === "capture_recovery_state" ? 2_004_096 : 131072).catch(error => {
+          if (error instanceof BffResponseError) onFailure?.(body.operation.kind, error.status);
+          throw error;
+        }));
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
