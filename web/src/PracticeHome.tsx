@@ -9,7 +9,7 @@ import './practice-home.css';
 function recordingDetails(recording:PrivateRecordingSnapshot):string {
   const status=recording.phase==='sealed'?(recording.recordedChunks?'Saved on this device; not yet synced':'Stopped · no audio captured'):recording.phase==='paused'?'Paused · not yet synced':recording.phase==='interrupted'?'Interrupted · check retained audio':'Check recording status';
   const seconds=Math.floor(recording.elapsedSeconds),duration=`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
-  return `${status} · ${duration} · Private`;
+  return `${duration} · ${status} · Private`;
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:()=>Promise<PrivateNotebookResult>};
@@ -119,7 +119,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
     <p className="team-kicker">YOUR PRACTICE</p><h1>{team?.revision?'Your workspace':'Let’s get you ready.'}</h1>
     <p className="practice-home-lead">Record with Scribe or start a private note. Choose a patient or visit later.</p>
     {onRecord&&<section className="practice-home-scribe" aria-label="Start with Scribe"><div><p className="team-kicker">SCRIBE</p><h2>Record first. Organize later.</h2><p>Private audio stays encrypted on this device. Everyone’s consent is required before the microphone starts.</p></div><button className="team-primary" disabled={!recovery||busy||locked} onClick={record}>Start recording</button></section>}
-    {recordings&&onReopenRecording&&<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong><span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>}
+    {recordings&&onReopenRecording&&<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong>{recording.createdAt&&<time dateTime={recording.createdAt}>{new Date(recording.createdAt).toLocaleString()}</time>}<span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>}
     <form className="practice-quick-start" onSubmit={event=>{event.preventDefault();void create();}}>
       <label>Note title<input maxLength={160} value={title} disabled={!ready||busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>
       <div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):'Checking your team…'}</p>

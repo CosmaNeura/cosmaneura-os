@@ -20,7 +20,7 @@ export type PrivateRecordingStartupStage=CaptureSourceStartupStage|'preparing_st
 export type PrivateRecordingManifest={contract:'cosmabot.private-recording.v1';recordingId:string;scope:string;title:string;
   consent:CaptureAttestation&{language:CaptureLanguage};consentIntervals:(CaptureAttestation&{language:CaptureLanguage})[];workspaceId:string|null;createdAt:string;updatedAt:string;phase:PrivateRecordingPhase;
   chunks:{sequence:number;sha256:string;bytes:number;durationMs:number}[]};
-export type PrivateRecordingSnapshot={recordingId:string;title:string;phase:PrivateRecordingPhase;elapsedSeconds:number;recordedChunks:number;
+export type PrivateRecordingSnapshot={recordingId:string;title:string;createdAt?:string;phase:PrivateRecordingPhase;elapsedSeconds:number;recordedChunks:number;
   recordedBytes:number;workspaceId:string|null;busy:boolean;localOnly:true;transcription:'not_requested';failure:string|null;startupStage:PrivateRecordingStartupStage|null};
 export interface PrivateRecordingStore {
   read(key:string):Promise<unknown|null>;
@@ -107,7 +107,7 @@ export class PrivateRecordingRuntime {
       return new PrivateRecordingRuntime(options,store,checked);
     }catch(error){store.close();throw error;}
   }
-  get snapshot():PrivateRecordingSnapshot{return {recordingId:this.saved.recordingId,title:this.saved.title,phase:this.saved.phase,
+  get snapshot():PrivateRecordingSnapshot{return {recordingId:this.saved.recordingId,title:this.saved.title,createdAt:this.saved.createdAt,phase:this.saved.phase,
     elapsedSeconds:this.saved.chunks.reduce((sum,c)=>sum+c.durationMs,0)/1000,recordedChunks:this.saved.chunks.length,
     recordedBytes:this.saved.chunks.reduce((sum,c)=>sum+c.bytes,0),workspaceId:this.saved.workspaceId,busy:['starting','pausing','stopping'].includes(this.saved.phase),localOnly:true,transcription:'not_requested',failure:this.failure,startupStage:this.startupStage};}
   subscribe(listener:(snapshot:PrivateRecordingSnapshot)=>void):()=>void{this.current();this.listeners.add(listener);listener(this.snapshot);return()=>this.listeners.delete(listener);}
@@ -275,7 +275,7 @@ export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop
   const store=await(openStore?.()??openPrivateRecordingStore(scope,platform));
   try{const keys=(await store.keys()).filter(k=>k.startsWith('manifest:'));need(keys.length<=1000);
     const rows:PrivateRecordingSnapshot[]=[];
-    for(const key of keys){const row=manifest(await store.read(key),scope,key.slice('manifest:'.length));rows.push({recordingId:row.recordingId,title:row.title,phase:row.phase,elapsedSeconds:row.chunks.reduce((n,c)=>n+c.durationMs,0)/1000,recordedChunks:row.chunks.length,recordedBytes:row.chunks.reduce((n,c)=>n+c.bytes,0),workspaceId:row.workspaceId,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null});}
+    for(const key of keys){const row=manifest(await store.read(key),scope,key.slice('manifest:'.length));rows.push({recordingId:row.recordingId,title:row.title,createdAt:row.createdAt,phase:row.phase,elapsedSeconds:row.chunks.reduce((n,c)=>n+c.durationMs,0)/1000,recordedChunks:row.chunks.length,recordedBytes:row.chunks.reduce((n,c)=>n+c.bytes,0),workspaceId:row.workspaceId,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null});}
     return rows;
   }finally{store.close();}
 }
