@@ -1,6 +1,7 @@
 """Current-context and durable admission client for the first-party Core facade."""
 
 import json
+import re
 from datetime import timedelta
 from typing import Literal
 from uuid import UUID, uuid4
@@ -188,6 +189,7 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
                         code = ""
                     known = {
                         (409, "CAPTURE_CONSENT_REQUIRED"): "capture_consent_required",
+                        (409, "CAPTURE_RECORDING_CONSENT_REQUIRED"): "capture_recording_consent_required",
                         (409, "CAPTURE_CONSENT_UNAVAILABLE"): "capture_consent_unavailable",
                         (409, "CAPTURE_REQUEST_CONFLICT"): "capture_request_conflict",
                         (202, "CAPTURE_IN_PROGRESS"): "capture_in_progress",
@@ -364,10 +366,15 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
         attestation: CoreConsentAttestation | None,
         idempotency_key: str,
         *, configured_capture: ConfiguredCaptureSelection | None = None, expected_session_id: UUID | None = None,
+        recording_key_sha256: str | None = None, recover_legacy_request: bool = False,
     ) -> CoreCaptureAdmissionSnapshot:
         try:
             binding = CoreCaptureBindingSnapshot.model_validate(binding.model_dump())
             credential = CoreInteractionCredential.model_validate(credential.model_dump())
+            if recording_key_sha256 is not None and (not isinstance(recording_key_sha256, str) or not re.fullmatch(r"[a-f0-9]{64}", recording_key_sha256) or expected_session_id is not None):
+                raise ValueError
+            if type(recover_legacy_request) is not bool or recover_legacy_request and (recording_key_sha256 is None or attestation is None):
+                raise ValueError
             if expected_session_id is not None and (attestation is not None or configured_capture is not None):
                 raise ValueError
             if configured_capture is not None:
@@ -388,6 +395,7 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
                     "workspace_id": str(binding.workspace_id),
                     "request_nonce": str(nonce),
                     "attestation": attestation.model_dump(mode="json") if attestation else None,
+                    **({"recording_key_sha256":recording_key_sha256, "recover_legacy_request":recover_legacy_request} if recording_key_sha256 is not None else {}),
                     **({"configured_capture": configured_capture.model_dump(mode="json")} if configured_capture is not None else {}),
                     **({"expected_session_id": str(expected_session_id)} if expected_session_id is not None else
                        {"resume_current": True} if attestation is None and configured_capture is None else {}),
@@ -467,6 +475,7 @@ class HttpCoreCaptureAdmission(HttpCoreCaptureBinding):
                     "workspace_id": str(binding.workspace_id),
                     "request_nonce": str(nonce),
                     "operation": operation.model_dump(mode="json"),
+                    "expected_session_id": str(session_id),
                 },
                 {
                     **self._workload_headers(),

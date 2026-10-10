@@ -5,7 +5,7 @@ from typing import Literal
 from uuid import UUID
 
 from fastapi import Request
-from pydantic import ConfigDict, Field, field_validator, model_validator
+from pydantic import ConfigDict, Field, StrictBool, field_validator, model_validator
 
 from cosmas_os.api.note_schemas import CoreNoteLink
 from cosmas_os.api.team_schemas import BotAddress
@@ -31,9 +31,12 @@ class CaptureAdmissionRequest(ProtectedModel):
     configured_capture: ConfiguredCaptureSelection | None = None
     bot: CaptureBotSelection | None = None
     saved_recording: SavedRecordingSelection | VisitBoundRecordingSelection | None = None
+    renew_saved_consent: StrictBool = False
 
     @model_validator(mode="after")
     def saved_audio_consent(self):
+        if self.renew_saved_consent and self.saved_recording is None:
+            raise ValueError("saved_recording_consent_required")
         if self.saved_recording is not None and (self.attestation is None or self.configured_capture is None or self.bot is None):
             raise ValueError("saved_recording_consent_required")
         return self

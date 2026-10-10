@@ -135,7 +135,6 @@ class PrivateRecordingTransfer(Base):
     __tablename__ = "private_recording_transfers"
     __table_args__ = (
         UniqueConstraint("recording_id", name="uq_private_transfer_recording"),
-        UniqueConstraint("workspace_id", name="uq_private_transfer_workspace"),
         CheckConstraint("request_sha256 ~ '^[a-f0-9]{64}$'", name="ck_private_transfer_hash"),
     )
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
@@ -152,4 +151,27 @@ class PrivateRecordingTransferSession(Base):
     transfer_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("private_recording_transfers.id"), primary_key=True)
     session_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
     receipt: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PrivateRecordingTransferAttempt(Base):
+    """Explicit fresh consent after a definite, expired no-admission result."""
+    __tablename__ = "private_recording_transfer_attempts"
+    __table_args__ = (
+        UniqueConstraint("transfer_id", "prior_request_sha256", name="uq_private_transfer_attempt_prior"),
+        UniqueConstraint("transfer_id", "request_sha256", name="uq_private_transfer_attempt_hash"),
+        CheckConstraint("request_sha256 ~ '^[a-f0-9]{64}$' AND prior_request_sha256 ~ '^[a-f0-9]{64}$'", name="ck_private_transfer_attempt_hash"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    transfer_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("private_recording_transfers.id"))
+    prior_request_sha256: Mapped[str] = mapped_column(String(64))
+    request_sha256: Mapped[str] = mapped_column(String(64))
+    request: Mapped[dict] = mapped_column(JSONB)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PrivateRecordingTransferRejection(Base):
+    __tablename__ = "private_recording_transfer_rejections"
+    transfer_id: Mapped[str] = mapped_column(UUID(as_uuid=False), ForeignKey("private_recording_transfers.id"), primary_key=True)
+    request_sha256: Mapped[str] = mapped_column(String(64), primary_key=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

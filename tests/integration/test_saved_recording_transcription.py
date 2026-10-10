@@ -1,7 +1,7 @@
 """Signed saved-source admission pins the source, consent and session."""
 import hashlib
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import httpx
@@ -21,6 +21,8 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.models import CoreCaptureAccount
 from cosmas_os.private_recording_models import (
     PrivateRecordingTransfer,
+    PrivateRecordingTransferAttempt,
+    PrivateRecordingTransferRejection,
     PrivateRecordingTransferSession,
 )
 
@@ -38,6 +40,10 @@ class SavedCore(LocalCore):
         # exceeded this limit even though the previous fake accepted it.
         assert 8 <= len(key) <= 100 and key.isascii() and not any(c.isspace() for c in key)
         self.keys.append(key)
+        recording_key = kwargs.pop("recording_key_sha256", None)
+        recover_legacy = kwargs.pop("recover_legacy_request", False)
+        if recording_key is not None:
+            assert key == "saved:" + recording_key and recover_legacy is True
         receipt = super().admit_capture(binding, credential, attestation, key, **kwargs)
         self.saved = receipt.model_copy(update={"configured_capture": kwargs.get("configured_capture") or receipt.configured_capture})
         return self.saved
@@ -101,6 +107,8 @@ def test_saved_source_reaches_real_admission_adapter_with_bounded_stable_key(sav
         assert request.url.path == '/service/v1/agent/scribe/capture-admissions'
         keys.append(request.headers['Idempotency-Key'])
         body = json.loads(request.content)
+        assert body['recording_key_sha256'] == request.headers['Idempotency-Key'][6:]
+        assert body['recover_legacy_request'] is True
         return httpx.Response(200, headers={
             'Cache-Control': 'no-store', 'X-Cosmaneura-Capture-Version': '1',
         }, json={
@@ -158,6 +166,41 @@ def test_second_consent_cannot_replace_original_transfer(saved_case):
     assert result.status_code==409
 
 
+def test_expired_unadmitted_intent_requires_explicit_new_attempt(saved_case,session,monkeypatch):
+    from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
+    f,draft,body,port=saved_case
+    expired={**body,"attestation":{**body['attestation'],"granted_at":(datetime.now(UTC)-timedelta(hours=1)).isoformat()}}
+    native=port.admit_capture
+    def definite(*args,**kwargs):
+        raise ConnectorUnavailable('capture_recording_consent_required')
+    monkeypatch.setattr(port,'admit_capture',definite)
+    assert submit(saved_case,expired).status_code==409
+    transfer=session.scalar(select(PrivateRecordingTransfer).where(PrivateRecordingTransfer.recording_id==body['saved_recording']['recording_id']))
+    original=transfer.request.copy();assert session.get(PrivateRecordingTransferRejection,(transfer.id,transfer.request_sha256))
+    assert submit(saved_case,body).status_code==409
+    monkeypatch.setattr(port,'admit_capture',native)
+    renewed={**body,'renew_saved_consent':True}
+    result=submit(saved_case,renewed);assert result.status_code==200,result.text
+    assert submit(saved_case,renewed).json()==result.json()
+    session.refresh(transfer);assert transfer.request==original
+    attempts=session.scalars(select(PrivateRecordingTransferAttempt).where(PrivateRecordingTransferAttempt.transfer_id==transfer.id)).all()
+    assert len(attempts)==1 and attempts[0].request['source']==original['source']
+    assert attempts[0].request['attestation']!=original['attestation']
+    with Session(session.get_bind()) as independent:
+        with pytest.raises(DBAPIError):
+            independent.execute(text('UPDATE private_recording_transfer_attempts SET created_at=now()'))
+            independent.commit()
+
+
+def test_uncertain_attempt_cannot_replace_consent(saved_case,monkeypatch):
+    from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
+    def uncertain(*args,**kwargs):raise ConnectorUnavailable('synthetic_lost_reply')
+    monkeypatch.setattr(saved_case[3],'admit_capture',uncertain)
+    assert submit(saved_case).status_code==503
+    changed={**saved_case[2],'renew_saved_consent':True,'attestation':{**saved_case[2]['attestation'],'granted_at':datetime.now(UTC).isoformat()}}
+    assert submit(saved_case,changed).status_code==409
+
+
 @pytest.mark.parametrize('kind', ['native_recording_context','source_start'])
 def test_import_cannot_request_microphone_authority(saved_case, kind):
     admitted=submit(saved_case)
@@ -179,7 +222,7 @@ def test_saved_import_rechecks_account_after_each_remote_phase(saved_case,sessio
     def revoke(observed):
         if observed==phase:
             with Session(session.get_bind()) as independent:
-                account=independent.scalar(select(CoreCaptureAccount))
+                account=independent.scalar(select(CoreCaptureAccount).where(CoreCaptureAccount.external_identity_id==saved_case[0].binding.id))
                 assert account is not None
                 account.revoked_at=datetime.now(UTC)
                 independent.commit()

@@ -268,6 +268,7 @@ def exercise(kind, mutate=lambda value: None):
             mode="json"
         )
         assert "session_id" not in request_body
+        assert request_body["expected_session_id"] == str(session)
         response = {
             "contract_version": "1",
             "binding_ref": ref("scribe_capture_binding"),

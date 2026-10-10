@@ -19,11 +19,12 @@ let root:Root,host:HTMLDivElement,stored:unknown;
 const back=vi.fn(),navigation=vi.fn();
 beforeEach(()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();
+  HTMLElement.prototype.scrollIntoView=vi.fn();
   stored={contract:'cosmas.saved-transfer.v1',recording_id:id(3),workspace_id:id(1),scope:'c'.repeat(64),link_request:null,receipt,admission:structuredClone(admission),admitted:null};
   mocks.read.mockImplementation(async()=>structuredClone(stored));
   mocks.write.mockImplementation(async(_key,_before,next)=>{stored=structuredClone(next);});
   mocks.ledger.mockResolvedValue({state:'finished',attach:{},receipt,finish:{}});
-  mocks.open.mockResolvedValue({snapshot:{workspaceId:id(1),phase:'sealed',recordedChunks:1},close:mocks.runtimeClose,
+  mocks.open.mockResolvedValue({snapshot:{workspaceId:id(1),phase:'sealed',recordedChunks:1,elapsedSeconds:19},close:mocks.runtimeClose,
     snapshotForLedger:async()=>({phase:'sealed',manifestSHA256:'b'.repeat(64),chunks:1,frames:1}),
     savedChunks:async function*(){const wavBytes=new Uint8Array(46);wavBytes[44]=1;yield{wavBytes};}});
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
@@ -50,4 +51,22 @@ it('keeps the exact retry for an uncertain response without exposing private err
   expect(button('Continue transcription')?.disabled).toBe(false);expect(host.textContent).not.toContain('private-response-must-not-appear');
   await act(async()=>button('Continue transcription')!.click());
   expect(vi.mocked(prepareCapture).mock.calls[0]).toEqual(vi.mocked(prepareCapture).mock.calls[1]);
+});
+
+it('requires fresh explicit consent only after a definite no-admission result and retains earlier intent across reopen',async()=>{
+  const original=structuredClone(admission);
+  vi.mocked(prepareCapture).mockRejectedValueOnce(new BffResponseError(409,'capture_recording_consent_required',null)).mockRejectedValue(new BffResponseError(503,'unconfirmed',null));
+  await mount();await act(async()=>button('Continue transcription')!.click());
+  const send=button('Send recording with confirmed consent');expect(send?.disabled).toBe(true);
+  expect(host.textContent).toContain('expired before Scribe accepted');
+  await act(async()=>(host.querySelector('input[type="checkbox"]') as HTMLInputElement).click());
+  expect(send?.disabled).toBe(false);await act(async()=>send!.click());
+  const retained=stored as {contract:string;admission:typeof admission;prior_admissions:typeof admission[];renew_saved_consent:boolean};
+  expect(retained.contract).toBe('cosmas.saved-transfer.v3');expect(retained.prior_admissions).toEqual([original]);
+  expect(retained.admission.source).toEqual(original.source);expect(retained.admission.key).not.toBe(original.key);
+  expect(retained.renew_saved_consent).toBe(true);expect(vi.mocked(prepareCapture).mock.calls[1][8]).toBe(true);
+  await act(async()=>root.unmount());root=createRoot(host);await mount();
+  await act(async()=>button('Continue transcription')!.click());
+  expect(vi.mocked(prepareCapture).mock.calls[2]).toEqual(vi.mocked(prepareCapture).mock.calls[1]);
+  expect((stored as typeof retained).prior_admissions).toEqual([original]);
 });
