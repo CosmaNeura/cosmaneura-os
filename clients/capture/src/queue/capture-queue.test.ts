@@ -28,7 +28,7 @@ const TENANT_ID = "20000000-0000-4000-8000-000000000002";
 const REGISTERED_AT = "2026-08-17T12:00:00.000Z";
 
 describe("CaptureQueue", () => {
-  it.each(['retry', 'registered', 'read_failure', 'mismatched_receipt', 'foreign_session', 'policy_rejection', 'registration_blocked'] as const)(
+  it.each(['retry', 'registered', 'read_failure', 'mismatched_receipt', 'foreign_session', 'policy_rejection', 'registration_blocked', 'expired_grant', 'denied_grant', 'accepted_grant'] as const)(
     'reconciles explicit repaired-upload recovery without changing custody: %s', async kind => {
       const h = await createHarness(), reservation = makeReservation(0);
       await h.queue.reserve(reservation, 'retained-reservation');
@@ -36,21 +36,25 @@ describe("CaptureQueue", () => {
       await h.queue.drainOnce(successfulTransport(() => h.now.value, {
         ...(kind === 'registration_blocked'
           ? { register: async () => { throw new QueueTransportError('terminal', 'registration_receipt_mismatch'); } }
-          : { upload: async () => { throw new QueueTransportError('terminal', kind === 'policy_rejection' ? 'upload_target_rejected' : 'upload_rejected'); } }),
+          : { upload: async () => { throw new QueueTransportError('terminal', kind === 'policy_rejection' ? 'upload_target_rejected' : kind.endsWith('_grant') ? 'bff_request_rejected' : 'upload_rejected'); } }),
       }));
       const before = await h.queue.get(reservation.objectId);
       if (!before || !('envelope' in before)) throw Error('retained envelope required');
       const receipt = { chunkId: '30000000-0000-4000-8000-000000000001', sha256: before.sha256,
         byteLength: before.byteLength, registeredAt: REGISTERED_AT };
-      const transport = successfulTransport(() => h.now.value, { receipt: async () => {
+      const transport = successfulTransport(() => h.now.value, { ...(kind.endsWith('_grant') ? {authorize:async()=>{
+        if(kind==='expired_grant')throw new QueueTransportError('credential_expired','upload_credential_expired');
+        if(kind==='denied_grant')throw new QueueTransportError('terminal','bff_request_rejected');
+        return {objectId:reservation.objectId,additionalAuthenticatedData:reservation.additionalAuthenticatedData,uploadUrl:'https://upload.invalid',expiresAtEpochMs:60000};
+      }}:{}),receipt: async () => {
         if (kind === 'read_failure') throw new QueueTransportError('retryable', 'bff_temporarily_unavailable');
         if (kind === 'registered' || kind === 'mismatched_receipt') return { state: 'registered',
           registration: { ...receipt, ...(kind === 'mismatched_receipt' ? { sha256: 'f'.repeat(64) } : {}) } };
         return { state: 'reserved' };
       } });
       const recovery = h.queue.retryRejectedUploads(kind === 'foreign_session' ? '90000000-0000-4000-8000-000000000001' : SESSION_ID, transport);
-      if (kind === 'read_failure' || kind === 'mismatched_receipt') await expect(recovery).rejects.toMatchObject({
-        code: kind === 'read_failure' ? 'bff_temporarily_unavailable' : 'registration_receipt_mismatch' });
+      if (kind === 'read_failure' || kind === 'mismatched_receipt'||kind==='denied_grant') await expect(recovery).rejects.toMatchObject({
+        code: kind === 'read_failure' ? 'bff_temporarily_unavailable' : kind==='denied_grant'?'bff_request_rejected':'registration_receipt_mismatch' });
       else await recovery;
       const after = await h.queue.get(reservation.objectId);
       if (kind === 'retry' || kind === 'registered') {
@@ -58,9 +62,15 @@ describe("CaptureQueue", () => {
           envelope: before.envelope, sha256: before.sha256, byteLength: before.byteLength });
         expect(after?.retry.upload.terminalCode).toBeNull();
         expect(after?.state).toBe(kind === 'registered' ? 'registered' : 'uploading');
-      } else expect(after).toEqual(before);
+      } else if(kind==='expired_grant'){
+        expect(after).toMatchObject({reservation:before.reservation,envelope:before.envelope,sha256:before.sha256,byteLength:before.byteLength});
+        expect(after?.idempotencyKeys.reservation).toBe(before.idempotencyKeys.reservation);expect(after?.idempotencyKeys.registration).toBe(before.idempotencyKeys.registration);
+        expect(after?.idempotencyKeys.uploadAuthorization).not.toBe(before.idempotencyKeys.uploadAuthorization);
+        expect(after?.idempotencyKeys.uploadAuthorizationGeneration).toBe(before.idempotencyKeys.uploadAuthorizationGeneration+1);
+        expect(after?.retry.upload.terminalCode).toBeNull();
+      }else expect(after).toEqual(before);
       expect(transport.upload).not.toHaveBeenCalled(); expect(transport.register).not.toHaveBeenCalled();
-      expect(transport.authorizeUpload).not.toHaveBeenCalled();
+      if(kind.endsWith('_grant'))expect(transport.authorizeUpload).toHaveBeenCalledOnce();else expect(transport.authorizeUpload).not.toHaveBeenCalled();
       if (kind === 'retry') {
         await h.queue.drainOnce(transport);
         expect(await h.queue.get(reservation.objectId)).toMatchObject({ state: 'registered', idempotencyKeys: before.idempotencyKeys });

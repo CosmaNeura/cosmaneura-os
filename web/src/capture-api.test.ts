@@ -21,6 +21,13 @@ it("reports only the closed operation and HTTP status on upload failure", async 
 const json = (body: unknown, status = 200) => new Response(JSON.stringify(body), {
   status, headers: { "Content-Type": "application/json", "Cache-Control": "no-store" },
 });
+it('preserves definite upload grant expiry without treating a generic conflict as expiry',async()=>{
+  const fetcher=vi.fn().mockResolvedValueOnce(json({detail:'upload_authorization_expired'},409)).mockResolvedValueOnce(json({detail:'capture_request_conflict'},409));
+  vi.stubGlobal('fetch',fetcher);const bff=workspaceCaptureBff(workspace,session,identity());
+  await expect(bff.authorizeUpload(session,consent,{protocol_version:'1.0'},{idempotencyKey:'same-grant-key'})).rejects.toMatchObject({status:409,code:'upload_authorization_expired'});
+  await expect(bff.authorizeUpload(session,consent,{protocol_version:'1.0'},{idempotencyKey:'same-grant-key'})).rejects.toMatchObject({status:409,code:'capture_request_conflict'});
+  expect(fetcher).toHaveBeenCalledTimes(2);
+});
 beforeEach(() => vi.stubEnv("VITE_API_BASE", "http://127.0.0.1:8018"));
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
 

@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from tests.integration import test_workspace_capture as shared
 
 from cosmas_os.models import CoreCaptureAccount, ExternalIdentity, PatientLink
+from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
 from cosmas_os.ports.capture_protocol import Capabilities, MediaCapabilities, SourceTranscript
 
 capture_case = shared.capture_case
@@ -81,6 +82,22 @@ def test_workspace_operation_rechecks_admission_and_keeps_no_store(capture_case)
     assert response.status_code == 200
     assert response.json()["receipt"] == capabilities().model_dump(mode="json")
     assert response.json()["session_id"] == f.session_id
+    assert response.headers["cache-control"] == "no-store"
+    assert f.port.calls == ["exchange", "resolve", "binding", "admit", "operation"]
+
+
+def test_upload_expiry_keeps_its_closed_recovery_code(capture_case):
+    f = capture_case
+    prepare(f)
+
+    def expired(*args):
+        f.port.calls.append("operation")
+        raise ConnectorUnavailable("upload_authorization_expired")
+
+    f.port.perform_capture_operation = expired
+    response = perform(f)
+    assert response.status_code == 409
+    assert response.json() == {"detail": "upload_authorization_expired"}
     assert response.headers["cache-control"] == "no-store"
     assert f.port.calls == ["exchange", "resolve", "binding", "admit", "operation"]
 

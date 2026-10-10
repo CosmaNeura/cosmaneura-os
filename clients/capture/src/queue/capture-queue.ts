@@ -170,13 +170,25 @@ export class CaptureQueue {
       try {
         const rows = (await this.#storage.listMetadata()).filter(row =>
           row.reservation.sessionId === sessionId && row.state === "uploading"
-          && row.retry.upload.terminalCode === "upload_rejected"
+          && ["upload_rejected", "bff_request_rejected"].includes(row.retry.upload.terminalCode ?? "")
           && row.retry.registration.terminalCode === null);
         for (const row of rows) {
           const remote = await transport.getReceipt(row.reservation);
           if (remote.state === "registered") {
             await this.#reconcileRegistered(row.reservation.objectId, remote.registration);
           } else if (remote.state === "reserved") {
+            if (row.retry.upload.terminalCode === "bff_request_rejected") {
+              try {
+                await transport.authorizeUpload(sessionId, row.reservation.objectId, row.idempotencyKeys.uploadAuthorization);
+              } catch (error) {
+                if (error instanceof QueueTransportError && error.kind === "credential_expired") {
+                  await this.#rotateAuthorization(row.reservation.objectId, row.idempotencyKeys.uploadAuthorizationGeneration);
+                  continue;
+                }
+                throw error;
+              }
+              continue; // An ordinary successful grant does not erase a prior denial.
+            }
             await this.#mutate(row.reservation.objectId, current =>
               current.revision === row.revision && current.state === "uploading"
               && current.retry.upload.terminalCode === "upload_rejected"

@@ -38,7 +38,7 @@ export type PreparedCapture = {
 };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const SAFE_CODES = new Set(["capture_consent_required", "capture_consent_unavailable", "capture_recording_consent_required",
-  "capture_request_conflict", "capture_in_progress", "capture_session_changed",
+  "capture_request_conflict", "upload_authorization_expired", "capture_in_progress", "capture_session_changed",
   "capture_context_changed", "capture_connection_required", "core_capture_access_unavailable",
   "capture_note_conflict", "capture_source_unavailable", "capture_notes_unavailable", "capture_notebook_changed", "capture_saved_recording_changed",
   "bot_paused", "team_revision_conflict", "bot_source_unavailable", "scribe_source_changed",

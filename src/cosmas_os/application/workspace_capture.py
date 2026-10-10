@@ -433,6 +433,7 @@ def admit(
             "capture_consent_required": 409,
             "capture_consent_unavailable": 409,
             "capture_request_conflict": 409,
+            "upload_authorization_expired": 409,
             "capture_in_progress": 202,
             "core_capture_access_unavailable": 403,
             "capture_note_conflict": 409,
