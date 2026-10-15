@@ -87,10 +87,7 @@ class CreatorSource(ProtectedContract):
             )
             != self.segments
             or sum(len(s.content) for s in self.segments) > MAX_TRANSCRIPT_TOTAL_CONTENT_CHARS
-            or any(
-                not s.content.strip() or s.end_ms > self.duration_ms
-                for s in self.segments
-            )
+            or any(not s.content.strip() or s.end_ms > self.duration_ms for s in self.segments)
             or self.language_mode == "en-US"
             and any(s.source_locale == "es-US" for s in self.segments)
         ):
@@ -199,16 +196,22 @@ class CreatorReviewView(ProtectedContract):
         default=(), max_length=10_000
     )
     capture_continuity: CaptureContinuity | None = None
+    # Capability metadata does not authorize edits or accept corrected histories.
+    editing_allowed: StrictBool | None = None
 
     @model_serializer(mode="wrap")
     def compatible_continuity(self, handler: SerializerFunctionWrapHandler):
         result = handler(self)
         if self.capture_continuity is None:
             result.pop("capture_continuity", None)
+        if self.editing_allowed is None:
+            result.pop("editing_allowed", None)
         return result
 
     @model_validator(mode="after")
     def current_source_projection(self):
+        if self.editing_allowed is not None and self.editing_allowed is not True:
+            raise ValueError("invalid_creator_editing_capability")
         source, working, queue = self.source, self.working, self.review_queue
         statuses = {
             "translation_pending": "not_ready",
@@ -218,11 +221,9 @@ class CreatorReviewView(ProtectedContract):
         }
         if self.status not in statuses:
             if (
-                any(
-                    v is not None
-                    for v in (source, working, queue, self.capture_continuity)
-                )
+                any(v is not None for v in (source, working, queue, self.capture_continuity))
                 or self.translation_progress
+                or self.editing_allowed is not None
             ):
                 raise ValueError("invalid_creator_metadata_view")
             return self
@@ -240,9 +241,7 @@ class CreatorReviewView(ProtectedContract):
             raise ValueError("invalid_creator_lineage")
         originals = {s.source_segment_id: s for s in source.segments}
         blockers = {(b.source_segment_id, b.code) for b in working.blockers}
-        if len(blockers) != len(working.blockers) or any(
-            i not in originals for i, _ in blockers
-        ):
+        if len(blockers) != len(working.blockers) or any(i not in originals for i, _ in blockers):
             raise ValueError("invalid_creator_blockers")
         codes_by_segment: dict[UUID, set[str]] = {}
         for segment_id, code in blockers:
@@ -251,8 +250,7 @@ class CreatorReviewView(ProtectedContract):
         unresolved = set()
         for original, projected in zip(source.segments, working.segments, strict=True):
             if any(
-                getattr(original, k) != getattr(projected, k)
-                for k in SegmentOrigin.model_fields
+                getattr(original, k) != getattr(projected, k) for k in SegmentOrigin.model_fields
             ):
                 raise ValueError("invalid_creator_segment_lineage")
             codes = codes_by_segment.get(original.source_segment_id, set()).copy()
@@ -269,9 +267,7 @@ class CreatorReviewView(ProtectedContract):
                 ):
                     raise ValueError("invalid_creator_english_source")
             elif original.source_locale == "unknown":
-                if projected.resolution != "unresolved" or codes != {
-                    "source_locale_unknown"
-                }:
+                if projected.resolution != "unresolved" or codes != {"source_locale_unknown"}:
                     raise ValueError("invalid_creator_unknown_source")
             elif projected.resolution == "unresolved":
                 if len(codes) != 1 or not codes <= {
@@ -326,10 +322,7 @@ class CreatorReviewView(ProtectedContract):
             ):
                 raise ValueError("invalid_creator_review_item")
         progress_ids = {p.source_segment_id for p in self.translation_progress}
-        if (
-            len(progress_ids) != len(self.translation_progress)
-            or progress_ids & review_ids
-        ):
+        if len(progress_ids) != len(self.translation_progress) or progress_ids & review_ids:
             raise ValueError("invalid_creator_progress")
         for progress in self.translation_progress:
             original = originals.get(progress.source_segment_id)
