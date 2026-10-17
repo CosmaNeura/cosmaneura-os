@@ -4,9 +4,10 @@ import {editorAddress} from './draft-journal';
 import {validatePrivateDraftLinkRecovery,type PrivateDraftLink} from './private-draft-recovery';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace,type WorkspaceEncounter} from './workspace-api';
 
-export function PrivateDraftLinkPanel({identity,workspace,recovery,locked,onSaved,onAccessLost,onBusyChange,onPendingChange,forTranscription=false}:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;
-  recovery:EditorRecoveryAccess|null;locked:boolean;onSaved:(value:Workspace)=>void;onAccessLost:(cause:unknown)=>void;onBusyChange?:(busy:boolean)=>void;onPendingChange?:(pending:boolean)=>void;forTranscription?:boolean}){
+export function PrivateDraftLinkPanel({identity,workspace,recovery,locked,recoveryLocked=locked,onSaved,onAccessLost,onBusyChange,onPendingChange,forTranscription=false}:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;
+  recovery:EditorRecoveryAccess|null;locked:boolean;recoveryLocked?:boolean;onSaved:(value:Workspace)=>void;onAccessLost:(cause:unknown)=>void;onBusyChange?:(busy:boolean)=>void;onPendingChange?:(pending:boolean)=>void;forTranscription?:boolean}){
   const [pending,setPending]=useState<PrivateDraftLink|null>(null),[choices,setChoices]=useState<WorkspaceEncounter[]|null>(null);
+  const [search,setSearch]=useState('');
   const [selection,setSelection]=useState(''),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[ready,setReady]=useState(false),[retryAllowed,setRetryAllowed]=useState(false),[error,setError]=useState('');
   const live=useRef({identity,workspaceId:workspace.id,recovery,epoch:0,alive:true});
   if(live.current.identity!==identity||live.current.workspaceId!==workspace.id||live.current.recovery!==recovery)live.current={identity,workspaceId:workspace.id,recovery,epoch:live.current.epoch+1,alive:true};
@@ -34,22 +35,24 @@ export function PrivateDraftLinkPanel({identity,workspace,recovery,locked,onSave
   useEffect(()=>{const key=workspace.id+':'+live.current.epoch;
     if(forTranscription&&ready&&!busy&&!locked&&!pending&&choices===null&&autoLoaded.current!==key){autoLoaded.current=key;void load();}
   },[forTranscription,ready,busy,locked,pending,workspace.id,choices]);
-  async function link(retry=false){if(!recovery||!ready||busy||locked||pending&&(!retry||!retryAllowed)||retry&&!pending||!retry&&(!confirmed||!selectedAvailable))return;
+  async function link(retry=false){if(!recovery||!ready||busy||(retry?recoveryLocked:locked)||pending&&(!retry||!retryAllowed)||retry&&!pending||!retry&&(!confirmed||!selectedAvailable))return;
     const epoch=live.current.epoch,body:PrivateDraftLink=pending??{expected_revision:workspace.revision,idempotency_key:crypto.randomUUID(),appointment_id:selection,appointment_link_confirmed:true};setBusy(true);setRetryAllowed(false);setError('');
     try{await recovery.authorize();if(!current(epoch))return;await persist(body);if(!current(epoch))return;setPending(body);
       const result=await workspaceApi.linkAppointment(identity,workspace.id,body);if(!current(epoch))return;
       await recovery.authorize();if(!current(epoch))return;await persist(null);if(current(epoch)){setPending(null);onSaved(result.workspace);}}
     catch(cause){if(current(epoch))failure(cause);}finally{if(current(epoch))setBusy(false);}}
-  async function resolve(){if(!recovery||!ready||busy||locked||!pending)return;const epoch=live.current.epoch;setBusy(true);setError('');
+  async function resolve(){if(!recovery||!ready||busy||recoveryLocked||!pending)return;const epoch=live.current.epoch;setBusy(true);setError('');
     try{await recovery.authorize();if(!current(epoch))return;const result=await workspaceApi.resolveAppointmentLink(identity,workspace.id,pending);if(!current(epoch))return;
       await recovery.authorize();if(!current(epoch))return;if(result.outcome==='saved'&&result.workspace){await persist(null);if(current(epoch)){setPending(null);onSaved(result.workspace);}}else{setRetryAllowed(true);setError('No saved link was found. The exact original request is retained; retry only that same request.');}}
     catch(cause){if(current(epoch))failure(cause);}finally{if(current(epoch))setBusy(false);}}
   if(!workspace.private_draft||workspace.private_draft.state==='linked')return null;
   return <section className={`private-draft-link${forTranscription?' saved-visit-selection':''}`} aria-label={forTranscription?'Choose a visit for this recording':'Link private draft to a visit'}><h2>{forTranscription?'Choose a visit':'Private draft'}</h2><p>{forTranscription?'Your recording is saved. Choose the patient and visit it belongs to before sending it to Scribe.':'This note is not linked to a patient or appointment. Recording and visit actions remain unavailable.'}</p>
-    {pending?<><p>The earlier visit link is unconfirmed. Its exact request is retained. You can return Home and reopen this notebook to continue.</p><button disabled={!ready||busy||locked} onClick={()=>void resolve()}>Check saved visit link</button>{retryAllowed&&<button disabled={!ready||busy||locked} onClick={()=>void link(true)}>Retry same visit link</button>}</>:<details open={forTranscription||undefined}><summary>{forTranscription?'Choose the patient and visit for this recording':'Link a confirmed visit'}</summary>
+    {pending?<><p>The earlier visit link is unconfirmed. Its exact request is retained. You can return Home and reopen this notebook to continue.</p><button disabled={!ready||busy||recoveryLocked} onClick={()=>void resolve()}>Check saved visit link</button>{retryAllowed&&<button disabled={!ready||busy||recoveryLocked} onClick={()=>void link(true)}>Retry same visit link</button>}</>:<details open={forTranscription||undefined}><summary>{forTranscription?'Choose the patient and visit for this recording':'Link a confirmed visit'}</summary>
       {!forTranscription&&<p>Choose an appointment you can access, then confirm the note belongs to that patient and visit. Your draft history is kept.</p>}
       {(!forTranscription||choices===null)&&<button disabled={!ready||busy||locked} onClick={()=>void load()}>{forTranscription?(busy?'Finding your visits…':'Try loading visits again'):'Load available visits'}</button>}
-      {choices&&<><label>Visit<select disabled={busy||locked} value={selection} onChange={event=>{setSelection(event.target.value);setConfirmed(false);}}><option value="">Choose a visit…</option>{choices.map(choice=><option key={choice.appointment_id} value={choice.appointment_id} disabled={!available(choice)}>{choice.label}{available(choice)?'':' · already has a notebook'}</option>)}</select></label>
+      {choices&&<><label>Search visits<input type="search" value={search} disabled={busy||locked} onChange={event=>{setSearch(event.target.value);setSelection('');setConfirmed(false);}} placeholder="Patient or visit title"/></label>
+        <label>Visit<select disabled={busy||locked} value={selection} onChange={event=>{setSelection(event.target.value);setConfirmed(false);}}><option value="">Choose a visit…</option>{choices.filter(choice=>choice.label.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase())).map(choice=><option key={choice.appointment_id} value={choice.appointment_id} disabled={!available(choice)}>{choice.label}{available(choice)?'':' · already has a notebook'}</option>)}</select></label>
+        {selection&&<p><strong>Selected patient and visit:</strong> {choices.find(choice=>choice.appointment_id===selection)?.label}</p>}
         {choices.some(choice=>!available(choice))&&<p>Visits with an existing notebook cannot be linked to this private notebook. {forTranscription?'Your recording remains saved on this device.':'Your private note remains saved.'}</p>}
         {!!choices.length&&!choices.some(available)&&<p>No visits are available for this notebook. Return Home, then use Visits and notes to find another visit.</p>}
         {!choices.length&&<p>{forTranscription?'No visits are available. Your recording is still saved on this device.':'No confirmed visits are available. Your private note remains available.'}</p>}

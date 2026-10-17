@@ -8,7 +8,7 @@ from cosmas_os.application.workspace import WorkspaceError
 
 def contract_header(request, *, required=False):
     values = request.headers.getlist('x-cosmas-team-contract')
-    if len(values) > 1 or values and values not in (['1'], ['2'], ['3'], ['4']):
+    if len(values) > 1 or values and values not in (['1'], ['2'], ['3'], ['4'], ['5']):
         raise WorkspaceError('team_contract_unsupported', 426)
     if required and not values:
         raise WorkspaceError('team_contract_required', 426)

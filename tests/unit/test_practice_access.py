@@ -4,6 +4,7 @@ import asyncio
 import json
 import time
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -18,13 +19,26 @@ from sqlalchemy.orm import sessionmaker
 
 from cosmas_os.api.auth import AccessDenied, ClerkTokenVerifier, authenticate_request
 from cosmas_os.api.practice_access_routes import register
-from cosmas_os.api.practice_access_schemas import DecideAccess, ReviewAccess, SubmitAccess
+from cosmas_os.api.practice_access_schemas import (
+    CreateInvitation,
+    DecideAccess,
+    JoinInvitation,
+    ReviewAccess,
+    RevokeInvitation,
+    SubmitAccess,
+)
 from cosmas_os.application import beta_identity_admin as admin
 from cosmas_os.application import practice_access as access
+from cosmas_os.application import practice_invites as invites
 from cosmas_os.config import Settings
 from cosmas_os.db import Base
 from cosmas_os.models import AuditEvent, BoxContext, ExternalIdentity, Principal
-from cosmas_os.practice_access_models import PracticeAccessRequest
+from cosmas_os.practice_access_models import (
+    PracticeAccessRequest,
+    PracticeInvitation,
+    PracticeInviteRevocation,
+    PracticeInviteUse,
+)
 from cosmas_os.practice_setup_models import PracticeOwnerReservation, PracticeSetupProfile
 
 
@@ -47,7 +61,7 @@ def case(engine):
 
 def _practice_access_case(engine):
     tables = [BoxContext.__table__, Principal.__table__, ExternalIdentity.__table__,
-              AuditEvent.__table__, PracticeAccessRequest.__table__, PracticeOwnerReservation.__table__, PracticeSetupProfile.__table__]
+              AuditEvent.__table__, PracticeAccessRequest.__table__, PracticeOwnerReservation.__table__, PracticeSetupProfile.__table__, PracticeInvitation.__table__, PracticeInviteRevocation.__table__, PracticeInviteUse.__table__]
     Base.metadata.create_all(engine, tables=tables)
     factory = sessionmaker(engine, autoflush=False)
     values = json.loads((Path(__file__).parents[1] / "fixtures/hosted-workspace-settings.json").read_text())
@@ -264,4 +278,117 @@ def test_real_signed_http_request_owner_decision_and_recovery(case):
             assert (await client.get("/practice-access?subject=outside", headers=h)).status_code == 422
             assert (await client.post("/practice-access/request", headers=h,
                 json={"idempotency_key": str(uuid4()), "display_name": "Name", "subject": c.owner.subject})).status_code == 422
+    asyncio.run(exercise())
+
+# Invitation links are synthetic credentials, never identity-matching codes.
+
+
+def invite_command(**changes):
+    return CreateInvitation(idempotency_key=uuid4(), label="Invented onboarding", token=uuid4().hex + uuid4().hex,
+                            expires_in_hours=72, **changes)
+
+
+def test_invitation_exact_recovery_hash_only_storage_and_reviewed_join(case):
+    c, command = case, invite_command()
+    absent = invoke(c, invites.resolve_create, c.owner, command)
+    assert absent == {"contract_version": 1, "outcome": "not_found", "invitation": None}
+    first = invoke(c, invites.create, c.owner, command)
+    assert first == invoke(c, invites.create, c.owner, command)
+    resolved = invoke(c, invites.resolve_create, c.owner, command)
+    assert resolved["outcome"] == "recorded" and resolved["invitation"] == first["invitation"]
+    assert command.token not in json.dumps(first)
+    assert command.token not in json.dumps(invoke(c, invites.list_invitations, c.owner))
+    with c.factory() as s:
+        row = s.get(PracticeInvitation, first["invitation"]["invitation_id"])
+        assert row.token_sha256 == sha256(command.token.encode()).hexdigest()
+        assert command.token not in json.dumps({column.key: str(getattr(row, column.key)) for column in row.__table__.columns})
+    join = JoinInvitation(idempotency_key=uuid4(), display_name="Invented invited teammate", token=command.token)
+    result = invoke(c, invites.join, command=join)
+    assert result == invoke(c, invites.join, command=join)
+    assert result["state"] == "pending" and count(c, Principal) == 1 and count(c, ExternalIdentity) == 1
+    assert count(c, PracticeInviteUse) == 1
+    assert invoke(c, invites.list_invitations, c.owner)["invitations"][0]["requests"] == 1
+    invoke(c, access.decide, c.owner, decision(result["request"]))
+    assert invoke(c, access.status)["state"] == "connected" and count(c, ExternalIdentity) == 2
+
+
+def test_invitation_scope_non_owner_wrong_org_expiry_revocation_and_no_grant(case, monkeypatch):
+    c, command = case, invite_command()
+    with pytest.raises(access.PracticeAccessError, match="practice_access_denied"):
+        invoke(c, invites.create, command=command)
+    first = invoke(c, invites.create, c.owner, command)["invitation"]
+    bad = access.VerifiedMember(c.config.beta_box_id, c.config.clerk_issuer, "org_invented_wrong", c.applicant.subject)
+    join = JoinInvitation(idempotency_key=uuid4(), display_name="Invented teammate", token=command.token)
+    with pytest.raises(access.PracticeAccessError):
+        invoke(c, invites.join, bad, join)
+    with c.factory() as s:
+        expires = s.get(PracticeInvitation, first["invitation_id"]).expires_at
+    with monkeypatch.context() as patch:
+        patch.setattr(access, "_now", lambda s: expires)
+        with pytest.raises(access.PracticeAccessError, match="practice_invitation_unavailable"):
+            invoke(c, invites.join, command=join)
+        assert invoke(c, invites.list_invitations, c.owner)["invitations"][0]["state"] == "expired"
+    revoke = RevokeInvitation(idempotency_key=uuid4(), invitation_id=first["invitation_id"])
+    assert invoke(c, invites.resolve_revoke, c.owner, revoke)["outcome"] == "not_found"
+    changed = invoke(c, invites.revoke, c.owner, revoke)
+    assert changed == invoke(c, invites.revoke, c.owner, revoke)
+    assert invoke(c, invites.resolve_revoke, c.owner, revoke)["invitation"]["state"] == "revoked"
+    with pytest.raises(access.PracticeAccessError, match="practice_invitation_unavailable"):
+        invoke(c, invites.join, command=join)
+    assert count(c, Principal) == 1 and count(c, PracticeAccessRequest) == 0 and count(c, PracticeInviteRevocation) == 1
+
+
+def test_invitation_conflicting_retries_concurrent_create_and_late_authority_rollback(case):
+    c, command = case, invite_command()
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        rows = list(pool.map(lambda _: invoke(c, invites.create, c.owner, command), range(3)))
+    assert rows[0] == rows[1] == rows[2] and count(c, PracticeInvitation) == 1
+    for changed in [command.model_copy(update={"label": "Other invented label"}), command.model_copy(update={"token": "a"*64})]:
+        with pytest.raises(access.PracticeAccessError, match="practice_access_conflict"):
+            invoke(c, invites.create, c.owner, changed)
+    same_token = command.model_copy(update={"idempotency_key": uuid4()})
+    with pytest.raises(access.PracticeAccessError, match="practice_access_conflict"):
+        invoke(c, invites.create, c.owner, same_token)
+    calls = []
+    def fence():
+        calls.append(True)
+        if len(calls) == 2:
+            raise AccessDenied()
+    with pytest.raises(AccessDenied):
+        invoke(c, invites.create, c.owner, invite_command(), fence=fence)
+    assert count(c, PracticeInvitation) == 1
+
+
+@pytest.mark.parametrize("changes", [{"token": "matching-code"}, {"expires_in_hours": True}, {"expires_in_hours": 1}, {"expires_in_hours": 169}, {"label": "bad\nname"}, {"unexpected": True}])
+def test_invitation_closed_bounded_requests(changes):
+    from pydantic import ValidationError
+    value = invite_command().model_dump(mode="json")
+    with pytest.raises(ValidationError):
+        CreateInvitation.model_validate({**value, **changes})
+
+
+def test_signed_http_invitation_resolve_join_and_revoke(case):
+    c = case
+    checked, token = verifier(c)
+    app = FastAPI()
+    register(app, runtime=lambda: c.config, verifier=lambda _origins: checked, session_factory=c.factory)
+    command = invite_command().model_dump(mode="json")
+    def headers(member):
+        return {"Authorization": "Bearer " + token(member), "X-Cosmas-Practice-Access-Contract": "1"}
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://local") as client:
+            owner, applicant = headers(c.owner), headers(c.applicant)
+            assert (await client.get('/practice-access/invitations', headers=applicant)).status_code == 403
+            response = await client.post('/practice-access/invitation/create', json=command, headers=owner)
+            assert response.status_code == 200, response.text
+            assert response.headers['cache-control'] == 'no-store' and command['token'] not in response.text
+            row = response.json()['invitation']
+            assert (await client.post('/practice-access/invitation/create/resolve', json=command, headers=owner)).json()['outcome'] == 'recorded'
+            join = {"idempotency_key": str(uuid4()), "display_name": "Invented invited HTTP member", "token": command['token']}
+            result = await client.post('/practice-access/invitation/join', json=join, headers=applicant)
+            assert result.status_code == 200 and result.json()['state'] == 'pending', result.text
+            revoke = {"idempotency_key": str(uuid4()), "invitation_id": row['invitation_id']}
+            assert (await client.post('/practice-access/invitation/revoke', json=revoke, headers=owner)).json()['invitation']['state'] == 'revoked'
+            assert (await client.post('/practice-access/invitation/join', json=join, headers=applicant)).status_code == 409
+            assert (await client.post('/practice-access/invitation/create?token=outside', json=command, headers=owner)).status_code == 422
     asyncio.run(exercise())

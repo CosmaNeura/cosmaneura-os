@@ -159,6 +159,8 @@ def catalog(s: Session, box: str, actor: str):
         {
             "appointment_id": a.id,
             "label": a.patient_label,
+            "start_at": a.start_at.isoformat() if a.start_at is not None else None,
+            "source": a.source,
             "workspace_id": next(
                 (
                     w.id
@@ -447,10 +449,13 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
         .order_by(Ticket.created_at)
         .limit(100)
     )
+    from cosmas_os.application import notebook_metadata
+
     return {
         "id": w.id,
         "appointment_id": w.appointment_id,
         "label": a.patient_label if a else w.draft_title,
+        **({"notebook": notebook_metadata.display(s, w)} if w.draft_title is not None else {}),
         "revision": revision,
         "entries": entries,
         "handoffs": handoffs.read(s, w, revision),

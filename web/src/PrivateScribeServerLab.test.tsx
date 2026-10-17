@@ -82,8 +82,8 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   const checkbox=container.querySelector<HTMLInputElement>('.private-recording-check input')!;
   const consentAt=performance.now();await act(async()=>checkbox.click());await click('Start recording');
   await wait(()=>expect(container.querySelector('.private-recording-status strong')?.textContent,container.textContent??'').toBe('Recording'));
-  expect(container.querySelector<HTMLElement>('.team-sidebar')!.hidden).toBe(true);
-  expect(container.querySelector<HTMLElement>('.team-topbar')!.hidden).toBe(true);
+  expect(container.querySelector<HTMLElement>('.team-sidebar')!.hidden).toBe(false);
+  expect(container.querySelector<HTMLElement>('.team-topbar')!.hidden).toBe(false);
   expect(button('Close recording').disabled).toBe(true);
   const adapterStartedAt=hardware.startedAt!;
   expect(adapterStartedAt).toBeGreaterThan(consentAt);
@@ -134,7 +134,7 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   await wait(()=>expect(container.querySelector('.private-recording-status strong')?.textContent).toBe('Saved on this device'));
   const orphan=runtimes.at(-1)!.snapshot;expect(orphan.workspaceId).toBeNull();expect(orphan.recordedChunks).toBe(1);
   await act(async()=>root!.unmount());root=createRoot(container);await act(async()=>root!.render(<PrivateRecordingPanel {...panelProps} recordingId={orphan.recordingId}/>));
-  await click('Choose private notebook');await click('Use notebook: Private recording');
+  await click('Choose private notebook');await click('Use notebook: '+recoveredNotebook.workspace.notebook!.title);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(1);
   await click('Save recording details to notebook');await wait(()=>expect(container.textContent).toContain('Recording details saved to your private notebook'));
   await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(3));

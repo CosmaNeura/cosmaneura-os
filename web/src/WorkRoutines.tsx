@@ -174,7 +174,7 @@ export function WorkRoutines({identity,team,onAccessLost,onRefreshTeam,onOpenInc
   const canEnable=!!bot?.enabled&&!bot.retired&&!restricted;
   function change(value:Partial<BriefSchedule>){setDraft({...draft,...value});setDirty(true);setMessage("");}
   return <section className="work-routines" aria-label="Private work briefs">
-    <header><div><p className="team-kicker">YOUR BOT'S ROUTINE</p><h2 ref={overviewHeading} tabIndex={-1}>Private work briefs</h2></div>
+    <header><div><p className="team-kicker">YOUR BOT'S ROUTINE</p><h2 ref={overviewHeading} tabIndex={-1}>Daily Brief</h2></div>
       <button disabled={busy||pending!==null||recovery.blocked} onClick={()=>void load()}>{dirty||conflict?"Reload saved schedule":"Refresh briefs"}</button></header>
     <p>Have a coworker summarize the shared work available to you, including overdue items and responsibility offers. Each brief is a dated observation.</p>
     <AccountEditorRecoveryNotice recovery={recovery} label="Work routine" onRestore={restore}/>
@@ -192,7 +192,10 @@ export function WorkRoutines({identity,team,onAccessLost,onRefreshTeam,onOpenInc
     {routine&&<><p className="team-pill">{statuses[routine.status]}</p>
       {routine.next_scheduled_at&&routine.configuration?.enabled&&!["team_changed","restricted"].includes(routine.status)&&<p>Next scheduled: {new Date(routine.next_scheduled_at).toLocaleString()} (your device time)</p>}
       {routine.team_revision!==team.revision&&<p>Refresh the workspace team before enabling or changing this routine.</p>}
-      <div className="routine-overview" hidden={editing}>
+      <div className="routine-overview routine-summary-card" hidden={editing}>
+        <h3>{bot?.name??'Your coworker'} · {routine.configuration?.enabled?'On':'Off'}</h3>
+        <p>{routine.configuration?`${routine.configuration.at} · ${routine.configuration.timezone}`:'Choose a time to get started.'}</p>
+        {routine.runs.length>0&&<p>Last brief: {routine.runs[0].local_date} <button disabled={busy||pending!==null} onClick={()=>void openRun(routine.runs[0].id)}>Open latest brief</button></p>}
         <button aria-controls={editorId} aria-expanded={editing} disabled={busy} onClick={()=>{if(!busy)setEditing(true);}}>Edit schedule</button>
         {dirty&&<p className="team-fine">Unfinished schedule retained. Open Edit schedule to continue. Returning did not save these edits.</p>}
       </div>

@@ -16,7 +16,7 @@ vi.mock("./team-setup-api", async () => {
 
 vi.mock("./workspace-api", async original => {
   const actual = await original<typeof import("./workspace-api")>();
-  return { ...actual, workspaceApi: { ...actual.workspaceApi, privateDrafts:vi.fn(), practiceWorkItem:vi.fn().mockRejectedValue(new Error("Unavailable fixture")), open: vi.fn(), catalog: vi.fn(), team: vi.fn(),
+  return { ...actual, workspaceApi: { ...actual.workspaceApi, privateDraftSummaries:vi.fn(), practiceWorkItem:vi.fn().mockRejectedValue(new Error("Unavailable fixture")), open: vi.fn(), catalog: vi.fn(), team: vi.fn(),
     read: vi.fn(), append: vi.fn(), saveTeam: vi.fn(), saveNote: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn() } };
 });
 // Namespace hashing and encryption are exercised by private-drafts.test.ts and
@@ -50,6 +50,7 @@ async function input(selector:string,value:string) {
   expect(field).toBeTruthy();expect(field.disabled).toBe(false);
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,"value")!.set!.call(field,value);
     field.dispatchEvent(new Event("input",{bubbles:true}));});
+  await act(async()=>{await new Promise(done=>setTimeout(done,220));});
 }
 async function mount() {root=createRoot(element);await act(async()=>root.render(<EncounterWorkspace authenticated={access} draftStorage={factory}/>));}
 async function open() {await click("Visits and notes");await act(async()=>element.querySelector<HTMLButtonElement>(".team-encounter-option")!.click());}
@@ -59,11 +60,12 @@ function savedNote(content:string): Workspace { return {...workspace,revision:2,
 
 beforeEach(async()=>{
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true);vi.clearAllMocks();
+  history.replaceState(null,'','/');
   records=new Map();failPending=false;element=document.createElement("div");document.body.append(element);
   vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:workspace.appointment_id,workspace_id:workspace.id,label:workspace.label}]);
   vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team});
   vi.mocked(workspaceApi.team).mockResolvedValue(team);vi.mocked(workspaceApi.read).mockResolvedValue(workspace);
-  vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+  vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
   await mount();
 });
 afterEach(async()=>{await act(async()=>root.unmount());element.remove();vi.unstubAllGlobals();});
@@ -78,6 +80,77 @@ it("offers stored drafts after remount without submitting them and restores exac
   const result=savedNote("Invented unsaved note across interruption");
   vi.mocked(workspaceApi.append).mockResolvedValue({workspace:result,entry_id:"invented-entry",entry_revision:2});
   await click("Save notebook revision");expect(notebookRecord()?.value).toBeNull();
+});
+
+it('keeps a failed visit link recoverable without locking notes or workspace navigation',async()=>{
+  const draft:Workspace={...workspace,appointment_id:null,private_draft:{title:'Invented private visit',state:'unlinked',link_receipt_id:null,linked_at:null}};
+  vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:draft,team});
+  vi.mocked(workspaceApi.read).mockResolvedValue(draft);
+  vi.spyOn(workspaceApi,'linkAppointment').mockRejectedValue(new WorkspaceApiError(503));
+  vi.spyOn(workspaceApi,'resolveAppointmentLink').mockResolvedValue({contract_version:1,outcome:'not_found',link_receipt_id:null,workspace:null});
+  await open();await click('Load available visits');
+  const select=element.querySelector<HTMLSelectElement>('.private-draft-link select')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,workspace.appointment_id);select.dispatchEvent(new Event('change',{bubbles:true}));});
+  await act(async()=>element.querySelector<HTMLInputElement>('.private-draft-link input[type=checkbox]')!.click());
+  await click('Link this visit');
+  const check=[...element.querySelectorAll<HTMLButtonElement>('button')].find(button=>button.textContent==='Check saved visit link')!;
+  expect(check.disabled).toBe(false);
+  expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(false);
+  await input('#team-notebook','Keep my clinical text while this visit link is checked.');
+  await click('Check saved visit link');expect(workspaceApi.resolveAppointmentLink).toHaveBeenCalledOnce();
+  await click('Home');await click('Current notebook');
+  expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Keep my clinical text while this visit link is checked.');
+  expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();
+  vi.mocked(workspaceApi.linkAppointment).mockRestore();vi.mocked(workspaceApi.resolveAppointmentLink).mockRestore();
+});
+
+it('clears the previous success banner before a failed refresh',async()=>{
+  await open();await click('Refresh encounter');
+  expect(element.textContent).toContain('Latest saved history and team loaded');
+  vi.mocked(workspaceApi.team).mockRejectedValueOnce(new WorkspaceApiError(503));
+  await click('Refresh encounter');
+  expect(element.textContent).not.toContain('Latest saved history and team loaded');
+  expect(element.querySelector('.team-banner.error')).toBeTruthy();
+});
+
+it('preserves long clinical text, focus and selection while a refresh is waiting',async()=>{
+  await open();let release!:(value:Workspace)=>void;
+  vi.mocked(workspaceApi.read).mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+  const field=element.querySelector<HTMLTextAreaElement>('#team-notebook')!;field.focus();
+  const refresh=[...element.querySelectorAll('button')].find(button=>button.textContent==='Refresh encounter')!;
+  await act(async()=>refresh.click());
+  expect(field.disabled).toBe(false);
+  const exact='Synthetic visit: dizziness began Tuesday. Patient says “I feel lightheaded when standing.” No loss of consciousness.\nPlan: review medications and home blood pressure readings; uncertainty remains.\n'.repeat(25);
+  await input('#team-notebook',exact);field.setSelectionRange(83,101);
+  await act(async()=>release(workspace));
+  expect(field.value).toBe(exact);expect(document.activeElement).toBe(field);
+  expect([field.selectionStart,field.selectionEnd]).toEqual([83,101]);
+  await act(async()=>{await new Promise(done=>setTimeout(done,220));});
+  expect((notebookRecord()?.value?.body as {note:string}).note).toBe(exact);
+});
+
+it('keeps the same notebook shell and selects the visit helper without dispatching work',async()=>{
+  await open();await click('During');
+  expect(element.querySelector('.team-roster button[aria-pressed=true] strong')?.textContent).toBe('Scribe');
+  await click('After');expect(element.querySelector('.team-roster button[aria-pressed=true] strong')?.textContent).toBe(team.configuration.bots.find(bot=>bot.role==='follow_up')!.name);
+  await click('Before');expect(element.querySelector('.team-roster button[aria-pressed=true] strong')?.textContent).toBe(team.configuration.bots.find(bot=>bot.role==='visit_prep')!.name);
+  expect(element.querySelector('.team-content')?.getAttribute('data-scribe-focus')).toBe('true');
+  expect(workspaceApi.append).not.toHaveBeenCalled();
+});
+
+it('restores an authorized notebook route on reload and uses Back without losing its draft',async()=>{
+  await open();await input('#team-notebook','Synthetic route recovery text');await click('During');await click('Review note');
+  const savedRoute=location.hash;expect(savedRoute).toContain('helper=scribe');expect(savedRoute).toContain('material=Review');
+  await act(async()=>root.unmount());await mount();
+  await vi.waitFor(async()=>{await act(async()=>{});expect(element.querySelector('.team-content')?.getAttribute('data-mobile-panel')).toBe('Review');});
+  expect(location.hash).toBe(savedRoute);expect(workspaceApi.open).toHaveBeenCalledOnce();
+  await click('Restore notebook draft');expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Synthetic route recovery text');
+  await act(async()=>{history.pushState(null,'','#cosmas/home');window.dispatchEvent(new PopStateEvent('popstate'));});
+  expect(element.querySelector('.team-content')?.closest('[hidden]')).toBeTruthy();
+  await act(async()=>{history.pushState(null,'',savedRoute);window.dispatchEvent(new PopStateEvent('popstate'));});
+  expect(element.querySelector('.team-content')?.closest('[hidden]')).toBeNull();
+  await click('Visit notes');
+  expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Synthetic route recovery text');
 });
 
 it("persists the exact request before sending and recovers a lost reply only through explicit retry",async()=>{

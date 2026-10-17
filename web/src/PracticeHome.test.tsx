@@ -20,7 +20,8 @@ describe('practice Quick start recovery',()=>{
     // fake-indexeddb and Node WebCrypto return Node-realm binary objects.
     vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
     recovery={journal:new DraftJournal(await openDraftStore({scope:'a'.repeat(64),native:false,indexedDB:new IDBFactory(),crypto:webcrypto})),authorize:vi.fn().mockResolvedValue(undefined)};
-    vi.spyOn(workspaceApi,'privateDrafts').mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+    vi.spyOn(workspaceApi,'catalog').mockResolvedValue([]);
+    vi.spyOn(workspaceApi,'privateDraftSummaries').mockResolvedValue({contract_version:2,drafts:[],has_more:false});
     vi.spyOn(workspaceApi,'createPrivateDraft').mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
     vi.spyOn(workspaceApi,'resolvePrivateDraft').mockResolvedValue({contract_version:1,outcome:'saved',workspace:structuredClone(workspace)});
     vi.spyOn(workspaceApi,'openPrivateDraft').mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
@@ -28,10 +29,10 @@ describe('practice Quick start recovery',()=>{
   });
   afterEach(async()=>{await act(async()=>root.unmount());recovery.journal.close();container.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
   async function render(member=identity,configured=team){
-    const reads=vi.mocked(workspaceApi.privateDrafts).mock.calls.length;
+    const reads=vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length;
     await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
-    for(let attempt=0;attempt<100&&vi.mocked(workspaceApi.privateDrafts).mock.calls.length===reads;attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
-    expect(vi.mocked(workspaceApi.privateDrafts).mock.calls.length).toBeGreaterThan(reads);
+    for(let attempt=0;attempt<100&&vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length===reads;attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+    expect(vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length).toBeGreaterThan(reads);
   }
   async function click(label:string,heldReply=false){
     const button=[...container.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button,label).toBeTruthy();expect(button.disabled).toBe(false);
@@ -43,6 +44,11 @@ describe('practice Quick start recovery',()=>{
     }
     if(!heldReply)for(let attempt=0;attempt<100&&container.textContent?.includes('Checking…');attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
   }
+  it('offers the offline sample on signed Home without starting a notebook or an outside action',async()=>{
+    await render();await click('Try a sample');expect(container.querySelector('[role="dialog"]')).toBeTruthy();
+    expect(container.textContent).toContain('The note and teammate drafts are prepared examples');
+    expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();expect(opened).not.toHaveBeenCalled();
+  });
   it('opens an actual API-backed private notebook without an appointment or provider read',async()=>{
     await render();expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();await click('Start a private note');
     const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];expect(body).toMatchObject({title:'Private note'});
@@ -77,16 +83,25 @@ describe('practice Quick start recovery',()=>{
     vi.mocked(workspaceApi.createPrivateDraft).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));await render();await click('Start a private note',true);
     const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await render(next);await act(async()=>finish({identity,workspace,team}));expect(opened).not.toHaveBeenCalled();
   });
-  it('offers safe team activation without per-bot forms or automatic save',async()=>{await render(identity,{...team,revision:0});expect(useTeam).not.toHaveBeenCalled();await click('Use this team');expect(useTeam).toHaveBeenCalledOnce();expect(container.querySelectorAll('input').length).toBe(1);});
+  it('filters recent notes by title, patient and real review state while showing dates and actions',async()=>{
+    const base={workspace_id:id(201),title:'Yesterday’s synthetic note',title_revision:0,revision:2,created_at:'2026-10-15T15:00:00Z',updated_at:'2026-10-15T16:00:00Z',link_state:'linked' as const,appointment_id:id(301),patient_label:'Invented Rowan',visit_at:'2026-10-15T15:00:00Z',note_state:'needs_review' as const,duration_seconds:90,recording_state:'finished' as const};
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[base,{...base,workspace_id:id(202),title:'Other note',patient_label:'Invented Ash',note_state:'reviewed'}],has_more:false});
+    await render();const rows=()=>container.querySelectorAll('.notebook-list-row');expect(rows()).toHaveLength(2);expect(rows()[0].textContent).toContain('Invented Rowan');expect(rows()[0].textContent).toContain('1:30 recording');expect(rows()[0].querySelector('time')?.dateTime).toBe(base.updated_at);
+    const search=container.querySelector<HTMLInputElement>('.notebook-list-tools input[type=search]')!;
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'Rowan');search.dispatchEvent(new Event('input',{bubbles:true}));});expect(rows()).toHaveLength(1);
+    await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(search,'');search.dispatchEvent(new Event('input',{bubbles:true}));container.querySelector<HTMLInputElement>('.notebook-list-tools input[type=checkbox]')!.click();});expect(rows()).toHaveLength(1);expect(rows()[0].textContent).toContain('Needs review');
+    expect([...rows()[0].querySelectorAll('button')].map(button=>button.textContent)).toContain('Rename');
+  });
+  it('offers safe team activation without per-bot forms or automatic save',async()=>{await render(identity,{...team,revision:0});expect(useTeam).not.toHaveBeenCalled();await click('Use this team');expect(useTeam).toHaveBeenCalledOnce();expect(container.querySelectorAll('.practice-quick-start input').length).toBe(1);});
   it('opens Scribe before catalog readiness and caches the background exact create without navigating',async()=>{
     const record=vi.fn();let finish!:(value:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>void;
     vi.mocked(workspaceApi.createPrivateDraft).mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));
     await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onRecord={record} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
     await click('Start recording');expect(record).toHaveBeenCalledOnce();expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
-    const input=record.mock.calls[0][0] as StartPrivateRecording;expect(input.title).toBe('Private recording');let first!:Promise<Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>>;
-    await act(async()=>{first=input.prepareNotebook();expect(input.prepareNotebook()).toBe(first);});
+    const input=record.mock.calls[0][0] as StartPrivateRecording;expect(input.title).toMatch(/^Visit recording · /);let first!:Promise<Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>>;
+    await act(async()=>{first=input.prepareNotebook('Synthetic cardiometabolic visit');expect(input.prepareNotebook('Another title')).toBe(first);});
     for(let n=0;n<100&&!vi.mocked(workspaceApi.createPrivateDraft).mock.calls.length;n++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
-    expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];expect(body.title).toBe('Private recording');
+    expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();const body=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1];expect(body.title).toBe('Synthetic cardiometabolic visit');
     expect((await recovery.journal.load(accountEditorAddress('private-draft')))?.pending).toBe(body.idempotency_key);
     await act(async()=>{finish({identity,workspace,team});await first;});expect(opened).not.toHaveBeenCalled();expect(await recovery.journal.load(accountEditorAddress('private-draft'))).toBeNull();
   });

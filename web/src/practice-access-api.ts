@@ -1,3 +1,4 @@
+import {invitationToken,validateInvitationCommand,validateInvitationReceipt,validateInvitationResolution,validateInvitations,type CreateInvitation,type RevokeInvitation,type InvitationOperation} from './practice-invitation-contract';
 import {workspaceFetch} from './workspace-protocol';
 import {validateWorkspaceCompatibility} from './workspace-protocol';
 import {validateMembersPage,validateMemberChange,validateMemberChangeResult,type MemberChange} from './practice-members-contract';
@@ -13,7 +14,7 @@ const closed=accessObject;
 
 const errorCodes:Readonly<Record<number,readonly string[]>>={
   401:['practice_access_authentication_required'],403:['practice_access_denied'],404:['practice_access_not_found'],
-  405:['invalid_practice_access_request'],409:['practice_access_conflict'],422:['invalid_practice_access_request'],
+  405:['invalid_practice_access_request'],409:['practice_access_conflict','practice_invitation_unavailable'],422:['invalid_practice_access_request'],
   426:['practice_access_contract_required','workspace_client_update_required','workspace_protocol_required'],429:['practice_access_limit'],
   503:['practice_access_unavailable'],504:['practice_access_timeout'],
 };
@@ -105,6 +106,23 @@ async function send<T>(identity:WorkspaceIdentity,path:string,validate:(value:un
 }
 
 export const practiceAccessApi={
+  resolveInvitation:(identity:WorkspaceIdentity,operation:InvitationOperation,signal?:AbortSignal)=>{
+    const exact=validateInvitationCommand(operation.body,operation.type==='create');
+    return send(identity,`/practice-access/invitation/${operation.type}/resolve`,value=>validateInvitationResolution(value,operation),exact,signal);
+  },
+  invitations:(identity:WorkspaceIdentity,signal?:AbortSignal)=>send(identity,'/practice-access/invitations',validateInvitations,undefined,signal),
+  createInvitation:(identity:WorkspaceIdentity,command:CreateInvitation,signal?:AbortSignal)=>{
+    const exact=validateInvitationCommand(command,true);
+    return send(identity,'/practice-access/invitation/create',value=>validateInvitationReceipt(value,{type:'create',body:exact}),exact,signal);
+  },
+  revokeInvitation:(identity:WorkspaceIdentity,command:RevokeInvitation,signal?:AbortSignal)=>{
+    const exact=validateInvitationCommand(command,false);
+    return send(identity,'/practice-access/invitation/revoke',value=>validateInvitationReceipt(value,{type:'revoke',body:exact}),exact,signal);
+  },
+  joinInvitation:(identity:WorkspaceIdentity,command:{idempotency_key:string;display_name:string;token:string},signal?:AbortSignal)=>{
+    if(!closed(command,'display_name,idempotency_key,token')||!vendorUuid(command.idempotency_key)||!accessName(command.display_name)||!invitationToken(command.token))throw new WorkspaceApiError(422,'invalid_practice_access_request');
+    return send(identity,'/practice-access/invitation/join',validateAccessStatus,{...command},signal);
+  },
   setup:(identity:WorkspaceIdentity,signal?:AbortSignal)=>send(identity,'/practice-access/setup',validatePracticeSetup,undefined,signal),
   confirmSetup:(identity:WorkspaceIdentity,command:CompletePracticeSetup,signal?:AbortSignal)=>send(identity,'/practice-access/setup/complete',validatePracticeSetup,validateCompletePracticeSetup(command),signal),
   compatibility:(identity:WorkspaceIdentity,signal?:AbortSignal)=>send(identity,'/practice-access/compatibility',validateWorkspaceCompatibility,undefined,signal,true),

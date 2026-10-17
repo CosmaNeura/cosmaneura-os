@@ -115,6 +115,23 @@ describe("signed workspace transport", () => {
     expect(fetchMock.mock.calls[0][1]?.signal?.aborted).toBe(true);
   });
 
+  it('bounds visit credentials and prevents a late request after the deadline',async()=>{
+    vi.useFakeTimers();let release!:(token:string)=>void;
+    const fetchMock=vi.fn();vi.stubGlobal('fetch',fetchMock);
+    const rejected=expect(workspaceApi.catalog({mode:'clerk_jwt',getToken:()=>new Promise(resolve=>{release=resolve;})})).rejects.toMatchObject({status:503});
+    await vi.advanceTimersByTimeAsync(20_000);await rejected;
+    release('late-synthetic-token');await vi.advanceTimersByTimeAsync(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('bounds a stalled notebook response without repeating its request',async()=>{
+    vi.useFakeTimers();const fetchMock=vi.fn().mockResolvedValue(new Response(new ReadableStream({start(){}}),{headers:{'Content-Type':'application/json'}}));
+    vi.stubGlobal('fetch',fetchMock);
+    const rejected=expect(workspaceApi.read({mode:'clerk_jwt',getToken:async()=>'synthetic-token'},workspace)).rejects.toMatchObject({status:503});
+    await vi.advanceTimersByTimeAsync(20_000);await rejected;
+    expect(fetchMock).toHaveBeenCalledOnce();expect(fetchMock.mock.calls[0][1].signal.aborted).toBe(true);
+  });
+
   it("does not issue a team save after timed-out credentials eventually arrive", async () => {
     vi.useFakeTimers();
     let resolveToken!: (token:string)=>void;

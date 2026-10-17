@@ -197,3 +197,10 @@ it('uses native SecureQueue create/CAS and resolves a lost write response by exa
   const native=()=>openPrivateRecordingStore(scope,'ios',{native:plugin,crypto:webcrypto});const source=new ControlledSource(),runtime=await open(source,{platform:'ios',openStore:native});lose=true;await runtime.start(consent());lose=true;await source.emit();await runtime.stop();const result=await runtime.exportWav();expect(result.durationMs).toBe(1);expect([...records.keys()].every(k=>k.startsWith('cosmas-private-recording:v1:'+scope+':'))).toBe(true);
   const foreign=await openPrivateRecordingStore(otherScope,'ios',{native:plugin});expect(await foreign.keys()).toEqual([]);foreign.close();expect(fetch).not.toHaveBeenCalled();
 });
+
+it('can close a stopped recording again after access changes without reopening audio',async()=>{
+  let current=true;const source=new ControlledSource(),runtime=await open(source,{isCurrent:()=>current});
+  await runtime.start(consent());await source.emit();await runtime.close();current=false;
+  await runtime.close();expect(source.stops).toBe(1);expect(runtime.snapshot.recordedChunks).toBe(1);
+  expect(fetch).not.toHaveBeenCalled();
+});

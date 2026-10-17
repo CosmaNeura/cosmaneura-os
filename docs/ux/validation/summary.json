@@ -1,0 +1,121 @@
+{
+  "synthetic_only": true,
+  "baseline_commit": "c12f2ddac5d68ee19be2b4cd408971ab148fc113",
+  "migration_head": "e3a90d77b812",
+  "frontend": {
+    "passed": 3784,
+    "skipped": 103,
+    "files_passed": 279,
+    "files_skipped": 17
+  },
+  "capture": {
+    "passed": 550,
+    "files_passed": 39
+  },
+  "signed_backend": {
+    "passed": 196,
+    "exit_code": 0,
+    "source_unchanged_during_run": true,
+    "tested_source_sha256": "4c012adb841d67d9579e44e73d39b90cebe2a8ec48bb72b3063c685c36fe45f2",
+    "selections": {
+      "workspace": [
+        "tests/integration/test_notebook_metadata.py",
+        "tests/integration/test_private_workspace_drafts.py",
+        "tests/integration/test_practice_profile.py",
+        "tests/integration/test_practice_access_ui_server_lab.py",
+        "tests/integration/test_practice_home_ui_server_lab.py",
+        "tests/integration/test_private_scribe_ui_server_lab.py",
+        "tests/integration/test_scribe_to_specialists_ui_server_lab.py",
+        "tests/unit/test_environment_source_contract.py",
+        "tests/unit/test_release_schema_contract.py",
+        "tests/unit/test_practice_access.py",
+        "tests/unit/test_provider_team_contract.py",
+        "tests/unit/test_team_setup_contract.py"
+      ]
+    },
+    "started_at": "2026-10-16T20:50:54.250936+00:00",
+    "finished_at": "2026-10-16T20:52:57.261825+00:00"
+  },
+  "runtime_privileges": {
+    "passed": 24
+  },
+  "compact_isolation": {
+    "passed": 23
+  },
+  "builds": {
+    "web_typecheck": "passed",
+    "capture_typecheck": "passed",
+    "normal_web": "passed",
+    "workspace_acceptance": "passed",
+    "connection_lab": "passed",
+    "large_chunk_warning": true
+  },
+  "broader_backend": {
+    "preliminary_changed_run": {
+      "passed": 4514,
+      "failed": 26,
+      "skipped": 31,
+      "source_unchanged_during_run": false
+    },
+    "unchanged_source_run": {
+      "passed": 4471,
+      "failed": 25,
+      "skipped": 31,
+      "source_unchanged_during_run": true
+    },
+    "remaining_failures_also_reproduced_on_unchanged_source": [
+      "tests/unit/test_agent_tools.py::test_changed_operation_commitment_is_withheld",
+      "tests/unit/test_agent_tools.py::test_exact_source_read_is_attributed_to_distinct_agent_and_human",
+      "tests/unit/test_agent_tools.py::test_listing_returns_handles_without_source_contents",
+      "tests/unit/test_agent_tools.py::test_mutation_request_is_rejected_before_admission_queries",
+      "tests/unit/test_agent_tools.py::test_read_requires_exact_admitted_handle[mutation0]",
+      "tests/unit/test_agent_tools.py::test_read_requires_exact_admitted_handle[mutation1]",
+      "tests/unit/test_agent_tools.py::test_read_requires_exact_admitted_handle[mutation2]",
+      "tests/unit/test_agent_tools.py::test_revalidation_failure_withholds_content",
+      "tests/unit/test_agent_tools.py::test_selected_draft_remains_attributed_and_never_establishes_external_work",
+      "tests/unit/test_agent_tools.py::test_unselected_draft_and_operation_are_rejected_before_any_read",
+      "tests/unit/test_capture_deadline.py::test_retained_admission_stops_after_late_remote_phase[note]",
+      "tests/unit/test_research_analysis.py::test_actual_admission_keeps_selection_and_only_selected_prepared_body",
+      "tests/unit/test_research_analysis.py::test_existing_claim_and_settlement_input_check_rejects_revocation[research]",
+      "tests/unit/test_research_analysis.py::test_existing_claim_and_settlement_input_check_rejects_revocation[source]",
+      "tests/unit/test_research_analysis.py::test_no_fourth_entry_and_bounds_precede_admission",
+      "tests/unit/test_research_analysis.py::test_unchanged_selected_context_revalidates_without_io_or_whole_workspace",
+      "tests/unit/test_runtime_tool_hardening.py::test_exact_nonexecutable_completion_metadata_only[None]",
+      "tests/unit/test_runtime_tool_hardening.py::test_inode_revalidation_after_import_preflight_refuses_modified_plan",
+      "tests/unit/test_runtime_tool_hardening.py::test_optimized_python_still_fails_closed_without_mutation",
+      "tests/unit/test_runtime_tool_hardening.py::test_privileged_regular_inode_plan_on_hosts_that_clear_setid[False]",
+      "tests/unit/test_runtime_tool_hardening.py::test_privileged_regular_inode_plan_on_hosts_that_clear_setid[True]",
+      "tests/unit/test_runtime_tool_hardening.py::test_remove_all_bytes_aliases_and_privilege_preserving_metadata_and_libraries"
+    ],
+    "schema_failures_corrected_and_verified": [
+      "tests/unit/test_environment_source_contract.py::test_selected_schema_matches_runtime_and_complete_migration_graph",
+      "tests/unit/test_release_schema_contract.py::test_actual_checkout_agrees_with_selected_release"
+    ],
+    "changed_journey_failures_corrected_or_rechecked_successfully": [
+      "tests/integration/test_practice_home_ui_server_lab.py::test_real_solo_setup_team_private_note_save_reopen",
+      "tests/integration/test_scribe_to_specialists_ui_server_lab.py::test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs"
+    ],
+    "additional_baseline_failure": [
+      "tests/unit/test_capture_deadline.py::test_actual_product_capture_graph_refuses_late_core_response[capture-admissions]"
+    ]
+  },
+  "visual_acceptance": {
+    "widths": [
+      1090,
+      1507,
+      768
+    ],
+    "screenshots": 14,
+    "physical_microphone_opened": false,
+    "keyboard_focus_and_review_controls": "checked",
+    "primary_text_contrast": 14.53,
+    "muted_text_contrast": 5.71,
+    "primary_button_contrast": 11.69
+  },
+  "limitations": [
+    "No hosted rollout or external delivery",
+    "No physical microphone, native packaging or real-user qualification",
+    "Clinical and speech-recognition fixture outputs are scripted",
+    "Broad backend suite remains affected by 22 reproduced baseline failures"
+  ]
+}

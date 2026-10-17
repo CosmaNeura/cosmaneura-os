@@ -56,7 +56,7 @@ describe("desktop native workspace", () => {
     expect(headers.has("Authorization")).toBe(false); expect(headers.has("X-Box-Id")).toBe(false);
     expect(catalogCall[0]).toBe("app://cosmas/api/workspaces");
     await click("Sign out"); expect(container.textContent).not.toContain("Private desktop encounter");
-    expect(container.textContent).toContain("Sign in to Cosmas");
+    expect(container.textContent).toContain("Sign in to CosmaBot");
   });
   it("discards a private response received after account change", async () => {
     const native = fixture(ready); window.cosmasDesktopAuth = native.port;
@@ -65,7 +65,7 @@ describe("desktop native workspace", () => {
     await act(async () => root.render(createElement(DesktopAuthenticatedWorkspace))); await click("Visits and notes");
     await act(async () => native.emit(signedOut));
     await act(async () => release(Response.json([{ appointment_id: "invented", workspace_id: null, label: "Old private label" }])));
-    expect(container.textContent).not.toContain("Old private label"); expect(container.textContent).toContain("Sign in to Cosmas");
+    expect(container.textContent).not.toContain("Old private label"); expect(container.textContent).toContain("Sign in to CosmaBot");
   });
   it("requires the narrow preload API and does not accept a credential-bearing port", async () => {
     const fetchMock = vi.fn<typeof fetch>(); vi.stubGlobal("fetch", fetchMock);

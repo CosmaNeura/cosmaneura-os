@@ -106,10 +106,10 @@ it('updates independent read proof without another account check and never carri
   vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,google:true});
   vi.mocked(readConnectionSummary).mockImplementation(async(owner,id)=>{expect(id).toBe('google');observeConnectionStatus(owner,'google',connected);return personalConnectionSummary('google',connectionHealth(owner,'google'),connected.account.email);});
   await mount(<p>Google</p>);const row=()=>[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
-  expect(row().textContent).toContain('Email: Not verified');expect(row().textContent).toContain('Calendar: Permission needed');expect(row().parentElement!.textContent).toContain('Account checked');
+  expect(row().parentElement!.textContent).toContain('EmailNot verified');expect(row().parentElement!.textContent).toContain('CalendarPermission needed');expect(row().parentElement!.textContent).toContain('Account checked');
   await act(async()=>{observeConnectionRead(identity,'google',connectionReadScope(identity,'google'),{kind:'mail',account:connected.account,observed_at:new Date().toISOString()});});
-  expect(row().textContent).toContain('Email: Verified in this session');expect(row().parentElement!.textContent).toContain('Last successful read:');expect(readConnectionSummary).toHaveBeenCalledOnce();
-  await mount(<p>Google</p>,{...identity});expect(row().textContent).not.toContain('Verified in this session');expect(row().parentElement!.textContent).not.toContain('Last successful read:');expect(row().textContent).toContain('Email: Not verified');
+  expect(row().parentElement!.textContent).toContain('EmailVerified in this session');expect(row().parentElement!.textContent).toContain('Last successful read:');expect(readConnectionSummary).toHaveBeenCalledOnce();
+  await mount(<p>Google</p>,{...identity});expect(row().parentElement!.textContent).not.toContain('Verified in this session');expect(row().parentElement!.textContent).not.toContain('Last successful read:');expect(row().parentElement!.textContent).toContain('EmailNot verified');
 });
 it('drops a cached account label and proof when a background check changes or revokes the connection',async()=>{
   const connected={state:'connected',account:{email:'previous@example.invalid'},connected_at:new Date(Date.now()-600000).toISOString(),capabilities:{mail:true,calendar:true}};
@@ -158,7 +158,7 @@ it('keeps legacy setup unqualified when current action and account readiness wer
  const payments=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Payments'))!;
  expect(payments.querySelector('.connection-badge')?.textContent).toBe('Not checked');
  expect(payments.textContent).toContain('Supported actions and installed accounts have not been checked');
- expect(payments.textContent).toContain('Next: Review accounts and permissions');
+ expect(payments.textContent).toContain('Review accounts and permissions');
  expect(readConnectionSummary).not.toHaveBeenCalled();
  await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} google={<p>Google editor</p>} teamSummary="Team" teamDirty={false} onClose={()=>{}}/>));
  expect(host.querySelector('.connection-card .connection-badge')?.textContent).toBe('Not checked');
@@ -185,7 +185,7 @@ it('keeps next steps and independent service states visible while disclosing che
  vi.mocked(readConnectionSummary).mockImplementation(async(owner)=>{observeConnectionStatus(owner,'google',connected);return personalConnectionSummary('google',connectionHealth(owner,'google'),connected.account.email);});
  await mount(<p>Google</p>);
  const card=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
- expect(card.textContent).toContain('📨');expect(card.textContent).toContain('Email: Not verified');expect(card.textContent).toContain('Calendar: Not verified');expect(card.textContent).toContain('Next: Read recent email');
+ expect(card.textContent).toContain('📨');expect(card.parentElement!.textContent).toContain('EmailNot verified');expect(card.parentElement!.textContent).toContain('CalendarNot verified');expect(card.textContent).toContain('Read recent email');
  expect(card.textContent).not.toContain('Account checked');expect(card.textContent).not.toContain('Sign-in confirmed');
  const details=card.parentElement!.querySelector<HTMLDetailsElement>('details')!;
  expect(details.open).toBe(false);expect(details.textContent).toContain('Account checked');expect(details.textContent).toContain('Sign-in confirmed');

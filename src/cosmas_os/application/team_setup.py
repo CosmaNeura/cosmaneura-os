@@ -84,6 +84,8 @@ def membership_configuration(configuration):
 
 
 def require_compatible(compatible, *configurations):
+    if compatible < 5 and any(value and value.get("practice_profile") for value in configurations):
+        raise ws.WorkspaceError("team_contract_required", 426)
     if compatible < 4 and any(membership_configuration(value) for value in configurations):
         raise ws.WorkspaceError("team_contract_required", 426)
     if compatible < 3 and any(inbox_configuration(value) for value in configurations):

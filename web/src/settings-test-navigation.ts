@@ -23,7 +23,7 @@ export function settingsNavigation(container: HTMLElement) {
     for (let i = 0; i < 5 && page() !== 'overview'; i++) await click('Back');
     expect(page()).toBe('overview');
   }
-  async function practice() { await team(); await overview(); await click('Team preferences'); await click('Practice context'); }
+  async function practice() { await team(); await overview(); await click('Team preferences'); await click('Practice profile');const disclosure=container.querySelector<HTMLDetailsElement>('.team-practice-editor details');if(disclosure&&!disclosure.open)await act(async()=>disclosure.querySelector('summary')!.click()); }
   async function editSelected(preferredName?:string) {
     const name = preferredName ?? container.querySelector('.team-roster button[aria-pressed="true"] strong')?.textContent ?? 'Visit Prep';
     await team(); await overview();

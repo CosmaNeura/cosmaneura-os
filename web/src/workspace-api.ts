@@ -1,3 +1,5 @@
+import type {PracticeProfile} from './practice-profile';
+import {validNotebookSummaries,validNotebookRename,validTitleReceipt,validTitleResolution,type NotebookRename,type NotebookSummaries,type NotebookTitleReceipt,type NotebookTitleResolution} from './notebook-metadata-contract';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import type {MembershipAnalysis} from "./membership-analysis-contract";
 import {workspaceFetch} from './workspace-protocol';
@@ -29,7 +31,7 @@ export type AuthenticatedWorkspaceIdentity = {
   nativeSession?: {revision:string;isCurrent:()=>boolean};
 } | { mode: "desktop_native"; revision: string; isCurrent: () => boolean };
 export type WorkspaceIdentity = { boxId: string; actorId: string } | AuthenticatedWorkspaceIdentity;
-export type WorkspaceEncounter = { appointment_id: string; label: string; workspace_id: string | null };
+export type WorkspaceEncounter = { appointment_id: string; label: string; workspace_id: string | null; start_at?:string; source?:string };
 export type WorkReference = { id: string; state: string; lane: string };
 export type BotRole = "scribe" | "visit_prep" | "follow_up" | "chief" | "custom" | "research";
 export type BotSkill = "saved_context" | "work_status" | "encounter_prep" | "calendar_availability" | "inbox_review" | "membership_review";
@@ -50,7 +52,7 @@ export const supportsSkill = (bot: BotSettings, skill: BotSkill): boolean => bot
   ? (bot.skills ?? []).includes(skill)
   : ({saved_context: ["scribe", "visit_prep", "follow_up", "chief", "research"], work_status: ["scribe", "visit_prep", "follow_up", "chief", "research"],
       encounter_prep: ["scribe", "visit_prep"], calendar_availability: ["follow_up"], inbox_review: [] as string[], membership_review: [] as string[]})[skill].includes(bot.role);
-export type TeamConfiguration = { practice_context: string; bots: BotSettings[]; presets?: PresetBinding[]; model_work?: ModelWorkPolicy };
+export type TeamConfiguration = { practice_context: string; practice_profile?:PracticeProfile; bots: BotSettings[]; presets?: PresetBinding[]; model_work?: ModelWorkPolicy };
 export type BotTemplate = {
   role: BotRole; agent_id: string | null; name: string; initials: string; description: string; prompt: string;
   instance_id?: string | null;
@@ -138,6 +140,7 @@ export type FollowUpOperation = { type: "followUpPropose"; body: FollowUpPropose
   { type: "followUpComplete"; ticketId: string; body: FollowUpCompleteInput };
 export type Workspace = {
   id: string; appointment_id: string | null; label: string; revision: number;
+  notebook?:{title:string;title_revision:number;created_at:string};
   private_draft?: {title:string;state:'unlinked'|'linked';link_receipt_id:string|null;linked_at:string|null};
   entries: WorkspaceEntry[]; work_candidates: WorkReference[];
   handoffs?: DraftHandoff[];
@@ -160,7 +163,7 @@ export function validPrivateWorkspace(value:unknown,workspaceId?:string):value i
   if(!value||typeof value!=='object'||Array.isArray(value))return false;
   const w=value as Workspace,d=w.private_draft;
   return teamUuid(w.id)&&(!workspaceId||workspaceId===w.id)&&Number.isSafeInteger(w.revision)&&w.revision>=1&&
-    teamText(w.label,200,1)&&Array.isArray(w.entries)&&w.entries.length<=500&&Array.isArray(w.work_candidates)&&
+    teamText(w.label,200,1)&&(w.notebook===undefined||teamClosed(w.notebook,'created_at,title,title_revision')&&teamText(w.notebook.title,160,1)&&Number.isSafeInteger(w.notebook.title_revision)&&w.notebook.title_revision>=0&&typeof w.notebook.created_at==='string'&&Number.isFinite(Date.parse(w.notebook.created_at)))&&Array.isArray(w.entries)&&w.entries.length<=500&&Array.isArray(w.work_candidates)&&
     !!d&&teamClosed(d,'title,state,link_receipt_id,linked_at')&&teamText(d.title,160,1)&&
     (d.state==='unlinked'?w.appointment_id===null&&d.link_receipt_id===null&&d.linked_at===null:
       d.state==='linked'&&teamUuid(w.appointment_id)&&teamUuid(d.link_receipt_id)&&typeof d.linked_at==='string'&&Number.isFinite(Date.parse(d.linked_at)));
@@ -190,7 +193,7 @@ async function privateDraftRequest<T>(identity:AuthenticatedWorkspaceIdentity,pa
     const bytes=new Uint8Array(size);let offset=0;for(const part of chunks){bytes.set(part,offset);offset+=part.length;}
     const value:unknown=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
     assertCurrentDesktopSession(identity);
-    if(!response.ok){const codes=['workspace_already_exists','workspace_already_linked','workspace_appointment_required','idempotency_conflict','workspace_revision_conflict','private_draft_limit','encounter_unavailable'];
+    if(!response.ok){const codes=['workspace_already_exists','workspace_already_linked','workspace_appointment_required','idempotency_conflict','workspace_revision_conflict','private_draft_limit','encounter_unavailable','notebook_title_conflict'];
       throw new WorkspaceApiError(response.status,teamClosed(value,'detail')&&typeof value.detail==='string'&&codes.includes(value.detail)?value.detail:undefined);}
     if(!validate(value))throw new WorkspaceApiError(503);return value;
   }catch(error){if(error instanceof WorkspaceApiError)throw error;throw new WorkspaceApiError(503);}
@@ -251,39 +254,48 @@ export function requireRecoveryScope(team: ProviderTeam | null): string {
 
 async function request<T>(path: string, identity?: WorkspaceIdentity, body?: unknown, signal?: AbortSignal): Promise<T> {
   if (signal?.aborted) throw new WorkspaceApiError(503);
+  const controller=new AbortController(),abort=()=>controller.abort();
+  const timer=setTimeout(abort,20_000);
+  signal?.addEventListener('abort',abort,{once:true});
+  const interrupted=new Promise<never>((_,reject)=>controller.signal.addEventListener('abort',()=>reject(new WorkspaceApiError(503)),{once:true}));
+  void interrupted.catch(()=>{});
+  const wait=<V,>(promise:Promise<V>)=>Promise.race([promise,interrupted]);
+  try {
   const base = import.meta.env.VITE_API_BASE?.trim().replace(/\/+$/, "") || "http://127.0.0.1:8000";
   if (!permittedWorkspaceApi(base, import.meta.env.VITE_DESKTOP_SYNTHETIC_ENABLED === "true", window.location.href)) {
     throw new Error("The synthetic workspace requires its approved local API.");
   }
   let headers = new Headers({ "Content-Type": "application/json" });
   if (identity && "mode" in identity) {
-    try { headers = await workspaceAuthHeaders(identity, base); }
-    catch { throw new WorkspaceApiError(401); }
+    try { headers = await wait(workspaceAuthHeaders(identity, base)); }
+    catch { if(controller.signal.aborted)throw new WorkspaceApiError(503);throw new WorkspaceApiError(401); }
   } else if (identity) {
     headers.set("X-Box-Id", identity.boxId);
     headers.set("X-Actor-Principal-Id", identity.actorId);
   }
-  if (signal?.aborted) throw new WorkspaceApiError(503);
-  const response = await workspaceFetch(identity,base + path, {
+  if (controller.signal.aborted) throw new WorkspaceApiError(503);
+  const response = await wait(workspaceFetch(identity,base + path, {
     method: body === undefined ? "GET" : "POST", cache: "no-store", credentials: "omit", redirect: "error",
     referrerPolicy: "no-referrer",
     headers,
-    ...(signal ? { signal } : {}),
+    signal:controller.signal,
     body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  }));
   if (identity && "mode" in identity) assertCurrentDesktopSession(identity);
   if (!response.ok) {
     let code: string | undefined;
     try {
-      const error = await response.json();
+      const error = await wait(response.json());
       if (["core_note_changed", "capture_note_conflict", "core_note_edit_required"].includes(error.detail)) code = error.detail;
     } catch { /* Error content is never shown to the user. */ }
     throw new WorkspaceApiError(response.status, code);
   }
-  const value = await response.json() as T;
-  if (signal?.aborted) throw new WorkspaceApiError(503);
+  const value = await wait(response.json()) as T;
+  if (controller.signal.aborted) throw new WorkspaceApiError(503);
   if (identity && "mode" in identity) assertCurrentDesktopSession(identity);
   return value;
+  } catch(cause) {if(cause instanceof WorkspaceApiError)throw cause;throw new WorkspaceApiError(503);}
+  finally {clearTimeout(timer);signal?.removeEventListener('abort',abort);controller.abort();}
 }
 
 type TeamPath = "/provider-team" | "/provider-team/setup" | "/provider-team/rehearsal" | "/provider-team/resources" | "/provider-team/usage";
@@ -318,7 +330,7 @@ export async function requestTeamPayload<T = unknown>(identity: WorkspaceIdentit
       headers=await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);}));
       assertCurrentDesktopSession(identity);
     } else headers=new Headers({"Content-Type":"application/json","X-Box-Id":identity.boxId,"X-Actor-Principal-Id":identity.actorId});
-    checkDeadline();headers.set("X-Cosmas-Team-Contract","4");
+    checkDeadline();headers.set("X-Cosmas-Team-Contract","5");
     const response=await wait(workspaceFetch(identity,base+path,{method:body===undefined?"GET":"POST",body:encoded,headers,signal:controller.signal,
       cache:"no-store",credentials:"omit",redirect:"error",referrerPolicy:"no-referrer"}));
     if("mode" in identity)assertCurrentDesktopSession(identity);
@@ -373,6 +385,17 @@ function legacyPracticeWork(value: PracticeWorkEntry): PracticeWorkItem {
 }
 
 export const workspaceApi = {
+  privateDraftSummaries:(identity:AuthenticatedWorkspaceIdentity)=>privateDraftRequest<NotebookSummaries>(identity,'/workspaces/private-drafts/summary',undefined,validNotebookSummaries),
+  renameNotebook:(identity:AuthenticatedWorkspaceIdentity,workspaceId:string,body:NotebookRename)=>{
+    if(!teamUuid(workspaceId)||!validNotebookRename(body))throw new WorkspaceApiError(422);
+    return privateDraftRequest<NotebookTitleReceipt>(identity,`/workspaces/${workspaceId}/title`,body,
+      (v):v is NotebookTitleReceipt=>validTitleReceipt(v)&&v.workspace_id===workspaceId&&v.title===body.title&&v.title_revision===body.expected_title_revision+1);
+  },
+  resolveNotebookTitle:(identity:AuthenticatedWorkspaceIdentity,workspaceId:string,body:NotebookRename)=>{
+    if(!teamUuid(workspaceId)||!validNotebookRename(body))throw new WorkspaceApiError(422);
+    return privateDraftRequest<NotebookTitleResolution>(identity,`/workspaces/${workspaceId}/title/resolve`,body,
+      (v):v is NotebookTitleResolution=>validTitleResolution(v)&&(v.receipt===null||v.receipt.workspace_id===workspaceId&&v.receipt.title===body.title&&v.receipt.title_revision===body.expected_title_revision+1));
+  },
   privateDrafts: (identity:AuthenticatedWorkspaceIdentity)=>privateDraftRequest<PrivateDraftCatalog>(identity,'/workspaces/private-drafts',undefined,
     (v):v is PrivateDraftCatalog=>teamClosed(v,'contract_version,drafts,has_more')&&v.contract_version===1&&typeof v.has_more==='boolean'&&Array.isArray(v.drafts)&&v.drafts.length<=50&&
       new Set(v.drafts.map(row=>row.workspace_id)).size===v.drafts.length&&v.drafts.every(row=>teamClosed(row,'workspace_id,title,revision,created_at,link_state,appointment_id')&&

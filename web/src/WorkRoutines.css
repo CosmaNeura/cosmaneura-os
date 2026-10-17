@@ -23,3 +23,5 @@
   .work-routines .routine-days { padding: .75rem; gap: .7rem; }
   .work-routines .routine-editor-nav { align-items: stretch; }
 }
+.routine-summary-card { padding:16px; background:#f4f7f1; border:1px solid #dce4d9; border-radius:12px; }
+.routine-summary-card h3 { margin:0 0 6px; }.routine-summary-card p { margin:8px 0; }

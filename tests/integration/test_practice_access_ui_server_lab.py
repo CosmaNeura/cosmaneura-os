@@ -14,7 +14,12 @@ from tests.unit import test_practice_access as existing
 
 from cosmas_os.api.practice_access_routes import register
 from cosmas_os.models import AuditEvent, ExternalIdentity
-from cosmas_os.practice_access_models import PracticeAccessRequest
+from cosmas_os.practice_access_models import (
+    PracticeAccessRequest,
+    PracticeInvitation,
+    PracticeInviteRevocation,
+    PracticeInviteUse,
+)
 
 case = existing.case
 REPO = Path(__file__).resolve().parents[2]
@@ -79,7 +84,12 @@ def test_signed_onboarding_review_pause_denial_restore_and_reopen(case, tmp_path
         evidence = json.loads((tmp_path / "ui-server-lab.json").read_text())
         assert evidence["completed"] is True
         assert identities == 2 and requests == 1 and report["member_active"]
-        assert len([p for p in calls if p["path"] == "/practice-access/request"]) == 1
+        with c.factory() as s:
+            for model in (PracticeInvitation, PracticeInviteUse, PracticeInviteRevocation):
+                assert s.scalar(select(func.count()).select_from(model)) == 1
+        assert len([p for p in calls if p["path"] == "/practice-access/invitation/create"]) == 1
+        assert len([p for p in calls if p["path"] == "/practice-access/invitation/revoke"]) == 1
+        assert len([p for p in calls if p["path"] == "/practice-access/invitation/join"]) == 1
         assert len([p for p in calls if p["path"] == "/practice-access/decide"]) == 1
         assert len([p for p in calls if p["path"] == "/practice-access/member-change"]) == 2
         assert any(p["path"] == "/practice-access/requests" and p["status"] == 403 for p in calls)

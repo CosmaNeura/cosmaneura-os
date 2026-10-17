@@ -31,7 +31,7 @@ async function store(){return openDraftStore({scope,native:false,indexedDB:idb,c
 async function saved(){const reader=await store();try{return (await reader.read(address)).value?.body as {kind:'account-editor';pending:null;data:InboxHandoffRecoveryRecord}|undefined;}finally{reader.close();}}
 async function seed(data:InboxHandoffRecoveryRecord){const journal=new DraftJournal(await store());try{await journal.load(address);await journal.persist(address,{kind:'account-editor',editor:'inbox-handoffs',pending:null,data});}finally{journal.close();}}
 async function mount(){await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={factory}/>));}
-async function open(){await click('Practice work');await click('Incoming follow-up');await wait(()=>expect(button('Refresh follow-up')?.matches(':disabled')===false||!!button('Restore saved follow-up')).toBe(true));}
+async function open(){await click('Practice work');await click('Follow-ups');await wait(()=>expect(button('Refresh follow-up')?.matches(':disabled')===false||!!button('Restore saved follow-up')).toBe(true));}
 async function select(){const ticket=host.querySelector<HTMLButtonElement>('nav[aria-label="Incoming follow-up items"] button');expect(ticket).toBeTruthy();await act(async()=>ticket!.click());await click('Record human result');await wait(()=>expect(field()?.matches(':disabled')).toBe(false));}
 function noDispatch(){expect(inboxHandoffApi.execute).not.toHaveBeenCalled();expect(inboxHandoffApi.recover).not.toHaveBeenCalled();expect(inboxApi.execute).not.toHaveBeenCalled();expect(inboxApi.recover).not.toHaveBeenCalled();expect(workspaceApi.open).not.toHaveBeenCalled();}
 beforeEach(async()=>{
@@ -47,18 +47,18 @@ beforeEach(async()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('opens signed follow-up on demand before an encounter, without opening the private Inbox',async()=>{
-  await mount();expect(accountIdentityApi.read).not.toHaveBeenCalled();await click('Practice work');expect(inboxHandoffApi.catalog).not.toHaveBeenCalled();await click('Incoming follow-up');await wait(()=>expect(button('Refresh follow-up')?.matches(':disabled')).toBe(false));
+  await mount();expect(accountIdentityApi.read).not.toHaveBeenCalled();await click('Practice work');expect(inboxHandoffApi.catalog).not.toHaveBeenCalled();await click('Follow-ups');await wait(()=>expect(button('Refresh follow-up')?.matches(':disabled')).toBe(false));
   expect(accountIdentityApi.read).toHaveBeenCalledWith(identity,expect.anything());expect(inboxHandoffApi.catalog).toHaveBeenCalledWith(identity,actor,expect.anything());expect(inboxApi.catalog).not.toHaveBeenCalled();noDispatch();
 });
 it('retains an exact pending handoff through workspace close and reopen without recovering or retrying it automatically',async()=>{
   const operation=await inboxHandoffFixtureOperation();await seed(withInboxHandoffCommand(emptyInboxHandoffRecovery(actor),operation));
   await mount();await open();await click('Restore saved follow-up');await wait(()=>expect(button('Recover exact receipt')?.matches(':disabled')).toBe(false));const before=await saved(),panel=host.querySelector('.inbox-handoff');
-  await click('Assigned work');await click('Incoming follow-up');expect(host.querySelector('.inbox-handoff')).toBe(panel);expect((await saved())?.data.pending).toEqual(operation);
+  await click('Assigned to me');await click('Follow-ups');expect(host.querySelector('.inbox-handoff')).toBe(panel);expect((await saved())?.data.pending).toEqual(operation);
   await click('Close notebook');await wait(()=>expect(host.querySelector('.inbox-handoff')).toBeNull());expect(await saved()).toEqual(before);await open();expect(button('Restore saved follow-up')).toBeTruthy();noDispatch();
 });
 it('keeps failed handoff input and blocks workspace exits until the exact retained draft is saved',async()=>{
   await mount();await open();await select();failWrites=1;await input('Retained responsible-person evidence during storage outage');await wait(()=>expect(button('Retry saving retained follow-up')).toBeTruthy());
-  expect(hasUnsavedWork()).toBe(true);for(const label of ['Assigned work','Incoming messages','Back to notebook','Team settings','Done'])expect(button(label)?.matches(':disabled'),label).toBe(true);
+  expect(hasUnsavedWork()).toBe(true);for(const label of ['Assigned to me','Messages','Back to notebook','Team settings','Done'])expect(button(label)?.matches(':disabled'),label).toBe(true);
   const panel=host.querySelector('.inbox-handoff');await click('Close notebook');expect(host.querySelector('.inbox-handoff')).toBe(panel);expect(field().value).toBe('Retained responsible-person evidence during storage outage');
   await click('Retry saving retained follow-up');await wait(async()=>expect((await saved())?.data.drafts[0]).toMatchObject({kind:'ticket',evidence:'Retained responsible-person evidence during storage outage'}));await wait(()=>expect(button('Back to notebook')?.matches(':disabled')).toBe(false));noDispatch();
 });
@@ -67,8 +67,8 @@ it('clears rendered follow-up when signed account authority is lost, preserving 
   vi.mocked(workspaceApi.team).mockRejectedValueOnce(new WorkspaceApiError(403));await click('Back');await click('Refresh follow-up');await wait(()=>expect(host.querySelector('.inbox-handoff')).toBeNull());expect(host.textContent).toContain('Workspace access is unavailable');expect(await saved()).toEqual(before);noDispatch();
 });
 it('passes a selected Inbox item into a warm follow-up controller without copying source text or preparing an action',async()=>{
-  const initial=await inboxFixture('initial');await mount();await open();await click('Saved action history');const panel=host.querySelector('.inbox-handoff');await click('Incoming messages');await click(initial.detail.summary.label);await click('Open incoming follow-up');
+  const initial=await inboxFixture('initial');await mount();await open();await click('Saved action history');const panel=host.querySelector('.inbox-handoff');await click('Messages');await click(initial.detail.summary.label);await click('Open incoming follow-up');
   await wait(()=>expect(button('Prepare from selected Inbox message')?.matches(':disabled')).toBe(false));expect(host.querySelector('.inbox-handoff')).toBe(panel);expect(host.querySelector('.inbox-handoff textarea')).toBeNull();expect(inboxHandoffApi.detail).not.toHaveBeenCalled();expect((await saved())?.data.drafts??[]).toEqual([]);
   // Repeating the same explicit selection returns to the focused list, preserving the controller.
-  await click('Saved action history');await click('Incoming messages');await click('Open incoming follow-up');await wait(()=>expect(button('Prepare from selected Inbox message')?.matches(':disabled')).toBe(false));expect(host.querySelector('.inbox-handoff')).toBe(panel);noDispatch();
+  await click('Saved action history');await click('Messages');await click('Open incoming follow-up');await wait(()=>expect(button('Prepare from selected Inbox message')?.matches(':disabled')).toBe(false));expect(host.querySelector('.inbox-handoff')).toBe(panel);noDispatch();
 });

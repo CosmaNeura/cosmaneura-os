@@ -1,0 +1,258 @@
+{
+  "completed": true,
+  "synthetic_only": true,
+  "actual_signed_api": true,
+  "actual_DOM_controls": true,
+  "hardware_simulated": true,
+  "actual_browser_capture_adapter": true,
+  "production_encrypted_indexeddb": true,
+  "microphone_started_before_create_response": true,
+  "recording": {
+    "recording_id": "d4661c84-5c0d-426b-97e3-80514facc834",
+    "workspace_id": "fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5",
+    "chunks": 1,
+    "wav_sha256": "237cfa66005564f8106fef8291efee7508379fab28012a50b6bddeb90a3d34cb"
+  },
+  "reopened_wav_sha256": "237cfa66005564f8106fef8291efee7508379fab28012a50b6bddeb90a3d34cb",
+  "timings": {
+    "ready_to_select_ms": 0.00016699999991942605,
+    "select_to_adapter_start_ms": 65.50291700000002,
+    "consent_to_adapter_start_ms": 25.115084000000024,
+    "private_create_complete_ms": 3122.262625
+  },
+  "automated_elapsed_ms": 4165.581333,
+  "real_users_tested": false,
+  "physical_devices_tested": false,
+  "phone_visual_or_native_qualified": false,
+  "provider_io_performed": false,
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/lab/identity",
+      "status": 200,
+      "completed_at_ms": 1558.598458
+    },
+    {
+      "method": "GET",
+      "path": "/practice-access/compatibility",
+      "status": 200,
+      "completed_at_ms": 1573.129167
+    },
+    {
+      "method": "GET",
+      "path": "/practice-access/setup",
+      "status": 200,
+      "completed_at_ms": 1596.338083
+    },
+    {
+      "method": "GET",
+      "path": "/practice-access",
+      "status": 200,
+      "completed_at_ms": 1598.239792
+    },
+    {
+      "method": "POST",
+      "path": "/practice-access/setup/complete",
+      "status": 200,
+      "completed_at_ms": 1649.442792
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 1681.296542
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 1711.541583
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces",
+      "status": 200,
+      "completed_at_ms": 1724.948458
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/private-drafts/summary",
+      "status": 200,
+      "completed_at_ms": 1725.510917
+    },
+    {
+      "method": "POST",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 1750.819625
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 1757.817292
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 1836.698292
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 1873.404125
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 1882.041583
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/private-drafts",
+      "status": 200,
+      "completed_at_ms": 4925.465625
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 4934.36675
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5/private-recordings",
+      "status": 200,
+      "completed_at_ms": 4980.88075
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5/private-recordings/04314097-47d6-4cfd-b3b1-d98c65e5e100/finish",
+      "status": 200,
+      "completed_at_ms": 4998.659208
+    },
+    {
+      "method": "GET",
+      "path": "/practice-access/compatibility",
+      "status": 200,
+      "completed_at_ms": 5103.222292
+    },
+    {
+      "method": "GET",
+      "path": "/practice-access/setup",
+      "status": 200,
+      "completed_at_ms": 5121.643042
+    },
+    {
+      "method": "GET",
+      "path": "/practice-access",
+      "status": 200,
+      "completed_at_ms": 5122.606625
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5141.033875
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5161.451583
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces",
+      "status": 200,
+      "completed_at_ms": 5173.110875
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/private-drafts/summary",
+      "status": 200,
+      "completed_at_ms": 5174.462042
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5201.977667
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5203.073875
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5",
+      "status": 200,
+      "completed_at_ms": 5213.235667
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5350.035792
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5350.666083
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5",
+      "status": 200,
+      "completed_at_ms": 5362.214208
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/private-drafts/summary",
+      "status": 200,
+      "completed_at_ms": 5487.73375
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5509.309667
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5",
+      "status": 200,
+      "completed_at_ms": 5520.289583
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5/private-recordings",
+      "status": 200,
+      "completed_at_ms": 5568.289833
+    },
+    {
+      "method": "POST",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5/private-recordings/d4f69474-d94a-4937-bc3b-48bda9a23bc0/finish",
+      "status": 200,
+      "completed_at_ms": 5584.746042
+    },
+    {
+      "method": "GET",
+      "path": "/provider-team",
+      "status": 200,
+      "completed_at_ms": 5663.159208
+    },
+    {
+      "method": "GET",
+      "path": "/workspaces/fedd2bcd-504d-47fc-b7ce-83bb6f0a7aa5",
+      "status": 200,
+      "completed_at_ms": 5673.7615
+    }
+  ]
+}

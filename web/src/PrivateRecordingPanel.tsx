@@ -1,19 +1,21 @@
+import type {NotebookSummaries} from './notebook-metadata-contract';
 import {useEffect,useRef,useState} from 'react';
 import {PrivateRecordingRuntime,openPrivateRecordingStore,prewarmPrivateRecordingNative,consumePrivateRecordingNativeReceipt,type PrivateRecordingNativeReceipt,type PrivateRecordingOptions,type PrivateRecordingSnapshot,type PrivateRecordingStore} from './private-recording-runtime';
 import {PrivateRecordingLedgerController,type PrivateRecordingLedger} from './private-recording-ledger';
 import {readPrivateRecordingLanguage,savePrivateRecordingLanguage} from './recording-preferences';
 import type {CaptureAttestation,CaptureLanguage} from './capture-api';
-import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace,type PrivateDraftCatalog} from './workspace-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
 import './practice-home.css';
 import {IOSPCM} from '../../clients/capture/plugins/ios-pcm';
 import {parseInputSignal,presentInputSignal} from '../../clients/capture/src/native/ios-input-signal';
 
 export type PrivateNotebookResult={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam};
 type Consent=CaptureAttestation&{language:CaptureLanguage};
-type Controller=Pick<PrivateRecordingRuntime,'snapshot'|'subscribe'|'start'|'pause'|'stop'|'close'|'attachWorkspace'|'exportWav'|'snapshotForLedger'>;
+type Controller=Pick<PrivateRecordingRuntime,'snapshot'|'subscribe'|'start'|'pause'|'stop'|'close'|'attachWorkspace'|'exportWav'|'snapshotForLedger'|'rename'>;
 export type PrivateRecordingPanelProps={
+  minimized?:boolean;onExpand?:()=>void;onMinimize?:()=>void;
   identity:AuthenticatedWorkspaceIdentity;scope:string;platform:'ios'|'desktop';isCurrent:()=>boolean;authorize?:()=>Promise<void>;
-  title?:string;recordingId?:string;prepareNotebook?:()=>Promise<PrivateNotebookResult>;
+  title?:string;recordingId?:string;prepareNotebook?:(title?:string)=>Promise<PrivateNotebookResult>;
   onClose:()=>void;onNotebook?:(value:PrivateNotebookResult)=>Promise<void>;onAccessLost?:(cause:unknown)=>void;
   onTranscribe?:(value:PrivateNotebookResult,recordingId:string)=>Promise<void>;
   /** Closed-panel result finalizer; caller verifies the original owner and reopens only this saved recording. */
@@ -38,10 +40,12 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const preparationRetry=useRef(false);
   const [snapshot,setSnapshot]=useState<PrivateRecordingSnapshot|null>(null),[error,setError]=useState(''),[notebookError,setNotebookError]=useState('');
   const [notebook,setNotebook]=useState<PrivateNotebookResult|null>(null),[audio,setAudio]=useState<string|null>(null);
-  const [notebookChoices,setNotebookChoices]=useState<PrivateDraftCatalog|null>(null);
+  const [notebookChoices,setNotebookChoices]=useState<NotebookSummaries|null>(null);
   const [notebookWorking,setNotebookWorking]=useState(false);
+  const [notebookTitle,setNotebookTitle]=useState<string|null>(null),[permissionHelp,setPermissionHelp]=useState(false);
   const [liveSeconds,setLiveSeconds]=useState(0),[inputSignal,setInputSignal]=useState<ReturnType<typeof presentInputSignal>|null>(null);
   const [playbackWarning,setPlaybackWarning]=useState('');
+  const [renameOpen,setRenameOpen]=useState(false),[renameTitle,setRenameTitle]=useState('');
   const live=useRef(props);live.current=props;
   const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;scope:string;store:PrivateRecordingStore|null;runtime:Controller|null;closed:Promise<void>|null;unsubscribe?:()=>void}|null>(null);
   const audioRef=useRef<string|null>(null),notebookRef=useRef<PrivateNotebookResult|null>(null);
@@ -122,9 +126,9 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     void(async()=>{try{await selected.runtime?.pause();live.current.onAccessLost?.(new WorkspaceApiError(401));}catch{setError('Access changed and the microphone stop is unconfirmed. Keep this panel open and check Stop.');}})();
   });
   useEffect(()=>{
-    if(!props.prepareNotebook)return;
+    if(!props.prepareNotebook||!recordingId&&!notebookTitle)return;
     const selected=owner.current,finalize=props.onNotebookPrepared;let active=true;
-    void props.prepareNotebook().then(async value=>{
+    void props.prepareNotebook(notebookTitle??props.title).then(async value=>{
       if(value.identity!==identity||!value.workspace.private_draft)throw new WorkspaceApiError(403);
       if(!active||!selected?.alive||owner.current!==selected||selected.closed){
         const savedId=selected?.runtime?.snapshot.recordingId;
@@ -144,7 +148,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       }
     });
     return()=>{active=false;};
-  },[identity,scope,recordingId]);
+  },[identity,scope,recordingId,notebookTitle]);
   // Metadata synchronization uses a separate encrypted-store handle and never
   // gates microphone start, Stop, playback or closing the recording.
   function synchronizeLedger(action:'automatic'|'check'|'retry'|'finish'|'save'='automatic'){
@@ -194,6 +198,11 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   useEffect(()=>{synchronizeLedger();},[notebook,snapshot?.recordingId,snapshot?.phase]);
   const activeAudio=!!snapshot&&['starting','recording','pausing','stopping','stop_unconfirmed'].includes(snapshot.phase);
   useEffect(()=>{
+    setPermissionHelp(false);
+    if(snapshot?.startupStage!=='microphone_permission')return;
+    const timer=setTimeout(()=>setPermissionHelp(true),15000);return()=>clearTimeout(timer);
+  },[snapshot?.startupStage]);
+  useEffect(()=>{
     setInputSignal(null);
     if(snapshot?.phase!=='recording')return;
     const selected=owner.current,start=performance.now(),base=snapshot.elapsedSeconds;
@@ -222,9 +231,11 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     starting.current=true;
     const consent:Consent={modality,participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:new Date().toISOString(),language};
     const selected=owner.current!;setWorking(true);setConsented(false);setError('');clearAudio();
+    const chosenTitle=title.trim()||`Visit recording · ${new Date().toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}`;
+    setTitle(chosenTitle);setNotebookTitle(previous=>previous??chosenTitle);
     try{
       let runtime=selected.runtime;
-      if(!runtime){runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>selected.store!,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{title:title.trim()||'Private recording',consent});selected.runtime=runtime;selected.unsubscribe=runtime.subscribe(value=>{if(selected.alive&&owner.current===selected)setSnapshot(value);});}
+      if(!runtime){runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope,platform,isCurrent:()=>owner.current===selected&&current(),openStore:async()=>selected.store!,...(platform==='ios'?{nativePreparation:()=>owner.current===selected?takeNativeReceipt():null}:{})},{title:chosenTitle,consent});selected.runtime=runtime;selected.unsubscribe=runtime.subscribe(value=>{if(selected.alive&&owner.current===selected)setSnapshot(value);});}
       if(!current())throw new WorkspaceApiError(401);
       if(platform==='ios'){
         const receipt=nativeReceipt.current;nativeReceipt.current=null;setNativeReady(false);nativeConsumed.current=true;
@@ -236,7 +247,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       const mapping=notebookRef.current;if(mapping)void runtime.attachWorkspace(mapping.workspace.id,true).catch(()=>setNotebookError('The notebook mapping could not be confirmed. Local audio is retained.'));
       await runtime.start(consent);setConsented(false);
       savePrivateRecordingLanguage(scope,language);
-    }catch{if(selected.alive&&owner.current===selected)setError('Recording did not start cleanly. Check the microphone and saved recording status before trying again.');}
+    }catch(cause){if(selected.alive&&owner.current===selected)setError((cause instanceof DOMException&&cause.name==='NotAllowedError'||snapshot?.failure==='audio_capture_permission_denied'||cause&&typeof cause==='object'&&'code'in cause&&cause.code==='audio_capture_permission_denied')?'Microphone access was denied. Allow microphone access in your browser’s site settings, then consent and try again.':(cause instanceof DOMException&&cause.name==='NotFoundError'||cause&&typeof cause==='object'&&'code'in cause&&cause.code==='audio_capture_device_unavailable')?'No microphone was found. Connect or select a microphone, then try again.':'Recording did not start cleanly. Check the microphone and saved recording status before trying again.');}
     finally{consumedReceipt.current=null;starting.current=false;if(selected.alive&&owner.current===selected)setWorking(false);}
   }
   async function halt(seal:boolean){
@@ -290,7 +301,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     setNotebookWorking(true);setNotebookError('');
     try{
       if(!workspaceId){
-        const choices=await workspaceApi.privateDrafts(identity);
+        const choices=await workspaceApi.privateDraftSummaries(identity);
         if(notebookCurrent(selected))setNotebookChoices(choices);
       }else{
         if(!notebookChoices?.drafts.some(row=>row.workspace_id===workspaceId&&row.link_state==='unlinked'))throw new WorkspaceApiError(403);
@@ -321,23 +332,31 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))props.onAccessLost?.(cause);
     }}finally{if(notebookCurrent(selected))setNotebookWorking(false);}
   }
+  async function renameRecording(){const selected=owner.current;if(!selected?.runtime||working||activeAudio||!current())return;setWorking(true);setError('');
+    try{await selected.runtime.rename(renameTitle);if(current())setRenameOpen(false);}catch{if(current())setError('The device title could not be confirmed. Reopen the saved recording to check its title; audio is retained.');}finally{if(current())setWorking(false);}}
   const mayResume=snapshot&&['paused','interrupted'].includes(snapshot.phase);
   if(owner.current&&!current())return <section className="private-recording-panel" aria-label="Private Scribe recording">
     <h1>Recording access changed</h1><p>Private recording details are hidden. Retained audio remains encrypted for its original account.</p>
-    <p role="status">{activeAudio?'Checking microphone stop':'Microphone stopped'}</p>
+    <p role="status">{activeAudio?'Checking microphone stop':'Microphone stopped'}</p>{error&&<p role="alert">{error}</p>}
     {activeAudio&&<button className="team-primary" onClick={()=>void halt(true)}>Stop and save recording</button>}
     {!activeAudio&&<button className="private-recording-close" disabled={working} onClick={()=>void close()}>Close recording</button>}
   </section>;
-  return <section className="private-recording-panel" aria-label="Private Scribe recording">
-    <header><div><p className="team-kicker">SCRIBE</p><h1 ref={heading} tabIndex={-1}>{snapshot||recordingId?'Private recording':'Start a private recording'}</h1></div><button className="private-recording-close" disabled={activeAudio||working} onClick={()=>void close()}>Close recording</button></header>
+  return <><aside hidden={!props.minimized} className="recording-persistent-bar" aria-label="Ongoing private recording">
+    <strong>{snapshot?.phase==='recording'?'Recording':snapshot?.phase==='paused'?'Recording paused':snapshot?.phase==='sealed'?'Recording saved on this device':'Check recording controls'}</strong><span>{snapshot?elapsed(Math.max(snapshot.elapsedSeconds,liveSeconds)):''} · {snapshot?.title??title}</span>
+    <button onClick={props.onExpand}>Return to recording</button>{activeAudio&&<button disabled={snapshot?.phase!=='recording'} onClick={()=>void halt(false)}>Pause</button>}{snapshot&&snapshot.phase!=='sealed'&&<button className="team-primary" disabled={working} onClick={()=>void halt(true)}>Stop and save</button>}
+  </aside><section hidden={props.minimized} className="private-recording-panel" aria-label="Private Scribe recording">
+    <header>{props.onMinimize&&<button onClick={props.onMinimize}>Browse workspace</button>}<div><p className="team-kicker">SCRIBE</p><h1 ref={heading} tabIndex={-1}>{snapshot||recordingId?'Private recording':'Start a private recording'}</h1></div><button className="private-recording-close" disabled={activeAudio||working} onClick={()=>void close()}>Close recording</button></header>
     <p className="private-recording-return">Close recording to return Home and find your saved recordings.{activeAudio?' Stop and save before closing.':''}</p>
     <p>{recordingId?'Play your saved recording or send it to Scribe for transcription. Your original audio stays encrypted on this device.':'Record now. Choose a patient or confirmed visit later. This recording stays encrypted on this device and is not synced to another device.'}</p>
     <div className="private-recording-status"><strong role="status">{snapshot?.phase==='recording'?'Recording':snapshot?.phase==='sealed'?snapshot.recordedChunks?'Saved on this device':'Stopped · no audio captured':snapshot?.phase==='paused'?'Paused':snapshot?.phase==='interrupted'?'Interrupted · retained audio':snapshot?.phase==='stop_unconfirmed'?'Microphone stop unconfirmed':snapshot?.startupStage?startupLabels[snapshot.startupStage]:snapshot?.phase==='stopping'?'Stopping audio and saving on this device':snapshot?.phase==='pausing'?'Pausing audio and saving on this device':snapshot?.busy?'Updating recording':preparationError||nativeError?'Recording not ready':!prepared?recordingId?'Opening saved recording…':'Checking access and encrypted storage':!nativeReady?'Checking this device’s recording access':'Ready for consent'}</strong>
       {snapshot&&<span>{snapshot.phase==='recording'?`${elapsed(Math.max(snapshot.elapsedSeconds,liveSeconds))} recording · ${elapsed(snapshot.elapsedSeconds)} saved`:elapsed(snapshot.elapsedSeconds)} · {snapshot.recordedChunks} saved audio chunks</span>}<span>{snapshot?.recordedChunks?'Original audio saved on this device':'Private recording on this device'}</span>
       {snapshot?.phase==='recording'&&<span>Microphone on · audio saves in chunks while you record.</span>}
+      {snapshot?.phase==='recording'&&platform==='desktop'&&<><meter min="0" max="1" value={snapshot.inputLevel??0} aria-label="Microphone activity"/><span>Microphone signal</span></>}
       {snapshot?.phase==='recording'&&inputSignal&&<><meter min="0" max="1" value={inputSignal.level} aria-label="Microphone activity"/><span>{inputSignal.route} · {inputSignal.message}</span></>}
       {snapshot&&['paused','interrupted'].includes(snapshot.phase)&&<span>{snapshot.failure==='capture_backgrounded'?'Recording paused when the app became inactive.':snapshot.failure==='audio_route_changed'?'Recording paused because the microphone route changed.':snapshot.failure==='audio_session_interrupted'?'Recording paused because iOS interrupted the audio session.':snapshot.failure?'Recording paused because microphone startup or capture was interrupted.':'Microphone off.'} Select consent and Resume recording when ready.</span>}
       </div>
+    {snapshot?.startupStage==='microphone_permission'&&<aside role="status" className="team-note-notice"><p>Allow microphone access in the browser prompt to begin. Recording has not started.</p>
+      {permissionHelp&&<p>Still waiting? Check the microphone icon beside the address, or open your browser’s site settings. You can Stop and save to end this attempt; a late permission response will not restart it.</p>}</aside>}
     {recordingId&&!snapshot&&preparationError&&!working&&<button onClick={()=>void retryPreparation()}>Try preparing recording again</button>}
     {(!snapshot&&!recordingId||mayResume||snapshot?.phase==='ready')&&<div className="private-recording-consent">
       <details><summary>Recording options · {language==='en-US'?'English':'English and Spanish'} · {modality==='in_person'?'In person':modality==='virtual'?'Video visit':'Phone'}</summary>
@@ -352,9 +371,10 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       {nativeError&&snapshot&&!working&&<button onClick={()=>setNativeEpoch(value=>value+1)}>Try preparing recording again</button>}
     </div>}
     {activeAudio&&<div className="private-recording-actions"><button disabled={snapshot?.phase!=='recording'} onClick={()=>void halt(false)}>Pause recording</button><button className="team-primary" onClick={()=>void halt(true)}>Stop and save recording</button></div>}
-    {snapshot&&!activeAudio&&<div className="private-recording-actions">{snapshot.phase!=='sealed'&&<button disabled={working} onClick={()=>void halt(true)}>Finish and save recording</button>}<button disabled={working||!snapshot.recordedChunks||!current()} onClick={()=>void playback()}>Play saved recording</button>
+    {snapshot&&!activeAudio&&<div className="private-recording-actions"><button disabled={working} onClick={()=>{setRenameTitle(snapshot.title);setRenameOpen(true);}}>Rename recording</button>{snapshot.phase!=='sealed'&&<button disabled={working} onClick={()=>void halt(true)}>Finish and save recording</button>}<button disabled={working||!snapshot.recordedChunks||!current()} onClick={()=>void playback()}>Play saved recording</button>
       {notebook&&props.onTranscribe&&snapshot.phase==='sealed'&&snapshot.recordedChunks>0&&<button className="team-primary" disabled={working||notebookWorking||ledgerBusy||!current()} onClick={()=>void transcribeSaved()}>Transcribe recording</button>}
       {notebook&&props.onNotebook&&<button disabled={working||notebookWorking||!current()} onClick={()=>void openNotebook()}>Open private notebook</button>}</div>}
+    {renameOpen&&snapshot&&!activeAudio&&<form className="notebook-title-editor" aria-label="Rename device recording" onSubmit={event=>{event.preventDefault();void renameRecording();}}><label>Recording title<input autoFocus maxLength={160} value={renameTitle} onChange={event=>setRenameTitle(event.target.value)}/></label><button disabled={working||!renameTitle.trim()}>Save recording title</button><button type="button" onClick={()=>setRenameOpen(false)}>Cancel rename</button><p>Changes the title on this device. Audio and the original recording receipt are retained.</p></form>}
     {snapshot&&!activeAudio&&!notebook&&!snapshot.workspaceId&&snapshot.recordedChunks>0&&props.onNotebook&&<aside className="private-recording-notebook" aria-label="Connect saved recording to notebook">
       <p>This recording has no confirmed notebook link. Choose an existing private notebook; saved audio stays on this device.</p>
       <button disabled={working||notebookWorking||!prepared} onClick={()=>void chooseNotebook()}>Choose private notebook</button>
@@ -376,5 +396,5 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     {audio&&current()&&<audio controls src={audio} aria-label="Saved private recording playback"/>}
     {playbackWarning&&<p role="status">{playbackWarning}</p>}
     {preparationError&&<p role="alert">{preparationError}</p>}{nativeError&&<p role="alert">{nativeError}</p>}{error&&<p role="alert">{error}</p>}{notebookError&&<p role="status">{notebookError}</p>}
-  </section>;
+  </section></>;
 }

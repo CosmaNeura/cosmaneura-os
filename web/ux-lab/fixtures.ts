@@ -2,8 +2,10 @@
 import {faxConnectionSummary,personalConnectionSummary,type ConnectionSummary} from '../src/connection-summary';
 import type {FaxReadiness} from '../src/fax-readiness-api';
 import type {AuthenticatedWorkspaceIdentity} from '../src/workspace-api';
+import type {ConnectionId,ConnectionReadiness} from '../src/connection-catalog-api';
 import {observeConnectionStatus,connectionHealth} from '../src/connection-operation-health';
-export {personalConnectionSummary} from '../src/connection-summary';
+export {personalConnectionSummary,connectionSetupSummary} from '../src/connection-summary';
+export {connectionActionClientAvailable} from '../src/connection-catalog-api';
 
 export let scenario='mixed';
 export const setScenario=(value:string)=>{scenario=value;};
@@ -29,7 +31,13 @@ const wait=(signal:AbortSignal)=>new Promise<void>((resolve,reject)=>{
 });
 export async function readConnectionCatalog(_identity:unknown,signal:AbortSignal){
   await wait(signal);if(scenario==='offline')throw new Error('Synthetic offline fixture');
-  return {core:true,google:true,microsoft:true,scheduling:false,messaging:scenario in faxScenarios,payments:false,portals:false};
+  const available={core:true,google:true,microsoft:true,scheduling:false,messaging:scenario in faxScenarios,payments:false,portals:false};
+  const readiness=Object.fromEntries(Object.entries(available).map(([id,enabled])=>[id,{
+    supported:!['payments','portals'].includes(id),setup_allowed:enabled,
+    state:['payments','portals'].includes(id)?'coming_soon':['google','microsoft'].includes(id)?'user_connectable':'practice_setup',
+    runtime_available:enabled,installed_account:'not_checked',client_status:'not_checked',account_status:'not_checked',operation_status:'not_checked',actions:[],
+  }])) as Record<ConnectionId,ConnectionReadiness>;
+  return {...available,readiness};
 }
 export async function readConnectionSummary(identity:AuthenticatedWorkspaceIdentity,id:string,signal:AbortSignal):Promise<ConnectionSummary>{
   await wait(signal);

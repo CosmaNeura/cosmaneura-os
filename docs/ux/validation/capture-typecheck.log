@@ -1,0 +1,4 @@
+
+> @cosmas-os/retained-capture@0.1.0 typecheck /private/tmp/cosmabot-ux-execution-20261016/clients/capture
+> tsc --noEmit
+

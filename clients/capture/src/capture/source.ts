@@ -21,6 +21,8 @@ export interface CaptureSourceStartOptions {
   readonly onError?: (code: CaptureSourceErrorCode) => void;
   /** Transient progress only; observers cannot grant authority or affect capture. */
   readonly onStartupStage?: (stage: CaptureSourceStartupStage) => void;
+  /** Transient measured amplitude. No samples or device identity leave the source. */
+  readonly onInputLevel?: (level: number) => void;
   readonly signal?: AbortSignal;
   /** Called after accepted audio is drained and the producer has stopped. */
   readonly onWindowClosed?: (reason: "authority_expired" | "frame_limit") => void;

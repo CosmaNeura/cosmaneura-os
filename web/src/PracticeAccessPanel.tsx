@@ -1,3 +1,4 @@
+import {PracticeInvitationPanel} from './PracticeInvitationPanel';
 import {PracticeMembersPanel} from './PracticeMembersPanel';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {practiceAccessApi} from './practice-access-api';
@@ -9,12 +10,14 @@ export function PracticeAccessPanel({identity,access,onBusyChange}:{identity:Aut
   const [rows,setRows]=useState<AccessRequest[]|null>(null),[selected,setSelected]=useState<AccessRequest|null>(null);
   const [matched,setMatched]=useState(false),[error,setError]=useState(''),[receipt,setReceipt]=useState('');
   const [unconfirmed,setUnconfirmed]=useState<AccessDecision|null>(null);
+  const [inviteOpen,setInviteOpen]=useState(false),[inviteBusy,setInviteBusy]=useState(false);
+  const reportInviteBusy=useCallback((value:boolean)=>setInviteBusy(value),[]);
   const [membersOpen,setMembersOpen]=useState(false),[membersBusy,setMembersBusy]=useState(false);
   const reportMembersBusy=useCallback((value:boolean)=>setMembersBusy(value),[]);
   const writing=useRef(false);
   const {busy,run}=usePracticeAccessTask(identity);
   const loss=useRef(access.onAccessLost);loss.current=access.onAccessLost;
-  useEffect(()=>{onBusyChange(busy||unconfirmed!==null||membersBusy);return ()=>onBusyChange(false);},[busy,unconfirmed,membersBusy,onBusyChange]);
+  useEffect(()=>{onBusyChange(busy||unconfirmed!==null||membersBusy||inviteBusy);return ()=>onBusyChange(false);},[busy,unconfirmed,membersBusy,inviteBusy,onBusyChange]);
   function fail(cause:unknown){
     if(accessDenied(cause)){setRows(null);setSelected(null);setMatched(false);setUnconfirmed(null);loss.current();}
     setError(accessFailure(cause));
@@ -47,6 +50,8 @@ export function PracticeAccessPanel({identity,access,onBusyChange}:{identity:Aut
   return <section className="practice-access-panel" aria-label="Practice member requests">
     <button disabled={busy||unconfirmed!==null||membersBusy} onClick={()=>setMembersOpen(value=>!value)}>{membersOpen?'Hide connected members':'Manage connected members'}</button>
     {membersOpen&&<PracticeMembersPanel identity={identity} blocked={busy||unconfirmed!==null} onBusyChange={reportMembersBusy} onAccessLost={()=>loss.current()}/>}
+    <button disabled={busy||unconfirmed!==null||membersBusy||inviteBusy} onClick={()=>setInviteOpen(value=>!value)}>{inviteOpen?'Close invitations':'Invite a teammate'}</button>
+    {inviteOpen&&<PracticeInvitationPanel identity={identity} onBusyChange={reportInviteBusy} onAccessLost={()=>loss.current()}/>}
     <h2>Requests to join</h2>
     <p>Approve teammates you know to join this practice workspace. Only the practice owner can review these requests.</p>
     {error && <p role="alert">{error}</p>}{receipt && <p role="status">{receipt}</p>}

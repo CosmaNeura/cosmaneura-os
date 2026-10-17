@@ -1,7 +1,15 @@
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import UUID4, BaseModel, ConfigDict, Field, model_serializer, model_validator
+from pydantic import (
+    UUID4,
+    BaseModel,
+    ConfigDict,
+    Field,
+    field_validator,
+    model_serializer,
+    model_validator,
+)
 
 from cosmas_os.api.session_prep_analysis_schemas import ConversationAnalysisFields
 from cosmas_os.api.workspace_schemas import IdempotencyKey
@@ -111,17 +119,44 @@ class BotSettings(BaseModel):
         return self
 
 
+class PracticeProfile(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+    version: Literal[1]
+    practice_name: str = Field(default="", max_length=100)
+    specialty: str = Field(default="", max_length=80)
+    provider_name: str = Field(default="", max_length=80)
+    credentials: str = Field(default="", max_length=40)
+    state: str = Field(default="", max_length=40)
+    note_format: str = Field(default="", max_length=60)
+    language: str = Field(default="", max_length=40)
+
+    @field_validator("version", mode="before")
+    @classmethod
+    def exact_version(cls, value):
+        if type(value) is not int or value != 1:
+            raise ValueError("practice profile version required")
+        return value
+
+    @model_validator(mode="after")
+    def unicode_scalars(self):
+        if any(0xD800 <= ord(char) <= 0xDFFF or ord(char) < 32 for key, value in self.model_dump().items()
+               if key != "version" for char in value):
+            raise ValueError("invalid practice profile text")
+        return self
+
+
 class TeamConfiguration(BaseModel):
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
     practice_context: str = Field(default="Direct Primary Care", max_length=1000)
     bots: list[BotSettings] = Field(min_length=4, max_length=100)
     presets: list[PresetBinding] = Field(default_factory=list, max_length=3)
     model_work: ModelWorkPolicy | None = None
+    practice_profile: PracticeProfile | None = None
 
     @model_validator(mode="before")
     @classmethod
     def explicit_work_policy_not_null(cls, value):
-        if isinstance(value, dict) and "model_work" in value and value["model_work"] is None:
+        if isinstance(value, dict) and any(key in value and value[key] is None for key in ("model_work", "practice_profile")):
             raise ValueError("work policy must be absent or explicit")
         return value
 
@@ -130,10 +165,16 @@ class TeamConfiguration(BaseModel):
         value = handler(self)
         if self.model_work is None:
             value.pop("model_work", None)
+        if self.practice_profile is None:
+            value.pop("practice_profile", None)
         return value
 
     @model_validator(mode="after")
     def all_roles_once(self):
+        from cosmas_os.application.practice_profile import context
+        if len(context({"practice_profile": self.practice_profile.model_dump() if self.practice_profile else None,
+                        "practice_context": self.practice_context})) > 1000:
+            raise ValueError("practice profile and additional instructions exceed the helper context limit")
         if sum(not bot.retired for bot in self.bots) > 12:
             raise ValueError("a Provider Team can contain at most twelve current bots")
         baseline = [bot for bot in self.bots if bot.instance_id is None]
@@ -162,7 +203,7 @@ class TeamConfiguration(BaseModel):
 
 class SetupReview(BaseModel):
     model_config = ConfigDict(extra="forbid")
-    catalog_version: int = Field(ge=1, le=4, strict=True)
+    catalog_version: int = Field(ge=1, le=5, strict=True)
     configuration_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
     prerequisites_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
 

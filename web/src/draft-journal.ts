@@ -1,3 +1,5 @@
+import {validateInvitationRecovery} from './practice-invitation-contract';
+import {validateTitleRecovery} from './notebook-metadata-contract';
 import {parsePendingReviewDecision} from "../../clients/scribe-review/creator-review-journal";
 import {validScribeSourceRequest} from './scribe-source-api';
 import {validateResearchDraft} from './research-contract';
@@ -35,10 +37,10 @@ import {validatePrivateDraftRecovery,validatePrivateDraftLinkRecovery} from './p
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
   note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest };
-export type EditorKind = "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
+export type EditorKind = "notebook-title" | "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
-export type AccountEditorKind = "private-draft" | "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
+export type AccountEditorKind = "practice-invite" | "private-draft" | "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
 export type AccountEditorDraft = {kind:"account-editor";editor:AccountEditorKind;data:unknown;pending:string|null};
 export const accountEditorAddress = (editor: AccountEditorKind) => `account-editor:${editor}`;
 export type RecoveredDraft = TeamDraft | NotebookDraft | EditorDraft | AccountOperationDraft | AccountEditorDraft;
@@ -47,7 +49,7 @@ export const editorAddress = (workspaceId: string, editor: EditorKind) => `edito
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const validEditor = (kind: unknown) => typeof kind === "string" &&
-  (["private-draft-link", "agent-research-review", "private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
+  (["notebook-title", "private-draft-link", "agent-research-review", "private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
     kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) || kind.startsWith("handoff-review:") && UUID.test(kind.slice("handoff-review:".length)) ||
     kind.startsWith("fax-source-review:") && UUID.test(kind.slice("fax-source-review:".length)) ||
     kind.startsWith("efax-source-review:") && UUID.test(kind.slice("efax-source-review:".length)) ||
@@ -99,7 +101,7 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   const draft = value.body as RecoveredDraft;
   if (draft && draft.kind === "account-editor") {
     if (Object.keys(draft).sort().join(",")!=="data,editor,kind,pending" ||
-        typeof draft.editor!=="string" || !(draft.editor==="private-draft" || draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="google-calendar" || draft.editor==="efax-inbound" || draft.editor==="fax-inbound" ||
+        typeof draft.editor!=="string" || !(draft.editor==="practice-invite" || draft.editor==="private-draft" || draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="google-calendar" || draft.editor==="efax-inbound" || draft.editor==="fax-inbound" ||
           draft.editor.startsWith("practice-result:") && UUID.test(draft.editor.slice("practice-result:".length)) ||
           draft.editor.startsWith("vendor-work:") && UUID.test(draft.editor.slice("vendor-work:".length))) ||
         address!==accountEditorAddress(draft.editor) || draft.pending!==null && !UUID.test(draft.pending) ||
@@ -134,6 +136,14 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if(draft?.kind==='account-editor'&&draft.editor==='practice-invite'){
+    try{const data=validateInvitationRecovery(draft.data);if(draft.pending!==(data.pending?.body.idempotency_key??null))throw new Error();}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
+  if(draft?.kind==='editor'&&draft.editor==='notebook-title'){
+    try{const data=validateTitleRecovery(draft.data,draft.workspaceId);if(draft.pending!==data.pending.idempotency_key)throw new Error();}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
   if(draft?.kind==='account-editor'&&draft.editor==='private-draft'){
     try{const data=validatePrivateDraftRecovery(draft.data);if(draft.pending!==(data.pending?.idempotency_key??null))throw new Error();}
     catch{throw new DraftStoreError('integrity');}return;

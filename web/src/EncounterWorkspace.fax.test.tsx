@@ -66,7 +66,7 @@ describe('Settings fax navigation in an encounter', () => {
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('Unexpected HTTP in navigation test')));
     scroll = vi.fn();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {configurable: true, value: scroll});
-    vi.spyOn(workspaceApi, 'privateDrafts').mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+    vi.spyOn(workspaceApi, 'privateDraftSummaries').mockResolvedValue({contract_version:2,drafts:[],has_more:false});
     vi.spyOn(workspaceApi, 'catalog').mockResolvedValue([{
       appointment_id: workspace.appointment_id, workspace_id: workspace.id, label: workspace.label,
     }]);
@@ -166,7 +166,7 @@ describe('Settings fax navigation in an encounter', () => {
     await openFaxSettings();
     await click('Choose a visit for fax work');
     expect(host.querySelector('.team-welcome h1')?.textContent).toBe('Choose a visit for fax work');
-    expect(host.querySelector('.team-encounter-option')?.textContent).toContain('Open fax work');
+    expect(host.querySelector('.team-encounter-option')?.textContent).toContain('Open saved notes');
     expect(host.querySelector('[aria-label="Messaging and fax work"]')).toBeNull();
     expect(workspaceApi.open).not.toHaveBeenCalled();
     scroll.mockClear(); await chooseVisit();

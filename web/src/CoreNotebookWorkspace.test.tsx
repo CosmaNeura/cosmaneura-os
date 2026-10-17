@@ -34,5 +34,5 @@ it('moves from guided account setup into its existing private notebook without c
   await click('Check connection status');await click('View appointments');await click('Open notebook');
   await wait(()=>expect(existing).toHaveBeenCalledWith(identity,selection));
   await wait(()=>expect(host.querySelector('.settings-hub')?.hasAttribute('hidden')).toBe(true));
-  expect(host.textContent).toContain(workspace.label);expect(catalog).not.toHaveBeenCalled();expect(create).not.toHaveBeenCalled();
+  expect(host.textContent).toContain(workspace.label);expect(catalog).toHaveBeenCalledTimes(1);expect(create).not.toHaveBeenCalled();
 });

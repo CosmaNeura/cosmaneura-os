@@ -1,0 +1,32 @@
+{
+  "contract_checks": {
+    "passed": 193,
+    "exit_code": 0,
+    "source_unchanged_during_run": true,
+    "source_sha256": "bc78cc4dc7b591edba54bdcb0fc0e1ebb0b4e3e522dbc7a5072c3a5029309fb9"
+  },
+  "signed_ui_journeys": [
+    {
+      "name": "test_signed_onboarding_review_pause_denial_restore_and_reopen",
+      "passed": true
+    },
+    {
+      "name": "test_real_solo_setup_team_private_note_save_reopen",
+      "passed": true
+    },
+    {
+      "name": "test_private_scribe_starts_before_slow_notebook_and_reopens_encrypted_audio",
+      "passed": true
+    },
+    {
+      "name": "test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs",
+      "passed": true
+    }
+  ],
+  "changed_python_lint": "passed",
+  "repository_wide_baseline_lint_errors": 28,
+  "repository_wide_baseline_pyright_errors": 101,
+  "beta_build": "passed with complete operational-beta-v1 synthetic public configuration",
+  "existing_main_ci_failure_url": "https://github.com/CosmaNeura/cosmaneura-os/actions/runs/38067807377",
+  "merge_requires_deployment": false
+}

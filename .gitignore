@@ -80,3 +80,7 @@ web/tsconfig.tsbuildinfo
 /web/clinician-lab-dist/
 /lab/browser/test-results/
 /lab/browser/playwright-report/
+
+/web/ux-acceptance-dist/
+/web/.beta/
+!/docs/ux/validation/*.log

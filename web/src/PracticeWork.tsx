@@ -21,6 +21,7 @@ function requirePreparationVersion(operation: Pending, item: PracticeWorkItem) {
 export function PracticeWork({ identity, onChanged, onAccessLost }: {
   identity: WorkspaceIdentity; onChanged: () => void; onAccessLost: (cause: WorkspaceApiError) => void;
 }) {
+  const [query,setQuery]=useState(''),[filter,setFilter]=useState<'all'|'mine'|'offers'|'overdue'|'complete'>('all');
   const [items, setItems] = useState<PracticeWorkEntry[]>([]);
   const [people, setPeople] = useState<WorkPerson[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
@@ -164,6 +165,10 @@ export function PracticeWork({ identity, onChanged, onAccessLost }: {
   }
 
   const locked = busy || pending !== null || conflict || recoveryBlocked;
+  const today=new Date().toLocaleDateString('en-CA');
+  const visible=items.filter(item=>pending?.ticketId===item.ticket_id||
+    (filter==='all'||filter==='mine'&&item.responsible.id===item.viewer_id||filter==='offers'&&(item.work_kind!=='vendor_delivery'&&!!item.pending_offer)||filter==='overdue'&&item.due_date<today&&!['closed','superseded','withdrawn'].includes(item.state)||filter==='complete'&&(item.work_kind==='vendor_delivery'?item.vendor_work.verification==='verified':item.receipts.some(receipt=>receipt.kind==='human_completion')))&&
+    [item.body,item.expected_outcome,item.responsible.name,item.due_date,item.work_kind??'follow-up'].join(' ').toLowerCase().includes(query.trim().toLowerCase()));
   return <section className="practice-work" aria-label="Practice work">
     <div className="practice-work-heading"><div><p className="team-kicker">SHARED RESPONSIBILITY</p><h1>Practice work</h1></div>
       <button disabled={busy || pending !== null} onClick={() => void load()}>Refresh work</button></div>
@@ -180,7 +185,9 @@ export function PracticeWork({ identity, onChanged, onAccessLost }: {
       {checkedRejected && <button disabled={busy || recoveryBlocked} onClick={()=>void setAsideRejected()}>Set aside rejected request</button>}</div>}
     {!loaded && busy && <p role="status">Loading practice work…</p>}
     {loaded && !items.length && <p>No shared work is available for your account.</p>}
-    {items.map(item => item.work_kind === "vendor_delivery"
+    {loaded&&items.length>0&&<div className="practice-work-filters"><label>Search work<input type="search" value={query} onChange={event=>setQuery(event.target.value)} placeholder="Task, owner or due date"/></label><label>Show work<select value={filter} onChange={event=>setFilter(event.target.value as typeof filter)}><option value="all">All work</option><option value="mine">Assigned to me</option><option value="offers">Awaiting acceptance</option><option value="overdue">Overdue</option><option value="complete">Result checked</option></select></label></div>}
+    {loaded&&items.length>0&&visible.length===0&&<p>No work matches these filters.</p>}
+    {visible.map(item => item.work_kind === "vendor_delivery"
       ? <VendorPracticeMount key={item.ticket_id} identity={identity} item={item} people={people} locked={locked} onDenied={failure} onChanged={() => { void load(); onChanged(); }} />
       : <WorkCard key={item.ticket_id} identity={identity} item={item} people={people} locked={locked} onCurrent={show} onDenied={failure} onSave={operation => void save(operation)} />)}
     {cursor && <button disabled={locked} onClick={() => void load(cursor)}>Load more work</button>}

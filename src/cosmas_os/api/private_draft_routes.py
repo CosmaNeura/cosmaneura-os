@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 
 from cosmas_os.api.capture_schemas import _unique_object
 from cosmas_os.api.workspace_schemas import IdempotencyKey
+from cosmas_os.application import notebook_metadata as notebooks
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.capture_deadline import run_in_threadpool
 
@@ -33,6 +34,13 @@ class PrivateDraftLink(BaseModel):
         if value is not True:
             raise ValueError("human appointment confirmation required")
         return value
+
+
+class NotebookRename(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    expected_title_revision: int = Field(ge=0, strict=True)
+    title: str = Field(min_length=1, max_length=160)
+    idempotency_key: IdempotencyKey
 
 
 def router(*, workspace_gate, get_session, identity, fence):
@@ -77,6 +85,26 @@ def router(*, workspace_gate, get_session, identity, fence):
         return await run_in_threadpool(observe, session, member, request,
             lambda: ws.create_private_draft(session, member.box_id, member.principal_id, command.title,
                 command.idempotency_key, fence=lambda: fence(request, session, member)))
+
+    @routes.get("/workspaces/private-drafts/summary")
+    async def summaries(request: Request, session: Session = Depends(get_session), member=Depends(identity)):
+        return await run_in_threadpool(observe, session, member, request,
+            lambda: notebooks.summaries(session, member.box_id, member.principal_id))
+
+    @routes.post("/workspaces/{workspace_id}/title")
+    async def rename(workspace_id: UUID, request: Request, session: Session = Depends(get_session), member=Depends(identity)):
+        command = await body(request, NotebookRename)
+        return await run_in_threadpool(observe, session, member, request,
+            lambda: notebooks.rename(session, member.box_id, member.principal_id, str(workspace_id),
+                title=command.title, expected=command.expected_title_revision, key=command.idempotency_key,
+                fence=lambda: fence(request, session, member)))
+
+    @routes.post("/workspaces/{workspace_id}/title/resolve")
+    async def resolve_title(workspace_id: UUID, request: Request, session: Session = Depends(get_session), member=Depends(identity)):
+        command = await body(request, NotebookRename)
+        return await run_in_threadpool(observe, session, member, request,
+            lambda: notebooks.resolve(session, member.box_id, member.principal_id, str(workspace_id),
+                title=command.title, expected=command.expected_title_revision, key=command.idempotency_key))
 
     @routes.post("/workspaces/private-drafts/resolve")
     async def resolve_draft(request: Request, session: Session = Depends(get_session), member=Depends(identity)):

@@ -11,7 +11,7 @@ vi.hoisted(() => {vi.stubEnv('VITE_COSMAS_ENV', 'synth_os'); vi.stubEnv('VITE_WO
 vi.mock('./team-setup-api', async () => {const {WorkspaceApiError} = await import('./workspace-api'); return {teamSetupApi: {read: vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 vi.mock('./draft-store', async original => ({...await original<typeof import('./draft-store')>(), privateDraftScope: async (s: string) => s}));
 vi.mock('./workspace-api', async original => {const actual = await original<typeof import('./workspace-api')>(); return {...actual,
-  workspaceApi: {...actual.workspaceApi, team: vi.fn(), privateDrafts:vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), ask: vi.fn()}};});
+  workspaceApi: {...actual.workspaceApi, team: vi.fn(), privateDraftSummaries:vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), ask: vi.fn()}};});
 vi.mock('./ResearchPanelLoader', () => ({ResearchPanelLoader: () => <p>Controlled public research boundary</p>}));
 const identity = {mode: 'clerk_jwt' as const, getToken: async () => 'invented-signed-current-session'};
 const baseTeam = teamFixture(), researchId = uuid(105);
@@ -37,7 +37,7 @@ const open = async () => {await click('Visits and notes'); await wait(() => expe
   await act(async () => [...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(e => e.querySelector('strong')?.textContent === 'Research')!.click());};
 beforeEach(async () => {vi.clearAllMocks(); vi.stubGlobal('crypto', webcrypto); vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT', true); vi.stubEnv('VITE_API_BASE', 'http://127.0.0.1:8000');
   storage = memoryDraftStorage(); approved = false; reads = 0; approvals = []; lostApproval = false;
-  vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+  vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
   vi.mocked(workspaceApi.team).mockResolvedValue(team); vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id: current.appointment_id, label: current.label, workspace_id: current.id}]);
   vi.mocked(workspaceApi.open).mockResolvedValue({identity, workspace: current, team}); vi.mocked(workspaceApi.read).mockResolvedValue(current);
   vi.stubGlobal('fetch', async (url: string, init: RequestInit) => {
@@ -64,7 +64,7 @@ it('locks real workspace edits while approval is uncertain and recovers only thr
   await act(async () => host.querySelector<HTMLInputElement>('[aria-label="Proposed public query"] input')!.click());
   await click('Approve public search');
   await wait(() => expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.disabled).toBe(true));
-  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(false);
   expect(button('Team settings')!.disabled).toBe(true);
   expect([...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].every(e => e.disabled)).toBe(true);
   await click('Check saved query review'); expect(approvals).toHaveLength(1);
