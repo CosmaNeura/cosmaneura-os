@@ -21,9 +21,9 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
   open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
-  teamSummary: string; teamDirty: boolean; onClose: () => void; navigationLocked?: boolean;
+  teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
   onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];onReviewProviderFaxDocument?:FaxInboundPanelProps['onReviewDocument'];
@@ -100,8 +100,9 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
     title.current?.focus({preventScroll:true});
     title.current?.scrollIntoView?.({block:'start'});
   }, [open, screen]);
-  function visit(next: Screen) {
+  function visit(next: Screen, accepted=false) {
     if (leaveLocked) return;
+    if(!accepted&&screen==='team'&&next!=='team'&&teamDirty&&beforeLeaveTeam){beforeLeaveTeam(()=>visit(next,true));return;}
     setRecovering(null);
     if (next !== 'home' && next !== 'connections') {
       if(!(next in CONNECTION_GUIDES)||!connectionIdentity||catalog?.[next as ConnectionId]===true||catalogError&&!current?.denied)
@@ -197,15 +198,13 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
             return <div className="connection-card-box" key={item.id}><button disabled={navigationLocked||!!connectionIdentity&&!catalog&&!catalogError} className="settings-card connection-card" onClick={()=>visit(item.id)}>
             <span className="settings-card-icon" aria-hidden="true">{item.icon}</span>
             <span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{state.reason}</small>
-              {state.services&&<span className="connection-service-summary">{state.services.map(service=><small key={service.kind}><b>{service.name}:</b> {service.label}
-                </small>)}</span>}
             </span>
             <span className="connection-card-state"><span role="status" aria-atomic="true" className={`connection-badge connection-badge-${state.tone}`}>{state.tone==='ready'&&<span aria-hidden="true">✓ </span>}{state.label}</span>
               {!state.checkedAt&&current?.checks[item.id]?.last&&<small>Last confirmed: {current.checks[item.id]!.last!.label}{current.checks[item.id]!.last!.checkedAt?` · ${new Date(current.checks[item.id]!.last!.checkedAt!).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`:''}</small>}
-              {!state.action.startsWith('Open ')&&<small className="connection-next-step">Next: {state.action}</small>}
-              <span className="connection-card-action">Open {item.id==='core'?'practice connection':item.id==='google'?'Google':item.id==='microsoft'?'Microsoft':item.id==='scheduling'?'Scheduling':item.id==='messaging'?'fax setup':item.id==='payments'?'payments':'portals'} <span aria-hidden="true">›</span></span></span>
-          </button>{(state.proof||state.checkedAt||state.services?.some(service=>service.lastSuccessAt))&&<details className="connection-state-help" aria-label={`${titles[item.id]} check details`}>
+              <span className="connection-card-action">{state.action} <span aria-hidden="true">›</span></span></span>
+          </button>{(state.proof||state.checkedAt||!!state.services?.length)&&<details className="connection-state-help" aria-label={`${titles[item.id]} check details`}>
             <summary>Check details</summary>
+            {state.services&&<dl className="connection-service-summary">{state.services.map(service=><div key={service.kind}><dt>{service.name}</dt><dd>{service.label}</dd></div>)}</dl>}
             {state.proof&&<p className="connection-proof">{state.proof}</p>}
             {state.checkedAt&&<p>{state.checkKind==='availability'?'Availability checked':'Account checked'} {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</p>}
             {state.services?.filter(service=>service.lastSuccessAt).map(service=><p key={service.kind}>{service.name} · Last successful read: {new Date(service.lastSuccessAt!).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})}</p>)}

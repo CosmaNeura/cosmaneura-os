@@ -25,8 +25,8 @@ export function policyProjection(configuration:TeamConfiguration,previous:SetupP
   }
   return result;
 }
-export function upgradeSetupFixture(value:TeamSetup):TeamSetup{return {...structuredClone(value),catalog:structuredClone(currentWorkContract.setup.catalog) as TeamSetup['catalog'],setup:{...policyProjection(value.team.configuration,value.setup),contract_version:4,catalog_version:4}};}
-export function upgradeRehearsalFixture(value:TeamRehearsal):TeamRehearsal{return {...structuredClone(value),scenario_id:'team_policy_setup.v1',setup:{...policyProjection(value.configuration,value.setup),contract_version:4,catalog_version:4},setup_review:{...value.setup_review,catalog_version:4},cases:[...value.cases,
+export function upgradeSetupFixture(value:TeamSetup):TeamSetup{return {...structuredClone(value),catalog:{...structuredClone(currentWorkContract.setup.catalog),version:5} as TeamSetup['catalog'],setup:{...policyProjection(value.team.configuration,value.setup),contract_version:5,catalog_version:5}};}
+export function upgradeRehearsalFixture(value:TeamRehearsal):TeamRehearsal{return {...structuredClone(value),scenario_id:'team_policy_setup.v1',setup:{...policyProjection(value.configuration,value.setup),contract_version:5,catalog_version:5},setup_review:{...value.setup_review,catalog_version:5},cases:[...value.cases,
   {case_id:'model_work_policy',bot:null,result:'demonstrated',explanation:'Invented policy only; no provider call.'},...value.configuration.bots.map(bot=>({case_id:'resource_policy' as const,bot:bot.instance_id??bot.role,result:'demonstrated' as const,explanation:'Invented source policy only; no grant or service call.'}))]};}
 export async function policySetupFixture(configuration:TeamConfiguration=teamFixture().configuration,revision=1):Promise<TeamSetup>{return upgradeSetupFixture({team:teamFixture(configuration,revision),catalog:catalogFixture(),setup:await projectionFixture(configuration,revision)});}
 export async function policyRehearsalFixture(configuration:TeamConfiguration,revision=1){return upgradeRehearsalFixture(await rehearsalFixture(configuration,revision));}

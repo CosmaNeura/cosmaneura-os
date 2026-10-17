@@ -1,3 +1,4 @@
+import {invitationFromHash} from './practice-invitation-contract';
 import {useCallback,useEffect,useLayoutEffect,useRef,useState,type ReactNode} from 'react';
 import {practiceAccessApi} from './practice-access-api';
 import {accessCode,accessName,type AccessStatus,type PracticeSetupStatus,type CompletePracticeSetup} from './practice-access-contract';
@@ -41,7 +42,9 @@ export function PracticeAccessGate({identity,accountControls,children,prefetchTe
   const [name,setName]=useState(''),[error,setError]=useState(''),[uncertain,setUncertain]=useState(false);
   const [setup,setSetup]=useState<{identity:AuthenticatedWorkspaceIdentity;value:PracticeSetupStatus}|null>(null);
   const [practiceName,setPracticeName]=useState(''),[specialty,setSpecialty]=useState('');
-  const [entry,setEntry]=useState<'choose'|'solo'|'join'>('choose');
+  const [inviteToken,setInviteToken]=useState(()=>invitationFromHash(window.location.hash));
+  const [entry,setEntry]=useState<'choose'|'solo'|'join'>(()=>invitationFromHash(window.location.hash)?'join':'choose');
+  useEffect(()=>{const change=()=>{const token=invitationFromHash(window.location.hash);setInviteToken(token);if(token)setEntry('join');};window.addEventListener?.('hashchange',change);return()=>window.removeEventListener?.('hashchange',change);},[]);
   const [startupTeam,setStartupTeam]=useState<WorkspaceStartupTeam>();
   const setupCommand=useRef<CompletePracticeSetup|null>(null);
   const requestKey=useRef<{name:string;key:string}|null>(null);
@@ -78,7 +81,7 @@ export function PracticeAccessGate({identity,accountControls,children,prefetchTe
       return {status,profile,team:value?{identity,protocolGeneration:generation,expiresAt,value}:undefined};
     }finally{clearTimeout(timer);signal.removeEventListener('abort',abort);controller.abort();}
   },value=>{setStartupTeam(value.team);accept(value.status);acceptSetup(value.profile);},fail),[identity,run,accept,acceptSetup,fail,prefetchTeam]);
-  useEffect(()=>{setObserved(null);setSetup(null);setStartupTeam(undefined);setName('');setPracticeName('');setSpecialty('');setEntry('choose');setError('');setUncertain(false);requestKey.current=null;setupCommand.current=null;void check();},[check]);
+  useEffect(()=>{setObserved(null);setSetup(null);setStartupTeam(undefined);setName('');setPracticeName('');setSpecialty('');setEntry(invitationFromHash(window.location.hash)?'join':'choose');setError('');setUncertain(false);requestKey.current=null;setupCommand.current=null;void check();},[check]);
   useEffect(()=>{
     if(status?.state!=='pending')return;
     const refresh=()=>{if(document.visibilityState==='visible')void check();};
@@ -96,7 +99,7 @@ export function PracticeAccessGate({identity,accountControls,children,prefetchTe
     if(requestKey.current?.name!==displayName)requestKey.current={name:displayName,key:crypto.randomUUID()};
     const command={idempotency_key:requestKey.current.key,display_name:displayName};
     setError('');setUncertain(true);
-    await run(signal=>practiceAccessApi.request(identity,command,signal),accept,fail);
+    await run(signal=>inviteToken?practiceAccessApi.joinInvitation(identity,{...command,token:inviteToken},signal):practiceAccessApi.request(identity,command,signal),accept,cause=>{if(cause instanceof WorkspaceApiError&&cause.code==='practice_invitation_unavailable'){setUncertain(false);setError('This invitation expired or was revoked. Ask your practice owner for a new link.');}else fail(cause);});
   }
   async function cancel(){
     if(!request||busy||uncertain)return;
@@ -137,6 +140,7 @@ export function PracticeAccessGate({identity,accountControls,children,prefetchTe
     </div>}
     {entry==='solo'&&!profile?.can_start_practice&&<section><h2>Set up my practice</h2><p>This sign-in belongs to an existing practice or has no reserved owner workspace. A new practice must be authorized before setup; joining this practice does not make you its owner.</p><button onClick={()=>setEntry('choose')}>Back</button></section>}
     {(entry==='join'||request)&&<p>Your practice owner approves access to this workspace.</p>}
+    {inviteToken&&<p>This invitation is for the practice organization selected in your signed-in account. Choose that organization first. The owner will still review your request and matching code.</p>}
     {error && <p role="alert">{error}</p>}
     {busy && <p role="status">Checking practice access…</p>}
     {request && <section aria-label="Your access request">

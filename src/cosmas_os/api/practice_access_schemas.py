@@ -84,3 +84,33 @@ class MemberChange(BaseModel):
         if parsed.tzinfo is None or parsed.astimezone(UTC).isoformat() != value:
             raise ValueError("canonical UTC review timestamp required")
         return value
+
+
+class CreateInvitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    idempotency_key: UUID
+    label: str = Field(min_length=1, max_length=120, strict=True)
+    token: str = Field(pattern=r"^[a-f0-9]{64}$", strict=True)
+    expires_in_hours: Literal[24, 72, 168]
+
+    @field_validator("label")
+    @classmethod
+    def text(cls, value):
+        return SubmitAccess.name(value)
+
+    @field_validator("expires_in_hours", mode="before")
+    @classmethod
+    def exact_hours(cls, value):
+        if type(value) is not int:
+            raise ValueError("integer expiry required")
+        return value
+
+
+class RevokeInvitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    idempotency_key: UUID
+    invitation_id: UUID
+
+
+class JoinInvitation(SubmitAccess):
+    token: str = Field(pattern=r"^[a-f0-9]{64}$", strict=True)

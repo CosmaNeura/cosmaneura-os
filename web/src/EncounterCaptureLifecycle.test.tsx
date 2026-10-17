@@ -138,7 +138,7 @@ it("requires a new recording request after closing one encounter and opening ano
   expect(openCaptureRuntime).toHaveBeenCalledTimes(1);
   expect(container.querySelector('[aria-label="Scribe recording"]')?.textContent).toContain("Consent first");
   expect(container.querySelector<HTMLTextAreaElement>("#team-notebook")?.value).toBe("");
-  await click("Record visit");
+  await click("Record visit", container.querySelector('[aria-label="Scribe recording"]')!);
   expect(prepareCapture).toHaveBeenCalledTimes(2);
   expect(vi.mocked(prepareCapture).mock.calls[1][0]).toBe(visit(2).id);
   expect(runtime.controller.startRecording).toHaveBeenCalledTimes(1);

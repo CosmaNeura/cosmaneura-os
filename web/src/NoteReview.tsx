@@ -6,8 +6,9 @@ import { useUnsavedWork } from "./unsaved-work";
 import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from "./editor-recovery";
 import { DraftStoreError } from "./draft-store";
 
-export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false }: {
+export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange }: {
   workspace: Workspace; locked: boolean; onSave: (operation: NoteOperation) => void; onSources: () => void; active?:boolean;
+  onStateChange?:(state:'editing'|'review'|'saved')=>void;
 }) {
   const latest = workspace.note?.latest;
   const core = !!latest?.core_source;
@@ -63,6 +64,7 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
     ["scratchpad", "evidence", "synthetic_source"].includes(e.kind)).map(e => e.revision));
   const sourcesChanged = sourceId !== latest?.source_reply_id && sourceRevision !== undefined
     ? newestSource > sourceRevision : latest?.sources_changed ?? false;
+  useEffect(()=>{onStateChange?.(!dirty&&!otherVersion&&!sourcesChanged&&latest?.review?'saved':content.trim()?'review':'editing');},[dirty,otherVersion,sourcesChanged,latest?.review,!!content.trim(),onStateChange]);
   function useScribe(entry: WorkspaceEntry) {
     baseCore.current = false;
     setContent(entry.reply!.content); setSourceId(entry.id); setReconciled(false); setConfirmed(false); setReplacement(null);
@@ -88,6 +90,11 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
     <div className="team-notebook-title"><h2>Note review</h2><span className="team-pill">
       {otherVersion ? "New version available" : dirty ? "Review version not saved" : sourcesChanged ? "Sources changed" : latest?.review ? "Reviewed privately" : "Needs review"}
     </span></div>
+    {latest && !otherVersion && !dirty && !sourcesChanged && !latest.review && <div className="team-note-approval">
+      <label className="team-check"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e => setConfirmed(e.target.checked)} />I reviewed this saved note and its sources.</label>
+      {gaps && <label className="team-check"><input type="checkbox" checked={gapsConfirmed} disabled={locked}
+        onChange={e => setAcknowledgedGapTarget(e.target.checked ? gapTarget : null)} />I reviewed these capture interruptions and checked this note for missing context.</label>}
+    </div>}
     {!core && <button className="team-primary" disabled={locked || otherVersion || !content.trim() || !dirty} onClick={() => onSave({type: "note", body: {
       expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(), base_note_id: baseId,
       source_reply_id: sourceId, content, sources_reconciled: reconciled,
@@ -123,11 +130,6 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
       {core ? <p>Check the recorded visit draft against these changes, save any edits in Core, then use that saved version for review.</p> : <label className="team-check"><input type="checkbox" checked={reconciled} disabled={locked || otherVersion}
         onChange={e => { setReconciled(e.target.checked); setConfirmed(false); }} />I checked the newer sources and reconciled this note.</label>}</div>}
 
-    {latest && !otherVersion && !dirty && !sourcesChanged && !latest.review && <div className="team-note-approval">
-      <label className="team-check"><input type="checkbox" checked={confirmed} disabled={locked} onChange={e => setConfirmed(e.target.checked)} />I reviewed this saved note and its sources.</label>
-      {gaps && <label className="team-check"><input type="checkbox" checked={gapsConfirmed} disabled={locked}
-        onChange={e => setAcknowledgedGapTarget(e.target.checked ? gapTarget : null)} />I reviewed these capture interruptions and checked this note for missing context.</label>}
-</div>}
     {latest?.review && !dirty && !otherVersion && <p className="team-fine">Version {latest.version} reviewed by you at {new Date(latest.review.created_at).toLocaleString()}.{sourcesChanged ? " That review predates the source changes." : ""}</p>}
     {!!workspace.note?.history.length && <details className="team-history"><summary>Note version history</summary>
       {[...workspace.note.history].reverse().map(n => <article key={n.id}><small>Version {n.version} · {n.review ? "Review recorded" : "Unreviewed"}{n.sources_changed ? " · Sources changed" : ""}</small><p>{n.content}</p></article>)}

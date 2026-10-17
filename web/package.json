@@ -11,12 +11,15 @@
     "test": "vitest run",
     "preview": "vite preview",
     "ux:lab": "vite --config vite.ux-lab.config.ts",
-    "ux:lab:build": "vite build --config vite.ux-lab.config.ts"
+    "ux:lab:build": "vite build --config vite.ux-lab.config.ts",
+    "ux:acceptance": "vite --config vite.ux-acceptance.config.ts",
+    "ux:acceptance:build": "vite build --config vite.ux-acceptance.config.ts"
   },
   "dependencies": {
     "@clerk/react": "6.15.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-markdown": "10.1.0"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

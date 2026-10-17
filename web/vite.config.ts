@@ -42,5 +42,5 @@ export default defineConfig({
     "@cosmaneura-scribe/capacitor-secure-queue": fileURLToPath(new URL("../clients/capture/plugins/secure-queue/index.ts", import.meta.url)),
   } },
   server: { port: 5173 },
-  test: { environment: "jsdom", globals: true },
+  test: { alias:{"@cosmaneura-scribe/capture-preview-domain":fileURLToPath(new URL("../clients/capture/test-fixtures/preview-constants.ts",import.meta.url))}, environment: "jsdom", globals: true, setupFiles:['./vitest.setup.ts'] },
 });

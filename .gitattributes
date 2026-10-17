@@ -1,0 +1,3 @@
+
+# Preserve raw synthetic validation output without applying source whitespace rules.
+docs/ux/validation/*.log -whitespace

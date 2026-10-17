@@ -1,0 +1,103 @@
+
+> @cosmas-os/retained-capture@0.1.0 test /private/tmp/cosmabot-ux-execution-20261016/clients/capture
+> vitest run
+
+
+ RUN  v3.2.7 /private/tmp/cosmabot-ux-execution-20261016/clients/capture
+
+ ✓ src/storage/workspace-native.integration.test.ts (11 tests) 1078ms
+   ✓ OS native queue binding > opens maximum-sized retained chunks with one native payload read at a time  1053ms
+ ✓ src/flow/controller.integration.test.ts (14 tests) 1548ms
+ ✓ src/audio/browser-microphone-source.test.ts (27 tests) 1330ms
+   ✓ closes input when producer confirmation is missing  1002ms
+ ✓ src/native/renewable-native-source.test.ts (25 tests) 882ms
+   ✓ preserves WAV sequence across three native extensions and one recording  460ms
+ ✓ src/storage/private-drafts.test.ts (24 tests) 2213ms
+   ✓ private draft custody > recovers an exact 8 MiB native team frame after a lost commit reply and preserves CAS  1530ms
+   ✓ private draft custody > rejects noncanonical native base64 and oversized frames without returning draft data  376ms
+ ✓ src/bff/source-contracts.test.ts (27 tests) 68ms
+ ✓ src/native/inbox-workspace-boundary.test.ts (14 tests) 171ms
+ ✓ src/configured/flow/controller.integration.test.ts (22 tests) 3159ms
+   ✓ CaptureFlowController > continues microphone with retained ciphertext and exact renewal/reservation recovery  375ms
+   ✓ CaptureFlowController > continues mixed with retained ciphertext and exact renewal/reservation recovery  336ms
+ ✓ src/flow/renewal-exchange.test.ts (32 tests) 468ms
+ ✓ src/configured/native/continuous-source.test.ts (2 tests) 216ms
+ ✓ src/storage/inbox-private-drafts.test.ts (6 tests) 132ms
+ ✓ src/flow/empty-preparation-transfer.test.ts (12 tests) 168ms
+ ✓ src/native/owned-recorder.test.ts (30 tests) 134ms
+ ✓ src/configured/native/workspace-source.test.ts (3 tests) 109ms
+ ✓ src/native/workspace-connectors.test.ts (17 tests) 65ms
+ ✓ src/audio/pcm-capture-worklet.test.ts (11 tests) 98ms
+ ✓ src/flow/recovery-exchange.test.ts (11 tests) 193ms
+ ✓ src/flow/encrypted-store.test.ts (7 tests) 91ms
+ ✓ src/bff/recovery-contracts.test.ts (17 tests) 33ms
+ ✓ src/storage/scribe-source-drafts.test.ts (4 tests) 41ms
+ ✓ src/bff/queue-transport.test.ts (17 tests) 16ms
+ ✓ src/configured/flow/empty-profile-preparation.test.ts (6 tests) 47ms
+ ✓ src/native/workspace-auth-requests.test.ts (21 tests) 99ms
+ ✓ src/storage/encrypted-indexeddb.test.ts (8 tests) 22ms
+ ✓ src/bff/profile-contracts.test.ts (18 tests) 37ms
+ ✓ src/flow/recovery-finish-state.test.ts (9 tests) 26ms
+ ✓ src/storage/research-drafts.test.ts (2 tests) 18ms
+ ✓ src/configured/flow/capacity-compatibility.test.ts (2 tests) 9ms
+ ✓ src/audio/renewable-pcm.test.ts (3 tests) 6ms
+ ✓ src/capture-source-factory.test.ts (7 tests) 5ms
+ ✓ src/configured/native/ios-native-microphone-source.test.ts (1 test) 7ms
+ ✓ src/team/connector-tools.test.ts (8 tests) 4ms
+ ✓ src/flow/recovery-state.test.ts (8 tests) 6ms
+ ✓ src/bff/workspace-client.test.ts (7 tests) 5ms
+ ✓ src/queue/capture-queue.test.ts (23 tests) 6688ms
+   ✓ CaptureQueue > reopens 1080 retained chunks and retries an unknown registration without bulk payload reads  6574ms
+ ✓ src/flow/continuous-controller.test.ts (18 tests) 8246ms
+   ✓ automatically renews two windows in one run and preserves reused objects, queue keys and audio  1573ms
+   ✓ saves chunks during slow renewal, stops promptly, then reconciles a late commit without new reservations  368ms
+   ✓ keeps a normal Stop retryable across restart after a lost committed renewal  655ms
+   ✓ ignores stale expiry callbacks after producer confirmation  433ms
+   ✓ completes the full chunk budget on normal producer closure without an artificial gap  2329ms
+   ✓ does not hold audio persistence while awaiting producer confirmation and suppresses its late reply after Stop  398ms
+   ✓ does not complete the final budget when a physical error is reported during its drain  551ms
+   ✓ recovers completion after restart with an already applied continuous lease  457ms
+ ✓ src/flow/admitted-controller.integration.test.ts (42 tests) 12508ms
+   ✓ encrypts native PCM, completes the scoped upload queue and recovers the resulting transcript  465ms
+   ✓ requires native closure proof before resume of a process-interrupted visit  571ms
+   ✓ requires native closure proof before finish of a process-interrupted visit  742ms
+   ✓ finishes an older configured journal without a new source or key after losing the finish reply  857ms
+   ✓ finishes an older committed Resume without changing its original intent or adding a recording  761ms
+   ✓ finishes an older uncommitted Resume without changing its original intent or adding a recording  492ms
+   ✓ finishes an older late Resume without changing its original intent or adding a recording  540ms
+   ✓ finishes an older lost_phase Resume without changing its original intent or adding a recording  552ms
+   ✓ recovers a lost qualified-source reply, releases only matched gaps, and reopens without recording  502ms
+   ✓ retains capture state when qualified source has missing_gap  897ms
+   ✓ retains capture state when qualified source has changed_gap  881ms
+   ✓ retains capture state when qualified source has missing_intent  804ms
+   ✓ retains capture state when qualified source has changed_following_segment  859ms
+   ✓ resumes native generated PCM only on explicit Start, preserves global sequence and seals finish  863ms
+   ✓ replays a durable reservation after its response is lost and keeps capture paused until confirmation  873ms
+ ✓ src/configured/native/nurse-operational-recording.test.ts (6 tests) 13038ms
+   ✓ nurse walk-in recording 'manual-pause' run 1 preserves exact audio through control, relaunch and upload  2295ms
+   ✓ nurse walk-in recording 'manual-pause' run 2 preserves exact audio through control, relaunch and upload  2901ms
+   ✓ nurse walk-in recording 'route-change' run 1 preserves exact audio through control, relaunch and upload  1978ms
+   ✓ nurse walk-in recording 'route-change' run 2 preserves exact audio through control, relaunch and upload  2080ms
+   ✓ nurse walk-in recording 'background' run 1 preserves exact audio through control, relaunch and upload  1904ms
+   ✓ nurse walk-in recording 'background' run 2 preserves exact audio through control, relaunch and upload  1879ms
+ ✓ src/configured/flow/automatic-controller.test.ts (28 tests) 190522ms
+   ✓ profile capture > reopens an uncertain explicit continuation after automatic renewal without replacing old chunks  1167ms
+   ✓ profile capture > explicitly resumes after automatic renewal while preserving earlier reservations and keys  796ms
+   ✓ profile capture > automatically extends twice while preserving one source and every reserved object  1940ms
+   ✓ profile capture > Stop reconciles an uncertain renewal, committed=false, without issuing another one  944ms
+   ✓ profile capture > Stop reconciles an uncertain renewal, committed=true, without issuing another one  360ms
+   ✓ profile capture > reopens a pending committed renewal in the encrypted journal and finishes without starting capture  360ms
+   ✓ profile capture > stopRecording settles a busy native extension and retries the same stop without another provider action  451ms
+   ✓ standard capture > reopens an uncertain explicit continuation after automatic renewal without replacing old chunks  664ms
+   ✓ standard capture > explicitly resumes after automatic renewal while preserving earlier reservations and keys  525ms
+   ✓ standard capture > automatically extends twice while preserving one source and every reserved object  1156ms
+   ✓ operational recovery: preserves decrypted PCM tail through interruption, offline reopen and lost receipts  49476ms
+   ✓ stress: preserves the full one-hour profile PCM limit through repeated lease windows and exact upload  39017ms
+   ✓ stress: preserves the full one-hour standard PCM limit through repeated lease windows and exact upload  62153ms
+   ✓ stress: recovers offline upload and a lost registration receipt after reopening both encrypted stores  29854ms
+
+ Test Files  39 passed (39)
+      Tests  550 passed (550)
+   Start at  16:13:02
+   Duration  191.02s (transform 1.42s, setup 0ms, collect 3.77s, tests 243.50s, environment 4ms, prepare 1.80s)
+

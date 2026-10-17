@@ -32,7 +32,7 @@ export function validProviderTeam(v:unknown):v is ProviderTeam {
   return v.capture===undefined||closed(v.capture,'enabled','notes_enabled,corrections_enabled,prep_enabled,prep_work_enabled')&&Object.values(v.capture).every(value=>typeof value==='boolean');
 }
 export function validPresetCatalog(v:unknown):v is PresetCatalog {
-  if(!closed(v,'contract,version,presets')||v.contract!=='private-team-presets.v1'||(v.version!==1&&v.version!==2&&v.version!==3&&v.version!==4)||!Array.isArray(v.presets)||v.presets.length!==3)return false;
+  if(!closed(v,'contract,version,presets')||v.contract!=='private-team-presets.v1'||(v.version!==1&&v.version!==2&&v.version!==3&&v.version!==4&&v.version!==5)||!Array.isArray(v.presets)||v.presets.length!==3)return false;
   for(const [index,preset] of v.presets.entries()) {
     if(!closed(preset,'preset_id,version,label,purpose,slots,unavailable_capabilities')||preset.preset_id!==PRESET_IDS[index]||preset.version!==((v.version>=3&&preset.preset_id==='front_desk'||v.version>=4&&preset.preset_id==='practice_manager')?2:1)||
       !teamText(preset.label,80,1)||!teamText(preset.purpose,500,1)||!Array.isArray(preset.slots))return false;
@@ -69,7 +69,7 @@ function source(v:unknown):boolean {
   }
 }
 export function validSetupProjection(v:unknown,configuration:TeamConfiguration,revision:number):v is SetupProjection {
-  if(!closed(v,'contract_version,catalog_version,team_revision,configuration_sha256,prerequisites_sha256,capabilities')||(v.contract_version!==1&&v.contract_version!==2&&v.contract_version!==3&&v.contract_version!==4)||v.catalog_version!==v.contract_version||
+  if(!closed(v,'contract_version,catalog_version,team_revision,configuration_sha256,prerequisites_sha256,capabilities')||(v.contract_version!==1&&v.contract_version!==2&&v.contract_version!==3&&v.contract_version!==4&&v.contract_version!==5)||v.catalog_version!==v.contract_version||
     v.team_revision!==revision||!teamHash(v.configuration_sha256)||!teamHash(v.prerequisites_sha256)||!Array.isArray(v.capabilities)||v.capabilities.length>1400)return false;
   if(v.contract_version===1&&(configuration.model_work!==undefined||configuration.bots.some(bot=>bot.resources!==undefined)))return false;
   const seen=new Set<string>(),bots=new Map(configuration.bots.map(b=>[address(b),b]));

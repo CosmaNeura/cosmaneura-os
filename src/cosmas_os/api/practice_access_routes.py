@@ -10,15 +10,18 @@ from starlette.requests import Request
 from cosmas_os.api.auth import AccessDenied, AuthenticationFailed, _organization_id
 from cosmas_os.api.practice_access_schemas import (
     CompletePracticeSetup,
+    CreateInvitation,
     DecideAccess,
+    JoinInvitation,
     MemberChange,
     MembersPage,
     ReviewAccess,
+    RevokeInvitation,
     SubmitAccess,
 )
 from cosmas_os.api.workspace_protocol import compatibility
 from cosmas_os.application import practice_access as access
-from cosmas_os.application import practice_members, practice_setup
+from cosmas_os.application import practice_invites, practice_members, practice_setup
 from cosmas_os.application.beta_identity_admin import BetaIdentityAdminError
 from cosmas_os.application.capture_deadline import (
     CaptureBudget,
@@ -28,7 +31,13 @@ from cosmas_os.application.capture_deadline import (
 )
 from cosmas_os.domain.rules import AuthorizationError
 
-PATHS = {"/practice-access/compatibility": ("GET", None, compatibility),
+PATHS = {"/practice-access/invitations": ("GET", None, practice_invites.list_invitations),
+         "/practice-access/invitation/create/resolve": ("POST", CreateInvitation, practice_invites.resolve_create),
+         "/practice-access/invitation/revoke/resolve": ("POST", RevokeInvitation, practice_invites.resolve_revoke),
+         "/practice-access/invitation/create": ("POST", CreateInvitation, practice_invites.create),
+         "/practice-access/invitation/revoke": ("POST", RevokeInvitation, practice_invites.revoke),
+         "/practice-access/invitation/join": ("POST", JoinInvitation, practice_invites.join),
+         "/practice-access/compatibility": ("GET", None, compatibility),
          "/practice-access": ("GET", None, access.status),
          "/practice-access/setup": ("GET", None, practice_setup.status),
          "/practice-access/setup/complete": ("POST", CompletePracticeSetup, practice_setup.complete),

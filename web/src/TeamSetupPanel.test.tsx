@@ -73,7 +73,7 @@ it('requires review for zero attempt limits and explicit source restrictions, re
  await click('Restrict Scribe sources');expect(latest.bots[0].resources?.allowed).toEqual([]);
  const select=[...element.querySelectorAll('label')].find(l=>l.textContent?.includes('Saved intake preparation for Scribe'))!.querySelector('select')!;
  await act(async()=>{select.value=resourcesFixture.resources[0].resource_ref;select.dispatchEvent(new Event('change',{bubbles:true}));});expect(latest.bots[0].resources?.allowed).toEqual([{purpose:'core_preparation',resource_ref:'d'.repeat(64)}]);
- await run();expect(element.textContent).toContain('Capabilities with these settings');expect(element.textContent).not.toContain('invented cases');await checkReview();expect(approval?.review.catalog_version).toBe(4);
+ await run();expect(element.textContent).toContain('Capabilities with these settings');expect(element.textContent).not.toContain('invented cases');await checkReview();expect(approval?.review.catalog_version).toBe(5);
  await click('Remove team attempt limit from draft');expect(latest).not.toHaveProperty('model_work');expect(approval).toBeNull();expect(button('Save team settings').disabled).toBe(true);
  await click('Use inherited source checks for Scribe');expect(latest.bots[0]).not.toHaveProperty('resources');expect(element.textContent).toContain('They do not grant connector access');
 });

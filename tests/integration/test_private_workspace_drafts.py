@@ -6,7 +6,7 @@ from uuid import uuid4
 import pytest
 from pydantic import SecretStr
 from sqlalchemy import func, select, text
-from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import DBAPIError, IntegrityError, SQLAlchemyError
 from tests.helpers.task_brief import REQUIREMENTS
 from tests.integration.test_workspace_auth import signed_workspace as _signed_workspace
 
@@ -68,6 +68,29 @@ def test_empty_draft_save_reopen_exact_create_recovery_and_team(signed_workspace
     assert f.client.get("/provider-team", headers=second_session).status_code == 200
     conflict = f.client.post("/workspaces/private-drafts", headers=headers(f), json={**body, "title": "Different"})
     assert conflict.status_code == 409
+
+
+def test_team_and_visit_storage_failures_are_bounded_safe_and_do_not_create_a_link(signed_workspace, session, monkeypatch):
+    f = signed_workspace
+    _, draft = create(f)
+    selected = appointment(session, f)
+    command = {"expected_revision": 1, "idempotency_key": "synthetic-storage-fault", "appointment_id": selected.id, "appointment_link_confirmed": True}
+
+    def unavailable(*args, **kwargs):
+        raise SQLAlchemyError("PRIVATE DATABASE PARAMETER")
+
+    with monkeypatch.context() as fault:
+        fault.setattr(provider_team, "read", unavailable)
+        response = f.client.get("/provider-team", headers=headers(f))
+        assert response.status_code == 503 and "PRIVATE" not in response.text
+        assert response.headers["cache-control"] == "no-store"
+    with monkeypatch.context() as fault:
+        fault.setattr(ws, "link_appointment", unavailable)
+        response = f.client.post(f"/workspaces/{draft['id']}/appointment-link", headers=headers(f), json=command)
+        assert response.status_code == 503 and "PRIVATE" not in response.text
+    response = f.client.post(f"/workspaces/{draft['id']}/appointment-link/resolve", headers=headers(f), json=command)
+    assert response.status_code == 200 and response.json()["outcome"] == "not_found"
+    assert session.scalar(select(func.count()).select_from(WorkspaceAppointmentLink).where(WorkspaceAppointmentLink.workspace_id == draft["id"])) == 0
 
 
 @pytest.mark.parametrize("bad", [{"patient_id": str(uuid4())}, {"appointment_id": str(uuid4())}, {"title": " "}])

@@ -1,3 +1,4 @@
+import {validPracticeProfile,normalizedProfile,practiceProfileContext} from './practice-profile';
 import type {BotAddress, BotRole, BotSettings, BotSkill, TeamConfiguration, TeamSaveInput} from "./workspace-api";
 
 export const TEAM_REQUEST_BYTES = 4 * 1048576, TEAM_RESPONSE_BYTES = 8 * 1048576;
@@ -15,12 +16,12 @@ export type ResourcePurpose=typeof RESOURCE_PURPOSES[number];
 export type BotResources={version:1;allowed:{purpose:ResourcePurpose;resource_ref:string}[]};
 export type ResourceInventory={contract_version:1;resources:{purpose:ResourcePurpose;resource_ref:string;label:"Current reviewed preparation account"|"Current reviewed scheduling account"}[];inventory_sha256:string};
 export type ModelUsage={contract_version:1;policy:ModelWorkPolicy|null;team_revision:number;as_of:string;window_start:string;admitted_units:number;occupied_units:number;remaining_units:number|null;pending_units:number;unknown_units:number;verified_input_tokens:number|null;verified_output_tokens:number|null;usage_complete:boolean;coverage:"new_admissions_and_retained_legacy_records"};
-export type SetupReview = {catalog_version:1|2|3|4;configuration_sha256:string;prerequisites_sha256:string};
+export type SetupReview = {catalog_version:1|2|3|4|5;configuration_sha256:string;prerequisites_sha256:string};
 export type TeamRehearsalRequest = {expected_revision:number;configuration:TeamConfiguration;scenario_id:"preset_setup.v1"|"team_policy_setup.v1"};
 export type PresetSlot = {slot:SlotName;role:BotRole;address:BotAddress|null;name:string;job_focus:string;working_preferences:string;
   enabled:boolean;response_style:"brief"|"detailed";include_notebook:boolean;include_evidence:boolean;skills:BotSkill[];blocked_capabilities:BlockedCapability[]};
 export type PresetDescriptor = {preset_id:PresetId;version:1|2;label:string;purpose:string;slots:PresetSlot[];unavailable_capabilities:CapabilityId[]};
-export type PresetCatalog = {contract:"private-team-presets.v1";version:1|2|3|4;presets:PresetDescriptor[]};
+export type PresetCatalog = {contract:"private-team-presets.v1";version:1|2|3|4|5;presets:PresetDescriptor[]};
 export const CAPABILITIES = ["saved_notebook","saved_evidence","work_status","model_answer","private_draft_handoff","practice_work_brief",
   "encounter_prep","consented_capture","clinical_note","transcript_correction","calendar_availability","staff_handoff","inbox_operations","membership_billing"] as const;
 export type CapabilityId = typeof CAPABILITIES[number];
@@ -34,7 +35,7 @@ export type SetupSource = {kind:"runtime";key:"model"|"capture"|"prep"|"notes"|"
   {kind:"resource";purpose:ResourcePurpose;mode:"inherit"|"allow_list";selection:"inherited"|"current"|"unavailable"|"denied";inventory_sha256:string} |
   {kind:"model_work";limit:number|null;occupied_units:number;state:"unlimited"|"available"|"paused"|"exhausted";as_of:string};
 export type CapabilityReadiness = {bot:BotAddress;capability:CapabilityId;selected:boolean;restricted:boolean;state:ReadinessState;explanation:string;sources:SetupSource[]};
-export type SetupProjection = {contract_version:1|2|3|4;catalog_version:1|2|3|4;team_revision:number;configuration_sha256:string;prerequisites_sha256:string;capabilities:CapabilityReadiness[]};
+export type SetupProjection = {contract_version:1|2|3|4|5;catalog_version:1|2|3|4|5;team_revision:number;configuration_sha256:string;prerequisites_sha256:string;capabilities:CapabilityReadiness[]};
 export const REHEARSAL_CASES = ["private_sources","work_brief","scheduling","preparation","inbox","membership_billing","human_control"] as const;
 export type TeamRehearsal = {scenario_id:"preset_setup.v1"|"team_policy_setup.v1";expected_revision:number;configuration:TeamConfiguration;setup:SetupProjection;setup_review:SetupReview;
   configuration_checks:"passed";cases:{case_id:typeof REHEARSAL_CASES[number]|"model_work_policy"|"resource_policy";bot:BotAddress|null;result:"demonstrated"|"withheld"|"prerequisite_required"|"unavailable";explanation:string}[]};
@@ -70,8 +71,9 @@ export function validResources(v:unknown):v is BotResources {
 
 /** Closed editable shape; temporary blank names/jobs stay recoverable. */
 export function validTeamConfiguration(value:unknown,editing=false):value is TeamConfiguration {
-  if(!teamClosed(value,"bots","practice_context,presets,model_work") || value.model_work!==undefined&&!validModelPolicy(value.model_work)||value.practice_context!==undefined&&!text(value.practice_context,1000) ||
+  if(!teamClosed(value,"bots","practice_context,presets,model_work,practice_profile") || value.practice_profile!==undefined&&!validPracticeProfile(value.practice_profile)|| value.model_work!==undefined&&!validModelPolicy(value.model_work)||value.practice_context!==undefined&&!text(value.practice_context,1000) ||
     !Array.isArray(value.bots)||value.bots.length<4||value.bots.length>100)return false;
+  if(!editing&&practiceProfileContext(value.practice_profile as import("./practice-profile").PracticeProfile|undefined,(value.practice_context as string|undefined)??"Direct Primary Care").length>1000)return false;
   const baseline=new Set<string>(), addresses=new Map<string,Record<string,unknown>>();let current=0;
   for(const bot of value.bots) {
     if(!teamClosed(bot,"role,name,enabled","response_style,include_notebook,include_evidence,instance_id,job_focus,working_preferences,retired,skills,blocked_capabilities,resources") ||
@@ -123,6 +125,7 @@ export function normalizeTeamConfiguration(value:unknown):TeamConfiguration {
     if(bot.resources!==undefined)item.resources={version:1,allowed:RESOURCE_PURPOSES.flatMap(p=>bot.resources!.allowed.filter(b=>b.purpose===p).map(b=>({...b})))};
     return item;
   })};
+  const profile=normalizedProfile(value.practice_profile);if(profile)result.practice_profile=profile;
   if(value.presets?.length)result.presets=PRESET_IDS.flatMap(id=>value.presets!.filter(p=>p.preset_id===id).map(p=>structuredClone(p)));
   if(value.model_work!==undefined)result.model_work={...value.model_work};
   return result;
@@ -137,7 +140,7 @@ export async function configurationHash(value:TeamConfiguration):Promise<string>
   return [...new Uint8Array(bytes)].map(v=>v.toString(16).padStart(2,'0')).join('');
 }
 export const validSetupReview=(value:unknown):value is SetupReview => teamClosed(value,'catalog_version,configuration_sha256,prerequisites_sha256')&&
-  (value.catalog_version===1||value.catalog_version===2||value.catalog_version===3||value.catalog_version===4)&&teamHash(value.configuration_sha256)&&teamHash(value.prerequisites_sha256);
+  (value.catalog_version===1||value.catalog_version===2||value.catalog_version===3||value.catalog_version===4||value.catalog_version===5)&&teamHash(value.configuration_sha256)&&teamHash(value.prerequisites_sha256);
 export function validTeamSave(value:unknown):value is TeamSaveInput {
   return teamClosed(value,'expected_revision,idempotency_key,configuration','setup_review')&&teamNatural(value.expected_revision)&&
     typeof value.idempotency_key==='string'&&/^[A-Za-z0-9._:-]{8,255}$/.test(value.idempotency_key)&&validTeamConfiguration(value.configuration)&&

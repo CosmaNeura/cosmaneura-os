@@ -1,0 +1,18 @@
+{
+  "synthetic_only": true,
+  "completed": true,
+  "actual_signed_api": true,
+  "actual_DOM_controls": true,
+  "real_users_tested": false,
+  "steps": [
+    "owner creates encrypted invitation",
+    "link enters request without granting membership",
+    "request is not grant",
+    "matching owner review",
+    "member connected",
+    "exact reviewed pause",
+    "paused member denied on reopen",
+    "exact reviewed restore",
+    "restored member reopen"
+  ]
+}

@@ -12,7 +12,7 @@ const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(s:string)=>s}));
 vi.mock('./workspace-api',async original=>{const actual=await original<typeof import('./workspace-api')>();return {...actual,workspaceApi:{...actual.workspaceApi,
-  open:vi.fn(),catalog:vi.fn(),team:vi.fn(),privateDrafts:vi.fn(),read:vi.fn(),ask:vi.fn(),append:vi.fn(),retryHandoff:vi.fn()}};});
+  open:vi.fn(),catalog:vi.fn(),team:vi.fn(),privateDraftSummaries:vi.fn(),read:vi.fn(),ask:vi.fn(),append:vi.fn(),retryHandoff:vi.fn()}};});
 const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const time='2026-10-02T14:00:00Z',identity={mode:'clerk_jwt' as const,getToken:async()=> 'invented-owner'},team=teamFixture();
 team.capture={enabled:false};team.scheduling={enabled:false};
@@ -62,7 +62,7 @@ async function open(){await click('Visits and notes');await wait(()=>expect(host
 async function review(){await click('Review result');await wait(()=>expect(host.querySelector('[aria-label="Complete saved draft"]')?.textContent).toBe(current.entries.find(e=>e.id===current.handoffs![0].result_entry_id)!.reply!.content));}
 beforeEach(async()=>{vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE','http://127.0.0.1:8018');
   current=await fixture();reviews.splice(0);revisions.splice(0);storage=memoryDraftStorage();fetcher=vi.fn(wire);vi.stubGlobal('fetch',fetcher);
-  vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+  vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
   vi.mocked(workspaceApi.team).mockResolvedValue(structuredClone(team));vi.mocked(workspaceApi.open).mockImplementation(async()=>({identity,workspace:structuredClone(current),team:structuredClone(team)}));
   vi.mocked(workspaceApi.read).mockImplementation(async()=>structuredClone(current));vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:current.appointment_id,workspace_id:current.id,label:current.label}]);
   host=document.createElement('div');document.body.append(host);await mount();});
@@ -82,7 +82,7 @@ it('retains an unconfirmed review in the actual product and blocks navigation an
   await wait(()=>expect(button('Retry same review save')).toBeTruthy());const panel=host.querySelector('.handoff-review'),encoded=fetcher.mock.calls[0][1].body;
   expect(hasUnsavedWork()).toBe(true);expect(host.querySelector('main')?.getAttribute('data-settings-navigation-locked')).toBe('true');
   for(const label of ['Team settings','Practice work','Close draft review'])expect(button(label)?.disabled,label).toBe(true);
-  expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.disabled).toBe(true);expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(true);
+  expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.disabled).toBe(true);expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(false);
   expect(button('Refresh encounter')?.disabled).toBe(true);await click('Close notebook');expect(host.querySelector('.handoff-review')).toBe(panel);
   const readsBefore=vi.mocked(workspaceApi.read).mock.calls.length;
   expect(button('Retry same review save')?.disabled).toBe(true);await click('Check saved review status');

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from cosmas_os.adapters.workspace_review import WorkspaceReviewConnector
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
+from cosmas_os.application.practice_profile import context as practice_context
 from cosmas_os.config import settings as runtime_settings
 from cosmas_os.models import WorkspaceEntry, WorkspaceReply
 from cosmas_os.ports.bot_capabilities import (
@@ -112,7 +113,7 @@ def build_context(
             and e["ticket"]["id"] not in follow_up_ids
         ),
         tuple(history[-8:]),
-        version.configuration["practice_context"],
+        practice_context(version.configuration),
         tuple(handoff_roles),
         draft_only,
         follow_ups,

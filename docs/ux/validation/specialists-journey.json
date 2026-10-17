@@ -1,0 +1,1344 @@
+{
+  "schema": "cosmabot.scribe-to-specialists-signed-product-ui.v1",
+  "synthetic_only": true,
+  "source_adapter": "actual recording controller/queue/transport and v6 with offline MockTransport",
+  "hardware": "deterministic generated PCM only",
+  "speech_recognition": "simulated only after independently verified capture completes",
+  "personas_are_scripted_not_real_users": true,
+  "trials": [
+    {
+      "persona": "physician",
+      "round": 1,
+      "workspace_id": "400b51f7-201c-4241-a9e4-908075277722",
+      "steps": [
+        {
+          "name": "recorded_encrypted_uploaded_verified_and_simulated_asr_ready",
+          "elapsed_ms": 1242
+        },
+        {
+          "name": "explicit_review_and_actual_snapshot_share",
+          "elapsed_ms": 1556
+        },
+        {
+          "name": "scribe_summary_revision_and_acceptance",
+          "elapsed_ms": 3213
+        },
+        {
+          "name": "chief_three_exact_assignments_saved",
+          "elapsed_ms": 4688
+        },
+        {
+          "name": "three_parallel_product_workers_completed",
+          "elapsed_ms": 5794
+        },
+        {
+          "name": "follow_up_revision_and_acceptance",
+          "elapsed_ms": 7452
+        },
+        {
+          "name": "research_revision_and_acceptance",
+          "elapsed_ms": 9939
+        },
+        {
+          "name": "visit_prep_revision_and_acceptance",
+          "elapsed_ms": 12545
+        },
+        {
+          "name": "chief_reads_saved_teammate_drafts",
+          "elapsed_ms": 16331
+        },
+        {
+          "name": "fresh_read_exact_acceptance_and_custody",
+          "elapsed_ms": 16633
+        },
+        {
+          "name": "reopened_product_ui_without_rerecording_or_duplicate_effect",
+          "elapsed_ms": 17083
+        },
+        {
+          "name": "reopened_each_specialist_conversation_shows_exact_saved_human_acceptance",
+          "elapsed_ms": 17213
+        }
+      ],
+      "wire": [
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/admission",
+          "status": 409
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/admission",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/400b51f7-201c-4241-a9e4-908075277722/2bade2d6-f975-4253-9984-079b3884581e",
+          "status": 201
+        },
+        {
+          "path": "/lab/audio/400b51f7-201c-4241-a9e4-908075277722/734b13cd-e64b-47eb-8454-1e9780a39492",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/400b51f7-201c-4241-a9e4-908075277722/b76be7e3-c921-4e1b-a168-dd140696312e",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/notes",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/existing",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/capture/source-packets",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/a150c812-0e21-4416-a359-2ff0aecf94e5/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/a150c812-0e21-4416-a359-2ff0aecf94e5/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/20c938c4-b498-4863-bf52-99edd6872a35/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/e9b18f6a-aacd-442a-bdc7-d207e31e20e0/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/e9b18f6a-aacd-442a-bdc7-d207e31e20e0/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/616d02b3-ab91-4c69-8b84-7bb10b6685d3/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/edb37cf8-fa4c-4a32-9b77-64c965a4b07c/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/edb37cf8-fa4c-4a32-9b77-64c965a4b07c/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/3805774e-ca05-48eb-8c85-3799b02d63e0/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/0f4992aa-0288-4065-af0c-61696af3ed17/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/0f4992aa-0288-4065-af0c-61696af3ed17/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/handoffs/56470b41-2c32-409f-bd86-d21dcf6d2aff/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/400b51f7-201c-4241-a9e4-908075277722/conversation",
+          "status": 200
+        }
+      ],
+      "passed": true
+    },
+    {
+      "persona": "nurse_practitioner",
+      "round": 1,
+      "workspace_id": "9b57640b-1b68-4b66-9e41-25f5a445b1f2",
+      "steps": [
+        {
+          "name": "recorded_encrypted_uploaded_verified_and_simulated_asr_ready",
+          "elapsed_ms": 1185
+        },
+        {
+          "name": "explicit_review_and_actual_snapshot_share",
+          "elapsed_ms": 1497
+        },
+        {
+          "name": "scribe_summary_revision_and_acceptance",
+          "elapsed_ms": 3035
+        },
+        {
+          "name": "chief_three_exact_assignments_saved",
+          "elapsed_ms": 4225
+        },
+        {
+          "name": "three_parallel_product_workers_completed",
+          "elapsed_ms": 5342
+        },
+        {
+          "name": "follow_up_revision_and_acceptance",
+          "elapsed_ms": 7051
+        },
+        {
+          "name": "research_revision_and_acceptance",
+          "elapsed_ms": 9229
+        },
+        {
+          "name": "visit_prep_revision_and_acceptance",
+          "elapsed_ms": 11808
+        },
+        {
+          "name": "chief_reads_saved_teammate_drafts",
+          "elapsed_ms": 15508
+        },
+        {
+          "name": "fresh_read_exact_acceptance_and_custody",
+          "elapsed_ms": 15788
+        },
+        {
+          "name": "reopened_product_ui_without_rerecording_or_duplicate_effect",
+          "elapsed_ms": 16287
+        },
+        {
+          "name": "reopened_each_specialist_conversation_shows_exact_saved_human_acceptance",
+          "elapsed_ms": 16405
+        }
+      ],
+      "wire": [
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/admission",
+          "status": 409
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/admission",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/9b57640b-1b68-4b66-9e41-25f5a445b1f2/7af64b11-4369-42a9-a0c2-0a8bcf831581",
+          "status": 201
+        },
+        {
+          "path": "/lab/audio/9b57640b-1b68-4b66-9e41-25f5a445b1f2/be643129-79f7-4c1c-844c-566a7f8a948d",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/9b57640b-1b68-4b66-9e41-25f5a445b1f2/347677d2-1e1e-4f5a-be0e-eef3136060e0",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/notes",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/existing",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/capture/source-packets",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/a6b168df-cd03-4054-bc2a-064ecf38aef8/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/a6b168df-cd03-4054-bc2a-064ecf38aef8/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/6938ca61-11ba-4dab-a076-c8ce24ac00a7/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/cd2b8ee2-9bd5-42d7-8aa4-c11ccb32114a/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/cd2b8ee2-9bd5-42d7-8aa4-c11ccb32114a/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/34711841-bbc3-422f-9654-ab1bdafff061/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/74e49c51-a006-478d-8e7b-a69d96ddf426/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/74e49c51-a006-478d-8e7b-a69d96ddf426/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/1dd8f0d2-909a-4ac8-969b-a301dec13c16/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/801c2abb-d822-4603-b73d-463ea0d9509f/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/801c2abb-d822-4603-b73d-463ea0d9509f/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/handoffs/819ff3ba-4e5b-46b4-abd6-b247581972cc/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9b57640b-1b68-4b66-9e41-25f5a445b1f2/conversation",
+          "status": 200
+        }
+      ],
+      "passed": true
+    },
+    {
+      "persona": "physician_assistant",
+      "round": 1,
+      "workspace_id": "aff2f92b-ccf3-42ea-aee1-701ef103e183",
+      "steps": [
+        {
+          "name": "recorded_encrypted_uploaded_verified_and_simulated_asr_ready",
+          "elapsed_ms": 1356
+        },
+        {
+          "name": "explicit_review_and_actual_snapshot_share",
+          "elapsed_ms": 1648
+        },
+        {
+          "name": "scribe_summary_revision_and_acceptance",
+          "elapsed_ms": 3208
+        },
+        {
+          "name": "chief_three_exact_assignments_saved",
+          "elapsed_ms": 4452
+        },
+        {
+          "name": "three_parallel_product_workers_completed",
+          "elapsed_ms": 5536
+        },
+        {
+          "name": "follow_up_revision_and_acceptance",
+          "elapsed_ms": 7199
+        },
+        {
+          "name": "research_revision_and_acceptance",
+          "elapsed_ms": 9395
+        },
+        {
+          "name": "visit_prep_revision_and_acceptance",
+          "elapsed_ms": 11980
+        },
+        {
+          "name": "chief_reads_saved_teammate_drafts",
+          "elapsed_ms": 15734
+        },
+        {
+          "name": "fresh_read_exact_acceptance_and_custody",
+          "elapsed_ms": 16017
+        },
+        {
+          "name": "reopened_product_ui_without_rerecording_or_duplicate_effect",
+          "elapsed_ms": 16431
+        },
+        {
+          "name": "reopened_each_specialist_conversation_shows_exact_saved_human_acceptance",
+          "elapsed_ms": 16559
+        }
+      ],
+      "wire": [
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/admission",
+          "status": 409
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/admission",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/aff2f92b-ccf3-42ea-aee1-701ef103e183/07ae64bd-986b-40a8-ab96-b7bb14c35ac1",
+          "status": 201
+        },
+        {
+          "path": "/lab/audio/aff2f92b-ccf3-42ea-aee1-701ef103e183/fc56f18e-8758-4c0b-ba3f-f0ae5b82b504",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/aff2f92b-ccf3-42ea-aee1-701ef103e183/1d79a611-9754-4052-baa2-c71e60335404",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/notes",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/existing",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/capture/source-packets",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/2516529b-2d5f-4b4d-aa15-864f32d75d4c/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/2516529b-2d5f-4b4d-aa15-864f32d75d4c/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/a3c1407b-bfb8-44d7-8df2-8551c98c3504/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/10687d9e-0dca-4b1e-a3f8-0f36d5f74983/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/10687d9e-0dca-4b1e-a3f8-0f36d5f74983/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/bcf9b562-2d1c-4c1a-abe6-4e9fbd8c0e4d/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/6e181d8e-8bb5-4f5d-a9fe-72451a4141c5/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/6e181d8e-8bb5-4f5d-a9fe-72451a4141c5/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/6015a410-e19a-4da9-9fb9-389d03974418/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/8d1f505b-5345-4b45-8313-c3ef26469309/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/8d1f505b-5345-4b45-8313-c3ef26469309/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/handoffs/65212227-562a-4716-a8b9-e364588a60f9/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/aff2f92b-ccf3-42ea-aee1-701ef103e183/conversation",
+          "status": 200
+        }
+      ],
+      "passed": true
+    },
+    {
+      "persona": "physician",
+      "round": 2,
+      "workspace_id": "9a4096b4-155a-4653-842a-a0697cc27fdc",
+      "steps": [
+        {
+          "name": "recorded_encrypted_uploaded_verified_and_simulated_asr_ready",
+          "elapsed_ms": 1261
+        },
+        {
+          "name": "explicit_review_and_actual_snapshot_share",
+          "elapsed_ms": 1562
+        },
+        {
+          "name": "scribe_summary_revision_and_acceptance",
+          "elapsed_ms": 3052
+        },
+        {
+          "name": "chief_three_exact_assignments_saved",
+          "elapsed_ms": 4279
+        },
+        {
+          "name": "three_parallel_product_workers_completed",
+          "elapsed_ms": 5370
+        },
+        {
+          "name": "follow_up_revision_and_acceptance",
+          "elapsed_ms": 6987
+        },
+        {
+          "name": "research_revision_and_acceptance",
+          "elapsed_ms": 9084
+        },
+        {
+          "name": "visit_prep_revision_and_acceptance",
+          "elapsed_ms": 11635
+        },
+        {
+          "name": "chief_reads_saved_teammate_drafts",
+          "elapsed_ms": 15279
+        },
+        {
+          "name": "fresh_read_exact_acceptance_and_custody",
+          "elapsed_ms": 15562
+        },
+        {
+          "name": "reopened_product_ui_without_rerecording_or_duplicate_effect",
+          "elapsed_ms": 16085
+        },
+        {
+          "name": "reopened_each_specialist_conversation_shows_exact_saved_human_acceptance",
+          "elapsed_ms": 16212
+        }
+      ],
+      "wire": [
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/admission",
+          "status": 409
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/admission",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/9a4096b4-155a-4653-842a-a0697cc27fdc/6a7c8ead-6b83-45ae-bc47-5fd8fe51544f",
+          "status": 201
+        },
+        {
+          "path": "/lab/audio/9a4096b4-155a-4653-842a-a0697cc27fdc/a161edef-4ba7-4774-a599-cae5e355e271",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/9a4096b4-155a-4653-842a-a0697cc27fdc/f0fb6435-4ffd-440f-9142-ab4dbf240fe6",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/notes",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/existing",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/capture/source-packets",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/d2ac70e7-d9b5-46f0-9296-7a92c8e425ec/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/d2ac70e7-d9b5-46f0-9296-7a92c8e425ec/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/9016246c-9c11-47f2-950e-5569cc8ea840/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/65e91d3e-3ddc-47a8-acb1-ec61aad2256e/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/65e91d3e-3ddc-47a8-acb1-ec61aad2256e/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/7a47a8d9-a740-4f6a-badf-0b3cf090a62b/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/549d0c5b-d449-4bb6-8186-30e30282e210/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/549d0c5b-d449-4bb6-8186-30e30282e210/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/f49dc300-cebc-4c55-999a-17a43d63627e/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/33b77273-567b-40dc-821b-5d72093fcd9f/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/33b77273-567b-40dc-821b-5d72093fcd9f/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/handoffs/992b4be4-fc19-40c5-91b8-931dcc37bd16/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/9a4096b4-155a-4653-842a-a0697cc27fdc/conversation",
+          "status": 200
+        }
+      ],
+      "passed": true
+    },
+    {
+      "persona": "nurse_practitioner",
+      "round": 2,
+      "workspace_id": "29bc836b-8726-4c15-bc94-7b51a5170b4f",
+      "steps": [
+        {
+          "name": "recorded_encrypted_uploaded_verified_and_simulated_asr_ready",
+          "elapsed_ms": 1262
+        },
+        {
+          "name": "explicit_review_and_actual_snapshot_share",
+          "elapsed_ms": 1562
+        },
+        {
+          "name": "scribe_summary_revision_and_acceptance",
+          "elapsed_ms": 3081
+        },
+        {
+          "name": "chief_three_exact_assignments_saved",
+          "elapsed_ms": 4271
+        },
+        {
+          "name": "three_parallel_product_workers_completed",
+          "elapsed_ms": 5358
+        },
+        {
+          "name": "follow_up_revision_and_acceptance",
+          "elapsed_ms": 6961
+        },
+        {
+          "name": "research_revision_and_acceptance",
+          "elapsed_ms": 9096
+        },
+        {
+          "name": "visit_prep_revision_and_acceptance",
+          "elapsed_ms": 11626
+        },
+        {
+          "name": "chief_reads_saved_teammate_drafts",
+          "elapsed_ms": 15363
+        },
+        {
+          "name": "fresh_read_exact_acceptance_and_custody",
+          "elapsed_ms": 15646
+        },
+        {
+          "name": "reopened_product_ui_without_rerecording_or_duplicate_effect",
+          "elapsed_ms": 16052
+        },
+        {
+          "name": "reopened_each_specialist_conversation_shows_exact_saved_human_acceptance",
+          "elapsed_ms": 16167
+        }
+      ],
+      "wire": [
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/admission",
+          "status": 409
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/admission",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/29bc836b-8726-4c15-bc94-7b51a5170b4f/0b18f55e-f565-404b-9366-a18366e9c816",
+          "status": 201
+        },
+        {
+          "path": "/lab/audio/29bc836b-8726-4c15-bc94-7b51a5170b4f/c9f39061-8511-4ff7-9c39-7294d3cce1aa",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/29bc836b-8726-4c15-bc94-7b51a5170b4f/8a0e76c7-0e2f-4ab0-8ee4-cfec8ed00007",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/notes",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/existing",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/capture/source-packets",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/91c84872-4f95-4b39-b323-3cc283414e84/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/91c84872-4f95-4b39-b323-3cc283414e84/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/439259cc-2e52-4bfd-942b-50b23c87fe91/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/4a9994c9-ef7b-4413-819b-287154bc00c5/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/4a9994c9-ef7b-4413-819b-287154bc00c5/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/1e49fdc2-f4c7-4e5b-8d17-1135dcad378c/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/2bf6601b-6c04-4a00-8851-9a5ac74f5709/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/2bf6601b-6c04-4a00-8851-9a5ac74f5709/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/13172e40-a07b-450d-b405-01758d26db30/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/7baa03bf-24db-418d-8d47-5240a33c7e36/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/7baa03bf-24db-418d-8d47-5240a33c7e36/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/handoffs/cb028592-0c96-4514-9b27-b1f30b8f7aac/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/29bc836b-8726-4c15-bc94-7b51a5170b4f/conversation",
+          "status": 200
+        }
+      ],
+      "passed": true
+    },
+    {
+      "persona": "physician_assistant",
+      "round": 2,
+      "workspace_id": "eb5af7a7-ab83-4b97-936f-ec5039ba62e2",
+      "steps": [
+        {
+          "name": "recorded_encrypted_uploaded_verified_and_simulated_asr_ready",
+          "elapsed_ms": 1200
+        },
+        {
+          "name": "explicit_review_and_actual_snapshot_share",
+          "elapsed_ms": 1505
+        },
+        {
+          "name": "scribe_summary_revision_and_acceptance",
+          "elapsed_ms": 3038
+        },
+        {
+          "name": "chief_three_exact_assignments_saved",
+          "elapsed_ms": 4234
+        },
+        {
+          "name": "three_parallel_product_workers_completed",
+          "elapsed_ms": 5338
+        },
+        {
+          "name": "follow_up_revision_and_acceptance",
+          "elapsed_ms": 6941
+        },
+        {
+          "name": "research_revision_and_acceptance",
+          "elapsed_ms": 9086
+        },
+        {
+          "name": "visit_prep_revision_and_acceptance",
+          "elapsed_ms": 11596
+        },
+        {
+          "name": "chief_reads_saved_teammate_drafts",
+          "elapsed_ms": 15288
+        },
+        {
+          "name": "fresh_read_exact_acceptance_and_custody",
+          "elapsed_ms": 15571
+        },
+        {
+          "name": "reopened_product_ui_without_rerecording_or_duplicate_effect",
+          "elapsed_ms": 16435
+        },
+        {
+          "name": "reopened_each_specialist_conversation_shows_exact_saved_human_acceptance",
+          "elapsed_ms": 16548
+        }
+      ],
+      "wire": [
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/admission",
+          "status": 409
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/admission",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/72146f9c-2974-4cab-b31a-38286ace9ba5",
+          "status": 201
+        },
+        {
+          "path": "/lab/audio/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/23e6d54d-a285-4704-9f2b-6d8f8a6944c7",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/lab/audio/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/3546d8fe-086a-4f7f-9c6c-574cf2cc3f65",
+          "status": 201
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/operations",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/notes",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/existing",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/capture/source-packets",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/7b646971-c618-4d12-b0c6-2ec9a30ca079/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/7b646971-c618-4d12-b0c6-2ec9a30ca079/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/a34f6231-5aa7-463e-8a94-3af4686e9a3c/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/conversation",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/f20b645e-8062-45ca-b785-9207974962cd/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/f20b645e-8062-45ca-b785-9207974962cd/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/b612230f-4351-423f-ad40-6c0168619c05/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/9dd67e56-e005-4afb-8881-d4e6e86e3c9c/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/9dd67e56-e005-4afb-8881-d4e6e86e3c9c/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/5b5e59a2-a97a-4321-a267-e87fa77771fa/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/d6a25eab-a0a5-4832-a867-823b4821fd0f/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/d6a25eab-a0a5-4832-a867-823b4821fd0f/revision",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/handoffs/dcc78d02-732f-46d9-bb6b-b95c131090fe/review",
+          "status": 200
+        },
+        {
+          "path": "/workspaces/eb5af7a7-ab83-4b97-936f-ec5039ba62e2/conversation",
+          "status": 200
+        }
+      ],
+      "passed": true
+    }
+  ],
+  "total": 6,
+  "completed": 6
+}

@@ -455,6 +455,29 @@ class EncounterWorkspace(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class WorkspaceTitleRevision(Base):
+    """Display metadata only; original create intent and clinical history stay immutable."""
+
+    __tablename__ = "workspace_title_revisions"
+    __table_args__ = (
+        ForeignKeyConstraint(["workspace_id", "box_id", "owner_id"],
+            ["encounter_workspaces.id", "encounter_workspaces.box_id", "encounter_workspaces.owner_id"]),
+        UniqueConstraint("workspace_id", "version", name="uq_workspace_title_version"),
+        UniqueConstraint("workspace_id", "idempotency_key", name="uq_workspace_title_key"),
+        CheckConstraint("version >= 1 AND char_length(title) BETWEEN 1 AND 160 AND request_hash ~ '^[a-f0-9]{64}$'",
+            name="ck_workspace_title_revision"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    box_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    version: Mapped[int] = mapped_column(Integer)
+    title: Mapped[str] = mapped_column(String(160))
+    idempotency_key: Mapped[str] = mapped_column(String(100))
+    request_hash: Mapped[str] = mapped_column(String(64))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class WorkspaceAppointmentLink(Base):
     """Immutable human selection of an existing local encounter; no upstream write."""
 

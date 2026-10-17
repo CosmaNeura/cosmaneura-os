@@ -28,6 +28,8 @@ def bot_address(settings):
 
 def configuration_value(configuration):
     result = TeamConfiguration.model_validate(configuration).model_dump(mode="json")
+    if result.get("practice_profile") and not any(value for key, value in result["practice_profile"].items() if key != "version"):
+        result.pop("practice_profile")
     # Preserve the exact v1 representation/digest for old requests and retries.
     for bot in result["bots"]:
         for field in ("instance_id", "job_focus", "working_preferences", "retired", "skills", "blocked_capabilities", "resources"):

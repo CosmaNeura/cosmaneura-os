@@ -42,7 +42,7 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   await click('Start a private note');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false));
   expect(container.querySelector('[aria-label="Link private draft to a visit"]')?.textContent).toContain('not linked');
   expect(container.querySelector('.team-encounter-heading .team-kicker')?.textContent).toBe('PRIVATE NOTE');
-  expect(container.querySelector('.team-encounter-heading')?.textContent).toContain('Private notebook · not linked to a visit');
+  expect(container.querySelector('.team-encounter-heading h1')?.textContent).toBe('Private note');expect(container.querySelector('.team-encounter-heading')?.textContent).toContain('No patient yet · Unlinked note');
   expect(container.querySelector('[aria-label="Scribe recording"]')).toBeNull();
   const content='Invented private planning note. Patient and appointment are not yet selected; DOB remains unknown.';
   await act(async()=>{const field=container.querySelector<HTMLTextAreaElement>('#team-notebook')!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,content);field.dispatchEvent(new Event('input',{bubbles:true}));});
@@ -51,7 +51,7 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   const workspaceId=savedPath.split('/')[2];await click('Home');
   await act(async()=>root!.unmount());root=createRoot(container);await act(render);
   await wait(()=>expect(container.querySelector('.practice-home-note')?.textContent).toContain('Private note'));
-  const noteButton=container.querySelector<HTMLButtonElement>('.practice-home-note')!;await act(async()=>noteButton.click());
+  const noteButton=container.querySelector<HTMLButtonElement>('[aria-label="Saved private notes"] .practice-home-note')!;await act(async()=>noteButton.click());
   await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe(content));
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/practice-access/setup/complete')).toHaveLength(1);

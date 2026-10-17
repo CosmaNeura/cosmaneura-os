@@ -40,8 +40,8 @@ describe("shared practice work", () => {
     const offered = {...fixture, version: 5, pending_offer: {id: "offer", from: provider, to: staff}};
     vi.mocked(workspaceApi.workHandoff).mockRejectedValueOnce(new Error("lost reply")).mockResolvedValueOnce(offered);
     await render(); expect(container.textContent).toContain("Overdue");
-    await input("select", staff.id); await click("Send responsibility offer");
-    expect(container.querySelector("select")!.disabled).toBe(true);
+    await input(".practice-work-card select", staff.id); await click("Send responsibility offer");
+    expect(container.querySelector<HTMLSelectElement>(".practice-work-card select")!.disabled).toBe(true);
     expect(workspaceApi.workHandoff).toHaveBeenCalledTimes(1);
     const original = vi.mocked(workspaceApi.workHandoff).mock.calls[0];
     await click("Retry same action");

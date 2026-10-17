@@ -3,6 +3,10 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,expect,it,vi} from 'vitest';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {PracticeAccessPanel} from './PracticeAccessPanel';
+import {AccountRecoveryContext} from './account-recovery';
+import {DraftJournal} from './draft-journal';
+import {openDraftStore} from './draft-store';
+import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 import {practiceAccessApi} from './practice-access-api';
 const environment=(globalThis as typeof globalThis&{process?:{env:Record<string,string|undefined>}}).process?.env;
 const base=environment?.COSMAS_ACCESS_LAB_URL;
@@ -20,14 +24,21 @@ it.skipIf(!base)('joins through signed real UI, owner approves, pauses/restores 
   async function wait(check:()=>void){const end=performance.now()+10000;while(performance.now()<end){let passed=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));try{check();passed=true;}catch{}});if(passed)return;}check();}
   const button=(host:HTMLElement,label:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===label)!;
   async function click(host:HTMLElement,label:string){await wait(()=>{expect(button(host,label)).toBeTruthy();expect(button(host,label).disabled).toBe(false);});await act(async()=>button(host,label).click());}
+  const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
+  const invitationJournal=new DraftJournal(await openDraftStore({scope:'d'.repeat(64),native:false,indexedDB:new IDBFactory(),crypto:webcrypto}));
+  const ownerRecovery={journal:invitationJournal,authorize:async()=>{expect((await practiceAccessApi.read(owner)).role).toBe('owner');}};
+  const losses=vi.fn();await act(async()=>or.render(<AccountRecoveryContext.Provider value={ownerRecovery}><PracticeAccessPanel identity={owner} access={{role:'owner',onAccessLost:losses}} onBusyChange={()=>{}}/></AccountRecoveryContext.Provider>));
+  await click(o,'Invite a teammate');await wait(()=>expect(o.querySelector<HTMLInputElement>('.practice-invitations input')?.disabled).toBe(false));
+  await act(async()=>{const input=o.querySelector<HTMLInputElement>('.practice-invitations input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Invented nurse invitation');input.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click(o,'Create invitation link');await wait(()=>expect(o.querySelector<HTMLInputElement>('.practice-invitations input[readonly]')?.value).toContain('#cosmas/invite/'));
+  const invitation=o.querySelector<HTMLInputElement>('.practice-invitations input[readonly]')!.value;window.history.replaceState(null,'',new URL(invitation).hash);
   const gate=()=>ar.render(<PracticeAccessGate identity={applicant} accountControls={<button>Account</button>}>{context=><p>Private workspace: {context.role}</p>}</PracticeAccessGate>);
-  await act(gate);await click(a,'Join an existing practice');await wait(()=>expect(button(a,'Request practice access'),a.textContent??'').toBeTruthy());expect(a.textContent).not.toContain('Private workspace');
+  await act(gate);await wait(()=>expect(button(a,'Request practice access'),a.textContent??'').toBeTruthy());expect(a.textContent).not.toContain('Private workspace');
   await act(async()=>{const input=a.querySelector('input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Invented nurse applicant');input.dispatchEvent(new Event('input',{bubbles:true}));});
   await click(a,'Request practice access');await wait(()=>expect(a.textContent).toContain('Waiting for your practice owner'));
   const code=a.querySelector('.practice-access-code')!.textContent;expect(code).toBeTruthy();
   await expect(practiceAccessApi.pending(applicant)).rejects.toMatchObject({status:403});
-  const losses=vi.fn();await act(async()=>or.render(<PracticeAccessPanel identity={owner} access={{role:'owner',onAccessLost:losses}} onBusyChange={()=>{}}/>));
-  await click(o,'Review Invented nurse applicant');expect(o.querySelector('.practice-access-review .practice-access-code')?.textContent).toBe(code);
+  await click(o,'Refresh requests');await click(o,'Review Invented nurse applicant');expect(o.querySelector('.practice-access-review .practice-access-code')?.textContent).toBe(code);
   expect(button(o,'Approve member').disabled).toBe(true);await act(async()=>o.querySelector<HTMLInputElement>('.practice-access-review input')!.click());await click(o,'Approve member');
   await wait(()=>expect(o.textContent).toContain('access approved'));await click(a,'Check access');await wait(()=>expect(a.textContent).toContain('Private workspace: member'));
   await click(o,'Manage connected members');await click(o,'Review pause for Invented nurse applicant');expect(button(o,'Pause CosmasOS access').disabled).toBe(true);
@@ -37,6 +48,7 @@ it.skipIf(!base)('joins through signed real UI, owner approves, pauses/restores 
   await click(o,'Review restore for Invented nurse applicant');await act(async()=>o.querySelector<HTMLInputElement>('[aria-label="Review member access"] input')!.click());await click(o,'Restore CosmasOS access');await wait(()=>expect(o.textContent).toContain('Access active'));
   await click(a,'Check access');await wait(()=>expect(a.textContent).toContain('Private workspace: member'));expect(losses).not.toHaveBeenCalled();
   await act(async()=>ar.unmount());roots=roots.filter(r=>r!==ar);ar=createRoot(a);roots.push(ar);await act(gate);await wait(()=>expect(a.textContent).toContain('Private workspace: member'));
+  await click(o,'Revoke Invented nurse invitation');await wait(()=>expect(o.querySelector('.practice-invitations')?.textContent).toContain('revoked'));invitationJournal.close();
   const fs='node:fs/promises';const {writeFile}=await import(/* @vite-ignore */fs) as {writeFile:(path:string,text:string)=>Promise<void>};
-  await writeFile(environment!.COSMAS_ACCESS_LAB_REPORT!,JSON.stringify({synthetic_only:true,completed:true,actual_signed_api:true,actual_DOM_controls:true,real_users_tested:false,steps:['request is not grant','matching owner review','member connected','exact reviewed pause','paused member denied on reopen','exact reviewed restore','restored member reopen']},null,2)+'\n');
+  await writeFile(environment!.COSMAS_ACCESS_LAB_REPORT!,JSON.stringify({synthetic_only:true,completed:true,actual_signed_api:true,actual_DOM_controls:true,real_users_tested:false,steps:['owner creates encrypted invitation','link enters request without granting membership','request is not grant','matching owner review','member connected','exact reviewed pause','paused member denied on reopen','exact reviewed restore','restored member reopen']},null,2)+'\n');
 },45000);

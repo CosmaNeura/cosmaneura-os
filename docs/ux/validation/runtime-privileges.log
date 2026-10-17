@@ -1,0 +1,42 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.15, pytest-9.1.1, pluggy-1.6.0 -- /private/tmp/cosmabot-ux-execution-20261016/.venv/bin/python
+cachedir: /private/tmp/cosmabot-ux-final-backend-checks/deployment/pytest-cache
+rootdir: /private/tmp/cosmabot-ux-execution-20261016
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.15.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 24 items
+
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_is_deterministic_and_detects_structural_change PASSED [  4%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_rejects_unsafe_target_before_connect[] PASSED [  8%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_rejects_unsafe_target_before_connect[sqlite+pysqlite:///:memory:] PASSED [ 12%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_rejects_unsafe_target_before_connect[postgresql+psycopg://runtime@database.example.invalid/cosmas_os?sslmode=verify-full&sslrootcert=system] PASSED [ 16%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_rejects_unsafe_target_before_connect[postgresql+psycopg://runtime:secret@localhost/cosmas_os?sslmode=verify-full&sslrootcert=system] PASSED [ 20%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_rejects_unsafe_target_before_connect[postgresql+psycopg://runtime:secret@database.example.invalid/other?sslmode=verify-full&sslrootcert=system] PASSED [ 25%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_rejects_unsafe_target_before_connect[postgresql+psycopg://runtime:secret@database.example.invalid/cosmas_os?sslmode=require&sslrootcert=system] PASSED [ 29%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_rejects_unsafe_target_before_connect[postgresql+psycopg://runtime:secret@database.example.invalid/cosmas_os?sslmode=verify-full&sslrootcert=system&application_name=unreviewed] PASSED [ 33%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_function_rejects_non_synthetic_beta_mode[synth_os-synthetic] PASSED [ 37%]
+tests/integration/test_database_fingerprint.py::test_database_fingerprint_function_rejects_non_synthetic_beta_mode[early_adopter_beta-authorized_beta] PASSED [ 41%]
+tests/integration/test_database_preparation.py::test_database_preparation_is_idempotent_and_proves_denials PASSED [ 45%]
+tests/integration/test_database_preparation.py::test_database_preparation_rolls_back_password_and_schema_on_migration_failure PASSED [ 50%]
+tests/integration/test_database_preparation.py::test_database_preparation_requires_every_ordinary_table_dml_privilege PASSED [ 54%]
+tests/integration/test_database_preparation.py::test_database_preparation_removes_public_table_and_sequence_privileges PASSED [ 58%]
+tests/integration/test_google_calendar_runtime_privileges.py::test_restricted_ordinary_admission_needs_no_direct_google_helper_execute PASSED [ 62%]
+tests/integration/test_google_calendar_runtime_privileges.py::test_restricted_calendar_observation_tool_handoffs_revision_acceptance_and_revoke PASSED [ 66%]
+tests/integration/test_hosted_appointment_runtime_privileges.py::test_signed_hosted_proposal_exact_review_with_restricted_runtime_role[book] PASSED [ 70%]
+tests/integration/test_hosted_appointment_runtime_privileges.py::test_signed_hosted_proposal_exact_review_with_restricted_runtime_role[reschedule] PASSED [ 75%]
+tests/integration/test_hosted_appointment_runtime_privileges.py::test_signed_hosted_proposal_exact_review_with_restricted_runtime_role[cancel] PASSED [ 79%]
+tests/integration/test_scheduling_patient_runtime_privileges.py::test_signed_initially_unmapped_runtime_preview_confirm_inspect_and_masked_replay PASSED [ 83%]
+tests/integration/test_scheduling_patient_runtime_privileges.py::test_forged_runtime_custody_reservation_cannot_commit[cross_owner] PASSED [ 87%]
+tests/integration/test_scheduling_patient_runtime_privileges.py::test_forged_runtime_custody_reservation_cannot_commit[wrong_hash] PASSED [ 91%]
+tests/integration/test_scheduling_patient_runtime_privileges.py::test_forged_runtime_custody_reservation_cannot_commit[string_revision] PASSED [ 95%]
+tests/integration/test_scheduling_patient_runtime_privileges.py::test_runtime_forged_preview_review_and_unreviewed_mapping_are_refused PASSED [100%]
+
+=============================== warnings summary ===============================
+.venv/lib/python3.13/site-packages/pydantic/_internal/_generate_schema.py:2274
+  /private/tmp/cosmabot-ux-execution-20261016/.venv/lib/python3.13/site-packages/pydantic/_internal/_generate_schema.py:2274: UnsupportedFieldAttributeWarning: The 'repr' attribute with value False was provided to the `Field()` function, which has no effect in the context it was used. 'repr' is field-specific metadata, and can only be attached to a model field using `Annotated` metadata or by assignment. This may have happened because an `Annotated` type alias using the `type` statement was used, or if the `Field()` function was attached to a single member of a union type.
+    warnings.warn(
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+- generated xml file: /private/tmp/cosmabot-ux-final-backend-checks/deployment/pytest-junit.xml -
+======================== 24 passed, 1 warning in 7.80s =========================

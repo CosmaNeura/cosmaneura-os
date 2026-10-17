@@ -29,7 +29,7 @@ async function input(value:string){expect(field()?.matches(':disabled')).toBe(fa
 async function store(){return openDraftStore({scope,native:false,indexedDB:idb,crypto:webcrypto});}
 async function saved(){const reader=await store();try{return (await reader.read(address)).value?.body as {kind:'account-editor';pending:null;data:InboxRecoveryRecord}|undefined;}finally{reader.close();}}
 async function mount(){await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={factory}/>));}
-async function open(){await click('Practice work');await click('Incoming messages');await wait(()=>expect(button('Refresh private Inbox')?.matches(':disabled')===false||!!button('Restore saved Inbox work')).toBe(true));}
+async function open(){await click('Practice work');await click('Messages');await wait(()=>expect(button('Refresh private Inbox')?.matches(':disabled')===false||!!button('Restore saved Inbox work')).toBe(true));}
 async function select(){await click(initial.detail.summary.label);await click('Plan human review');await wait(()=>expect(field()?.matches(':disabled')).toBe(false));await wait(async()=>expect((await saved())?.data.drafts).toHaveLength(1));}
 function noDispatch(){expect(inboxApi.execute).not.toHaveBeenCalled();expect(inboxApi.recover).not.toHaveBeenCalled();expect(workspaceApi.saveTeam).not.toHaveBeenCalled();expect(workspaceApi.open).not.toHaveBeenCalled();}
 beforeEach(async()=>{
@@ -48,15 +48,15 @@ it('does not read Inbox when its compiled mount is disabled',async()=>{
   expect(host.textContent).toBe('');expect(inboxApi.catalog).not.toHaveBeenCalled();
 });
 it('loads Inbox only on demand before encounter selection and preserves its encrypted draft across views and close',async()=>{
-  await mount();expect(inboxApi.catalog).not.toHaveBeenCalled();await click('Practice work');expect(inboxApi.catalog).not.toHaveBeenCalled();await click('Incoming messages');await select();
+  await mount();expect(inboxApi.catalog).not.toHaveBeenCalled();await click('Practice work');expect(inboxApi.catalog).not.toHaveBeenCalled();await click('Messages');await select();
   await input('Retained incoming review before encounter selection');await wait(async()=>expect((await saved())?.data.drafts[0].instructions).toBe('Retained incoming review before encounter selection'));
-  const panel=host.querySelector('.inbox-panel');await click('Assigned work');await click('Incoming messages');expect(host.querySelector('.inbox-panel')).toBe(panel);expect(field().value).toBe('Retained incoming review before encounter selection');
+  const panel=host.querySelector('.inbox-panel');await click('Assigned to me');await click('Messages');expect(host.querySelector('.inbox-panel')).toBe(panel);expect(field().value).toBe('Retained incoming review before encounter selection');
   const before=await saved();await click('Close notebook');await wait(()=>expect(host.querySelector('.inbox-panel')).toBeNull());expect(await saved()).toEqual(before);noDispatch();
 });
 it('blocks all workspace exits during failed Inbox storage and retains exact input through authorized local retry',async()=>{
   await mount();await open();await select();failWrites=1;await input('Exact Inbox input during storage outage');await wait(()=>expect(button('Retry saving retained Inbox work')).toBeTruthy());
   expect(field().value).toBe('Exact Inbox input during storage outage');expect(hasUnsavedWork()).toBe(true);
-  for(const label of ['Assigned work','Back to notebook','Team settings'])expect(button(label)?.matches(':disabled'),label).toBe(true);
+  for(const label of ['Assigned to me','Back to notebook','Team settings'])expect(button(label)?.matches(':disabled'),label).toBe(true);
   const panel=host.querySelector('.inbox-panel');await click('Close notebook');expect(host.querySelector('.inbox-panel')).toBe(panel);expect(host.textContent).toContain('before closing');
   await click('Retry saving retained Inbox work');await wait(async()=>expect((await saved())?.data.drafts[0].instructions).toBe('Exact Inbox input during storage outage'));
   await wait(()=>expect(button('Back to notebook')?.matches(':disabled')).toBe(false));expect(field().value).toBe('Exact Inbox input during storage outage');noDispatch();
@@ -74,7 +74,7 @@ it('clears private rendered Inbox content when current account authorization is 
 it('does not offer or reveal a saved Inbox record belonging to a different signed owner scope',async()=>{
   const record=emptyInboxRecovery({...inboxFixtureScope,owner_id:crypto.randomUUID()});
   const journal=new DraftJournal(await store());await journal.load(address);await journal.persist(address,{kind:'account-editor',editor:'inbox-work',pending:null,data:record});journal.close();
-  await mount();await click('Practice work');await click('Incoming messages');await wait(()=>expect(host.textContent).toContain('Private Inbox recovery could not be loaded'));
+  await mount();await click('Practice work');await click('Messages');await wait(()=>expect(host.textContent).toContain('Private Inbox recovery could not be loaded'));
   expect(button('Restore saved Inbox work')).toBeUndefined();expect(host.querySelector('.inbox-panel pre')).toBeNull();expect((await saved())?.data).toEqual(record);noDispatch();
 });
 

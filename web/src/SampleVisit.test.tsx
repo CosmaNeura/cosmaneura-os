@@ -29,3 +29,12 @@ it('keeps the sample available while a practice connection is unavailable',async
   await act(async()=>root.render(<WelcomeActions {...callbacks} showConnections connectionsDisabled encounterDisabled encounterLabel="Choose an encounter"/>));
   expect(button('Record a visit').disabled).toBe(true);expect(button('Try a sample').disabled).toBe(false);await click('Try a sample');expect(host.querySelector('textarea')).not.toBeNull();
 });
+
+it('shows actual prepared agenda, research reference and editable follow-up artifacts without outside actions',async()=>{
+  await click('Try a sample');await act(async()=>host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());await click('See the sample handoffs');
+  expect(host.querySelectorAll('.sample-visit-tasks ol li')).toHaveLength(4);expect(host.querySelector('.sample-visit-tasks a')?.getAttribute('href')).toContain('nhlbi.nih.gov');
+  const followup=host.querySelector<HTMLTextAreaElement>('#sample-follow-up')!;expect(followup.value).toContain('one-week sleep diary');
+  const checked=host.querySelector<HTMLInputElement>('.sample-visit-tasks input')!;await act(async()=>checked.click());expect(host.textContent).toContain('Sample message reviewed.');
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(followup,'Changed sample message');followup.dispatchEvent(new Event('input',{bubbles:true}));});expect(checked.checked).toBe(false);
+  expect(fetch).not.toHaveBeenCalled();for(const callback of Object.values(callbacks))expect(callback).not.toHaveBeenCalled();
+});

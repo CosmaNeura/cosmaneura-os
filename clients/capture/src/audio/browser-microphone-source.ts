@@ -57,6 +57,8 @@ export class BrowserMicrophoneCaptureSource implements CaptureSource {
   #decoder: PcmCaptureWorkletDecoder | undefined;
   #mediaSource: MediaStreamAudioSourceNode | undefined;
   #onChunk: ((chunk: CapturedWavChunk) => Promise<void>) | undefined;
+  #onInputLevel: CaptureSourceStartOptions["onInputLevel"];
+  #lastLevelAt = 0;
   #onError: ((code: CaptureSourceErrorCode) => void) | undefined;
   #onInterruption: ((code: CaptureSourceInterruptionCode) => void) | undefined;
   #pendingChunkDelivery: Promise<void> = Promise.resolve();
@@ -148,6 +150,7 @@ export class BrowserMicrophoneCaptureSource implements CaptureSource {
         throw new AudioCaptureError("audio_capture_device_unavailable");
       }
 
+      this.#onInputLevel = options.onInputLevel;
       this.#onError = options.onError;
       this.#onInterruption = options.onInterruption;
       audioTracks[0]?.addEventListener("ended", this.#handleTrackEnded, { once: true });
@@ -427,6 +430,13 @@ export class BrowserMicrophoneCaptureSource implements CaptureSource {
         return;
       }
       const frames = this.#requireDecoder().decode(value);
+      if (Date.now() - this.#lastLevelAt >= 100) {
+        this.#lastLevelAt = Date.now();
+        let squared = 0;
+        for (const sample of frames) squared += sample * sample;
+        const level = frames.length ? Math.min(1, Math.sqrt(squared / frames.length) * 4) : 0;
+        try { this.#onInputLevel?.(level); } catch { /* Observer isolation. */ }
+      }
       let samples: Int16Array;
       try {
         samples = this.#requireResampler().push(frames);
@@ -606,6 +616,7 @@ export class BrowserMicrophoneCaptureSource implements CaptureSource {
 
   #resetForStart(): void {
     this.#acceptMessages = false;
+    this.#onInputLevel = undefined;this.#lastLevelAt = 0;
     this.#pendingChunkDelivery = Promise.resolve();
     this.#sequenceNumber = 0;
     this.#shutdownPromise = undefined;

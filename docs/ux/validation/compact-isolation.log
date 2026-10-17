@@ -1,0 +1,35 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.13.15, pytest-9.1.1, pluggy-1.6.0 -- /private/tmp/cosmabot-ux-execution-20261016/.venv/bin/python
+cachedir: /private/tmp/cosmabot-ux-final-backend-checks/compact/pytest-cache
+rootdir: /private/tmp/cosmabot-ux-execution-20261016
+configfile: pyproject.toml
+plugins: asyncio-1.4.0, anyio-4.15.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=None, asyncio_default_test_loop_scope=function
+collecting ... collected 23 items
+
+tests/integration/test_compact_execution.py::test_pending_intent_survives_api_session_loss_without_broker PASSED [  4%]
+tests/integration/test_compact_execution.py::test_concurrent_claimers_only_one_wins PASSED [  8%]
+tests/integration/test_compact_execution.py::test_row_lock_skips_busy_work PASSED [ 13%]
+tests/integration/test_compact_execution.py::test_expired_pre_dispatch_claim_is_recovered_and_old_token_is_fenced PASSED [ 17%]
+tests/integration/test_compact_execution.py::test_crash_after_effect_before_ack_reconciles_durable_receipt PASSED [ 21%]
+tests/integration/test_compact_execution.py::test_sigkill_after_committed_effect_is_recovered_without_duplicate PASSED [ 26%]
+tests/integration/test_compact_execution.py::test_crash_after_dispatch_without_receipt_remains_unknown_no_blind_retry PASSED [ 30%]
+tests/integration/test_compact_execution.py::test_pre_dispatch_retry_has_backoff_and_bounded_budget PASSED [ 34%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[payload] PASSED [ 39%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[content] PASSED [ 43%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[target] PASSED [ 47%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[hash_and_payload] PASSED [ 52%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[invalidated] PASSED [ 56%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[decision] PASSED [ 60%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[agent_approver] PASSED [ 65%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[disabled_human] PASSED [ 69%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[box] PASSED [ 73%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[policy] PASSED [ 78%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[revoked_link] PASSED [ 82%]
+tests/integration/test_compact_execution.py::test_invalid_authority_never_records_effect[external_channel] PASSED [ 86%]
+tests/integration/test_compact_execution.py::test_wrong_box_and_legacy_executor_cannot_claim_or_execute PASSED [ 91%]
+tests/integration/test_compact_execution.py::test_receipt_mismatch_cannot_reconcile_or_resend PASSED [ 95%]
+tests/integration/test_compact_execution.py::test_extension_migration_is_idempotent_and_leaves_core_head_unchanged PASSED [100%]
+
+- generated xml file: /private/tmp/cosmabot-ux-final-backend-checks/compact/pytest-junit.xml -
+============================== 23 passed in 3.93s ==============================

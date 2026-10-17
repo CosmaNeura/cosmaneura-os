@@ -21,7 +21,7 @@ it('uses only compatible team routes and the exact header with fresh credentials
   const body={expected_revision:actualRehearsal.expected_revision,configuration:actualRehearsal.configuration as TeamConfiguration,scenario_id:'team_policy_setup.v1' as const};
   expect(await teamSetupApi.rehearse(identity,body)).toEqual(actualRehearsal);
   expect(fetcher.mock.calls.map(c=>String(c[0]))).toEqual(['http://127.0.0.1:8018/provider-team/setup','http://127.0.0.1:8018/provider-team/rehearsal']);
-  for(const [,init]of fetcher.mock.calls){const h=new Headers(init?.headers);expect(h.get('X-Cosmas-Team-Contract')).toBe('4');expect(h.get('Authorization')).toBe('Bearer invented-private-token');expect(h.has('X-Box-Id')).toBe(false);expect(init).toMatchObject({credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'});}
+  for(const [,init]of fetcher.mock.calls){const h=new Headers(init?.headers);expect(h.get('X-Cosmas-Team-Contract')).toBe('5');expect(h.get('Authorization')).toBe('Bearer invented-private-token');expect(h.has('X-Box-Id')).toBe(false);expect(init).toMatchObject({credentials:'omit',cache:'no-store',redirect:'error',referrerPolicy:'no-referrer'});}
   expect(token.mock.calls).toEqual([[{skipCache:true}],[{skipCache:true}]]);expect(fetcher.mock.calls[1][1]?.body).toBe(JSON.stringify(body));
 });
 it.each(['missing-no-store','wrong-type','wrong-status','unknown-field','wrong-hash','private-source','wrong-revision'])('withholds invalid setup response: %s',async fault=>{
@@ -78,7 +78,7 @@ it('negotiates small closed resource and usage reads without adding private inve
  const {resourcesFixture,usageFixture}=await import('./team-policy-test-fixture');const fetcher=vi.fn().mockResolvedValueOnce(json(resourcesFixture)).mockResolvedValueOnce(json(usageFixture));vi.stubGlobal('fetch',fetcher);
  expect(await teamSetupApi.resources(access)).toEqual(resourcesFixture);expect(await teamSetupApi.usage(access)).toEqual(usageFixture);
  expect(fetcher.mock.calls.map(c=>String(c[0]))).toEqual(['http://127.0.0.1:8018/provider-team/resources','http://127.0.0.1:8018/provider-team/usage']);
- for(const [,init]of fetcher.mock.calls){expect(init.method).toBe('GET');expect(init.body).toBeUndefined();expect(new Headers(init.headers).get('X-Cosmas-Team-Contract')).toBe('4');}
+ for(const [,init]of fetcher.mock.calls){expect(init.method).toBe('GET');expect(init.body).toBeUndefined();expect(new Headers(init.headers).get('X-Cosmas-Team-Contract')).toBe('5');}
 });
 it('limits resources and usage to 16 KiB independently of the 8 MiB setup bound',async()=>{
  const fetcher=vi.fn().mockImplementation(()=>Promise.resolve(new Response(new Uint8Array(16385),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}})));vi.stubGlobal('fetch',fetcher);

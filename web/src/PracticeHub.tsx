@@ -48,9 +48,9 @@ export function PracticeHub({identity,onDenied,onBusyChange,onDraftInbox,childre
   if(!INBOX_BUILD&&!INBOX_HANDOFF_BUILD)return <>{children}</>;
   return <section className="practice-hub" aria-label="Practice workspace">
     <nav aria-label="Practice views">
-      <button aria-pressed={view==='assigned'} disabled={blocked} onClick={()=>go('assigned')}>Assigned work</button>
-      {INBOX_BUILD&&<button aria-pressed={view==='incoming'} disabled={blocked} onClick={()=>go('incoming')}>Incoming messages</button>}
-      {INBOX_HANDOFF_BUILD&&<button aria-pressed={view==='handoffs'} disabled={blocked} onClick={()=>go('handoffs')}>Incoming follow-up</button>}
+      <button aria-pressed={view==='assigned'} disabled={blocked} onClick={()=>go('assigned')}>Assigned to me</button>
+      {INBOX_BUILD&&<button aria-pressed={view==='incoming'} disabled={blocked} onClick={()=>go('incoming')}>Messages</button>}
+      {INBOX_HANDOFF_BUILD&&<button aria-pressed={view==='handoffs'} disabled={blocked} onClick={()=>go('handoffs')}>Follow-ups</button>}
     </nav>
     {blocked&&<p role="status">Save or recover your unfinished edits before leaving this view.</p>}
     <div hidden={view!=='assigned'}>

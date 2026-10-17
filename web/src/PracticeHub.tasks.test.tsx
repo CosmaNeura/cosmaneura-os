@@ -20,12 +20,12 @@ it('opens incoming work only on a visible user action and retains the same revie
  await mount();expect(mounted.incoming).not.toHaveBeenCalled();expect(mounted.handoffs).not.toHaveBeenCalled();
  const action=button('Review incoming messages');expect(action.tagName).toBe('BUTTON');action.focus();expect(document.activeElement).toBe(action);
  await click('Review incoming messages');expect(mounted.incoming).toHaveBeenCalledOnce();expect(mounted.handoffs).not.toHaveBeenCalled();
- const input=host.querySelector('input');await click('Assigned work');expect(input?.closest('[hidden]')).not.toBeNull();
+ const input=host.querySelector('input');await click('Assigned to me');expect(input?.closest('[hidden]')).not.toBeNull();
  await click('Review incoming messages');expect(host.querySelector('input')).toBe(input);expect(mounted.incoming).toHaveBeenCalledOnce();
 });
 it('blocks view changes while recovery is needed then opens follow-up without claiming completion',async()=>{
  await mount();await click('Review incoming messages');await click('Keep pending review');
- expect(button('Assigned work').disabled).toBe(true);await click('Assigned work');expect(host.querySelector('[aria-label="Incoming test view"]')?.closest('[hidden]')).toBeNull();
- expect(mounted.handoffs).not.toHaveBeenCalled();await click('Recover review');await click('Assigned work');await click('Review incoming follow-up');
+ expect(button('Assigned to me').disabled).toBe(true);await click('Assigned to me');expect(host.querySelector('[aria-label="Incoming test view"]')?.closest('[hidden]')).toBeNull();
+ expect(mounted.handoffs).not.toHaveBeenCalled();await click('Recover review');await click('Assigned to me');await click('Review incoming follow-up');
  expect(mounted.handoffs).toHaveBeenCalledOnce();expect(host.textContent).toContain('Responsibility and saved result');expect(host.textContent).not.toContain('Completed');
 });

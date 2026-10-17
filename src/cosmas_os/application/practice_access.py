@@ -113,13 +113,14 @@ def status(s, runtime, member, *, fence):
     return result
 
 
-def submit(s, runtime, member, command, *, fence):
+def submit(s, runtime, member, command, *, fence, commit=True):
     _scope(s, runtime, member, fence)
     principal = _binding(s, member)
     if principal is not None:
         result = _self(s, member, principal)
         fence()
-        s.commit()
+        if commit:
+            s.commit()
         return result
     existing = s.scalar(select(PracticeAccessRequest).where(
         PracticeAccessRequest.issuer == member.issuer,
@@ -154,7 +155,8 @@ def submit(s, runtime, member, command, *, fence):
             s.flush()
     result = _self(s, member, None)
     fence()
-    s.commit()
+    if commit:
+        s.commit()
     return result
 
 

@@ -32,7 +32,7 @@ vi.mock('./VendorWorkMount',async original=>({...await original<typeof import('.
 let draftStorage: ReturnType<typeof memoryDraftStorage>;
 vi.mock("./workspace-api", async importOriginal => {
   const actual = await importOriginal<typeof import("./workspace-api")>();
-  return { ...actual, workspaceApi: { practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn(), privateDrafts:vi.fn(),createPrivateDraft:vi.fn(),linkAppointment:vi.fn(),resolveAppointmentLink:vi.fn() } };
+  return { ...actual, workspaceApi: { practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn(), privateDraftSummaries:vi.fn(),createPrivateDraft:vi.fn(),linkAppointment:vi.fn(),resolveAppointmentLink:vi.fn() } };
 });
 
 const fixture: Workspace & {appointment_id:string} = {
@@ -80,7 +80,7 @@ describe("private encounter workspace", () => {
     const recording:PrivateRecordingSnapshot={recordingId:modelUuid(901),title:'Invented saved recording',phase:'sealed',elapsedSeconds:19,recordedChunks:2,recordedBytes:608088,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};
     let stale!:(rows:PrivateRecordingSnapshot[])=>void;
     vi.mocked(listPrivateRecordings).mockResolvedValueOnce([recording]).mockResolvedValueOnce([recording]).mockImplementationOnce(()=>new Promise(resolve=>{stale=resolve;})).mockResolvedValue([recording]);
-    vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
     vi.mocked(workspaceApi.catalog).mockResolvedValue([]);
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
     const saved=()=>container.querySelector('[aria-label="Saved private recordings"]');
@@ -99,9 +99,9 @@ describe("private encounter workspace", () => {
     expect(saved()?.textContent).toContain('Invented saved recording');
     expect(saved()?.textContent).not.toContain('Obsolete recording list');
   });
-  it('lets Home navigation escape a retained visit-link conflict while keeping the original request and blocking notebook actions',async()=>{
+  it('lets Home navigation and note editing continue during a retained visit-link conflict',async()=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()},privateWorkspace:Workspace={id:modelUuid(701),appointment_id:null,label:'Private synthetic recording',revision:1,entries:[],work_candidates:[],private_draft:{title:'Private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
-    vi.mocked(workspaceApi.privateDrafts).mockResolvedValue({contract_version:1,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
     vi.mocked(workspaceApi.createPrivateDraft).mockResolvedValue({identity:access,workspace:privateWorkspace,team});
     vi.mocked(workspaceApi.read).mockResolvedValue(privateWorkspace);
     vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:modelUuid(702),workspace_id:null,label:'Synthetic available visit'}]);
@@ -117,7 +117,7 @@ describe("private encounter workspace", () => {
     await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain('This visit already has a notebook.');});
     const home=()=>[...container.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace navigation"] button')].find(b=>b.textContent==='Home')!;
     expect(home().disabled).toBe(false);
-    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(true);
+    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')!.disabled).toBe(false);
     await click('Home');expect(container.querySelector('[aria-label="Practice Home"]')?.closest('[hidden]')).toBeNull();
     await click('Current notebook');expect(container.textContent).toContain('The earlier visit link is unconfirmed. Its exact request is retained.');
     expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();expect(workspaceApi.resolveAppointmentLink).not.toHaveBeenCalled();
@@ -239,7 +239,7 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:initial});
     vi.mocked(workspaceApi.team).mockResolvedValue(initial);
     await click('Open synthetic encounter');await settings().practice();
-    await input('Practice context','Retain this personalized practice context');await settings().click('Done');
+    await input('Practice context','Retain this personalized practice context');await settings().click('Done');if(container.querySelector('[role="dialog"]'))await click('Keep draft and continue');
     const panel=container.querySelector('[aria-label="Start your team"]')!;
     expect(panel.textContent).toContain('Review team changes');expect(panel.textContent).not.toContain('Use this team');
     await click('Review team changes');expect(workspaceApi.saveTeam).not.toHaveBeenCalled();
@@ -300,7 +300,7 @@ describe("private encounter workspace", () => {
   it("starts without a request and labels unsupported capabilities", async () => {
     expect(workspaceApi.open).not.toHaveBeenCalled();
     await click("Open synthetic encounter");
-    expect(container.textContent).toContain("Private encounter notebook");
+    expect(container.textContent).toContain("Linked visit");
     expect(container.textContent).toContain("AI chat needs a service connection");
     await click("During");
     expect((([...container.querySelectorAll("button")].find(b => b.textContent === "Start recording")) as HTMLButtonElement).disabled).toBe(true);
@@ -354,7 +354,7 @@ describe("private encounter workspace", () => {
     const saved = vi.mocked(workspaceApi.saveTeam).mock.calls[0][1];
     expect(saved).toMatchObject({expected_revision:0,configuration:{practice_context:"Invented independent practice"}});
     expect([...container.querySelectorAll("button")].find(button=>button.textContent==="Set up my team")!.disabled).toBe(true);
-    await settings().click("Done"); await click("Choose an encounter"); expect(workspaceApi.catalog).not.toHaveBeenCalled();
+    await settings().click("Done");if(container.querySelector('[role="dialog"]'))await click("Keep draft and continue"); const catalogReads=vi.mocked(workspaceApi.catalog).mock.calls.length;await click("Choose an encounter"); expect(vi.mocked(workspaceApi.catalog).mock.calls.length).toBe(catalogReads+1);
     vi.mocked(workspaceApi.saveTeam).mockResolvedValue({...team,configuration:saved.configuration}); vi.mocked(workspaceApi.team).mockResolvedValue({...team,configuration:saved.configuration});
     await click("Retry same save");
     expect(vi.mocked(workspaceApi.saveTeam).mock.calls[1]).toEqual([access,saved]);
@@ -382,7 +382,7 @@ describe("private encounter workspace", () => {
     const access = {mode:"clerk_jwt" as const,getToken:vi.fn()};
     vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
-    await settings().practice(); await input("Practice context","Unfinished setup"); await settings().click("Done");
+    await settings().practice(); await input("Practice context","Unfinished setup"); await settings().click("Done");if(container.querySelector('[role="dialog"]'))await click("Keep draft and continue");
     await click("Choose an encounter");
     const visit = container.querySelector<HTMLButtonElement>(".team-encounter-option")!;
     await act(async()=>visit.click()); await settings().practice();
@@ -452,7 +452,7 @@ describe("private encounter workspace", () => {
     await settings().team(); await settings().overview(); await settings().click("Add a coworker");
     await settings().click("Scribe");
     await input("Bot name", "Visit partner");
-    await input("Job focus", "SOAP documentation");
+    await input("Job", "SOAP documentation");
     await input("Working preferences", "Keep transcript and scratch notes attributed");
   }
 
@@ -481,7 +481,7 @@ describe("private encounter workspace", () => {
     await click("Send message");
     expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({role: added.instance_id, team_revision: 2});
     await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Conversation saved.");});
-    await settings().editSelected(); await settings().click("Skills, permissions and source access");
+    await settings().editSelected(); await settings().click("Permissions");
     const enabled = [...container.querySelectorAll("label")].find(e => e.textContent === "Enable this bot")!.querySelector<HTMLInputElement>("input")!;
     await act(async () => enabled.click());
     vi.mocked(workspaceApi.saveTeam).mockImplementation(async (_, body) => ({...saved, revision: 3, configuration: body.configuration}));
@@ -491,7 +491,7 @@ describe("private encounter workspace", () => {
   });
 
   it("keeps an unsaved new bot in settings without routing chat to an uninstalled identity", async () => {
-    await click("Open synthetic encounter"); await addScribe(); await settings().click("Done");
+    await click("Open synthetic encounter"); await addScribe(); await settings().click("Done");if(container.querySelector('[role="dialog"]'))await click("Keep draft and continue");
     expect(container.querySelector(".team-conversation-header h2")?.textContent).toBe("Scribe");
     expect(workspaceApi.saveTeam).not.toHaveBeenCalled();
     await settings().editSelected();
@@ -530,7 +530,7 @@ describe("private encounter workspace", () => {
     await click("Open synthetic encounter");
     const rosterBot = [...container.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b => b.textContent?.startsWith("Visit partner"))!;
     await act(async () => rosterBot.click());
-    await settings().editSelected(); await settings().click("Skills, permissions and source access");
+    await settings().editSelected(); await settings().click("Permissions");
     const enabled = [...container.querySelectorAll("label")].find(e => e.textContent === "Enable this bot")!.querySelector<HTMLInputElement>("input")!;
     await act(async () => enabled.click());
     await click("Retire bot when saved");
@@ -576,7 +576,7 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.catalog).mockResolvedValue([]);
     await act(async () => root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={{ mode: "clerk_jwt", getToken: vi.fn() }} />));
     await click(action);
-    expect(container.textContent).toContain("No confirmed encounters are available for this account.");
+    expect(container.textContent).toContain("No confirmed visits are available.");
     expect(workspaceApi.open).not.toHaveBeenCalled();
   });
 
@@ -584,7 +584,7 @@ describe("private encounter workspace", () => {
     await click("Open synthetic encounter");
     await input("Jotted notes", "My invented private note");
     await click("After");
-    expect(container.querySelector('nav[aria-label="Mobile encounter view"] button[aria-pressed="true"]')?.textContent).toBe("Review");
+    expect(container.querySelector('nav[aria-label="Visit view"] button[aria-pressed="true"]')?.textContent).toBe("Review");
     await click("Notebook");
     expect(container.querySelector<HTMLTextAreaElement>("#team-notebook")?.value).toBe("My invented private note");
     vi.mocked(workspaceApi.append).mockResolvedValue({ entry_id: "saved", entry_revision: 2, workspace: { ...fixture, revision: 2 } });
@@ -593,6 +593,27 @@ describe("private encounter workspace", () => {
       kind: "scratchpad", content: "My invented private note", expected_revision: 1,
     }));
     expect(container.textContent).toContain("Saved revision 2");
+  });
+
+  it('drafts through Scribe after saving the intended notes and keeps edited review text',async()=>{
+    const configured=structuredClone(team);configured.llm.enabled=true;
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:configured});
+    vi.mocked(workspaceApi.team).mockResolvedValue(configured);
+    await click('Open synthetic encounter');await input('Jotted notes','Synthetic dizziness history with uncertain cause.');
+    const saved:Workspace={...structuredClone(fixture),revision:2,entries:[...fixture.entries,{...fixture.entries[0],id:'jottings',revision:2,kind:'scratchpad',content:'Synthetic dizziness history with uncertain cause.'}]};
+    vi.mocked(workspaceApi.append).mockResolvedValue({workspace:saved,entry_id:'jottings',entry_revision:2});
+    vi.mocked(workspaceApi.ask).mockImplementation(async(_identity,id,body)=>{
+      expect(workspaceApi.append).toHaveBeenCalledOnce();expect(body.expected_revision).toBe(2);expect(body.role).toBe('scribe');
+      vi.mocked(workspaceApi.read).mockResolvedValue({...saved,revision:3,entries:[...saved.entries,{...fixture.entries[0],id:modelUuid(601),revision:3,kind:'conversation',content:body.content,
+        reply:{agent_name:'Scribe',role:'scribe',backend:'azure_gpt41',content:'Assessment: dizziness; cause uncertain.',context_revision:2,citations:[]}}]});
+      return modelReceipt(body,id,3);
+    });
+    await click('Draft note from my notes');
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')?.value).toBe('Assessment: dizziness; cause uncertain.');});
+    expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(workspaceApi.saveNote).not.toHaveBeenCalled();
+    await input('Private note draft','My edited assessment, preserving uncertainty.');
+    await click('Visit notes');await click('Review note');
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')?.value).toBe('My edited assessment, preserving uncertainty.');
   });
 
   it("keeps unsaved notebook typing when opening and returning from shared work", async () => {
@@ -619,7 +640,7 @@ describe("private encounter workspace", () => {
   it("preserves the private review editor across sources and team settings", async () => {
     await click("Open synthetic encounter"); await click("After");
     await input("Private note draft", "Keep this unsaved review edit.");
-    await click("Sources"); await settings().editSelected(); await settings().click("Done");
+    await click("Sources"); await settings().editSelected(); await settings().click("Done");if(container.querySelector('[role="dialog"]'))await click("Keep draft and continue");
     await click("After");
     expect(container.querySelector<HTMLTextAreaElement>("#private-note-text")?.value).toBe("Keep this unsaved review edit.");
   });
@@ -774,7 +795,7 @@ describe("private encounter workspace", () => {
     await act(async () => resolve(await modelReceipt(vi.mocked(workspaceApi.ask).mock.calls[0][2],fixture.id)));
     await act(async()=>{await vi.waitFor(()=>expect(workspaceApi.read).toHaveBeenCalled());});
     expect(container.textContent).toContain("Review the invented source.");
-    const citation = [...container.querySelectorAll("button")].find(b => b.textContent?.startsWith("[1] Fixture v1"))!;
+    const citation = [...container.querySelectorAll("button")].find(b => b.textContent?.startsWith("Fixture v1"))!;
     await act(async () => citation.click());
     expect(document.activeElement?.id).toBe("source-source-invented");
   });

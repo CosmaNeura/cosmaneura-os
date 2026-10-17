@@ -1,0 +1,8 @@
+import {teamClosed,teamStrip,teamText} from './team-setup-request';
+export const profileFields={practice_name:'Practice name',specialty:'Specialty',provider_name:'Provider name',credentials:'Credentials',state:'State',note_format:'Default note format',language:'Language'} as const;
+export type PracticeProfile={version:1}&Record<keyof typeof profileFields,string>;
+export const emptyPracticeProfile=():PracticeProfile=>({version:1,practice_name:'',specialty:'',provider_name:'',credentials:'',state:'',note_format:'',language:''});
+export const profileLimits={practice_name:100,specialty:80,provider_name:80,credentials:40,state:40,note_format:60,language:40};
+export function validPracticeProfile(value:unknown):value is PracticeProfile{return teamClosed(value,'version',Object.keys(profileFields).join(','))&&value.version===1&&Object.keys(profileFields).every(key=>value[key]===undefined||teamText(value[key],profileLimits[key as keyof typeof profileLimits])&&!/[\u0000-\u001f]/.test(value[key] as string));}
+export function normalizedProfile(value:PracticeProfile|undefined):PracticeProfile|undefined{if(!value)return undefined;const result=emptyPracticeProfile();for(const key of Object.keys(profileFields) as (keyof typeof profileFields)[])result[key]=teamStrip(value[key]??'');return Object.values(result).some(value=>typeof value==='string'&&value)?result:undefined;}
+export function practiceProfileContext(profile:PracticeProfile|undefined,extra:string){const normalized=normalizedProfile(profile);return [...(Object.keys(profileFields) as (keyof typeof profileFields)[]).flatMap(key=>normalized?.[key]?[`${profileFields[key]}: ${normalized[key]}`]:[]),...(extra?[teamStrip(extra)]:[])].join('\n');}

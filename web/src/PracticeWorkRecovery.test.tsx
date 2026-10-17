@@ -52,7 +52,7 @@ it("journals the exact offer before dispatch, then restores with fresh access wi
   vi.mocked(workspaceApi.workHandoff).mockImplementationOnce(async(_identity,ticketId,body)=>{
     expect(pending()).toEqual({type:"handoff",ticketId,body});throw new WorkspaceApiError(503);
   });
-  await render();await input("select",staff.id);await click("Send responsibility offer");
+  await render();await input(".practice-work-card select",staff.id);await click("Send responsibility offer");
   const original=vi.mocked(workspaceApi.workHandoff).mock.calls[0];expect(pending()).toBeTruthy();
   expect(JSON.stringify([...records.values()])).not.toContain("invented-token");
   await restart();expect(workspaceApi.workHandoff).toHaveBeenCalledTimes(1);expect(button("Set aside rejected request")).toBeUndefined();
@@ -63,23 +63,23 @@ it("journals the exact offer before dispatch, then restores with fresh access wi
 
 it("restores unsent work text and colleague choice without restoring the result check",async()=>{
   vi.mocked(workspaceApi.practiceWorkItem).mockResolvedValue(item);
-  await render();await input("select",staff.id);await input("textarea","Unsent invented result");await check();
+  await render();await input(".practice-work-card select",staff.id);await input("textarea","Unsent invented result");await check();
   const key=accountEditorAddress(`practice-result:${item.ticket_id}`);
   expect((records.get(key)?.value?.body as AccountEditorDraft).data).toMatchObject({recipient:staff.id,evidence:"Unsent invented result",version:item.version});
   await restart();expect(element.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("");
   expect(button("Record completion").disabled).toBe(true);await click("Restore practice work form draft");
   expect(element.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("Unsent invented result");
-  expect(element.querySelector<HTMLSelectElement>("select")!.value).toBe(staff.id);
+  expect(element.querySelector<HTMLSelectElement>(".practice-work-card select")!.value).toBe(staff.id);
   expect(element.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
   expect(workspaceApi.workHandoff).not.toHaveBeenCalled();expect(workspaceApi.completeWork).not.toHaveBeenCalled();
 });
 
 it("retains an earlier work form across responsibility changes and requires explicit comparison",async()=>{
-  await render();await input("select",staff.id);await input("textarea","Earlier invented evidence");
+  await render();await input(".practice-work-card select",staff.id);await input("textarea","Earlier invented evidence");
   const latest={...item,version:item.version+2};vi.mocked(workspaceApi.practiceWork).mockResolvedValue({items:[latest],people:[owner,staff],next_cursor:null});
   vi.mocked(workspaceApi.practiceWorkItem).mockResolvedValue(latest);await restart();await click("Restore practice work form draft");
   expect(element.textContent).toContain("earlier responsibility or work version");expect(button("Record completion").disabled).toBe(true);
-  await click("Use this text for current work");expect(element.querySelector<HTMLSelectElement>("select")!.value).toBe("");
+  await click("Use this text for current work");expect(element.querySelector<HTMLSelectElement>(".practice-work-card select")!.value).toBe("");
   expect(element.querySelector<HTMLInputElement>('input[type="checkbox"]')!.checked).toBe(false);
   expect(element.querySelector<HTMLTextAreaElement>("textarea")!.value).toBe("Earlier invented evidence");expect(workspaceApi.completeWork).not.toHaveBeenCalled();
 });
@@ -128,20 +128,20 @@ it("recovers completion evidence and its key even when the item is outside the f
 
 it("retains an unconfirmed request when access is revoked before Restore",async()=>{
   vi.mocked(workspaceApi.workHandoff).mockRejectedValue(new WorkspaceApiError(503));
-  await render();await input("select",staff.id);await click("Send responsibility offer");const saved=structuredClone(records.get(address));
+  await render();await input(".practice-work-card select",staff.id);await click("Send responsibility offer");const saved=structuredClone(records.get(address));
   await restart();vi.mocked(access.authorize).mockRejectedValue(new WorkspaceApiError(403));await click("Restore practice-work request");
   expect(lost).toHaveBeenCalledOnce();expect(element.textContent).not.toContain(item.body);expect(records.get(address)).toEqual(saved);
   expect(workspaceApi.workHandoff).toHaveBeenCalledTimes(1);
 });
 
 it("sends nothing if the operation cannot be journaled locally",async()=>{
-  await render();await input("select",staff.id);failWrite=true;await click("Send responsibility offer");
+  await render();await input(".practice-work-card select",staff.id);failWrite=true;await click("Send responsibility offer");
   expect(workspaceApi.workHandoff).not.toHaveBeenCalled();expect(element.textContent).toContain("request was not sent");
   failWrite=false;await click("Recheck practice-work recovery");await click("Send responsibility offer");expect(workspaceApi.workHandoff).toHaveBeenCalledOnce();
 });
 
 it("retains the original key when the service replies but clearing its journal fails",async()=>{
-  await render();await input("select",staff.id);failClear=true;await click("Send responsibility offer");
+  await render();await input(".practice-work-card select",staff.id);failClear=true;await click("Send responsibility offer");
   const original=vi.mocked(workspaceApi.workHandoff).mock.calls[0];expect(pending()).toBeTruthy();expect(button("Retry same action").disabled).toBe(true);
   failClear=false;await click("Recheck practice-work recovery");await click("Restore practice-work request");await click("Retry same action");
   expect(vi.mocked(workspaceApi.workHandoff).mock.calls[1]).toEqual(original);expect(records.get(address)?.value).toBeNull();
@@ -149,7 +149,7 @@ it("retains the original key when the service replies but clearing its journal f
 
 it("keeps a rejected request until the user checks current work and explicitly sets it aside",async()=>{
   vi.mocked(workspaceApi.workHandoff).mockRejectedValue(new WorkspaceApiError(409));
-  await render();await input("select",staff.id);await click("Send responsibility offer");expect(pending()).toBeTruthy();
+  await render();await input(".practice-work-card select",staff.id);await click("Send responsibility offer");expect(pending()).toBeTruthy();
   expect(button("Set aside rejected request")).toBeUndefined();await click("Check current work");
   expect(workspaceApi.practiceWorkItem).toHaveBeenCalledOnce();await click("Set aside rejected request");
   expect(records.get(address)?.value).toBeNull();expect(workspaceApi.workHandoff).toHaveBeenCalledOnce();
@@ -157,7 +157,7 @@ it("keeps a rejected request until the user checks current work and explicitly s
 
 it.each([null,undefined])("fails closed when signed practice work has no private recovery context (%j)",async context=>{
   await act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><PracticeWork identity={identity} onChanged={changed} onAccessLost={lost}/></AccountRecoveryContext.Provider>));
-  expect(element.querySelector("select")!.disabled).toBe(true);expect(workspaceApi.workHandoff).not.toHaveBeenCalled();
+  expect(element.querySelector<HTMLSelectElement>(".practice-work-card select")!.disabled).toBe(true);expect(workspaceApi.workHandoff).not.toHaveBeenCalled();
 });
 
 const request={type:"handoff",ticketId:item.ticket_id,body:{expected_version:4,revision_id:item.revision_id,payload_hash:item.payload_hash,idempotency_key:"exact-invented-key",kind:"offer",recipient_id:staff.id}};
