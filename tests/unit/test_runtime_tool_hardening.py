@@ -34,7 +34,7 @@ def synthetic_root(tmp_path):
         path.chmod(0o755)
         package = "invented-" + name
         pins.append(guard.ToolPin(name, len(data), hashlib.sha256(data).hexdigest(),
-                                 package, "1.0", os.getuid(), os.getgid()))
+                                 package, "1.0", path.stat().st_uid, path.stat().st_gid))
         packages[package] = {"version": "1.0", "essential": "yes", "status": "installed"}
     (root / "bin").symlink_to("usr/bin")
     library = root / "usr/lib/required.so"
@@ -246,7 +246,7 @@ def test_exact_nonexecutable_completion_metadata_only(tmp_path, fault):
     path.write_bytes(data)
     path.chmod(0o644)
     pin = guard.ToolPin("nsenter", len(data), hashlib.sha256(data).hexdigest(), pins[1].package,
-                        pins[1].version, os.getuid(), os.getgid(), 0o644)
+                        pins[1].version, path.stat().st_uid, path.stat().st_gid, 0o644)
     def package_owner(candidate):
         if candidate == "/" + relative:
             return "wrong-owner" if fault == "owner" else pin.package

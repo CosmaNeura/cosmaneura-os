@@ -7,6 +7,7 @@ execution adapter or PDF parser is replaced by a frontend mock.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -30,7 +31,7 @@ from cosmas_os.models import Decision, Operation, Ticket
 
 managed_case = signed_fixture.managed_case
 efax_http = signed_fixture.efax_http
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 

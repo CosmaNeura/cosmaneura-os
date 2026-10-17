@@ -221,6 +221,8 @@ def install_vendor(f, scenario, factory):
 
 
 @pytest.mark.parametrize("scenario", scenarios(), ids=lambda case: case["scenario_id"])
+@pytest.mark.skipif(not os.environ.get("COSMAS_COMPLETED_CYCLE_OUTPUT"),
+    reason="Interactive actor plans require an explicit COSMAS_COMPLETED_CYCLE_OUTPUT directory")
 def test_completed_action_cycle(capture_case, monkeypatch, tmp_path, scenario):
     f = capture_case
     root = Path(os.environ.get("COSMAS_COMPLETED_CYCLE_OUTPUT", os.environ.get("COSMAS_SCRIBE_SPECIALIST_EVIDENCE_DIR", str(tmp_path / "cycle-evidence"))))

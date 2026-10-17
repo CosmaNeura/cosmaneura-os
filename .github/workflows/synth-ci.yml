@@ -19,7 +19,7 @@ permissions:
 env:
   COSMAS_ENV: synth_os
   PYTHON_VERSION: "3.13"
-  NODE_VERSION: "22"
+  NODE_VERSION: "24"
 
 jobs:
   python-quality:
@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Sync
-        run: uv sync --extra dev --extra efax-inbound
+        run: uv sync --extra dev --extra efax-inbound --extra mcp
       - name: Ruff
         run: uv run ruff check src tests
       - name: Pyright
@@ -73,11 +73,27 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Sync
-        run: uv sync --extra dev --extra efax-inbound
+        run: uv sync --extra dev --extra efax-inbound --extra mcp
       - name: Migrations on empty database
         run: uv run alembic upgrade head
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+      - name: Enable pnpm for signed UI integration tests
+        run: corepack enable
+      - name: Install signed UI integration dependencies
+        run: ./scripts/install-client-deps.sh
       - name: Pytest
-        run: uv run pytest -q
+        run: uv run python scripts/check-backend-local.py --postgres-bin /usr/lib/postgresql/16/bin --evidence-dir "${RUNNER_TEMP}/cosmabot-backend-checks"
+      - name: Upload backend test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-evidence
+          path: |
+            ${{ runner.temp }}/cosmabot-backend-checks/*-pytest.log
+            ${{ runner.temp }}/cosmabot-backend-checks/*/pytest-junit.xml
+          if-no-files-found: ignore
       - name: Demo ArtifactChase
         run: uv run python -m cosmas_os.cli demo-artifact-chase
       - name: OpenAPI dump
@@ -99,8 +115,7 @@ jobs:
       - name: Enable pnpm
         run: corepack enable
       - name: Install
-        working-directory: web
-        run: pnpm install --frozen-lockfile
+        run: ./scripts/install-client-deps.sh
       - name: Test
         working-directory: web
         run: pnpm test
@@ -111,6 +126,14 @@ jobs:
         working-directory: web
         env:
           VITE_COSMAS_ENV: early_adopter_beta
+          VITE_WORKSPACE_FEATURE_PROFILE: operational-beta-v1
+          VITE_WORKSPACE_HOSTED_CLIENT: web
+          VITE_WORKSPACE_DATA_MODE: synthetic
+          VITE_WORKSPACE_HOSTED_API_ORIGIN: https://api.example.invalid
+          VITE_WORKSPACE_WEB_ORIGIN: https://app.example.invalid
+          VITE_WORKSPACE_CAPTURE_MODE: browser_microphone
+          VITE_CAPTURE_UPLOAD_ORIGINS: https://upload.example.invalid
+          VITE_COSMANEURA_WEB_ORIGIN: https://core.example.invalid
           VITE_CLERK_PUBLISHABLE_KEY: pk_live_synthetic_public_ci_value
           VITE_API_BASE: https://api.example.invalid
         run: pnpm run build:beta
@@ -146,9 +169,11 @@ jobs:
             --platform linux/amd64 \
             --tag "$WEB_IMAGE_TAG" \
             --file Dockerfile.web \
-            --build-arg VITE_COSMAS_ENV=early_adopter_beta \
             --build-arg VITE_CLERK_PUBLISHABLE_KEY=pk_live_synthetic_public_ci_value \
-            --build-arg VITE_API_BASE=https://api.example.invalid \
+            --build-arg VITE_WORKSPACE_HOSTED_API_ORIGIN=https://api.example.invalid \
+            --build-arg VITE_WORKSPACE_WEB_ORIGIN=https://app.example.invalid \
+            --build-arg VITE_COSMANEURA_WEB_ORIGIN=https://core.example.invalid \
+            --build-arg VITE_CAPTURE_UPLOAD_ORIGINS=https://upload.example.invalid \
             .
           DIGEST="$(docker image inspect --format='{{.Id}}' "$IMAGE_TAG")"
           WEB_DIGEST="$(docker image inspect --format='{{.Id}}' "$WEB_IMAGE_TAG")"

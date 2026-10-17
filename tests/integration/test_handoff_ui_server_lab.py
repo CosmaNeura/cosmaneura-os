@@ -6,6 +6,7 @@ or clinical validation. The bridge lives solely in this test process.
 
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -27,7 +28,7 @@ from cosmas_os.application import services as svc
 from cosmas_os.application import workspace as ws
 from cosmas_os.models import ModelWorkAdmission
 
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 

@@ -2,7 +2,6 @@
 import os
 
 import pytest
-
 from tests.integration import test_scribe_to_specialists_ui_server_lab as fixture
 
 

@@ -2,19 +2,29 @@
 
 import json
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 import pytest
 from fastapi import HTTPException
 from sqlalchemy import select
 from tests.integration.test_appointment_execution import Journal, claim, run, setup
 from tests.integration.test_appointment_work import decide, prepare, propose
+from tests.integration.test_scheduling_patient_setup import (
+    InventedReceiver,
+    confirm,
+    confirmation,
+    preview,
+)
 from tests.integration.test_workspace_auth import signed_workspace as _signed_workspace
 from tests.unit.test_scheduling_actions import operation
 
 from cosmas_os.api import app as api
+from cosmas_os.application import scheduling_patient_setup as patient_setup
 from cosmas_os.application import workspace as ws
-from cosmas_os.models import AppointmentReceipt, Operation
+from cosmas_os.models import AppointmentReceipt, Operation, SchedulingPatientAccount
+from cosmas_os.ports.scheduling import SchedulingSelection
+from cosmas_os.scheduling_login_models import SchedulingLoginCredential
 
 signed_workspace = _signed_workspace
 
@@ -67,11 +77,47 @@ def test_replayed_submit_never_retries_or_reconciles_uncertain_operation(session
 
 
 @pytest.fixture
-def signed_case(session, signed_workspace):
+def signed_patient_case(session, signed_workspace):
     signed = signed_workspace
     signed.configuration.workspace_scheduling_enabled = True
     signed.configuration.workspace_appointments_enabled = True
-    case = prepare(session, {"box_id": signed.box, "owner_id": signed.actor}, existing=signed)
+    signed.configuration.workspace_scheduling_login_enabled = True
+    signed.configuration.workspace_scheduling_patient_setup_enabled = True
+    case = prepare(session, {"box_id": signed.box, "owner_id": signed.actor},
+                   existing=signed, patient_mapping=False)
+    connected = datetime.now(UTC)
+    session.add(SchedulingLoginCredential(account_id=case.account, binding_digest="a" * 64,
+        status="ready", sealed=b"i" * 40, connected_at=connected,
+        expires_at=connected + timedelta(hours=1)))
+    session.commit()
+    fixture = SimpleNamespace(s=session, box=case.box, owner=case.owner, wid=case.wid,
+        identity=case.identity, configuration=signed.configuration,
+        before=ws.read(session, case.box, case.owner, case.wid))
+    fixture.port = InventedReceiver(fixture)
+
+    def binding(_session, identity_id, account):
+        assert identity_id == case.identity and account.id == case.account
+        return patient_setup.PatientSetupBinding(account_id=account.id,
+            selection=SchedulingSelection.model_validate(dict(box_id=case.box, owner_id=case.owner,
+                practice_id=account.practice_id, expected_actor_id=account.actor_id,
+                practitioner_id=account.practitioner_id, location_id=account.location_id,
+                appointment_type_id=account.appointment_type_id)),
+            binding_sha256="a" * 64, connected_at=connected, grant_sha256="b" * 64)
+
+    with patient_setup.install_binding_reader(binding):
+        observed = preview(fixture)
+        saved = confirm(fixture, confirmation(fixture, observed))
+        assert saved["status"] == "saved" and not saved["source_withheld"]
+        case.patient = saved["mapping"]["mapping_id"]
+        patient = session.get(SchedulingPatientAccount, case.patient)
+        assert patient is not None
+        case.selection = case.selection.model_copy(update={"patient_id": UUID(patient.patient_id)})
+        yield signed, case
+
+
+@pytest.fixture
+def signed_case(session, signed_patient_case):
+    signed, case = signed_patient_case
     now = datetime.now(UTC)
     original = operation(case.selection).intent
     assert original.slot is not None
@@ -112,7 +158,7 @@ def test_signed_execution_and_explicit_calendar_read_preserve_same_effect(sessio
         return signed.client.post(case.path, headers=case.headers, json=body)
 
     first = request(case.body)
-    assert first.status_code == 200 and first.headers["cache-control"] == "no-store"
+    assert first.status_code == 200 and first.headers["cache-control"] == "no-store", first.json()
     saved = first.json()
     assert (
         saved["appointment_saved"]

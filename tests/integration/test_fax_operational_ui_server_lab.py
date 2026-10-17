@@ -7,6 +7,7 @@ execution adapter or PDF parser is replaced by a frontend mock.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -15,29 +16,31 @@ from types import SimpleNamespace
 from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
+import httpx
+from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from tests.integration import test_fax_inbound_source_api as source_fixture
-
-from cosmas_os.application import workspace as ws,model_work as work,provider_team as team,fax_inbound as fax_ledger
-from cosmas_os.adapters.gpt41 import _context
-from cosmas_os.fax_source_models import FaxInboundSourceReview
-from cosmas_os.models import ModelWorkAdmission,EncounterWorkspace
-from tests.integration.test_efax_inbound_source_ui_server_lab import invented_pdf
 from tests.helpers.task_brief import REQUIREMENTS
-from pydantic import SecretStr
-import httpx
+from tests.integration import test_fax_inbound_source_api as source_fixture
+from tests.integration.test_efax_inbound_source_ui_server_lab import invented_pdf
+
+from cosmas_os.adapters.gpt41 import _context
+from cosmas_os.application import fax_inbound as fax_ledger
+from cosmas_os.application import model_work as work
+from cosmas_os.application import provider_team as team
+from cosmas_os.application import workspace as ws
 from cosmas_os.config import settings
 from cosmas_os.fax_inbound_models import (
     FaxInboundAttempt,
     FaxInboundOutcome,
 )
-from cosmas_os.models import Decision, Operation, Ticket
+from cosmas_os.fax_source_models import FaxInboundSourceReview
+from cosmas_os.models import Decision, EncounterWorkspace, ModelWorkAdmission, Operation, Ticket
 
 managed_case = source_fixture.managed_case
 inbox = source_fixture.inbox
 source_http = source_fixture.source_http
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -114,10 +117,22 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                 from cosmas_os.models import AppointmentObservation
                 prior=session.get(AppointmentObservation,old.appointment_id)
                 appointment=AppointmentObservation(box_id=f.box,patient_link_id=prior.patient_link_id,external_id=uuid4().hex,source="synthetic",start_at=prior.start_at,patient_label=f"Invented {persona} fax encounter round {iteration}")
-                session.add(appointment);session.commit();f.wid=ws.create(session,f.box,f.owner,appointment.id,"fax-ui-next:"+uuid4().hex)["id"]
+                session.add(appointment)
+                session.commit()
+                f.wid = ws.create(
+                    session, f.box, f.owner, appointment.id, "fax-ui-next:" + uuid4().hex
+                )["id"]
         with Session(f.case.engine) as session:
             team_snapshot=team.read(session,f.box,f.owner)
-            if team_snapshot["revision"]==0:team_snapshot=team.save(session,f.box,f.owner,expected=0,key="fax-ui-team",configuration=team.default_configuration())
+            if team_snapshot["revision"] == 0:
+                team_snapshot = team.save(
+                    session,
+                    f.box,
+                    f.owner,
+                    expected=0,
+                    key="fax-ui-team",
+                    configuration=team.default_configuration(),
+                )
         episode = SimpleNamespace(id=str(uuid4()), persona=persona, iteration=iteration,
             operation_id=None, provider_before=len(f.wire), credentials_before=len(f.wire),
             provider_after=None, credentials_after=None,
@@ -173,14 +188,19 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                         return self.respond(200, inspect(holder.active))
                     assert holder.active is not None
                     if self.command=="POST" and parsed.path=="/lab/revoke":
-                        size=int(self.headers.get("Content-Length","0"));body=json.loads(self.rfile.read(size));episode=cases[body["case_id"]]
+                        size = int(self.headers.get("Content-Length", "0"))
+                        body = json.loads(self.rfile.read(size))
+                        episode = cases[body["case_id"]]
                         with Session(f.case.engine) as session:
                             from cosmas_os.fax_inbound_models import FaxInboundImage
                             image=session.scalar(select(FaxInboundImage).where(FaxInboundImage.operation_id==episode.operation_id))
                             fax_ledger.revoke(session,f.box,f.owner,image.grant_id,key="ui-revoke:"+uuid4().hex)
                         return self.respond(200,inspect(episode))
                     if self.command=="POST" and parsed.path=="/lab/work":
-                        size=int(self.headers.get("Content-Length","0"));body=json.loads(self.rfile.read(size));episode=cases[body["case_id"]];return self.respond(200,run_tasks(episode,body.get("handoff_id")))
+                        size = int(self.headers.get("Content-Length", "0"))
+                        body = json.loads(self.rfile.read(size))
+                        episode = cases[body["case_id"]]
+                        return self.respond(200, run_tasks(episode, body.get("handoff_id")))
                     assert parsed.path in {"/provider-team", "/workspaces"} or parsed.path.startswith(("/provider-team/", "/connections/", "/vendor-settings", "/fax-inbound", "/workspaces/"))
                     assert not parsed.query
                     headers = {name: value for name, value in self.headers.items()
@@ -213,29 +233,62 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
         context=_context(claim.envelope["context"])
         selected=next(p for p in context.sources if p.label=="Received practice fax passage (human reviewed)")
         def provider(request):
-            body=json.loads(request.content);assert body["store"] is False
+            body = json.loads(request.content)
+            assert body["store"] is False
             model_rounds.append({"workspace_id":claim.workspace_id,"role":context.role})
             if not any(m["role"]=="tool" for m in body["messages"]):
                 handle=next(p for p in claim.envelope["tool_selection"]["sources"] if p["entry_id"]==selected.entry_id)
-                msg={"role":"assistant","content":None,"tool_calls":[{"id":"read_fax","type":"function","function":{"name":"read_selected_source","arguments":json.dumps({k:handle[k] for k in ("entry_id","revision","sha256")})}}]};finish="tool_calls"
+                msg = {
+                    "role": "assistant",
+                    "content": None,
+                    "tool_calls": [
+                        {
+                            "id": "read_fax",
+                            "type": "function",
+                            "function": {
+                                "name": "read_selected_source",
+                                "arguments": json.dumps(
+                                    {k: handle[k] for k in ("entry_id", "revision", "sha256")}
+                                ),
+                            },
+                        }
+                    ],
+                }
+                finish = "tool_calls"
             else:
-                tool=json.loads(next(m["content"] for m in body["messages"] if m["role"]=="tool"));assert tool["data"]["content"]==selected.content and tool["receipt"]["actor_agent_id"]!=f.owner
+                tool = json.loads(
+                    next(m["content"] for m in body["messages"] if m["role"] == "tool")
+                )
+                assert (
+                    tool["data"]["content"] == selected.content
+                    and tool["receipt"]["actor_agent_id"] != f.owner
+                )
                 if context.role=="chief":
                     content={"answer":"Preparing a private fax draft.","source_ids":[selected.entry_id],"handoffs":[{"role":"scribe","intended_role":"scribe","brief":"Organize the reviewed fax into a private draft; preserve uncertainty.","requirements":REQUIREMENTS}]}
-                    if claim.envelope["baseline"]["flags"]["work_status"]:content["intent"]="conversation"
+                    if claim.envelope["baseline"]["flags"]["work_status"]:
+                        content["intent"] = "conversation"
                 else:
                     needs=["Who owns the next step and when should it be reviewed?"]
                     marker="Human-requested revision of the prior private draft\n"
-                    if marker in context.question:needs.append(json.loads(context.question.split(marker,1)[1].split("\nTreat the quoted prior draft",1)[0])["feedback"])
+                    if marker in context.question:
+                        needs.append(
+                            json.loads(
+                                context.question.split(marker, 1)[1].split(
+                                    "\nTreat the quoted prior draft", 1
+                                )[0]
+                            )["feedback"]
+                        )
                     content={"excerpts":[{"source_id":selected.entry_id,"quote":selected.content}],"needs_from_clinician":needs}
-                msg={"role":"assistant","content":json.dumps(content)};finish="stop"
+                msg = {"role": "assistant", "content": json.dumps(content)}
+                finish = "stop"
             return httpx.Response(200,json={"model":"gpt-4.1","usage":{"prompt_tokens":100,"completion_tokens":20},"choices":[{"finish_reason":finish,"message":msg}]})
         return original_dispatch(claim,session_factory=lambda:Session(f.case.engine),transport=httpx.MockTransport(provider))
     def run_tasks(episode,hid=None):
         for _ in range(3):
             with Session(f.case.engine) as session:
                 rows=list(session.scalars(select(ModelWorkAdmission).where(ModelWorkAdmission.workspace_id==episode.wid,ModelWorkAdmission.state=="reserved").order_by(ModelWorkAdmission.admitted_at)))
-                if not rows:break
+                if not rows:
+                    break
                 row=rows[0]
                 if hid:
                     h=next(h for h in ws.read(session,f.box,f.owner,episode.wid)["handoffs"] if h["id"]==hid)
@@ -243,8 +296,10 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                 claim=work.claim(session,f.box,f.owner,row.id)
             assert claim is not None
             result=dispatch(claim)
-            with Session(f.case.engine) as session:work.settle(session,claim,result)
-            if hid:break
+            with Session(f.case.engine) as session:
+                work.settle(session, claim, result)
+            if hid:
+                break
         return read_workspace()
     monkeypatch.setattr(work,"dispatch_claim",dispatch)
     start()

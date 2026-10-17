@@ -2,8 +2,9 @@
 
 import json
 import os
-import subprocess
 import select as io_select
+import shutil
+import subprocess
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,8 +24,8 @@ from fastapi.testclient import TestClient
 from pydantic import SecretStr
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
-from tests.integration.test_scheduling_patient_setup import case as patient_case
 from tests.integration import test_scheduling_patient_setup as patient_fixture_module
+from tests.integration.test_scheduling_patient_setup import case as patient_case
 from tests.unit.test_hosted_workspace_config import hosted
 
 from cosmas_os.adapters.scheduling import HttpSchedulingAvailability
@@ -53,7 +54,7 @@ from cosmas_os.scheduling_patient_models import (
     SchedulingPatientSetupRequest,
 )
 
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 ORIGIN = "https://workspace.example.invalid"
 
@@ -87,7 +88,9 @@ class SignedWriterReceiver:
             self.remote_appointment = ready["remote_appointment"]
             self.resources = {"practitioner_id": ready["practitioner"], "location_id": ready["location"], "appointment_type_id": ready["appointment_type"]}
         except BaseException:
-            self.process.kill(); self.process.wait(timeout=5); self.stderr.close()
+            self.process.kill()
+            self.process.wait(timeout=5)
+            self.stderr.close()
             raise
 
     def read(self, timeout=30):
@@ -117,9 +120,11 @@ class SignedWriterReceiver:
             self.closed = self.process.returncode == 0
         finally:
             if self.process.poll() is None:
-                self.process.kill(); self.process.wait(timeout=5)
+                self.process.kill()
+                self.process.wait(timeout=5)
             for pipe in (self.process.stdin, self.process.stdout):
-                if pipe is not None: pipe.close()
+                if pipe is not None:
+                    pipe.close()
             self.stderr.close()
 
 

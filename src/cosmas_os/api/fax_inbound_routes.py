@@ -199,7 +199,7 @@ def register(app, get_session, identity_dependency, *, execution_dependency, rea
             if response.status_code == 200:
                 import json
 
-                result = json.loads(response.body)
+                result = json.loads(bytes(response.body))
                 if model is not schema.Resolve:
                     result["public_request_sha256"] = ledger.commitment(
                         command.model_dump(mode="json")

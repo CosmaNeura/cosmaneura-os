@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,7 +24,7 @@ from cosmas_os.practice_access_models import (
 
 case = existing.case
 REPO = Path(__file__).resolve().parents[2]
-NODE = "/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+NODE = shutil.which("node") or "node"
 
 
 def test_signed_onboarding_review_pause_denial_restore_and_reopen(case, tmp_path):

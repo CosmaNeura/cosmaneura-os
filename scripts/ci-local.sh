@@ -19,7 +19,7 @@ for i in $(seq 1 45); do
 done
 
 echo "== uv sync =="
-uv sync --extra dev
+uv sync --extra dev --extra efax-inbound --extra mcp
 
 echo "== ruff =="
 uv run ruff check src tests
@@ -31,7 +31,8 @@ echo "== alembic upgrade =="
 uv run alembic upgrade head
 
 echo "== pytest =="
-uv run pytest -q
+./scripts/install-client-deps.sh
+uv run python scripts/check-backend-local.py --postgres-bin "${COSMAS_POSTGRES_BIN:-$(pg_config --bindir)}"
 
 echo "== openapi =="
 uv run python -m cosmas_os.cli dump-openapi

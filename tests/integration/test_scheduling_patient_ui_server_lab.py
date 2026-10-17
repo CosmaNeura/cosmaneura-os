@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 from contextlib import ExitStack, contextmanager
 from datetime import UTC, datetime, timedelta
@@ -47,7 +48,7 @@ from cosmas_os.scheduling_patient_models import (
     SchedulingPatientSetupRequest,
 )
 
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 ORIGIN = "https://workspace.example.invalid"
 

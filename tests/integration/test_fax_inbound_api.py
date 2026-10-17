@@ -617,8 +617,9 @@ def test_expired_exact_image_approval_refuses_without_provider_or_attempt(inbox,
 
 
 def test_database_refuses_each_missing_acquired_custody_field(inbox, monkeypatch):
-    from cosmas_os.application import fax_inbound_document as custody
     from sqlalchemy.exc import DBAPIError
+
+    from cosmas_os.application import fax_inbound_document as custody
 
     f = inbox
     original_protect = custody.protect

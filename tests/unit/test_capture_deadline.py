@@ -221,7 +221,9 @@ def test_retained_admission_stops_after_late_remote_phase(monkeypatch, phase):
         def scalar(self, statement):
             deadline.check_capture_deadline()
             from cosmas_os.models import CoreCaptureAccount
-            return account if statement.column_descriptions[0]['entity'] is CoreCaptureAccount else object()
+            from cosmas_os.private_recording_models import PrivateRecordingTransfer
+            entity = statement.column_descriptions[0]['entity']
+            return account if entity is CoreCaptureAccount else None if entity is PrivateRecordingTransfer else object()
         def commit(self):
             deadline.check_capture_deadline()
             events.append('commit')
@@ -241,9 +243,12 @@ def test_retained_admission_stops_after_late_remote_phase(monkeypatch, phase):
         def resolve_context(self, *a):
             return self.value('resolve', object())
         def resolve_binding(self, *a):
-            return self.value('binding', object())
+            return self.value('binding', SimpleNamespace(workspace_id=selected.workspace_id,
+                binding_ref='invented-binding', appointment_ref=selected.appointment_ref))
         def admit_capture(self, *a, **kwargs):
-            return self.value('admission', SimpleNamespace(session_id=session_id))
+            return self.value('admission', SimpleNamespace(session_id=session_id,
+                workspace_id=selected.workspace_id, binding_ref='invented-binding',
+                appointment_ref=selected.appointment_ref))
         def encounter_context(self, *a):
             return self.value('prep', SimpleNamespace())
         def capture_note(self, *a):

@@ -5,6 +5,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import struct
 import subprocess
 import threading
@@ -54,7 +55,7 @@ from cosmas_os.ports.core_notes import CoreTemplateReceipt
 from cosmas_os.ports.creator_review import CreatorReviewView, ProviderEncounter
 from cosmas_os.ports.scribe_capture import ScribeSessionReceipt
 
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 

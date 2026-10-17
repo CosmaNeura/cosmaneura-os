@@ -8,6 +8,7 @@ live models or outside delivery. The only model boundary is finite mock HTTP.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -46,7 +47,7 @@ managed_case = full.managed_case
 efax_http = full.efax_http
 source_http = full.source_http
 long_fax = full.long_fax
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 
