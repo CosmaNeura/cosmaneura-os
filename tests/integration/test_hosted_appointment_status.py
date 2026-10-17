@@ -5,6 +5,9 @@ from unittest.mock import Mock
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from tests.integration.test_appointment_execution_api import signed_case as _signed_case
+from tests.integration.test_appointment_execution_api import (
+    signed_patient_case as _signed_patient_case,
+)
 from tests.integration.test_hosted_appointment_proposals import (
     capture_case as _capture_case,
 )
@@ -25,6 +28,7 @@ from cosmas_os.models import ExternalIdentity, Operation
 capture_case = _capture_case
 proposal_case = _proposal_case
 signed_case = _signed_case
+signed_patient_case = _signed_patient_case
 signed_workspace = _signed_workspace
 
 
