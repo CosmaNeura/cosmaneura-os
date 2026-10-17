@@ -118,6 +118,8 @@ class Checks:
             finally:
                 record.update(exit_code=process.returncode, seconds=round(time.monotonic() - started, 3))
                 self.save()
+        print(f"{label}: exit={process.returncode} elapsed={record['seconds']}s "
+              f"timed_out={record.get('timed_out', False)}", flush=True)
         return 124 if record.get("timed_out") else process.returncode
 
 
@@ -130,6 +132,7 @@ def main() -> int:
     parser.add_argument("--sandbox-profile", type=Path, help="Optional macOS sandbox-exec profile for child commands")
     parser.add_argument("--pytest-timeout", type=int, default=1800, help="Seconds per pytest process (default: 1800)")
     parser.add_argument("--stack-dump-after", type=int, default=60, help="Pytest faulthandler timeout per test")
+    parser.add_argument("--fail-fast", action="store_true", help="Stop each pytest process on its first failure")
     args = parser.parse_args()
     if (REPO / ".env").exists() or (REPO / ".env").is_symlink():
         parser.error("Refusing a checkout containing .env; use a clean checkout")
@@ -273,6 +276,8 @@ def main() -> int:
                        "-o", f"cache_dir={folder / 'pytest-cache'}",
                        "-o", f"faulthandler_timeout={args.stack_dump_after}",
                        f"--junitxml={folder / 'pytest-junit.xml'}"]
+            if args.fail_fast:
+                command.append("--maxfail=1")
             if profile == "workspace":
                 command.extend(f"--ignore={name}" for name in (*DEPLOYMENT_TESTS, COMPACT_TEST))
             if checks.run(f"{profile}-pytest", command, args.pytest_timeout, test_env):
