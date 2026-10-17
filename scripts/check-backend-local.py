@@ -28,6 +28,22 @@ DEPLOYMENT_TESTS = (
     "tests/integration/test_scheduling_patient_runtime_privileges.py",
 )
 COMPACT_TEST = "tests/integration/test_compact_execution.py"
+SIGNED_UI_TESTS = tuple(sorted({
+    path.relative_to(REPO).as_posix()
+    for pattern in ("test_*_ui_server_lab.py", "test_*_workspace_server_lab.py")
+    for path in (REPO / "tests/integration").glob(pattern)
+}))
+SIGNED_UI_SUITES = ("signed-ui-1", "signed-ui-2", "signed-ui-3")
+
+
+def suite_selections(suite: str) -> tuple[dict[str, list[str]], tuple[str, ...]]:
+    if suite in SIGNED_UI_SUITES:
+        index = SIGNED_UI_SUITES.index(suite)
+        paths = list(SIGNED_UI_TESTS[index::len(SIGNED_UI_SUITES)])
+        if not paths:
+            raise ValueError(f"No signed UI tests belong to {suite}")
+        return selections(paths, "workspace"), ()
+    return selections([], "all"), SIGNED_UI_TESTS if suite == "backend" else ()
 
 
 def selections(paths: list[str], profile: str) -> dict[str, list[str]]:
@@ -127,6 +143,8 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tests", nargs="*", help="Repository-relative test paths or pytest node IDs")
     parser.add_argument("--profile", choices=("workspace", "deployment", "compact", "all"), default="all")
+    parser.add_argument("--suite", choices=("all", "backend", *SIGNED_UI_SUITES), default="all",
+                        help="Complete local run or disjoint CI batches; defaults to all")
     parser.add_argument("--postgres-bin", type=Path, help="Directory containing PostgreSQL tools")
     parser.add_argument("--evidence-dir", type=Path, help="New directory; defaults to an owned system-temp directory")
     parser.add_argument("--sandbox-profile", type=Path, help="Optional macOS sandbox-exec profile for child commands")
@@ -139,7 +157,12 @@ def main() -> int:
     if args.pytest_timeout <= 0 or args.stack_dump_after <= 0:
         parser.error("Timeouts must be positive")
     try:
-        groups = selections(args.tests, args.profile)
+        if args.suite != "all" and (args.tests or args.profile != "all"):
+            raise ValueError("CI suites cannot be combined with test paths or --profile")
+        if args.suite == "all":
+            groups, ignored = selections(args.tests, args.profile), ()
+        else:
+            groups, ignored = suite_selections(args.suite)
     except ValueError as error:
         parser.error(str(error))
     discovered = shutil.which("pg_ctl")
@@ -192,7 +215,7 @@ def main() -> int:
         if key in os.environ:
             env[key] = os.environ[key]
     checks = Checks(output, env, prefix)
-    checks.report.update(repository=str(REPO), python=sys.executable, profile=args.profile,
+    checks.report.update(repository=str(REPO), python=sys.executable, profile=args.profile, suite=args.suite,
                          selections=groups, postgres={"host": "127.0.0.1", "port": port,
                                                       "owner": owner, "data": str(data)})
     result = 1
@@ -279,7 +302,7 @@ def main() -> int:
             if args.fail_fast:
                 command.append("--maxfail=1")
             if profile == "workspace":
-                command.extend(f"--ignore={name}" for name in (*DEPLOYMENT_TESTS, COMPACT_TEST))
+                command.extend(f"--ignore={name}" for name in (*DEPLOYMENT_TESTS, COMPACT_TEST, *ignored))
             if checks.run(f"{profile}-pytest", command, args.pytest_timeout, test_env):
                 result = 1
     except (Exception, KeyboardInterrupt) as error:

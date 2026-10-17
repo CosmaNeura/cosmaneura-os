@@ -38,9 +38,13 @@ jobs:
         run: uv run pyright src
 
   python-tests:
-    name: python-tests-migrate
+    name: python-tests-migrate (${{ matrix.suite }})
     runs-on: ubuntu-latest
     timeout-minutes: 90
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [backend, signed-ui-1, signed-ui-2, signed-ui-3]
     services:
       postgres:
         image: postgres:16.9
@@ -85,21 +89,24 @@ jobs:
       - name: Install signed UI integration dependencies
         run: ./scripts/install-client-deps.sh
       - name: Pytest
-        run: uv run python scripts/check-backend-local.py --postgres-bin /usr/lib/postgresql/16/bin --pytest-timeout 3600 --stack-dump-after 300 --fail-fast --evidence-dir "${RUNNER_TEMP}/cosmabot-backend-checks"
+        run: uv run python scripts/check-backend-local.py --suite "${{ matrix.suite }}" --postgres-bin /usr/lib/postgresql/16/bin --pytest-timeout 3600 --stack-dump-after 300 --fail-fast --evidence-dir "${RUNNER_TEMP}/cosmabot-backend-checks"
       - name: Upload backend test evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: backend-test-evidence
+          name: backend-test-evidence-${{ matrix.suite }}
           path: |
             ${{ runner.temp }}/cosmabot-backend-checks/*-pytest.log
             ${{ runner.temp }}/cosmabot-backend-checks/*/pytest-junit.xml
           if-no-files-found: ignore
       - name: Demo ArtifactChase
+        if: matrix.suite == 'backend'
         run: uv run python -m cosmas_os.cli demo-artifact-chase
       - name: OpenAPI dump
+        if: matrix.suite == 'backend'
         run: uv run python -m cosmas_os.cli dump-openapi
       - name: Upload OpenAPI
+        if: matrix.suite == 'backend'
         uses: actions/upload-artifact@v4
         with:
           name: openapi-json

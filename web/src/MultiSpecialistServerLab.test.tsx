@@ -11,7 +11,7 @@ const util='node:util';const {transferableAbortController}=await import(/* @vite
 const environment=(globalThis as typeof globalThis&{process?:{env:Record<string,string|undefined>}}).process?.env;
 const base=environment?.COSMAS_MULTI_LAB_URL;
 const realFetch=globalThis.fetch.bind(globalThis),pending=new Set<Promise<Response>>(),abortBridges:(()=>void)[]=[];
-type Trial={persona:string;round:number;workspace_id:string;steps:{name:string;elapsed_ms:number}[];wire:{path:string;status:number|null}[];passed:boolean;failure?:string};
+type Trial={persona:string;round:number;workspace_id:string;steps:{name:string;elapsed_ms:number}[];wire:{path:string;method:string;status:number|null;aborted?:boolean}[];passed:boolean;failure?:string};
 const trials:Trial[]=[];let active:Trial|undefined,root:Root,host:HTMLDivElement,identity:AuthenticatedWorkspaceIdentity,wid:string,noteBefore:string,sourcesBefore:string;
 const note=(w:Workspace)=>JSON.stringify(w.note),sources=(w:Workspace)=>JSON.stringify(w.entries.filter(e=>['scratchpad','evidence'].includes(e.kind)));
 async function wait(check:()=>void){for(let i=0;i<3000;i++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));try{check();done=true;}catch{}});if(done)return;}check();}
@@ -38,7 +38,7 @@ async function review(h:ReviewableHandoff,feedback:string){
 beforeEach(()=>{window.history.replaceState(null,'',window.location.pathname+window.location.search);if(!base)return;vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base);vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
  const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);if(url.origin!==base)throw new Error('Synthetic test permits only its own loopback bridge.');
  let native=init;if(init?.signal){const source=init.signal,target=transferableAbortController(),abort=()=>target.abort(source.reason);source.addEventListener('abort',abort,{once:true});if(source.aborted)abort();abortBridges.push(()=>source.removeEventListener('abort',abort));native={...init,signal:target.signal};}
- const owner=active,transport=realFetch(input,native);pending.add(transport);try{const r=await transport;owner?.wire.push({path:url.pathname,status:r.status});return r;}catch(e){owner?.wire.push({path:url.pathname,status:null});throw e;}finally{pending.delete(transport);}
+ const owner=active,method=init?.method??'GET',transport=realFetch(input,native);pending.add(transport);try{const r=await transport;owner?.wire.push({path:url.pathname,method,status:r.status});return r;}catch(e){owner?.wire.push({path:url.pathname,method,status:null,aborted:init?.signal?.aborted===true});throw e;}finally{pending.delete(transport);}
  });host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(async()=>{if(!base)return;await act(async()=>root.unmount());if(pending.size)await Promise.allSettled([...pending]);abortBridges.splice(0).forEach(fn=>fn());host.remove();active=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
 it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitioner',round:1},{persona:'physician_assistant',round:1},{persona:'physician',round:2},{persona:'nurse_practitioner',round:2},{persona:'physician_assistant',round:2}])('$persona round $round gives Chief Scribe sources then reviews four actual specialist loops',async({persona,round})=>{
@@ -64,7 +64,9 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
  const r=await realFetch(`${base}/lab/inspect?workspace_id=${wid}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(r.status).toBe(200);const evidence=await r.json() as {admissions:{state:string;role:string}[];tool_receipts:{actor_id:string;human_id:string;detail:Record<string,unknown>}[];dispatches:{started_s:number;ended_s:number;role:string}[]};
  expect(evidence.admissions).toHaveLength(11);expect(evidence.admissions.every(a=>a.state==='completed')).toBe(true);expect(evidence.tool_receipts).toHaveLength(25);expect(evidence.tool_receipts.every(r=>r.actor_id!==r.human_id)).toBe(true);
  const parallel=evidence.dispatches.filter(d=>['research','visit_prep','follow_up'].includes(d.role)).slice(0,3);expect(Math.max(...parallel.map(d=>d.started_s))).toBeLessThan(Math.min(...parallel.map(d=>d.ended_s)));
- const reread=await read();for(const h of accepted)expect((reread.handoffs!.find(x=>x.id===h.id) as ReviewableHandoff).review).toMatchObject(h.review!);expect(trial.wire.every(x=>x.status===200)).toBe(true);step('fresh_read_exact_acceptance_and_custody');trial.passed=true;
+ const reread=await read();for(const h of accepted)expect((reread.handoffs!.find(x=>x.id===h.id) as ReviewableHandoff).review).toMatchObject(h.review!);
+ // Navigation and refresh may cancel obsolete reads; every command and completed read must succeed.
+ expect(trial.wire.filter(x=>x.status!==200&&!(x.method==='GET'&&x.status===null&&x.aborted))).toEqual([]);step('fresh_read_exact_acceptance_and_custody');trial.passed=true;
  }catch(e){trial.failure=(e instanceof Error?e.message:String(e))+'\nDOM: '+host.textContent;throw e;}
 },60000);
 afterAll(async()=>{if(!base||!environment?.COSMAS_MULTI_LAB_REPORT)return;const fs='node:fs/promises';const {writeFile}=await import(/* @vite-ignore */fs) as {writeFile:(p:string,s:string)=>Promise<void>};await writeFile(environment.COSMAS_MULTI_LAB_REPORT,JSON.stringify({schema:'cosmabot.multispecialist-signed-product-ui.v1',synthetic_only:true,source_adapter:'actual v6 with offline MockTransport',personas_are_scripted_not_real_users:true,trials,total:trials.length,completed:trials.filter(t=>t.passed).length},null,2)+'\n');});
