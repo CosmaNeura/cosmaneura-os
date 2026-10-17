@@ -7,6 +7,7 @@ execution adapter or PDF parser is replaced by a frontend mock.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -29,7 +30,7 @@ from cosmas_os.models import Decision, Operation, Ticket
 
 managed_case = signed_fixture.managed_case
 inbox = signed_fixture.inbox
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -144,7 +145,7 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                     assert parsed.path == "/provider-team/identity" or parsed.path.startswith("/fax-inbound")
                     assert not parsed.query
                     headers = {name: value for name, value in self.headers.items()
-                        if name.lower() in {"authorization", "x-cosmas-draft-recovery", "x-cosmas-fax-inbound",
+                        if name.lower() in {"authorization", "x-cosmas-draft-recovery", "x-cosmas-private-draft", "x-cosmas-fax-inbound",
                             "x-cosmas-team-contract", "accept", "content-type"}}
                     if self.command == "GET":
                         response = holder.client.get(self.path, headers=headers)

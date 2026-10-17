@@ -8,6 +8,7 @@ live models or outside delivery. The only model boundary is finite mock HTTP.
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
@@ -46,7 +47,7 @@ managed_case = full.managed_case
 efax_http = full.efax_http
 source_http = full.source_http
 long_fax = full.long_fax
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -70,7 +71,7 @@ def test_six_signed_fax_chief_human_revision_acceptance_graphs(long_fax, monkeyp
         result.pop("model_observed_at", None)
         return result
 
-    def dispatch(claim):
+    def dispatch(claim, **_dependencies):
         episode = holder.active
         assert episode is not None
         assert claim.workspace_id == episode.wid
@@ -347,10 +348,10 @@ def test_six_signed_fax_chief_human_revision_acceptance_graphs(long_fax, monkeyp
                                 assert len(cases) == 6
                                 full.revoke(f)
                             return self.respond(200, inspect(episode))
-                        assert not parsed.query and (parsed.path.startswith("/provider-team") or parsed.path == "/workspaces"
+                        assert not parsed.query and (parsed.path.startswith("/provider-team") or parsed.path in {"/workspaces", "/workspaces/private-drafts", "/workspaces/private-drafts/summary"}
                             or parsed.path.startswith("/workspaces/" + episode.wid))
                         headers = {name: value for name, value in self.headers.items() if name.lower() in {
-                            "authorization", "x-cosmas-draft-recovery", "x-cosmas-team-contract",
+                            "authorization", "x-cosmas-draft-recovery", "x-cosmas-private-draft", "x-cosmas-team-contract",
                             "x-cosmas-model-contract", "x-cosmas-handoff-review", "accept", "content-type"}}
                         if self.command == "GET":
                             response = f.client.get(self.path, headers=headers)

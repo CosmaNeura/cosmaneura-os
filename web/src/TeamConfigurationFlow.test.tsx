@@ -99,7 +99,7 @@ it('rechecks after a temporary lock discards an automatic result and still requi
   await act(async()=>root.render(<Harness/>));
   await wait(()=>expect(teamSetupApi.rehearse).toHaveBeenCalledTimes(2));
   expect(vi.mocked(teamSetupApi.rehearse).mock.calls[1][1]).toEqual(request);
-  expect(input('I reviewed these team changes').checked).toBe(false);
+  await wait(()=>expect(input('I reviewed these team changes').checked).toBe(false));
   expect(button('Save team changes').disabled).toBe(true);expect(review).toBeNull();expect(saved).toBeNull();
   await act(async()=>input('I reviewed these team changes').click());
   await click('Save team changes');expect(saved?.draft).toEqual(latest);expect(saved?.review).toEqual(review);

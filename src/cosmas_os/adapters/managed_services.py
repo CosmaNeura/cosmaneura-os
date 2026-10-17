@@ -188,7 +188,7 @@ class ManagedServices:
             transport_factory=self._profile.transport_factory)
 
     def fax_inbound_execution(self, identity_current: CurrentIdentity) -> FaxInboundExecution:
-        if not self.has_credentials:
+        if not self.has_credentials or self._profile.credentials is None:
             raise VendorError("connector_disabled")
         provider = self._profile.credentials
         def enabled():

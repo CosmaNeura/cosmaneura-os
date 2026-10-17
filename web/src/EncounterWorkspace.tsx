@@ -453,9 +453,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const run=()=>{
       clearTimeout(timer);
       if(!flight){
-        if(current===generation.current)setRecoveryState("saving");
+        // Saving the current draft cannot verify a failed target recovery read.
+        if(current===generation.current)setRecoveryState(previous=>previous==="failed"?previous:"saving");
         flight=Promise.all(writes.map(write=>write())).then(()=>{
-          if(!canceled&&current===generation.current)setRecoveryState("saved");
+          if(!canceled&&current===generation.current)setRecoveryState(previous=>previous==="failed"?previous:"saved");
         }).catch(error=>{if(!canceled&&current===generation.current)setRecoveryState("failed");throw error;});
       }
       return flight;
@@ -1116,9 +1117,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     // A transient parent write failure disables editing, but must not replace this scoped controller.
     if (!accountScopeReady || !editorJournal || !validRecoveryScope(editorScope)) return null;
     return {journal:editorJournal, recoveryScope:editorScope, async authorize() {
-      const current = generation.current;
       const latest = await workspaceApi.team(authenticated);
-      if (current !== generation.current || requireRecoveryScope(latest) !== editorScope ||
+      // This controller follows the owner/API scope across encounter navigation.
+      // A notebook change does not revoke an in-flight Home recovery check.
+      if (requireRecoveryScope(latest) !== editorScope ||
           journal.current?.value !== editorJournal) throw new WorkspaceApiError(403);
     }};
   }, [authenticated, editorJournal, editorScope, accountScopeReady]);

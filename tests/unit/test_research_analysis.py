@@ -68,7 +68,8 @@ class MemoryProofs:
 
 def fixture(count=1, *, excerpt="Invented public evidence."):
     s = MemoryProofs()
-    w = NS(id=str(uuid4()), box_id=str(uuid4()), owner_id=str(uuid4()), revision=10)
+    w = NS(id=str(uuid4()), box_id=str(uuid4()), owner_id=str(uuid4()),
+           appointment_id=str(uuid4()), revision=10)
     bot = NS(agent_id=str(uuid4()))
     settings = {"role": "research", "instance_id": str(uuid4()), "name": "Research",
                 "enabled": True, "response_style": "brief", "include_notebook": True,
@@ -142,6 +143,7 @@ def row_and_context(case):
              kind="conversation", request_body=deepcopy(command), source_sha256=work.source_digest(context),
              prepared_envelope=GPT41Connector(lambda: pytest.fail("credential access")).prepare(context),
              request_hash=work.conversation_request_hash(**{k: v for k, v in arguments(command).items() if k != "key"}))
+    row.envelope_contract = row.prepared_envelope["contract"]
     return row, context
 
 
@@ -152,7 +154,8 @@ def gates(monkeypatch, case):
     monkeypatch.setattr(work.ws, "_workspace", lambda *_args, **_kwargs: w)
     monkeypatch.setattr(work.team, "active_bot", lambda *_args, **_kwargs: (version, bot, settings))
     monkeypatch.setattr(work.team, "runtime_settings", NS(workspace_llm_available=True,
-                        workspace_research_available=True, workspace_research_io_enabled=False))
+                        workspace_research_available=True, workspace_research_io_enabled=False,
+                        workspace_agent_tools_enabled=False))
     monkeypatch.setattr(work.ws, "read", lambda *_args, **_kwargs: pytest.fail("whole workspace read"))
     return s, w
 

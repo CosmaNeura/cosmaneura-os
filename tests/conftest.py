@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from cosmas_os.adapters.local import FakeNotifyAdapter, InjectableClock, LocalBlobAdapter
@@ -22,6 +23,26 @@ def engine():
     eng = make_engine(url)
     metadata.create_all(eng)
     yield eng
+
+
+@pytest.fixture(autouse=True)
+def owned_database_isolation(request):
+    """Committed worker tests must not consume another test's pending work."""
+    token = os.environ.get("COSMAS_TEST_DATABASE_TOKEN")
+    if not token or "engine" not in request.fixturenames:
+        return
+    eng = request.getfixturevalue("engine")
+    if eng.url.host != "127.0.0.1" or eng.url.database != "w1a_local_checks":
+        raise RuntimeError("Test isolation requires the owned local database")
+    with eng.begin() as connection:
+        marker = connection.scalar(text(
+            "SELECT shobj_description(oid, 'pg_database') FROM pg_database WHERE datname=current_database()"
+        ))
+        if marker != "cosmas-local-workspace:" + token:
+            raise RuntimeError("Test database ownership marker does not match")
+        tables = ", ".join(eng.dialect.identifier_preparer.format_table(table)
+                           for table in metadata.sorted_tables)
+        connection.exec_driver_sql("TRUNCATE TABLE " + tables + " RESTART IDENTITY CASCADE")
 
 
 @pytest.fixture

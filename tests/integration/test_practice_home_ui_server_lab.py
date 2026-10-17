@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -26,7 +27,7 @@ from cosmas_os.practice_setup_models import PracticeSetupProfile
 
 solo = setup_fixture.solo
 REPO = Path(__file__).resolve().parents[2]
-NODE = "/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+NODE = shutil.which("node") or "node"
 
 
 def test_real_solo_setup_team_private_note_save_reopen(solo, monkeypatch, tmp_path):

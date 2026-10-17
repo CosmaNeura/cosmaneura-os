@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 import threading
 import time
@@ -42,7 +43,7 @@ from cosmas_os.models import (
     PatientLink,
 )
 
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -130,7 +131,8 @@ def test_actual_signed_multi_specialist_ui_completes_six_revision_and_acceptance
         context = _context(claim.envelope["context"])
         selection = claim.envelope["tool_selection"]
         started = time.monotonic()
-        assert claim.envelope["contract"] == "cosmas-gpt41-prepared.v6"
+        assert claim.envelope["contract"] == (
+            "cosmas-gpt41-prepared.v7" if context.role == "research" else "cosmas-gpt41-prepared.v6")
         packet_sources = [
             p for p in context.sources if p.label.startswith("Reviewed Scribe snapshot ·")
         ]

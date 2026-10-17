@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -47,7 +48,7 @@ from cosmas_os.ports.google_calendar import (
     GoogleCalendarRead,
 )
 
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 

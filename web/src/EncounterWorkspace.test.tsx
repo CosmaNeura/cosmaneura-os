@@ -75,6 +75,30 @@ describe("private encounter workspace", () => {
     await act(async () => button!.click());
   }
   const settings = () => settingsNavigation(container);
+  it.each([false,true])('keeps account recovery scoped to the owner after notebook navigation (scope changed: %s)',async scopeChanged=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    let release!:(value:ProviderTeam)=>void,held=false;
+    vi.mocked(workspaceApi.team).mockImplementation(async(_identity,signal)=>{
+      if(!signal&&!held){held=true;return new Promise(resolve=>{release=resolve;});}
+      return structuredClone(team);
+    });
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    await vi.waitFor(async()=>{await act(async()=>{});expect(held).toBe(true);});
+    await click('Visits and notes');
+    await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+    expect(container.querySelector('#team-notebook')).not.toBeNull();
+    await act(async()=>release({...structuredClone(team),recovery_scope:(scopeChanged?'b':'a').repeat(64)}));
+    if(scopeChanged){
+      expect(container.querySelector('#team-notebook')).toBeNull();
+      expect(container.textContent).toContain('Workspace access is unavailable');
+    }else{
+      expect(container.querySelector('#team-notebook')).not.toBeNull();
+      expect(container.textContent).not.toContain('Workspace access is unavailable');
+    }
+  });
   it('keeps saved recordings available on Home after visit catalog navigation and withholds stale list completions',async()=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
     const recording:PrivateRecordingSnapshot={recordingId:modelUuid(901),title:'Invented saved recording',phase:'sealed',elapsedSeconds:19,recordedChunks:2,recordedBytes:608088,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};

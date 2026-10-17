@@ -9,6 +9,7 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -31,7 +32,7 @@ from cosmas_os.ports.vendor_connectors import digest
 managed_case = source_fixture.managed_case
 efax_http = source_fixture.efax_http
 source_http = source_fixture.source_http
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -217,7 +218,7 @@ def test_six_signed_manual_passage_reviews_with_exact_encrypted_restart_recovery
                         f.path, f.path + "/resolve", "/efax-inbound/resolve"}
                     assert parsed.path in allowed
                     headers = {name: value for name, value in self.headers.items() if name.lower() in {
-                        "authorization", "x-cosmas-draft-recovery", "x-cosmas-efax-inbound",
+                        "authorization", "x-cosmas-draft-recovery", "x-cosmas-private-draft", "x-cosmas-efax-inbound",
                         "x-cosmas-team-contract", "x-cosmas-model-contract", "accept", "content-type"}}
                     if parsed.path == "/provider-team/identity":
                         assert self.command == "GET" and self.headers.get("X-Cosmas-Team-Contract") == "2"

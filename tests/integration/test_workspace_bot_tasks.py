@@ -29,8 +29,11 @@ def install(f):
 
 
 def jot(f, expected=1, content="Invented clinician scratch notes"):
-    return ws.append(f.session, f.box, f.actor, f.workspace["id"], expected=expected,
-                     key=str(uuid4()), kind="scratchpad", content=content)
+    result = ws.append(f.session, f.box, f.actor, f.workspace["id"], expected=expected,
+                       key=str(uuid4()), kind="scratchpad", content=content)
+    # append committed the edit; release its readback lock before an API request.
+    f.session.rollback()
+    return result
 
 
 def sourced_port(f):

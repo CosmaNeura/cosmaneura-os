@@ -12,6 +12,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
+from typing import NoReturn
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
@@ -61,7 +62,7 @@ def commitment(value):
     ).hexdigest()
 
 
-def fail(code="fax_inbound_unavailable", status=409):
+def fail(code="fax_inbound_unavailable", status=409) -> NoReturn:
     raise ws.WorkspaceError(code, status)
 
 

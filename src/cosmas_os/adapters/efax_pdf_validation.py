@@ -57,7 +57,7 @@ async def validate_received_pdf(document: bytes) -> int:
         raise Failure("document_needs_human")
     worker = Path(__file__).with_name("_efax_pdf_worker.py")
     process = None
-    monitor = None
+    monitor: asyncio.Task[None] | None = None
     try:
         async with asyncio.timeout(5):
             process = await asyncio.create_subprocess_exec(

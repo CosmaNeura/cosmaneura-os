@@ -433,7 +433,7 @@ run "workloads_reject_skipped_database_preparation" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -480,7 +480,7 @@ run "workloads_reject_attestation_for_different_image" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -507,7 +507,7 @@ run "workloads_reject_attestation_for_different_box" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000099"
@@ -538,7 +538,7 @@ run "workloads_reject_pending_production_clerk" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -564,7 +564,7 @@ run "workloads_reject_missing_web_digest" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -591,7 +591,7 @@ run "workloads_reject_unapproved_web_origin" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -617,7 +617,7 @@ run "workloads_reject_missing_custom_domain" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -644,7 +644,7 @@ run "workloads_create_digest_pinned_https_web_host" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -757,7 +757,7 @@ run "workloads_create_custom_domain_only_after_dns_gate" {
     runner_live_network_evidence_reference = "network-live:custom-domain-test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -796,7 +796,7 @@ run "workloads_stage_custom_domain_before_dns_gate" {
     runner_live_network_evidence_reference = "network-live:custom-domain-test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -884,7 +884,7 @@ run "workloads_reject_missing_alert_contact" {
     alert_contact_email                    = null
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -911,7 +911,7 @@ run "database_candidate_can_advance_without_replacing_live_workloads" {
     runner_live_network_evidence_reference = "network-live:upgrade:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-current"
       box_id             = "00000000-0000-4000-8000-000000000004"
@@ -1208,7 +1208,7 @@ run "eastus2_workloads_preserve_centralus_bootstrap_boundary" {
     runner_live_network_evidence_reference = "network-live:workloads:test"
     database_preparation_attestation = {
       image_digest       = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-      schema_revision    = "p43c9e7a2d15"
+      schema_revision    = jsondecode(file("release-schema.json")).schema_revision
       evidence_sha256    = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
       execution_id       = "/subscriptions/00000000-0000-4000-8000-000000000001/resourceGroups/rg-cosmas-os-beta-lab01/providers/Microsoft.App/jobs/caj-dbprep-cosmas-beta-lab01/executions/database-preparation-execution-test"
       box_id             = "00000000-0000-4000-8000-000000000004"

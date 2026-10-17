@@ -50,7 +50,7 @@ def _human(s: Session, box: str, actor: str, *, creating: bool = False) -> Princ
     return p
 
 
-def _encounter(s: Session, box: str, appointment: str, link_id: str | None = None, *, owner: str | None = None):
+def _encounter(s: Session, box: str, appointment: str | None, link_id: str | None = None, *, owner: str | None = None):
     a = s.scalar(
         select(AppointmentObservation)
         .where(

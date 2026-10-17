@@ -149,7 +149,12 @@ def test_committed_personal_patient_custody_survives_actual_logical_restore(engi
                 original = workspace.read(check, f.box, f.owner, f.wid)
                 assert original["note"] == f.before["note"] and original["entries"] == f.before["entries"]
                 assert check.scalar(text("SELECT current_user")) == url.username
-                assert check.scalar(text("SELECT datacl IS NULL FROM pg_database WHERE datname=current_database()")) is True
+                assert check.scalar(text("SELECT pg_get_userbyid(datdba)=current_user FROM pg_database WHERE datname=current_database()")) is True
+                public_grants = list(check.execute(text(
+                    "SELECT a.privilege_type, a.is_grantable FROM pg_database d "
+                    "CROSS JOIN LATERAL aclexplode(coalesce(d.datacl,acldefault('d',d.datdba))) a "
+                    "WHERE d.datname=current_database() AND a.grantee=0"
+                )))
             before = snapshot(engine)
             assert set(PATIENT_TABLES) <= set(before.tables)
             assert all(cast(int, before.tables[name]["count"]) > 0 for name in PATIENT_TABLES)
@@ -171,6 +176,12 @@ def test_committed_personal_patient_custody_survives_actual_logical_restore(engi
                 assert connection.scalar(text("SELECT EXISTS(SELECT 1 FROM pg_database WHERE datname=:name)"), {"name": clone}) is False
                 connection.execute(text(f"CREATE DATABASE {quote(clone)} TEMPLATE template0 OWNER {quote(url.username)}"))
                 created = True
+                # pg_restore without --create restores objects but not database ACLs.
+                # Preserve PUBLIC's exact source grants on this owned clone too.
+                connection.execute(text(f"REVOKE ALL PRIVILEGES ON DATABASE {quote(clone)} FROM PUBLIC"))
+                for privilege, grantable in public_grants:
+                    assert privilege in {"CONNECT", "CREATE", "TEMPORARY"} and not grantable
+                    connection.execute(text(f"GRANT {privilege} ON DATABASE {quote(clone)} TO PUBLIC"))
             pg("pg_restore", ["--exit-on-error", "--dbname", clone, str(dump)])
             restored = snapshot(clone_engine)
             assert restored == before
@@ -237,6 +248,7 @@ def test_committed_personal_patient_custody_survives_actual_logical_restore(engi
                 aggregate_sha256=before.aggregate_sha256, dump_sha256=hashlib.sha256(dump.read_bytes()).hexdigest(),
                 custody_commitment_sha256=hashlib.sha256(json.dumps(expected_custody, sort_keys=True).encode()).hexdigest(),
                 actual_dump_restore=True, full_catalog_and_data_equal=True, fresh_process_equal=True,
+                database_public_access_restored=True,
                 exact_historical_replay=True, changed_grant_masked=True, changed_restored_source_masked=True,
                 receiver_calls=len(f.port.calls),
                 immutable_delete_refused=True, changed_guard_detected=True, clinical_note_unchanged=True)

@@ -56,7 +56,10 @@ def test_tool_schemas_have_closed_arguments_without_identity_or_endpoints():
 
 @pytest.fixture
 def executor(monkeypatch):
-    reader = tools.AgentToolExecutor(cast(Session, None), cast(tools.work.ModelClaim, None))
+    claim = tools.work.ModelClaim("invented-admission", "invented-box", "invented-human",
+        "invented-workspace", "invented-dispatch", "b" * 64,
+        {"contract": tools.work.TOOL_PREPARED_CONTRACT})
+    reader = tools.AgentToolExecutor(cast(Session, None), claim)
     row = SimpleNamespace(id="invented-admission", dispatch_id="invented-dispatch", workspace_id="invented-workspace",
         agent_id="invented-agent", owner_id="invented-human", envelope_sha256="b" * 64)
     guards = []

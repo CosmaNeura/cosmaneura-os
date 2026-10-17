@@ -6,6 +6,7 @@ The UI never mocks appointmentApi or calls the execution route.
 
 import json
 import os
+import shutil
 import subprocess
 from datetime import UTC, datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -31,7 +32,7 @@ from cosmas_os.models import AppointmentReceipt, AppointmentWork, Operation
 
 capture_case = _capture_case
 proposal_case = _proposal_case
-NODE = Path("/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node")
+NODE = Path(shutil.which("node") or "node")
 REPO = Path(__file__).resolve().parents[2]
 
 

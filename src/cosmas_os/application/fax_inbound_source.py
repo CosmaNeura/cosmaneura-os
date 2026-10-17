@@ -120,7 +120,8 @@ def _document_history(s, box, owner, operation_id):
     grant = s.get(FaxInboundGrant, revision.grant_id) if revision else None
     action = s.get(ActionRevision, revision.revision_id) if revision else None
     operation = s.get(Operation, operation_id)
-    if any(row is None for row in (claim, outcome, revision, grant, action, operation)):
+    if (claim is None or outcome is None or revision is None
+        or grant is None or action is None or operation is None):
         raise ws.WorkspaceError("fax_inbound_source_unavailable", 404)
     if any((row.box_id, row.owner_id) != (box, owner) for row in (claim, outcome, revision, grant)):
         raise ws.WorkspaceError("fax_inbound_source_unavailable", 404)

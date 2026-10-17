@@ -2,6 +2,7 @@
 
 import json
 import os
+import shutil
 import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -33,7 +34,7 @@ from cosmas_os.private_recording_models import (
 
 solo = setup_fixture.solo
 REPO = Path(__file__).resolve().parents[2]
-NODE = "/Users/jw/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node"
+NODE = shutil.which("node") or "node"
 
 
 def test_private_scribe_starts_before_slow_notebook_and_reopens_encrypted_audio(solo, monkeypatch, tmp_path):

@@ -176,13 +176,16 @@ def test_expired_unadmitted_intent_requires_explicit_new_attempt(saved_case,sess
     monkeypatch.setattr(port,'admit_capture',definite)
     assert submit(saved_case,expired).status_code==409
     transfer=session.scalar(select(PrivateRecordingTransfer).where(PrivateRecordingTransfer.recording_id==body['saved_recording']['recording_id']))
-    original=transfer.request.copy();assert session.get(PrivateRecordingTransferRejection,(transfer.id,transfer.request_sha256))
+    original = transfer.request.copy()
+    assert session.get(PrivateRecordingTransferRejection, (transfer.id, transfer.request_sha256))
     assert submit(saved_case,body).status_code==409
     monkeypatch.setattr(port,'admit_capture',native)
     renewed={**body,'renew_saved_consent':True}
-    result=submit(saved_case,renewed);assert result.status_code==200,result.text
+    result = submit(saved_case, renewed)
+    assert result.status_code == 200, result.text
     assert submit(saved_case,renewed).json()==result.json()
-    session.refresh(transfer);assert transfer.request==original
+    session.refresh(transfer)
+    assert transfer.request == original
     attempts=session.scalars(select(PrivateRecordingTransferAttempt).where(PrivateRecordingTransferAttempt.transfer_id==transfer.id)).all()
     assert len(attempts)==1 and attempts[0].request['source']==original['source']
     assert attempts[0].request['attestation']!=original['attestation']
