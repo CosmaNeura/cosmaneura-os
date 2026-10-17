@@ -235,6 +235,9 @@ def main() -> int:
                 test_env["COMPACT_TEST_DATABASE_URL"] = url
                 compact_token = secrets.token_hex(16)
                 test_env["COMPACT_TEST_DATABASE_TOKEN"] = compact_token
+            if profile == "workspace":
+                workspace_token = secrets.token_hex(16)
+                test_env["COSMAS_TEST_DATABASE_TOKEN"] = workspace_token
             if checks.run(f"{profile}-createdb", [str(pg_bin / "createdb"), "-h", "127.0.0.1", "-p", str(port),
                                                   "-U", owner, "-O", database_owner, database]):
                 result = 1
@@ -248,6 +251,17 @@ def main() -> int:
                 if checks.run("compact-ownership", [str(pg_bin / "psql"), "-X", "-v", "ON_ERROR_STOP=1",
                                                      "-h", "127.0.0.1", "-p", str(port), "-U", owner,
                                                      "-d", "postgres", "-f", str(ownership_file)]):
+                    result = 1
+                    continue
+            if profile == "workspace":
+                ownership_file = output / "workspace-ownership.sql"
+                ownership_file.write_text(
+                    "COMMENT ON DATABASE w1a_local_checks IS "
+                    f"'cosmas-local-workspace:{workspace_token}';\n"
+                )
+                if checks.run("workspace-ownership", [str(pg_bin / "psql"), "-X", "-v", "ON_ERROR_STOP=1",
+                                                       "-h", "127.0.0.1", "-p", str(port), "-U", owner,
+                                                       "-d", "postgres", "-f", str(ownership_file)]):
                     result = 1
                     continue
             if checks.run(f"{profile}-migrations", [sys.executable, "-m", "alembic", "upgrade", "head"], 120, test_env):

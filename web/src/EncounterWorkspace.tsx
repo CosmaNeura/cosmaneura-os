@@ -1116,9 +1116,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     // A transient parent write failure disables editing, but must not replace this scoped controller.
     if (!accountScopeReady || !editorJournal || !validRecoveryScope(editorScope)) return null;
     return {journal:editorJournal, recoveryScope:editorScope, async authorize() {
-      const current = generation.current;
       const latest = await workspaceApi.team(authenticated);
-      if (current !== generation.current || requireRecoveryScope(latest) !== editorScope ||
+      // This controller follows the owner/API scope across encounter navigation.
+      // A notebook change does not revoke an in-flight Home recovery check.
+      if (requireRecoveryScope(latest) !== editorScope ||
           journal.current?.value !== editorJournal) throw new WorkspaceApiError(403);
     }};
   }, [authenticated, editorJournal, editorScope, accountScopeReady]);

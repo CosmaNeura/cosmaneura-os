@@ -36,7 +36,7 @@ const preserved=(w:Workspace)=>JSON.stringify({note:w.note,entries:w.entries,rev
 async function inspect():Promise<Counters>{const r=await realFetch(`${base}/lab/inspect?workspace_id=${packet.workspace.id}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(r.status,await r.clone().text()).toBe(200);return r.json();}
 async function assertPreserved(){const c=await inspect();expect(preserved(c.workspace)).toBe(preserved(packet.workspace));expect(c.receiver_writes).toBe(0);expect(c.appointment_receipts).toBe(0);
  expect(c.operations.every(o=>!o.started&&o.attempt_count===0&&o.external_reference===null)).toBe(true);return c;}
-async function mount(){root=createRoot(host);await act(async()=>root!.render(<EncounterWorkspace authenticated={identity}/>));await click('Choose an encounter');
+async function mount(){root=createRoot(host);await act(async()=>root!.render(<EncounterWorkspace authenticated={identity}/>));await click('Visits and notes');
  await wait(()=>expect([...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b=>b.textContent?.includes(packet.workspace.label))).toBe(true));
  await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b=>b.textContent?.includes(packet.workspace.label))!.click());await wait(()=>expect(host.querySelector('#team-notebook')).toBeTruthy());
  const follow=[...host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent==='Follow-up')!;expect(follow).toBeTruthy();await act(async()=>follow.click());
@@ -60,7 +60,7 @@ async function proposal(){await wait(()=>expect(host.textContent).toContain('Pat
  expect([...region.querySelectorAll('button')].some(b=>b.textContent==='Send approved appointment change')).toBe(false);expect(active!.wire.some(w=>w.path.endsWith('/execute'))).toBe(false);
  const c=await assertPreserved();expect(c.proposal_count).toBe(1);expect(c.receiver_calls).toBe(2);expect(c.mapping_reviews).toBe(1);expect(c.setup_requests).toBe(2);expect(c.availability_calls).toBe(2);
  await click('Withdraw proposal',region);await wait(()=>expect(region.textContent).toContain('Withdrawn.'));await assertPreserved();}
-beforeEach(()=>{if(!base)return;vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
+beforeEach(()=>{window.history.replaceState(null,'',window.location.pathname+window.location.search);if(!base)return;vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
  idb=new IDBFactory();vi.stubGlobal('indexedDB',idb);host=document.createElement('div');document.body.append(host);loseConfirmation=false;
  vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{const u=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);if(u.origin!==logical)throw new Error('Only the exact invented hosted API is allowed.');
  let native=init;if(init?.signal){const source=init.signal,target=transferableAbortController(),abort=()=>target.abort(source.reason);source.addEventListener('abort',abort,{once:true});if(source.aborted)abort();bridges.push(()=>source.removeEventListener('abort',abort));native={...init,signal:target.signal};}

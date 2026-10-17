@@ -119,7 +119,7 @@ async function read() { const w = await workspaceApi.read(identity, packet.works
     }
 } return w; }
 async function refresh() { await click('Refresh encounter'); await wait(() => expect(button('Refresh encounter').disabled).toBe(false)); return read(); }
-async function mount() { root = createRoot(host); await act(async () => root!.render(<EncounterWorkspace authenticated={identity}/>)); await click('Choose an encounter'); await wait(() => expect([...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b => b.textContent?.includes(packet.workspace.label))).toBe(true)); await act(async () => [...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b => b.textContent?.includes(packet.workspace.label))!.click()); await wait(() => expect(host.querySelector('#team-notebook')).toBeTruthy()); }
+async function mount() { root = createRoot(host); await act(async () => root!.render(<EncounterWorkspace authenticated={identity}/>)); await click('Visits and notes'); await wait(() => expect([...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b => b.textContent?.includes(packet.workspace.label))).toBe(true)); await act(async () => [...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b => b.textContent?.includes(packet.workspace.label))!.click()); await wait(() => expect(host.querySelector('#team-notebook')).toBeTruthy()); }
 async function open(persona: string, round: string) { const r = await realFetch(`${base}/lab/case?persona=${persona}&round=${round}`, { cache: 'no-store', credentials: 'omit', redirect: 'error' }); expect(r.status, await r.clone().text()).toBe(200); packet = await r.json(); identity = { mode: 'clerk_jwt', getToken: async () => packet.token }; const team = await workspaceApi.team(identity); namespace = await privateDraftScope(team.recovery_scope!, base!, webcrypto); await mount(); }
 async function settings() { await click('Team settings'); await click('Connections', host.querySelector('.settings-hub')!); await click('Google email & calendar', host.querySelector('.settings-hub')!); await wait(() => expect(host.querySelector('.google-connection')?.textContent).toContain(revoked ? 'Connect your Google account to continue.' : 'Google connected.')); await click(calendar ? '📅 Work with calendar' : 'Work with email'); await wait(() => expect(host.querySelector(calendar ? '.google-calendar-panel' : '.google-message-panel')?.textContent).toMatch(/Check (?:calendar|email) access|Restore saved (?:calendar|email) work/)); }
 async function reopen() { await act(async () => root!.unmount()); root = undefined; await mount(); }
@@ -186,7 +186,7 @@ async function revisionAccept(lost = false) { await askChief(); let w = await wo
     await wait(() => expect(host.textContent).toContain('Review save unconfirmed'));
     return { accepted: final, content };
 } await click('Accept draft for next work'); await wait(() => expect(host.querySelector('.handoff-review')?.textContent).toContain('Draft accepted')); w = await read(); const accepted = w.handoffs!.find(h => h.id === final.id)! as ReviewableHandoff; expect(accepted.review).toMatchObject({ decision: 'accepted', attempt_id: final.attempt_id, result_entry_id: final.result_entry_id, result_sha256: final.result_sha256 }); await click('Close draft review'); return { accepted, content }; }
-beforeEach(() => {
+beforeEach(() => {window.history.replaceState(null,'',window.location.pathname+window.location.search);
     if (!base)
         return;
     if (terminal)

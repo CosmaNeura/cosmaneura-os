@@ -204,7 +204,7 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                     assert parsed.path in {"/provider-team", "/workspaces"} or parsed.path.startswith(("/provider-team/", "/connections/", "/vendor-settings", "/fax-inbound", "/workspaces/"))
                     assert not parsed.query
                     headers = {name: value for name, value in self.headers.items()
-                        if name.lower() in {"authorization", "x-cosmas-draft-recovery", "x-cosmas-fax-inbound",
+                        if name.lower() in {"authorization", "x-cosmas-draft-recovery", "x-cosmas-private-draft", "x-cosmas-fax-inbound",
                             "x-cosmas-team-contract", "x-cosmas-model-contract", "x-cosmas-handoff-review", "x-cosmas-connection-contract", "x-cosmas-vendor-setup-contract", "accept", "content-type"}}
                     if self.command == "GET":
                         response = holder.client.get(self.path, headers=headers)
@@ -229,7 +229,7 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
         do_GET = dispatch
         do_POST = dispatch
 
-    def dispatch(claim):
+    def dispatch(claim, **_dependencies):
         context=_context(claim.envelope["context"])
         selected=next(p for p in context.sources if p.label=="Received practice fax passage (human reviewed)")
         def provider(request):

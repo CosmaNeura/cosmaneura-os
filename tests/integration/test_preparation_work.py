@@ -449,9 +449,11 @@ def test_database_provider_verification_requires_private_complete_proof(case, ch
     f.session.rollback()
 
 
-def test_routine_counts_only_provider_verified_preparation_completion_without_private_proof(case):
+def test_routine_counts_only_provider_verified_preparation_completion_without_private_proof(case, monkeypatch):
     from cosmas_os.application import routines
     f = case
+    f.configuration.workspace_routines_enabled = True
+    monkeypatch.setattr(routines, "settings", f.configuration)
     item, _, _ = published(f)
     response, _ = ready(f, item)
     pending = response.json()

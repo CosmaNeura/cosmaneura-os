@@ -593,7 +593,7 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
             ],
         }
 
-    def dispatch(claim):
+    def dispatch(claim, **_dependencies):
         context = _context(claim.envelope["context"])
         selection = claim.envelope["tool_selection"]
         started = time.monotonic()

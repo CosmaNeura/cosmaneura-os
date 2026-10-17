@@ -54,7 +54,7 @@ async function openJournal(ep:Episode){
 }
 async function mount(ep:Episode){
  ep.root=createRoot(ep.host);await act(async()=>ep.root!.render(<EncounterWorkspace authenticated={ep.identity}/>));
- const c=controls(ep);await c.click('Choose an encounter');
+ const c=controls(ep);await c.click('Visits and notes');
  await c.wait(()=>expect([...ep.host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b=>b.textContent?.includes(ep.packet!.workspace.label))).toBe(true));
  await act(async()=>[...ep.host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b=>b.textContent?.includes(ep.packet!.workspace.label))!.click());
  await c.wait(()=>expect(ep.host.querySelector('#team-notebook')).toBeTruthy());await openJournal(ep);
@@ -71,7 +71,7 @@ async function refresh(ep:Episode){const c=controls(ep);await c.click('Refresh e
 async function teammate(ep:Episode,name:string){const b=[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent===name);expect(b,name).toBeTruthy();await act(async()=>b!.click());}
 async function material(ep:Episode,name:string){const b=[...ep.host.querySelectorAll<HTMLButtonElement>('.team-material-tabs button')].find(b=>b.textContent===name);expect(b,name).toBeTruthy();await act(async()=>b!.click());}
 async function sealedRows(ep:Episode){const db=await new Promise<IDBDatabase>((resolve,reject)=>{const r=ep.idb.open('cosmas-private-drafts:v1:'+ep.namespace);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});try{return await new Promise<unknown[]>((resolve,reject)=>{const r=db.transaction('sealed-drafts').objectStore('sealed-drafts').getAll();r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});}finally{db.close();}}
-beforeEach(()=>{
+beforeEach(()=>{window.history.replaceState(null,'',window.location.pathname+window.location.search);
  if(!base)return;if(terminalFailure)throw new Error('Prior signed practice fax episode failed; no new case admitted: '+terminalFailure);
  const native=transferableAbortController();vi.stubGlobal('AbortController',native.constructor);vi.stubGlobal('AbortSignal',native.signal.constructor);
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('Blob',NativeBlob);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base);

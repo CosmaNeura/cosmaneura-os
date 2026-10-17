@@ -35,10 +35,10 @@ async function review(h:ReviewableHandoff,feedback:string){
  current=await read();const accepted=current.handoffs!.find(row=>row.id===completed.id)! as ReviewableHandoff;expect(accepted.review).toMatchObject({decision:'accepted',attempt_id:completed.attempt_id,result_entry_id:completed.result_entry_id,result_sha256:completed.result_sha256});
  await click('Close draft review');return accepted;
 }
-beforeEach(()=>{if(!base)return;vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base);vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
+beforeEach(()=>{window.history.replaceState(null,'',window.location.pathname+window.location.search);if(!base)return;vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base);vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
  const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);if(url.origin!==base)throw new Error('Synthetic test permits only its own loopback bridge.');
  let native=init;if(init?.signal){const source=init.signal,target=transferableAbortController(),abort=()=>target.abort(source.reason);source.addEventListener('abort',abort,{once:true});if(source.aborted)abort();abortBridges.push(()=>source.removeEventListener('abort',abort));native={...init,signal:target.signal};}
- const owner=active,transport=realFetch(input,native);pending.add(transport);try{const r=await transport;if(init?.method==='POST')owner?.wire.push({path:url.pathname,status:r.status});return r;}catch(e){if(init?.method==='POST')owner?.wire.push({path:url.pathname,status:null});throw e;}finally{pending.delete(transport);}
+ const owner=active,transport=realFetch(input,native);pending.add(transport);try{const r=await transport;owner?.wire.push({path:url.pathname,status:r.status});return r;}catch(e){owner?.wire.push({path:url.pathname,status:null});throw e;}finally{pending.delete(transport);}
  });host=document.createElement('div');document.body.append(host);root=createRoot(host);});
 afterEach(async()=>{if(!base)return;await act(async()=>root.unmount());if(pending.size)await Promise.allSettled([...pending]);abortBridges.splice(0).forEach(fn=>fn());host.remove();active=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
 it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitioner',round:1},{persona:'physician_assistant',round:1},{persona:'physician',round:2},{persona:'nurse_practitioner',round:2},{persona:'physician_assistant',round:2}])('$persona round $round gives Chief Scribe sources then reviews four actual specialist loops',async({persona,round})=>{
@@ -46,7 +46,7 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
  try{
  const seeded=await realFetch(`${base}/lab/case?persona=${persona}&round=${round}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(seeded.status,await seeded.clone().text()).toBe(200);
  const packet=await seeded.json() as {token:string;workspace:Workspace};wid=packet.workspace.id;trial.workspace_id=wid;identity={mode:'clerk_jwt',getToken:async()=>packet.token};noteBefore=note(packet.workspace);sourcesBefore=sources(packet.workspace);
- await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));await click('Choose an encounter');
+ await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));await click('Visits and notes');
  await wait(()=>expect([...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b=>b.textContent?.includes(packet.workspace.label))).toBe(true));
  await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b=>b.textContent?.includes(packet.workspace.label))!.click());
  await wait(()=>expect(host.querySelector('#team-notebook')).toBeTruthy());

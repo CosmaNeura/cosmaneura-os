@@ -40,6 +40,7 @@ jobs:
   python-tests:
     name: python-tests-migrate
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     services:
       postgres:
         image: postgres:16.9
@@ -84,7 +85,7 @@ jobs:
       - name: Install signed UI integration dependencies
         run: ./scripts/install-client-deps.sh
       - name: Pytest
-        run: uv run python scripts/check-backend-local.py --postgres-bin /usr/lib/postgresql/16/bin --evidence-dir "${RUNNER_TEMP}/cosmabot-backend-checks"
+        run: uv run python scripts/check-backend-local.py --postgres-bin /usr/lib/postgresql/16/bin --pytest-timeout 3600 --evidence-dir "${RUNNER_TEMP}/cosmabot-backend-checks"
       - name: Upload backend test evidence
         if: always()
         uses: actions/upload-artifact@v4

@@ -149,7 +149,7 @@ def test_committed_personal_patient_custody_survives_actual_logical_restore(engi
                 original = workspace.read(check, f.box, f.owner, f.wid)
                 assert original["note"] == f.before["note"] and original["entries"] == f.before["entries"]
                 assert check.scalar(text("SELECT current_user")) == url.username
-                assert check.scalar(text("SELECT datacl IS NULL FROM pg_database WHERE datname=current_database()")) is True
+                assert check.scalar(text("SELECT pg_get_userbyid(datdba)=current_user FROM pg_database WHERE datname=current_database()")) is True
             before = snapshot(engine)
             assert set(PATIENT_TABLES) <= set(before.tables)
             assert all(cast(int, before.tables[name]["count"]) > 0 for name in PATIENT_TABLES)

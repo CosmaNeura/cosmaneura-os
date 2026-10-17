@@ -218,7 +218,7 @@ def test_six_signed_manual_passage_reviews_with_exact_encrypted_restart_recovery
                         f.path, f.path + "/resolve", "/efax-inbound/resolve"}
                     assert parsed.path in allowed
                     headers = {name: value for name, value in self.headers.items() if name.lower() in {
-                        "authorization", "x-cosmas-draft-recovery", "x-cosmas-efax-inbound",
+                        "authorization", "x-cosmas-draft-recovery", "x-cosmas-private-draft", "x-cosmas-efax-inbound",
                         "x-cosmas-team-contract", "x-cosmas-model-contract", "accept", "content-type"}}
                     if parsed.path == "/provider-team/identity":
                         assert self.command == "GET" and self.headers.get("X-Cosmas-Team-Contract") == "2"

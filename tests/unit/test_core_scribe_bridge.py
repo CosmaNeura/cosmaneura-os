@@ -2,14 +2,14 @@
 
 import copy
 import json
-from datetime import UTC, datetime
+from datetime import datetime
 from pathlib import Path
 from uuid import uuid4
 
 import httpx
 import pytest
 from pydantic import SecretStr
-from tests.unit.test_core_capture_admission import core_handler
+from tests.unit.test_core_capture_admission import NOW, core_handler
 from tests.unit.test_core_capture_admission import selection as capture_selection
 from tests.unit.test_core_connection_transport import fixture as connection_fixture
 
@@ -230,7 +230,7 @@ def test_existing_recording_read_never_admits_or_starts_capture(fault):
             "workspace_id": body["workspace_id"],
             "request_nonce": body["request_nonce"],
             "operation": "provider_encounter",
-            "checked_at": datetime.now(UTC).isoformat(),
+            "checked_at": NOW.isoformat(),
             "receipt": {
                 "schema_version": "1.0",
                 "status": "available",
@@ -255,6 +255,7 @@ def test_existing_recording_read_never_admits_or_starts_capture(fault):
         "https://core.example.invalid",
         lambda: "synthetic_PRIVATE_workload",
         transport=httpx.MockTransport(handler),
+        now=lambda: NOW,
     )
     try:
         token = port.exchange_context(selected, SecretStr("synthetic_PRIVATE_jwt"))

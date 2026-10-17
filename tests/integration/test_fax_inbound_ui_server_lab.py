@@ -145,7 +145,7 @@ def test_six_signed_fax_ui_journeys_with_private_pdf_and_encrypted_restart_recov
                     assert parsed.path == "/provider-team/identity" or parsed.path.startswith("/fax-inbound")
                     assert not parsed.query
                     headers = {name: value for name, value in self.headers.items()
-                        if name.lower() in {"authorization", "x-cosmas-draft-recovery", "x-cosmas-fax-inbound",
+                        if name.lower() in {"authorization", "x-cosmas-draft-recovery", "x-cosmas-private-draft", "x-cosmas-fax-inbound",
                             "x-cosmas-team-contract", "accept", "content-type"}}
                     if self.command == "GET":
                         response = holder.client.get(self.path, headers=headers)
