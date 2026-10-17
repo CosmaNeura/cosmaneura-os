@@ -453,9 +453,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const run=()=>{
       clearTimeout(timer);
       if(!flight){
-        if(current===generation.current)setRecoveryState("saving");
+        // Saving the current draft cannot verify a failed target recovery read.
+        if(current===generation.current)setRecoveryState(previous=>previous==="failed"?previous:"saving");
         flight=Promise.all(writes.map(write=>write())).then(()=>{
-          if(!canceled&&current===generation.current)setRecoveryState("saved");
+          if(!canceled&&current===generation.current)setRecoveryState(previous=>previous==="failed"?previous:"saved");
         }).catch(error=>{if(!canceled&&current===generation.current)setRecoveryState("failed");throw error;});
       }
       return flight;
