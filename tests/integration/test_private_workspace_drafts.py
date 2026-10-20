@@ -263,8 +263,24 @@ def test_signed_chat_private_handoff_saved_reply_reopens_without_patient(signed_
     assert reopened.status_code == 200
     value = reopened.json()
     saved = next(entry for entry in value["entries"] if entry["id"] == result.json()["saved_entry"]["id"])
-    assert value["appointment_id"] is None and saved["reply"]["content"] == "Private draft requests: 1 queued; 0 not started. Review each teammate’s recorded status below."
-    assert value["handoffs"] and value["handoffs"][0]["recipient_role"] == "scribe"
+    assert value["appointment_id"] is None
+    assert len(value["handoffs"]) == 1
+    handoff = value["handoffs"][0]
+    assert (handoff["recipient_role"], handoff["recipient_name"], handoff["status"], handoff["error_code"]) == (
+        "scribe", "Scribe", "queued", None)
+    assert handoff["brief"] == "Organize the invented private agenda; patient remains unselected."
+    assert handoff["task_brief"]["expected_output"] == REQUIREMENTS["expected_output"]
+    assert handoff["review"] is None and handoff["result_entry_id"] is None
+    assert saved["reply"]["content"] == (
+        "I saved these private draft assignments for your review."
+        "\n\nTeammate\n> Scribe"
+        "\n\nStatus: Queued; waiting for a private draft."
+        "\n\nRequested work (quoted)\n"
+        r"> Organize the invented private agenda; patient remains unselected\."
+        "\n\nExpected draft (quoted)\n"
+        r"> A private draft for clinician review\."
+        "\n\nThese assignments prepare private drafts only. Review each completed result before using it."
+    )
     assert value["work_candidates"] == []
     replay = f.client.post(path + "/conversation/resolve", headers=auth, json=body)
     assert replay.status_code == 200 and replay.json()["saved_entry"] == result.json()["saved_entry"]
