@@ -11,6 +11,14 @@ const json = (value: unknown) => new Response(JSON.stringify(value), {
 describe("signed workspace transport", () => {
   beforeEach(() => vi.stubEnv("VITE_API_BASE", "http://127.0.0.1:8018"));
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it('uses operation-neutral copy for unavailable reads and describes a connection pause without inventing a save',()=>{
+    const pause=new WorkspaceApiError(503,'workspace_protocol_required');
+    expect(pause.message).toContain('workspace connection is paused');
+    expect(pause.message).not.toContain('Retry the same save');
+    expect(new WorkspaceApiError(503).message).toContain('workspace request');
+    expect(new WorkspaceApiError(503).message).not.toContain('same save');
+    expect(new WorkspaceApiError(426,'workspace_protocol_required').message).toContain('Update Cosmas');
+  });
 
   it('creates and resolves an exact private draft through the signed bounded contract',async()=>{
     const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>'invented-token'};

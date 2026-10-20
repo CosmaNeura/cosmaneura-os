@@ -13,3 +13,24 @@
 .private-recording-notebook{padding:18px;border:1px solid var(--team-line);border-radius:12px;background:#fff;margin:18px 0}.private-recording-notebook>p{margin-top:0;line-height:1.5}.private-recording-panel .private-recording-notebook button{min-height:48px;padding:10px 14px;margin:6px 8px 6px 0;border:1px solid #91a69a;border-radius:8px;background:#fff;cursor:pointer}.private-recording-panel .private-recording-notebook button:disabled{opacity:.5;cursor:default}.private-recording-notebook>div{display:grid;gap:6px;margin-top:8px}.private-recording-notebook>div button{text-align:left}
 @media(max-width:600px){.private-recording-panel>header{flex-wrap:wrap}.private-recording-panel>header>.private-recording-close{width:100%}.private-recording-panel{padding-top:12px}}
 @media(max-width:600px){.team-workspace .private-recording-panel button{min-height:44px}}
+@media(max-width:600px) {
+  .practice-home[data-native-compact=true] { padding:14px 16px 32px; }
+  .practice-home[data-native-compact=true]>.practice-home-lead { font-size:13px; margin:0 0 12px; }
+  .practice-home[data-native-compact=true] input:not([type=checkbox]),
+  .practice-home[data-native-compact=true] textarea { font-size:16px; }
+  .practice-home[data-native-compact=true]>.practice-quick-start { margin:0 0 12px; padding:16px; }
+  .practice-home[data-native-compact=true]>.practice-quick-start h2 { font-size:20px; margin:0 0 4px; }
+  .practice-home[data-native-compact=true]>.practice-quick-start>p { font-size:13px; margin:0 0 12px; color:var(--team-muted); }
+  .practice-home[data-native-compact=true] .practice-home-title { margin-top:8px; }
+  .practice-home[data-native-compact=true] .practice-home-title>summary { display:flex; align-items:center; min-height:44px; color:var(--team-muted); font-size:13px; cursor:pointer; }
+  .practice-home[data-native-compact=true] .practice-home-title>label { display:grid; gap:6px; margin-top:6px; }
+  .practice-home[data-native-compact=true]>.practice-home-scribe { margin:0 0 12px; padding:16px; }
+  .practice-home[data-native-compact=true]>.practice-home-scribe h2 { font-size:20px; margin:0 0 4px; }
+  .practice-home[data-native-compact=true]>.practice-home-scribe p { font-size:13px; }
+  .practice-home[data-native-compact=true]>.practice-home-scribe button { margin-top:12px; }
+  .practice-home[data-native-compact=true]>.practice-home-recordings-disclosure { margin:0 0 18px; border-bottom:1px solid var(--team-line); }
+  .practice-home[data-native-compact=true]>.practice-home-recordings-disclosure>summary { display:flex; align-items:center; min-height:44px; font-weight:550; cursor:pointer; }
+  .practice-home[data-native-compact=true] .practice-home-title>summary::after,
+  .practice-home[data-native-compact=true]>.practice-home-recordings-disclosure>summary::after { content:'⌄'; margin-left:auto; padding-left:12px; }
+  .practice-home[data-native-compact=true] .practice-home-notes>h2 { margin:16px 0 10px; }
+}

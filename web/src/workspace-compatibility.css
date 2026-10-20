@@ -10,3 +10,9 @@
 .workspace-access-paused { max-width:52rem; margin:.5rem auto; padding:.5rem 1rem; font-size:.9rem; }
 @media (max-width: 600px) { .workspace-compatibility { margin: .5rem; padding: 1rem; } }
 @media (max-width:600px) { .workspace-compatibility-paused { padding:.65rem .8rem; } .workspace-compatibility header { gap:.5rem; } }
+@media(max-width:600px) {
+  .workspace-compatibility-native { margin:8px; padding:8px 12px; }
+  .workspace-compatibility-native h1 { margin:0; font-size:15px; }
+  .workspace-compatibility-native p { margin:4px 0; font-size:13px; line-height:1.4; }
+  .workspace-compatibility-native summary { display:flex; align-items:center; min-height:44px; font-size:12px; }
+}
