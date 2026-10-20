@@ -1,6 +1,8 @@
 import {SampleVisit} from './SampleVisit';
 import {NotebookTitleEditor} from './NotebookTitleEditor';
-import {useEffect,useRef,useState} from 'react';
+import {useContext,useEffect,useLayoutEffect,useRef,useState} from 'react';
+import {WorkspaceConnectionRecoveryContext} from './PracticeAccessGate';
+import {workspaceProtocolGeneration} from './workspace-protocol';
 import type {AccountRecoveryAccess} from './account-recovery';
 import {loadPrivateDraftRecovery,persistPrivateDraftRecovery,type PrivateDraftCreate,type PrivateDraftRecovery} from './private-draft-recovery';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
@@ -23,10 +25,14 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   onRecord?:(value:StartPrivateRecording)=>void;recordings?:PrivateRecordingSnapshot[];onReopenRecording?:(recordingId:string)=>void;
   openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;
 }){
+  const connection=useContext(WorkspaceConnectionRecoveryContext),connectionLive=useRef(connection);connectionLive.current=connection;
+  const recoveredLists=useRef({identity,recovery,sequence:connection?.identity===identity?connection.sequence:0});
+  const listRead=useRef<{epoch:number;promise:Promise<void>}|null>(null);
   const [sample,setSample]=useState(false);
   const [title,setTitle]=useState('Private note'),[pending,setPending]=useState<PrivateDraftCreate|null>(null),[ready,setReady]=useState(false);
   const [busy,setBusy]=useState(false),[retryAllowed,setRetryAllowed]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
   const [drafts,setDrafts]=useState<Awaited<ReturnType<typeof workspaceApi.privateDraftSummaries>>|null>(null);
+  const [listError,setListError]=useState('');
   const [search,setSearch]=useState(''),[needsReview,setNeedsReview]=useState(false),[renaming,setRenaming]=useState<string|null>(null);
   const [visits,setVisits]=useState<Awaited<ReturnType<typeof workspaceApi.catalog>>|null>(null),[visitError,setVisitError]=useState('');
   const live=useRef({identity,recovery,epoch:0,alive:true});
@@ -38,23 +44,48 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   const recordingRequest=useRef({identity,seen:0});
   useEffect(()=>{callback.current(busy);},[busy]);
   useEffect(()=>{live.current.alive=true;return()=>{live.current.alive=false;};},[]);
+  useLayoutEffect(()=>{recoveredLists.current={identity,recovery,sequence:connection?.identity===identity?connection.sequence:0};},[identity,recovery]);
+  function readLists(epoch:number){
+    const flight={epoch,promise:Promise.resolve()};
+    flight.promise=(async()=>{
+      const [notes,schedule]=await Promise.allSettled([workspaceApi.privateDraftSummaries(identity),workspaceApi.catalog(identity)]);
+      if(!current(epoch))return;
+      if(notes.status==='fulfilled'){setDrafts(notes.value);setListError('');}else{setListError('Recent notes could not be loaded. You can still start recording or write a note.');deny(notes.reason);}
+      if(schedule.status==='fulfilled'){setVisits(schedule.value);setVisitError('');}else{setVisitError('Today’s visits could not be loaded. Recording and private notes remain available.');deny(schedule.reason);}
+    })().finally(()=>{if(listRead.current===flight)listRead.current=null;});
+    listRead.current=flight;return flight.promise;
+  }
   useEffect(()=>{
-    const epoch=++live.current.epoch;setReady(false);setPending(null);setDrafts(null);setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');
+    const epoch=++live.current.epoch;setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');
     if(!recovery)return;
     const promise=loadPrivateDraftRecovery(recovery);initialRecovery.current={epoch,promise};
     void(async()=>{const saved=await promise;if(!current(epoch))return;
       if(saved){setTitle(saved.title);setPending(saved.pending);}setReady(true);
-      const [notes,schedule]=await Promise.allSettled([workspaceApi.privateDraftSummaries(identity),workspaceApi.catalog(identity)]);if(!current(epoch))return;
-      if(notes.status==='fulfilled')setDrafts(notes.value);else{setError('Recent notes could not be loaded. You can still start recording or write a note.');deny(notes.reason);}
-      if(schedule.status==='fulfilled')setVisits(schedule.value);else{setVisitError('Today’s visits could not be loaded. Recording and private notes remain available.');deny(schedule.reason);}
+      await readLists(epoch);
     })().catch(cause=>{if(current(epoch)){setError('Private recovery could not be checked. Refresh Home before starting a new draft.');deny(cause);}});
   },[identity,recovery]);
+  useEffect(()=>{
+    if(!recovery||!ready||connection?.identity!==identity||recoveredLists.current.identity!==identity||recoveredLists.current.recovery!==recovery||
+      connection.sequence<=recoveredLists.current.sequence||connection.phase!=='ready'||connection.busy||workspaceProtocolGeneration(identity)!==connection.generation)return;
+    const epoch=live.current.epoch,sequence=connection.sequence,protocolGeneration=connection.generation;
+    recoveredLists.current.sequence=sequence;
+    const prior=listRead.current?.epoch===epoch?listRead.current.promise:null;
+    // Read lists once after an explicit reconnect. Do not reload the journal,
+    // change the private-create request, or resolve/submit any operation.
+    void(async()=>{
+      await prior;
+      const latest=connectionLive.current;
+      if(!current(epoch)||latest?.identity!==identity||latest.sequence!==sequence||latest.generation!==protocolGeneration||latest.phase!=='ready'||latest.busy||
+        workspaceProtocolGeneration(identity)!==protocolGeneration)return;
+      await readLists(epoch);
+    })();
+  },[identity,recovery,ready,connection?.identity,connection?.sequence,connection?.generation,connection?.phase,connection?.busy]);
   function deny(cause:unknown){if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status)){setDrafts(null);setReady(false);onAccessLost(cause);}}
   async function refresh(){
     if(!recovery||busy||creating.current||locked)return;const epoch=live.current.epoch;setBusy(true);setError('');setMessage('');
     try{const promise=loadPrivateDraftRecovery(recovery);initialRecovery.current={epoch,promise};const saved=await promise;if(!current(epoch))return;
       setPending(saved?.pending??null);if(saved)setTitle(saved.title);setReady(true);
-      const list=await workspaceApi.privateDraftSummaries(identity);if(current(epoch))setDrafts(list);
+      const list=await workspaceApi.privateDraftSummaries(identity);if(current(epoch)){setDrafts(list);setListError('');}
     }catch(cause){if(current(epoch)){setError('Private notes could not be checked. No new draft was started.');deny(cause);}}
     finally{if(current(epoch))setBusy(false);}
   }
@@ -153,7 +184,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
     {recordings&&onReopenRecording&&(nativeCompact?<details className="practice-home-recordings-disclosure"><summary>Saved recordings · {recordings.length}</summary>{recordingList}</details>:recordingList)}
     {!nativeCompact&&quickStart}
     {pending&&<div className="team-recovery"><p>An earlier note creation is unconfirmed. Check its saved result to avoid a duplicate.</p><button disabled={!ready||busy||locked} onClick={()=>void resolve()}>Check saved note creation</button>{retryAllowed&&<button disabled={!ready||busy||locked} onClick={()=>void create(true)}>Retry same note creation</button>}</div>}
-    {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
+    {error&&<p role="alert">{error}</p>}{listError&&<p role="alert">{listError}</p>}{message&&<p role="status">{message}</p>}
     {!nativeCompact&&todayVisits}
     <section className="practice-home-notes" aria-label="Saved private notes"><h2>{nativeCompact?'Saved notes':'Recent notes'}</h2>
       <div className="notebook-list-tools"><label>Search notes<input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Title or patient"/></label>

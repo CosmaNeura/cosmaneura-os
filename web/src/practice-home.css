@@ -16,6 +16,8 @@
 @media(max-width:600px) {
   .practice-home[data-native-compact=true] { padding:14px 16px 32px; }
   .practice-home[data-native-compact=true]>.practice-home-lead { font-size:13px; margin:0 0 12px; }
+  .practice-home[data-native-compact=true] input:not([type=checkbox]),
+  .practice-home[data-native-compact=true] textarea { font-size:16px; }
   .practice-home[data-native-compact=true]>.practice-quick-start { margin:0 0 12px; padding:16px; }
   .practice-home[data-native-compact=true]>.practice-quick-start h2 { font-size:20px; margin:0 0 4px; }
   .practice-home[data-native-compact=true]>.practice-quick-start>p { font-size:13px; margin:0 0 12px; color:var(--team-muted); }

@@ -2,13 +2,14 @@ import {WorkspaceDialog} from './WorkspaceDialog';
 import {teamConfigurationChanged} from './team-configuration-diff';
 import {VisitCatalog} from './VisitCatalog';
 import {consumeWorkspaceStartupTeam} from './workspace-team-read';
+import {workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 import {WorkspaceMarkdown} from './WorkspaceMarkdown';
 import {readWorkspaceRoute,workspaceRouteHash,type WorkspaceRoute} from './workspace-route';
 import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
-import type {PracticeAccessContext} from './PracticeAccessGate';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {WorkspaceConnectionRecoveryContext,type PracticeAccessContext} from './PracticeAccessGate';
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { ReviewedTeamDraft } from "./TeamSetupPanel";
 import { TeamConfigurationFlow } from "./TeamConfigurationFlow";
 import {accountIdentityApi} from "./account-identity-api";
@@ -121,6 +122,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   practiceAccess?:PracticeAccessContext;
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
+  const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
+  const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
+  const [connectionError,setConnectionError]=useState<{identity:WorkspaceIdentity;generation:number;message:string}|null>(null);
   const [inboxSelection,setInboxSelection]=useState<InboxDraftSelection|null>(null);
   const [inboxNavigation,setInboxNavigation]=useState<{selection:InboxDraftSelection;identity:WorkspaceIdentity;generation:number}|null>(null);
   const inboxNavigationConsumed=useRef<object|null>(null);
@@ -245,6 +249,17 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [recoveryState, setRecoveryState] = useState<"" | "saving" | "saved" | "failed">("");
   const [recoveryEpoch, setRecoveryEpoch] = useState(0);
   const generation = useRef(0);
+  useLayoutEffect(()=>{recoveredConnection.current={identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0};setConnectionError(null);},[authenticated]);
+  useEffect(()=>{
+    if(!authenticated||connectionRecovery?.identity!==authenticated||recoveredConnection.current.identity!==authenticated||
+      connectionRecovery.sequence<=recoveredConnection.current.sequence||connectionRecovery.phase!=='ready'||connectionRecovery.busy||
+      workspaceProtocolGeneration(authenticated)!==connectionRecovery.generation||
+      authenticated.mode==='desktop_native'&&!authenticated.isCurrent()||
+      authenticated.mode==='clerk_jwt'&&authenticated.nativeSession&&!authenticated.nativeSession.isCurrent())return;
+    recoveredConnection.current.sequence=connectionRecovery.sequence;
+    // A connection retry never resolves a save, clears a conflict, or replaces working text.
+    setConnectionError(previous=>previous?.identity===authenticated&&previous.generation<=connectionRecovery.generation?null:previous);
+  },[authenticated,connectionRecovery?.identity,connectionRecovery?.sequence,connectionRecovery?.generation,connectionRecovery?.phase,connectionRecovery?.busy]);
   const connectionGeneration = generation.current;
   const reportAccessBusy = useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setAccessBusy(blocked);
@@ -592,6 +607,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   }
 
   function clear() {
+    setConnectionError(null);
     setSavedRecordingEntry(null);
     generation.current++;activityNavigation.current?.abort();activityNavigation.current=null;
     closeDraftJournal(); setRecoveryOffers([]); setRecoveryState("");
@@ -615,6 +631,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setReviewHandoffId(null);setHandoffReviewPending(false);
   }
   function failure(cause: unknown) {
+    if(transientConnectionFailure(cause))return;
     setMessage("");
     if (cause instanceof WorkspaceApiError && [401, 403, 404, 426].includes(cause.status)) {
       clear(); setError(cause.status === 426 ? "Update required for this team configuration. Private content is withheld; encrypted drafts and exact unconfirmed requests remain on this device." : "Workspace access is unavailable. Private content has been cleared from this view.");
@@ -624,6 +641,15 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       if (cause instanceof WorkspaceApiError && cause.status === 409) { setConflict(true); setPending(null); setSetupApproval(null); setSetupEpoch(value => value + 1); }
       if (cause instanceof WorkspaceApiError && [400, 422].includes(cause.status)) setPending(null);
     }
+  }
+  function transientConnectionFailure(cause:unknown){
+    if(!(cause instanceof WorkspaceApiError)||cause.status!==503||cause.code!=='workspace_protocol_required')return false;
+    const owner=authenticated??identity;
+    // A discarded pre-reconnect reply can arrive after the connection is ready.
+    // It cannot adopt old data or restore a warning for an already recovered pause.
+    if(owner&&(workspaceProtocolPhase(owner)!=='ready'||connectionRecovery?.identity===owner&&connectionRecovery.phase!=='ready'))
+      setConnectionError({identity:owner,generation:workspaceProtocolGeneration(owner),message:cause.message});
+    return true;
   }
   function goHome(){
     routeSequence.current++;routeApplying.current=false;routeReady.current=true;
@@ -828,6 +854,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     finally{if(current===generation.current)setBusy(false);}
   }
   function modelFailure(cause:unknown){
+    if(transientConnectionFailure(cause))return;
     if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status)){failure(cause);return;}
     setError(cause instanceof WorkspaceApiError?cause.message:"The model request could not be confirmed. Its exact request is retained; check the saved result.");
   }
@@ -1778,6 +1805,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         {ROUTINES_BUILD && authenticated && team && team.revision > 0 && <WorkRoutines identity={authenticated} team={team} onAccessLost={failure} onRefreshTeam={refreshRoutineTeam} />}
         {authenticated && team?.revision === 0 && <div className="team-banner"><p>Set up your private team to schedule work briefs.</p><button onClick={() => void openSettings()}>Set up your team</button></div>}</PracticeHub></fieldset></AccountRecoveryContext.Provider>}
       <div hidden={practiceOpen}>
+      {connectionError&&connectionError.identity===(authenticated??identity)&&<div className="team-banner error" role="alert">{connectionError.message}</div>}
       {error && <div className="team-banner error" role="alert">{error}</div>}
       {message && <div className="team-banner" role="status">{message}</div>}
       {conflict && <div className="team-recovery"><p>Your text has not been overwritten. Load the latest history and team, compare changes, then save a new revision.</p>

@@ -9,6 +9,8 @@ import type {AccountRecoveryAccess} from './account-recovery';
 import {workspaceApi,WorkspaceApiError,type ProviderTeam,type Workspace} from './workspace-api';
 import {validatePrivateDraftRecovery,validatePrivateDraftLinkRecovery} from './private-draft-recovery';
 import type {PrivateRecordingSnapshot} from './private-recording-runtime';
+import {WorkspaceConnectionRecoveryContext} from './PracticeAccessGate';
+import {workspaceProtocolGeneration} from './workspace-protocol';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const team:ProviderTeam={revision:1,recovery_scope:'a'.repeat(64),template_version:'provider-team-v1',llm:{enabled:false,model:'gpt-4.1'},configuration:{practice_context:'',bots:[{role:'chief',name:'Chief',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}]},members:[{role:'chief',agent_id:id(10),name:'Chief',initials:'Ch',description:'Prepare private drafts',prompt:'Saved context',capabilities:[]}]};
@@ -77,6 +79,27 @@ describe('practice Quick start recovery',()=>{
     await click('Check saved note creation');expect(opened).not.toHaveBeenCalled();expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
     expect((await recovery.journal.load(accountEditorAddress('private-draft')))?.pending).toBe(body.idempotency_key);
     await click('Retry same note creation');expect(workspaceApi.createPrivateDraft).toHaveBeenLastCalledWith(identity,body);expect(opened).toHaveBeenCalledOnce();
+  });
+  it('refreshes only Home lists after explicit same-owner reconnect while retaining an unconfirmed private creation',async()=>{
+    const retry=vi.fn(),protocolGeneration=workspaceProtocolGeneration(identity);
+    vi.mocked(workspaceApi.privateDraftSummaries).mockRejectedValueOnce(new WorkspaceApiError(503,'workspace_protocol_required'));
+    vi.mocked(workspaceApi.catalog).mockRejectedValueOnce(new WorkspaceApiError(503,'workspace_protocol_required'));
+    async function draw(sequence:number,phase:'ready'|'blocked',owner=identity){await act(async()=>root.render(
+      <WorkspaceConnectionRecoveryContext.Provider value={{identity:owner,sequence,generation:protocolGeneration,phase,busy:false,retry}}>
+        <PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>
+      </WorkspaceConnectionRecoveryContext.Provider>));}
+    await draw(0,'ready');await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain('Recent notes could not be loaded');});
+    vi.mocked(workspaceApi.createPrivateDraft).mockRejectedValueOnce(new WorkspaceApiError(503));await click('Start a private note');
+    const request=vi.mocked(workspaceApi.createPrivateDraft).mock.calls[0][1],retained=await recovery.journal.load(accountEditorAddress('private-draft'));
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});vi.mocked(workspaceApi.catalog).mockResolvedValue([]);
+    await draw(0,'blocked');await draw(0,'ready');expect(workspaceApi.privateDraftSummaries).toHaveBeenCalledOnce();
+    await draw(1,'ready',{mode:'clerk_jwt',getToken:vi.fn()});expect(workspaceApi.privateDraftSummaries).toHaveBeenCalledOnce();
+    await draw(1,'ready');await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain('No private notes yet.');});
+    expect(workspaceApi.privateDraftSummaries).toHaveBeenCalledTimes(2);expect(workspaceApi.catalog).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain('Recent notes could not be loaded');expect(container.textContent).toContain('note creation is unconfirmed');
+    expect(await recovery.journal.load(accountEditorAddress('private-draft'))).toEqual(retained);
+    expect(workspaceApi.createPrivateDraft).toHaveBeenCalledExactlyOnceWith(identity,request);expect(workspaceApi.resolvePrivateDraft).not.toHaveBeenCalled();expect(opened).not.toHaveBeenCalled();
+    await draw(1,'ready');expect(workspaceApi.privateDraftSummaries).toHaveBeenCalledTimes(2);
   });
   it('withholds former-account late results and never opens their notebook',async()=>{
     let finish!:(value:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>void;

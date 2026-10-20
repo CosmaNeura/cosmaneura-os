@@ -217,7 +217,8 @@ export type AppendInput = {
 
 export class WorkspaceApiError extends Error {
   constructor(public status: number, public code?: string) {
-    super(code === "workspace_recovery_unavailable" ? "The workspace service could not confirm private draft recovery. Existing drafts are retained. Recheck recovery before continuing." :
+    super(status === 503 && code === "workspace_protocol_required" ? "The workspace connection is paused. Retry the connection to continue. Your saved work is retained." :
+      code === "workspace_recovery_unavailable" ? "The workspace service could not confirm private draft recovery. Existing drafts are retained. Recheck recovery before continuing." :
       code === "handoff_source_context_too_large" ? "The selected sources are too large for a complete team handoff. Your recording and saved notes are retained. Select fewer saved sources before asking Chief to delegate." :
       code === "handoff_source_contract_unavailable" ? "Team handoffs need the source-reading tools enabled for this request. Your recording and saved notes are retained. Check Chief’s tools before preparing a new assignment." :
       code === "session_prep_analysis_too_large" ? "This brief and the selected saved notes are too large to review together. Ask without Session Prep, or narrow this bot's saved sources." :
@@ -240,7 +241,7 @@ export class WorkspaceApiError extends Error {
       status === 400 || status === 422 ? "The entry was not accepted. Review the text and try again." :
       status === 426 ? "Update Cosmas before opening this workspace. Saved work and this device's drafts are retained." :
       status === 401 || status === 403 || status === 404 ? "This workspace is unavailable. Access or the local feature may have changed." :
-      "The save could not be confirmed. Retry the same save before making changes.");
+      "The workspace request could not be confirmed. Check the connection to continue.");
   }
 }
 

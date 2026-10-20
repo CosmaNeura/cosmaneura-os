@@ -18,6 +18,7 @@ import {listPrivateRecordings,type PrivateRecordingSnapshot} from "./private-rec
 vi.mock("./private-recording-runtime",async original=>({...await original<typeof import("./private-recording-runtime")>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
 
 import {workspaceProtocolGeneration} from './workspace-protocol';
+import {WorkspaceConnectionRecoveryContext} from './PracticeAccessGate';
 import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 import type {DraftStore} from './draft-store';
@@ -186,6 +187,55 @@ describe("private encounter workspace", () => {
     await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
     await vi.waitFor(async()=>{await act(async()=>{});expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false);});
   }
+  it('clears a read-only connection pause only after an explicit same-owner reconnect without starting a save',async()=>{
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn()};
+    const retry=vi.fn(),protocolGeneration=workspaceProtocolGeneration(access);
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([]);
+    async function draw(sequence:number,phase:'ready'|'blocked',owner=access,checkedGeneration=protocolGeneration){await act(async()=>root.render(
+      <WorkspaceConnectionRecoveryContext.Provider value={{identity:owner,sequence,generation:checkedGeneration,phase,busy:false,retry}}>
+        <EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>
+      </WorkspaceConnectionRecoveryContext.Provider>));}
+    await draw(0,'ready');await vi.waitFor(()=>expect(workspaceApi.privateDraftSummaries).toHaveBeenCalled());
+    vi.mocked(workspaceApi.catalog).mockRejectedValueOnce(new WorkspaceApiError(503,'workspace_protocol_required'));
+    await draw(0,'blocked');await click('Visits and notes');
+    expect(container.querySelector('.team-banner.error')?.textContent).toContain('workspace connection is paused');
+    expect(container.textContent).not.toContain('Retry the same save');
+    await draw(0,'ready');expect(container.querySelector('.team-banner.error')).not.toBeNull();
+    await draw(1,'ready',{mode:'clerk_jwt',getToken:vi.fn()});expect(container.querySelector('.team-banner.error')).not.toBeNull();
+    await draw(1,'ready',access,protocolGeneration+1);expect(container.querySelector('.team-banner.error')).not.toBeNull();
+    await draw(1,'ready');expect(container.querySelector('.team-banner.error')).toBeNull();
+    expect(workspaceApi.append).not.toHaveBeenCalled();expect(workspaceApi.saveNote).not.toHaveBeenCalled();expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
+  });
+  it.each(['protocol pause','unconfirmed write','conflict'] as const)('preserves %s and working text through explicit reconnect without replaying a write',async kind=>{
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn()},retry=vi.fn(),protocolGeneration=workspaceProtocolGeneration(access);
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
+    async function draw(sequence:number,phase:'ready'|'blocked'){await act(async()=>root.render(
+      <WorkspaceConnectionRecoveryContext.Provider value={{identity:access,sequence,generation:protocolGeneration,phase,busy:false,retry}}>
+        <EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>
+      </WorkspaceConnectionRecoveryContext.Provider>));}
+    await draw(0,'ready');await click('Visits and notes');
+    await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+    await vi.waitFor(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false));
+    await input('Jotted notes','Invented working text retained through reconnect.');
+    const failure=new WorkspaceApiError(kind==='conflict'?409:503,kind==='protocol pause'?'workspace_protocol_required':undefined);
+    vi.mocked(workspaceApi.append).mockRejectedValueOnce(failure);
+    await draw(0,'blocked');await click('Save notebook revision');
+    const request=vi.mocked(workspaceApi.append).mock.calls[0][2];
+    await draw(1,'ready');
+    expect(workspaceApi.append).toHaveBeenCalledOnce();
+    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Invented working text retained through reconnect.');
+    if(kind==='protocol pause')expect(container.querySelector('.team-banner.error')).toBeNull();
+    else expect(container.querySelector('.team-banner.error')?.textContent).toBe(failure.message);
+    if(kind==='conflict')expect(container.textContent).toContain('Your text has not been overwritten');
+    else{
+      expect(container.textContent).toContain('previous save is unconfirmed');
+      vi.mocked(workspaceApi.append).mockResolvedValue({entry_id:modelUuid(909),entry_revision:2,workspace:{...structuredClone(fixture),revision:2}});
+      await click('Retry same save');expect(vi.mocked(workspaceApi.append).mock.calls[1][2]).toEqual(request);
+    }
+  });
 
   it.each(['browser hidden','browser pagehide','native suspended'] as const)('flushes the latest draft before its debounce on %s and reports saved only after acknowledgment',async transition=>{
     const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn(),...(transition==='native suspended'?{
