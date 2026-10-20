@@ -104,7 +104,7 @@ def children(engine, case):
             },
             handoff_roles=("scribe", "visit_prep", "follow_up"),
         )
-        queued, refused = work.reserve_children(
+        assignments = work.reserve_children(
             s,
             workspace,
             s.get(WorkspaceEntry, origin_id),
@@ -117,7 +117,14 @@ def children(engine, case):
             ),
             external_identity_id=None,
         )
-        assert (queued, refused) == (3, 0)
+        assert len(assignments) == 3
+        assert tuple(item.assignment.recipient_role for item in assignments) == (
+            "scribe", "visit_prep", "follow_up"
+        )
+        assert all(
+            item.attempt.status == "queued" and item.attempt.error_code is None
+            for item in assignments
+        )
         s.commit()
         return list(
             s.scalars(

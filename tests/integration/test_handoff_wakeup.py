@@ -139,7 +139,7 @@ def stage_children(session, case, *, count=1):
     )
     origin = session.get(WorkspaceEntry, origin_id)
     assert origin is not None
-    queued, refused = work.reserve_children(
+    assignments = work.reserve_children(
         session,
         workspace,
         origin,
@@ -152,7 +152,14 @@ def stage_children(session, case, *, count=1):
         ),
         external_identity_id=None,
     )
-    assert queued == count and refused == 0
+    assert len(assignments) == count
+    assert tuple(item.assignment.recipient_role for item in assignments) == (
+        "visit_prep", "follow_up"
+    )[:count]
+    assert all(
+        item.attempt.status == "queued" and item.attempt.error_code is None
+        for item in assignments
+    )
     session.flush()
 
 
