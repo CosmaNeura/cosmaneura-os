@@ -65,7 +65,12 @@ def _selected_versions(s, w, settings):
 
     additional = _selected_connector_passages(s, w, settings)
     for source in additional:
-        selected_connector_sources.validate_selected_source(s, w, source.entry_id)
+        from cosmas_os.application import clinical_note_share
+
+        if clinical_note_share.is_shared_snapshot(s.get(WorkspaceEntry, source.entry_id)):
+            clinical_note_share.validate_current_source(s, w, source.entry_id)
+        else:
+            selected_connector_sources.validate_selected_source(s, w, source.entry_id)
         versions.append({"entry_id": source.entry_id, "revision": source.revision,
                          "label": source.label, "kind": "evidence", "sha256": _hash(source.content)})
     if additional:
@@ -207,9 +212,20 @@ def _binding(s, w, handoff, attempt, *, current=True):
         for source in versions:
             source_entry = s.get(WorkspaceEntry, source["entry_id"])
             source_kind = source_entry.kind if source_entry is not None else None
-            from cosmas_os.application import selected_connector_sources
+            from cosmas_os.application import clinical_note_share, selected_connector_sources
 
-            if selected_connector_sources.is_selected_connector(source_entry):
+            if clinical_note_share.is_shared_snapshot(source_entry):
+                try:
+                    source_entry = clinical_note_share.historical_source(s, w, source["entry_id"])
+                except ws.WorkspaceError:
+                    raise ValueError("saved clinical source binding") from None
+                if current:
+                    try:
+                        clinical_note_share.validate_current_source(s, w, source["entry_id"])
+                    except ws.WorkspaceError:
+                        raise ws.WorkspaceError("handoff_sources_changed") from None
+                source_kind = "evidence"
+            elif selected_connector_sources.is_selected_connector(source_entry):
 
                 source_entry = selected_connector_sources.historical_source(s, w, source["entry_id"])
                 if current:

@@ -24,7 +24,22 @@ const factory=async({scope}:{scope:string}):Promise<DraftStore>=>{let closed=fal
   const before=records.get(scope+key)??{revision:null,value:null};if(before.revision!==expected)throw new DraftStoreError('conflict');const next={revision:String(Number(expected??0)+1),value:structuredClone(value)};records.set(scope+key,next);return next;}};};
 const currentDraft=()=>records.get(team.recovery_scope!+address)?.value?.body as NotebookDraft|null|undefined;
 async function mount(){root=createRoot(element);await act(async()=>root.render(<EncounterWorkspace authenticated={access} draftStorage={factory}/>));}
-async function click(text:string){let button:HTMLButtonElement|undefined;await vi.waitFor(async()=>{await act(async()=>{});button=[...element.querySelectorAll('button')].find(b=>b.textContent?.replace(/\s*↗$/,'').trim()===text||b.getAttribute('aria-label')===text||[...b.querySelectorAll('strong')].some(label=>label.textContent?.trim()===text));expect(button,text).toBeTruthy();expect(button!.disabled,text).toBe(false);});await act(async()=>button!.click());if(text==='Check saved result'&&button!.isConnected&&button!.disabled)await vi.waitFor(async()=>{await act(async()=>{});expect(!button!.isConnected||!button!.disabled).toBe(true);});}
+async function click(text:string){
+  const matches=(button:HTMLButtonElement)=>button.textContent?.replace(/\s*↗$/,'').trim()===text||button.getAttribute('aria-label')===text||[...button.querySelectorAll('strong')].some(label=>label.textContent?.trim()===text);
+  const banners=()=>[...element.querySelectorAll('.team-banner[role="status"],.team-banner[role="alert"]')];
+  let button:HTMLButtonElement|undefined;
+  await vi.waitFor(async()=>{await act(async()=>{});button=[...element.querySelectorAll('button')].find(matches);expect(button,text).toBeTruthy();expect(button!.disabled,text).toBe(false);});
+  const before=new Map(banners().map(banner=>[banner,banner.textContent]));
+  await act(async()=>button!.click());
+  if(['Check saved result','Send message','Send new attempt','Send this saved request','Send to Research'].includes(text))await vi.waitFor(async()=>{
+    await act(async()=>{});
+    // Busy rendering removes the recovery button before receipt verification and
+    // journal writes finish. Wait for a new result acknowledgment, then check the
+    // current control or the durable cleared pending body rather than the old node.
+    expect(banners().some(banner=>!!banner.textContent?.trim()&&(!before.has(banner)||before.get(banner)!==banner.textContent)),text).toBe(true);
+    if(text==='Check saved result')expect([...element.querySelectorAll('button')].some(current=>matches(current)&&!current.disabled)||currentDraft()?.pending===null,text).toBe(true);
+  });
+}
 async function input(selector:string,value:string){const field=element.querySelector<HTMLTextAreaElement>(selector)!;expect(field).toBeTruthy();await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function open(){await click('Choose an encounter');await act(async()=>element.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());}
 async function restart(){await act(async()=>root.unmount());history.replaceState(null,'','/');await mount();await open();await vi.waitFor(async()=>{await act(async()=>{});expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Restore notebook draft')).toBe(true);});}

@@ -524,6 +524,7 @@ def append(
         or not content.strip()
         or len(content) > 20000
         or ((kind == "evidence") != bool(source_label))
+        or source_label == "Human-shared saved note"
         or len(source_label or "") > 160
     ):
         raise WorkspaceError("invalid_entry", 400)

@@ -599,6 +599,9 @@ def _context_for(
         handoff_targets=targets,
         additional_sources=_selected_connector_passages(s, workspace, settings),
     )
+    from cosmas_os.application.clinical_note_share import clinical_request
+
+    context = clinical_request(s, workspace, settings, command["content"], context)
     selected_google_kinds = {"google_message", "google_calendar"}
     if any(s.get(WorkspaceEntry, source.entry_id).kind in selected_google_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
@@ -678,7 +681,7 @@ def _selected_connector_passages(s, workspace, settings):
     if workspace.appointment_id is None:
         return ()
     sources = _selected_google_passages(s, workspace, settings)
-    from cosmas_os.application import efax_inbound_source, fax_inbound_source
+    from cosmas_os.application import clinical_note_share, efax_inbound_source, fax_inbound_source
     from cosmas_os.ports.bot_capabilities import SourcePassage
 
     reviewed = []
@@ -686,7 +689,7 @@ def _selected_connector_passages(s, workspace, settings):
         reviewed.extend(efax_inbound_source.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.fax_inbound_source_available:
         reviewed.extend(fax_inbound_source.selected_entries(s, workspace, settings, workspace.revision))
-    return tuple(sorted((*sources, *(SourcePassage(row.id, row.revision, row.source_label,
+    return tuple(sorted((*sources, *clinical_note_share.selected(s, workspace, settings), *(SourcePassage(row.id, row.revision, row.source_label,
                         "evidence", row.content) for row in reviewed)), key=lambda source: source.revision))
 
 
@@ -1021,18 +1024,23 @@ def _current_input(s, row, *, reauthenticate=None, session_prep_phase="before"):
     ):
         raise ws.WorkspaceError("authority_changed")
     frozen = _context(row.prepared_envelope["context"])
-    context = _context_for(
-        s,
-        workspace,
-        version,
-        settings,
-        bot,
-        command,
-        handoff_roles=frozen.handoff_roles,
-        draft_only=row.kind == "private_handoff",
-        session_prep_phase=session_prep_phase,
-        prepared_contract=row.envelope_contract,
-    )
+    try:
+        context = _context_for(
+            s,
+            workspace,
+            version,
+            settings,
+            bot,
+            command,
+            handoff_roles=frozen.handoff_roles,
+            draft_only=row.kind == "private_handoff",
+            session_prep_phase=session_prep_phase,
+            prepared_contract=row.envelope_contract,
+        )
+    except ws.WorkspaceError as error:
+        if error.code in {"clinical_note_source_changed", "clinical_note_source_unavailable"}:
+            raise ws.WorkspaceError("source_changed") from None
+        raise
     if source_digest(context) != row.source_sha256:
         raise ws.WorkspaceError("source_changed")
     return workspace, version, bot, settings

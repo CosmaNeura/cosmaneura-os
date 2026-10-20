@@ -6,9 +6,9 @@ export const CHIEF_STARTERS = [
   {id:'team',label:'Prepare team drafts',prompt:'Break down the saved intake and visit notes into useful, independent private draft tasks for the available team members. Preserve source uncertainty and missing facts. Use each teammate only for its actual role, and explain unavailable or dependent work instead of substituting another role. No public search or external action is requested.'},
 ] as const;
 
-export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedContext,notesDirty,hasQuestion,canDelegate,onChoose}:{
+export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedContext,notesDirty,hasQuestion,canDelegate,compact=false,onChoose}:{
   locked:boolean;modelEnabled:boolean;sourceAllowed:boolean;hasSavedContext:boolean;notesDirty:boolean;hasQuestion:boolean;canDelegate:boolean;
-  onChoose:(prompt:string)=>void;
+  compact?:boolean;onChoose:(prompt:string)=>void;
 }) {
   const disabled=locked||!modelEnabled||!sourceAllowed||!hasSavedContext||notesDirty||hasQuestion;
   const guidance=!modelEnabled?'AI drafting is unavailable. You can still write and review your notes.'
@@ -18,9 +18,12 @@ export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedCon
     :hasQuestion?'Your question is below. Keep it, or clear it to choose another task.'
     :'Choose a task, review the question, then send it when ready.';
   return <section className="chief-start-actions" aria-label="Chief task starters">
+    <details className={`chief-starters-disclosure${compact?' compact':''}`} open={!compact}>
+    <summary>Choose a Chief task</summary>
     <div>{CHIEF_STARTERS.map(task=><button type="button" key={task.id} disabled={disabled||task.id==='team'&&!canDelegate}
       onClick={()=>{if(!disabled&&(task.id!=='team'||canDelegate))onChoose(task.prompt);}}>{task.label}</button>)}</div>
     <p>{guidance}{!canDelegate&&modelEnabled?' Private team assignments are off for Chief.':''}</p>
+    </details>
   </section>;
 }
 

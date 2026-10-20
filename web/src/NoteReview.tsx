@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NoteOperation, Workspace, WorkspaceEntry } from "./workspace-api";
 import { CaptureGapNotice } from "./CaptureGapNotice";
 import { captureGapKey, validateCaptureGapReview, type CaptureGapReview } from "./capture-gap-review";
@@ -71,9 +71,10 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
   }
   // Opening review can adopt an available draft only into a genuinely empty editor.
   // Recovery and saved-version conflicts take precedence over this convenience.
-  useEffect(()=>{
-    if(active&&!locked&&!latest&&!content&&sourceId===null&&scribe)useScribe(scribe);
-  },[active,locked,latest,content,sourceId,scribe]);
+  const initializingScribe=active&&!locked&&!latest&&!content&&sourceId===null&&!!scribe;
+  useLayoutEffect(()=>{
+    if(initializingScribe)useScribe(scribe!);
+  },[initializingScribe,scribe]);
   return <section className="team-note-review" aria-label="Private note review">
     <EditorRecoveryNotice recovery={recovery} label="Private note" onRestore={async (draft,current) => {
       const data = draft.data; editorData(data,"content,baseId,sourceId");
@@ -120,7 +121,7 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
       <button disabled={locked} onClick={() => useScribe(replacement)}>Replace editor with draft</button>
       <button disabled={locked} onClick={() => setReplacement(null)}>Keep my text</button></div>}
     <label htmlFor="private-note-text">Private note draft</label>
-    <textarea id="private-note-text" rows={10} maxLength={core ? undefined : 20000} value={content} readOnly={core} disabled={locked || otherVersion}
+    <textarea id="private-note-text" rows={10} maxLength={core ? undefined : 20000} value={content} readOnly={core} disabled={locked || otherVersion || initializingScribe}
       onChange={e => { setContent(e.target.value); setConfirmed(false); }} placeholder="Review a Scribe draft or write your own note…" />
     <button className="team-subtle" onClick={onSources}>Check notebook and sources</button>
     {latest?.core_source?.reviewed_source?.capture_continuity && <p role="status" className="team-note-notice">Recording continuity is unconfirmed. Check the note for missing speech. The length of any gap is unknown.</p>}

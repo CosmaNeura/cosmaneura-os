@@ -338,6 +338,13 @@ from cosmas_os.api.private_recording_routes import router as private_recording_r
 app.include_router(private_recording_router(workspace_gate=_workspace_gate, get_session=get_session, identity=_identity,
     fence=lambda request, session, identity: _refresh_model_identity(request, session, identity)))
 
+from cosmas_os.api.clinical_note_share_routes import (  # noqa: E402
+    router as clinical_note_share_router,
+)
+
+app.include_router(clinical_note_share_router(workspace_gate=_workspace_gate, get_session=get_session, identity=_identity,
+    fence=lambda request, session, identity: _refresh_model_identity(request, session, identity)))
+
 
 def _capture_gate() -> None:
     if not settings.workspace_capture_available:
@@ -2148,6 +2155,7 @@ from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: 
 
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")
+allowed_headers.append("X-Cosmas-Clinical-Team")
 # Origin policy covers compatibility failures before any inner handler runs.
 app.add_middleware(
     CORSMiddleware,
