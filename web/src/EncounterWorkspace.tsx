@@ -1834,9 +1834,14 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         </section>
         {practicePage==='notebook'&&CAPTURE_WORKSPACE_BUILD&&authenticated&&team&&savedRecordingEntry?.identity===authenticated&&savedRecordingEntry.workspaceId===workspace.id&&!savedRecordingEntry.visitResolved&&!savedRecordingEntry.binding&&
           <RecordingVisitPanel entry={savedRecordingEntry} identity={authenticated} origin={workspace} team={team} locked={locked||captureNavigationLocked||captureDraftLocked||note!==latestNote}
+            taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}
             isCurrent={()=>authenticated===privateRecordingLive.current.authenticated&&journal.current?.scope===savedRecordingEntry.scope}
-            onSelected={async(target,binding)=>{const entry=savedRecordingEntry;await openPrivateNotebook({identity:authenticated,workspace:target,team});
-              if(authenticated===entry.identity&&journal.current?.scope===entry.scope)setSavedRecordingEntry({...entry,workspaceId:target.id,originWorkspace:entry.originWorkspace??workspace,visitResolved:true,...(binding?{binding}:{})});}}/>}
+            onSelected={async(target,binding,transcriptionGesture)=>{const entry=savedRecordingEntry,selectedOwner=privateRecordingLive.current,selectedRoute=routeSequence.current;
+              if(selectedOwner.authenticated!==entry.identity||selectedOwner.generation!==generation.current||journal.current?.scope!==entry.scope)return;
+              const openingGeneration=generation.current+1;await openPrivateNotebook({identity:authenticated,workspace:target,team});
+              if(privateRecordingLive.current.authenticated===entry.identity&&generation.current===openingGeneration&&routeSequence.current===selectedRoute&&
+                journal.current?.scope===entry.scope&&journal.current.value===selectedOwner.editorJournal&&journal.current.serverScope===selectedOwner.editorScope)
+                setSavedRecordingEntry({...entry,workspaceId:target.id,originWorkspace:entry.originWorkspace??workspace,visitResolved:true,...(binding?{binding}:{}),transcriptionGesture});}}/>}
         {practicePage==='notebook'&&CAPTURE_WORKSPACE_BUILD&&authenticated&&team&&savedRecordingEntry?.identity===authenticated&&savedRecordingEntry.workspaceId===workspace.id&&(!!savedRecordingEntry.binding||savedRecordingEntry.visitResolved===true)&&
           <SavedRecordingTranscriptionPanel key={savedRecordingEntry.recordingId} entry={savedRecordingEntry} identity={authenticated} workspace={workspace} team={team}
             isCurrent={()=>authenticated===privateRecordingLive.current.authenticated&&journal.current?.scope===savedRecordingEntry.scope}

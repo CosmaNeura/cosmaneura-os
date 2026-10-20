@@ -72,14 +72,28 @@ export async function openSavedRecordingRuntime(options:{workspaceId:string;admi
     const captureQueue=new CaptureQueue(queue.storage),transport=new BffCaptureQueueTransport(bff,upload);
     controller=new CaptureFlowController({bff,profiles:bff,flowStore:flow,queue:captureQueue,source,
       queueTransport:transport});
-    const view=await creatorReviewApi(workspaceId,sessionId,identity,abort.signal).read();
+    const activeFlow=await flow.getActiveCaptureState();
     if(!current())throw new QueueInvariantError('capture_access_unavailable');
+    if(activeFlow&&activeFlow.sessionId!==sessionId)throw new QueueInvariantError('capture_saved_session_changed');
     let reviewOnly=false;
-    if(!await controller.restore()){
-      if(!['created','capturing'].includes(view.status))reviewOnly=true;
-      else if(view.status==='capturing')throw new QueueInvariantError('capture_saved_session_changed');
-      else await controller.prepareConfigured(sessionId);
+    if(activeFlow?.reviewAfterUpload===true&&activeFlow.phase==='processing'){
+      // This encrypted terminal record proves upload, not transcript readiness.
+      // The mounted review panel reauthorizes every actual transcript read.
+      if(activeFlow.recordedChunks!==options.chunks)
+        throw new QueueInvariantError('capture_saved_session_changed');
+      if(!await controller.restore()||controller.snapshot.state!=='processing'||
+        controller.snapshot.sessionId!==sessionId||controller.snapshot.recordedChunks!==options.chunks)
+        throw new QueueInvariantError('capture_saved_session_changed');
+    }else{
+      const view=await creatorReviewApi(workspaceId,sessionId,identity,abort.signal).read();
+      if(!current())throw new QueueInvariantError('capture_access_unavailable');
+      if(!await controller.restore()){
+        if(!['created','capturing'].includes(view.status))reviewOnly=true;
+        else if(view.status==='capturing')throw new QueueInvariantError('capture_saved_session_changed');
+        else await controller.prepareConfigured(sessionId);
+      }
     }
+    if(!current())throw new QueueInvariantError('capture_access_unavailable');
     const selected=controller;
     return {controller:selected,reviewOnly,transcribe:()=>{
       if(reviewOnly)return Promise.resolve();

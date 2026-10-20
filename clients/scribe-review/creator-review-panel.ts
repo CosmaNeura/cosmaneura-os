@@ -11,6 +11,7 @@ import {
 import "./creator-review.css";
 
 type Phase = "loading" | "ready" | "saving" | "retry" | "unavailable";
+export type CreatorReviewAvailability = "loading" | "ready" | "unavailable";
 export interface CreatorReviewState {
   readonly phase: Phase;
   readonly view: CreatorReviewView | null;
@@ -19,6 +20,8 @@ export interface CreatorReviewState {
 
 export interface CreatorReviewOptions {
   readonly journal?: CreatorReviewJournal;
+  /** Read availability only; no transcript, credentials or failure detail is exposed. */
+  readonly onAvailability?: (availability: CreatorReviewAvailability) => void;
   /** The host reauthorizes and opens its existing Core note flow. No source text is sent. */
   readonly continueToNote?: () => Promise<void>;
 }
@@ -33,6 +36,13 @@ export function mountCreatorReview(
   let generation = 0;
   let recovered = false;
   let continuing = false;
+  let availability: CreatorReviewAvailability | undefined;
+  const reportAvailability = (next: CreatorReviewAvailability): void => {
+    if (disposed || next === availability) return;
+    availability = next;
+    // A passive host observer cannot turn an authorized result into a failed request.
+    try { options.onAvailability?.(next); } catch { /* The review remains usable. */ }
+  };
   const render = (): void => {
     if (disposed) return;
     root.innerHTML = renderCreatorReview(state);
@@ -43,6 +53,9 @@ export function mountCreatorReview(
       button.disabled = continuing;
       button.textContent = continuing ? "Opening note…" : "Continue to note";
       root.querySelector(".creator-status")?.append(button);
+    }
+    if (state.phase === "loading" || state.phase === "ready" || state.phase === "unavailable") {
+      reportAvailability(state.phase);
     }
   };
 
@@ -65,6 +78,7 @@ export function mountCreatorReview(
         state = { phase: "retry", view: null,
           notice: "A previous decision needs confirmation. Retry that same decision to recover its result." };
         render();
+        reportAvailability("ready");
         return;
       }
       state = { ...state, phase: "ready", view };

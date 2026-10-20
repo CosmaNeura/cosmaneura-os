@@ -9,10 +9,15 @@ import {teamFixture} from './team-setup-test-fixture';
 import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 import {listPrivateRecordings} from './private-recording-runtime';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
+import type {PrivateRecordingPanelProps} from './PrivateRecordingPanel';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(scope:string)=>scope}));
 vi.mock('./private-recording-runtime',async original=>({...await original<typeof import('./private-recording-runtime')>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
+vi.mock('./capture-api',async original=>({...await original<typeof import('./capture-api')>(),CAPTURE_WORKSPACE_BUILD:true}));
+vi.mock('./PrivateRecordingPanel',()=>({PrivateRecordingPanel:({identity,onTranscribe}:PrivateRecordingPanelProps)=><button onClick={()=>void onTranscribe?.({identity,workspace,team},modelUuid(989))}>Finish synthetic saved recording</button>}));
+vi.mock('./RecordingVisitPanel',()=>({RecordingVisitPanel:({origin,onSelected}:Parameters<typeof import('./RecordingVisitPanel').RecordingVisitPanel>[0])=><button onClick={()=>void onSelected(origin,null)}>Open synthetic saved transcript</button>}));
+vi.mock('./SavedRecordingTranscriptionPanel',()=>({SavedRecordingTranscriptionPanel:()=> <section aria-label="Saved recording transcription"><h2>Review your transcript</h2><p role="alert">Your transcript cannot currently be retrieved. Choose Refresh to check again.</p><button>Refresh</button></section>}));
 vi.mock('./workspace-api',async original=>{const actual=await original<typeof import('./workspace-api')>();return {...actual,workspaceApi:{...actual.workspaceApi,open:vi.fn(),catalog:vi.fn(),team:vi.fn(),read:vi.fn(),privateDraftSummaries:vi.fn(),ask:vi.fn()}};});
 const team=teamFixture();team.capture={enabled:false};
 const workspace:Workspace={id:modelUuid(71),appointment_id:modelUuid(72),label:'Invented native chat',revision:1,entries:[],work_candidates:[],model_contract_version:1,model_observed_at:modelTimestamp};
@@ -97,4 +102,17 @@ it('does not let an old settling receipt block or overwrite the next owner’s l
   await click('Visits and notes');await ready(()=>expect(host.querySelector('.team-encounter-option')).toBeTruthy());await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await ready(()=>expect(question()?.disabled).toBe(false));
   await type('New owner working draft');await ready(()=>expect((records.get(nextTeam.recovery_scope+`workspace:${workspace.id}`)?.value?.body as NotebookDraft)?.thought).toBe('New owner working draft'));
   await act(async()=>finishWrite());expect(question().value).toBe('New owner working draft');expect(host.textContent).not.toContain('Conversation saved.');
+});
+
+it('releases native conversation containment for a saved transcription review and its recovery controls',async()=>{
+  await click('Home');await click('Start recording');await click('Finish synthetic saved recording');
+  await ready(()=>expect(host.querySelector('.workspace-notebook-body[data-native-chat="false"]')).toBeTruthy());
+  await click('Open synthetic saved transcript');
+  await ready(()=>expect(host.querySelector('[aria-label="Saved recording transcription"]')).toBeTruthy());
+  const review=host.querySelector('[aria-label="Saved recording transcription"]')!;
+  expect(review.closest('[data-native-chat="true"]')).toBeNull();
+  expect(review.closest('.workspace-notebook-body')).toBeNull();
+  expect(host.querySelector('.team-workspace[data-native-chat="true"]')).toBeNull();
+  expect(review.querySelector('[role="alert"]')?.textContent).toContain('cannot currently be retrieved');
+  expect(review.querySelector('button')?.textContent).toBe('Refresh');
 });

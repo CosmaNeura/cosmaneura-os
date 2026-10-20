@@ -9,7 +9,7 @@ import type {PrivateRecordingSnapshot} from './private-recording-runtime';
 import './practice-home.css';
 
 function recordingDetails(recording:PrivateRecordingSnapshot):string {
-  const status=recording.phase==='sealed'?(recording.recordedChunks?'Saved on this device; not yet synced':'Stopped · no audio captured'):recording.phase==='paused'?'Paused · not yet synced':recording.phase==='interrupted'?'Interrupted · check retained audio':'Check recording status';
+  const status=recording.phase==='sealed'?(recording.recordedChunks?'Saved on this device':'Stopped · no audio captured'):recording.phase==='paused'?'Paused':recording.phase==='interrupted'?'Interrupted · check retained audio':'Check recording status';
   const seconds=Math.floor(recording.elapsedSeconds),duration=`${Math.floor(seconds/60)}:${String(seconds%60).padStart(2,'0')}`;
   return `${duration} · ${status} · Private`;
 }

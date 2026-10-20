@@ -124,7 +124,7 @@ describe('practice Quick start recovery',()=>{
     await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} recordings={rows} onReopenRecording={reopen} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
     const times=[...container.querySelectorAll<HTMLTimeElement>('[aria-label="Saved private recordings"] time')];expect(times).toHaveLength(4);expect(times[0].dateTime).toBe(saved.createdAt);
     const buttons=[...container.querySelectorAll<HTMLButtonElement>('[aria-label="Saved private recordings"] button')];
-    expect(buttons.map(button=>`${button.querySelector('strong')?.textContent}${button.querySelector('span')?.textContent}`)).toEqual(['Private recording0:18 · Saved on this device; not yet synced · Private','Private recording1:36 · Saved on this device; not yet synced · Private','Private recording0:00 · Stopped · no audio captured · Private','Private recording0:00 · Check recording status · Private']);
+    expect(buttons.map(button=>`${button.querySelector('strong')?.textContent}${button.querySelector('span')?.textContent}`)).toEqual(['Private recording0:18 · Saved on this device · Private','Private recording1:36 · Saved on this device · Private','Private recording0:00 · Stopped · no audio captured · Private','Private recording0:00 · Check recording status · Private']);
     await act(async()=>buttons[1].click());expect(reopen).toHaveBeenCalledExactlyOnceWith(id(102));expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();
   });
   it('refuses added authority fields and mismatched encrypted request keys',async()=>{
