@@ -27,9 +27,10 @@ class PcmSource implements CaptureSource {
 }
 describe('Private Scribe recording controls with encrypted local PCM',()=>{
   let root:Root,container:HTMLDivElement,factory:IDBFactory,sources:PcmSource[],runtimes:PrivateRecordingRuntime[],props:PrivateRecordingPanelProps;
-  const close=vi.fn(),opened=vi.fn(),accessLost=vi.fn(),fetch=vi.fn(),createUrl=vi.fn((_blob:Blob|MediaSource)=> 'blob:private-test'),revokeUrl=vi.fn();
+  const close=vi.fn(),opened=vi.fn(),accessLost=vi.fn(),fetch=vi.fn(),createUrl=vi.fn((_blob:Blob|MediaSource)=> 'blob:private-test'),revokeUrl=vi.fn(),playMedia=vi.fn(async()=>{});
   beforeEach(()=>{
     Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();
+    vi.spyOn(HTMLMediaElement.prototype,'play').mockImplementation(playMedia);
     vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);vi.stubGlobal('Blob',NodeBlob);vi.stubGlobal('fetch',fetch);
     vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:createUrl,revokeObjectURL:revokeUrl}));localStorage.clear();
     factory=new IDBFactory();sources=[];runtimes=[];
@@ -47,6 +48,156 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
   async function consent(){
     const check=container.querySelector<HTMLInputElement>('input[type=checkbox]')!;await act(async()=>check.click());
   }
+  async function metadataNotebook(){
+    const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+    const serverScope=await vendorSha256(new TextEncoder().encode(vendorCanonical({contract:'cosmas-private-drafts-v1',box_id:uuid(10),owner_id:uuid(11)})));
+    const mapping:PrivateNotebookResult={...notebook,workspace:{...notebook.workspace,revision:1},team:{...notebook.team,recovery_scope:serverScope,
+      configuration:{practice_context:'',bots:[{role:'scribe',name:'Scribe',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}]},
+      members:[{role:'scribe',agent_id:uuid(12),name:'Scribe',initials:'S',description:'',prompt:'',capabilities:[]}]}};
+    let receipt!:PrivateRecordingReceipt;
+    const attach=vi.spyOn(privateRecordingApi,'attach').mockImplementation(async(_identity,v)=>receipt={contract:'cosmas.private-recording.v1',custody:'local_device_metadata',recording_id:uuid(3),local_recording_id:v.request.local_recording_id,workspace_id:id,workspace_revision:1,owner_id:uuid(11),box_id:uuid(10),agent_id:uuid(12),team_revision_id:uuid(13),recovery_scope:serverScope,attach_sha256:v.request_sha256,started_at:v.request.started_at,created_at:new Date().toISOString(),state:'unfinished',finish:null,link:null,upstream_capture_admitted:false,audio_uploaded:false,transcription_started:false});
+    const finish=vi.spyOn(privateRecordingApi,'finish').mockImplementation(async(_identity,_v,_team,_id,f)=>receipt={...receipt,state:'finished',finish:{receipt_id:uuid(4),request_sha256:f.request_sha256,manifest_sha256:f.request.manifest_sha256,chunks:f.request.chunks,frames:f.request.frames,ended_at:f.request.ended_at}});
+    return {mapping,attach,finish,receipt:()=>receipt};
+  }
+  it.each([false,true])('withholds old Close success or failure after owner replacement (%s)',async fails=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve),original=runtimes[0].close.bind(runtimes[0]);
+    vi.spyOn(runtimes[0],'close').mockImplementationOnce(async()=>{await held;if(fails)throw new Error('Synthetic old close failed');await original();});
+    await click('Close recording');expect(close).not.toHaveBeenCalled();
+    const replacementClose=vi.fn(),replacementIdentity={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    props={...props,identity:replacementIdentity,onClose:replacementClose};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await act(async()=>release());
+    expect(close).not.toHaveBeenCalled();expect(replacementClose).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('The microphone stop remains unconfirmed');
+    await consent();expect(button('Start recording').disabled).toBe(false);
+  });
+  it.each([false,true])('withholds old Close success or failure after same-owner recording entry replacement (%s)',async fails=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    let replacementId='';await act(async()=>{const info=await runtimes[0].snapshotForLedger();
+      const newer=await PrivateRecordingRuntime.open({scope,platform:'desktop',isCurrent:()=>true,openStore:props.prepareStore!,acquireLock:async()=>async()=>{}},{title:'Invented replacement saved recording',consent:info.consent});
+      replacementId=newer.snapshot.recordingId;await newer.close();});
+    let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve),original=runtimes[0].close.bind(runtimes[0]);
+    vi.spyOn(runtimes[0],'close').mockImplementationOnce(async()=>{await held;if(fails)throw new Error('Synthetic old close failed');await original();});
+    await click('Close recording');expect(close).not.toHaveBeenCalled();
+    const replacementClose=vi.fn();props={...props,recordingId:replacementId,onClose:replacementClose};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await wait(()=>container.textContent?.includes('Invented replacement saved recording')===true);
+    await act(async()=>release());
+    expect(close).not.toHaveBeenCalled();expect(replacementClose).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('The microphone stop remains unconfirmed');
+    expect(button('Close recording').disabled).toBe(false);
+  });
+  it('allows same-owner Close after access is lost and physical pause is confirmed',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));props={...props,isCurrent:()=>false};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>accessLost.mock.calls.length===1);
+    expect(sources[0].stops).toBe(1);expect(button('Close recording').disabled).toBe(false);
+    await click('Close recording');await wait(()=>close.mock.calls.length===1);expect(close).toHaveBeenCalledOnce();
+  });
+  it.each([false,true])('withholds old transcription handoff or error after owner replacement during close (%s)',async fails=>{
+    const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{});
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true);
+    let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve),original=runtimes[0].close.bind(runtimes[0]);
+    const closing=vi.spyOn(runtimes[0],'close').mockImplementationOnce(async()=>{await held;if(fails)throw new Error('Synthetic old handoff close failed');await original();});
+    await click('Transcribe recording');await wait(()=>closing.mock.calls.length===1);
+    const replacementTranscribe=vi.fn(async()=>{}),replacementIdentity={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    props={...props,identity:replacementIdentity,prepareNotebook:undefined,onTranscribe:replacementTranscribe};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await act(async()=>release());
+    expect(transcribe).not.toHaveBeenCalled();expect(replacementTranscribe).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('The recording details need to finish saving before transcription');
+    await consent();expect(button('Start recording').disabled).toBe(false);
+  });
+  it('withholds old Play rejection after owner replacement',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>!!container.querySelector('audio'));
+    let reject!:(cause:Error)=>void;playMedia.mockImplementationOnce(()=>new Promise<void>((_resolve,no)=>reject=no));
+    await click('Play saved recording');expect(playMedia).toHaveBeenCalledOnce();
+    // This synthetic replacement is explicitly permitted to reopen the same invented clip.
+    // It isolates stale UI ownership from real account/storage authorization.
+    props={...props,identity:{mode:'clerk_jwt' as const,getToken:vi.fn()},recordingId:runtimes[0].snapshot.recordingId};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await wait(()=>!!container.querySelector('audio'));
+    await act(async()=>reject(new Error('Synthetic prior clip play rejected')));
+    expect(container.textContent).not.toContain('The clip is ready. Press Play in the audio player');
+    expect(container.querySelector('[role=alert]')).toBeNull();
+  });
+
+  it('transcribes a reopened saved clip with one action that saves its notebook details',async()=>{
+    const recordingId=await reopenMappedClip(),metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{});
+    await act(async()=>root.unmount());root=createRoot(container);
+    props={...props,recordingId,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};await render();
+    await wait(()=>!![...container.querySelectorAll('button')].find(b=>b.textContent==='Transcribe recording'));
+    expect(metadata.attach).not.toHaveBeenCalled();expect(metadata.finish).not.toHaveBeenCalled();
+    await click('Transcribe recording');await wait(()=>transcribe.mock.calls.length===1);
+    expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();
+    expect(transcribe).toHaveBeenCalledExactlyOnceWith(metadata.mapping,recordingId);expect(sources).toHaveLength(1);
+  });
+  it.each(['saved','not_found'] as const)('resolves a lost metadata response (%s) inside one transcription action without asking for manual recovery',async outcome=>{
+    const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{}),original=metadata.attach.getMockImplementation()!;
+    metadata.attach.mockImplementationOnce(async(...args)=>{await original(...args);throw new WorkspaceApiError(503);});
+    const resolve=vi.spyOn(privateRecordingApi,'resolve').mockImplementation(async()=>outcome==='saved'?{outcome,recording:metadata.receipt()}:{outcome,recording:null});
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await wait(()=>container.textContent?.includes('Notebook recording status is unconfirmed')===true);
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+    await click('Transcribe recording');await wait(()=>transcribe.mock.calls.length===1);
+    expect(resolve).toHaveBeenCalledOnce();expect(metadata.attach).toHaveBeenCalledTimes(outcome==='saved'?1:2);
+    if(outcome==='not_found')expect(metadata.attach.mock.calls[1][1]).toEqual(metadata.attach.mock.calls[0][1]);
+    expect(metadata.finish).toHaveBeenCalledOnce();expect(transcribe).toHaveBeenCalledExactlyOnceWith(metadata.mapping,runtimes[0].snapshot.recordingId);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each([false,true])('keeps transcription usable while metadata finish is held and withholds navigation after access loss (%s)',async loseAccess=>{
+    const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{}),original=metadata.finish.getMockImplementation()!;
+    let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);
+    metadata.finish.mockImplementation(async(...args)=>{await held;return original(...args);});
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await wait(()=>metadata.attach.mock.calls.length===1);await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>metadata.finish.mock.calls.length===1&&!!container.querySelector('audio'));
+    expect(button('Transcribe recording').disabled).toBe(false);expect(button('Play saved recording').disabled).toBe(false);
+    await click('Transcribe recording');expect(container.textContent).toContain('Preparing transcription');expect(transcribe).not.toHaveBeenCalled();
+    if(loseAccess){props={...props,isCurrent:()=>false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));}
+    await act(async()=>release());
+    if(loseAccess){expect(transcribe).not.toHaveBeenCalled();expect(container.textContent).toContain('Recording access changed');}
+    else{await wait(()=>transcribe.mock.calls.length===1);expect(metadata.finish).toHaveBeenCalledOnce();}
+    expect(sources[0].stops).toBe(1);
+  });
+  it('makes a verified clip ready inline after one Stop and the Play button actually plays it',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>status()==='Saved on this device'&&!!container.querySelector('.private-recording-playback audio'));
+    expect(sources[0].stops).toBe(1);expect(fetch).not.toHaveBeenCalled();
+    expect(createUrl).toHaveBeenCalledOnce();expect(container.querySelector('.private-recording-status')?.nextElementSibling?.getAttribute('aria-label')).toBe('Saved recording playback');
+    expect(playMedia).not.toHaveBeenCalled();await click('Play saved recording');expect(playMedia).toHaveBeenCalledOnce();
+    expect(createUrl).toHaveBeenCalledOnce();expect(container.textContent).not.toContain('Finish and save recording');
+  });
+  it('does not gate saved acknowledgment or Close on delayed playback and discards its late URL',async()=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));
+    const original=runtimes[0].exportWav.bind(runtimes[0]);let release!:()=>void,verified=false;
+    const held=new Promise<void>(resolve=>release=resolve);
+    vi.spyOn(runtimes[0],'exportWav').mockImplementation(async()=>{const result=await original();verified=true;await held;return result;});
+    await click('Stop and save recording');await wait(()=>status()==='Saved on this device'&&verified);
+    expect(button('Close recording').disabled).toBe(false);expect(container.textContent).toContain('Preparing playback');
+    await click('Close recording');await act(async()=>release());
+    expect(close).toHaveBeenCalledOnce();expect(createUrl).not.toHaveBeenCalled();expect(playMedia).not.toHaveBeenCalled();
+  });
+  it('plays the local saved clip while the notebook response is still pending',async()=>{
+    let release!:(value:PrivateNotebookResult)=>void;
+    props.prepareNotebook=()=>new Promise(resolve=>release=resolve);
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>!!container.querySelector('audio')&&!button('Play saved recording').disabled);
+    await click('Play saved recording');expect(playMedia).toHaveBeenCalledOnce();expect(button('Close recording').disabled).toBe(false);
+    await click('Close recording');await act(async()=>release(notebook));expect(close).toHaveBeenCalledOnce();
+  });
   it('shows saved-recording recovery without new-recording consent while access is pending',async()=>{
     let release!:()=>void;props={...props,recordingId:id,authorize:()=>new Promise<void>(resolve=>release=resolve)};
     await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
@@ -274,6 +425,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     let resolve!:(value:Awaited<ReturnType<typeof workspaceApi.privateDraftSummaries>>)=>void;
     vi.spyOn(workspaceApi,'privateDraftSummaries').mockImplementation(()=>new Promise(done=>resolve=done));
     await click('Choose private notebook');expect(button('Choose private notebook').disabled).toBe(true);
+    await wait(()=>!button('Play saved recording').disabled);
     expect(button('Close recording').disabled).toBe(false);expect(button('Play saved recording').disabled).toBe(false);expect(busy.mock.calls.at(-1)).toEqual([false]);
     await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);
     expect(new DataView(await (createUrl.mock.calls[0][0] as Blob).arrayBuffer()).getInt16(44,true)).toBe(84);
@@ -341,6 +493,7 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     vi.spyOn(workspaceApi,'openPrivateDraft').mockImplementation(()=>new Promise(done=>resolve=done));
     const attach=vi.spyOn(privateRecordingApi,'attach'),finish=vi.spyOn(privateRecordingApi,'finish');
     await click('Retry opening private notebook');expect(button('Retry opening private notebook').disabled).toBe(true);
+    await wait(()=>!button('Play saved recording').disabled);
     expect(button('Close recording').disabled).toBe(false);expect(button('Play saved recording').disabled).toBe(false);
     await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);
     await click('Close recording');expect(close).toHaveBeenCalledOnce();await act(async()=>resolve(notebook));

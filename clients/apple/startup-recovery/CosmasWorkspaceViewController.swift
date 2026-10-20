@@ -93,11 +93,16 @@ import CosmaneuraIOSPCMCapacitor
         addChild(next)
         next.view.translatesAutoresizingMaskIntoConstraints = false
         view.insertSubview(next.view, belowSubview: panel)
+        // UIKit owns keyboard geometry. Resize the WebView once instead of
+        // letting a document composer and the keyboard pan each other.
+        let keyboard = view.keyboardLayoutGuide
+        keyboard.followsUndockedKeyboard = false
+        keyboard.usesBottomSafeArea = false
         NSLayoutConstraint.activate([
             next.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             next.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             next.view.topAnchor.constraint(equalTo: view.topAnchor),
-            next.view.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+            next.view.bottomAnchor.constraint(equalTo: keyboard.topAnchor),
         ])
         next.didMove(toParent: self)
     }

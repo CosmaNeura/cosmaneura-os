@@ -366,6 +366,8 @@
 .chief-starters-disclosure.compact[open] > summary { margin-bottom:6px; }
 .workspace-notebook-body > .handoff-review { order:-1; }
 .workspace-draft-save-status:empty { display:none; }
+.mobile-chat-scroll { display:contents; }
+.mobile-chat-scroll > details > summary { box-sizing:border-box; min-height:44px; padding:12px 16px; cursor:pointer; }
 @media (max-width:600px) {
   .team-workspace:has(.workspace-notebook:not([hidden]) > .workspace-notebook-body[data-view=conversation]:not([hidden])) .workspace-draft-save-status { display:block; min-height:48px; }
   .workspace-notebook:has(> .workspace-notebook-body[data-view=conversation]) > .team-prep[aria-label="Existing Scribe recording"] > .team-fine[aria-label="Scribe source recovery"] { min-height:29px; }
@@ -390,4 +392,48 @@
   .team-view-switch,
   .workspace-notebook-body[data-view=conversation] .team-composer-wrap { position:static; }
   .workspace-notebook-body .team-conversation-header { scroll-margin-top:12px; }
+}
+
+/* WK's keyboardLayoutGuide supplies this viewport; only messages scroll. */
+@media (max-width:600px) {
+  .team-workspace[data-native-chat=true] > .team-sidebar,
+  .team-workspace[data-native-chat=true] .team-topbar,
+  .team-workspace[data-native-chat=true] .workspace-draft-save-status,
+  .team-workspace[data-native-chat=true] .team-main > .team-banner { display:none; }
+  .team-workspace[data-native-chat=true] .team-main > :not(.workspace-notebook):not(:has(.workspace-notebook)):not(.workspace-dialog-backdrop),
+  .team-workspace[data-native-chat=true] .workspace-notebook > :not(.workspace-notebook-body) { display:none; }
+  .workspace-notebook-body[data-native-chat=true] {
+    position:fixed; inset:0; z-index:12; height:100%; max-height:100%; box-sizing:border-box;
+    padding-top:env(safe-area-inset-top,0px); overflow:hidden; background:#fffdf7;
+  }
+  .workspace-notebook-body[data-native-chat=true] > .team-view-switch {
+    order:0; flex:none; position:static; display:grid; grid-template-columns:repeat(3,minmax(0,1fr));
+    gap:4px; padding:4px 8px; border-top:0;
+  }
+  .workspace-notebook-body[data-native-chat=true] .team-view-switch button { min-width:0; max-width:none; padding:4px; font-size:12px; }
+  .workspace-notebook-body[data-native-chat=true] > .team-content {
+    order:1; flex:1; display:flex; min-height:0; margin:0; border:0; border-radius:0; overflow:hidden;
+  }
+  .workspace-notebook-body[data-native-chat=true] .team-notebook-panel { display:none; }
+  .workspace-notebook-body[data-native-chat=true] .team-conversation { flex:1; min-height:0; width:100%; }
+  .workspace-notebook-body[data-native-chat=true] .team-conversation-header { flex:none; gap:6px; min-height:54px; padding:4px 8px; }
+  .workspace-notebook-body[data-native-chat=true] .team-conversation-header .bot-avatar { width:28px; height:28px; flex-shrink:0; }
+  .team-workspace .native-chat-home { min-height:44px; padding:4px 8px; border:0; background:transparent; font-size:13px; }
+  .workspace-notebook-body[data-native-chat=true] .team-conversation-header .team-subtle { min-height:44px; max-width:92px; padding:4px; font-size:12px; }
+  .workspace-notebook-body[data-native-chat=true] .mobile-chat-scroll {
+    display:block; flex:1; min-height:0; overflow-y:auto; overscroll-behavior-y:contain; overflow-anchor:none; -webkit-overflow-scrolling:touch;
+  }
+  .workspace-notebook-body[data-native-chat=true] .team-messages { overflow:visible; flex:none; min-height:0; max-height:none; padding:12px; }
+  .workspace-notebook-body[data-native-chat=true] .team-work-disclosure { margin:0; border:0; border-bottom:1px solid var(--team-line); border-radius:0; }
+  .workspace-notebook-body[data-native-chat=true] .chief-starters-disclosure { padding:0 12px; border-bottom:1px solid var(--team-line); }
+  .workspace-notebook-body[data-native-chat=true] .team-conversation-empty { margin:8px auto; }
+  .workspace-notebook-body[data-native-chat=true] .team-conversation-empty h3 { font-size:18px; }
+  .workspace-notebook-body[data-native-chat=true] .team-composer-wrap {
+    position:static; flex:none; padding:8px; padding-bottom:max(8px,env(safe-area-inset-bottom,0px));
+    background:#fffdf7; border-top:1px solid var(--team-line);
+  }
+  .workspace-notebook-body[data-native-chat=true] .team-composer { padding:8px; }
+  .workspace-notebook-body[data-native-chat=true] .native-chat-progress { box-sizing:border-box; height:36px; min-height:36px; margin:0 0 4px; overflow:hidden; font-size:12px; line-height:18px; }
+  .workspace-notebook-body[data-native-chat=true] .team-composer textarea { box-sizing:border-box; height:58px; min-height:58px; max-height:58px; resize:none; }
+  .workspace-notebook-body[data-native-chat=true] .team-composer-wrap > .team-fine { display:none; }
 }

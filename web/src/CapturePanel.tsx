@@ -25,10 +25,11 @@ const idle: CaptureFlowSnapshot = { state: "idle", statusCode: "idle", sessionId
   recordedChunks: 0, queuedChunks: 0, elapsedSeconds: 0, remainingBudgetSeconds: null,
   remainingAuthoritySeconds: null, transcriptionStatus: null, transcript: null };
 
-export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptureRuntime, notesEnabled = false, correctionsEnabled = false, recoveryEnabled = CAPTURE_RECOVERY_BUILD, onDraftLock, onNavigationLock, onReviewDraft, onCurrentDraft, reviewLocked, scratchpad, notebookDirty = false, onNotebook, taskBot, openRequest = 0, preferencesScope, encounterLabel }: {
+export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptureRuntime, notesEnabled = false, correctionsEnabled = false, recoveryEnabled = CAPTURE_RECOVERY_BUILD, onDraftLock, onNavigationLock, onExpandedChange, onReviewDraft, onCurrentDraft, reviewLocked, scratchpad, notebookDirty = false, onNotebook, taskBot, openRequest = 0, preferencesScope, encounterLabel }: {
   workspaceId: string; identity: AuthenticatedWorkspaceIdentity; runtimeFactory?: CaptureRuntimeFactory; notesEnabled?: boolean;
   onDraftLock?: (locked: boolean) => void;
   onNavigationLock?: (locked: boolean) => void;
+  onExpandedChange?: (expanded:boolean)=>void;
   onReviewDraft?: (draft: CaptureDraft) => void; reviewLocked?: boolean;
   onCurrentDraft?: (draft: CaptureDraft) => void;
   correctionsEnabled?: boolean;
@@ -65,6 +66,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
     onNavigationLock?.(!!busy || !!pending || ["recording", "uploading", "preparing", "stopping"].includes(snapshot.state));
     return () => onNavigationLock?.(false);
   }, [busy, pending, snapshot.state, onNavigationLock]);
+  useEffect(()=>{onExpandedChange?.(expanded);return()=>onExpandedChange?.(false);},[expanded,onExpandedChange]);
   const runtime = useRef<CaptureRuntime | null>(null);
   const preparing = useRef(false);
   const contextKey = JSON.stringify([workspaceId, preferencesScope, taskBot?.selection, taskBot?.enabled]);

@@ -597,7 +597,7 @@ def test_actual_signed_multi_specialist_ui_completes_six_revision_and_acceptance
             env=env,
             text=True,
             capture_output=True,
-            timeout=300,
+            timeout=900,
         )
         (report_root / "vitest.log").write_text(result.stdout + result.stderr)
         report = {

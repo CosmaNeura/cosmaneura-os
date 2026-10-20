@@ -1314,7 +1314,7 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
         if result.handoffs:
             from dataclasses import replace
 
-            queued, refused = reserve_children(
+            assignments = reserve_children(
                 s,
                 workspace,
                 entry,
@@ -1328,7 +1328,7 @@ def settle(s, claimed, result, *, reauthenticate=None, clock=None):
             )
             published = replace(
                 result,
-                content=f"Private draft requests: {queued} queued; {refused} not started. Review each teammate’s recorded status below.",
+                content=private_draft_assignment_receipt(assignments),
             )
         # Pending child entries have no answer and do not alter selected inputs.
         _current_input(s, row, reauthenticate=reauthenticate, session_prep_phase="after")
@@ -1541,6 +1541,59 @@ def project_workspace(s, value, *, as_of=None):
     return {**value, "model_contract_version": 1, "model_observed_at": as_of.isoformat()}
 
 
+@dataclass(frozen=True)
+class ReservedDraft:
+    assignment: WorkspaceHandoff
+    attempt: WorkspaceHandoffAttempt
+    expected_output: str | None
+
+
+def _quoted_assignment_text(value):
+    # The receipt is Markdown in the product. Keep task text visibly quoted,
+    # including strings that otherwise form links, headings or HTML.
+    special = "\\`*_{}[]<>()#+-.!|~"
+    escaped = "".join("\\" + char if char in special else char for char in value)
+    return "".join("> " + line for line in escaped.splitlines(keepends=True))
+
+
+def private_draft_assignment_receipt(assignments):
+    """Describe the exact saved requests; never publish model action claims."""
+    def render(*, include_briefs):
+        parts = ["I saved these private draft assignments for your review."]
+        for reserved in assignments:
+            assignment, attempt = reserved.assignment, reserved.attempt
+            name = _quoted_assignment_text(assignment.recipient_name)
+            if attempt.status == "queued" and attempt.error_code is None:
+                status = "Queued; waiting for a private draft."
+            elif attempt.status == "failed" and attempt.error_code == "team_work_limit":
+                status = "Not started: your team's work limit was reached."
+            elif attempt.status == "failed" and attempt.error_code == "authority_changed":
+                status = "Not started: the teammate's access or configuration changed."
+            else:
+                raise ws.WorkspaceError("invalid_model_output")
+            part = f"Teammate\n{name}\n\nStatus: {status}"
+            if include_briefs:
+                part += f"\n\nRequested work (quoted)\n{_quoted_assignment_text(assignment.brief)}"
+            else:
+                part += "\n\nOpen this teammate's saved assignment below to read the full unchanged request."
+            if reserved.expected_output is not None:
+                part += f"\n\nExpected draft (quoted)\n{_quoted_assignment_text(reserved.expected_output)}"
+            else:
+                part += "\n\nExpected result: a private draft for human review."
+            parts.append(part)
+        parts.append("These assignments prepare private drafts only. Review each completed result before using it.")
+        return "\n\n".join(parts)
+
+    receipt = render(include_briefs=True)
+    if len(receipt) > 20000:
+        # Escaping three maximally sized briefs can exceed the reply bound.
+        # Do not truncate a task: the immutable full brief remains in its card.
+        receipt = render(include_briefs=False)
+    if not assignments or len(receipt) > 20000:
+        raise ws.WorkspaceError("invalid_model_output")
+    return receipt
+
+
 def reserve_children(
     s, workspace, origin, version, chief, context, briefs, *, external_identity_id, clock=None, prepared_contract=None
 ):
@@ -1550,7 +1603,7 @@ def reserve_children(
 
     if len(briefs) > 3 or len({brief.role for brief in briefs}) != len(briefs):
         raise ws.WorkspaceError("invalid_handoff", 400)
-    queued = refused = 0
+    reserved = []
     for brief in briefs:
         if (
             brief.role not in context.handoff_roles
@@ -1612,8 +1665,14 @@ def reserve_children(
         )
         s.add(attempt)
         s.flush()
+        expected_output = None
+        if brief.requirements is not None:
+            try:
+                expected_output = TaskRequirements.model_validate(brief.requirements).expected_output
+            except (ValueError, TypeError):
+                raise ws.WorkspaceError("invalid_model_output") from None
+        reserved.append(ReservedDraft(assignment, attempt, expected_output))
         if reason:
-            refused += 1
             handoffs._audit(s, attempt, "not_admitted")
             continue
         command = {
@@ -1652,8 +1711,7 @@ def reserve_children(
             attempt=attempt,
         )
         handoffs._audit(s, attempt, "queued")
-        queued += 1
-    return queued, refused
+    return tuple(reserved)
 
 
 def attempt_state(s, attempt, as_of):

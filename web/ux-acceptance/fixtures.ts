@@ -8,7 +8,8 @@ import {CLINICAL_NOTE_LABEL,verifyClinicalNoteShareReceipt} from '../src/clinica
 import {researchApi} from '../src/research-api';
 import {researchCatalog,researchObservation,researchSaved} from '../src/research-test-fixture';
 import type {ResearchObservation,ResearchSavedPacket} from '../src/research-contract';
-export const identity={mode:'clerk_jwt' as const,getToken:async()=>null};
+export const identity={mode:'clerk_jwt' as const,getToken:async()=>null,
+  ...(new URLSearchParams(location.search).has('native-chat')?{nativeSession:{revision:modelUuid(999),isCurrent:()=>true}}:{})};
 const roles:BotRole[]=['visit_prep','scribe','follow_up','chief','research'];
 const names=['Visit Prep','Scribe','Follow-up','Chief of Staff','Research'];
 const stamp=new Date().toISOString();
@@ -102,6 +103,7 @@ export function installFixtures(){
       note.review={id:crypto.randomUUID(),reviewer_id:'synthetic-tester',created_at:new Date().toISOString()};
       state.note!.history=state.note!.history.map(item=>item.id===note.id?structuredClone(note):item);state.revision++;return receipt();}),
     ask:async(_identity:unknown,id:string,body:Parameters<typeof workspaceApi.ask>[2])=>once(body.idempotency_key,async()=>{
+      if(new URLSearchParams(location.search).get('scenario')==='delayed-native-reply')await new Promise(resolve=>setTimeout(resolve,600));
       check(id,body.expected_revision);const added=entry(modelUuid(601),++state.revision,'conversation',body.content);
       added.id=crypto.randomUUID();const i=body.role===modelUuid(104)?4:roles.indexOf(body.role as BotRole);
       added.reply={agent_name:names[i]??'Chief of Staff',role:roles[i]??'chief',backend:'azure_gpt41',context_revision:body.expected_revision,citations:[],

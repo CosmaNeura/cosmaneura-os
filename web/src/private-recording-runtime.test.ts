@@ -54,6 +54,27 @@ it('prewarms encrypted custody without consent, microphone, manifest or network'
   await expect(webcrypto.subtle.exportKey('raw',key)).rejects.toThrow();expect(fetch).not.toHaveBeenCalled();
 });
 
+it('lists encrypted recordings newest first by creation instant with a stable ID tie-break without rewriting custody',async()=>{
+  const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+  const timestamps=new Map([
+    [1,'2026-10-09T15:00:00.000Z'],
+    [2,'2026-10-20T12:00:00.000Z'],
+    [3,'2026-10-20T13:00:00.000Z'],
+    [4,'2026-10-20T08:00:00.000-04:00'],
+  ]);
+  const encrypted=await store();
+  for(const n of [4,1,3,2]){
+    const row:PrivateRecordingManifest={contract:'cosmabot.private-recording.v1',recordingId:id(n),scope,title:`Invented recording ${n}`,
+      consent:consent(),consentIntervals:[],workspaceId:null,createdAt:timestamps.get(n)!,updatedAt:'2026-10-21T09:00:00.000Z',phase:'sealed',chunks:[]};
+    await encrypted.write('manifest:'+id(n),null,row);
+  }
+  expect(await encrypted.keys()).toEqual([1,2,3,4].map(n=>'manifest:'+id(n)));encrypted.close();
+  const before=await inspect(),rows=await listPrivateRecordings(scope,'desktop',store);
+  expect(rows.map(row=>row.recordingId)).toEqual([3,2,4,1].map(id));
+  expect(rows.map(row=>row.createdAt)).toEqual([3,2,4,1].map(n=>timestamps.get(n)));
+  expect((await inspect()).records).toEqual(before.records);expect(fetch).not.toHaveBeenCalled();
+});
+
 it('runs the production desktop getUserMedia/AudioWorklet/resampler path and durably drains private PCM before playback',async()=>{
   // Browser hardware boundaries are simulated; source, resampler, chunker, persistence and WAV export are production code.
   const track=Object.assign(new EventTarget(),{stop:vi.fn()}),node=()=>({connect:vi.fn(),disconnect:vi.fn()}),port={onmessage:null as MessagePort['onmessage'],postMessage:vi.fn()},worklet={...node(),port,onprocessorerror:null};

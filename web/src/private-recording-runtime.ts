@@ -288,8 +288,9 @@ export async function listPrivateRecordings(scope:string,platform:'ios'|'desktop
   need(HASH.test(scope));
   const store=await(openStore?.()??openPrivateRecordingStore(scope,platform));
   try{const keys=(await store.keys()).filter(k=>k.startsWith('manifest:'));need(keys.length<=1000);
-    const rows:PrivateRecordingSnapshot[]=[];
+    const rows:(PrivateRecordingSnapshot&{createdAt:string})[]=[];
     for(const key of keys){const row=manifest(await store.read(key),scope,key.slice('manifest:'.length));rows.push({recordingId:row.recordingId,title:displayTitle(await store.read('display-title:'+row.recordingId),scope,row.recordingId)??row.title,createdAt:row.createdAt,phase:row.phase,elapsedSeconds:row.chunks.reduce((n,c)=>n+c.durationMs,0)/1000,recordedChunks:row.chunks.length,recordedBytes:row.chunks.reduce((n,c)=>n+c.bytes,0),workspaceId:row.workspaceId,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null});}
-    return rows;
+    // Manifest validation guarantees finite instants; metadata edits leave creation order intact.
+    return rows.sort((a,b)=>Date.parse(b.createdAt)-Date.parse(a.createdAt)||(a.recordingId<b.recordingId?-1:a.recordingId>b.recordingId?1:0));
   }finally{store.close();}
 }

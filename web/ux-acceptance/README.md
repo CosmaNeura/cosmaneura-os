@@ -42,6 +42,15 @@ identity header below the view strip, the reachable editor and Send control,
 and the explicit Chief task disclosure. Reduced height approximates keyboard
 space; it does not operate or qualify a physical iOS keyboard.
 
+Three additional native-layout journeys use `?native-chat=1&scenario=delayed-native-reply`
+to select an invented native identity and a delayed scripted response. They
+verify a contained chat viewport, persistent editor/Send geometry and focus,
+new typing retained during the old request, actual encrypted reload of that
+next question, older-message scroll anchoring, and available-viewport resize.
+Home, Workspace and the same recorder's consent setup remain reachable. This
+is a browser simulation of the native presentation, with no installed native
+app, physical keyboard or native microphone involved.
+
 `?scenario=unconfirmed-save` deliberately commits the first notebook revision
 and withholds its reply. Retry uses the same saved synthetic receipt. This is
 an interaction failure fixture, not a production service failure injection.

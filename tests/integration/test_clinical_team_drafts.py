@@ -165,6 +165,15 @@ def test_exact_saved_soap_and_scribe_reach_chief_both_specialists_and_human_revi
     assert len(result.handoffs) == 2
     with Session(f.engine) as s:
         work.settle(s, chief, result)
+        snapshot = ws.read(s, f.box, f.actor, f.workspace["id"])
+        admission = s.get(ModelWorkAdmission, chief.admission_id)
+        assert admission is not None
+        chief_reply = next(e for e in snapshot["entries"] if e["id"] ==
+            admission.request_entry_id)["reply"]["content"]
+        assert chief_reply.count("Queued; waiting for a private draft.") == 2
+        assert "Patient email with Subject and Body" in chief_reply
+        assert "Provider treatment assessment" in chief_reply
+        assert "Review each completed result before using it" in chief_reply
     for _ in range(2):
         assert work.process_next(lambda: sessions(f.engine), dispatch=lambda c: dispatch(f, c, calls))
     with Session(f.engine) as s:
