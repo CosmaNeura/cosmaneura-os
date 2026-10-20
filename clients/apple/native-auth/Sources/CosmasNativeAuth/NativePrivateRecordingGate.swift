@@ -27,6 +27,11 @@ public struct NativePrivateRecordingPermit: Sendable {
     public let maximumChunks: Int, captureExpiresAt: Date
 }
 
+public struct NativePrivateSavedReadPermit: Sendable {
+    public let scope: String, revision: String
+    fileprivate let accountDigest: String, generation: UUID
+}
+
 /// Native account proof and local consent authorize only foreground device PCM.
 /// No token, Core lease, provider reservation or clinical admission enters this gate.
 @MainActor public enum NativePrivateRecordingGate {
@@ -37,15 +42,36 @@ public struct NativePrivateRecordingPermit: Sendable {
     private static var active: Active?
     private static var preparing = false
     private static var generation = UUID()
+    private static var savedGeneration = UUID()
+    private static var savedRevision: String?
+    private static var savedScopes: [String: String] = [:]
     private static var usedIntents = Set<UUID>()
     private static var lastFinished: UUID?
     public static func configure(auth: NativeWorkspaceAuth, derive: @escaping @MainActor (String) async throws -> (scope: String, accountDigest: String)) {
         let replaced = self.auth !== auth
-        if replaced { generation = UUID(); proof = nil }
+        if replaced { generation = UUID(); proof = nil; savedScopes.removeAll(); savedGeneration = UUID(); savedRevision = nil }
         self.auth = auth; self.derive = derive
         // Auth plugin replacement must fence an old microphone immediately,
         // even before the replacement delivers its first change notification.
         if replaced, active != nil { retire() }
+    }
+    /// Reuses existing account/scope authority for a saved local source. No microphone permit or clinical admission.
+    public static func authorizeSaved(scope: String, revision: String) async throws -> NativePrivateSavedReadPermit {
+        guard active == nil, let auth, let derive, Self.hex(scope), auth.state().phase == .ready,
+              auth.state().revision == revision else { throw NativeAuthError.sessionChanged }
+        if savedRevision != revision { savedGeneration = UUID(); savedRevision = revision }
+        let ticket = savedGeneration, account = try auth.recordingAccountDigest(expectedRevision: revision)
+        if savedScopes[scope] == account { return NativePrivateSavedReadPermit(scope: scope, revision: revision, accountDigest: account, generation: ticket) }
+        let observed = try await derive(revision)
+        guard ticket == savedGeneration, active == nil, auth.state().revision == revision,
+              try auth.recordingAccountDigest(expectedRevision: revision) == account,
+              observed.accountDigest == account, observed.scope == scope else { throw NativeAuthError.sessionChanged }
+        savedScopes[scope] = account
+        return NativePrivateSavedReadPermit(scope: scope, revision: revision, accountDigest: account, generation: ticket)
+    }
+    public static func savedCurrent(_ permit: NativePrivateSavedReadPermit) -> Bool {
+        guard permit.generation == savedGeneration, active == nil, let auth, auth.state().phase == .ready else { return false }
+        return (try? auth.recordingAccountDigest(expectedRevision: permit.revision)) == permit.accountDigest
     }
     public static func prepare(scope: String, revision: String) async throws -> NativePrivateRecordingProof {
         guard !preparing, active == nil, let auth, let derive, Self.hex(scope) else { throw NativeAuthError.busy }
@@ -56,6 +82,7 @@ public struct NativePrivateRecordingPermit: Sendable {
         guard ticket == generation, auth.state().revision == revision,
               try auth.recordingAccountDigest(expectedRevision: revision) == account,
               observed.accountDigest == account, observed.scope == scope else { throw NativeAuthError.sessionChanged }
+        savedScopes[scope] = account
         let result = NativePrivateRecordingProof(id: UUID(), scope: scope, revision: revision, accountDigest: account, expiresAt: Date().addingTimeInterval(300))
         proof = result; return result
     }
@@ -97,6 +124,9 @@ public struct NativePrivateRecordingPermit: Sendable {
         try NativeCaptureStartGate.finishPrivate(owner: permit.owner); active = nil; lastFinished = permit.owner
     }
     public static func authChanged(_ state: NativeAuthState) {
+        if state.phase != .ready || savedRevision != state.revision { savedGeneration = UUID() }
+        savedRevision = state.phase == .ready ? state.revision : nil
+        if state.phase != .ready { savedScopes.removeAll() }
         if state.phase != .ready || proof?.revision != state.revision { proof = nil; generation = UUID() }
         if let active, !current(active.permit) { retire() }
     }

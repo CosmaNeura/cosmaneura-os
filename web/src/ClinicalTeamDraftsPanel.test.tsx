@@ -6,11 +6,11 @@ import {CLINICAL_NOTE_LABEL,clinicalRequestDisplay,clinicalTeamRequest,currentSh
 import {EncounterSources} from './EncounterSources';
 import {modelCanonical} from './model-work-request';
 import {vendorSha256} from './vendor-contract';
-import type {ProviderTeam,Workspace,WorkspaceEntry} from './workspace-api';
+import type {DraftHandoff,ProviderTeam,Workspace,WorkspaceEntry} from './workspace-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`,time='2026-10-20T14:00:00Z';
 let host:HTMLDivElement,root:Root,workspace:Workspace,team:ProviderTeam;
-const share=vi.fn(),ask=vi.fn(),review=vi.fn();
+const share=vi.fn(),ask=vi.fn(),review=vi.fn(),retry=vi.fn();
 async function shared(w=workspace):Promise<Workspace>{
   const note=w.note!.latest!,body=noteSelection(note,w.revision,'invented-note-share');
   const snapshot:SharedClinicalNote={contract:'clinical-note-team-source.v1',request:body,note:{id:note.id,version:note.version,
@@ -20,7 +20,19 @@ async function shared(w=workspace):Promise<Workspace>{
 }
 const button=(text:string)=>[...host.querySelectorAll('button')].find(b=>b.textContent===text)!;
 const click=(text:string)=>act(async()=>button(text).click());
-const mount=()=>act(async()=>root.render(<ClinicalTeamDraftsPanel workspace={workspace} team={team} locked={false} onShare={share} onAskChief={ask} onReview={review}/>));
+const mount=()=>act(async()=>root.render(<ClinicalTeamDraftsPanel workspace={workspace} team={team} locked={false} onShare={share} onAskChief={ask} onReview={review} onRetry={retry}/>));
+function chiefRequest() {
+  const entry:WorkspaceEntry={id:id(10),revision:4,kind:'conversation',content:clinicalTeamRequest(currentSharedNote(workspace)!),source_label:null,origin:'authenticated_human',ticket:null,created_at:time,
+    reply:{agent_name:'Chief',role:'chief',backend:'invented',content:'Saved private assignments',context_revision:3,citations:[]}};
+  workspace.entries.push(entry);return entry;
+}
+function draft(role:'follow_up'|'research',n:number,originId:string,content:string):DraftHandoff {
+  const entry:WorkspaceEntry={id:id(n+4),revision:n,kind:'handoff_result',content:'Saved task',source_label:null,origin:'agent_handoff',ticket:null,created_at:time,
+    reply:{agent_name:role,agent_id:id(n+2),role,backend:'invented',content,context_revision:3,citations:[]}};
+  workspace.entries.push(entry);
+  return {id:id(n),origin_entry_id:originId,recipient_role:role,recipient_name:role,recipient_agent_id:id(n+2),brief:'Exact saved note',context_revision:3,
+    status:'completed',attempt_id:id(n+3),attempt_count:1,result_entry_id:entry.id,result_sha256:'b'.repeat(64),error_code:null,attempts:[],review_status:'not_reviewed'};
+}
 beforeEach(async()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.stubGlobal('crypto',webcrypto);vi.clearAllMocks();
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
@@ -72,13 +84,58 @@ it('distinguishes both draft outcomes and only labels current accepted human rev
   const origin:WorkspaceEntry={id:id(10),revision:4,kind:'conversation',content,source_label:null,origin:'authenticated_human',ticket:null,created_at:time,
     reply:{agent_name:'Chief',role:'chief',backend:'invented',content:'Two private assignments',context_revision:3,citations:[]}};
   workspace.entries.push(origin);workspace.handoffs=[{id:id(11),origin_entry_id:origin.id,recipient_role:'follow_up',recipient_name:'Follow-up',recipient_agent_id:id(12),brief:'Email and actions',
-    context_revision:3,status:'completed',attempt_id:id(13),attempt_count:1,result_entry_id:null,result_sha256:'b'.repeat(64),error_code:null,attempts:[],review_status:'current',
+    context_revision:3,status:'completed',attempt_id:id(13),attempt_count:1,result_entry_id:id(15),result_sha256:'b'.repeat(64),error_code:null,attempts:[],review_status:'current',
     review:{id:id(14),attempt_id:id(13),result_entry_id:id(15),result_sha256:'b'.repeat(64),decision:'accepted',feedback:'',created_at:time}},
     {id:id(16),origin_entry_id:origin.id,recipient_role:'research',recipient_name:'Research',recipient_agent_id:id(17),brief:'Assess same note',context_revision:3,status:'queued',attempt_id:id(18),attempt_count:1,
       result_entry_id:null,result_sha256:null,error_code:null,attempts:[],review_status:'not_reviewed'}];
+  workspace.entries.push({id:id(15),revision:5,kind:'handoff_result',content:'Email and actions',source_label:null,origin:'agent_handoff',ticket:null,created_at:time,
+    reply:{agent_name:'Follow-up',agent_id:id(12),role:'follow_up',backend:'invented',content:'Private email draft and provider tasks.',context_revision:3,citations:[]}});
   await mount();expect(host.querySelector('[aria-label="Follow-up drafts"]')?.textContent).toContain('Accepted private draft');
   expect(host.querySelector('[aria-label="Research assessment"]')?.textContent).toContain('Draft queued');await click('Review follow-up draft');expect(review).toHaveBeenCalledWith(id(11));
   workspace.handoffs![0].review_status='stale';await mount();expect(host.textContent).not.toContain('Accepted private draft');expect(host.textContent).toContain('Source changed');
+});
+it('shows separate saved email, provider actions and research sections while retaining each complete draft',async()=>{
+  workspace=await shared();const origin=chiefRequest();
+  const email='## Patient email draft\n**Subject:** Your invented visit\n**Body:** Please confirm your medicines with your provider.\n\n## Provider action items\n- Proposed owner: provider. Confirm the current medicine list.';
+  const research='## Provider treatment assessment\n## Source-supported findings\nThe saved note says the medicine list is unavailable.\n## Drug and treatment questions\nWhich medicines are currently taken?\n## Missing evidence / next checks\nCurrent drug evidence is unavailable. No public search was performed.';
+  workspace.handoffs=[draft('follow_up',20,origin.id,email),draft('research',30,origin.id,research)];await mount();
+  expect(host.querySelector('[aria-label="Patient email draft"]')?.textContent).toContain('Please confirm your medicines');
+  expect(host.querySelector('[aria-label="Patient email draft"]')?.textContent).not.toContain('Proposed owner');
+  expect(host.querySelector('[aria-label="Provider action items"]')?.textContent).toContain('Proposed owner');
+  expect(host.querySelector('[aria-label="Drug and treatment questions"]')?.textContent).toContain('Which medicines');
+  expect(host.querySelector('[aria-label="Missing evidence / next checks"]')?.textContent).toContain('No public search');
+  const originals=[...host.querySelectorAll('details')].filter(d=>d.querySelector('summary')?.textContent==='Complete saved draft');
+  expect(originals).toHaveLength(2);expect(originals[0].textContent).toContain('Proposed owner');
+  await click('Review follow-up draft');await click('Review research draft');expect(review.mock.calls).toEqual([[id(20)],[id(30)]]);
+});
+it('keeps each specialist on the exact provider-requested revision and preserves earlier review access',async()=>{
+  workspace=await shared();const origin=chiefRequest(),parent=draft('follow_up',20,origin.id,'Earlier email.'),child=draft('follow_up',40,id(90),'Revised email applying the provider feedback.');
+  const feedback='Keep the medicine list explicitly unconfirmed.';
+  parent.review_status='current';parent.review={id:id(80),attempt_id:parent.attempt_id,result_entry_id:parent.result_entry_id!,result_sha256:parent.result_sha256!,decision:'changes_requested',feedback,created_at:time,revision_handoff_id:child.id};
+  child.recipient_agent_id=parent.recipient_agent_id;workspace.entries.find(e=>e.id===child.result_entry_id)!.reply!.agent_id=parent.recipient_agent_id;
+  child.revision_request={parent_handoff_id:parent.id,review_id:parent.review.id,attempt_id:parent.attempt_id,result_entry_id:parent.result_entry_id!,result_sha256:parent.result_sha256!,feedback};
+  const unrelated=draft('follow_up',60,id(99),'Unrelated newer work must stay outside this workflow.');workspace.handoffs=[parent,unrelated,child];
+  await mount();const card=host.querySelector('[aria-label="Follow-up drafts"]')!;
+  expect(card.textContent).toContain('revision 2');expect(card.textContent).toContain('Revised email');expect(card.textContent).not.toContain('Unrelated newer work');
+  await click('Review follow-up draft');expect(review).toHaveBeenLastCalledWith(child.id);
+  await click('Open earlier follow-up review');expect(review).toHaveBeenLastCalledWith(parent.id);
+  child.revision_request.feedback='Different unbound feedback';await mount();expect(card.textContent).not.toContain('Revised email');
+  await click('Continue follow-up changes');expect(review).toHaveBeenLastCalledWith(parent.id);
+});
+it('blocks duplicate pending Chief work but allows a deliberate new request after a completed reply saved no assignments',async()=>{
+  workspace=await shared();const origin=chiefRequest();origin.reply=null;
+  origin.model_request={contract_version:1,request_sha256:'c'.repeat(64),request:{kind:'conversation',expected_revision:3,team_revision:1,idempotency_key:'invented-chief-request',role:'chief'},
+    bot:{address:'chief',agent_id:id(88),role:'chief',name:'Chief',team_revision:1},admission:{id:id(89),state:'running',unit:1,admitted_at:time,dispatch:'started',usage:'unknown',input_tokens:null,output_tokens:null},reason:null};
+  await mount();expect(button('Ask Chief for follow-up and research drafts').disabled).toBe(true);expect(host.textContent).toContain('no second request is needed');
+  origin.model_request.admission.state='completed';origin.reply={agent_name:'Chief',role:'chief',backend:'invented',content:'No assignments were prepared.',context_revision:3,citations:[]};
+  await mount();expect(host.textContent).toContain('did not save any team assignments');await click('Ask Chief again for both drafts');
+  expect(ask).toHaveBeenCalledExactlyOnceWith(clinicalTeamRequest(currentSharedNote(workspace)!));
+});
+it('retries the exact retained specialist assignment and withholds unavailable saved result content',async()=>{
+  workspace=await shared();const origin=chiefRequest(),row=draft('follow_up',20,origin.id,'Withheld original draft');row.status='failed';row.error_code='model_unavailable';workspace.handoffs=[row];
+  await mount();await click('Retry follow-up draft');expect(retry).toHaveBeenCalledExactlyOnceWith(row);expect(ask).not.toHaveBeenCalled();
+  row.status='completed';workspace.entries.find(e=>e.id===row.result_entry_id)!.fax_source_state='unavailable';await mount();
+  expect(host.textContent).not.toContain('Withheld original draft');expect(button('Review follow-up draft').disabled).toBe(true);
 });
 it('verifies exact Unicode content, request binding, saved revision and recovery outcome',async()=>{
   const w=await shared(),body=noteSelection(workspace.note!.latest!,workspace.revision,'invented-note-share');

@@ -1,5 +1,12 @@
 .workspace-compatibility { max-width: 52rem; margin: 1rem auto; padding: 1.25rem; border: 1px solid #cfad72; border-radius: .75rem; background: #fff8eb; color: #372b1a; overflow-wrap: anywhere; }
 .workspace-compatibility h1 { font-size: 1.2rem; margin: .5rem 0; }
+.workspace-compatibility header { display:flex; align-items:center; justify-content:space-between; gap:1rem; }
 .workspace-compatibility p { line-height: 1.5; }
 .workspace-compatibility button { min-height: 44px; padding: .5rem 1rem; }
+.workspace-compatibility-paused { margin:.5rem auto; padding:.75rem 1rem; }
+.workspace-compatibility-paused h1 { font-size:1rem; }
+.workspace-compatibility-paused p { margin:.35rem 0; font-size:.9rem; line-height:1.4; }
+.workspace-compatibility-paused summary { font-size:.85rem; cursor:pointer; }
+.workspace-access-paused { max-width:52rem; margin:.5rem auto; padding:.5rem 1rem; font-size:.9rem; }
 @media (max-width: 600px) { .workspace-compatibility { margin: .5rem; padding: 1rem; } }
+@media (max-width:600px) { .workspace-compatibility-paused { padding:.65rem .8rem; } .workspace-compatibility header { gap:.5rem; } }

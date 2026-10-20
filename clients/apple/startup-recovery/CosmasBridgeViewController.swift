@@ -65,6 +65,7 @@ import CosmasWorkspaceAuthPlugin
     private(set) var capturePlugin: IOSPCMCapacitorPlugin?
     #if canImport(CosmasWorkspaceAuthPlugin)
     private var authPlugin: CosmasWorkspaceAuthPlugin?
+    private var speechPlugin: CosmasPrivateSpeechPlugin?
     #endif
     private(set) var startedNavigation = false
 
@@ -111,6 +112,7 @@ import CosmasWorkspaceAuthPlugin
                 throw NSError(domain: "CosmasWorkspace", code: 1)
             }
             authPlugin = auth
+            speechPlugin = bridge?.plugin(withName: "CosmasPrivateSpeech") as? CosmasPrivateSpeechPlugin
             try auth.prepareCosmaneuraNavigation(on: webView)
         } catch {
             quarantine()
@@ -157,6 +159,7 @@ import CosmasWorkspaceAuthPlugin
         quarantined = true
         #if canImport(CosmasWorkspaceAuthPlugin)
         authPlugin?.fenceForRendererLoss()
+        speechPlugin?.fenceForRendererLoss()
         #endif
         webView?.stopLoading()
         webView?.isUserInteractionEnabled = false

@@ -42,6 +42,12 @@ it.each([0,1234])('checks saved PCM signal without counting the WAV header as au
   expect(exported.durationMs).toBe(1);expect(exported.bytes).toBe(76);expect(fetch).not.toHaveBeenCalled();
 });
 
+it('keeps sealed speech audio lineage stable through later notebook organization while the ledger manifest changes',async()=>{
+  const source=new ControlledSource(),runtime=await open(source);await runtime.start(consent());await source.emit();await runtime.stop();
+  const original=await runtime.snapshotForPrivateTranscript(),ledger=await runtime.snapshotForLedger();await runtime.attachWorkspace(workspace,true);await runtime.rename('Invented organized recording');
+  expect(await runtime.snapshotForPrivateTranscript()).toEqual(original);expect((await runtime.snapshotForLedger()).manifestSHA256).not.toBe(ledger.manifestSHA256);expect(runtime.snapshot.workspaceId).toBe(workspace);
+});
+
 it('retains the actual interruption reason and clears it on explicit Resume',async()=>{
   const source=new ControlledSource(),runtime=await open(source);await runtime.start(consent());source.options!.onInterruption!('capture_backgrounded');
   await vi.waitFor(()=>expect(runtime.snapshot.phase).toBe('paused'));expect(runtime.snapshot.failure).toBe('capture_backgrounded');

@@ -6,9 +6,10 @@ import { useUnsavedWork } from "./unsaved-work";
 import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from "./editor-recovery";
 import { DraftStoreError } from "./draft-store";
 
-export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange }: {
+export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts }: {
   workspace: Workspace; locked: boolean; onSave: (operation: NoteOperation) => void; onSources: () => void; active?:boolean;
   onStateChange?:(state:'editing'|'review'|'saved')=>void;
+  onTeamDrafts?:(noteId:string)=>void;
 }) {
   const latest = workspace.note?.latest;
   const core = !!latest?.core_source;
@@ -107,6 +108,12 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
       }})}>Record private review</button>}
     </div>
     {!dirty&&latest&&<p className="team-fine">Note version {latest.version} saved · {latest.review?"Private review recorded":"Needs your review"}.</p>}
+    {latest&&onTeamDrafts&&<section aria-label="Next steps from this note">
+      <p>Use the saved Scribe note with Chief to prepare a patient email draft, provider action items and a treatment assessment.</p>
+      <button type="button" className="team-primary" disabled={locked||dirty||otherVersion||sourcesChanged}
+        onClick={()=>{if(!locked&&!dirty&&!otherVersion&&!sourcesChanged)onTeamDrafts(latest.id);}}>Prepare follow-up and research</button>
+      {(dirty||otherVersion||sourcesChanged)&&<p className="team-fine">Save and reconcile this note before preparing team drafts.</p>}
+    </section>}
     {dirty&&<p className="team-fine">Your working copy and the saved review version are separate. Choose Save note version when your edits are ready for review.</p>}
     <p className="team-fine">{core ? "This is the exact saved Core version. Make changes in the recorded visit draft and use its saved version for review. Core is checked again when you review or authorize follow-up." : "Edit the note, save a version, then review the exact saved text."} Private review does not sign the clinical record or send a follow-up.</p>
     {otherVersion && <div role="status" className="team-note-notice"><p>A different saved note is available. Your editor text is preserved.</p>

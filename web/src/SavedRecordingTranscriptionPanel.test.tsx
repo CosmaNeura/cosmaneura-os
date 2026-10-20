@@ -7,8 +7,9 @@ import {BffResponseError} from '../../clients/capture/src/bff/http-client';
 import {workspaceApi,type ProviderTeam,type Workspace} from './workspace-api';
 import {RecordingVisitPanel} from './RecordingVisitPanel';
 import type {RecordingVisitBinding} from './private-recording-api';
-const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn(),bindVisit:vi.fn(),continueReview:null as null|(()=>Promise<void>),review:null as unknown,availability:null as 'loading'|'ready'|'unavailable'|null}));
+const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn(),bindVisit:vi.fn(),continueReview:null as null|(()=>Promise<void>),review:null as unknown,availability:null as 'loading'|'ready'|'unavailable'|null,privateBegin:vi.fn(),privateAppend:vi.fn(),privateFinish:vi.fn(),privateCancel:vi.fn()}));
 vi.mock('./CreatorReviewPanel',()=>({CreatorReviewPanel:({onSource,onAvailability,onContinue}:{onSource:(view:unknown)=>void;onAvailability?:(v:'loading'|'ready'|'unavailable')=>void;onContinue:()=>Promise<void>})=>{mocks.continueReview=onContinue;useEffect(()=>{onAvailability?.(mocks.availability??(mocks.review?'ready':'loading'));onSource(mocks.review);},[onSource,onAvailability,mocks.availability,mocks.review]);return null;}}));
+vi.mock('./private-transcription-native',async original=>({...await original<typeof import('./private-transcription-native')>(),privateSpeechNative:{begin:mocks.privateBegin,append:mocks.privateAppend,finish:mocks.privateFinish,cancel:mocks.privateCancel}}));
 vi.mock('./saved-recording-runtime',()=>({openSavedRecordingRuntime:mocks.savedRuntime}));
 vi.mock('./private-recording-runtime',()=>({openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close}),PrivateRecordingRuntime:{open:mocks.open}}));
 vi.mock('./private-recording-ledger',()=>({PrivateRecordingLedgerController:class{readCurrent=mocks.ledger;}}));
@@ -301,4 +302,28 @@ it('hides redundant consent only while a claimed continuation is pending and res
   await c.render();await waitFor(()=>expect(release).toBeTypeOf('function'));expect(host.querySelector('input[type=checkbox]')).toBeNull();expect(button('Sending saved recording…')?.disabled).toBe(true);
   await act(async()=>{release({...await original(),consent:{...admission.attestation,modality:'phone',language:'en-US'}} as Awaited<ReturnType<typeof original>>);await held;});
   await waitFor(()=>expect(host.querySelector('[role=alert]')).toBeTruthy());expect(host.querySelector('input[type=checkbox]')).not.toBeNull();expect(button('Transcribe recording')?.disabled).toBe(true);expect(prepareCapture).not.toHaveBeenCalled();expect(stored).toBeNull();
+});
+
+
+it('transcribes unavailable Scribe review locally from the same retained source with one action and no upload/admission change',async()=>{
+  (stored as {admitted:unknown}).admitted={status:'prepared',workspace_id:id(1),session_id:id(7),consent_record_id:id(8),configured_capture:{schema_version:'1.0',language_mode:'en-US'}};
+  const original=structuredClone(stored),privateRows=new Map<string,unknown>(),localIdentity={...identity,nativeSession:{revision:'invented-local-revision',isCurrent:()=>true}};
+  mocks.read.mockImplementation(async key=>structuredClone(key.startsWith('private-transcript:')?privateRows.get(key)??null:stored));
+  mocks.write.mockImplementation(async(key,before,next)=>{expect(key).toBe('private-transcript:'+id(3));expect(privateRows.get(key)??null).toEqual(before);privateRows.set(key,structuredClone(next));});
+  mocks.open.mockResolvedValue({snapshot:{recordingId:id(3),workspaceId:id(1),phase:'sealed',recordedChunks:1,elapsedSeconds:23,title:'Invented retained clip'},close:mocks.runtimeClose,
+    snapshotForLedger:async()=>({phase:'sealed',manifestSHA256:'b'.repeat(64),chunks:1,frames:1}),
+    snapshotForPrivateTranscript:async()=>({recordingId:id(3),scope:'c'.repeat(64),phase:'sealed',audioSHA256:'e'.repeat(64),chunks:1,frames:1,consent:{language:'en-US'}}),
+    savedChunks:async function*(){const wavBytes=new Uint8Array(46);wavBytes[44]=1;yield{sequence:0,sha256:'f'.repeat(64),wavBytes};}});
+  mocks.privateBegin.mockResolvedValue({runId:id(30)});mocks.privateAppend.mockImplementation(async v=>({sequence:v.sequence}));mocks.privateFinish.mockResolvedValue({runId:id(30),recordingId:id(3),audioSHA256:'e'.repeat(64),frames:1,text:'Invented private fallback words.',engine:'ios-speech-on-device-v1',language:'en-US'});mocks.privateCancel.mockResolvedValue(undefined);
+  const upload=vi.fn(),snapshot={state:'processing',recordedChunks:1};mocks.availability='unavailable';mocks.review=null;
+  mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:upload,close:async()=>{}});
+  const render=()=>act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'ios'}} identity={localIdentity} workspace={workspace} team={{revision:1} as ProviderTeam}
+    isCurrent={()=>true} locked={false} notesEnabled={false} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}} notebookDirty={false} onNotebook={()=>{}} onNavigationLock={navigation}
+    taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}/>));
+  await render();await waitFor(()=>expect(button('Transcribe on this iPhone')?.disabled).toBe(false));expect(mocks.privateBegin).not.toHaveBeenCalled();
+  await act(async()=>button('Transcribe on this iPhone')!.click());await waitFor(()=>expect(host.querySelector('textarea')?.value).toBe('Invented private fallback words.'));
+  expect(mocks.privateBegin).toHaveBeenCalledOnce();expect(mocks.privateBegin).toHaveBeenCalledWith(expect.objectContaining({scope:'c'.repeat(64),recordingId:id(3),audioSHA256:'e'.repeat(64),chunks:1,frames:1}));
+  expect(prepareCapture).not.toHaveBeenCalled();expect(upload).not.toHaveBeenCalled();expect(stored).toEqual(original);expect(privateRows.get('private-transcript:'+id(3))).toMatchObject({workspaceId:id(1),working:'Invented private fallback words.'});
+  await act(async()=>root.unmount());root=createRoot(host);await render();await waitFor(()=>expect(button('Transcribe on this iPhone')?.disabled).toBe(false));expect(mocks.privateBegin).toHaveBeenCalledOnce();
+  await act(async()=>button('Transcribe on this iPhone')!.click());await waitFor(()=>expect(host.querySelector('textarea')?.value).toBe('Invented private fallback words.'));expect(mocks.privateBegin).toHaveBeenCalledOnce();expect(stored).toEqual(original);
 });

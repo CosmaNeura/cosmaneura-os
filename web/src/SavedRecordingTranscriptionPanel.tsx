@@ -1,3 +1,4 @@
+import {PrivateTranscriptPanel,type PrivateTranscriptGesture} from './PrivateTranscriptPanel';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import {PrivateRecordingRuntime,openPrivateRecordingStore,type PrivateRecordingStore} from './private-recording-runtime';
 import {PrivateRecordingLedgerController} from './private-recording-ledger';
@@ -107,6 +108,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const [renewConsent,setRenewConsent]=useState(false),[claimedContinuation,setClaimedContinuation]=useState(false);
   const [uploadProgress,setUploadProgress]=useState<Awaited<ReturnType<Runtime['uploadProgress']>>|null>(null);
   const [clipDate,setClipDate]=useState<string|null>(null);
+  const [privateGesture,setPrivateGesture]=useState<PrivateTranscriptGesture|null>(null),[privateBusy,setPrivateBusy]=useState(false);
   const [recovery,setRecovery]=useState<ReturnType<typeof savedTranscriptionRecovery>>(null);
   const [transfer,setTransfer]=useState<Transfer|null>(null),[snapshot,setSnapshot]=useState<Runtime['controller']['snapshot']|null>(null);
   const [reviewAvailability,setReviewAvailability]=useState<'loading'|'ready'|'unavailable'>('loading');
@@ -118,7 +120,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const noteSection=useRef<HTMLDivElement>(null);
   const transcriptionSection=useRef<HTMLElement>(null);
   const reportDraftLock=useCallback((value:boolean)=>{setDraftLocked(value);onDraftLock(value);},[onDraftLock]);
-  useEffect(()=>{onNavigationLock?.(busy);return()=>onNavigationLock?.(false);},[busy,onNavigationLock]);
+  useEffect(()=>{onNavigationLock?.(busy||privateBusy);return()=>onNavigationLock?.(false);},[busy,privateBusy,onNavigationLock]);
   useEffect(()=>{if(ready){const heading=transcriptionSection.current?.querySelector<HTMLElement>('h2');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[ready]);
   useEffect(()=>{if(showDraft){const heading=noteSection.current?.querySelector<HTMLElement>('h3');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[showDraft]);
   const authorityKey=vendorCanonical({workspace:workspace.id,workspace_revision:workspace.revision,origin:origin.id,appointment:workspace.appointment_id,binding:entry.binding??null,team_revision:team.revision,recovery_scope:team.recovery_scope??null,bot:taskBot?.selection??null,enabled:taskBot?.enabled??false});
@@ -129,7 +131,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const reportReviewAvailability=useCallback((value:'loading'|'ready'|'unavailable')=>{if(current())setReviewAvailability(value);},[identity,entry.scope,entry.recordingId,authorityKey]);
   const reportReview=useCallback((value:CreatorReviewView|null)=>{if(current())setReview(value);},[identity,entry.scope,entry.recordingId,authorityKey]);
   useEffect(()=>{let alive=true;
-    setReady(false);setBusy(false);setConsented(false);setRenewConsent(false);setRecovery(null);setUploadProgress(null);setReviewLock(false);setDraftLocked(false);setReview(null);setReviewAvailability('loading');setShowDraft(false);setClipDate(null);setTransfer(null);setSnapshot(null);setError('');saved.current=null;flight.current=null;
+    setReady(false);setBusy(false);setPrivateGesture(null);setPrivateBusy(false);setConsented(false);setRenewConsent(false);setRecovery(null);setUploadProgress(null);setReviewLock(false);setDraftLocked(false);setReview(null);setReviewAvailability('loading');setShowDraft(false);setClipDate(null);setTransfer(null);setSnapshot(null);setError('');saved.current=null;flight.current=null;
     const gesture=entry.transcriptionGesture,prior=continuation.current;
     if(gesture&&(!prior||prior.gesture!==gesture||prior.identity!==identity||prior.recordingId!==entry.recordingId||prior.scope!==entry.scope||prior.authority!==authorityKey)){
       // Claim before async readiness. StrictMode's repeated setup uses this same
@@ -261,6 +263,10 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     }}}
     finally{if(flight.current===ticket)flight.current=null;if(requestCurrent())setBusy(false);}
   }
+  function transcribePrivately(){
+    const selected=owner.current;if(!ready||busy||privateBusy||locked||!current(selected)||!selected||entry.platform!=='ios'||reviewAvailability!=='unavailable')return;
+    let claimed=false;setPrivateGesture({identity,scope:entry.scope,recording:selected.recording,claim:()=>{if(claimed||!current(selected))return false;claimed=true;return true;}});
+  }
   const processing=!!transfer?.admitted&&(snapshot?.state==='processing'||review!==null);
   return <section ref={transcriptionSection} className="capture-panel saved-transcription" aria-label="Saved recording transcription" data-english-only={transfer?.admission?.language==='en-US'}>
     <h2>{showDraft?'Review your visit note':processing?'Review your transcript':'Transcribe your saved recording'}</h2>
@@ -274,6 +280,8 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       {!taskBot?.enabled&&<p role="status">Enable Scribe in team settings to transcribe this recording. Your audio is saved.</p>}
     </>}
     {snapshot&&<p role="status">{showDraft?'Review and edit your visit note below.':reviewAvailability==='unavailable'?'Audio uploaded. Your transcript cannot currently be retrieved. Your audio and progress are retained. Open Review transcript and choose Refresh to check again.':processing&&reviewAvailability==='loading'?'Audio uploaded. Checking your existing transcript.':review?.working?.note_ready?'Transcript ready. Review it, then continue to your note.':review?.status==='speech_failed'?'Scribe could not finish transcription. Your audio is saved. Return to recordings to play it.':review?.status==='speech_retryable'?'Your audio is uploaded. Scribe will retry transcription automatically; choose Refresh to check progress.':processing?'Audio uploaded. Scribe is preparing your transcript.':uploadProgress?`${uploadProgress.confirmed} of ${uploadProgress.total} audio parts confirmed by Scribe. Your recording is saved.`:snapshot.recordedChunks===(transfer?.admission?.source.chunks??0)?busy?'Sending your saved audio to Scribe. Keep CosmaBot open until upload is confirmed.':'Your saved audio is ready. Choose Continue transcription to send the remaining parts.':`Preparing your saved recording… ${Math.floor(snapshot.recordedChunks/Math.max(1,transfer?.admission?.source.chunks??1)*100)}%`}</p>}
+    {entry.platform==='ios'&&ready&&current()&&processing&&reviewAvailability==='unavailable'&&!privateGesture&&<button className="team-primary" disabled={busy||privateBusy||locked} onClick={transcribePrivately}>Transcribe on this iPhone</button>}
+    {privateGesture&&privateGesture.identity===identity&&privateGesture.scope===entry.scope&&owner.current?.recording===privateGesture.recording&&current()&&<PrivateTranscriptPanel identity={identity} scope={entry.scope} recording={privateGesture.recording} isCurrent={()=>current()&&!live.current.locked} onBusy={setPrivateBusy} transcriptionGesture={privateGesture} savedScribeSource/>}
     {error&&uploadProgress?.reference&&<details><summary>Support details</summary><p>Upload status: <code>{uploadProgress.reference}</code></p></details>}
     {error&&<p role="alert">{error}</p>}
     {(recovery||review?.status==='speech_failed')&&<div className="capture-actions">

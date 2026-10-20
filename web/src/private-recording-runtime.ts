@@ -1,3 +1,4 @@
+import {vendorCanonical} from './vendor-contract';
 import type {CaptureSource, CaptureSourceStartupStage, CapturedWavChunk} from '../../clients/capture/src/capture/source';
 import type {CaptureCapabilities} from '../../clients/capture/src/bff/contracts';
 import {acquireCaptureFlowLock,type ReleaseCaptureFlowLock} from '../../clients/capture/src/flow/capture-lock';
@@ -229,6 +230,12 @@ export class PrivateRecordingRuntime {
     this.current();await this.chain;this.current();const retained=structuredClone(this.saved),bytes=encode(retained);
     try{return {recordingId:retained.recordingId,scope:retained.scope,consent:retained.consent,consentIntervals:retained.consentIntervals,startedAt:retained.consentIntervals[0]?.granted_at??null,phase:retained.phase,frames:retained.chunks.reduce((n,c)=>n+(c.bytes-44)/2,0),chunks:retained.chunks.length,manifestSHA256:await hash(bytes),updatedAt:retained.updatedAt};}finally{bytes.fill(0);}
   }
+  /** Stable sealed-audio lineage excludes later display/title/notebook organization. Ledger semantics remain unchanged. */
+  async snapshotForPrivateTranscript():Promise<{recordingId:string;scope:string;consent:PrivateRecordingManifest['consent'];phase:PrivateRecordingPhase;frames:number;chunks:number;audioSHA256:string}>{
+    this.current();await this.chain;this.current();need(!this.source&&this.saved.phase==='sealed');const retained=structuredClone(this.saved);
+    const bytes=new TextEncoder().encode(vendorCanonical({contract:'cosmabot.private-speech-source.v1',recordingId:retained.recordingId,scope:retained.scope,createdAt:retained.createdAt,consent:retained.consent,consentIntervals:retained.consentIntervals,chunks:retained.chunks}));
+    try{const audioSHA256=await hash(bytes);this.current();return {recordingId:retained.recordingId,scope:retained.scope,consent:retained.consent,phase:retained.phase,frames:retained.chunks.reduce((n,c)=>n+(c.bytes-44)/2,0),chunks:retained.chunks.length,audioSHA256};}finally{bytes.fill(0);}
+  }
   private async release(){const release=this.releaseLock;this.releaseLock=null;if(owner===this)owner=null;await release?.();}
   private onAbort=()=>{void this.pause().catch(()=>{});};
 }
@@ -249,7 +256,7 @@ export async function openPrivateRecordingStore(scope:string,platform:'ios'|'des
   need(HASH.test(scope));
   const crypt=deps.crypto??globalThis.crypto;need(crypt?.subtle);
   const name='cosmas-private-recording:v1:'+scope;
-  const validKey=(key:string)=>/^(?:(?:manifest|ledger|transfer|visit-binding|display-title):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
+  const validKey=(key:string)=>/^(?:(?:manifest|ledger|transfer|visit-binding|display-title|private-transcript):[a-f0-9-]{36}|chunk:[a-f0-9-]{36}:[0-9]{1,3})$/.test(key);
   const serialize=(value:unknown)=>{const bytes=encode(value);need(bytes.length<=450000);return bytes;};
   if(platform==='ios'){
     const plugin=deps.native??(await import('../../clients/capture/plugins/secure-queue')).SecureQueue;

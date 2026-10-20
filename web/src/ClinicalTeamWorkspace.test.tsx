@@ -4,8 +4,9 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {clinicalTeamApi} from './clinical-team-api';
 import {memoryDraftStorage} from './draft-test-fixture';
-import {CLINICAL_NOTE_LABEL,type ClinicalNoteShareReceipt,type ShareSavedNoteInput} from './clinical-team-contract';
+import {CLINICAL_NOTE_LABEL,clinicalTeamRequest,currentSharedNote,noteSelection,type ClinicalNoteShareReceipt,type ShareSavedNoteInput} from './clinical-team-contract';
 import {modelCanonical} from './model-work-request';
+import {modelReceipt,pendingWorkspace} from './model-work-test-fixture';
 import {vendorSha256} from './vendor-contract';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type BotRole,type PrivateNote,type ProviderTeam,type Workspace} from './workspace-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
@@ -66,6 +67,20 @@ async function selectNote() {
   await act(async()=>host.querySelector<HTMLInputElement>('.clinical-team-drafts input[type=checkbox]')!.click());
 }
 async function retained() {const probe=await storage({scope});try{return (await probe.read(`workspace:${workspace.id}`)).value?.body as {note:string;pending:null|{type:string;body:ShareSavedNoteInput}}|undefined;}finally{probe.close();}}
+function preparationServer(base=workspace){
+  let current=structuredClone(base);
+  vi.mocked(clinicalTeamApi.share).mockImplementation(async(_owner,_id,body)=>{const receipt=saved(body,current);current=receipt.workspace;return receipt;});
+  vi.mocked(workspaceApi.read).mockImplementation(async()=>structuredClone(current));
+  vi.mocked(workspaceApi.ask).mockImplementation(async(_owner,id,body)=>{
+    expect((await retained())?.pending).toEqual({type:'ask',model_contract:1,origin:'durable_admission_v1',body});
+    expect(body.expected_revision).toBe(current.revision);
+    const receipt=await modelReceipt(body,id,current.revision+1);current.revision++;
+    current.entries.push({id:receipt.saved_entry!.id,revision:current.revision,kind:'conversation',content:body.content,source_label:null,origin:'human',ticket:null,
+      created_at:'2026-10-20T12:00:00Z',reply:{agent_name:'Chief',role:'chief',backend:'invented',content:'Private team preparation received.',context_revision:body.expected_revision,citations:[]}});
+    return receipt;
+  });
+  return {get current(){return current;},set current(value:Workspace){current=value;}};
+}
 beforeEach(async()=>{
   vi.clearAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);
   storage=memoryDraftStorage();identity={mode:'clerk_jwt',getToken:vi.fn()};
@@ -163,5 +178,88 @@ it('ignores a late identity denial from the old share after a different owner ha
   expect(host.textContent).not.toContain('Workspace access is unavailable');expect(host.textContent).not.toContain(workingText);
   expect(host.querySelector('#team-notebook')).toBeNull();expect(button('Check saved note share')).toBeUndefined();
   const probe=await storage({scope:'c'.repeat(64)});expect((await probe.read(`workspace:${workspace.id}`)).value).toBeNull();probe.close();
+  expect(clinicalTeamApi.share).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
+});
+
+it('prepares from one gesture only after the exact share is durably cleared and uses the confirmed new revision',async()=>{
+  const clear=deferred<void>();let sharing=false,cleared=false;
+  const factory:typeof storage=async options=>{const store=await storage(options);return {...store,write:async(address,revision,value)=>{
+    if((value?.body as {pending?:{type?:string}})?.pending?.type==='clinicalNoteShare')sharing=true;
+    if(sharing&&value===null&&!cleared){await clear.promise;const result=await store.write(address,revision,value);cleared=true;return result;}
+    return store.write(address,revision,value);
+  }};};
+  const server=preparationServer();await open(factory);
+  expect(host.querySelector('[aria-label="Saved note for Follow-up and Research"]')?.textContent).toContain(workspace.note!.latest!.content);
+  await click('Prepare Follow-up and Research');
+  await vi.waitFor(()=>expect(clinicalTeamApi.share).toHaveBeenCalledOnce());expect(workspaceApi.ask).not.toHaveBeenCalled();
+  expect((await retained())?.pending?.type).toBe('clinicalNoteShare');
+  await act(async()=>clear.resolve());
+  await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledOnce();expect((await retained())?.pending??null).toBeNull();});
+  expect(cleared).toBe(true);expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({expected_revision:3,team_revision:1,role:'chief',
+    content:clinicalTeamRequest(currentSharedNote(server.current)!)});
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe(workingText);
+});
+
+it('does not chain or replay Chief after an uncertain combined share, including resolve after remount',async()=>{
+  vi.mocked(clinicalTeamApi.share).mockRejectedValueOnce(new TypeError('Invented lost combined reply'));
+  await open();await click('Prepare Follow-up and Research');
+  await vi.waitFor(async()=>expect((await retained())?.pending?.type).toBe('clinicalNoteShare'));
+  const body=vi.mocked(clinicalTeamApi.share).mock.calls[0][2];expect(workspaceApi.ask).not.toHaveBeenCalled();
+  await act(async()=>root.unmount());root=createRoot(host);await open(storage,true);await click('Restore notebook draft');
+  vi.mocked(clinicalTeamApi.resolve).mockResolvedValue(saved(body));await click('Check saved note share');
+  expect(clinicalTeamApi.share).toHaveBeenCalledOnce();expect(clinicalTeamApi.resolve).toHaveBeenCalledExactlyOnceWith(identity,workspace.id,body);
+  expect(workspaceApi.ask).not.toHaveBeenCalled();expect((await retained())?.pending??null).toBeNull();
+});
+
+it('reuses the exact already-shared source without another share and prepares directly from saved-note review',async()=>{
+  workspace=saved(noteSelection(workspace.note!.latest!,workspace.revision)).workspace;
+  const server=preparationServer(workspace);vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
+  await open();await click('Workspace view');await click('Review');await click('Prepare follow-up and research');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledOnce();expect((await retained())?.pending??null).toBeNull();});
+  expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(vi.mocked(workspaceApi.ask).mock.calls[0][2].content).toBe(clinicalTeamRequest(currentSharedNote(server.current)!));
+  expect(host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')?.open).toBe(true);
+});
+
+it.each(['note','team'] as const)('stops the combined continuation when the fresh %s changes after sharing',async changed=>{
+  const server=preparationServer();await open();
+  if(changed==='note')vi.mocked(workspaceApi.read).mockImplementation(async()=>{const next=structuredClone(server.current);next.note!.latest!.sources_changed=true;return next;});
+  else vi.mocked(workspaceApi.team).mockResolvedValue({...structuredClone(team),revision:2});
+  await click('Prepare Follow-up and Research');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('No new Chief request was sent');});
+  expect(clinicalTeamApi.share).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();expect((await retained())?.pending??null).toBeNull();
+});
+
+it('cancels combined preparation under owner replacement while its pre-share journal write is held',async()=>{
+  const write=deferred<void>();let recorded=false;
+  const factory:typeof storage=async options=>{const store=await storage(options);return {...store,write:async(address,revision,value)=>{
+    if((value?.body as {pending?:{type?:string}})?.pending?.type==='clinicalNoteShare'){recorded=true;await write.promise;}
+    return store.write(address,revision,value);
+  }};};
+  await open(factory);await click('Prepare Follow-up and Research');await vi.waitFor(()=>expect(recorded).toBe(true));
+  const next:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn()};
+  vi.mocked(workspaceApi.team).mockResolvedValue({...structuredClone(team),recovery_scope:'c'.repeat(64)});
+  await act(async()=>root.render(<EncounterWorkspace authenticated={next} draftStorage={factory}/>));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[aria-label="Practice Home"]')).toBeTruthy();});
+  await act(async()=>write.resolve());expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+  expect(host.textContent).not.toContain(workingText);
+});
+
+it('does not enqueue Chief for a replaced owner after sharing while the fresh source read is held',async()=>{
+  const fresh=deferred<Workspace>();preparationServer();await open();vi.mocked(workspaceApi.read).mockReturnValue(fresh.promise);
+  await click('Prepare Follow-up and Research');await vi.waitFor(()=>expect(workspaceApi.read).toHaveBeenCalled());
+  const body=vi.mocked(clinicalTeamApi.share).mock.calls[0][2],receipt=saved(body);
+  const next:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn()};vi.mocked(workspaceApi.team).mockResolvedValue({...structuredClone(team),recovery_scope:'c'.repeat(64)});
+  await act(async()=>root.render(<EncounterWorkspace authenticated={next} draftStorage={storage}/>));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[aria-label="Practice Home"]')).toBeTruthy();});
+  await act(async()=>fresh.resolve(receipt.workspace));expect(workspaceApi.ask).not.toHaveBeenCalled();expect(host.textContent).not.toContain(workingText);
+});
+
+it('does not duplicate a Chief request discovered in the fresh source read',async()=>{
+  const server=preparationServer();await open();vi.mocked(workspaceApi.read).mockImplementation(async()=>{
+    const latest=structuredClone(server.current),source=currentSharedNote(latest)!;
+    const existing=await pendingWorkspace({expected_revision:latest.revision,team_revision:1,idempotency_key:'invented-existing-chief',role:'chief',content:clinicalTeamRequest(source)});
+    const entry=existing.entries[0];entry.model_request!.bot.role='chief';entry.model_request!.bot.name='Chief';entry.revision=++latest.revision;latest.entries.push(entry);return latest;
+  });
+  await click('Prepare Follow-up and Research');await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('Chief’s request is already saved');});
   expect(clinicalTeamApi.share).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
 });

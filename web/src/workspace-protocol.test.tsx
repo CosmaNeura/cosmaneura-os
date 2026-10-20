@@ -7,7 +7,7 @@ import {PracticeAccessGate} from './PracticeAccessGate';
 import {PracticeAccessPanel} from './PracticeAccessPanel';
 import {accessFixture as accessRow,accessConnected} from './practice-access-test-fixture';
 import {practiceAccessApi} from './practice-access-api';
-import {workspaceApi} from './workspace-api';
+import {workspaceApi,WorkspaceApiError} from './workspace-api';
 import {admitWorkspaceProtocol,REQUIRED_WORKSPACE_CONTRACTS,requireWorkspaceProtocol,validateWorkspaceCompatibility,workspaceFetch,workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 
 const api='https://api.example.invalid';
@@ -28,7 +28,7 @@ beforeEach(()=>{
   container=document.createElement('div');document.body.append(container);root=createRoot(container);
 });
 afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.restoreAllMocks();vi.unstubAllGlobals();vi.unstubAllEnvs();});
-const click=async()=>act(async()=>[...container.querySelectorAll('button')].find(b=>b.textContent==='Check connection')!.click());
+const click=async()=>act(async()=>[...container.querySelectorAll('button')].find(b=>b.textContent==='Retry')!.click());
 const ready=(id:ReturnType<typeof identity>)=>admitWorkspaceProtocol(id,workspaceProtocolGeneration(id));
 
 it('rejects the older signed observation and accepts only current required contracts',()=>{
@@ -58,7 +58,7 @@ it('holds children closed for legacy servers and outages, then retries without r
   const id=identity(),mounted=vi.fn();function Workspace(){useEffect(()=>{mounted();},[]);return <p>Private draft</p>;}
   vi.mocked(fetch).mockResolvedValueOnce(response({detail:'Not found'},404,null));
   await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={<button>Account</button>}><Workspace/></WorkspaceCompatibilityGate>));
-  expect(mounted).not.toHaveBeenCalled();expect(container.textContent).toContain('An update is needed');expect(container.textContent).toContain('Account');
+  expect(mounted).not.toHaveBeenCalled();expect(container.textContent).toContain('could not confirm a compatible version');expect(container.textContent).toContain('Account');
   vi.mocked(fetch).mockResolvedValueOnce(response({detail:'unavailable'},503,null));await click();expect(mounted).not.toHaveBeenCalled();expect(container.textContent).toContain('Reconnect');
   vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()));await click();expect(mounted).toHaveBeenCalledOnce();expect(container.textContent).toContain('Private draft');
 });
@@ -132,11 +132,40 @@ it('keeps a real owner approval and its exact recovery command mounted through a
   expect(container.textContent).toContain('last decision is unconfirmed');
   expect(button('Recover approval')).toBeTruthy();expect(container.textContent).not.toContain('Join your practice');
   const command=vi.mocked(fetch).mock.calls[3][1]?.body;
-  vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()));await click();
-  expect(fetch).toHaveBeenCalledTimes(5);expect(button('Recover approval')).toBeTruthy();
+  vi.mocked(fetch).mockResolvedValueOnce(response(descriptor())).mockResolvedValueOnce(response({...accessConnected,role:'owner'}));await click();
+  expect(fetch).toHaveBeenCalledTimes(6);expect(button('Recover approval')).toBeTruthy();
+  expect(vi.mocked(fetch).mock.calls[5][0]).toBe(api+'/practice-access');expect(vi.mocked(fetch).mock.calls[5][1]?.method).toBe('GET');
   vi.mocked(fetch).mockResolvedValueOnce(response({contract_version:1,request:{...accessRow,state:'approved'}}))
     .mockResolvedValueOnce(response({contract_version:1,requests:[]}));
   await act(async()=>button('Recover approval').click());
-  expect(vi.mocked(fetch).mock.calls[5][1]?.body).toBe(command);
+  expect(vi.mocked(fetch).mock.calls[6][1]?.body).toBe(command);
   expect(container.textContent).toContain('Ada Beta: access approved.');
+});
+
+it('one Retry checks compatibility then rechecks current access exactly once without another button or any write',async()=>{
+  const id=identity(),read=vi.spyOn(practiceAccessApi,'read').mockImplementationOnce(async(signalIdentity)=>{
+    await workspaceFetch(signalIdentity,api+'/practice-access',options);return accessConnected;
+  }).mockResolvedValue(accessConnected);
+  const setup=vi.spyOn(practiceAccessApi,'setup').mockResolvedValue({contract_version:1,state:'member_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Invented member',can_start_practice:false});
+  vi.mocked(fetch).mockResolvedValueOnce(response(descriptor())).mockResolvedValueOnce(response({detail:'workspace_protocol_required'},426));
+  await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><PracticeAccessGate identity={id} accountControls={null}>{()=> <p>Private workspace</p>}</PracticeAccessGate></WorkspaceCompatibilityGate>));
+  expect(workspaceProtocolPhase(id)).toBe('blocked');expect(container.querySelectorAll('.workspace-compatibility-paused')).toHaveLength(1);
+  expect([...container.querySelectorAll('button')].map(b=>b.textContent)).toEqual(['Retry']);
+  vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()));await click();
+  expect(read).toHaveBeenCalledTimes(2);expect(setup).toHaveBeenCalledTimes(2);expect(container.textContent).toContain('Private workspace');
+  expect(vi.mocked(fetch).mock.calls.every(([,init])=>init?.method==='GET'&&init?.body===undefined)).toBe(true);
+});
+
+it('waits for the prior access read to settle before consuming the successful Retry and does not loop after another failure',async()=>{
+  const id=identity();let finish!:(value:typeof accessConnected)=>void;
+  const read=vi.spyOn(practiceAccessApi,'read').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}))
+    .mockRejectedValue(new WorkspaceApiError(503));
+  vi.spyOn(practiceAccessApi,'setup').mockResolvedValue({contract_version:1,state:'member_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Invented member',can_start_practice:false});
+  vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()));
+  await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><PracticeAccessGate identity={id} accountControls={null}>{()=> <p>Private workspace</p>}</PracticeAccessGate></WorkspaceCompatibilityGate>));
+  vi.mocked(fetch).mockResolvedValueOnce(response({detail:'workspace_protocol_required'},426));
+  await act(async()=>{await expect(workspaceFetch(id,api+'/workspaces',options)).rejects.toMatchObject({status:503});});
+  vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()));await click();expect(read).toHaveBeenCalledOnce();
+  await act(async()=>finish(accessConnected));expect(read).toHaveBeenCalledTimes(2);
+  await act(async()=>{});expect(read).toHaveBeenCalledTimes(2);
 });

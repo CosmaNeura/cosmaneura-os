@@ -57,6 +57,15 @@ describe("private note review", () => {
     expect(container.querySelector("textarea")!.value).toBe("Other client's text.");
   });
 
+  it('opens team preparation only from the exact saved unchanged note without creating work',async()=>{
+    const next=vi.fn();const mount=(w=initial)=>act(async()=>root.render(<NoteReview workspace={w} locked={false} onSave={onSave} onSources={onSources} onTeamDrafts={next}/>));
+    await mount();await click('Prepare follow-up and research');expect(next).toHaveBeenCalledExactlyOnceWith(saved.id);expect(onSave).not.toHaveBeenCalled();
+    await input('My unsaved change');expect(button('Prepare follow-up and research').disabled).toBe(true);
+    await click('Prepare follow-up and research');expect(next).toHaveBeenCalledOnce();
+    await input(saved.content);await mount({...initial,note:{latest:{...saved,sources_changed:true},history:[saved]}});
+    expect(button('Prepare follow-up and research').disabled).toBe(true);expect(onSave).not.toHaveBeenCalled();
+  });
+
   it("blocks stale source review until reconciliation is saved as a new note", async () => {
     await render({...initial, revision: 3, note: {latest: {...saved, sources_changed: true}, history: [saved]}});
     expect(button("Record private review")).toBeUndefined();
