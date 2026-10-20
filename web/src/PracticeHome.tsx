@@ -15,13 +15,13 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false}:{
+export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false}:{
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
   onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onConnections:()=>void;onPracticeWork:()=>void;
   onOpened:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onAccessLost:(cause:unknown)=>void;onBusyChange:(busy:boolean)=>void;
   onRecord?:(value:StartPrivateRecording)=>void;recordings?:PrivateRecordingSnapshot[];onReopenRecording?:(recordingId:string)=>void;
-  openRecordingRequest?:number;recordingActive?:boolean;
+  openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;
 }){
   const [sample,setSample]=useState(false);
   const [title,setTitle]=useState('Private note'),[pending,setPending]=useState<PrivateDraftCreate|null>(null),[ready,setReady]=useState(false);
@@ -124,28 +124,38 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   const query=search.trim().toLocaleLowerCase(),today=new Date().toDateString();
   const todaysVisits=visits?.filter(visit=>visit.start_at&&new Date(visit.start_at).toDateString()===today)??[];
   const names=team?.configuration.bots.filter(bot=>bot.enabled&&!bot.retired).map(bot=>bot.name)??[];
-  return <section className="practice-home" aria-label="Practice Home">
-    <p className="team-kicker">YOUR PRACTICE</p><h1>{team?.revision?'Your workspace':'Let’s get you ready.'}</h1>
-    <p className="practice-home-lead">Record with Scribe or start a private note. Choose a patient or visit later.</p>
-    {onRecord&&<section className="practice-home-scribe" aria-label="Start with Scribe"><div><p className="team-kicker">SCRIBE</p><h2>Record first. Organize later.</h2><p>Private audio stays encrypted on this device. Everyone’s consent is required before the microphone starts.</p></div><button className="team-primary" disabled={!recovery||busy||locked} onClick={record}>Start recording</button></section>}
-    {recordings&&onReopenRecording&&<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong>{recording.createdAt&&<time dateTime={recording.createdAt}>{new Date(recording.createdAt).toLocaleString()}</time>}<span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>}
-    <form className="practice-quick-start" onSubmit={event=>{event.preventDefault();void create();}}>
-      <label>Note title<input maxLength={160} value={title} disabled={!ready||busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>
-      <div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):'Checking your team…'}</p>
+  const chiefAvailable=team?.configuration.bots.some(bot=>bot.role==='chief'&&bot.enabled&&!bot.retired)??false;
+  const nativeStartLabel=!team?'Start conversation':chiefAvailable?'Start with Chief':'Start a private note';
+  const nativeTitleLabel=!team||chiefAvailable?'Name this conversation':'Name this note';
+  const titleField=<label>Note title<input maxLength={160} value={title} disabled={!ready||busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>;
+  const todayVisits=<section className="practice-home-notes" aria-label="Today's visits"><h2>Today's visits</h2>
+      {todaysVisits.map(visit=><button className="practice-home-note" key={visit.appointment_id} onClick={onVisits}><strong>{visit.label}</strong><time dateTime={visit.start_at}>{new Date(visit.start_at!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time><span>{visit.workspace_id?'Open visit notes':'View visit'}</span></button>)}
+      {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length?<p>No supported visits are scheduled today. You can record or write a private note.</p>:!visits?<p>Checking available visits…</p>:null}
+    </section>;
+  const recordingList=recordings&&onReopenRecording?<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong>{recording.createdAt&&<time dateTime={recording.createdAt}>{new Date(recording.createdAt).toLocaleString()}</time>}<span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>:null;
+  const quickStart=<form className="practice-quick-start" onSubmit={event=>{event.preventDefault();void create();}}>
+      {nativeCompact&&<><h2>{!team?"Conversation":chiefAvailable?"Chief":"Private note"}</h2><p>Plan your next step privately.</p></>}
+      {!nativeCompact&&titleField}
+      {(!nativeCompact||team?.revision===0)&&<div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):'Checking your team…'}</p>
         <p>Private drafts first. External actions need separate human review.</p>
         {team?.revision===0&&<button type="button" disabled={locked||busy||!ready||!!pending} onClick={onUseTeam}>{teamUnchanged?'Use this team':'Review team changes'}</button>}
         <button type="button" className="team-subtle" onClick={onSettings}>Personalize later in Settings</button>
-      </div>
-      <button type="submit" className="team-primary" disabled={!ready||busy||locked||!!pending||!title.trim()}>{busy?'Checking…':'Start a private note'}</button>
-      <p className="team-fine">No appointment, email, calendar or patient portal is needed. Patient-linked work and external actions need separate review.</p>
-    </form>
+      </div>}
+      <button type="submit" className="team-primary" disabled={!ready||busy||locked||!!pending||!title.trim()}>{busy?'Checking…':nativeCompact?nativeStartLabel:'Start a private note'}</button>
+      {nativeCompact&&<details className="practice-home-title"><summary>{title==='Private note'?nativeTitleLabel:title}</summary>{titleField}</details>}
+      {!nativeCompact&&<p className="team-fine">No appointment, email, calendar or patient portal is needed. Patient-linked work and external actions need separate review.</p>}
+    </form>;
+  return <section className="practice-home" data-native-compact={nativeCompact} aria-label="Practice Home">
+    {nativeCompact?<h1 className="team-sr-only">Home</h1>:<><p className="team-kicker">YOUR PRACTICE</p><h1>{team?.revision?'Your workspace':'Let’s get you ready.'}</h1></>}
+    <p className="practice-home-lead">{nativeCompact?'Private notes, recordings and next steps.':'Record with Scribe or start a private note. Choose a patient or visit later.'}</p>
+    {nativeCompact&&quickStart}
+    {onRecord&&<section className="practice-home-scribe" aria-label="Start with Scribe"><div>{!nativeCompact&&<p className="team-kicker">SCRIBE</p>}<h2>{nativeCompact?'Record privately':'Record first. Organize later.'}</h2><p>{nativeCompact?'Original audio is encrypted on this iPhone. Confirm consent before recording.':'Private audio stays encrypted on this device. Everyone’s consent is required before the microphone starts.'}</p></div><button className="team-primary" disabled={!recovery||busy||locked} onClick={record}>Start recording</button></section>}
+    {recordings&&onReopenRecording&&(nativeCompact?<details className="practice-home-recordings-disclosure"><summary>Saved recordings · {recordings.length}</summary>{recordingList}</details>:recordingList)}
+    {!nativeCompact&&quickStart}
     {pending&&<div className="team-recovery"><p>An earlier note creation is unconfirmed. Check its saved result to avoid a duplicate.</p><button disabled={!ready||busy||locked} onClick={()=>void resolve()}>Check saved note creation</button>{retryAllowed&&<button disabled={!ready||busy||locked} onClick={()=>void create(true)}>Retry same note creation</button>}</div>}
     {error&&<p role="alert">{error}</p>}{message&&<p role="status">{message}</p>}
-    <section className="practice-home-notes" aria-label="Today's visits"><h2>Today's visits</h2>
-      {todaysVisits.map(visit=><button className="practice-home-note" key={visit.appointment_id} onClick={onVisits}><strong>{visit.label}</strong><time dateTime={visit.start_at}>{new Date(visit.start_at!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time><span>{visit.workspace_id?'Open visit notes':'View visit'}</span></button>)}
-      {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length?<p>No supported visits are scheduled today. You can record or write a private note.</p>:!visits?<p>Checking available visits…</p>:null}
-    </section>
-    <section className="practice-home-notes" aria-label="Saved private notes"><h2>Recent notes</h2>
+    {!nativeCompact&&todayVisits}
+    <section className="practice-home-notes" aria-label="Saved private notes"><h2>{nativeCompact?'Saved notes':'Recent notes'}</h2>
       <div className="notebook-list-tools"><label>Search notes<input type="search" value={search} onChange={event=>setSearch(event.target.value)} placeholder="Title or patient"/></label>
         <label><input type="checkbox" checked={needsReview} onChange={event=>setNeedsReview(event.target.checked)}/>Needs review</label>
         <button disabled={!recovery||busy} onClick={()=>void refresh()}>Refresh private notes</button></div>
@@ -160,6 +170,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
       </article>)}
       {drafts&&!drafts.drafts.length&&<p>No private notes yet.</p>}{drafts&&drafts.drafts.length>0&&!drafts.drafts.some(draft=>(!query||`${draft.title} ${draft.patient_label??''}`.toLocaleLowerCase().includes(query))&&(!needsReview||draft.note_state==='needs_review'))&&<p>No notes match these filters.</p>}{drafts?.has_more&&<p>The latest 50 private notes are shown.</p>}
     </section>
+    {nativeCompact&&todayVisits}
     {sample&&<SampleVisit onClose={()=>setSample(false)}/>}
     <nav className="practice-home-next" aria-label="Other ways to start"><button onClick={onVisits}>Visits and notes</button><button onClick={onPracticeWork}>Practice work</button><button onClick={onConnections}>Connect an account later</button><button disabled={recordingActive} onClick={()=>setSample(true)}>Try a sample</button></nav>
   </section>;

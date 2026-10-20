@@ -1556,6 +1556,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   }
   const localModelPending=pending?.type==='ask'||pending?.type==='retry'?pending:null;
   const nativeChatOwner=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?authenticated:null;
+  const nativeHome=!!nativeChatOwner&&phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&!savedRecordingEntry;
   const nativeChat=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!!workspace&&practicePage==='notebook'&&mobilePanel==='Conversation'&&
     !settingsOpen&&!practiceOpen&&!privateRecordingEntry&&!savedRecordingEntry&&!scribeRecordingOpen&&!scribeSourceBusy&&!reviewHandoffId&&!conflict&&!recoveryBlocked&&!recoveryOffers.length&&(!pending||busy);
   const nativeComposerEditable=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&!conflict&&!recoveryBlocked&&recoveryState!=='failed'&&!recoveryOffers.length&&
@@ -1700,7 +1701,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     modelEnabled={team.llm.enabled&&!bot.blocked_capabilities?.includes('model_answer')} sourceAllowed={bot.include_notebook||bot.include_evidence}
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
     canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}/>;
-  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-native-chat={nativeChat} data-recording-open={!!privateRecordingEntry} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
+  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-native-home={nativeHome} data-native-chat={nativeChat} data-recording-open={!!privateRecordingEntry} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
     <aside className="team-sidebar">
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span></div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
@@ -1729,12 +1730,21 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>Invented data · private to you</small></div>
     </aside>
     <div className="team-main">
-      <header className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Settings" : practicePage==="home"?"Home":practicePage==="visits"?"Visits and notes":"Notebook"}</span>
+      {nativeHome?<header className="native-home-header"><strong>CosmaBot</strong>
+        <details className="native-home-menu"><summary>More</summary><nav aria-label="More workspace actions">
+          {(workspace||onExit)&&<button onClick={()=>void exitWorkspace(false)}>{onExit?"Open execution proof":"Close notebook"}</button>}
+          <button disabled={connectionNavigationLocked} onClick={()=>void openSettings()}>Settings</button>
+          <button disabled={connectionNavigationLocked||busy||!!pending||captureDraftLocked||captureNavigationLocked}
+            onClick={()=>leaveTeamSettings(()=>{setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}>Practice work</button>
+          {accountControls}
+          <span className="team-fine">Synthetic preview</span>
+        </nav></details>
+      </header>:<header className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Settings" : practicePage==="home"?"Home":practicePage==="visits"?"Visits and notes":"Notebook"}</span>
         <div className="row">{(workspace||onExit||settingsOpen||practiceOpen)&&<button className="team-subtle" onClick={() => void exitWorkspace(false)}>{onExit ? "Open execution proof" : "Close notebook"}</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked} onClick={() => void openSettings()}>Team settings</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked || !practiceOpen && (busy || !!pending || captureDraftLocked || captureNavigationLocked)}
           onClick={() => leaveTeamSettings(()=>{setSettingsOpen(false);setPracticeOpen(!practiceOpen);setPracticeOpened(true);})}>{practiceOpen ? "Back to notebook" : "Practice work"}</button>}
-          <span className="team-pill">Synthetic preview</span>{accountControls}</div></header>
+          <span className="team-pill">Synthetic preview</span>{accountControls}</div></header>}
       {confirmTeamExit&&<WorkspaceDialog title="Unsaved team changes" onClose={()=>{setConfirmTeamExit(false);setTeamSaveExit(false);}}>
         <p>Your team has unsaved changes. Save them, discard this local draft, or keep editing.</p>
         {pending?.type==='team'?<p>The team save is unconfirmed. Its exact request is retained; check or retry it before discarding.</p>:null}
@@ -1899,6 +1909,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         onNotebook={async result=>{if(!recordingCurrent(privateRecordingEntry))throw new WorkspaceApiError(403);
           await returnPrivateRecordingNotebook(privateRecordingEntry,result);setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setPrivateRecordingListEpoch(value=>value+1);}}/>}
       {authenticated&&<div ref={recordingHome} tabIndex={-1} hidden={!!privateRecordingEntry&&!recordingMinimized||settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
+        nativeCompact={nativeHome}
         locked={!!privateRecordingEntry||busy||!!pending||conflict||recoveryState==="failed"||recoveryBlocked||captureNavigationLocked||captureDraftLocked} onBusyChange={setHomeBusy} onAccessLost={failure}
         onUseTeam={()=>{if(initialTeamUnchanged)saveTeam();else void openSettings();}} onSettings={()=>void openSettings()} onVisits={()=>void loadEncounters()}
         onConnections={()=>void openSettings('connections')} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}}

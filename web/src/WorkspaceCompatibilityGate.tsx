@@ -30,14 +30,19 @@ export function WorkspaceCompatibilityGate({identity,accountControls,children}:{
   },[identity,run]);
   useEffect(()=>{void check();},[check]);
   const opened=admitted===identity;
+  const compact=opened&&identity.mode==='clerk_jwt'&&!!identity.nativeSession&&
+    (window.matchMedia?.('(max-width: 600px)').matches??false);
   return <WorkspaceConnectionRecoveryContext.Provider value={{identity,sequence:recovery?.identity===identity?recovery.sequence:0,
     generation:recovery?.identity===identity?recovery.generation:workspaceProtocolGeneration(identity),phase,busy,retry:()=>void check(true)}}>
-    {(!opened || phase!=='ready') && <section className={`workspace-compatibility${opened?' workspace-compatibility-paused':''}`} aria-label="Workspace connection" role={busy?'status':'alert'}>
+    {(!opened || phase!=='ready') && <section className={`workspace-compatibility${opened?' workspace-compatibility-paused':''}${compact?' workspace-compatibility-native':''}`} aria-label="Workspace connection" role={busy?'status':'alert'}>
       {!opened && <nav aria-label="Account and organization">{accountControls}</nav>}
-      <header><h1>{busy?'Checking workspace connection':opened?'Workspace connection paused':'Connect to your workspace'}</h1>
+      <header><h1>{compact?(busy?'Reconnecting…':'Connection paused'):busy?'Checking workspace connection':opened?'Workspace connection paused':'Connect to your workspace'}</h1>
         <button disabled={busy} onClick={()=>void check(true)}>{busy?'Retrying…':'Retry'}</button></header>
-      <p>{error || (phase==='blocked'?'The service connection is paused. Retry checks the connection and your practice access.':'Checking that this app can work with your practice service.')}</p>
-      {opened?<details><summary>Your saved work is retained</summary><p>You can keep editing or stop a recording. Sending and syncing are paused. Already-sent requests may still finish; their saved results need to be checked separately.</p></details>
+      {!compact&&<p>{error || (phase==='blocked'?'The service connection is paused. Retry checks the connection and your practice access.':'Checking that this app can work with your practice service.')}</p>}
+      {compact&&<p>{error||'Sending is paused. Your saved work stays on this device.'}</p>}
+      {opened?<details><summary>{compact?'Connection details':'Your saved work is retained'}</summary>
+        {compact&&!error&&<p>Retry checks the service connection and your practice access.</p>}
+        <p>You can keep editing or stop a recording. Sending and syncing are paused. Already-sent requests may still finish; their saved results need to be checked separately.</p></details>
         :<p>Saved drafts and recordings stay on this device.</p>}
     </section>}
     {/* Keep editors and the recorder mounted after admission, including uncertain writes. */}

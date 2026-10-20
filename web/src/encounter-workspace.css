@@ -326,6 +326,17 @@
 .recording-persistent-bar{position:sticky;top:56px;z-index:9;display:flex;flex-wrap:wrap;align-items:center;gap:.75rem;padding:.75rem 1rem;background:#eef5e8;border:1px solid #c2d4b7;border-radius:.75rem}.recording-persistent-bar[hidden]{display:none}.recording-persistent-bar span{flex:1}.private-recording-status meter{width:10rem;max-width:100%}
 /* Native hidden must also hide panels with author display rules. */
 .team-workspace [hidden] { display:none !important; }
+.native-home-header { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:6px 16px; box-sizing:border-box; border-bottom:1px solid var(--team-line); background:#faf8f2; }
+.native-home-header>strong { font-size:20px; letter-spacing:-.5px; }
+.native-home-menu { position:relative; }
+.native-home-menu>summary { display:flex; align-items:center; justify-content:center; min-height:44px; padding:0 12px; box-sizing:border-box; border:1px solid var(--team-line); border-radius:8px; background:#fff; font-size:14px; cursor:pointer; list-style:none; }
+.native-home-menu>summary::-webkit-details-marker { display:none; }
+.native-home-menu>nav { position:absolute; right:0; top:calc(100% + 6px); z-index:20; display:grid; gap:6px; width:min(210px,calc(100vw - 32px)); padding:8px; border:1px solid var(--team-line); border-radius:12px; background:#fff; box-shadow:0 8px 24px #20362820; }
+.native-home-menu button { width:100%; min-height:44px; padding:10px 12px; text-align:left; }
+@media(max-width:600px) {
+  .team-workspace[data-native-home=true] { display:block; }
+  .team-workspace[data-native-home=true]>.team-sidebar { display:none; }
+}
 .practice-work-filters { display:flex; flex-wrap:wrap; gap:12px; margin:18px 0; }
 .practice-work-filters label { display:flex; flex-direction:column; gap:6px; flex:1; min-width:180px; }
 .practice-work-filters input,.practice-work-filters select,.practice-invitations input,.practice-invitations select { font:inherit; border:1px solid #cdd9cd; border-radius:8px; padding:10px; min-height:44px; box-sizing:border-box; }
