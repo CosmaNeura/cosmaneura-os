@@ -1,6 +1,7 @@
 """Exact human-shared saved-note custody for immutable private draft reviews."""
 
-from importlib import import_module
+from pathlib import Path
+from runpy import run_path
 
 from alembic import op
 
@@ -14,14 +15,14 @@ def upgrade():
     op.execute(HELPERS)
     # Reuse the frozen prior guard, preserving every existing connector and
     # human/agent check. Each exact replacement fails migration on drift.
-    frozen = import_module("migrations.versions.h68e0c4f1239_fax_reviewed_source")
-    prior = frozen.HANDOFF_GUARDS
+    frozen = run_path(str(Path(__file__).with_name("h68e0c4f1239_fax_reviewed_source.py")))
+    prior = frozen["HANDOFF_GUARDS"]
     for before, after in REVIEW_EXTENSIONS:
         if prior.count(before) != 1:
             raise RuntimeError("Prior immutable handoff guard differs from the reviewed extension")
         prior = prior.replace(before, after)
     op.execute(prior)
-    prior = frozen.MODEL_GUARDS
+    prior = frozen["MODEL_GUARDS"]
     for before, after in MODEL_EXTENSIONS:
         if prior.count(before) != 1:
             raise RuntimeError("Prior model source guard differs from the reviewed extension")
