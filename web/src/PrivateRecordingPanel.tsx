@@ -128,7 +128,10 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     const selected=owner.current;
     if(!selected?.alive||current()||accessStopped.current)return;
     accessStopped.current=true;setConsented(false);setNotebook(null);notebookRef.current=null;setLedger(null);clearAudio();
-    void(async()=>{try{await selected.runtime?.pause();live.current.onAccessLost?.(new WorkspaceApiError(401));}catch{setError('Access changed and the microphone stop is unconfirmed. Keep this panel open and check Stop.');}})();
+    void(async()=>{try{
+      await selected.runtime?.pause();
+      if(owns(selected)&&!current())live.current.onAccessLost?.(new WorkspaceApiError(401));
+    }catch{if(owns(selected)&&!current())setError('Access changed and the microphone stop is unconfirmed. Keep this panel open and check Stop.');}})();
   });
   useEffect(()=>{
     if(!props.prepareNotebook||!recordingId&&!notebookTitle)return;

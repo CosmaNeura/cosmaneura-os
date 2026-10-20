@@ -632,7 +632,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     void scheduledDraftSave.current?.run().catch(()=>{});
     leaveTeamSettings(()=>{setSettingsOpen(false);setPracticeOpen(false);setPracticePage('home');});
   }
-  async function openPrivateNotebook(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam}){
+  async function openPrivateNotebook(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam},view:'default'|'notebook'='default'){
     setSavedRecordingEntry(null);
     if(result.identity!==authenticated)throw new WorkspaceApiError(403);
     const preserveTeamDraft=!!team&&!!teamDraft&&teamConfigurationChanged(team.configuration,teamDraft);
@@ -642,7 +642,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setThought('');setEvidence('');setSource('');setPreviousModelRequest(null);setModelObservation(null);setReplacementDraft(null);setModelHashes({});
     setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(0);setRecordingSourceRequest(0);
     setSelected(botAddress(result.team.configuration.bots.find(bot=>bot.role==='chief'&&!bot.retired)??result.team.configuration.bots[0]));
-    setPanel('Notebook');setMobilePanel(phoneLayout()?'Conversation':'Notebook');setStage('Before');setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');
+    setPanel('Notebook');setMobilePanel(view==='notebook'?'Notebook':phoneLayout()?'Conversation':'Notebook');setStage('Before');setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');
     chiefNotebookFocus.current={workspace:result.workspace.id,generation:current};
     await recoverAfterRead(result.team,result.workspace,current);
   }
@@ -1377,8 +1377,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setRecordingMinimized(false);setPrivateRecordingEntry(entry);
   }
   async function returnPrivateRecordingNotebook(entry:NonNullable<typeof privateRecordingEntry>,result:PrivateNotebookResult){
-    if(!recordingCurrent(entry)||result.identity!==entry.identity)throw new WorkspaceApiError(403);
-    if(!entry.returnWorkspaceId){await openPrivateNotebook(result);return;}
+    if(!recordingCurrent(entry)||result.identity!==entry.identity||result.team.recovery_scope!==entry.serverScope)throw new WorkspaceApiError(403);
+    if(!entry.returnWorkspaceId){
+      // Retire this stopped recorder before changing notebook generation. Its
+      // access-loss monitor must not clear the newly opened private editor.
+      setPrivateRecordingEntry(previous=>previous===entry?null:previous);setPrivateRecordingBusy(false);
+      await openPrivateNotebook(result,'notebook');return;
+    }
     if(result.workspace.id!==entry.returnWorkspaceId||workspace?.id!==entry.returnWorkspaceId||result.team.recovery_scope!==entry.serverScope)
       throw new WorkspaceApiError(403);
     setWorkspace(previous=>previous?.id===result.workspace.id&&previous.revision<=result.workspace.revision?result.workspace:previous);

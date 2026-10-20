@@ -97,6 +97,23 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(sources[0].stops).toBe(1);expect(button('Close recording').disabled).toBe(false);
     await click('Close recording');await wait(()=>close.mock.calls.length===1);expect(close).toHaveBeenCalledOnce();
   });
+  it.each([false,true])('withholds an old access-pause result after owner replacement (%s)',async fails=>{
+    await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
+    await act(async()=>sources[0].chunk(84));
+    let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve),original=runtimes[0].pause.bind(runtimes[0]);
+    const pause=vi.spyOn(runtimes[0],'pause').mockImplementationOnce(async()=>{
+      await original();await held;if(fails)throw new Error('Synthetic old pause result failed');
+    });
+    props={...props,isCurrent:()=>false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    await wait(()=>runtimes[0].snapshot.phase==='paused');
+    const replacementLost=vi.fn(),replacementIdentity={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    props={...props,identity:replacementIdentity,isCurrent:()=>true,onAccessLost:replacementLost};
+    await render();
+    await act(async()=>{release();await pause.mock.results[0].value.catch(()=>{});});
+    expect(accessLost).not.toHaveBeenCalled();expect(replacementLost).not.toHaveBeenCalled();
+    expect(container.textContent).not.toContain('Access changed and the microphone stop is unconfirmed');
+    await consent();expect(button('Start recording').disabled).toBe(false);
+  });
   it.each([false,true])('withholds old transcription handoff or error after owner replacement during close (%s)',async fails=>{
     const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{});
     props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};

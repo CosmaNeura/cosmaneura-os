@@ -33,7 +33,12 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   // Match the binary-object realm used by fake-indexeddb and Node WebCrypto.
   vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);vi.stubGlobal('Float32Array',structuredClone(new Float32Array(0)).constructor);
   const bufferModule='node:buffer';const {Blob:NodeBlob}=await import(/* @vite-ignore */bufferModule) as {Blob:typeof Blob};vi.stubGlobal('Blob',NodeBlob);
-  const playbacks:Blob[]=[];vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:(blob:Blob)=>{playbacks.push(blob);return 'blob:generated-private-recording';},revokeObjectURL:()=>{}}));
+  const playbacks=new Map<string,Blob>();vi.stubGlobal('URL',Object.assign(URL,{createObjectURL:(blob:Blob)=>{
+    const url=`blob:generated-private-recording-${playbacks.size}`;playbacks.set(url,blob);return url;
+  },revokeObjectURL:()=>{}}));
+  // jsdom has no OS audio output. Production playback must still target the
+  // actual mounted player and its verified decrypted WAV.
+  const playMedia=vi.spyOn(HTMLMediaElement.prototype,'play').mockResolvedValue();
   const logical='https://api.example.invalid';
   const originalWindow=window;vi.stubGlobal('window',new Proxy(originalWindow,{get(target,key){return key==='location'?new URL('https://workspace.example.invalid/'):Reflect.get(target,key);}}));
   vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',logical);vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_HOSTED_ENABLED','true');
@@ -48,6 +53,10 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   const packet=await(await fetch(base+'/lab/identity')).json() as {token:string};
   const identity={mode:'clerk_jwt' as const,getToken:async()=>packet.token};
   const container=document.createElement('div');document.body.append(container);root=createRoot(container);
+  const playback=()=>{
+    const player=container.querySelector<HTMLAudioElement>('audio');expect(player).toBeTruthy();
+    const blob=playbacks.get(player!.getAttribute('src')!);expect(blob).toBeTruthy();return blob!;
+  };
   const render=()=>root!.render(<WorkspaceCompatibilityGate identity={identity} accountControls={null}><PracticeAccessGate identity={identity} accountControls={null}>{access=><EncounterWorkspace authenticated={identity} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>);
   async function wait(check:()=>void){const end=performance.now()+15000;while(performance.now()<end){let passed=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10));try{check();passed=true;}catch{}});if(passed)return;}check();}
   const visible=(element:Element)=>!element.closest('[hidden]');
@@ -97,8 +106,8 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   await wait(()=>expect(runtimes[0].snapshot.workspaceId).not.toBeNull());
   await wait(()=>expect(metadataReceipts.some(receipt=>receipt.state==='finished'),container.textContent??'').toBe(true));
   const saved=runtimes[0].snapshot;expect(saved.recordedChunks).toBe(1);expect(saved.recordedBytes).toBe(3244);
-  await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(1));
-  const first=new Uint8Array(await playbacks[0].arrayBuffer());expect(new DataView(first.buffer).getInt16(44,true)).toBe(16384);
+  await click('Play saved recording');expect(playMedia).toHaveBeenCalledTimes(1);
+  const first=new Uint8Array(await playback().arrayBuffer());expect(new DataView(first.buffer).getInt16(44,true)).toBe(16384);
   const sha=async(bytes:Uint8Array<ArrayBuffer>)=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',bytes)),v=>v.toString(16).padStart(2,'0')).join('');
   const wavSha=await sha(first);const workspaceId=saved.workspaceId!;
   await click('Close recording');
@@ -112,9 +121,9 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   await wait(()=>expect(container.querySelector('[aria-label="Saved private recordings"] .practice-home-note'),container.textContent??'').toBeTruthy());
   await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Saved private recordings"] .practice-home-note')!.click());
   await wait(()=>expect(container.querySelector('.private-recording-status strong')?.textContent,container.textContent??'').toBe('Saved on this device'));
-  expect(hardware.requestCount).toBe(1);await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(2));
-  const reopenedSha=await sha(new Uint8Array(await playbacks[1].arrayBuffer()));expect(reopenedSha).toBe(wavSha);
-  await click('Open private notebook');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false));
+  expect(hardware.requestCount).toBe(1);await click('Play saved recording');expect(playMedia).toHaveBeenCalledTimes(2);
+  const reopenedSha=await sha(new Uint8Array(await playback().arrayBuffer()));expect(reopenedSha).toBe(wavSha);
+  await click('Open private notebook');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled,container.textContent??'').toBe(false));
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/practice-access/setup/complete')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/provider-team')).toHaveLength(1);
@@ -137,8 +146,9 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   await click('Choose private notebook');await click('Use notebook: '+recoveredNotebook.workspace.notebook!.title);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(1);
   await click('Save recording details to notebook');await wait(()=>expect(container.textContent).toContain('Recording details saved to your private notebook'));
-  await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(3));
-  expect(new DataView(await playbacks[2].arrayBuffer()).getInt16(44,true)).toBe(8192);
+  await click('Play saved recording');expect(playMedia).toHaveBeenCalledTimes(3);
+  const orphanPlayback=await playback().arrayBuffer();expect(new DataView(orphanPlayback).getInt16(44,true)).toBe(8192);
+  const orphanSha=await sha(new Uint8Array(orphanPlayback));
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(2);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings\/[^/]+\/finish$/.test(call.path))).toHaveLength(2);
@@ -149,8 +159,8 @@ it.skipIf(!base)('starts actual browser capture before a slow signed notebook cr
   await click('Retry opening private notebook');
   await wait(()=>expect(container.textContent).toContain('Recording details saved to your private notebook'));
   expect(runtimes.at(-1)!.snapshot.workspaceId).toBe(workspaceId);
-  await click('Play saved recording');await wait(()=>expect(playbacks.length).toBe(4));
-  expect(await sha(new Uint8Array(await playbacks[3].arrayBuffer()))).toBe(await sha(new Uint8Array(await playbacks[2].arrayBuffer())));
+  await click('Play saved recording');expect(playMedia).toHaveBeenCalledTimes(4);
+  expect(await sha(new Uint8Array(await playback().arrayBuffer()))).toBe(orphanSha);
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings$/.test(call.path))).toHaveLength(2);
   expect(calls.filter(call=>call.method==='POST'&&/\/private-recordings\/[^/]+\/finish$/.test(call.path))).toHaveLength(2);
