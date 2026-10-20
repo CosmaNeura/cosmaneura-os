@@ -36,6 +36,17 @@ SIGNED_UI_TESTS = tuple(sorted({
 SIGNED_UI_SUITES = ("signed-ui-1", "signed-ui-2", "signed-ui-3")
 
 
+def child_tool_path(pg_bin: Path, python: Path) -> str:
+    # Preserve the caller's selected Node before other tools' directories: an
+    # OpenSSL installation may also contain an older, otherwise hidden Node.
+    node = shutil.which("node")
+    dirs = ([str(Path(node).parent)] if node else []) + [str(pg_bin), str(python.parent)]
+    dirs.extend(str(Path(found).parent) for tool in ("openssl", "git", "jq", "swift", "xcodebuild")
+                if (found := shutil.which(tool)))
+    dirs.extend(os.defpath.split(os.pathsep))
+    return os.pathsep.join(dict.fromkeys(dirs))
+
+
 def suite_selections(suite: str) -> tuple[dict[str, list[str]], tuple[str, ...]]:
     if suite in SIGNED_UI_SUITES:
         index = SIGNED_UI_SUITES.index(suite)
@@ -197,11 +208,9 @@ def main() -> int:
     with socket.socket() as listener:
         listener.bind(("127.0.0.1", 0))
         port = listener.getsockname()[1]  # pg_ctl must bind this otherwise-free port itself.
-    local_tool_dirs = [str(Path(found).parent) for tool in ("openssl", "git", "node", "jq", "swift", "xcodebuild")
-                       if (found := shutil.which(tool))]
     scratch = output / "tmp"
     scratch.mkdir()
-    env = {"PATH": os.pathsep.join((str(pg_bin), str(Path(sys.executable).parent), *local_tool_dirs, os.defpath)),
+    env = {"PATH": child_tool_path(pg_bin, Path(sys.executable)),
            "LANG": "C", "LC_ALL": "C", "PYTHONUTF8": "1", "TMPDIR": str(scratch),
            "PYTHONDONTWRITEBYTECODE": "1", "PYTHONNOUSERSITE": "1",
            "PYTHONPATH": os.pathsep.join((str(REPO), str(REPO / "src"))), "COSMAS_ENV": "synth_os", "DATA_MODE": "synthetic",
@@ -222,6 +231,12 @@ def main() -> int:
     try:
         checks.report["source_before"] = source_state(git, env)
         checks.save()
+        if node := shutil.which("node", path=env["PATH"]):
+            if checks.run("node-runtime", [node, "--version"], 10):
+                raise RuntimeError("Selected Node runtime could not be verified")
+            checks.report["node_runtime"] = {"path": node, "resolved_path": str(Path(node).resolve()),
+                "version": (output / "node-runtime.log").read_text().strip()}
+            checks.save()
         if checks.run("initdb", [str(pg_bin / "initdb"), "-D", str(data), "--username", owner,
                                  "--auth-local=trust", "--auth-host=scram-sha-256",
                                  "--pwfile", str(password_file), "--no-locale", "--encoding=UTF8"]):

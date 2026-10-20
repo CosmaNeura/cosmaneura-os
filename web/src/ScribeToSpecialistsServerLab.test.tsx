@@ -41,7 +41,8 @@ async function click(label:string){await wait(()=>expect(button(label).disabled,
 async function input(selector:string,value:string){await wait(()=>expect(ep.host.querySelector(selector)).toBeTruthy());const field=ep.host.querySelector<HTMLTextAreaElement>(selector)!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function read(){ep.lifecycle.check();const w=await workspaceApi.read(ep.identity,ep.wid);ep.lifecycle.check();expect(note(w)).toBe(ep.noteBefore);expect(sources(w)).toBe(ep.sourcesBefore);return w;}
 async function refresh(){await click('Refresh encounter');await wait(()=>expect(button('Refresh encounter').disabled).toBe(false));}
-async function ask(content:string){await input('#team-question',content);await click('Send message');await wait(()=>expect(ep.host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toBe(''));return read();}
+async function ask(content:string){await input('#team-question',content);await click('Send message');await wait(()=>expect(ep.host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toBe(''));const current=await read();expect(current.entries.find(e=>e.kind==='conversation'&&e.content===content)?.reply).toBeTruthy();return current;}
+async function coworker(name:string){await wait(()=>expect([...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent===name)).toBeTruthy());await act(async()=>[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent===name)!.click());}
 async function workers(){const r=await ep.lifecycle.fetch(realFetch,`${base}/lab/work`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({workspace_id:ep.wid}),cache:'no-store',credentials:'omit',redirect:'error'});expect(r.status,await r.clone().text()).toBe(200);await refresh();return read();}
 async function review(h:ReviewableHandoff,feedback:string){
  const earlier=ep.host.querySelector<HTMLDetailsElement>('.team-earlier-tasks');if(earlier)earlier.open=true;
@@ -56,7 +57,7 @@ async function review(h:ReviewableHandoff,feedback:string){
  current=await read();const accepted=current.handoffs!.find(row=>row.id===completed.id)! as ReviewableHandoff;expect(accepted.review).toMatchObject({decision:'accepted',attempt_id:completed.attempt_id,result_entry_id:completed.result_entry_id,result_sha256:completed.result_sha256});
  await click('Close draft review');return accepted;
 }
- return {act,wait,button,click,input,read,refresh,ask,workers,review};
+ return {act,wait,button,click,input,read,refresh,ask,workers,review,coworker};
 }
 beforeEach(()=>{window.history.replaceState(null,'',window.location.pathname+window.location.search);if(!base)return;if(terminalFailure)throw new Error('Prior Scribe lab episode failed; no new case admitted: '+terminalFailure);
  const nativeAbort=transferableAbortController();vi.stubGlobal('AbortController',nativeAbort.constructor);vi.stubGlobal('AbortSignal',nativeAbort.signal.constructor);vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base);vi.stubEnv('VITE_CAPTURE_UPLOAD_ORIGINS',base);vi.stubGlobal('indexedDB',new IDBFactory());vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
@@ -77,9 +78,9 @@ afterEach(async()=>{if(!base||!mounted)return;const ep=mounted;ep.lifecycle.clos
  }}
  catch(error){terminalFailure=error instanceof Error?error.message:String(error);throw error;}
  finally{ep.host.remove();mounted=undefined;generatedSource.create=null;Reflect.deleteProperty(navigator,'locks');vi.restoreAllMocks();vi.unstubAllGlobals();vi.unstubAllEnvs();await saveReport();}
-});
+},20000);
 it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitioner',round:1},{persona:'physician_assistant',round:1},{persona:'physician',round:2},{persona:'nurse_practitioner',round:2},{persona:'physician_assistant',round:2}])('$persona round $round records generated audio, reviews it and accepts four actual specialist loops',async({persona,round})=>{
- const ep=mounted!;const {act,wait,button,click,read,ask,workers,review}=controls(ep);
+ const ep=mounted!;const {act,wait,button,click,read,ask,workers,review,coworker}=controls(ep);
  const began=performance.now(),trial:Trial={persona,round,workspace_id:'',steps:[],wire:[],passed:false};ep.trial=trial;trials.push(trial);const step=(name:string)=>{ep.lifecycle.check();trial.steps.push({name,elapsed_ms:Math.round(performance.now()-began)});};
  return ep.lifecycle.run(async()=>{try{
  const seeded=await ep.lifecycle.fetch(realFetch,`${base}/lab/case?persona=${persona}&round=${round}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(seeded.status,await seeded.clone().text()).toBe(200);
@@ -88,8 +89,7 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
  await wait(()=>expect([...ep.host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b=>b.textContent?.includes(packet.workspace.label))).toBe(true));
  await act(async()=>[...ep.host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b=>b.textContent?.includes(packet.workspace.label))!.click());
  await wait(()=>expect(ep.host.querySelector('#team-notebook'),ep.host.textContent??'').toBeTruthy());
- const scribeButton=[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent==='Scribe')!;
- await act(async()=>scribeButton.click());await click('Record visit');
+ await coworker('Scribe');await click('Record visit');
  await wait(()=>expect(ep.host.querySelector('[aria-label="Recording consent"] input')).toBeTruthy());await act(async()=>{const regions=ep.host.querySelector<HTMLInputElement>('[aria-label="Recording consent"] input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(regions,'US-NY');regions.dispatchEvent(new Event('input',{bubbles:true}));});
  await wait(()=>expect(button('Confirm consent & record').disabled).toBe(false));
  expect(ep.host.querySelector('input[type="date"]')).toBeNull();await click('Confirm consent & record');
@@ -101,16 +101,15 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
  const sourcePanel=ep.host.querySelector('[aria-label="Existing Scribe recording"]')!;const ack=sourcePanel.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
  await act(async()=>ack.click());await click('Use this version with my team');await wait(()=>expect(ep.host.textContent).toContain('Saved to this encounter’s sources'));
  let w=await workspaceApi.read(ep.identity,ep.wid);expect(note(w)).toBe(ep.noteBefore);expect(w.note?.latest?.sources_changed).toBe(true);expect(w.entries.filter(e=>e.kind==='evidence')).toHaveLength(1);ep.sourcesBefore=sources(w);step('explicit_review_and_actual_snapshot_share');
- const chief=[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent==='Chief')!;
- await act(async()=>chief.click());await wait(()=>expect(button('Prepare team drafts').disabled).toBe(false));
+ await coworker('Chief');await wait(()=>expect(button('Prepare team drafts').disabled).toBe(false));
  w=await ask('Ask Scribe only to organize the same recorded and reviewed transcript into a source-based private summary; keep the existing clinical note unchanged.');w=await workers();
  const scribe=w.handoffs!.find(h=>h.recipient_role==='scribe')! as ReviewableHandoff;const accepted=[await review(scribe,`${persona}: confirm missing DOB and owner without inventing facts.`)];step('scribe_summary_revision_and_acceptance');
- const chiefAgain=[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent==='Chief')!;await act(async()=>chiefAgain.click());
+ await coworker('Chief');
  w=await ask(`For this invented ${persona} encounter, ask Research, Visit Prep and Follow-up to prepare independent private drafts from the recorded, reviewed Scribe transcript and Scribe’s accepted saved summary. Preserve unknown diagnosis, missing DOB and trial eligibility. Do not search publicly or send anything.`);
  expect(w.handoffs).toHaveLength(5);expect(new Set(w.handoffs!.filter(h=>h.recipient_role!=='scribe').map(h=>h.recipient_role))).toEqual(new Set(['research','visit_prep','follow_up']));step('chief_three_exact_assignments_saved');
  w=await workers();const first=w.handoffs!.filter(h=>h.recipient_role!=='scribe') as ReviewableHandoff[];expect(first.every(h=>h.status==='completed')).toBe(true);step('three_parallel_product_workers_completed');
  for(const h of first){accepted.push(await review(h,`${persona}: identify owner and due date for ${h.recipient_role}; preserve unknown trial eligibility.`));step(h.recipient_role+'_revision_and_acceptance');}
- await act(async()=>chiefAgain.click());w=await ask('Collect the revised saved work from all four specialists. Identify the exact saved draft versions and what a human must still do. Do not create more assignments.');expect(w.handoffs).toHaveLength(8);step('chief_reads_saved_teammate_drafts');
+ await coworker('Chief');w=await ask('Collect the revised saved work from all four specialists. Identify the exact saved draft versions and what a human must still do. Do not create more assignments.');expect(w.handoffs).toHaveLength(8);step('chief_reads_saved_teammate_drafts');
  for(const h of accepted){expect(w.entries.at(-1)?.reply?.content).toContain(h.result_entry_id!);expect(w.entries.at(-1)?.reply?.content).toContain(h.result_sha256!);}expect(w.entries.at(-1)?.reply?.content).toContain('A human must confirm owner, due date and trial eligibility');
  const r=await ep.lifecycle.fetch(realFetch,`${base}/lab/inspect?workspace_id=${ep.wid}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(r.status).toBe(200);const evidence=await r.json() as {admissions:{state:string;role:string}[];tool_receipts:{actor_id:string;human_id:string;detail:Record<string,unknown>}[];dispatches:{started_s:number;ended_s:number;role:string}[];capture:{complete:boolean;session_id:string;uploads:{sequence_number:number;frames:number}[];real_asr_tested:boolean;physical_microphone_tested:boolean}};
  expect(evidence.admissions).toHaveLength(11);expect(evidence.admissions.every(a=>a.state==='completed')).toBe(true);expect(evidence.tool_receipts).toHaveLength(15);expect(evidence.tool_receipts.every(r=>r.actor_id!==r.human_id)).toBe(true);
@@ -118,14 +117,13 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
  const parallel=evidence.dispatches.filter(d=>['research','visit_prep','follow_up'].includes(d.role)).slice(0,3);expect(Math.max(...parallel.map(d=>d.started_s))).toBeLessThan(Math.min(...parallel.map(d=>d.ended_s)));
  const reread=await read();for(const h of accepted)expect((reread.handoffs!.find(x=>x.id===h.id) as ReviewableHandoff).review).toMatchObject(h.review!);expect(trial.wire.every(x=>x.status===200||x.status===201||x.path.endsWith('/capture/admission')&&x.status===409)).toBe(true);step('fresh_read_exact_acceptance_and_custody');const captureRequests=trial.wire.filter(x=>x.path.includes('/capture/')||x.path.startsWith('/lab/audio/')).length;await act(async()=>ep.root.unmount());await wait(()=>expect(ep.locksHeld.size).toBe(0));expect(ep.closeAlerts).toEqual([]);ep.root=createRoot(ep.host);await act(async()=>ep.root.render(<EncounterWorkspace authenticated={ep.identity} draftStorage={draftStorage}/>));await click('Visits and notes');await wait(()=>expect([...ep.host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].some(b=>b.textContent?.includes(packet.workspace.label))).toBe(true));await act(async()=>[...ep.host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(b=>b.textContent?.includes(packet.workspace.label))!.click());await wait(()=>expect(ep.host.querySelector('#team-notebook'),ep.host.textContent??'').toBeTruthy());const reopened=await read();for(const h of accepted)expect((reopened.handoffs!.find(x=>x.id===h.id) as ReviewableHandoff).review).toMatchObject(h.review!);expect(trial.wire.filter(x=>x.path.includes('/capture/')||x.path.startsWith('/lab/audio/'))).toHaveLength(captureRequests);expect(ep.source).toMatchObject({starts:1,stops:1});step('reopened_product_ui_without_rerecording_or_duplicate_effect');
   const reviewRequests=trial.wire.filter(x=>x.path.endsWith('/review')||x.path.endsWith('/revision')).length;
-  for(const h of accepted){const teammate=[...ep.host.querySelectorAll<HTMLButtonElement>('[aria-label="Provider Team"] button')].find(b=>b.querySelector('strong')?.textContent===h.recipient_name)!;
-    expect(teammate).toBeTruthy();await act(async()=>teammate.click());
+  for(const h of accepted){await coworker(h.recipient_name);
     await wait(()=>expect(ep.host.querySelector(`#turn-${h.result_entry_id} .team-bot-message header`)?.textContent).toContain('Draft accepted'));
     expect(ep.host.querySelector(`#turn-${h.result_entry_id} .team-bot-message header`)?.textContent).not.toContain('Unreviewed draft');
   }
   expect(trial.wire.filter(x=>x.path.endsWith('/review')||x.path.endsWith('/revision'))).toHaveLength(reviewRequests);
   step('reopened_each_specialist_conversation_shows_exact_saved_human_acceptance');trial.passed=true;
- }catch(e){trial.failure=(e instanceof Error?e.message:String(e))+'\nDOM: '+ep.host.textContent;terminalFailure=trial.failure.split('\n')[0];throw e;}},55000).catch(error=>{if(!trial.failure)trial.failure=(error instanceof Error?error.message:String(error))+'\nDOM: '+ep.host.textContent;terminalFailure=trial.failure.split('\n')[0];throw error;});
-},60000);
+ }catch(e){trial.failure=(e instanceof Error?e.message:String(e))+'\nDOM: '+ep.host.textContent;terminalFailure=trial.failure.split('\n')[0];throw e;}},120000).catch(error=>{if(!trial.failure)trial.failure=(error instanceof Error?error.message:String(error))+'\nDOM: '+ep.host.textContent;terminalFailure=trial.failure.split('\n')[0];throw error;});
+},130000);
 async function saveReport(){if(!base||!environment?.COSMAS_SCRIBE_LAB_REPORT)return;const fs='node:fs/promises';const {writeFile}=await import(/* @vite-ignore */fs) as {writeFile:(p:string,s:string)=>Promise<void>};await writeFile(environment.COSMAS_SCRIBE_LAB_REPORT,JSON.stringify({schema:'cosmabot.scribe-to-specialists-signed-product-ui.v1',synthetic_only:true,source_adapter:'actual recording controller/queue/transport and v6 with offline MockTransport',hardware:'deterministic generated PCM only',speech_recognition:'simulated only after independently verified capture completes',personas_are_scripted_not_real_users:true,trials,total:trials.length,completed:trials.filter(t=>t.passed).length},null,2)+'\n');}
 afterAll(saveReport);

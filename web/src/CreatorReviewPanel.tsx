@@ -1,5 +1,5 @@
 import { useContext, useEffect, useRef, useState } from "react";
-import { mountCreatorReview } from "../../clients/scribe-review/creator-review-panel";
+import { mountCreatorReview, type CreatorReviewAvailability } from "../../clients/scribe-review/creator-review-panel";
 import { parsePendingReviewDecision, type PendingReviewDecision } from "../../clients/scribe-review/creator-review-journal";
 import type { CreatorReviewView } from "../../clients/scribe-review/creator-review-api";
 import { creatorReviewApi } from "./creator-review-api";
@@ -10,18 +10,21 @@ import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
 import { useUnsavedWork } from "./unsaved-work";
 
 /** Reuse Scribe's clinician review UI with the workspace's encrypted recovery store. */
-export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, onLock, onSource, onContinue }: {
+export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, onLock, onSource, onContinue, onAvailability }: {
   workspaceId: string; sessionId: string; identity: AuthenticatedWorkspaceIdentity; locked: boolean;
   onLock: (locked: boolean) => void; onSource: (view: CreatorReviewView | null) => void;
   onContinue: () => Promise<void>;
+  onAvailability?: (availability: CreatorReviewAvailability) => void;
 }) {
   const root = useRef<HTMLDivElement>(null);
   const access = useContext(EditorRecoveryContext);
-  const callbacks = useRef({onLock, onSource, onContinue, locked});
-  callbacks.current = {onLock, onSource, onContinue, locked};
+  const callbacks = useRef({onLock, onSource, onContinue, onAvailability, locked});
+  callbacks.current = {onLock, onSource, onContinue, onAvailability, locked};
   const [retained, setRetained] = useState(false);
   useUnsavedWork(retained);
   useEffect(() => {
+    callbacks.current.onSource(null);
+    callbacks.current.onAvailability?.(access && access.workspaceId !== workspaceId ? "unavailable" : "loading");
     if (!root.current || !access || access.workspaceId !== workspaceId) return;
     const controller = new AbortController();
     let current = true, pending: PendingReviewDecision | null = null, working = 0;
@@ -86,7 +89,11 @@ export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, o
         try { return await api.decide(decision, key); }
         finally { working--; report(); }
       },
-    }, {journal, continueToNote: async () => {
+    }, {journal, onAvailability: availability => {
+      if (!current || controller.signal.aborted) return;
+      if (availability !== "ready") callbacks.current.onSource(null);
+      callbacks.current.onAvailability?.(availability);
+    }, continueToNote: async () => {
       requireCurrent();
       if (callbacks.current.locked) throw new DraftStoreError("unavailable");
       await callbacks.current.onContinue();

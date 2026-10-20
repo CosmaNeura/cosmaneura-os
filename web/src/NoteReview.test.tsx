@@ -1,4 +1,4 @@
-import { act } from "react";
+import { act, useLayoutEffect } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NoteReview } from "./NoteReview";
@@ -57,6 +57,15 @@ describe("private note review", () => {
     expect(container.querySelector("textarea")!.value).toBe("Other client's text.");
   });
 
+  it('opens team preparation only from the exact saved unchanged note without creating work',async()=>{
+    const next=vi.fn();const mount=(w=initial)=>act(async()=>root.render(<NoteReview workspace={w} locked={false} onSave={onSave} onSources={onSources} onTeamDrafts={next}/>));
+    await mount();await click('Prepare follow-up and research');expect(next).toHaveBeenCalledExactlyOnceWith(saved.id);expect(onSave).not.toHaveBeenCalled();
+    await input('My unsaved change');expect(button('Prepare follow-up and research').disabled).toBe(true);
+    await click('Prepare follow-up and research');expect(next).toHaveBeenCalledOnce();
+    await input(saved.content);await mount({...initial,note:{latest:{...saved,sources_changed:true},history:[saved]}});
+    expect(button('Prepare follow-up and research').disabled).toBe(true);expect(onSave).not.toHaveBeenCalled();
+  });
+
   it("blocks stale source review until reconciliation is saved as a new note", async () => {
     await render({...initial, revision: 3, note: {latest: {...saved, sources_changed: true}, history: [saved]}});
     expect(button("Record private review")).toBeUndefined();
@@ -88,6 +97,47 @@ describe("private note review", () => {
     await input("My working edit");await render(w);
     await act(async()=>root.render(<NoteReview workspace={w} active locked={false} onSave={onSave} onSources={onSources}/>));
     expect(container.querySelector("textarea")!.value).toBe("My working edit");
+  });
+
+  it.each([false,true])('initializes an available Scribe draft before the first editable commit and preserves the immediate edit (initially locked: %s)',async initiallyLocked=>{
+    await act(async()=>root.unmount());root=createRoot(container);
+    const draft:Workspace={...initial,note:{latest:null,history:[]},entries:[{id:'scribe-initial',revision:2,kind:'handoff_result',origin:'agent_handoff',
+      content:'',source_label:null,ticket:null,created_at:saved.created_at,reply:{agent_name:'Scribe',role:'scribe',backend:'azure_gpt41_source_draft_v1',
+        content:'Initial Scribe draft for review.',context_revision:1,citations:[]}}]};
+    const commits:Array<{disabled:boolean;content:string}>=[];
+    function ObserveReview({value,locked}:{value:Workspace;locked:boolean}) {
+      // Observe the committed DOM before passive effects, the same readiness
+      // boundary a browser's visible/editable locator uses for its first fill.
+      useLayoutEffect(()=>{const editor=container.querySelector<HTMLTextAreaElement>('#private-note-text')!;
+        commits.push({disabled:editor.disabled,content:editor.value});});
+      return <NoteReview workspace={value} active locked={locked} onSave={onSave} onSources={onSources}/>;
+    }
+    await act(async()=>root.render(<ObserveReview value={draft} locked={initiallyLocked}/>));
+    if(initiallyLocked)await act(async()=>root.render(<ObserveReview value={draft} locked={false}/>));
+    expect(commits.some(commit=>!commit.disabled&&!commit.content.trim())).toBe(false);
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')?.disabled).toBe(false);
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')?.value).toBe('Initial Scribe draft for review.');
+    const human='Invented reviewed note. Confirm contact consent and medication list before outreach.';
+    await input(human);
+    const newer={...draft,revision:3,entries:[...draft.entries,{...draft.entries[0],id:'scribe-newer',revision:3,
+      reply:{...draft.entries[0].reply!,content:'Newer Scribe draft must not replace the human edit.'}}]};
+    await act(async()=>root.render(<ObserveReview value={newer} locked={false}/>));
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')?.value).toBe(human);
+    await click('Save note version');
+    expect(onSave).toHaveBeenCalledWith({type:'note',body:expect.objectContaining({content:human,source_reply_id:'scribe-initial',expected_revision:3})});
+  });
+
+  it('preserves text typed before a Scribe draft arrives instead of adopting over it',async()=>{
+    await act(async()=>root.unmount());root=createRoot(container);
+    const empty:Workspace={...initial,note:{latest:null,history:[]},entries:[]};
+    await act(async()=>root.render(<NoteReview workspace={empty} active locked={false} onSave={onSave} onSources={onSources}/>));
+    await input('My invented note typed before Scribe was ready.');
+    const draft={...empty,revision:3,entries:[{id:'late-scribe',revision:3,kind:'handoff_result' as const,origin:'agent_handoff',content:'',source_label:null,ticket:null,
+      created_at:saved.created_at,reply:{agent_name:'Scribe',role:'scribe' as const,backend:'azure_gpt41_source_draft_v1',content:'Late generated draft.',context_revision:1,citations:[]}}]};
+    await act(async()=>root.render(<NoteReview workspace={draft} active locked={false} onSave={onSave} onSources={onSources}/>));
+    expect(container.querySelector<HTMLTextAreaElement>('#private-note-text')?.value).toBe('My invented note typed before Scribe was ready.');
+    await click('Save note version');
+    expect(onSave).toHaveBeenCalledWith({type:'note',body:expect.objectContaining({content:'My invented note typed before Scribe was ready.',source_reply_id:null})});
   });
 
   it("adopts a remotely created note only when the editor is still empty", async () => {

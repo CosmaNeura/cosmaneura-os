@@ -5,6 +5,7 @@ import {validScribeSourceRequest} from './scribe-source-api';
 import {validateResearchDraft} from './research-contract';
 import { DraftStoreError, type DraftRecord, type DraftStore, type DraftValue } from "./draft-store";
 import type { PendingSave } from "./EncounterWorkspace";
+import {validShareSavedNoteInput} from './clinical-team-contract';
 import type { ProviderTeam, TeamConfiguration, TeamSaveInput, Workspace } from "./workspace-api";
 import { validTeamConfiguration, validTeamSave } from "./team-setup-request";
 import { validPracticeOperation, type PracticeWorkOperation } from "./practice-work-request";
@@ -54,7 +55,7 @@ const validEditor = (kind: unknown) => typeof kind === "string" &&
     kind.startsWith("fax-source-review:") && UUID.test(kind.slice("fax-source-review:".length)) ||
     kind.startsWith("efax-source-review:") && UUID.test(kind.slice("efax-source-review:".length)) ||
     kind.startsWith("follow-up-result:") && UUID.test(kind.slice("follow-up-result:".length)) || kind.startsWith("research:") && UUID.test(kind.slice("research:".length)));
-const operations = ["entry", "ask", "retry", "note", "coreNoteLink", "review", "followUpPropose", "followUpDecision", "followUpComplete", "link"];
+const operations = ["entry", "ask", "retry", "note", "coreNoteLink", "review", "followUpPropose", "followUpDecision", "followUpComplete", "clinicalNoteShare", "link"];
 
 export function notebookDraft(workspace: Workspace, note: string, thought: string, evidence: string, source: string,
   pending: PendingSave | null,previous:PreviousModelRequest|null=null): NotebookDraft | null {
@@ -80,6 +81,7 @@ function pendingRequest(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const operation = value as Record<string,unknown>;
   if (typeof operation.type !== "string" || !operations.includes(operation.type)) return false;
+  if(operation.type==='clinicalNoteShare')return Object.keys(operation).sort().join(',')==='body,type'&&validShareSavedNoteInput(operation.body);
   if(operation.type==='ask'||operation.type==='retry')return validModelOperation(operation);
   if (operation.type !== "followUpDecision" && operation.type !== "followUpComplete") return request(operation.body);
   // Follow-up authority binds an immutable ticket revision, not a notebook

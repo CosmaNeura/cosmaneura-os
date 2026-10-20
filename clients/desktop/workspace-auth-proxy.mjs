@@ -2,12 +2,14 @@ import {sameAuthState} from './auth-helper-client.mjs';
 import {exactHostedApiOrigin} from './hosted-auth-http.mjs';
 import {connectorApiRoute, CONNECTOR_HEADERS, isModelActivityPath} from './connector-api-routes.mjs';
 import {MAX_SCRIBE_SOURCE_REQUEST_BYTES, validScribeSourceRequest} from './scribe-source-requests.mjs';
+import {MAX_CLINICAL_TEAM_REQUEST_BYTES, validClinicalTeamRequest} from './clinical-team-requests.mjs';
 
 const API_ORIGIN = 'http://127.0.0.1:8046';
 const ID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const BOT = `(?:chief|scribe|visit_prep|follow_up|${ID})`;
 const READ = new RegExp(`^/(?:workspaces(?:/${ID}(?:/(?:appointments(?:/(?:pages/)?${ID})?|prep-work(?:/${ID})?))?)?|provider-team(?:/(?:identity|setup|resources|usage|routines/${BOT}(?:/runs/${ID})?))?|practice-work(?:/(?:pages/)?${ID})?)$`);
-const WRITE = new RegExp(`^/(?:provider-team(?:/(?:rehearsal|routines/${BOT}))?|practice-work/${ID}/(?:handoffs|complete)|workspaces(?:/${ID}/(?:entries|conversation(?:/resolve)?|work-links|handoffs/${ID}/(?:retry(?:/resolve)?|review|revision)|notes(?:/${ID}/review)?|follow-ups(?:/${ID}/(?:decide|complete))?|appointments(?:/(?:current|${ID}/(?:decide|execute)))?|prep-work(?:/${ID}/(?:decide|verify))?|scheduling/availability|capture/(?:admission|operations|notes|note-links|prep|existing|source-packets)))?)$`);
+const WRITE = new RegExp(`^/(?:provider-team(?:/(?:rehearsal|routines/${BOT}))?|practice-work/${ID}/(?:handoffs|complete)|workspaces(?:/${ID}/(?:entries|conversation(?:/resolve)?|work-links|handoffs/${ID}/(?:retry(?:/resolve)?|review|revision)|notes(?:/${ID}/review)?|note/team-source(?:/resolve)?|follow-ups(?:/${ID}/(?:decide|complete))?|appointments(?:/(?:current|${ID}/(?:decide|execute)))?|prep-work(?:/${ID}/(?:decide|verify))?|scheduling/availability|capture/(?:admission|operations|notes|note-links|prep|existing|source-packets)))?)$`);
+const CLINICAL_TEAM = new RegExp(`^/workspaces/${ID}/note/team-source(?:/resolve)?$`);
 const SCRIBE_SOURCE = new RegExp(`^/workspaces/${ID}/capture/(existing|source-packets)$`);
 const MODEL_COMMAND = new RegExp(`^/workspaces/${ID}/(?:conversation(?:/resolve)?|handoffs/${ID}/retry(?:/resolve)?)$`);
 const HANDOFF_REVIEW = new RegExp(`^/workspaces/${ID}/handoffs/${ID}/(?:review|revision)$`);
@@ -22,7 +24,7 @@ export function permittedAuthenticatedApiPath(url, method) {
         parsed.password || parsed.hash || !parsed.pathname.startsWith('/api/')) return null;
     const path = parsed.pathname.slice(4) + parsed.search;
     const connector = connectorApiRoute(path,method);
-    if ((connector?.strictResponse || path === '/provider-team/identity' || isModelActivityPath(path) || SCRIBE_SOURCE.test(path)) &&
+    if ((connector?.strictResponse || path === '/provider-team/identity' || isModelActivityPath(path) || SCRIBE_SOURCE.test(path) || CLINICAL_TEAM.test(path)) &&
         (url !== 'app://cosmas/api' + path || url.includes('?') && connector?.canonicalQuery !== true)) return null;
     if (connector) return path;
     return !parsed.search && (method === 'GET' && (READ.test(path) || isModelActivityPath(path)) || method === 'POST' && WRITE.test(path)) ? path : null;
@@ -80,6 +82,9 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   if (!path) return unavailable(404);
   const workspaceProtocol=request.headers.get('X-Cosmas-Workspace-Protocol');
   if(workspaceProtocol!==null && workspaceProtocol!=='1')return unavailable(426);
+  const clinicalTeam = request.method === 'POST' && CLINICAL_TEAM.test(path);
+  const clinicalContract = request.headers.get('X-Cosmas-Clinical-Team');
+  if (clinicalTeam ? clinicalContract !== '1' : clinicalContract !== null) return unavailable(426);
   const routineRun = request.method === 'GET' && ROUTINE_RUN_READ.test(path);
   const routineContract = request.headers.get('X-Cosmas-Routine-Contract');
   // Generation 2 changes only an exact saved-run read. Missing negotiation
@@ -110,12 +115,12 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   const activityContract=request.headers.get('X-Cosmas-Activity-Contract');
   if(activityContract!==null&&(!activityPath||!['1','2'].includes(activityContract)))return unavailable(426);
   const recoveryGeneration = request.headers.get('X-Cosmas-Draft-Recovery');
-  if ((identityPath || activityPath) && recoveryGeneration !== '2') return unavailable(426);
+  if ((identityPath || activityPath || clinicalTeam) && recoveryGeneration !== '2') return unavailable(426);
   if (recoveryGeneration !== null && !['1', '2'].includes(recoveryGeneration)) return unavailable(400);
   const handoffReview = request.method === 'POST' && HANDOFF_REVIEW.test(path);
   const handoffContract = request.headers.get('X-Cosmas-Handoff-Review');
   if(handoffReview ? handoffContract !== '1' : handoffContract !== null) return unavailable(426);
-  const strictResponse = identityPath || activityPath || handoffReview || connector?.strictResponse;
+  const strictResponse = identityPath || activityPath || handoffReview || clinicalTeam || connector?.strictResponse;
   const teamPath = ['/provider-team', '/provider-team/setup', '/provider-team/rehearsal'].includes(path);
   const teamInfoPath = activityPath || ['/provider-team/resources', '/provider-team/usage', '/provider-team/identity'].includes(path);
   const teamContract = request.headers.get('X-Cosmas-Team-Contract');
@@ -136,7 +141,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   const signal = AbortSignal.any([controller.signal, request.signal]);
   let expired = false, authorityStatus = null;
   const startedAt = Date.now();
-  let timer = setTimeout(() => { expired = true; controller.abort(); }, identityPath || activityPath ? 15000 : connector ? connector.seconds * 1000 : routineRun || modelContract === '1' ? 30000 : path.endsWith('/capture/notes') ? 120000 : 45000);
+  let timer = setTimeout(() => { expired = true; controller.abort(); }, identityPath || activityPath ? 15000 : connector ? connector.seconds * 1000 : clinicalTeam || routineRun || modelContract === '1' ? 30000 : path.endsWith('/capture/notes') ? 120000 : 45000);
   const remove = auth.subscribe(state => { if (state.phase !== 'ready' || state.revision !== revision) controller.abort(); });
   try {
     const before = await untilAborted(() => auth.getState(), signal);
@@ -144,12 +149,13 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     const appointmentPath = path.endsWith('/appointments') || path.includes('/appointments/');
     const prepWorkPath = path.endsWith('/prep-work') || path.includes('/prep-work/');
     const routinePath = path.startsWith('/provider-team/routines/');
-    const maximumInput = handoffReview ? 12288 : identityPath || activityPath ? 0 : scribeSource ? MAX_SCRIBE_SOURCE_REQUEST_BYTES : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
+    const maximumInput = clinicalTeam ? MAX_CLINICAL_TEAM_REQUEST_BYTES : handoffReview ? 12288 : identityPath || activityPath ? 0 : scribeSource ? MAX_SCRIBE_SOURCE_REQUEST_BYTES : connector ? connector.input : modelReceipt ? (path.includes('/conversation') ? 65536 : 2048) : teamPath ? 4194304 : teamInfoPath ? 2048 : prepWorkPath ? (path.endsWith('/prep-work') ? 32768 : 2048) : (path.endsWith('/capture/admission') || path.endsWith('/scheduling/availability') || appointmentPath || routinePath) ? 2048 : path.endsWith('/capture/notes') ? 270336 :
       path.endsWith('/capture/operations') ? 4194304 : path.includes('/capture/') ? 1048576 : 128000;
     const body = await boundedBytes(request.body, maximumInput, signal);
     if (request.method === 'GET' && body.length) return unavailable(400);
     if (request.method === 'POST') {
       const parsed = JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(body));
+      if (clinicalTeam && !validClinicalTeamRequest(parsed)) return unavailable(400);
       if (scribeSource && !validScribeSourceRequest(scribeSource, parsed)) return unavailable(400);
       if (modelReceipt && path.endsWith('/conversation') && parsed?.session_prep_analysis) {
         clearTimeout(timer);
@@ -168,6 +174,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
         ...(activityContract ? {'X-Cosmas-Activity-Contract': activityContract} : {}),
         ...(modelContract ? {'X-Cosmas-Model-Contract': modelContract} : {}),
         ...(handoffContract ? {'X-Cosmas-Handoff-Review': handoffContract} : {}),
+        ...(clinicalContract ? {'X-Cosmas-Clinical-Team': clinicalContract} : {}),
         ...(routineContract ? {'X-Cosmas-Routine-Contract': routineContract} : {}),
         ...(connector ? {[connector.header]:catalogV2 ? request.headers.get(connector.header) : '1'} : {}),
         ...(writeKey ? {'X-Cosmas-Artifact-Write-Key':writeKey} : {})}, body: request.method === 'POST' || request.method === 'PUT' ? body : undefined,
@@ -179,7 +186,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     if(workspaceProtocol && response.status>=200 && response.status<300 && response.headers.get('X-Cosmas-Workspace-Protocol')!=='1'){cancelBody(response.body);return unavailable(426);}
     if (strictResponse && [401,403,404].includes(response.status)) authorityStatus = response.status;
     const responseType = connector?.binaryResponse && response.status === 200 ? 'application/pdf' : 'application/json';
-    const maximumOutput = identityPath ? 1024 : activityPath ? response.status === 200 ? 65536 : 1024 : connector ? connector.errorOutput && response.status !== 200 ? connector.errorOutput : connector.binaryResponse && response.status !== 200 ? 8192 : connector.output : modelReceipt || teamInfoPath ? 16384 : teamPath ? 8388608 : prepWorkPath ? 1048576 : appointmentPath || routinePath ? 32768 : path.endsWith('/scheduling/availability') ? 1048576 : path.endsWith('/capture/operations') ? 32 * 1024 * 1024 + 4096 : path.includes('/capture/') ? 25169920 : 12000000;
+    const maximumOutput = clinicalTeam ? response.status === 200 ? 12000000 : 2048 : identityPath ? 1024 : activityPath ? response.status === 200 ? 65536 : 1024 : connector ? connector.errorOutput && response.status !== 200 ? connector.errorOutput : connector.binaryResponse && response.status !== 200 ? 8192 : connector.output : modelReceipt || teamInfoPath ? 16384 : teamPath ? 8388608 : prepWorkPath ? 1048576 : appointmentPath || routinePath ? 32768 : path.endsWith('/scheduling/availability') ? 1048576 : path.endsWith('/capture/operations') ? 32 * 1024 * 1024 + 4096 : path.includes('/capture/') ? 25169920 : 12000000;
     const length = response.headers.get('Content-Length');
     if (response.headers.get('Content-Type')?.split(';', 1)[0].trim() !== responseType ||
         !response.headers.get('Cache-Control')?.split(',').some(value => value.trim().toLowerCase() === 'no-store') ||
@@ -189,7 +196,7 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
     }
     const bytes = await boundedBytes(response.body, maximumOutput, signal);
     if (strictResponse && length !== null && Number(length) !== bytes.byteLength) return unavailable(authorityStatus ?? 502);
-    if (modelReceipt) JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes));
+    if (modelReceipt || clinicalTeam) JSON.parse(new TextDecoder('utf-8', {fatal: true}).decode(bytes));
     signal.throwIfAborted();
     const after = await untilAborted(() => auth.getState(), signal); signal.throwIfAborted();
     if (!sameAuthState(before, after)) return unavailable(401);

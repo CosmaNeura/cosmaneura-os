@@ -42,6 +42,12 @@ it.each([0,1234])('checks saved PCM signal without counting the WAV header as au
   expect(exported.durationMs).toBe(1);expect(exported.bytes).toBe(76);expect(fetch).not.toHaveBeenCalled();
 });
 
+it('keeps sealed speech audio lineage stable through later notebook organization while the ledger manifest changes',async()=>{
+  const source=new ControlledSource(),runtime=await open(source);await runtime.start(consent());await source.emit();await runtime.stop();
+  const original=await runtime.snapshotForPrivateTranscript(),ledger=await runtime.snapshotForLedger();await runtime.attachWorkspace(workspace,true);await runtime.rename('Invented organized recording');
+  expect(await runtime.snapshotForPrivateTranscript()).toEqual(original);expect((await runtime.snapshotForLedger()).manifestSHA256).not.toBe(ledger.manifestSHA256);expect(runtime.snapshot.workspaceId).toBe(workspace);
+});
+
 it('retains the actual interruption reason and clears it on explicit Resume',async()=>{
   const source=new ControlledSource(),runtime=await open(source);await runtime.start(consent());source.options!.onInterruption!('capture_backgrounded');
   await vi.waitFor(()=>expect(runtime.snapshot.phase).toBe('paused'));expect(runtime.snapshot.failure).toBe('capture_backgrounded');
@@ -52,6 +58,27 @@ it('prewarms encrypted custody without consent, microphone, manifest or network'
   const prepared=await store();expect(await prepared.keys()).toEqual([]);prepared.close();
   const {records,key}=await inspect();expect(records).toEqual([]);expect(key).toMatchObject({type:'secret',extractable:false,algorithm:{name:'AES-GCM',length:256}});
   await expect(webcrypto.subtle.exportKey('raw',key)).rejects.toThrow();expect(fetch).not.toHaveBeenCalled();
+});
+
+it('lists encrypted recordings newest first by creation instant with a stable ID tie-break without rewriting custody',async()=>{
+  const id=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+  const timestamps=new Map([
+    [1,'2026-10-09T15:00:00.000Z'],
+    [2,'2026-10-20T12:00:00.000Z'],
+    [3,'2026-10-20T13:00:00.000Z'],
+    [4,'2026-10-20T08:00:00.000-04:00'],
+  ]);
+  const encrypted=await store();
+  for(const n of [4,1,3,2]){
+    const row:PrivateRecordingManifest={contract:'cosmabot.private-recording.v1',recordingId:id(n),scope,title:`Invented recording ${n}`,
+      consent:consent(),consentIntervals:[],workspaceId:null,createdAt:timestamps.get(n)!,updatedAt:'2026-10-21T09:00:00.000Z',phase:'sealed',chunks:[]};
+    await encrypted.write('manifest:'+id(n),null,row);
+  }
+  expect(await encrypted.keys()).toEqual([1,2,3,4].map(n=>'manifest:'+id(n)));encrypted.close();
+  const before=await inspect(),rows=await listPrivateRecordings(scope,'desktop',store);
+  expect(rows.map(row=>row.recordingId)).toEqual([3,2,4,1].map(id));
+  expect(rows.map(row=>row.createdAt)).toEqual([3,2,4,1].map(n=>timestamps.get(n)));
+  expect((await inspect()).records).toEqual(before.records);expect(fetch).not.toHaveBeenCalled();
 });
 
 it('runs the production desktop getUserMedia/AudioWorklet/resampler path and durably drains private PCM before playback',async()=>{

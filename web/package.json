@@ -13,7 +13,7 @@
     "ux:lab": "vite --config vite.ux-lab.config.ts",
     "ux:lab:build": "vite build --config vite.ux-lab.config.ts",
     "ux:acceptance": "vite --config vite.ux-acceptance.config.ts",
-    "ux:acceptance:build": "vite build --config vite.ux-acceptance.config.ts"
+    "ux:acceptance:build": "tsc -p ux-acceptance/tsconfig.json && vite build --config vite.ux-acceptance.config.ts"
   },
   "dependencies": {
     "@clerk/react": "6.15.0",

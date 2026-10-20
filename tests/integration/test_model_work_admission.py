@@ -578,7 +578,10 @@ def test_chief_partial_admission_keeps_paid_answer_and_truthful_unstarted_child(
         snapshot = ws.read(s, box, owner, wid)
         handoff = snapshot["handoffs"][0]
         assert handoff["status"] == "failed" and handoff["error_code"] == "team_work_limit"
-        assert "0 queued; 1 not started" in snapshot["entries"][-1]["reply"]["content"]
+        published = snapshot["entries"][-1]["reply"]["content"]
+        assert "Not started: your team's work limit was reached." in published
+        assert "Organize the invented saved notes" in published
+        assert "I queued every draft" not in published
         attempt = s.get(WorkspaceHandoffAttempt, handoff["attempt_id"])
         assert attempt.started_at is None and attempt.completed_at is not None
         assert (
@@ -593,6 +596,122 @@ def test_chief_partial_admission_keeps_paid_answer_and_truthful_unstarted_child(
             work.usage(s, box, owner)["occupied_units"] == 2
             and work.usage(s, box, owner)["verified_input_tokens"] == 55
         )
+
+
+def test_chief_receipt_names_actual_queued_tasks_and_suppresses_action_claims(engine, enabled):
+    from cosmas_os.adapters.gpt41 import _context
+    from cosmas_os.ports.bot_capabilities import DraftBrief
+
+    box, owner, wid, _ = case(engine)
+    briefs = (
+        DraftBrief("scribe", "Organize the invented saved notes.", REQUIREMENTS),
+        DraftBrief("follow_up", "Prepare a patient email draft and provider action items.", {
+            **REQUIREMENTS, "expected_output": "Subject and Body; provider owner and next action."}),
+    )
+    seen = []
+
+    def dispatch(claim):
+        sources = _context(claim.envelope["context"]).sources[:1]
+        seen.extend(sources)
+        return BotReply("I sent the patient email and completed all tasks.", sources,
+            "azure_gpt41", 30, 9, briefs)
+
+    with Session(engine) as s:
+        result = work.run_conversation(s, box, owner, wid, dispatch=dispatch,
+            **{**command(), "role": "chief"})
+        snapshot = ws.read(s, box, owner, wid)
+        reply = next(e for e in snapshot["entries"] if e["id"] == result["saved_entry"]["id"])["reply"]
+        assert "I sent the patient email" not in reply["content"]
+        assert "completed all tasks" not in reply["content"]
+        assert reply["content"].count("Queued; waiting for a private draft.") == 2
+        assert "Review each completed result before using it" in reply["content"]
+        assert reply["citations"] == [{"entry_id": p.entry_id, "revision": p.revision,
+            "label": p.label, "kind": p.kind} for p in seen]
+        assert len(snapshot["handoffs"]) == 2
+        for h in snapshot["handoffs"]:
+            assert h["status"] == "queued" and h["error_code"] is None
+            assert work._quoted_assignment_text(h["recipient_name"]) in reply["content"]
+            assert work._quoted_assignment_text(h["brief"]) in reply["content"]
+            assert work._quoted_assignment_text(h["task_brief"]["expected_output"]) in reply["content"]
+            assert h["review"] is None and h["result_entry_id"] is None
+
+
+@pytest.mark.parametrize("reason", ["team_work_limit", "authority_changed"])
+def test_chief_receipt_distinguishes_actual_queued_and_unstarted_recipients(engine, enabled, reason):
+    from cosmas_os.models import ProviderBot
+    from cosmas_os.ports.bot_capabilities import DraftBrief
+
+    box, owner, wid, revision = case(engine)
+    other = None
+    if reason == "team_work_limit":
+        other = another_workspace(engine, box, owner, wid)
+        with Session(engine) as s:
+            # Chief can initially request two drafts. A separate request uses
+            # one slot while Chief is running, leaving exactly one child slot.
+            revision = install_limit_fixture(s, box, owner, 3)
+
+    def dispatch(claim):
+        if reason == "team_work_limit":
+            assert claim.envelope["context"]["handoff_limit"] == 2
+            assert other is not None
+            with Session(engine) as s:
+                competing = work.run_conversation(s, box, owner, other, dispatch=answer,
+                    **{**command(), "team_revision": revision})
+                assert competing["outcome"] == "saved"
+        else:
+            with Session(engine) as s:
+                recipient = s.scalar(select(ProviderBot).where(ProviderBot.box_id == box,
+                    ProviderBot.owner_id == owner, ProviderBot.role == "follow_up"))
+                assert recipient is not None
+                principal = s.get(Principal, recipient.agent_id)
+                assert principal is not None
+                principal.state = "disabled"
+                s.commit()
+        return BotReply("Every teammate finished and I sent the email.", (), "azure_gpt41", 30, 9,
+            (DraftBrief("scribe", "Organize the invented saved notes.", REQUIREMENTS),
+                DraftBrief("follow_up", "Prepare the private patient email draft.", REQUIREMENTS)))
+
+    with Session(engine) as s:
+        result = work.run_conversation(s, box, owner, wid, dispatch=dispatch,
+            **{**command(), "role": "chief", "team_revision": revision})
+        assert result["outcome"] == "saved", result
+        snapshot = ws.read(s, box, owner, wid)
+        reply = next(e for e in snapshot["entries"] if e["id"] == result["saved_entry"]["id"])["reply"]["content"]
+        assert "Every teammate finished" not in reply and "I sent the email" not in reply
+        assert reply.count("Queued; waiting for a private draft.") == 1
+        assert reply.count("Not started:") == 1
+        assert ("work limit was reached" if reason == "team_work_limit"
+            else "access or configuration changed") in reply
+        assert {h["recipient_role"]: (h["status"], h["error_code"]) for h in snapshot["handoffs"]} == {
+            "scribe": ("queued", None), "follow_up": ("failed", reason)}
+
+
+@pytest.mark.parametrize("escaped", [False, True])
+def test_chief_three_maximum_briefs_fit_reply_bound_without_truncating_saved_tasks(engine, enabled, escaped):
+    from cosmas_os.ports.bot_capabilities import DraftBrief
+
+    box, owner, wid, _ = case(engine)
+    goal = "*\n" * 2000 if escaped else "X" * 4000
+    expected = "!\n" * 300 if escaped else "Y" * 600
+    briefs = tuple(DraftBrief(role, goal, {**REQUIREMENTS, "expected_output": expected})
+        for role in ("scribe", "visit_prep", "follow_up"))
+    with Session(engine) as s:
+        result = work.run_conversation(s, box, owner, wid,
+            dispatch=lambda _: BotReply("I finished everything.", (), "azure_gpt41", 30, 9, briefs),
+            **{**command(), "role": "chief"})
+        assert result["outcome"] == "saved"
+        snapshot = ws.read(s, box, owner, wid)
+        reply = next(e for e in snapshot["entries"] if e["id"] == result["saved_entry"]["id"])["reply"]["content"]
+        assert len(reply) <= 20000 and "I finished everything" not in reply
+        assert len(snapshot["handoffs"]) == 3
+        for h in snapshot["handoffs"]:
+            assert h["brief"] == goal
+            assert work._quoted_assignment_text(h["task_brief"]["expected_output"]) in reply
+        if escaped:
+            assert reply.count("full unchanged request") == 3
+            assert "Requested work (quoted)" not in reply
+        else:
+            assert reply.count(goal) == 3
 
 
 def test_two_claimants_get_only_one_dispatch_token(engine, enabled):

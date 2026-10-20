@@ -1,6 +1,6 @@
 import {useCallback,useEffect,useState,type ReactNode} from 'react';
 import {practiceAccessApi} from './practice-access-api';
-import {usePracticeAccessTask} from './PracticeAccessGate';
+import {usePracticeAccessTask,WorkspaceConnectionRecoveryContext} from './PracticeAccessGate';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {admitWorkspaceProtocol,subscribeWorkspaceProtocol,workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 import './workspace-compatibility.css';
@@ -9,33 +9,38 @@ export function WorkspaceCompatibilityGate({identity,accountControls,children}:{
   const [admitted,setAdmitted]=useState<AuthenticatedWorkspaceIdentity|null>(null);
   const [phase,setPhase]=useState(()=>workspaceProtocolPhase(identity));
   const [error,setError]=useState('');
+  const [recovery,setRecovery]=useState<{identity:AuthenticatedWorkspaceIdentity;sequence:number;generation:number}|null>(null);
   const {busy,run}=usePracticeAccessTask(identity);
   useEffect(()=>{
-    setAdmitted(null);setError('');setPhase(workspaceProtocolPhase(identity));
+    setAdmitted(null);setError('');setRecovery(null);setPhase(workspaceProtocolPhase(identity));
     return subscribeWorkspaceProtocol(identity,()=>setPhase(workspaceProtocolPhase(identity)));
   },[identity]);
-  const check=useCallback(()=>{
+  const check=useCallback((reconnecting=false)=>{
     setError('');
     const generation=workspaceProtocolGeneration(identity);
     return run(async signal=>{
       await practiceAccessApi.compatibility(identity,signal);
-    },()=>{admitWorkspaceProtocol(identity,generation);setAdmitted(identity);},cause=>setError(cause instanceof WorkspaceApiError && cause.status===426
-      ? 'An update is needed before this workspace can connect. On desktop, use CosmaBot → Update CosmaBot for installation steps. If the app is current, the practice service needs a compatible update. Then check the connection again.'
+    },()=>{admitWorkspaceProtocol(identity,generation);setAdmitted(identity);
+      if(reconnecting)setRecovery(previous=>({identity,generation,sequence:previous?.identity===identity?previous.sequence+1:1}));
+    },cause=>setError(cause instanceof WorkspaceApiError && cause.status===426
+      ? 'The app and practice service could not confirm a compatible version. Retry after the app or service is updated.'
       : cause instanceof WorkspaceApiError && [401,403].includes(cause.status)
       ? 'Your secure session could not be checked. Sign in again to continue.'
-      : 'The workspace connection could not be checked. Reconnect and try again.'));
+      : 'The practice service could not be reached or its reply could not be checked. Reconnect and retry.'));
   },[identity,run]);
   useEffect(()=>{void check();},[check]);
   const opened=admitted===identity;
-  return <>
-    {(!opened || phase!=='ready') && <section className="workspace-compatibility" aria-label="Workspace connection" role={busy?'status':'alert'}>
+  return <WorkspaceConnectionRecoveryContext.Provider value={{identity,sequence:recovery?.identity===identity?recovery.sequence:0,
+    generation:recovery?.identity===identity?recovery.generation:workspaceProtocolGeneration(identity),phase,busy,retry:()=>void check(true)}}>
+    {(!opened || phase!=='ready') && <section className={`workspace-compatibility${opened?' workspace-compatibility-paused':''}`} aria-label="Workspace connection" role={busy?'status':'alert'}>
       {!opened && <nav aria-label="Account and organization">{accountControls}</nav>}
-      <h1>{busy?'Checking workspace connection':opened?'Workspace connection paused':'Connect to your workspace'}</h1>
-      <p>{error || (phase==='blocked'?'The app and workspace service need a compatible update. Check the connection before sending or syncing more work.':'Checking that this app can work with your practice service.')}</p>
-      <p>{opened?'Keep this workspace open. You can keep editing or stop a recording; sending and syncing new work are paused. Already-sent requests may still finish; check their saved results.':'Saved drafts and recordings stay on this device.'}</p>
-      <button disabled={busy} onClick={()=>void check()}>Check connection</button>
+      <header><h1>{busy?'Checking workspace connection':opened?'Workspace connection paused':'Connect to your workspace'}</h1>
+        <button disabled={busy} onClick={()=>void check(true)}>{busy?'Retrying…':'Retry'}</button></header>
+      <p>{error || (phase==='blocked'?'The service connection is paused. Retry checks the connection and your practice access.':'Checking that this app can work with your practice service.')}</p>
+      {opened?<details><summary>Your saved work is retained</summary><p>You can keep editing or stop a recording. Sending and syncing are paused. Already-sent requests may still finish; their saved results need to be checked separately.</p></details>
+        :<p>Saved drafts and recordings stay on this device.</p>}
     </section>}
     {/* Keep editors and the recorder mounted after admission, including uncertain writes. */}
     {opened && children}
-  </>;
+  </WorkspaceConnectionRecoveryContext.Provider>;
 }

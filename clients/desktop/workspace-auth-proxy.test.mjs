@@ -7,6 +7,55 @@ const ready = {phase: 'ready', revision: id, identity: {userId: 'user_one', sess
 const response = value => Response.json(value, {headers: {'Cache-Control': 'no-store'}});
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
+const clinicalBody={expected_revision:3,idempotency_key:'invented-note-share',note_id:id,note_version:1,
+  content_hash:'a'.repeat(64),source_fingerprint:'b'.repeat(64),share_with_team:true};
+const clinicalOptions=body=>({method:'POST',body:JSON.stringify(body),headers:{'X-Cosmas-Clinical-Team':'1','X-Cosmas-Draft-Recovery':'2'}});
+test('clinical saved-note sharing admits exact metadata and read-only recovery with fresh native authority',async()=>{
+  for(const suffix of ['', '/resolve']){
+    const path=`/workspaces/${id}/note/team-source${suffix}`;
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,'POST'),path);
+    for(const method of ['GET','PUT','PATCH','DELETE','post'])assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path,method),null);
+    for(const tail of ['?','?owner='+id,'/send','/','/execute'])assert.equal(permittedAuthenticatedApiPath('app://cosmas/api'+path+tail,'POST'),null);
+    assert.equal(permittedAuthenticatedApiPath('app://cosmas/api/ignored/../'+path.slice(1),'POST'),null);
+    const auth=fixture();
+    const result=await proxyAuthenticatedWorkspaceRequest(request(path,clinicalOptions(clinicalBody)),auth,async(url,options)=>{
+      assert.equal(url,'http://127.0.0.1:8046'+path);assert.equal(options.headers['X-Cosmas-Clinical-Team'],'1');
+      assert.equal(options.headers['X-Cosmas-Draft-Recovery'],'2');assert.deepEqual(JSON.parse(new TextDecoder().decode(options.body)),clinicalBody);
+      assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');return response({outcome:'saved'});
+    });assert.equal(result.status,200);assert.equal(auth.tokenCalls(),1);
+    for(const bad of [null,{},[],{...clinicalBody,share_with_team:1},{...clinicalBody,note_version:true},
+      {...clinicalBody,note_id:'bad'},{...clinicalBody,source_fingerprint:'bad'},{...clinicalBody,content:'private text'},
+      {...clinicalBody,expected_revision:0},{...clinicalBody,note_version:51}]){
+      const auth=fixture();assert.equal((await proxyAuthenticatedWorkspaceRequest(request(path,clinicalOptions(bad)),auth,
+        ()=>assert.fail('Malformed clinical share must not dispatch'))).status,400);assert.equal(auth.tokenCalls(),0);
+    }
+    for(const headers of [{},{'X-Cosmas-Clinical-Team':'2','X-Cosmas-Draft-Recovery':'2'},{'X-Cosmas-Clinical-Team':'1','X-Cosmas-Draft-Recovery':'1'}])
+      assert.equal((await proxyAuthenticatedWorkspaceRequest(request(path,{method:'POST',body:JSON.stringify(clinicalBody),headers}),fixture(),()=>assert.fail('Missing negotiation'))).status,426);
+    const oversized=fixture();assert.equal((await proxyAuthenticatedWorkspaceRequest(request(path,{...clinicalOptions(clinicalBody),body:' '.repeat(4097)}),oversized,
+      ()=>assert.fail('Oversized metadata never dispatches'))).status,503);assert.equal(oversized.tokenCalls(),0);
+  }
+  assert.equal((await proxyAuthenticatedWorkspaceRequest(request('/provider-team',{headers:{'X-Cosmas-Clinical-Team':'1'}}),fixture(),()=>assert.fail('Clinical header cannot leak'))).status,426);
+});
+test('clinical sharing rejects encoded or inconsistent replies and withholds late private bytes after sign-out',async()=>{
+  const path=`/workspaces/${id}/note/team-source`;
+  for(const headers of [{'Content-Encoding':'gzip'},{'Content-Length':'999'},{'Content-Length':'12000001'}]){
+    const result=await proxyAuthenticatedWorkspaceRequest(request(path,clinicalOptions(clinicalBody)),fixture(),async()=>
+      new Response('{}',{headers:{'Content-Type':'application/json','Cache-Control':'no-store',...headers}}));assert.equal(result.status,502);
+  }
+  const denied=await proxyAuthenticatedWorkspaceRequest(request(path,clinicalOptions(clinicalBody)),fixture(),async()=>
+    new Response('x'.repeat(2049),{status:403,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));assert.equal(denied.status,403);assert.ok(!(await denied.text()).includes('xxx'));
+  const auth=fixture();let release;
+  const pending=proxyAuthenticatedWorkspaceRequest(request(path,clinicalOptions(clinicalBody)),auth,async()=>new Promise(resolve=>{release=resolve;}));
+  await tick();auth.change();assert.equal((await pending).status,401);release(response({private:'Invented saved note'}));await tick();
+});
+test('clinical sharing has one 30-second deadline including a stalled response stream',async t=>{
+  t.mock.timers.enable({apis:['setTimeout']});let cancelled=false;
+  const stream=new ReadableStream({pull:()=>new Promise(()=>{}),cancel(){cancelled=true;return new Promise(()=>{});}});
+  const pending=proxyAuthenticatedWorkspaceRequest(request(`/workspaces/${id}/note/team-source`,clinicalOptions(clinicalBody)),fixture(),async()=>
+    new Response(stream,{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));
+  await tick();t.mock.timers.tick(30000);assert.equal((await pending).status,504);assert.equal(cancelled,true);
+});
+
 test('private recording admits metadata only with exact paths, version and byte bounds',async()=>{
   const base=`/workspaces/${id}/private-recordings`;
   for(const [path,method] of [[base,'POST'],[base+'/resolve','POST'],[base+'/'+id,'GET'],[base+'/'+id+'/finish','POST'],[base+'/'+id+'/link','POST'],[base+'/'+id+'/visit-binding','GET'],[base+'/'+id+'/visit-binding','POST']]){

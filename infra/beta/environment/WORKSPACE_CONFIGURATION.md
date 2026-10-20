@@ -40,8 +40,8 @@ configuration. No generic portal I/O enablement is offered by this module.
 Athena exposes only the existing Core read-only connection and reviewed visit
 links; there is no Athena write flag or write credential input.
 
-Database-preparation attestations now require the current API's exact
-`c83a2f19b650` revision from `release-schema.json`; older release schema
+Database-preparation attestations now require the current API's
+exact revision from `release-schema.json`; older release schema
 attestations remain invalid. The
 manual preparation job must run the same immutable current API image and retain
 its existing exact Box/server/execution evidence. No database command runs during

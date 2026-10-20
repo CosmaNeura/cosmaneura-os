@@ -1,11 +1,12 @@
-import {act} from 'react';
+import {act,useEffect,useState} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {PracticeAccessGate,type PracticeAccessContext} from './PracticeAccessGate';
 import {PracticeAccessPanel} from './PracticeAccessPanel';
 import {SettingsHub} from './SettingsHub';
 import {practiceAccessApi} from './practice-access-api';
-import {workspaceApi,WorkspaceApiError,type ProviderTeam} from './workspace-api';
+import {workspaceApi,WorkspaceApiError} from './workspace-api';
+import {admitWorkspaceProtocol,workspaceFetch,workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 import {accessFixture as row,accessRequired,accessPending,accessConnected} from './practice-access-test-fixture';
 
 let root:Root,container:HTMLDivElement;
@@ -21,7 +22,7 @@ beforeEach(()=>{
   vi.spyOn(practiceAccessApi,'cancel').mockResolvedValue({...accessPending,state:'cancelled',request:{...row,state:'cancelled'}});
   vi.spyOn(practiceAccessApi,'pending').mockResolvedValue([row]);vi.spyOn(practiceAccessApi,'decide').mockResolvedValue({...row,state:'approved'});access.onAccessLost.mockClear();
 });
-afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.restoreAllMocks();vi.useRealTimers();});
+afterEach(async()=>{await act(async()=>root.unmount());container.remove();vi.restoreAllMocks();vi.useRealTimers();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 const button=(text:string)=>[...container.querySelectorAll('button')].find(item=>!item.closest('[hidden]')&&item.textContent===text)!;
 const click=async(text:string)=>{expect(button(text)).toBeDefined();await act(async()=>button(text).click());};
 async function name(value:string){await act(async()=>{const input=container.querySelector('input')!;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));});}
@@ -66,22 +67,35 @@ it('puts people access in its own Settings screen and returns to All settings',a
   expect(practiceAccessApi.pending).toHaveBeenCalledOnce();expect(button('← All settings')).toBeDefined();await click('← All settings');
   expect(document.activeElement?.textContent).toBe('Settings');
 });
-it('overlaps the team read with access and hands it off only after both practice reads accept',async()=>{
+it('admits only validated access and setup without starting the optional team prefetch',async()=>{
   let ready!:(value:typeof accessConnected)=>void;
   vi.mocked(practiceAccessApi.read).mockImplementationOnce(()=>new Promise(resolve=>{ready=resolve;}));
   vi.mocked(practiceAccessApi.setup).mockResolvedValue({contract_version:1,state:'member_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Ada Beta',can_start_practice:false});
-  const team:ProviderTeam={revision:1,template_version:'provider-team-v1',recovery_scope:'a'.repeat(64),configuration:{practice_context:'Invented',bots:[]},members:[],llm:{enabled:false,model:'offline'}};
-  vi.spyOn(workspaceApi,'team').mockResolvedValue(team);let admitted:PracticeAccessContext|undefined;
+  vi.spyOn(workspaceApi,'team').mockRejectedValue(new WorkspaceApiError(503));let admitted:PracticeAccessContext|undefined;
   await act(async()=>root.render(<PracticeAccessGate identity={identity} accountControls={null} prefetchTeam>{context=>{admitted=context;return <p>Ready</p>;}}</PracticeAccessGate>));
-  expect(workspaceApi.team).toHaveBeenCalledOnce();expect(admitted).toBeUndefined();
-  await act(async()=>ready(accessConnected));expect(admitted?.startupTeam?.value).toEqual(team);expect(admitted?.startupTeam?.identity).toBe(identity);
+  expect(workspaceApi.team).not.toHaveBeenCalled();expect(admitted).toBeUndefined();
+  await act(async()=>ready(accessConnected));expect(admitted?.role).toBe('member');expect(admitted?.startupTeam).toBeUndefined();expect(workspaceApi.team).not.toHaveBeenCalled();
 });
-it('bounds a slow speculative team read by the same15second startup window',async()=>{
-  vi.useFakeTimers();vi.mocked(practiceAccessApi.read).mockResolvedValue(accessConnected);
-  vi.mocked(practiceAccessApi.setup).mockResolvedValue({contract_version:1,state:'member_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Ada Beta',can_start_practice:false});
-  let signal!:AbortSignal;
-  vi.spyOn(workspaceApi,'team').mockImplementation(async(_,value)=>{signal=value!;return new Promise((_,reject)=>signal.addEventListener('abort',()=>reject(new WorkspaceApiError(503)),{once:true}));});
-  await act(async()=>root.render(<PracticeAccessGate identity={identity} accountControls={null} prefetchTeam>{()=> <p>Private workspace</p>}</PracticeAccessGate>));
-  expect(container.textContent).not.toContain('Private workspace');
-  await act(async()=>vi.advanceTimersByTime(15000));expect(signal.aborted).toBe(true);expect(container.textContent).not.toContain('Private workspace');expect(container.textContent).toContain('could not be confirmed');
+it('keeps the admitted owner workspace and local note when its separate team loader fails, while protocol guards block new API work',async()=>{
+  const account={...identity},stop=vi.fn();vi.stubEnv('VITE_WORKSPACE_HOSTED_ENABLED','true');
+  admitWorkspaceProtocol(account,workspaceProtocolGeneration(account));
+  vi.mocked(practiceAccessApi.read).mockResolvedValue({...accessConnected,role:'owner'});
+  vi.mocked(practiceAccessApi.setup).mockResolvedValue({contract_version:1,state:'owner_ready',practice:{display_name:'Invented practice',specialty:null},display_name:'Invented owner',can_start_practice:false});
+  const transport=vi.fn().mockResolvedValue(new Response('{}',{status:200,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}}));vi.stubGlobal('fetch',transport);
+  vi.spyOn(workspaceApi,'team').mockImplementation(async value=>{
+    await workspaceFetch(value,'https://api.example.invalid/provider-team',{method:'GET',headers:{'X-Cosmas-Workspace-Protocol':'1'}});
+    throw new Error('The unidentified team response must never be accepted');
+  });
+  function Workspace(){
+    const [unavailable,setUnavailable]=useState(false);
+    useEffect(()=>{void workspaceApi.team(account).catch(()=>setUnavailable(true));},[]);
+    return <><p>Private workspace</p><input aria-label="Retained private note" defaultValue="Invented local note retained"/><button onClick={stop}>Stop recording</button>{unavailable&&<p>Team unavailable</p>}</>;
+  }
+  await act(async()=>root.render(<PracticeAccessGate identity={account} accountControls={null} prefetchTeam>{context=><><p>Current role: {context.role}</p><Workspace/></>}</PracticeAccessGate>));
+  expect(container.textContent).toContain('Current role: owner');expect(container.textContent).toContain('Team unavailable');
+  expect(container.querySelector<HTMLInputElement>('[aria-label="Retained private note"]')!.value).toBe('Invented local note retained');
+  await click('Stop recording');expect(stop).toHaveBeenCalledOnce();expect(workspaceApi.team).toHaveBeenCalledOnce();
+  expect(workspaceProtocolPhase(account)).toBe('blocked');
+  await expect(workspaceFetch(account,'https://api.example.invalid/workspaces/invented/conversation',{method:'POST',headers:{'X-Cosmas-Workspace-Protocol':'1'},body:'invented request'})).rejects.toMatchObject({status:503});
+  expect(transport).toHaveBeenCalledOnce();expect(container.textContent).toContain('Private workspace');
 });

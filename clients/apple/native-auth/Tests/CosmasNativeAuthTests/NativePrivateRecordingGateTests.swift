@@ -105,6 +105,20 @@ import XCTest
         try NativePrivateRecordingGate.finish(permit)
         XCTAssertEqual(starts, 1)
     }
+    func testSavedAudioReusesVerifiedScopeWithoutPCMAndFencesActualOwnerChanges() async throws {
+        let h = try PrivateGateHarness(); defer { h.cleanup() }
+        _ = try await h.prepare()
+        NativePrivateRecordingGate.configure(auth: h.auth) { _ in throw NativeAuthError.unavailable }
+        let read = try await NativePrivateRecordingGate.authorizeSaved(scope: h.scope, revision: h.auth.state().revision)
+        XCTAssertTrue(NativePrivateRecordingGate.savedCurrent(read))
+        NativePrivateRecordingGate.authChanged(h.auth.state())
+        NativePrivateRecordingGate.authChanged(h.auth.state())
+        XCTAssertTrue(NativePrivateRecordingGate.savedCurrent(read)) // Repeated ready notification is not an account replacement.
+        do { _ = try await NativePrivateRecordingGate.authorizeSaved(scope: String(repeating: "f", count: 64), revision: h.auth.state().revision); XCTFail("Unverified scope must not read") } catch {}
+        h.driver.identity = nil; NativePrivateRecordingGate.authChanged(h.auth.state())
+        XCTAssertFalse(NativePrivateRecordingGate.savedCurrent(read))
+        XCTAssertEqual(h.driver.tokens, 0)
+    }
     func testConsentClosedSchemaBooleanFreshnessLanguageAndRegions() throws {
         let valid = privateConsent()
         _ = try NativePrivateRecordingConsent(valid)

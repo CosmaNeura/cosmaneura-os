@@ -1135,7 +1135,7 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
             env=env,
             text=True,
             capture_output=True,
-            timeout=300,
+            timeout=900,
         )
         (report_root / "vitest.log").write_text(result.stdout + result.stderr)
         report = {

@@ -66,7 +66,7 @@ export function useAccountEditorRecovery(required:boolean,kind:AccountEditorKind
 }
 export function AccountEditorRecoveryNotice({recovery,label,onRestore}:{recovery:ReturnType<typeof useAccountEditorRecovery>;label:string;onRestore:(draft:AccountEditorDraft,isCurrent:()=>boolean)=>Promise<void>}) {
   if(!recovery.required||!recovery.offer&&recovery.phase==="ready"&&recovery.message==="No unsaved form changes.")return null;
-  return <div className={recovery.offer||recovery.phase==="failed"?"team-recovery":"team-fine"} aria-label={`${label} recovery`}>
+  return <div role="group" className={recovery.offer||recovery.phase==="failed"?"team-recovery":"team-fine"} aria-label={`${label} recovery`}>
     {recovery.offer&&<><p>A {label.toLowerCase()} draft is saved on this device.{recovery.offer.pending?" Its save is unconfirmed; restore the exact request before continuing.":" Restore it to compare with current work, or discard this local draft."}</p>
       <button disabled={recovery.phase==="checking"||recovery.phase==="failed"} onClick={()=>void recovery.restore(onRestore)}>Restore {label.toLowerCase()} draft</button>
       {!recovery.offer.pending&&<button disabled={recovery.phase==="checking"||recovery.phase==="failed"} onClick={()=>void recovery.discard()}>Discard {label.toLowerCase()} draft</button>}</>}

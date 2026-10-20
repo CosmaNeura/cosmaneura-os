@@ -1,0 +1,123 @@
+import {act} from 'react';
+import {createRoot,type Root} from 'react-dom/client';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {EncounterWorkspace} from './EncounterWorkspace';
+import {memoryDraftStorage} from './draft-test-fixture';
+import type {PrivateNotebookResult,PrivateRecordingPanelProps} from './PrivateRecordingPanel';
+import {workspaceApi,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
+const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+const panel=vi.hoisted(()=>({props:null as PrivateRecordingPanelProps|null}));
+// No microphone adapter is constructed in this navigation test. The production
+// recording panel's consent/runtime behavior has its own adapter integration tests.
+vi.mock('./PrivateRecordingPanel',()=>({PrivateRecordingPanel:(props:PrivateRecordingPanelProps)=>{
+  panel.props=props;
+  return <section aria-label="Private Scribe recording"><h2>Start a private recording</h2>
+    <button onClick={props.onClose}>Close recording</button></section>;
+}}));
+vi.mock('./capture-api',async original=>({...await original<typeof import('./capture-api')>(),CAPTURE_WORKSPACE_BUILD:true}));
+vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(scope:string)=>scope}));
+vi.mock('./private-recording-runtime',async original=>({...await original<typeof import('./private-recording-runtime')>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
+vi.mock('./team-setup-api',async()=>{
+  const {WorkspaceApiError}=await import('./workspace-api');
+  return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404)),rehearse:vi.fn()}};
+});
+vi.mock('./workspace-api',async original=>{
+  const actual=await original<typeof import('./workspace-api')>();
+  return {...actual,workspaceApi:{...actual.workspaceApi,team:vi.fn(),catalog:vi.fn(),privateDraftSummaries:vi.fn(),
+    createPrivateDraft:vi.fn(),openPrivateDraft:vi.fn(),linkAppointment:vi.fn(),read:vi.fn(),ask:vi.fn()}};
+});
+const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
+const scope='a'.repeat(64),workingNote='Invented working note, kept while preparing a recording.',workingQuestion='Invented next question for Chief.';
+const team:ProviderTeam={revision:1,recovery_scope:scope,template_version:'provider-team-v1',llm:{enabled:false,model:'gpt-4.1'},
+  configuration:{practice_context:'Invented practice',bots:['chief','scribe'].map(role=>({role:role as 'chief'|'scribe',name:role==='chief'?'Chief':'Scribe',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}))},
+  members:['chief','scribe'].map((role,index)=>({role:role as 'chief'|'scribe',agent_id:uuid(810+index),name:role==='chief'?'Chief':'Scribe',initials:role.slice(0,2),description:'Invented teammate',prompt:'Use saved context',capabilities:[]}))};
+let root:Root,host:HTMLDivElement,identity:AuthenticatedWorkspaceIdentity,workspace:Workspace;
+const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>!b.closest('[hidden]')&&(b.textContent?.trim()===name||b.getAttribute('aria-label')===name));
+async function click(name:string){const selected=button(name);expect(selected,name).toBeTruthy();expect(selected!.disabled,name).toBe(false);await act(async()=>selected!.click());}
+async function write(selector:string,value:string){const field=host.querySelector<HTMLTextAreaElement>(selector)!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
+async function open(){
+  await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Start a private note')?.disabled).toBe(false);});
+  await click('Start a private note');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false);});
+  await click('Conversation view');await write('#team-notebook',workingNote);await write('#team-question',workingQuestion);
+}
+const notebookResult=():PrivateNotebookResult=>({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
+beforeEach(()=>{
+  vi.clearAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);panel.props=null;
+  identity={mode:'clerk_jwt',getToken:vi.fn()};
+  workspace={id:uuid(800),appointment_id:null,label:'Invented private note',revision:1,entries:[],work_candidates:[],
+    private_draft:{title:'Invented private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
+  vi.mocked(workspaceApi.team).mockResolvedValue(structuredClone(team));
+  vi.mocked(workspaceApi.catalog).mockResolvedValue([]);
+  vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
+  vi.mocked(workspaceApi.createPrivateDraft).mockImplementation(async()=>notebookResult());
+  vi.mocked(workspaceApi.openPrivateDraft).mockImplementation(async()=>notebookResult());
+  vi.mocked(workspaceApi.read).mockImplementation(async()=>structuredClone(workspace));
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);
+});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
+
+it.each(['Start a private recording','Scribe'])('opens consent preparation from an unlinked note through %s without creating or linking another notebook',async entry=>{
+  await open();
+  if(entry==='Scribe')await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='Scribe')!.click());
+  else await click(entry);
+  expect(host.querySelector('[aria-label="Private Scribe recording"]')).toBeTruthy();
+  expect(workspaceApi.openPrivateDraft).not.toHaveBeenCalled();expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
+  expect(panel.props!.title).toBe(workspace.private_draft!.title);expect(panel.props!.isCurrent()).toBe(true);
+  const result=await panel.props!.prepareNotebook!();
+  expect(workspaceApi.openPrivateDraft).toHaveBeenCalledExactlyOnceWith(identity,workspace.id);
+  expect(result.workspace.id).toBe(workspace.id);expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
+  expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
+  await click('Close recording');
+  expect(host.querySelector('.workspace-notebook')?.closest('[hidden]')).toBeNull();
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(workingQuestion);
+});
+
+it.each(['onNotebook','onTranscribe'] as const)('retains working text when %s returns a newer signed version of that same private notebook',async callback=>{
+  await open();await click('Start a private recording');
+  const current=panel.props!,result=notebookResult();result.workspace.revision=2;
+  result.workspace.entries=[{id:uuid(802),revision:2,kind:'scratchpad',content:'Different saved text from the signed read.',source_label:null,origin:'human',ticket:null,created_at:'2026-10-20T00:00:00Z'}];
+  await act(async()=>callback==='onNotebook'?current.onNotebook!(result):current.onTranscribe!(result,uuid(803)));
+  expect(host.querySelector('[aria-label="Private Scribe recording"]')).toBeNull();
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(workingQuestion);
+  expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
+});
+
+it.each(['workspace','identity','scope','linked'] as const)('rejects a signed preparation result with a different %s instead of attaching a recording',async mismatch=>{
+  await open();await click('Start a private recording');const result=notebookResult();
+  if(mismatch==='workspace')result.workspace.id=uuid(804);
+  if(mismatch==='identity')result.identity={mode:'clerk_jwt',getToken:vi.fn()};
+  if(mismatch==='scope')result.team.recovery_scope='b'.repeat(64);
+  if(mismatch==='linked'){result.workspace.appointment_id=uuid(805);result.workspace.private_draft!.state='linked';}
+  vi.mocked(workspaceApi.openPrivateDraft).mockResolvedValue(result);
+  await expect(panel.props!.prepareNotebook!()).rejects.toMatchObject({status:403});
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
+});
+
+it('rejects a notebook read completed after native owner access ends',async()=>{
+  let current=true;identity={mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:'invented-native-revision',isCurrent:()=>current} as NonNullable<Extract<AuthenticatedWorkspaceIdentity,{mode:'clerk_jwt'}>['nativeSession']>};
+  await open();await click('Start a private recording');
+  let release!:(value:PrivateNotebookResult)=>void;
+  vi.mocked(workspaceApi.openPrivateDraft).mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
+  const prepared=panel.props!.prepareNotebook!();
+  await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+  current=false;release(notebookResult());
+  await expect(prepared).rejects.toMatchObject({status:403});
+  expect(panel.props!.isCurrent()).toBe(false);expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();
+});
+
+it('keeps both private recording entry points visibly locked while an exact conversation save is unconfirmed',async()=>{
+  await open();vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
+  await click('Send message');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledOnce();});
+  expect(button('Start a private recording')!.disabled).toBe(true);
+  const scribe=[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='Scribe')!;
+  expect(scribe.disabled).toBe(true);await act(async()=>scribe.click());
+  expect(host.querySelector('[aria-label="Private Scribe recording"]')).toBeNull();
+  expect(workspaceApi.openPrivateDraft).not.toHaveBeenCalled();
+});

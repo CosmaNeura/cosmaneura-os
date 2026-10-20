@@ -185,7 +185,7 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
       if(busy||pending||(recoveryLocked??locked))return;
       onFreshAssignment(feedback||(validHandoffReviewReceipt(retained)&&retained.decision==='changes_requested'?retained.feedback:''));
     }}>Ask Chief for fresh work</button>}
-    {result&&<div aria-label="Complete saved draft" style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{result.content}</div>}
+    {result&&<div role="group" aria-label="Complete saved draft" style={{whiteSpace:'pre-wrap',overflowWrap:'anywhere'}}>{result.content}</div>}
     {receipt&&!pending&&<div role="status"><strong>{receipt.decision==='accepted'?'Draft accepted':'Changes requested'}</strong>
       {receipt.decision==='changes_requested'&&<><p>{receipt.feedback}</p>
         <p>{revisionPrepared?'Revised assignment saved.':'The change request is saved. Prepare a revised draft to get an updated result.'}</p>

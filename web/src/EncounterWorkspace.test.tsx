@@ -18,6 +18,9 @@ import {listPrivateRecordings,type PrivateRecordingSnapshot} from "./private-rec
 vi.mock("./private-recording-runtime",async original=>({...await original<typeof import("./private-recording-runtime")>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
 
 import {workspaceProtocolGeneration} from './workspace-protocol';
+import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
+import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
+import type {DraftStore} from './draft-store';
 
 vi.mock("./team-setup-api", async () => {
   const {WorkspaceApiError}=await import("./workspace-api");
@@ -173,6 +176,139 @@ describe("private encounter workspace", () => {
       element.dispatchEvent(new Event("input", { bubbles: true }));
     });
   }
+
+  async function openAuthenticated(access:AuthenticatedWorkspaceIdentity, storage=draftStorage) {
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={storage} authenticated={access}/>));
+    await click('Visits and notes');
+    await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false);});
+  }
+
+  it.each(['browser hidden','browser pagehide','native suspended'] as const)('flushes the latest draft before its debounce on %s and reports saved only after acknowledgment',async transition=>{
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn(),...(transition==='native suspended'?{
+      nativeSession:{revision:modelUuid(951),isCurrent:()=>true}}:{})};
+    let release!:()=>void;
+    const acknowledgment=new Promise<void>(resolve=>{release=resolve;});
+    const writes=vi.fn<DraftStore['write']>();
+    const storage:typeof draftStorage=async options=>{
+      const store=await draftStorage(options);
+      return {...store,write:async(address,expected,value)=>{
+        if(address.startsWith('workspace:')){writes(address,expected,value);await acknowledgment;}
+        return store.write(address,expected,value);
+      }};
+    };
+    await openAuthenticated(access,storage);vi.useFakeTimers();
+    let visibility:ReturnType<typeof vi.spyOn>|undefined;
+    try {
+      await input('Jotted notes','Invented note typed immediately before backgrounding.');
+      await input('Thought or question','Invented unsent multiline question.');
+      expect(writes).not.toHaveBeenCalled();
+      await act(async()=>{
+        if(transition==='native suspended')notifyNativeWorkspaceForeground(access,false);
+        else if(transition==='browser pagehide')window.dispatchEvent(new Event('pagehide'));
+        else {visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');document.dispatchEvent(new Event('visibilitychange'));}
+      });
+      expect(writes).toHaveBeenCalledOnce();
+      expect(writes.mock.calls[0][2]?.body).toMatchObject({note:'Invented note typed immediately before backgrounding.',thought:'Invented unsent multiline question.',pending:null});
+      expect(container.textContent).toContain('Saving notebook and team drafts on this device');
+      expect(container.textContent).not.toContain('Working copies saved on this device');
+      await act(async()=>release());
+      expect(container.textContent).toContain('Working copies saved on this device');
+      const probe=await draftStorage({scope:team.recovery_scope!});
+      expect((await probe.read(`workspace:${fixture.id}`)).value?.body).toMatchObject({note:'Invented note typed immediately before backgrounding.',thought:'Invented unsent multiline question.',pending:null});
+      probe.close();
+      expect(workspaceApi.append).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+      await act(async()=>vi.advanceTimersByTimeAsync(180));expect(writes).toHaveBeenCalledOnce();
+    } finally {release();visibility?.mockRestore();notifyNativeWorkspaceForeground(access,true);}
+  });
+
+  it('withholds a saved indication when background draft storage fails and keeps the typed text',async()=>{
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn()};
+    const storage:typeof draftStorage=async options=>{
+      const store=await draftStorage(options);
+      return {...store,write:async(address,expected,value)=>{
+        if(address.startsWith('workspace:'))throw new Error('Private disk detail');
+        return store.write(address,expected,value);
+      }};
+    };
+    await openAuthenticated(access,storage);vi.useFakeTimers();
+    await input('Jotted notes','Keep the invented note after a failed local flush.');
+    await act(async()=>window.dispatchEvent(new Event('pagehide')));
+    expect(container.textContent).toContain("This device's draft storage could not be checked");
+    expect(container.textContent).not.toContain('Working copies saved on this device');
+    expect(container.textContent).not.toContain('Private disk detail');
+    expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Keep the invented note after a failed local flush.');
+    expect(workspaceApi.append).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+  });
+
+  it('persists a final input update after the native suspension hint without waiting for another timer',async()=>{
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:modelUuid(955),isCurrent:()=>true}};
+    await openAuthenticated(access);vi.useFakeTimers();
+    await act(async()=>notifyNativeWorkspaceForeground(access,false));
+    await input('Jotted notes','Invented final dictation text received while suspending.');
+    const probe=await draftStorage({scope:team.recovery_scope!});
+    expect((await probe.read(`workspace:${fixture.id}`)).value?.body).toMatchObject({note:'Invented final dictation text received while suspending.'});
+    expect(container.textContent).toContain('Working copies saved on this device');
+    expect(workspaceApi.append).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+    probe.close();notifyNativeWorkspaceForeground(access,true);
+  });
+
+  it('withdraws the old saved indication immediately when a newer draft is typed',async()=>{
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn()};
+    await openAuthenticated(access);vi.useFakeTimers();
+    await input('Jotted notes','First acknowledged invented draft.');
+    await act(async()=>vi.advanceTimersByTimeAsync(180));
+    expect(container.textContent).toContain('Working copies saved on this device');
+    await input('Jotted notes','Second invented draft still waiting for its local timer.');
+    const probe=await draftStorage({scope:team.recovery_scope!});
+    expect((await probe.read(`workspace:${fixture.id}`)).value?.body).toMatchObject({note:'First acknowledged invented draft.'});
+    expect(container.textContent).not.toContain('Working copies saved on this device');
+    await act(async()=>vi.advanceTimersByTimeAsync(180));
+    expect((await probe.read(`workspace:${fixture.id}`)).value?.body).toMatchObject({note:'Second invented draft still waiting for its local timer.'});
+    expect(container.textContent).toContain('Working copies saved on this device');
+    probe.close();
+  });
+
+  it('flushes native suspension only for the current identity and ignores revoked ownership',async()=>{
+    let current=true;
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:modelUuid(952),isCurrent:()=>current}};
+    const other:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:modelUuid(953),isCurrent:()=>true}};
+    const writes=vi.fn<DraftStore['write']>();
+    const storage:typeof draftStorage=async options=>{
+      const store=await draftStorage(options);
+      return {...store,write:async(address,expected,value)=>{if(address.startsWith('workspace:'))writes(address,expected,value);return store.write(address,expected,value);}};
+    };
+    await openAuthenticated(access,storage);vi.useFakeTimers();
+    await input('Jotted notes','Invented owner-only draft.');
+    await act(async()=>notifyNativeWorkspaceForeground(other,false));expect(writes).not.toHaveBeenCalled();
+    current=false;await act(async()=>notifyNativeWorkspaceForeground(access,false));expect(writes).not.toHaveBeenCalled();
+    current=true;await act(async()=>notifyNativeWorkspaceForeground(access,false));expect(writes).toHaveBeenCalledOnce();
+    expect(workspaceApi.append).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+    notifyNativeWorkspaceForeground(access,true);notifyNativeWorkspaceForeground(other,true);
+  });
+
+  it.each([false,true])('uses explicit Send for native iOS multiline questions while preserving desktop Enter (native: %s)',async native=>{
+    const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn(),...(native?{nativeSession:{revision:modelUuid(954),isCurrent:()=>true}}:{})};
+    await openAuthenticated(access);
+    await input('Thought or question','First invented line');
+    vi.mocked(workspaceApi.ask).mockRejectedValue(new TypeError('Invented offline response'));
+    const question=container.querySelector<HTMLTextAreaElement>('#team-question')!;
+    for(const options of [{shiftKey:true},{isComposing:true}]){
+      const key=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true,...options});
+      await act(async()=>question.dispatchEvent(key));expect(key.defaultPrevented).toBe(false);expect(workspaceApi.ask).not.toHaveBeenCalled();
+    }
+    const enter=new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true});
+    await act(async()=>question.dispatchEvent(enter));
+    if(native){
+      expect(enter.defaultPrevented).toBe(false);expect(workspaceApi.ask).not.toHaveBeenCalled();
+      await input('Thought or question','First invented line\nSecond invented line');await click('Send message');
+    }else expect(enter.defaultPrevented).toBe(true);
+    expect(workspaceApi.ask).toHaveBeenCalledOnce();
+    expect(vi.mocked(workspaceApi.ask).mock.calls[0][2].content).toBe(native?'First invented line\nSecond invented line':'First invented line');
+  });
 
   it("opens Research from the initial dashboard after choosing the encounter, without starting a lookup",async()=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()};

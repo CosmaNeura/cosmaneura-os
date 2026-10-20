@@ -116,7 +116,7 @@ export function EditorRecoveryNotice({recovery,label,onRestore}: {
   onRestore: (draft: EditorDraft, workspace: Workspace, isCurrent:()=>boolean) => Promise<void>;
 }) {
   if (recovery.access === undefined) return null;
-  return <div className={recovery.offer || recovery.phase === "failed" ? "team-recovery" : "team-fine"} aria-label={`${label} recovery`}>
+  return <div role="group" className={recovery.offer || recovery.phase === "failed" ? "team-recovery" : "team-fine"} aria-label={`${label} recovery`}>
     {recovery.offer && <><p>A saved {label.toLowerCase()} draft is available on this device.{recovery.offer.pending ? " Its save is unconfirmed; restore the exact request before continuing." : " Restore it to compare with saved history, or discard this local draft."}</p>
       <button disabled={recovery.phase === "checking" || recovery.phase === "failed"} onClick={()=>void recovery.restore(onRestore)}>Restore {label.toLowerCase()} draft</button>
       {!recovery.offer.pending && <button disabled={recovery.phase === "checking" || recovery.phase === "failed"} onClick={()=>void recovery.discard()}>Discard {label.toLowerCase()} draft</button>}</>}

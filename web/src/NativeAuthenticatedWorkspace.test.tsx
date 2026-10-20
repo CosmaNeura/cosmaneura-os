@@ -76,8 +76,8 @@ describe("native workspace session", () => {
     });
     const native=harness();await render(native);expect(container.textContent).toContain("Waiting for your practice owner");
     expect(container.textContent).not.toContain("Choose an encounter");
-    expect(fetchMock.mock.calls.map(([url])=>url)).toEqual(["https://api.example.invalid/practice-access/compatibility","https://api.example.invalid/practice-access","https://api.example.invalid/practice-access/setup","https://api.example.invalid/provider-team"]);
-    expect(native.plugin.getToken).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.map(([url])=>url)).toEqual(["https://api.example.invalid/practice-access/compatibility","https://api.example.invalid/practice-access","https://api.example.invalid/practice-access/setup"]);
+    expect(native.plugin.getToken).toHaveBeenCalledTimes(3);
     for(const [,options] of fetchMock.mock.calls){
       expect(new Headers(options?.headers).get("X-Cosmas-Workspace-Protocol")).toBe("1");
       expect(new Headers(options?.headers).get("Authorization")).toBe(`Bearer ${token}`);

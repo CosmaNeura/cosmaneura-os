@@ -423,6 +423,7 @@ def prepare(
         "Cosmas records visit audio after you confirm consent and choose Start recording."
         if operational else "Record an invented encounter only after you explicitly start a synthetic capture test."
     )
+    info["NSSpeechRecognitionUsageDescription"] = "Transcribe your saved recording on this iPhone only when you choose Transcribe. Your audio is not sent to a speech server."
     info["NSAppTransportSecurity"] = {} if hosted_workspace else {"NSAllowsLocalNetworking": True}
     info_path.write_bytes(plistlib.dumps(info, sort_keys=False))
     (app / "capacitor.config.json").write_text(
@@ -498,6 +499,7 @@ def prepare(
         config_path = app / "capacitor.config.json"
         config = json.loads(config_path.read_text())
         config["packageClassList"].append("CosmasWorkspaceAuthPlugin")
+        config["packageClassList"].append("CosmasPrivateSpeechPlugin")
         config_path.write_text(json.dumps(config, indent=2) + "\n")
     manifest = {
         "purpose": "operational-beta-build-input" if operational else "local-synthetic-unsigned",

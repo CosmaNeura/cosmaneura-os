@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { NoteOperation, Workspace, WorkspaceEntry } from "./workspace-api";
 import { CaptureGapNotice } from "./CaptureGapNotice";
 import { captureGapKey, validateCaptureGapReview, type CaptureGapReview } from "./capture-gap-review";
@@ -6,9 +6,10 @@ import { useUnsavedWork } from "./unsaved-work";
 import { EditorRecoveryNotice, editorData, editorDraft, useEditorRecovery } from "./editor-recovery";
 import { DraftStoreError } from "./draft-store";
 
-export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange }: {
+export function NoteReview({ workspace, locked: parentLocked, onSave, onSources, active=false,onStateChange,onTeamDrafts }: {
   workspace: Workspace; locked: boolean; onSave: (operation: NoteOperation) => void; onSources: () => void; active?:boolean;
   onStateChange?:(state:'editing'|'review'|'saved')=>void;
+  onTeamDrafts?:(noteId:string)=>void;
 }) {
   const latest = workspace.note?.latest;
   const core = !!latest?.core_source;
@@ -71,9 +72,10 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
   }
   // Opening review can adopt an available draft only into a genuinely empty editor.
   // Recovery and saved-version conflicts take precedence over this convenience.
-  useEffect(()=>{
-    if(active&&!locked&&!latest&&!content&&sourceId===null&&scribe)useScribe(scribe);
-  },[active,locked,latest,content,sourceId,scribe]);
+  const initializingScribe=active&&!locked&&!latest&&!content&&sourceId===null&&!!scribe;
+  useLayoutEffect(()=>{
+    if(initializingScribe)useScribe(scribe!);
+  },[initializingScribe,scribe]);
   return <section className="team-note-review" aria-label="Private note review">
     <EditorRecoveryNotice recovery={recovery} label="Private note" onRestore={async (draft,current) => {
       const data = draft.data; editorData(data,"content,baseId,sourceId");
@@ -106,6 +108,12 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
       }})}>Record private review</button>}
     </div>
     {!dirty&&latest&&<p className="team-fine">Note version {latest.version} saved · {latest.review?"Private review recorded":"Needs your review"}.</p>}
+    {latest&&onTeamDrafts&&<section aria-label="Next steps from this note">
+      <p>Use the saved Scribe note with Chief to prepare a patient email draft, provider action items and a treatment assessment.</p>
+      <button type="button" className="team-primary" disabled={locked||dirty||otherVersion||sourcesChanged}
+        onClick={()=>{if(!locked&&!dirty&&!otherVersion&&!sourcesChanged)onTeamDrafts(latest.id);}}>Prepare follow-up and research</button>
+      {(dirty||otherVersion||sourcesChanged)&&<p className="team-fine">Save and reconcile this note before preparing team drafts.</p>}
+    </section>}
     {dirty&&<p className="team-fine">Your working copy and the saved review version are separate. Choose Save note version when your edits are ready for review.</p>}
     <p className="team-fine">{core ? "This is the exact saved Core version. Make changes in the recorded visit draft and use its saved version for review. Core is checked again when you review or authorize follow-up." : "Edit the note, save a version, then review the exact saved text."} Private review does not sign the clinical record or send a follow-up.</p>
     {otherVersion && <div role="status" className="team-note-notice"><p>A different saved note is available. Your editor text is preserved.</p>
@@ -120,7 +128,7 @@ export function NoteReview({ workspace, locked: parentLocked, onSave, onSources,
       <button disabled={locked} onClick={() => useScribe(replacement)}>Replace editor with draft</button>
       <button disabled={locked} onClick={() => setReplacement(null)}>Keep my text</button></div>}
     <label htmlFor="private-note-text">Private note draft</label>
-    <textarea id="private-note-text" rows={10} maxLength={core ? undefined : 20000} value={content} readOnly={core} disabled={locked || otherVersion}
+    <textarea id="private-note-text" rows={10} maxLength={core ? undefined : 20000} value={content} readOnly={core} disabled={locked || otherVersion || initializingScribe}
       onChange={e => { setContent(e.target.value); setConfirmed(false); }} placeholder="Review a Scribe draft or write your own note…" />
     <button className="team-subtle" onClick={onSources}>Check notebook and sources</button>
     {latest?.core_source?.reviewed_source?.capture_continuity && <p role="status" className="team-note-notice">Recording continuity is unconfirmed. Check the note for missing speech. The length of any gap is unknown.</p>}
