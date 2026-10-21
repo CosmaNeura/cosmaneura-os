@@ -333,9 +333,13 @@ def test_signed_gmail_source_and_existing_reviewed_note_coexist_with_fax(source_
 def test_actual_scoped_tool_and_derived_chief_handoff_are_withheld_after_signed_revoke(source_http, monkeypatch):
     f = source_http
     monkeypatch.setattr(settings, "workspace_agent_tools_enabled", True)
-    monkeypatch.setattr(settings, "workspace_llm_backend", "azure_gpt41")
-    monkeypatch.setattr(settings, "workspace_llm_api_key", SecretStr("invented-no-model-network"))
     with f.case.start(f.profile) as client:
+        # This case drives the real scoped claims/settlement itself. Keep the
+        # managed fixture's model backend disabled through lifespan startup so
+        # autonomous handoff lanes cannot claim the same admitted child.
+        assert "handoffs" not in client.app.state.workspace_worker_progress
+        monkeypatch.setattr(settings, "workspace_llm_backend", "azure_gpt41")
+        monkeypatch.setattr(settings, "workspace_llm_api_key", SecretStr("invented-no-model-network"))
         before = read(f, client)
         acquired = acquire(f, client)
         command = review_command(f, client, acquired)
