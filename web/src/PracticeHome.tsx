@@ -17,10 +17,11 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false}:{
+export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false}:{
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
   onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onConnections:()=>void;onPracticeWork:()=>void;
   onOpened:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
+  onNoteOpened?:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onAccessLost:(cause:unknown)=>void;onBusyChange:(busy:boolean)=>void;
   onRecord?:(value:StartPrivateRecording)=>void;recordings?:PrivateRecordingSnapshot[];onReopenRecording?:(recordingId:string)=>void;
   openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;
@@ -151,7 +152,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   async function reopen(id:string){
     if(!recovery||!ready||busy||locked||openingFlight.current)return;const epoch=live.current.epoch;
     const request={identity,recovery,epoch,workspaceId:id};openingFlight.current=request;setOpening(request);setBusy(true);setError('');
-    try{await recovery.authorize();if(!current(epoch))return;const value=await workspaceApi.openPrivateDraft(identity,id);if(current(epoch))await onOpened(value);}
+    try{await recovery.authorize();if(!current(epoch))return;const value=await workspaceApi.openPrivateDraft(identity,id);if(current(epoch))await (onNoteOpened??onOpened)(value);}
     catch(cause){if(current(epoch)){setError('This private note could not be opened. Check current access and try again.');deny(cause);}}
     finally{if(openingFlight.current===request)openingFlight.current=null;if(current(epoch)){setOpening(previous=>previous===request?null:previous);setBusy(false);}}
   }

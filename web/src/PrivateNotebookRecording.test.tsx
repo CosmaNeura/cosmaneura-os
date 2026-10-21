@@ -163,6 +163,20 @@ it('reopens the exact retained clip expanded after an earlier close completes wh
 });
 
 const nativeOwner=():AuthenticatedWorkspaceIdentity=>({mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:'invented-private-phone-owner',isCurrent:()=>true}});
+it('opens a saved native note directly in Notes without starting Chief, Scribe, or a new notebook',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true}));identity=nativeOwner();
+  workspace.revision=2;workspace.entries=[{id:uuid(863),revision:2,kind:'scratchpad',content:workingNote,origin:'human',source_label:null,ticket:null,created_at:'2026-10-21T00:00:00Z'}];
+  vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[{workspace_id:workspace.id,title:workspace.label,title_revision:0,revision:2,
+    created_at:'2026-10-21T00:00:00Z',updated_at:'2026-10-21T00:00:00Z',link_state:'unlinked',appointment_id:null,patient_label:null,visit_at:null,note_state:'draft',duration_seconds:null,recording_state:'none'}],has_more:false});
+  await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Open note')?.disabled).toBe(false);});
+  await click('Open note');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('.team-content')?.getAttribute('data-mobile-panel')).toBe('Notebook');});
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(host.querySelector('.workspace-notebook-body')?.getAttribute('data-view')).toBe('workspace');
+  expect(workspaceApi.openPrivateDraft).toHaveBeenCalledExactlyOnceWith(identity,workspace.id);
+  expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();expect(panel.props).toBeNull();
+});
 async function privatePanel(name:string){
   const selected=host.querySelector<HTMLButtonElement>(`.team-mobile-tabs button[data-panel="${name}"]`)!;
   expect(selected.disabled).toBe(false);await act(async()=>selected.click());

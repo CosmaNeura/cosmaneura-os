@@ -2019,7 +2019,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         onRecord={CAPTURE_WORKSPACE_BUILD?startPrivateRecording:undefined}
         recordingActive={!!privateRecordingEntry} openRecordingRequest={privateRecordingRequest}
         recordings={privateRecordings&&privateRecordings.identity===authenticated&&privateRecordings.generation===generation.current&&privateRecordings.scope===journal.current?.scope?privateRecordings.rows:undefined} onReopenRecording={reopenPrivateRecording}
-        onOpened={openPrivateNotebook}/></div>}
+        onOpened={openPrivateNotebook} onNoteOpened={value=>openPrivateNotebook(value,'notebook')}/></div>}
       <section hidden={settingsOpen||practicePage!=='visits'} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
         <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="fax" ? "Choose a visit for fax work" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='fax' ? "Keep the fax document, recipient and delivery status with the right visit." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
