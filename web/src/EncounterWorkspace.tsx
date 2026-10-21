@@ -2134,7 +2134,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               disabled={viewNavigationLocked} onClick={()=>phoneChiefToolsVisible?returnToPhoneChat():openPhoneChatTools()}>Tools</button>:
               <button className="team-subtle" onClick={() => setSettingsOpen(true)}>Skills & settings</button>}</header>
           {nativeClinicalPlan&&<section className="chief-saved-note-shortcut" aria-label="Saved visit note next steps">
-            <span>Saved visit note · version {nativeClinicalPlan.selection.note_version}</span>
+            <span>Saved visit note · version {nativeClinicalPlan.selection.note_version}
+              {note!==latestNote?<small>Save your note changes first.</small>:nativeClinicalPlan.sourcesChanged?<small>Review the updated note first.</small>:null}</span>
             <button type="button" aria-label={`Plan from saved visit note version ${nativeClinicalPlan.selection.note_version}`} disabled={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked||note!==latestNote||nativeClinicalPlan.sourcesChanged}
               onClick={()=>openClinicalTeamDrafts(nativeClinicalPlan.selection.note_id,false,nativeClinicalPlan)}>Follow-up + Research</button>
           </section>}
