@@ -108,7 +108,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const [renewConsent,setRenewConsent]=useState(false),[claimedContinuation,setClaimedContinuation]=useState(false);
   const [uploadProgress,setUploadProgress]=useState<Awaited<ReturnType<Runtime['uploadProgress']>>|null>(null);
   const [clipDate,setClipDate]=useState<string|null>(null);
-  const [privateBusy,setPrivateBusy]=useState(false),[privateDirty,setPrivateDirty]=useState(false);
+  const [privateBusy,setPrivateBusy]=useState(false),[privateDirty,setPrivateDirty]=useState(false),[privateTransition,setPrivateTransition]=useState(false);
   const [recovery,setRecovery]=useState<ReturnType<typeof savedTranscriptionRecovery>>(null);
   const [transfer,setTransfer]=useState<Transfer|null>(null),[snapshot,setSnapshot]=useState<Runtime['controller']['snapshot']|null>(null);
   const [reviewAvailability,setReviewAvailability]=useState<'loading'|'ready'|'unavailable'>('loading');
@@ -117,12 +117,13 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;authorityKey:string;scope:string;recordingId:string;store:PrivateRecordingStore;recording:PrivateRecordingRuntime;runtime:Runtime|null;unsubscribe?:()=>void}|null>(null);
   const openingFailure=useRef<{identity:AuthenticatedWorkspaceIdentity;authorityKey:string;scope:string;recordingId:string}|null>(null);
   const privatePreparation=useRef<{owner:NonNullable<typeof owner.current>;prepare:()=>Promise<void>}|null>(null);
+  const privateTransitionOwner=useRef<NonNullable<typeof owner.current>|null>(null);
   const saved=useRef<Transfer|null>(null),flight=useRef<symbol|null>(null);
   const continuation=useRef<{gesture:RecordingTranscriptionGesture;identity:AuthenticatedWorkspaceIdentity;recordingId:string;scope:string;authority:string;armed:boolean;started:boolean}|null>(null);
   const noteSection=useRef<HTMLDivElement>(null);
   const transcriptionSection=useRef<HTMLElement>(null);
   const reportDraftLock=useCallback((value:boolean)=>{setDraftLocked(value);onDraftLock(value);},[onDraftLock]);
-  useEffect(()=>{onNavigationLock?.(busy||privateBusy||privateDirty);return()=>onNavigationLock?.(false);},[busy,privateBusy,privateDirty,onNavigationLock]);
+  useEffect(()=>{onNavigationLock?.(busy||privateBusy||privateDirty||privateTransition);return()=>onNavigationLock?.(false);},[busy,privateBusy,privateDirty,privateTransition,onNavigationLock]);
   useEffect(()=>{if(ready){const heading=transcriptionSection.current?.querySelector<HTMLElement>('h2');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[ready]);
   useEffect(()=>{if(showDraft){const heading=noteSection.current?.querySelector<HTMLElement>('h3');if(heading){heading.tabIndex=-1;heading.focus();heading.scrollIntoView({block:'start'});}}},[showDraft]);
   const authorityKey=vendorCanonical({workspace:workspace.id,workspace_revision:workspace.revision,origin:origin.id,appointment:workspace.appointment_id,binding:entry.binding??null,team_revision:team.revision,recovery_scope:team.recovery_scope??null,bot:taskBot?.selection??null,enabled:taskBot?.enabled??false});
@@ -141,7 +142,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     need(current(selected));if(privatePreparation.current?.owner===selected)await privatePreparation.current.prepare();need(current(selected));
   }
   useEffect(()=>{let alive=true;
-    setReady(false);setBusy(false);setPrivateBusy(false);setPrivateDirty(false);privatePreparation.current=null;setConsented(false);setRenewConsent(false);setRecovery(null);setUploadProgress(null);setReviewLock(false);setDraftLocked(false);setReview(null);setReviewAvailability('loading');setShowDraft(false);setClipDate(null);setTransfer(null);setSnapshot(null);setError('');saved.current=null;flight.current=null;openingFailure.current=null;
+    setReady(false);setBusy(false);setPrivateBusy(false);setPrivateDirty(false);setPrivateTransition(false);privatePreparation.current=null;privateTransitionOwner.current=null;setConsented(false);setRenewConsent(false);setRecovery(null);setUploadProgress(null);setReviewLock(false);setDraftLocked(false);setReview(null);setReviewAvailability('loading');setShowDraft(false);setClipDate(null);setTransfer(null);setSnapshot(null);setError('');saved.current=null;flight.current=null;openingFailure.current=null;
     const gesture=entry.transcriptionGesture,prior=continuation.current;
     if(gesture&&(!prior||prior.gesture!==gesture||prior.identity!==identity||prior.recordingId!==entry.recordingId||prior.scope!==entry.scope||prior.authority!==authorityKey)){
       // Claim before async readiness. StrictMode's repeated setup uses this same
@@ -288,18 +289,21 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       {!taskBot?.enabled&&<p role="status">Enable Scribe in team settings to transcribe this recording. Your audio is saved.</p>}
     </>}
     {snapshot&&<p role="status">{showDraft?'Review and edit your visit note below.':reviewAvailability==='unavailable'?'Audio uploaded. Your Scribe transcript cannot currently be retrieved. Your audio and progress are retained. Choose Refresh in the review below to check again.':processing&&reviewAvailability==='loading'?'Audio uploaded. Checking your existing Scribe transcript.':review?.working?.note_ready?'Scribe transcript ready. Review it, then continue to your note.':review?.status==='speech_failed'?'Scribe could not finish transcription. Your audio is saved. Return to recordings to play it.':review?.status==='speech_retryable'?'Your audio is uploaded. Scribe will retry transcription automatically; choose Refresh to check progress.':processing?'Audio uploaded. Scribe is preparing your transcript.':uploadProgress?`${uploadProgress.confirmed} of ${uploadProgress.total} audio parts confirmed by Scribe. Your recording is saved.`:snapshot.recordedChunks===(transfer?.admission?.source.chunks??0)?busy?'Sending your saved audio to Scribe. Keep CosmaBot open until upload is confirmed.':'Your saved audio is ready. Choose Continue transcription to send the remaining parts.':`Preparing your saved recording… ${Math.floor(snapshot.recordedChunks/Math.max(1,transfer?.admission?.source.chunks??1)*100)}%`}</p>}
-    {entry.platform==='ios'&&ready&&current()&&processing&&owner.current?.recording&&<PrivateTranscriptPanel identity={identity} scope={entry.scope} recording={owner.current.recording} isCurrent={()=>current()&&!live.current.locked} onBusy={setPrivateBusy} onDirty={reportPrivateDirty} onPrepareNavigation={registerPrivatePreparation} allowTranscription={reviewAvailability==='unavailable'} locked={busy||reviewLock||draftLocked} savedScribeSource/>}
+    {entry.platform==='ios'&&ready&&current()&&processing&&owner.current?.recording&&<PrivateTranscriptPanel identity={identity} scope={entry.scope} recording={owner.current.recording} isCurrent={()=>current()&&!live.current.locked} onBusy={setPrivateBusy} onDirty={reportPrivateDirty} onPrepareNavigation={registerPrivatePreparation} allowTranscription={reviewAvailability==='unavailable'} locked={busy||reviewLock||draftLocked||privateTransition} savedScribeSource/>}
     {error&&uploadProgress?.reference&&<details><summary>Support details</summary><p>Upload status: <code>{uploadProgress.reference}</code></p></details>}
     {error&&<p role="alert">{error}</p>}
     {(recovery||review?.status==='speech_failed')&&<div className="capture-actions">
-      {onRecordings&&<button className="team-primary" disabled={busy||privateBusy||locked} onClick={()=>void(async()=>{try{await preparePrivateNavigation();onRecordings();}catch{/* Keep the exact private editor open on a failed save. */}})()}>Return to recordings</button>}
+      {onRecordings&&<button className="team-primary" disabled={busy||privateBusy||privateTransition||locked} onClick={()=>void(async()=>{try{await preparePrivateNavigation();onRecordings();}catch{/* Keep the exact private editor open on a failed save. */}})()}>Return to recordings</button>}
       {recovery&&<details><summary>Support details</summary><p>Recording connection: <code>{recovery.reference}</code></p></details>}
     </div>}
-    {showDraft&&<button disabled={locked||busy||privateBusy||reviewLock||draftLocked} onClick={()=>void(async()=>{try{await preparePrivateNavigation();setShowDraft(false);}catch{/* Keep the current editor open. */}})()}>Return to transcript review</button>}
+    {showDraft&&<button disabled={locked||busy||privateBusy||privateTransition||reviewLock||draftLocked} onClick={()=>void(async()=>{try{await preparePrivateNavigation();setShowDraft(false);}catch{/* Keep the current editor open. */}})()}>Return to transcript review</button>}
     {processing&&transfer?.admitted&&<section className="saved-transcript-review" aria-label="Scribe transcript review" hidden={showDraft}><CreatorReviewPanel workspaceId={workspace.id} sessionId={transfer.admitted.session_id} identity={identity}
-      locked={locked||busy||privateBusy||draftLocked} onLock={setReviewLock} onAvailability={reportReviewAvailability} onSource={reportReview} onContinue={async()=>{const selected=owner.current;if(!current(selected)||!selected?.runtime)return;
+      locked={locked||busy||privateBusy||privateTransition||draftLocked} onLock={setReviewLock} onAvailability={reportReviewAvailability} onSource={reportReview} onContinue={async()=>{const selected=owner.current;if(!current(selected)||!selected?.runtime||privateTransitionOwner.current===selected)return;
         await preparePrivateNavigation(selected);
-        await selected.runtime.releaseUploadedCapture();if(current(selected))setShowDraft(true);}}/></section>}
+        if(!current(selected)||privateTransitionOwner.current===selected)return;
+        privateTransitionOwner.current=selected;setPrivateTransition(true);
+        try{await selected.runtime.releaseUploadedCapture();if(current(selected))setShowDraft(true);}
+        finally{if(privateTransitionOwner.current===selected){privateTransitionOwner.current=null;if(current(selected))setPrivateTransition(false);}}}}/></section>}
     {showDraft&&review?.working?.note_ready&&notesEnabled&&transfer?.admitted&&<div ref={noteSection}><CaptureDraftPanel workspaceId={workspace.id} sessionId={transfer.admitted.session_id}
       sourceId={review.working.working_transcript_id} identity={identity} onDraftLock={reportDraftLock} onReviewDraft={onReviewDraft} onCurrentDraft={onCurrentDraft}
       reviewLocked={locked||privateBusy||privateDirty} sourceLocked={reviewLock||busy||privateBusy||privateDirty} taskBot={taskBot} scratchpad={scratchpad} notebookDirty={notebookDirty} onNotebook={onNotebook} simpleFlow/></div>}

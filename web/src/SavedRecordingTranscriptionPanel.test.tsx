@@ -284,13 +284,14 @@ it('the real visit selector hands off one exact consent directly to the real sav
   expect(intent.request.expected_target_revision).toBe(7);expect(c.origin.appointment_id).toBeNull();expect((stored as {admission:{source:{origin_workspace_id:string}}}).admission.source.origin_workspace_id).toBe(c.origin.id);
 });
 
-it('a held review release cannot show a note after replacement ownership returns to the original workspace',async()=>{
+it('simultaneous clean Continue callbacks release once and cannot show a note after owner replacement',async()=>{
   const c=await combined();let release!:()=>void,held!:Promise<void>;const snapshot={state:'processing',recordedChunks:1};
-  const runtime={controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:c.transcribe,close:async()=>{},releaseUploadedCapture:()=>held=new Promise<void>(resolve=>release=resolve)};
+  const releaseUploaded=vi.fn(()=>held=new Promise<void>(resolve=>release=resolve));
+  const runtime={controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:c.transcribe,close:async()=>{},releaseUploadedCapture:releaseUploaded};
   mocks.savedRuntime.mockResolvedValue(runtime);await c.render();await waitFor(()=>expect(mocks.continueReview).toBeTypeOf('function'));
-  let continuation!:Promise<void>;await act(async()=>{continuation=mocks.continueReview!();});await waitFor(()=>expect(release).toBeTypeOf('function'));
+  let continuations!:Promise<void>[];await act(async()=>{continuations=[mocks.continueReview!(),mocks.continueReview!()];});await waitFor(()=>expect(release).toBeTypeOf('function'));expect(releaseUploaded).toHaveBeenCalledOnce();
   await c.render({workspace:{...workspace,id:id(99)}});await c.render();await waitFor(()=>expect(host.textContent).toContain('Review your transcript'));
-  await act(async()=>{release();await held;await continuation;});expect(host.textContent).not.toContain('Review your visit note');
+  await act(async()=>{release();await held;await Promise.all(continuations);});expect(host.textContent).not.toContain('Review your visit note');
   expect(c.transcribe).toHaveBeenCalledOnce();expect(prepareCapture).toHaveBeenCalledOnce();
 });
 it('held failed-upload progress cannot write an old error after replacement ownership returns',async()=>{
@@ -347,6 +348,11 @@ it('transcribes unavailable Scribe review locally from the same retained source 
   expect(navigation).toHaveBeenLastCalledWith(true);mocks.availability='ready';mocks.review={working:{note_ready:true}};await render();
   mocks.write.mockRejectedValueOnce(new Error('Local encrypted save unavailable'));
   await act(async()=>{await expect(mocks.continueReview!()).rejects.toThrow();});expect(releaseUploaded).not.toHaveBeenCalled();expect(host.textContent).not.toContain('Review your visit note');expect(host.querySelector('textarea')?.value).toBe('Invented edits before opening note.');
-  await act(async()=>mocks.continueReview!());expect(releaseUploaded).toHaveBeenCalledOnce();expect(privateRows.get('private-transcript:'+id(3))).toMatchObject({working:'Invented edits before opening note.'});
+  let release!:()=>void,continuation!:Promise<void>;releaseUploaded.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+  await act(async()=>{continuation=mocks.continueReview!();});await waitFor(()=>expect(release).toBeTypeOf('function'));
+  expect(releaseUploaded).toHaveBeenCalledOnce();expect(privateRows.get('private-transcript:'+id(3))).toMatchObject({working:'Invented edits before opening note.'});
+  expect(host.querySelector('textarea')?.disabled).toBe(true);expect(navigation).toHaveBeenLastCalledWith(true);expect(host.textContent).not.toContain('Review your visit note');
+  await act(async()=>mocks.continueReview!());expect(releaseUploaded).toHaveBeenCalledOnce();
+  await act(async()=>{release();await continuation;});
   expect(host.textContent).toContain('Review your visit note');expect(stored).toEqual(original);expect(mocks.privateBegin).toHaveBeenCalledOnce();expect(upload).not.toHaveBeenCalled();
 });
