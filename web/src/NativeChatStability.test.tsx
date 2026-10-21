@@ -118,13 +118,13 @@ it('reveals native recovery at the bottom and permits only explicit same-key sen
   await ready(()=>expect(scroller.querySelector('[aria-label="Unconfirmed model request"]')).toBeTruthy());
   expect(scroller.scrollTop).toBe(1800);expect(question()).toBe(input);expect(document.activeElement).toBe(input);
   expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();expect(send().disabled).toBe(true);
-  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Send this saved request')).toBe(false);
-  await click('Check saved result');await ready(()=>expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Send this saved request'&&!button.disabled)).toBe(true));
+  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Retry message')).toBe(false);
+  await click('Check message');await ready(()=>expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Retry message'&&!button.disabled)).toBe(true));
   expect(modelWorkApi.resolve).toHaveBeenCalledExactlyOnceWith(access,workspace.id,expect.objectContaining({type:'ask',body:sent}));
   expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(draft()?.pending).toMatchObject({type:'ask',body:sent});
   expect(host.querySelector('.mobile-chat-scroll')).toBe(scroller);expect(scroller.scrollTop).toBe(1800);
   await type('Next unsent question after checking');expect(scroller.scrollTop).toBe(1800);
-  await click('Send this saved request');await ready(()=>expect(draft()?.pending).toBeNull());
+  await click('Retry message');await ready(()=>expect(draft()?.pending).toBeNull());
   expect(workspaceApi.ask).toHaveBeenNthCalledWith(2,access,workspace.id,sent);expect(workspaceApi.ask).toHaveBeenCalledTimes(2);
   expect(question()).toBe(input);expect(question().value).toBe('Next unsent question after checking');expect(document.activeElement).toBe(input);
   expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
