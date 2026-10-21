@@ -417,6 +417,7 @@
   .chief-tools-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px; border-bottom:1px solid var(--team-line); }
   .chief-tools-heading h3 { margin:0; font-size:16px; }
   .chief-tools-draft { margin:12px; }
+  .team-workspace .clinical-team-drafts .clinical-team-directions-label { display:block; }
   .clinical-team-directions { display:block; box-sizing:border-box; width:100%; min-height:104px; margin-top:8px; padding:12px; font-size:16px; line-height:1.5; resize:vertical; }
   .workspace-notebook-body[data-chief-phone=true] .clinical-team-drafts h3 { scroll-margin-top:calc(64px + env(safe-area-inset-top,0px)); }
   .team-workspace .chief-tools-heading button,.team-workspace .chief-tools-settings { min-height:44px; }

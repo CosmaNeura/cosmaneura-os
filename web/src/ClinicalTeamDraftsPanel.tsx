@@ -56,7 +56,7 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
       {onPrepare&&<>
         <div role="group" aria-label="Saved note for Follow-up and Research"><pre style={{whiteSpace:'pre-wrap'}}>{note.content}</pre></div>
         <div role="group" aria-label="Your directions for Chief"><p>{onDirectionsChange?'Add optional directions here.':'Use the message box below for optional directions.'} Prepare includes those exact words with this saved note. Your directions guide drafting; they do not add clinical facts or authorize sending.</p>
-          {onDirectionsChange?<label>Directions for Chief<textarea className="clinical-team-directions" rows={4} value={ownerDirections} disabled={directionsLocked}
+          {onDirectionsChange?<label className="clinical-team-directions-label">Directions for Chief<textarea className="clinical-team-directions" rows={4} value={ownerDirections} disabled={directionsLocked}
             onChange={event=>onDirectionsChange(event.target.value)} placeholder="For example: keep the patient email brief and identify missing treatment evidence."/></label>:
             ownerDirections!==''?<pre style={{whiteSpace:'pre-wrap'}}>{ownerDirections}</pre>:<p>No additional directions.</p>}</div>
         {directionsError&&<p role="status">{directionsError}</p>}
