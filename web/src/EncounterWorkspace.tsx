@@ -1590,12 +1590,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     !scribeSourceBusy&&!handoffReviewPending&&!schedulingPatientBusy&&!agentResearchBusy&&!captureNavigationLocked&&!captureDraftLocked&&!connectionEditorsLocked&&!activityBusy&&!accessBusy&&(!clinicalPreparing||modelBusy.current)&&
     (!pending||pending.type==='ask')&&(!busy||modelBusy.current);
   const chatGeneration=generation.current;
-  const mobileChatFrame=useMobileChatFrame({active:nativeChat&&!phoneChiefToolsVisible,owner:nativeChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${selected}`,
-    messages:JSON.stringify(turns.map(entry=>[entry.id,entry.reply?.content??null])),
-    isCurrent:()=>previousIdentity.current===nativeChatOwner&&generation.current===chatGeneration&&!!nativeChatOwner?.nativeSession?.isCurrent()});
-  function openPhoneChatTools(){setPhoneChatToolsOpen(true);if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=0;}
   const localQuestionRepresented=pending?.type==='ask'&&workspace?.entries.some(entry=>entry.model_request?.request.kind==='conversation'&&
     entry.model_request.request.idempotency_key===pending.body.idempotency_key&&entry.model_request.request_sha256===modelHashes[pending.body.idempotency_key]);
+  const mobileChatFrame=useMobileChatFrame({active:nativeChat&&!phoneChiefToolsVisible,owner:nativeChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${selected}`,
+    messages:JSON.stringify([turns.map(entry=>[entry.id,entry.reply?.content??null]),
+      pending?.type==='ask'&&pending.body.role===selected&&!localQuestionRepresented?pending.body.idempotency_key:null]),
+    isCurrent:()=>previousIdentity.current===nativeChatOwner&&generation.current===chatGeneration&&!!nativeChatOwner?.nativeSession?.isCurrent()});
+  function openPhoneChatTools(){setPhoneChatToolsOpen(true);if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=0;}
   function retryTeamTask(handoff:DraftHandoff) {
     if(workspace)void save({type:"retry",model_contract:1,origin:"durable_admission_v1",handoffId:handoff.id,
       body:{expected_revision:workspace.revision,previous_attempt_id:handoff.attempt_id,idempotency_key:crypto.randomUUID()}});

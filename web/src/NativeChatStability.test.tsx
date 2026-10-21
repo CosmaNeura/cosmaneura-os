@@ -33,6 +33,15 @@ async function click(label:string){let button:HTMLButtonElement|undefined;await 
 async function type(value:string){await act(async()=>{const field=host.querySelector<HTMLTextAreaElement>('#team-question')!;expect(field.disabled).toBe(false);Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
 const send=()=>host.querySelector<HTMLButtonElement>('[aria-label="Send message"]')!;
+async function positionConversation(top:number){
+  const scroller=host.querySelector<HTMLDivElement>('.mobile-chat-scroll')!;
+  Object.defineProperties(scroller,{
+    scrollHeight:{configurable:true,get:()=>scroller.querySelector('.team-human-message')?1400:1000},
+    clientHeight:{configurable:true,get:()=>200},
+  });
+  await act(async()=>{scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll',{bubbles:true}));});
+  return scroller;
+}
 beforeEach(async()=>{
   vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);
   vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener(){},removeEventListener(){}}));
@@ -48,6 +57,26 @@ beforeEach(async()=>{
   await ready(()=>expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy());
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+
+it('reveals the submitted native message before its saved reply arrives without scrolling for next-draft typing',async()=>{
+  vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
+  const scroller=await positionConversation(800);
+  await type('Invented outgoing message');expect(scroller.scrollTop).toBe(800);
+  question().focus();await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());
+  expect(scroller.querySelector('.team-human-message')?.textContent).toContain('Invented outgoing message');
+  expect(scroller.scrollTop).toBe(1200);expect(document.activeElement).toBe(question());
+  const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);
+  await act(async()=>{scroller.scrollTop=1180;scroller.dispatchEvent(new Event('scroll',{bubbles:true}));});
+  await type('Next unsent question');expect(scroller.scrollTop).toBe(1180);
+  expect(draft()?.pending).toMatchObject({type:'ask',body:sent});expect(workspaceApi.ask).toHaveBeenCalledOnce();
+});
+it('preserves an older native message position when an outgoing question is submitted away from the bottom',async()=>{
+  vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
+  const scroller=await positionConversation(200);
+  await type('Invented outgoing message');await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());
+  expect(scroller.querySelector('.team-human-message')?.textContent).toContain('Invented outgoing message');
+  expect(scroller.scrollTop).toBe(200);expect(send().disabled).toBe(true);
+});
 
 it('keeps new typing and keyboard focus while the old exact request saves, with Send locked',async()=>{
   let release!:(receipt:Awaited<ReturnType<typeof modelReceipt>>)=>void;
