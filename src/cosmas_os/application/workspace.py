@@ -346,6 +346,16 @@ def link_appointment(s: Session, box: str, actor: str, wid: str, *, expected: in
 
 
 def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None = None):
+    return _read(s, box, actor, wid, at_revision=at_revision, include_handoffs=True)
+
+
+def _read_model_context(s: Session, box: str, actor: str, wid: str):
+    # Model contexts consume entries and follow-up state, not the handoff review
+    # display. Keep identical ownership and source masking on every fresh read.
+    return _read(s, box, actor, wid, at_revision=None, include_handoffs=False)
+
+
+def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None, include_handoffs: bool):
     from cosmas_os.application import follow_up, handoffs, note_review
 
     w = _workspace(s, box, actor, wid, allow_private=True)
@@ -458,7 +468,7 @@ def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None 
         **({"notebook": notebook_metadata.display(s, w)} if w.draft_title is not None else {}),
         "revision": revision,
         "entries": entries,
-        "handoffs": handoffs.read(s, w, revision),
+        "handoffs": handoffs.read(s, w, revision) if include_handoffs else [],
         "note": note_review.read(s, w, revision),
         "follow_ups": follow_up.read(s, w, revision),
         "work_candidates": [{"id": t.id, "state": t.state, "lane": t.lane} for t in candidates],
