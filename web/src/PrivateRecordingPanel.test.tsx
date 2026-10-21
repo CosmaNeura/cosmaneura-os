@@ -146,13 +146,16 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(container.querySelector('[role=alert]')).toBeNull();
   });
 
-  it('transcribes a reopened saved clip with one action that saves its notebook details',async()=>{
+  it.each(['desktop','ios'] as const)('opens Scribe from a reopened saved clip with one visible action on %s',async platform=>{
     const recordingId=await reopenMappedClip(),metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{});
     await act(async()=>root.unmount());root=createRoot(container);
-    props={...props,recordingId,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};await render();
-    await wait(()=>!![...container.querySelectorAll('button')].find(b=>b.textContent==='Transcribe recording'));
+    props={...props,platform,recordingId,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};await render();
+    const label=platform==='ios'?'Use Scribe for a confirmed visit':'Transcribe recording';
+    await wait(()=>!![...container.querySelectorAll('button')].find(b=>b.textContent===label));
+    expect(button(label).closest('details')).toBeNull();
+    if(platform==='ios')expect(button('Open private notebook').closest('details')?.open).toBe(false);
     expect(metadata.attach).not.toHaveBeenCalled();expect(metadata.finish).not.toHaveBeenCalled();
-    await click('Transcribe recording');await wait(()=>transcribe.mock.calls.length===1);
+    await click(label);await wait(()=>transcribe.mock.calls.length===1);
     expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();
     expect(transcribe).toHaveBeenCalledExactlyOnceWith(metadata.mapping,recordingId);expect(sources).toHaveLength(1);
   });
