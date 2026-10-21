@@ -352,6 +352,35 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(container.textContent).toContain('Recording paused when the app became inactive.');
     expect(button('Resume recording').disabled).toBe(true);expect(sources[0].stops).toBe(1);
   });
+  it.each([false,true])('resumes native paused audio with fresh consent in one explicit tap without automatic capture (%s)',async interrupted=>{
+    const startTime=Date.now();vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(startTime);
+    try{
+      const revision='00000000-0000-4000-8000-000000000010',nativeIdentity={mode:'clerk_jwt' as const,getToken:vi.fn(),nativeSession:{revision,isCurrent:()=>true}};
+      let finish!:(value:PrivateRecordingNativeReceipt)=>void;
+      const receipt=(n:number)=>({receiptId:`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`,revision,expiresAt:new Date(Date.now()+60000).toISOString()});
+      const native=vi.fn().mockResolvedValueOnce(receipt(11)).mockImplementationOnce(()=>new Promise<PrivateRecordingNativeReceipt>(resolve=>finish=resolve));
+      const consume=vi.fn(async(value:PrivateRecordingNativeReceipt)=>({receiptId:value.receiptId,revision:value.revision})),receipts:{receiptId:string;revision:string}[]=[];
+      props={...props,identity:nativeIdentity,platform:'ios',prepareNative:native,consumeNative:consume,runtimeFactory:async(options,input)=>{
+        const runtime=await PrivateRecordingRuntime.open({...options,platform:'desktop',createSource:async()=>{const received=options.nativePreparation?.();expect(received).toBeTruthy();receipts.push(received!);const source=new PcmSource();sources.push(source);return source;},acquireLock:async()=>async()=>{}},input);runtimes.push(runtime);return runtime;
+      }};
+      await render();expect(button('Start recording').disabled).toBe(true);await consent();await click('Start recording');await wait(()=>status()==='Recording');
+      await act(async()=>sources[0].chunk(84));const original=await runtimes[0].snapshotForLedger();
+      if(interrupted)await act(async()=>sources[0].options!.onInterruption!('capture_backgrounded'));else await click('Pause recording');
+      await wait(()=>status()==='Paused'&&native.mock.calls.length===2);
+      expect(button('Resume with consent').disabled).toBe(true);expect(container.querySelector('input[type=checkbox]')).toBeNull();
+      expect(container.textContent).toContain('confirm everyone was informed and still agrees to this recording.');expect(sources).toHaveLength(1);expect(sources[0].stops).toBe(1);
+      vi.setSystemTime(startTime+1000);await act(async()=>finish(receipt(12)));await wait(()=>button('Resume with consent').disabled===false);
+      expect(sources).toHaveLength(1);expect(consume).toHaveBeenCalledOnce();
+      await act(async()=>{button('Resume with consent').click();button('Resume with consent').click();});await wait(()=>status()==='Recording');
+      const resumed=await runtimes[0].snapshotForLedger();
+      expect(runtimes).toHaveLength(1);expect(resumed.recordingId).toBe(original.recordingId);expect(resumed.consentIntervals).toHaveLength(2);
+      expect(resumed.consentIntervals[1]).toEqual({...original.consentIntervals[0],granted_at:new Date(startTime+1000).toISOString()});
+      expect(receipts).toEqual([{receiptId:receipt(11).receiptId,revision},{receiptId:receipt(12).receiptId,revision}]);expect(consume).toHaveBeenCalledTimes(2);
+      expect(sources).toHaveLength(2);expect(sources[1].starts).toBe(1);expect(fetch).not.toHaveBeenCalled();
+      await act(async()=>sources[1].chunk(42));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
+      const sealed=await runtimes[0].snapshotForLedger();expect(sealed.recordingId).toBe(original.recordingId);expect(sealed.chunks).toBe(2);expect(sealed.consentIntervals).toEqual(resumed.consentIntervals);
+    }finally{vi.useRealTimers();}
+  });
   it('uses the current private iPhone signal meter and discards late replies after Stop',async()=>{
     const revision='00000000-0000-4000-8000-000000000010';
     props={...props,platform:'ios',identity:{mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision,isCurrent:()=>true}},
@@ -459,8 +488,8 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     props.runtimeFactory=async(options,input)=>{const runtime=await PrivateRecordingRuntime.open({...options,platform:'desktop',createSource:async()=>{const received=options.nativePreparation?.();expect(received).toBeTruthy();receipts.push(received!);const source=new PcmSource();sources.push(source);return source;},acquireLock:async()=>async()=>{}},input);runtimes.push(runtime);return runtime;};
     await render();await consent();expect(button('Start recording').disabled).toBe(true);expect(sources).toHaveLength(0);expect(native).toHaveBeenCalledExactlyOnceWith({scope,revision});
     const receiptId='00000000-0000-4000-8000-000000000011';await act(async()=>finish({receiptId,revision,expiresAt:new Date(Date.now()+60000).toISOString()}));await click('Start recording');await wait(()=>status()==='Recording');
-    expect(receipts).toEqual([{receiptId,revision}]);expect(native).toHaveBeenCalledOnce();await click('Pause recording');await wait(()=>native.mock.calls.length===2);expect(button('Resume recording').disabled).toBe(true);
-    await consent();const secondId='00000000-0000-4000-8000-000000000012';await act(async()=>finish({receiptId:secondId,revision,expiresAt:new Date(Date.now()+60000).toISOString()}));await click('Resume recording');await wait(()=>status()==='Recording');expect(receipts).toEqual([{receiptId,revision},{receiptId:secondId,revision}]);expect(native).toHaveBeenCalledTimes(2);expect(consume).toHaveBeenCalledTimes(2);expect(fetch).not.toHaveBeenCalled();
+    expect(receipts).toEqual([{receiptId,revision}]);expect(native).toHaveBeenCalledOnce();await click('Pause recording');await wait(()=>native.mock.calls.length===2);expect(button('Resume with consent').disabled).toBe(true);expect(container.querySelector('input[type=checkbox]')).toBeNull();
+    const secondId='00000000-0000-4000-8000-000000000012';await act(async()=>finish({receiptId:secondId,revision,expiresAt:new Date(Date.now()+60000).toISOString()}));await click('Resume with consent');await wait(()=>status()==='Recording');expect(receipts).toEqual([{receiptId,revision},{receiptId:secondId,revision}]);expect(native).toHaveBeenCalledTimes(2);expect(consume).toHaveBeenCalledTimes(2);expect(fetch).not.toHaveBeenCalled();
   });
   it('shows failed device preparation and retries without location input or starting a microphone',async()=>{
     const revision='00000000-0000-4000-8000-000000000010';

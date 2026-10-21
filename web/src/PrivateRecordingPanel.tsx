@@ -270,11 +270,13 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   useEffect(()=>{live.current.onBusyChange?.(working||activeAudio||transcriptionBusy);},[working,activeAudio,transcriptionBusy]);
   useEffect(()=>{if(snapshot&&['sealed','paused','interrupted'].includes(snapshot.phase))live.current.onSaved?.(snapshot);},[snapshot]);
   useEffect(()=>{if(platform==='ios'&&nativeConsumed.current&&snapshot&&['paused','interrupted'].includes(snapshot.phase)){nativeConsumed.current=false;setNativeEpoch(value=>value+1);}},[snapshot?.phase,platform]);
-  async function start(){
-    if(!prepared||!nativeReady||working||starting.current||!current()||!consented||activeAudio||snapshot?.phase==='sealed')return;
+  async function start(resumeConsent=false){
+    const selected=owner.current;
+    const attestedResume=resumeConsent&&platform==='ios'&&selected?.runtime&&['paused','interrupted'].includes(selected.runtime.snapshot.phase);
+    if(!selected||selected.closed||!prepared||!nativeReady||working||starting.current||!current()||resumeConsent&&!attestedResume||!consented&&!attestedResume||activeAudio||snapshot?.phase==='sealed')return;
     starting.current=true;
     const consent:Consent={modality,participant_regions:[],method:'verbal_attestation',all_parties_consented:true,granted_at:new Date().toISOString(),language};
-    const selected=owner.current!;setWorking(true);setConsented(false);setError('');clearAudio();
+    setWorking(true);setConsented(false);setError('');clearAudio();
     const chosenTitle=title.trim()||`Visit recording · ${new Date().toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}`;
     setTitle(chosenTitle);setNotebookTitle(previous=>previous??chosenTitle);
     try{
@@ -465,6 +467,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   async function renameRecording(){const selected=owner.current;if(!selected?.runtime||working||activeAudio||!current())return;setWorking(true);setError('');
     try{await selected.runtime.rename(renameTitle);if(current())setRenameOpen(false);}catch{if(current())setError('The device title could not be confirmed. Reopen the saved recording to check its title; audio is retained.');}finally{if(current())setWorking(false);}}
   const mayResume=snapshot&&['paused','interrupted'].includes(snapshot.phase);
+  const nativeResume=platform==='ios'&&!!mayResume;
   if(owner.current&&!current())return <section className="private-recording-panel" aria-label="Private Scribe recording">
     <h1>Recording access changed</h1><p>Private recording details are hidden. Retained audio remains encrypted for its original account.</p>
     <p role="status">{activeAudio?'Checking microphone stop':'Microphone stopped'}</p>{error&&<p role="alert">{error}</p>}
@@ -483,7 +486,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       {snapshot?.phase==='recording'&&<span>Microphone on · audio saves in chunks while you record.</span>}
       {snapshot?.phase==='recording'&&platform==='desktop'&&<><meter min="0" max="1" value={snapshot.inputLevel??0} aria-label="Microphone activity"/><span>Microphone signal</span></>}
       {snapshot?.phase==='recording'&&inputSignal&&<><meter min="0" max="1" value={inputSignal.level} aria-label="Microphone activity"/><span>{inputSignal.route} · {inputSignal.message}</span></>}
-      {snapshot&&['paused','interrupted'].includes(snapshot.phase)&&<span>{snapshot.failure==='capture_backgrounded'?'Recording paused when the app became inactive.':snapshot.failure==='audio_route_changed'?'Recording paused because the microphone route changed.':snapshot.failure==='audio_session_interrupted'?'Recording paused because iOS interrupted the audio session.':snapshot.failure?'Recording paused because microphone startup or capture was interrupted.':'Microphone off.'} Select consent and Resume recording when ready.</span>}
+      {snapshot&&['paused','interrupted'].includes(snapshot.phase)&&<span>{snapshot.failure==='capture_backgrounded'?'Recording paused when the app became inactive.':snapshot.failure==='audio_route_changed'?'Recording paused because the microphone route changed.':snapshot.failure==='audio_session_interrupted'?'Recording paused because iOS interrupted the audio session.':snapshot.failure?'Recording paused because microphone startup or capture was interrupted.':'Microphone off.'} {platform==='ios'?'Resume only if everyone still agrees.':'Select consent and Resume recording when ready.'}</span>}
       </div>
     {snapshot&&!activeAudio&&snapshot.recordedChunks>0&&<div className="private-recording-playback" aria-label="Saved recording playback">
       {playbackBusy&&<p role="status">Preparing playback… Your recording is saved.</p>}
@@ -500,10 +503,10 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       <label>Title <span>optional</span><input maxLength={160} value={title} disabled={working||!!snapshot} onChange={event=>setTitle(event.target.value)}/></label>
       <div className="private-recording-options"><label>Conversation<select value={modality} disabled={working} onChange={event=>setModality(event.target.value as CaptureAttestation['modality'])}><option value="in_person">In person</option><option value="virtual">Video visit</option><option value="phone">Phone</option></select></label>
       <label>Language<select value={language} disabled={working} onChange={event=>setLanguage(event.target.value as CaptureLanguage)}><option value="en-US">English</option><option value="en-US+es-US">English and Spanish</option></select></label></div></details>
-      <label className="private-recording-check"><input type="checkbox" checked={consented} disabled={working} onChange={event=>setConsented(event.target.checked)}/>{platform==='ios'?'Everyone in this conversation was informed and agreed to this recording.':'I informed everyone that this conversation will be recorded and every party gave consent for this recording.'}</label>
-      <p className="team-fine">{platform==='ios'?'Confirm consent each time you start or resume.':'Consent is required each time you start or resume. Your language preference is remembered.'}</p>
+      {nativeResume?<p>By choosing Resume with consent, I confirm everyone was informed and still agrees to this recording.</p>:<><label className="private-recording-check"><input type="checkbox" checked={consented} disabled={working} onChange={event=>setConsented(event.target.checked)}/>{platform==='ios'?'Everyone in this conversation was informed and agreed to this recording.':'I informed everyone that this conversation will be recorded and every party gave consent for this recording.'}</label>
+      <p className="team-fine">{platform==='ios'?'Confirm consent each time you start or resume.':'Consent is required each time you start or resume. Your language preference is remembered.'}</p></>}
       {!nativeReady&&platform==='ios'&&!nativeError&&<p role="status">Checking this device’s recording access…</p>}
-      <button className="team-primary" disabled={!prepared||!nativeReady||working||!consented||!current()} onClick={()=>void start()}>{mayResume?'Resume recording':'Start recording'}</button>
+      <button className="team-primary" disabled={!prepared||!nativeReady||working||!!owner.current?.closed||!nativeResume&&!consented||!current()} onClick={()=>void start(nativeResume)}>{nativeResume?'Resume with consent':mayResume?'Resume recording':'Start recording'}</button>
       {(preparationError||nativeError)&&!working&&!snapshot&&<button onClick={()=>void retryPreparation()}>Try preparing recording again</button>}
       {nativeError&&snapshot&&!working&&<button onClick={()=>setNativeEpoch(value=>value+1)}>Try preparing recording again</button>}
     </div>}
