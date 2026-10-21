@@ -11,6 +11,7 @@ import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 import {listPrivateRecordings} from './private-recording-runtime';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
 import type {PrivateRecordingPanelProps} from './PrivateRecordingPanel';
+import type {CaptureDraft} from './capture-notes-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./workspace-api');return {teamSetupApi:{read:vi.fn().mockRejectedValue(new WorkspaceApiError(404))}};});
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(scope:string)=>scope}));
@@ -19,10 +20,13 @@ vi.mock('./capture-api',async original=>({...await original<typeof import('./cap
 vi.mock('./model-work-api',async original=>({...await original<typeof import('./model-work-api')>(),modelWorkApi:{resolve:vi.fn()}}));
 vi.mock('./PrivateRecordingPanel',()=>({PrivateRecordingPanel:({identity,onTranscribe}:PrivateRecordingPanelProps)=><button onClick={()=>void onTranscribe?.({identity,workspace,team},modelUuid(989))}>Finish synthetic saved recording</button>}));
 vi.mock('./RecordingVisitPanel',()=>({RecordingVisitPanel:({origin,onSelected}:Parameters<typeof import('./RecordingVisitPanel').RecordingVisitPanel>[0])=><button onClick={()=>void onSelected(origin,null)}>Open synthetic saved transcript</button>}));
-vi.mock('./SavedRecordingTranscriptionPanel',()=>({SavedRecordingTranscriptionPanel:({onNotebook}:Parameters<typeof import('./SavedRecordingTranscriptionPanel').SavedRecordingTranscriptionPanel>[0])=> <section aria-label="Saved recording transcription"><h2>Review your transcript</h2><p role="alert">Your transcript cannot currently be retrieved. Choose Refresh to check again.</p><button>Refresh</button><button onClick={onNotebook}>Open saved visit notebook</button></section>}));
-vi.mock('./workspace-api',async original=>{const actual=await original<typeof import('./workspace-api')>();return {...actual,workspaceApi:{...actual.workspaceApi,open:vi.fn(),catalog:vi.fn(),team:vi.fn(),read:vi.fn(),privateDraftSummaries:vi.fn(),ask:vi.fn()}};});
+vi.mock('./SavedRecordingTranscriptionPanel',()=>({SavedRecordingTranscriptionPanel:({onNotebook,onReviewDraft}:Parameters<typeof import('./SavedRecordingTranscriptionPanel').SavedRecordingTranscriptionPanel>[0])=> <section aria-label="Saved recording transcription"><h2>Review your transcript</h2><p role="alert">Your transcript cannot currently be retrieved. Choose Refresh to check again.</p><button>Refresh</button><button onClick={onNotebook}>Open saved visit notebook</button><button onClick={()=>onReviewDraft?.(reviewedDraft)}>Import reviewed saved note</button></section>}));
+vi.mock('./workspace-api',async original=>{const actual=await original<typeof import('./workspace-api')>();return {...actual,workspaceApi:{...actual.workspaceApi,open:vi.fn(),catalog:vi.fn(),team:vi.fn(),read:vi.fn(),privateDraftSummaries:vi.fn(),ask:vi.fn(),linkCoreNote:vi.fn()}};});
 const team=teamFixture();team.capture={enabled:false};
 const workspace:Workspace={id:modelUuid(71),appointment_id:modelUuid(72),label:'Invented native chat',revision:1,entries:[],work_candidates:[],model_contract_version:1,model_observed_at:modelTimestamp};
+const reviewedDraft:CaptureDraft={session_id:modelUuid(991),scribe_source_id:modelUuid(992),source_sha256:'a'.repeat(64),schema_ref:`doctor_note_schema_${'0'.repeat(25)}1`,
+  transcript_ref:`transcript_${'0'.repeat(25)}1`,note_ref:`note_${'0'.repeat(25)}1`,status:'draft',note_type:'Visit note',fields:{Plan:'Invented reviewed plan'},field_order:['Plan'],
+  note_sha256:'b'.repeat(64),created_at:modelTimestamp,review_required:true};
 let root:Root,host:HTMLDivElement,records:Map<string,DraftRecord>,access:AuthenticatedWorkspaceIdentity;
 let intercept:((value:NotebookDraft|null)=>Promise<void>)|null;
 const storage=async({scope}:{scope:string}):Promise<DraftStore>=>({close(){},async read(address){return structuredClone(records.get(scope+address)??{revision:null,value:null});},async write(address,expected,value){
@@ -205,4 +209,32 @@ it('releases native conversation containment for a saved transcription review an
   expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(false);
   expect(question().value).toBe('My next unsent question, still typing');
   expect(host.querySelector('.saved-recording-flow')).toBe(flow);
+});
+
+it.each(['saved','unconfirmed'] as const)('reveals the imported note only after its exact Scribe save is %s',async outcome=>{
+  await click('Home');await click('Start recording');await click('Finish synthetic saved recording');await click('Open synthetic saved transcript');
+  const review=host.querySelector('[aria-label="Saved recording transcription"]')!;
+  let resolve!:(result:Awaited<ReturnType<typeof workspaceApi.linkCoreNote>>)=>void,reject!:(cause:unknown)=>void;
+  vi.mocked(workspaceApi.linkCoreNote).mockImplementation(()=>new Promise((done,fail)=>{resolve=done;reject=fail;}));
+  await click('Import reviewed saved note');await ready(()=>expect(workspaceApi.linkCoreNote).toHaveBeenCalledOnce());
+  const input=vi.mocked(workspaceApi.linkCoreNote).mock.calls[0][2];
+  expect(input.source).toMatchObject({session_id:reviewedDraft.session_id,note_sha256:reviewedDraft.note_sha256});
+  expect(host.querySelector<HTMLElement>('.workspace-notebook-body')?.hidden).toBe(true);
+  expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(false);
+  if(outcome==='saved'){
+    const note={id:modelUuid(993),version:1,workspace_revision:3,content:'Invented reviewed plan',content_hash:'c'.repeat(64),source_reply_id:null,
+      source_revision:3,source_fingerprint:'d'.repeat(64),sources_changed:false,created_at:modelTimestamp,review:null,core_source:{...input.source,note_type:'Visit note'}};
+    await act(async()=>resolve({entry_revision:3,workspace:{...workspace,revision:3,note:{latest:note,history:[note]}}}));
+    await ready(()=>expect(host.querySelector<HTMLTextAreaElement>('#private-note-text')?.value).toBe(note.content));
+    expect(host.querySelector<HTMLElement>('.workspace-notebook-body')?.hidden).toBe(false);
+    expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(true);
+    expect(host.querySelector('[aria-label="Private note review"]')?.closest('[hidden]')).toBeNull();
+  }else{
+    await act(async()=>reject(new WorkspaceApiError(503)));await ready(()=>expect(draft()?.pending?.type).toBe('coreNoteLink'));
+    expect(host.querySelector<HTMLElement>('.workspace-notebook-body')?.hidden).toBe(true);
+    expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(false);
+    expect(draft()?.pending).toMatchObject({type:'coreNoteLink',body:input});
+  }
+  expect(host.querySelector('[aria-label="Saved recording transcription"]')).toBe(review);
+  expect(workspaceApi.linkCoreNote).toHaveBeenCalledOnce();
 });

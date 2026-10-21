@@ -768,6 +768,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const access = authenticated || identity;
     if (!access || busy || (operation.type !== "team" && (!workspace || !identity)) || authorityCurrent&&!authorityCurrent()) return;
     const current = generation.current;
+    const savedRecordingForSave=savedRecordingEntry;
     const currentSave=()=>current===generation.current&&(!authorityCurrent||authorityCurrent());
     setPending(operation); setBusy(true); setError(""); setMessage("");
     if(operation.type==='clinicalNoteShare')setClinicalShareCheck(null);
@@ -828,7 +829,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           operation.type === "entry" && operation.body.kind === "evidence" ? "" : source, null));
         if (!currentSave()) return;
         setWorkspace(result.workspace);
-        if (operation.type === "coreNoteLink") { setPanel("Review"); setMobilePanel("Review"); }
+        if (operation.type === "coreNoteLink") {
+          setPanel("Review"); setMobilePanel("Review");
+          if(savedRecordingForSave?.identity===identity&&savedRecordingForSave.workspaceId===result.workspace.id&&journal.current?.scope===savedRecordingForSave.scope)
+            setSavedRecordingNotebook(savedRecordingForSave);
+        }
         if (operation.type === "entry" && operation.body.kind === "conversation") setThought("");
         if (operation.type === "entry" && operation.body.kind === "evidence") { setEvidence(""); setSource(""); }
         setMessage(operation.type==='clinicalNoteShare'?'This exact saved note is shared with your private team. Ask Chief when you are ready.':`Saved revision ${result.entry_revision}.`);
