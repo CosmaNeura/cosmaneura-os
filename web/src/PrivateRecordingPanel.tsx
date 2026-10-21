@@ -9,6 +9,7 @@ import './practice-home.css';
 import {PrivateTranscriptPanel} from './PrivateTranscriptPanel';
 import {IOSPCM} from '../../clients/capture/plugins/ios-pcm';
 import {parseInputSignal,presentInputSignal} from '../../clients/capture/src/native/ios-input-signal';
+import {vendorSha256} from './vendor-contract';
 
 export type PrivateNotebookResult={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam};
 type Consent=CaptureAttestation&{language:CaptureLanguage};
@@ -50,7 +51,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const [renameOpen,setRenameOpen]=useState(false),[renameTitle,setRenameTitle]=useState('');
   const [transcriptionBusy,setTranscriptionBusy]=useState(false);
   const live=useRef(props);live.current=props;
-  const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;scope:string;entryRecordingId:string|undefined;store:PrivateRecordingStore|null;runtime:Controller|null;closed:Promise<void>|null;unsubscribe?:()=>void}|null>(null);
+  const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;scope:string;entryRecordingId:string|undefined;store:PrivateRecordingStore|null;runtime:Controller|null;closed:Promise<void>|null;rejectedClose:Promise<void>|null;unsubscribe?:()=>void}|null>(null);
   const transcriptPreparation=useRef<{selected:NonNullable<typeof owner.current>;runtime:Controller;registration:object;prepare:()=>Promise<void>}|null>(null);
   const navigationOwner=useRef<typeof owner.current>(null);
   const [navigationLockedOwner,setNavigationLockedOwner]=useState<typeof owner.current>(null);
@@ -92,10 +93,15 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   }
   function releaseNavigationLock(selected:NonNullable<typeof owner.current>){if(owns(selected))setNavigationLockedOwner(value=>value===selected?null:value);}
   const clearAudio=()=>{playbackEpoch.current++;if(audioRef.current)URL.revokeObjectURL(audioRef.current);audioRef.current=null;setAudio(null);setPlaybackWarning('');setPlaybackError('');setPlaybackBusy(false);};
-  function closeRuntime(selected:NonNullable<typeof owner.current>):Promise<void>{return selected.closed??(selected.closed=selected.runtime?.close()??Promise.resolve());}
+  function closeRuntime(selected:NonNullable<typeof owner.current>):Promise<void>{
+    if(selected.closed)return selected.closed;
+    const closing=selected.runtime?.close()??Promise.resolve();selected.closed=closing;
+    void closing.catch(()=>{if(owns(selected)&&selected.closed===closing)selected.rejectedClose=closing;});
+    return closing;
+  }
   useEffect(()=>{
     setNotebookChoices(null);setNotebookWorking(false);setTranscriptionBusy(false);setWorking(false);setNavigationLockedOwner(null);closedRecovery.current=null;setReopeningSaved(false);
-    const selected={alive:true,identity,scope,entryRecordingId:recordingId,store:null as PrivateRecordingStore|null,runtime:null as Controller|null,closed:null as Promise<void>|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;transcriptPreparation.current=null;navigationOwner.current=null;
+    const selected={alive:true,identity,scope,entryRecordingId:recordingId,store:null as PrivateRecordingStore|null,runtime:null as Controller|null,closed:null as Promise<void>|null,rejectedClose:null as Promise<void>|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;transcriptPreparation.current=null;navigationOwner.current=null;
     setPrepared(false);setPreparationError('');setSnapshot(null);setConsented(false);setError('');setNotebookError('');setNotebook(null);setLedger(null);setLedgerError('');setLedgerBusy(false);clearAudio();setTitle(props.title?.trim()||'Private recording');setLanguage(readPrivateRecordingLanguage(scope));notebookRef.current=null;accessStopped.current=false;nativeReceipt.current=null;consumedReceipt.current=null;nativeConsumed.current=false;setNativeReady(platform!=='ios');
     void(async()=>{
       const authorization=props.authorize?.()??Promise.resolve();
@@ -318,7 +324,10 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
       if(owns(selected))setWorking(false);return;
     }
     if(!owns(selected))return;
-    if(selected.runtime)try{await closeRuntime(selected);}catch{if(!owns(selected))return;releaseNavigationLock(selected);if(navigationOwner.current===selected)navigationOwner.current=null;selected.closed=null;setNotebookWorking(false);setError('The microphone stop remains unconfirmed. Keep the recording open.');setWorking(false);return;}
+    // Only this deliberate Close retries a known rejection. Until closure is
+    // confirmed, other actions cannot reuse a possibly closed runtime.
+    if(selected.closed&&selected.rejectedClose===selected.closed){selected.closed=null;selected.rejectedClose=null;}
+    if(selected.runtime)try{await closeRuntime(selected);}catch{if(!owns(selected))return;releaseNavigationLock(selected);if(navigationOwner.current===selected)navigationOwner.current=null;setNotebookWorking(false);setError('The microphone stop remains unconfirmed. Keep the recording open.');setWorking(false);return;}
     // A stopped recorder may close after access expires, but a late result
     // cannot dismiss a different owner or newly selected saved recording.
     if(!owns(selected))return;
@@ -381,17 +390,30 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     const store=await(props.prepareStore?.()??openPrivateRecordingStore(selected.scope,platform));let runtime:Controller|null=null;
     try{
       if(!owns(selected)||!current()||closedRecovery.current!==recovery)throw new WorkspaceApiError(403);
-      const retained=await store.read('manifest:'+recordingId);
-      // Recovery is a sealed local read. Never probe a changed active recording
-      // or create a microphone source while restoring a failed navigation.
-      if(!retained||typeof retained!=='object'||!('phase'in retained)||retained.phase!=='sealed')throw new WorkspaceApiError(409);
+      let restoring=true;
+      const mayRead=()=>owns(selected)&&current()&&(!restoring||closedRecovery.current===recovery)&&notebookRef.current?.workspace.id===workspaceId;
+      const recoveryStore:PrivateRecordingStore={keys:()=>store.keys(),write:(key,prior,value)=>store.write(key,prior,value),close:()=>store.close(),read:async key=>{
+        if(!mayRead())throw new WorkspaceApiError(403);
+        const retained=await store.read(key);
+        if(!mayRead())throw new WorkspaceApiError(403);
+        // Runtime.open reads again. Validate every manifest read before it can
+        // observe an active phase and invoke physical recovery or mutate state.
+        if(key==='manifest:'+recordingId){
+          if(!retained||typeof retained!=='object'||!('phase'in retained)||retained.phase!=='sealed')throw new WorkspaceApiError(409);
+          const bytes=new TextEncoder().encode(JSON.stringify(retained));
+          try{if(await vendorSha256(bytes)!==proof.manifestSHA256)throw new WorkspaceApiError(409);}finally{bytes.fill(0);}
+          if(!mayRead())throw new WorkspaceApiError(403);
+        }
+        return retained;
+      }};
+      await recoveryStore.read('manifest:'+recordingId);
       runtime=await(props.runtimeFactory??PrivateRecordingRuntime.open)({scope:selected.scope,platform,
-        isCurrent:()=>owns(selected)&&current(),openStore:async()=>store},{recordingId,title:selected.runtime?.snapshot.title??title});
+        isCurrent:()=>owns(selected)&&current(),openStore:async()=>recoveryStore},{recordingId,title:selected.runtime?.snapshot.title??title});
       const reopened=await runtime.snapshotForLedger();
       if(!owns(selected)||!current()||closedRecovery.current!==recovery||notebookRef.current?.workspace.id!==workspaceId||runtime.snapshot.workspaceId!==workspaceId||
         reopened.phase!=='sealed'||reopened.recordingId!==proof.recordingId||reopened.scope!==proof.scope||reopened.manifestSHA256!==proof.manifestSHA256||
         reopened.chunks!==proof.chunks||reopened.frames!==proof.frames)throw new WorkspaceApiError(409);
-      selected.unsubscribe?.();selected.runtime=runtime;selected.store=store;selected.closed=null;closedRecovery.current=null;
+      selected.unsubscribe?.();selected.runtime=runtime;selected.store=store;selected.closed=null;selected.rejectedClose=null;restoring=false;closedRecovery.current=null;
       transcriptPreparation.current=null;selected.unsubscribe=runtime.subscribe(value=>{if(owns(selected)&&current())setSnapshot(value);});
     }catch(cause){if(runtime)await runtime.close().catch(()=>{});else store.close();throw cause;}
   }

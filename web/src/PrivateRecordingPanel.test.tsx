@@ -244,6 +244,32 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(button('Transcribe recording').disabled).toBe(true);expect(button('Retry opening saved recording').disabled).toBe(false);
     expect(transcribe).toHaveBeenCalledOnce();expect(sources).toHaveLength(1);expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();
   });
+  it('rejects an active second manifest read before local recovery can probe or write',async()=>{
+    const metadata=await metadataNotebook(),prepareStore=props.prepareStore!,recoveryWrites=vi.fn();let recovering=false,manifestReads=0;
+    const transcribe=vi.fn(async()=>{recovering=true;throw new WorkspaceApiError(503);});
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,prepareStore:async()=>{
+      const store=await prepareStore();
+      if(!recovering)return store;
+      const key='manifest:'+runtimes[0].snapshot.recordingId;
+      return {keys:()=>store.keys(),close:()=>store.close(),write:async(k,prior,value)=>{recoveryWrites(k,value);await store.write(k,prior,value);},read:async k=>{
+        const retained=await store.read(k);
+        if(k===key&&++manifestReads===2){
+          const changed={...(retained as Record<string,unknown>),phase:'recording'};
+          // Simulate a competing renderer changing encrypted retained state
+          // between preflight and Runtime.open's own read, not a native action.
+          await store.write(k,retained,changed);return changed;
+        }
+        return retained;
+      }};
+    }};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true&&!!container.querySelector('audio'));
+    const audio=container.querySelector('audio');await click('Transcribe recording');await wait(()=>container.textContent?.includes('Choose Retry opening saved recording')===true);
+    expect(manifestReads).toBe(2);expect(sources).toHaveLength(1);expect(recoveryWrites).not.toHaveBeenCalled();expect(runtimes).toHaveLength(1);
+    expect(button('Transcribe recording').disabled).toBe(true);expect(button('Retry opening saved recording').disabled).toBe(false);
+    expect(container.querySelector('audio')).toBe(audio);expect(createUrl).toHaveBeenCalledOnce();expect(transcribe).toHaveBeenCalledOnce();
+    expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();expect(fetch).not.toHaveBeenCalled();
+  });
   it.each(['owner','recording'] as const)('discards a held original recording recovery after %s replacement',async replacement=>{
     const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{}).mockRejectedValueOnce(new WorkspaceApiError(503)),factory=props.runtimeFactory!;
     let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);let recoveryId='';
@@ -264,14 +290,24 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(transcribe).toHaveBeenCalledOnce();expect(props.onTranscribe).not.toHaveBeenCalled();expect(container.textContent).not.toContain('Scribe could not be opened');
     expect(container.textContent).not.toContain('Retry opening saved recording');expect(sources).toHaveLength(1);
   });
-  it('keeps an uncertain recorder close separate from a failed Scribe navigation and does not reopen or dispatch',async()=>{
+  it.each([false,true])('retries a known failed close only on explicit Close and keeps other actions locked after another failure (%s)',async failsAgain=>{
     const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{});props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
     await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true&&!!container.querySelector('audio'));
-    vi.spyOn(runtimes[0],'close').mockRejectedValueOnce(new Error('Invented unknown close result'));
+    const closeRuntime=vi.spyOn(runtimes[0],'close').mockRejectedValueOnce(new Error('Invented unknown close result'));
+    if(failsAgain)closeRuntime.mockRejectedValueOnce(new Error('Invented second close rejection'));
     await click('Transcribe recording');await wait(()=>container.textContent?.includes('could not be closed for Scribe')===true);
     expect(transcribe).not.toHaveBeenCalled();expect(runtimes).toHaveLength(1);expect(container.textContent).not.toContain('Retry opening saved recording');
     expect(button('Close recording').disabled).toBe(false);expect(button('Transcribe recording').disabled).toBe(true);
+    await click('Close recording');
+    if(failsAgain){
+      await wait(()=>container.textContent?.includes('The microphone stop remains unconfirmed')===true);
+      expect(closeRuntime).toHaveBeenCalledTimes(2);expect(close).not.toHaveBeenCalled();
+      expect(button('Transcribe recording').disabled).toBe(true);expect(button('Open private notebook').disabled).toBe(true);expect(button('Rename recording').disabled).toBe(true);
+      await click('Close recording');
+    }
+    await wait(()=>close.mock.calls.length===1);
+    expect(closeRuntime).toHaveBeenCalledTimes(failsAgain?3:2);expect(close).toHaveBeenCalledOnce();expect(transcribe).not.toHaveBeenCalled();expect(sources).toHaveLength(1);
   });
   it('does not gate saved acknowledgment or Close on delayed playback and discards its late URL',async()=>{
     await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
