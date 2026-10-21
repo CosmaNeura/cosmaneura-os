@@ -93,4 +93,6 @@ def test_unrelated_port_context_is_not_released(capture_case, fault):
 
     f.port.perform_capture_operation = incorrect
     response = perform(f, operation={"kind": "native_recording_context"})
-    assert response.status_code == 503 and "receipt" not in response.text
+    assert response.status_code == 503
+    assert response.json() == {"detail": "core_capture_receipt_invalid"}
+    assert str(f.tenant_id) not in response.text
