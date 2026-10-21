@@ -173,6 +173,33 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(metadata.finish).toHaveBeenCalledOnce();expect(transcribe).toHaveBeenCalledExactlyOnceWith(metadata.mapping,runtimes[0].snapshot.recordingId);
     expect(fetch).not.toHaveBeenCalled();
   });
+  it('keeps an exact pending ledger visibly unconfirmed after a held automatic reread until explicit resolution',async()=>{
+    const metadata=await metadataNotebook(),original=metadata.attach.getMockImplementation()!,prepareStore=props.prepareStore!,transcribe=vi.fn(async()=>{});
+    let rejected=false,rereading=false,pendingReads=0,release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);
+    metadata.attach.mockImplementationOnce(async(...args)=>{await original(...args);rejected=true;throw new WorkspaceApiError(503);});
+    const resolve=vi.spyOn(privateRecordingApi,'resolve').mockImplementation(async()=>({outcome:'saved',recording:metadata.receipt()}));
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,prepareStore:async()=>{
+      const store=await prepareStore();return {keys:()=>store.keys(),close:()=>store.close(),write:(key,prior,value)=>store.write(key,prior,value),read:async key=>{
+        const retained=await store.read(key);
+        if(rejected&&key==='ledger:'+runtimes[0].snapshot.recordingId&&++pendingReads===2){rereading=true;await held;}
+        return retained;
+      }};
+    }};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device'&&rereading);
+    const key='ledger:'+runtimes[0].snapshot.recordingId,store=await prepareStore();let retained:unknown;
+    try{retained=await store.read(key);}finally{store.close();}
+    expect(retained).toMatchObject({state:'attach_pending',uncertain:true,retry_ready:false,attach:metadata.attach.mock.calls[0][1],receipt:null,finish:null});
+    expect(container.textContent).toContain('Notebook recording status is unconfirmed');expect(button('Check saved recording result').disabled).toBe(true);
+    expect(resolve).not.toHaveBeenCalled();expect(transcribe).not.toHaveBeenCalled();
+    await act(async()=>release());await wait(()=>button('Check saved recording result').disabled===false);
+    // An ordinary read of that same encrypted pending intent is not a server
+    // receipt. Its warning must remain until the explicit exact resolution.
+    expect(container.textContent).toContain('Notebook recording status is unconfirmed');expect(metadata.attach).toHaveBeenCalledOnce();
+    await click('Transcribe recording');await wait(()=>transcribe.mock.calls.length===1);
+    expect(resolve).toHaveBeenCalledOnce();expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();
+    expect(transcribe).toHaveBeenCalledExactlyOnceWith(metadata.mapping,runtimes[0].snapshot.recordingId);expect(container.textContent).not.toContain('Notebook recording status is unconfirmed');expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([false,true])('keeps transcription usable while metadata finish is held and withholds navigation after access loss (%s)',async loseAccess=>{
     const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{}),original=metadata.finish.getMockImplementation()!;
     let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);

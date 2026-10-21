@@ -224,7 +224,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
             ['sealed','interrupted'].includes(latest.phase)&&latest.chunks>0){
           owned.finishAttempted=true;saved=await owned.controller.finish(latest);
         }
-        if(current()&&ledgerOwner.current===owned){setLedger(saved);setLedgerError('');}
+        if(current()&&ledgerOwner.current===owned){setLedger(saved);setLedgerError(saved?.uncertain?'Notebook recording status is unconfirmed. Local audio is retained. Check the saved result before retrying.':'');}
       }catch{
         if(current()&&ledgerOwner.current===owned){
           // The exact request was sealed before transmission; read it locally
