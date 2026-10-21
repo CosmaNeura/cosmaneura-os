@@ -587,7 +587,7 @@ def _context_for(
         if team.bot_address(candidate) in handoff_roles
     )
     context = conversation.build_context(
-        project_workspace(s, ws.read(s, workspace.box_id, workspace.owner_id, workspace.id)),
+        project_workspace(s, ws._read_model_context(s, workspace.box_id, workspace.owner_id, workspace.id)),
         version,
         settings,
         settings["role"],

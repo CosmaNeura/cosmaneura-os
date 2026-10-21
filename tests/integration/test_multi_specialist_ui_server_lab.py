@@ -335,6 +335,15 @@ def test_actual_signed_multi_specialist_ui_completes_six_revision_and_acceptance
                     )
                 )
             )
+            if len(admissions) == 11 and all(row.state == "completed" for row in admissions):
+                # The completed four-specialist graph must keep exactly the
+                # same model inputs while public reads still expose reviews.
+                full = ws.read(s, case["box"], case["owner"], case["wid"])
+                context = ws._read_model_context(s, case["box"], case["owner"], case["wid"])
+                assert len(full["handoffs"]) == 8
+                assert sum(bool(row["review"] and row["review"]["decision"] == "accepted")
+                           for row in full["handoffs"]) == 4
+                assert context == {**full, "handoffs": []}
             return {
                 "workspace": current(case),
                 "admissions": [
