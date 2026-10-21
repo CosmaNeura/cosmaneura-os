@@ -19,7 +19,7 @@ vi.mock('./capture-api',async original=>({...await original<typeof import('./cap
 vi.mock('./model-work-api',async original=>({...await original<typeof import('./model-work-api')>(),modelWorkApi:{resolve:vi.fn()}}));
 vi.mock('./PrivateRecordingPanel',()=>({PrivateRecordingPanel:({identity,onTranscribe}:PrivateRecordingPanelProps)=><button onClick={()=>void onTranscribe?.({identity,workspace,team},modelUuid(989))}>Finish synthetic saved recording</button>}));
 vi.mock('./RecordingVisitPanel',()=>({RecordingVisitPanel:({origin,onSelected}:Parameters<typeof import('./RecordingVisitPanel').RecordingVisitPanel>[0])=><button onClick={()=>void onSelected(origin,null)}>Open synthetic saved transcript</button>}));
-vi.mock('./SavedRecordingTranscriptionPanel',()=>({SavedRecordingTranscriptionPanel:()=> <section aria-label="Saved recording transcription"><h2>Review your transcript</h2><p role="alert">Your transcript cannot currently be retrieved. Choose Refresh to check again.</p><button>Refresh</button></section>}));
+vi.mock('./SavedRecordingTranscriptionPanel',()=>({SavedRecordingTranscriptionPanel:({onNotebook}:Parameters<typeof import('./SavedRecordingTranscriptionPanel').SavedRecordingTranscriptionPanel>[0])=> <section aria-label="Saved recording transcription"><h2>Review your transcript</h2><p role="alert">Your transcript cannot currently be retrieved. Choose Refresh to check again.</p><button>Refresh</button><button onClick={onNotebook}>Open saved visit notebook</button></section>}));
 vi.mock('./workspace-api',async original=>{const actual=await original<typeof import('./workspace-api')>();return {...actual,workspaceApi:{...actual.workspaceApi,open:vi.fn(),catalog:vi.fn(),team:vi.fn(),read:vi.fn(),privateDraftSummaries:vi.fn(),ask:vi.fn()}};});
 const team=teamFixture();team.capture={enabled:false};
 const workspace:Workspace={id:modelUuid(71),appointment_id:modelUuid(72),label:'Invented native chat',revision:1,entries:[],work_candidates:[],model_contract_version:1,model_observed_at:modelTimestamp};
@@ -166,8 +166,14 @@ it('does not let an old settling receipt block or overwrite the next owner’s l
 });
 
 it('releases native conversation containment for a saved transcription review and its recovery controls',async()=>{
+  const flow=host.querySelector<HTMLDivElement>('.saved-recording-flow')!,scroll=vi.fn();flow.scrollIntoView=scroll;
   await click('Home');await click('Start recording');await click('Finish synthetic saved recording');
   await ready(()=>expect(host.querySelector('.workspace-notebook-body[data-native-chat="false"]')).toBeTruthy());
+  expect(host.querySelector('.team-workspace[data-native-workspace="true"]')).toBeTruthy();
+  expect(host.querySelector<HTMLElement>('.workspace-notebook-body')?.hidden).toBe(true);
+  expect(host.querySelector<HTMLElement>('.team-sidebar')?.hidden).toBe(true);
+  expect(host.querySelector('.saved-recording-flow[data-focused="true"]')?.textContent).toContain('Open synthetic saved transcript');
+  await ready(()=>expect(scroll).toHaveBeenCalledExactlyOnceWith({block:'start'}));
   await click('Open synthetic saved transcript');
   await ready(()=>expect(host.querySelector('[aria-label="Saved recording transcription"]')).toBeTruthy());
   const review=host.querySelector('[aria-label="Saved recording transcription"]')!;
@@ -176,4 +182,27 @@ it('releases native conversation containment for a saved transcription review an
   expect(host.querySelector('.team-workspace[data-native-chat="true"]')).toBeNull();
   expect(review.querySelector('[role="alert"]')?.textContent).toContain('cannot currently be retrieved');
   expect(review.querySelector('button')?.textContent).toBe('Refresh');
+  expect(review.closest('.saved-recording-flow')?.getAttribute('data-focused')).toBe('true');
+  await click('Open saved visit notebook');
+  expect(host.querySelector<HTMLElement>('.workspace-notebook-body')?.hidden).toBe(false);
+  expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(true);
+  await type('My next unsent question');
+  await click('Back to Scribe');
+  expect(host.querySelector('[aria-label="Saved recording transcription"]')).toBe(review);
+  expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(false);
+  expect(host.querySelector<HTMLElement>('.workspace-notebook-body')?.hidden).toBe(true);
+  const restoredScrolls=scroll.mock.calls.length;
+  await click('Open notebook');
+  expect(question().value).toBe('My next unsent question');
+  await click('Conversation view');
+  expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
+  expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(true);
+  expect(host.querySelector('[aria-label="Saved recording transcription"]')).toBe(review);
+  await type('My next unsent question, still typing');
+  expect(scroll).toHaveBeenCalledTimes(restoredScrolls);
+  await click('Back to Scribe');
+  expect(host.querySelector('.team-workspace[data-native-chat="true"]')).toBeNull();
+  expect(host.querySelector<HTMLElement>('.saved-recording-flow')?.hidden).toBe(false);
+  expect(question().value).toBe('My next unsent question, still typing');
+  expect(host.querySelector('.saved-recording-flow')).toBe(flow);
 });

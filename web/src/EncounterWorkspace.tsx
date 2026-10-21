@@ -145,6 +145,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [recordingMinimized,setRecordingMinimized]=useState(false);
   const [privateRecordingEntry,setPrivateRecordingEntry]=useState<PrivateRecordingEntry|null>(null);
   const [savedRecordingEntry,setSavedRecordingEntry]=useState<(SavedRecordingEntry&{workspaceId:string;identity:AuthenticatedWorkspaceIdentity})|null>(null);
+  const [savedRecordingNotebook,setSavedRecordingNotebook]=useState<typeof savedRecordingEntry>(null);
+  const savedRecordingHost=useRef<HTMLDivElement>(null);
   const [privateRecordings,setPrivateRecordings]=useState<{identity:AuthenticatedWorkspaceIdentity;scope:string;generation:number;rows:PrivateRecordingSnapshot[]}|null>(null);
   const [privateRecordingListEpoch,setPrivateRecordingListEpoch]=useState(0);
   const [privateRecordingRequest,setPrivateRecordingRequest]=useState(0);
@@ -1594,8 +1596,21 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const nativeHome=!!nativeChatOwner&&phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&!savedRecordingEntry;
   const nativeConversationPending=bot?.role==='chief'&&localModelPending?.type==='ask'&&localModelPending.body.role===selected&&
     !localModelPending.body.research_analysis&&!localModelPending.body.inbox_analysis&&!localModelPending.body.membership_analysis&&!localModelPending.body.session_prep_analysis;
+  const nativeSavedRecording=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&CAPTURE_WORKSPACE_BUILD&&!!team&&
+    !!savedRecordingEntry&&savedRecordingEntry.identity===authenticated&&savedRecordingEntry.workspaceId===workspace?.id&&journal.current?.scope===savedRecordingEntry.scope;
+  const savedRecordingNotebookOpen=nativeSavedRecording&&savedRecordingNotebook===savedRecordingEntry;
+  const savedRecordingFocused=nativeSavedRecording&&!savedRecordingNotebookOpen;
   const nativeChat=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!!workspace&&practicePage==='notebook'&&mobilePanel==='Conversation'&&
-    !settingsOpen&&!practiceOpen&&!privateRecordingEntry&&!savedRecordingEntry&&!scribeRecordingOpen&&!scribeSourceBusy&&!reviewHandoffId&&!conflict&&!recoveryBlocked&&!recoveryOffers.length&&(!pending||busy||nativeConversationPending);
+    !settingsOpen&&!practiceOpen&&!privateRecordingEntry&&(!savedRecordingEntry||savedRecordingNotebookOpen)&&!scribeRecordingOpen&&!scribeSourceBusy&&!reviewHandoffId&&!conflict&&!recoveryBlocked&&!recoveryOffers.length&&(!pending||busy||nativeConversationPending);
+  const nativeWorkspace=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!nativeHome&&!nativeChat&&!privateRecordingEntry&&!settingsOpen&&!practiceOpen;
+  useLayoutEffect(()=>{
+    if(!savedRecordingFocused||!nativeChatOwner||!savedRecordingEntry)return;
+    const owner=nativeChatOwner,current=generation.current,host=savedRecordingHost.current;
+    const scroll=()=>{if(previousIdentity.current===owner&&owner.nativeSession?.isCurrent()&&generation.current===current&&host===savedRecordingHost.current&&host?.isConnected)
+      host?.scrollIntoView?.({block:'start'});};
+    if(!window.requestAnimationFrame){scroll();return;}
+    const frame=window.requestAnimationFrame(scroll);return()=>window.cancelAnimationFrame?.(frame);
+  },[savedRecordingFocused,nativeChatOwner,savedRecordingEntry?.recordingId,savedRecordingEntry?.workspaceId,savedRecordingEntry?.visitResolved]);
   const inlineModelRecovery=nativeChat&&nativeConversationPending;
   const nativeComposerEditable=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&!conflict&&!recoveryBlocked&&recoveryState!=='failed'&&!recoveryOffers.length&&
     !scribeSourceBusy&&!handoffReviewPending&&!schedulingPatientBusy&&!agentResearchBusy&&!captureNavigationLocked&&!captureDraftLocked&&!connectionEditorsLocked&&!activityBusy&&!accessBusy&&(!clinicalPreparing||modelBusy.current)&&
@@ -1773,8 +1788,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onClick={()=>void replaceModelRequest()}>Send new attempt</button><button disabled={busy} onClick={()=>setReplacementDraft(null)}>Keep previous request</button></div>}
       </section>}
   </>;
-  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-native-home={nativeHome} data-native-chat={nativeChat} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
-    <aside className="team-sidebar">
+  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-native-home={nativeHome} data-native-chat={nativeChat} data-native-workspace={nativeWorkspace} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
+    <aside className="team-sidebar" hidden={nativeWorkspace}>
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span></div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
       <nav className="practice-navigation" aria-label="Workspace navigation">
@@ -1802,7 +1817,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>Invented data · private to you</small></div>
     </aside>
     <div className="team-main">
-      {nativeHome?<header className="native-home-header"><strong>CosmaBot</strong>
+      {nativeHome||nativeWorkspace?<header className="native-home-header">
+        {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
+        <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
+        <div className="native-workspace-actions">
+        {nativeSavedRecording&&<button className="team-subtle" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={savedRecordingNotebookOpen?'Back to Scribe':'Open notebook'} onClick={()=>{
+          if(savedRecordingNotebookOpen)setSavedRecordingNotebook(null);else {setSavedRecordingNotebook(savedRecordingEntry);setPanel('Notebook');setMobilePanel('Notebook');}
+        }}>{savedRecordingNotebookOpen?'Back to Scribe':'Notebook'}</button>}
         <details className="native-home-menu"><summary>More</summary><nav aria-label="More workspace actions">
           {(workspace||onExit)&&<button onClick={()=>void exitWorkspace(false)}>{onExit?"Open execution proof":"Close notebook"}</button>}
           <button disabled={connectionNavigationLocked} onClick={()=>void openSettings()}>Settings</button>
@@ -1810,7 +1831,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onClick={()=>leaveTeamSettings(()=>{setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}>Practice work</button>
           {accountControls}
           <span className="team-fine">Synthetic preview</span>
-        </nav></details>
+        </nav></details></div>
       </header>:<header className={`team-topbar${accountControls ? " team-topbar-authenticated" : ""}`}><span>Provider workspace <span className="team-divider">/</span> {practiceOpen ? "Practice work" : settingsOpen ? "Settings" : practicePage==="home"?"Home":practicePage==="visits"?"Visits and notes":"Notebook"}</span>
         <div className="row">{(workspace||onExit||settingsOpen||practiceOpen)&&<button className="team-subtle" onClick={() => void exitWorkspace(false)}>{onExit ? "Open execution proof" : "Close notebook"}</button>}
           {(authenticated || identity) && <button disabled={connectionNavigationLocked} onClick={() => void openSettings()}>Team settings</button>}
@@ -1983,7 +2004,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         <p className="team-fine">Notes and private drafts do not need email or calendar setup.</p>
       </section>
       {workspace&&<div className="workspace-notebook" hidden={practicePage!=="notebook"}>
-        <section hidden={settingsOpen} className="team-encounter-heading"><div><p className="team-kicker">{workspace.private_draft?.state==='unlinked'?'PRIVATE NOTE':'ENCOUNTER NOTEBOOK'}</p><h1>{workspace.notebook?.title??workspace.label}</h1>
+        <section hidden={settingsOpen||savedRecordingFocused} className="team-encounter-heading"><div><p className="team-kicker">{workspace.private_draft?.state==='unlinked'?'PRIVATE NOTE':'ENCOUNTER NOTEBOOK'}</p><h1>{workspace.notebook?.title??workspace.label}</h1>
           <p>{workspace.private_draft?.state==='unlinked'?'No patient yet · Unlinked note':workspace.label+' · Linked visit'}{workspace.notebook?.created_at?' · '+new Date(workspace.notebook.created_at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):''}</p>
           <button className="team-subtle" disabled={busy || !!pending || handoffReviewPending || !!privateRecordingEntry || privateRecordingBusy} onClick={() => void refresh()}>Refresh encounter</button>
           {import.meta.env.VITE_COSMANEURA_RECORD_ENABLED === "true" && authenticated && visitLinked && team?.capture?.enabled &&
@@ -1995,6 +2016,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             setPanel(value==='After'?'Review':'Notebook');setMobilePanel(value==='After'?'Review':'Notebook');
           }}>{value}</button>)}</nav>
         </section>
+        <div ref={savedRecordingHost} className="saved-recording-flow" data-focused={savedRecordingFocused} hidden={savedRecordingNotebookOpen}>
         {practicePage==='notebook'&&CAPTURE_WORKSPACE_BUILD&&authenticated&&team&&savedRecordingEntry?.identity===authenticated&&savedRecordingEntry.workspaceId===workspace.id&&!savedRecordingEntry.visitResolved&&!savedRecordingEntry.binding&&
           <RecordingVisitPanel entry={savedRecordingEntry} identity={authenticated} origin={workspace} team={team} locked={locked||captureNavigationLocked||captureDraftLocked||note!==latestNote}
             taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}
@@ -2010,9 +2032,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             isCurrent={()=>authenticated===privateRecordingLive.current.authenticated&&journal.current?.scope===savedRecordingEntry.scope}
             locked={locked} notesEnabled={CAPTURE_NOTES_BUILD&&team.capture?.notes_enabled===true} onDraftLock={setCaptureDraftLocked}
             onReviewDraft={useCoreDraft} onCurrentDraft={setObservedCaptureDraft} scratchpad={workspace.entries.filter(e=>e.kind==='scratchpad').at(-1)}
-            notebookDirty={note!==latestNote} onNotebook={()=>{setPanel('Notebook');setMobilePanel('Notebook');}}
+            notebookDirty={note!==latestNote} onNotebook={()=>{setSavedRecordingNotebook(savedRecordingEntry);setPanel('Notebook');setMobilePanel('Notebook');}}
             onRecordings={goHome} onNavigationLock={setCaptureNavigationLocked}
             taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}/>}
+        </div>
         {authenticated&&workspace.private_draft&&!savedRecordingEntry&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry}
           recoveryLocked={busy||!!pending||recoveryBlocked||captureNavigationLocked||captureDraftLocked}
           locked={busy||homeBusy||!!pending||conflict||recoveryOffers.some(offer=>offer.address===`workspace:${workspace.id}`)||recoveryBlocked||captureNavigationLocked||captureDraftLocked||note!==latestNote}
@@ -2050,7 +2073,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               <p className="capture-description">Connect Scribe for this practice to use the recorder.</p></div>
             <button className="team-primary capture-record" disabled={locked || connectionNavigationLocked} onClick={() => void openSettings('connections')}>Set up recording</button>
           </header></section>}
-        <div className="workspace-notebook-body" data-native-chat={nativeChat} data-chief-phone={phoneChief} data-chief-tools={phoneChiefToolsVisible} data-view={mobilePanel==='Conversation'?'conversation':'workspace'} hidden={settingsOpen}>
+        <div className="workspace-notebook-body" data-native-chat={nativeChat} data-chief-phone={phoneChief} data-chief-tools={phoneChiefToolsVisible} data-view={mobilePanel==='Conversation'?'conversation':'workspace'} hidden={settingsOpen||savedRecordingFocused}>
         <nav className="team-view-switch" aria-label="Conversation and Workspace">
           <button aria-label="Conversation view" aria-pressed={mobilePanel==='Conversation'&&!phoneChiefToolsVisible} onClick={()=>{setMobilePanel('Conversation');setPhoneChatToolsOpen(false);}}>Conversation</button>
           <button aria-label={phoneChief?'Open private note':'Workspace view'} aria-pressed={mobilePanel!=='Conversation'} onClick={()=>{if(phoneChief){chiefNotebookFocus.current={workspace:workspace.id,generation:generation.current};setPanel('Notebook');setMobilePanel('Notebook');}else setMobilePanel(panel);}}>{phoneChief?'Private note':'Workspace'}</button>
@@ -2060,7 +2083,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           {!savedRecordingEntry&&CAPTURE_WORKSPACE_BUILD&&authenticated&&visitLinked&&team?.capture?.enabled&&
             <button aria-label="Open visit recorder" disabled={locked||captureDraftLocked||!scribe?.enabled} onClick={()=>setCaptureRequest(value=>value+1)}>
               <span aria-hidden="true">🎙️ </span>Record visit</button>}
-          {phoneChief&&scribe?.enabled&&!scribe.retired&&<button aria-label="Open Scribe" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked||!!privateRecordingEntry} onClick={()=>{
+          {nativeSavedRecording?<button aria-label={nativeChat?'Back to Scribe':'Open Scribe review'} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>setSavedRecordingNotebook(null)}>Scribe</button>:
+          phoneChief&&scribe?.enabled&&!scribe.retired&&<button aria-label="Open Scribe" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked||!!privateRecordingEntry} onClick={()=>{
             setSelected(botAddress(scribe));setSelectedResult(null);setPhoneChatToolsOpen(false);setPanel('Notebook');setMobilePanel('Notebook');
           }}>Scribe</button>}
         </nav>
