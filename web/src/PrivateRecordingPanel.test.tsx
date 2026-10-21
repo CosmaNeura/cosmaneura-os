@@ -198,6 +198,81 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(playMedia).not.toHaveBeenCalled();await click('Play saved recording');expect(playMedia).toHaveBeenCalledOnce();
     expect(createUrl).toHaveBeenCalledOnce();expect(container.textContent).not.toContain('Finish and save recording');
   });
+  it('keeps the exact saved recording playable and makes Scribe navigation retry usable after a rejected handoff',async()=>{
+    const metadata=await metadataNotebook(),transcribe=vi.fn(async(_mapping:PrivateNotebookResult,_recordingId:string)=>{}).mockRejectedValueOnce(new WorkspaceApiError(503));
+    let reopenedProof:Awaited<ReturnType<PrivateRecordingRuntime['snapshotForLedger']>>|undefined;const factory=props.runtimeFactory!;
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,runtimeFactory:async(options,input)=>{const value=await factory(options,input);if(input.recordingId)reopenedProof=await value.snapshotForLedger();return value;}};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true&&!!container.querySelector('audio'));
+    const original=runtimes[0],proof=await original.snapshotForLedger(),audio=container.querySelector('audio');
+    await click('Transcribe recording');await wait(()=>transcribe.mock.calls.length===1&&[...container.querySelectorAll('button')].some(button=>button.textContent==='Transcribe recording'&&!button.disabled));
+    await click('Transcribe recording');await wait(()=>transcribe.mock.calls.length===2);
+    expect(transcribe.mock.calls.every(([mapping,recordingId])=>mapping===metadata.mapping&&recordingId===original.snapshot.recordingId)).toBe(true);
+    expect(runtimes).toHaveLength(2);expect(reopenedProof).toEqual(proof);
+    expect(container.querySelector('audio')).toBe(audio);expect(createUrl).toHaveBeenCalledOnce();
+    expect(sources).toHaveLength(1);expect(sources[0].starts).toBe(1);expect(sources[0].stops).toBe(1);
+    expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();expect(fetch).not.toHaveBeenCalled();
+  });
+  it('offers an explicit exact local reopen after temporary recovery failure without repeating Scribe navigation',async()=>{
+    const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{}).mockRejectedValueOnce(new WorkspaceApiError(503)),factory=props.runtimeFactory!;
+    let failed=false;props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,runtimeFactory:async(options,input)=>{
+      if(input.recordingId&&!failed){failed=true;throw new Error('Invented encrypted-store read unavailable');}return factory(options,input);
+    }};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true&&!!container.querySelector('audio'));
+    const original=runtimes[0].snapshot.recordingId,audio=container.querySelector('audio');await click('Transcribe recording');
+    await wait(()=>container.textContent?.includes('Choose Retry opening saved recording')===true);
+    expect(button('Transcribe recording').disabled).toBe(true);expect(button('Retry opening saved recording').disabled).toBe(false);
+    expect(button('Open private notebook').disabled).toBe(true);expect(button('Rename recording').disabled).toBe(true);
+    await click('Play saved recording');expect(playMedia).toHaveBeenCalledOnce();
+    await click('Retry opening saved recording');await wait(()=>button('Transcribe recording').disabled===false);
+    expect(transcribe).toHaveBeenCalledOnce();expect(container.querySelector('audio')).toBe(audio);expect(createUrl).toHaveBeenCalledOnce();
+    expect(runtimes[1].snapshot.recordingId).toBe(original);await click('Transcribe recording');await wait(()=>transcribe.mock.calls.length===2);
+    expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();expect(sources).toHaveLength(1);expect(fetch).not.toHaveBeenCalled();
+  });
+  it('refuses a changed encrypted manifest during recovery and retains an explicit local retry',async()=>{
+    const metadata=await metadataNotebook(),factory=props.runtimeFactory!;
+    const transcribe=vi.fn(async()=>{const store=await props.prepareStore!(),key='manifest:'+runtimes[0].snapshot.recordingId;
+      try{const prior=await store.read(key) as {chunks:{sha256:string}[]};const changed=structuredClone(prior);changed.chunks[0].sha256='f'.repeat(64);await store.write(key,prior,changed);}finally{store.close();}
+      throw new WorkspaceApiError(503);
+    });
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,runtimeFactory:factory};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true&&!!container.querySelector('audio'));
+    await click('Transcribe recording');await wait(()=>container.textContent?.includes('Choose Retry opening saved recording')===true);
+    expect(button('Transcribe recording').disabled).toBe(true);expect(button('Retry opening saved recording').disabled).toBe(false);
+    expect(transcribe).toHaveBeenCalledOnce();expect(sources).toHaveLength(1);expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledOnce();
+  });
+  it.each(['owner','recording'] as const)('discards a held original recording recovery after %s replacement',async replacement=>{
+    const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{}).mockRejectedValueOnce(new WorkspaceApiError(503)),factory=props.runtimeFactory!;
+    let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);let recoveryId='';
+    props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe,runtimeFactory:async(options,input)=>{
+      const value=await factory(options,input);if(input.recordingId===recoveryId)await held;return value;
+    }};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true&&!!container.querySelector('audio'));recoveryId=runtimes[0].snapshot.recordingId;
+    await click('Transcribe recording');await wait(()=>runtimes.length===2);
+    let replacementId:string|undefined;
+    if(replacement==='recording'){
+      const consent=(await props.prepareStore!().then(async store=>{try{return await store.read('manifest:'+recoveryId) as {consent:Parameters<PrivateRecordingRuntime['start']>[0]};}finally{store.close();}})).consent;
+      const newer=await PrivateRecordingRuntime.open({scope,platform:'desktop',isCurrent:()=>true,openStore:props.prepareStore!},{title:'Different invented saved item',consent});replacementId=newer.snapshot.recordingId;await newer.close();
+    }
+    props={...props,identity:replacement==='owner'?{mode:'clerk_jwt',getToken:vi.fn()}:identity,recordingId:replacementId,prepareNotebook:undefined,onTranscribe:vi.fn()};
+    await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));await wait(()=>replacement==='owner'?status()==='Ready for consent':status()==='Stopped · no audio captured');
+    await act(async()=>release());await wait(()=>container.textContent?.includes('Reopening your saved recording')!==true);
+    expect(transcribe).toHaveBeenCalledOnce();expect(props.onTranscribe).not.toHaveBeenCalled();expect(container.textContent).not.toContain('Scribe could not be opened');
+    expect(container.textContent).not.toContain('Retry opening saved recording');expect(sources).toHaveLength(1);
+  });
+  it('keeps an uncertain recorder close separate from a failed Scribe navigation and does not reopen or dispatch',async()=>{
+    const metadata=await metadataNotebook(),transcribe=vi.fn(async()=>{});props={...props,prepareNotebook:async()=>metadata.mapping,onTranscribe:transcribe};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');await act(async()=>sources[0].chunk(84));await click('Stop and save recording');
+    await wait(()=>container.textContent?.includes('Recording details saved to your private notebook')===true&&!!container.querySelector('audio'));
+    vi.spyOn(runtimes[0],'close').mockRejectedValueOnce(new Error('Invented unknown close result'));
+    await click('Transcribe recording');await wait(()=>container.textContent?.includes('could not be closed for Scribe')===true);
+    expect(transcribe).not.toHaveBeenCalled();expect(runtimes).toHaveLength(1);expect(container.textContent).not.toContain('Retry opening saved recording');
+    expect(button('Close recording').disabled).toBe(false);expect(button('Transcribe recording').disabled).toBe(true);
+  });
   it('does not gate saved acknowledgment or Close on delayed playback and discards its late URL',async()=>{
     await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
     await act(async()=>sources[0].chunk(84));
