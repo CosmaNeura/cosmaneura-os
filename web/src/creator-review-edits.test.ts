@@ -37,7 +37,7 @@ it("reads and shows current Core's corrected English words and role, retaining t
 });
 
 it.each(["wrong_text","wrong_role","foreign_working","foreign_source","foreign_segment","foreign_speaker",
-  "future_version","segment_version","duplicate_edit","unknown_field","naive_timestamp","overlong_text"])(
+  "future_version","segment_version","duplicate_edit","unknown_field","naive_timestamp","overlong_text","missing_both_fields"])(
   "withholds an edited view with %s instead of displaying or adopting its projection",async fault=>{
     const value=structuredClone(edited),edit=value.review_edits[0];
     if(fault==="wrong_text")value.working.segments[0].content="Unevidenced synthetic assertion";
@@ -52,6 +52,9 @@ it.each(["wrong_text","wrong_role","foreign_working","foreign_source","foreign_s
     if(fault==="unknown_field")Object.assign(edit.request,{untrusted_permission:true});
     if(fault==="naive_timestamp")edit.created_at="2026-10-21T00:00:00";
     if(fault==="overlong_text")edit.request.corrections[0].content="x".repeat(100001);
+    if(fault==="missing_both_fields"){
+      Reflect.deleteProperty(value,"review_edits");Reflect.deleteProperty(value,"editing_allowed");
+    }
     expect(()=>parseCreatorReview(value,value.session_id)).toThrow();
     await expect(parseExistingScribeSource({contract_version:1,workspace_id:workspace,status:"available",review:value,
       selection:{version:1,session_id:value.session_id,source_transcript_version:1,working_transcript_id:value.working.working_transcript_id,

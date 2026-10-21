@@ -231,14 +231,12 @@ export function parseCreatorReview(value: unknown, sessionId: string): CreatorRe
     requireValue(original !== undefined && segment.source_segment_version === original.source_segment_version);
     requireValue(["english_source", "spanish_translation", "unresolved"].includes(String(segment.resolution)));
     requireValue(segment.resolution === "unresolved" ? segment.content === null : content(segment.content));
-    if (edits.length || Object.hasOwn(view, "editing_allowed")) {
-      requireValue(["source_locale", "speaker_id", "start_ms", "end_ms"].every(key => segment[key] === original[key])
-        && segment.speaker_role === (speakers.get(String(original.speaker_id)) ?? original.speaker_role));
-      const correction = corrections.get(segment.source_segment_id);
-      requireValue(correction === undefined || segment.resolution !== "unresolved" && segment.content === correction);
-      if (original.source_locale === "en-US") requireValue(segment.resolution === "english_source"
-        && segment.content === (correction ?? original.content));
-    }
+    requireValue(["source_locale", "speaker_id", "start_ms", "end_ms"].every(key => segment[key] === original[key])
+      && segment.speaker_role === (speakers.get(String(original.speaker_id)) ?? original.speaker_role));
+    const correction = corrections.get(segment.source_segment_id);
+    requireValue(correction === undefined || segment.resolution !== "unresolved" && segment.content === correction);
+    if (original.source_locale === "en-US") requireValue(segment.resolution === "english_source"
+      && segment.content === (correction ?? original.content));
   }
   const blockers = array(working.blockers);
   const unresolvedIds = new Set(segments.filter((item) => record(item).resolution === "unresolved")
