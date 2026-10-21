@@ -4,6 +4,7 @@ export const CHIEF_STARTERS = [
   {id:'notes',label:'Organize saved notes',prompt:'Organize the saved intake and visit notes into a concise summary. Distinguish documented facts, uncertainties and missing details. Do not create team assignments yet.'},
   {id:'questions',label:'Prepare visit questions',prompt:'Prepare a short visit agenda and questions from the saved notes and sources. Keep unknown facts explicit and identify what the clinician should verify. Do not create team assignments yet.'},
   {id:'team',label:'Prepare team drafts',prompt:'Break down the saved intake and visit notes into useful, independent private draft tasks for the available team members. Preserve source uncertainty and missing facts. Use each teammate only for its actual role, and explain unavailable or dependent work instead of substituting another role. No public search or external action is requested.'},
+  {id:'clinical',label:'Plan follow-up and research',prompt:'Use the saved Scribe notes and other saved sources available to you to prepare independent private tasks for Follow-up and Research. Follow-up should draft a patient email with follow-up instructions and separate provider action items from the documented plan. Research should assess the same sources for drug or treatment questions, cite supported findings, and identify missing evidence and further research needed. Ask me about missing information, preserve uncertainty, and explain any unavailable teammate or source. Do not invent medication doses, treatment changes, recipients, or completed actions. Keep the email and provider work as drafts for my review. Do not send an email or run a public search.\n\nMy directions: '},
 ] as const;
 
 export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedContext,notesDirty,hasQuestion,canDelegate,compact=false,onChoose}:{
@@ -20,8 +21,11 @@ export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedCon
   return <section className="chief-start-actions" aria-label="Chief task starters">
     <details className={`chief-starters-disclosure${compact?' compact':''}`} open={!compact}>
     <summary>Choose a Chief task</summary>
-    <div>{CHIEF_STARTERS.map(task=><button type="button" key={task.id} disabled={disabled||task.id==='team'&&!canDelegate}
-      onClick={()=>{if(!disabled&&(task.id!=='team'||canDelegate))onChoose(task.prompt);}}>{task.label}</button>)}</div>
+    <div>{CHIEF_STARTERS.map(task=>{
+      const delegationRequired=task.id==='team'||task.id==='clinical';
+      return <button type="button" key={task.id} disabled={disabled||delegationRequired&&!canDelegate}
+        onClick={()=>{if(!disabled&&(!delegationRequired||canDelegate))onChoose(task.prompt);}}>{task.label}</button>;
+    })}</div>
     <p>{guidance}{!canDelegate&&modelEnabled?' Private team assignments are off for Chief.':''}</p>
     </details>
   </section>;
