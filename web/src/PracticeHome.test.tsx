@@ -155,9 +155,9 @@ describe('practice Quick start recovery',()=>{
     vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[row,{...row,workspace_id:id(202),title:'Another retained note'}],has_more:false});
     await render();let release!:()=>void,reject!:(cause:unknown)=>void;
     vi.mocked(recovery.authorize).mockClear().mockImplementation(()=>new Promise<void>((resolve,fail)=>{release=resolve;reject=fail;}));
-    const selected=container.querySelector('.notebook-list-row')!,open=[...selected.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Open')!;
+    const selected=container.querySelector('.notebook-list-row')!,open=[...selected.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Open note')!;
     await act(async()=>{open.click();open.click();});
-    expect(selected.querySelector('[role="status"]')?.textContent).toBe('Opening saved note…');
+    expect(selected.querySelector('[role="status"]')?.textContent).toBe('Opening note…');
     expect(open.textContent).toBe('Opening…');expect(open.disabled).toBe(true);
     expect(container.querySelectorAll('.notebook-list-row [role="status"]')).toHaveLength(1);
     expect(recovery.authorize).toHaveBeenCalledOnce();expect(workspaceApi.openPrivateDraft).not.toHaveBeenCalled();expect(opened).not.toHaveBeenCalled();
@@ -169,20 +169,20 @@ describe('practice Quick start recovery',()=>{
       expect(workspaceApi.openPrivateDraft).not.toHaveBeenCalled();expect(opened).not.toHaveBeenCalled();
     }
     await vi.waitFor(()=>expect(selected.querySelector('[role="status"]')).toBeNull());
-    expect(open.textContent).toBe('Open');expect(open.disabled).toBe(false);expect(selected.textContent).toContain(row.title);
+    expect(open.textContent).toBe('Open note');expect(open.disabled).toBe(false);expect(selected.textContent).toContain(row.title);
   });
   it('withholds a late saved-note open result after the Home owner is replaced',async()=>{
     const row={workspace_id:id(201),title:'Invented retained note',title_revision:0,revision:2,created_at:'2026-10-15T15:00:00Z',updated_at:'2026-10-15T16:00:00Z',link_state:'unlinked' as const,appointment_id:null,patient_label:null,visit_at:null,note_state:'draft' as const,duration_seconds:23,recording_state:'finished' as const};
     vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[row],has_more:false});
     await render();let release!:(value:Awaited<ReturnType<typeof workspaceApi.openPrivateDraft>>)=>void;
     vi.mocked(workspaceApi.openPrivateDraft).mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
-    await click('Open',true);await vi.waitFor(()=>expect(workspaceApi.openPrivateDraft).toHaveBeenCalledOnce());
-    expect(container.querySelector('.notebook-list-row [role="status"]')?.textContent).toBe('Opening saved note…');
+    await click('Open note',true);await vi.waitFor(()=>expect(workspaceApi.openPrivateDraft).toHaveBeenCalledOnce());
+    expect(container.querySelector('.notebook-list-row [role="status"]')?.textContent).toBe('Opening note…');
     const next={mode:'clerk_jwt' as const,getToken:vi.fn()};await render(next);
     expect(container.querySelector('.notebook-list-row [role="status"]')).toBeNull();
     await act(async()=>release({identity,workspace,team}));
     expect(opened).not.toHaveBeenCalled();expect(container.querySelector('.notebook-list-row [role="status"]')).toBeNull();
-    expect([...container.querySelectorAll<HTMLButtonElement>('.notebook-list-row button')].find(b=>b.textContent==='Open')?.disabled).toBe(false);
+    expect([...container.querySelectorAll<HTMLButtonElement>('.notebook-list-row button')].find(b=>b.textContent==='Open note')?.disabled).toBe(false);
   });
   it('refuses added authority fields and mismatched encrypted request keys',async()=>{
     const body={title:'Private note',idempotency_key:id(5)},data={contract:'private-draft-recovery.v1' as const,title:'Private note',pending:body};
