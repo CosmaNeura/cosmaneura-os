@@ -4,7 +4,7 @@ import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {memoryDraftStorage} from './draft-test-fixture';
 import type {PrivateNotebookResult,PrivateRecordingPanelProps} from './PrivateRecordingPanel';
-import {workspaceApi,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
 import {listPrivateRecordings,type PrivateRecordingSnapshot} from './private-recording-runtime';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const panel=vi.hoisted(()=>({props:null as PrivateRecordingPanelProps|null,mounts:0,holdClose:false,completeClose:null as (()=>void)|null}));
@@ -29,7 +29,7 @@ vi.mock('./team-setup-api',async()=>{
 vi.mock('./workspace-api',async original=>{
   const actual=await original<typeof import('./workspace-api')>();
   return {...actual,workspaceApi:{...actual.workspaceApi,team:vi.fn(),catalog:vi.fn(),privateDraftSummaries:vi.fn(),
-    createPrivateDraft:vi.fn(),openPrivateDraft:vi.fn(),linkAppointment:vi.fn(),read:vi.fn(),ask:vi.fn()}};
+    createPrivateDraft:vi.fn(),openPrivateDraft:vi.fn(),linkAppointment:vi.fn(),read:vi.fn(),ask:vi.fn(),append:vi.fn()}};
 });
 const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const scope='a'.repeat(64),workingNote='Invented working note, kept while preparing a recording.',workingQuestion='Invented next question for Chief.';
@@ -62,7 +62,7 @@ beforeEach(()=>{
   vi.mocked(workspaceApi.read).mockImplementation(async()=>structuredClone(workspace));
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.useRealTimers();vi.unstubAllGlobals();});
 
 it.each(['Start a private recording','Scribe'])('opens consent preparation from an unlinked note through %s without creating or linking another notebook',async entry=>{
   await open();
@@ -172,6 +172,8 @@ it('opens an unlinked native phone note without visit-phase or duplicate progres
   expect(host.querySelector('.workspace-notebook')?.getAttribute('data-native-private-note')).toBe('true');
   for(const label of ['Encounter stage','Note progress','Current task'])expect(host.querySelector<HTMLElement>(`[aria-label="${label}"]`)!.hidden,label).toBe(true);
   const editor=host.querySelector<HTMLTextAreaElement>('#team-notebook')!;expect(editor.value).toBe(workingNote);
+  const actions=host.querySelector('.team-material-content > .team-task-actions')!;expect(editor.compareDocumentPosition(actions)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(editor.rows).toBe(8);
   const link=host.querySelector('.private-draft-link')!;expect(link.classList.contains('private-draft-link-compact')).toBe(true);
   expect(link.querySelector('details>summary')).toBeTruthy();expect(link.querySelector('h2')).toBeNull();
   await privatePanel('Review');expect(host.querySelector('.team-note-review')?.closest('[hidden]')).toBeNull();
@@ -187,5 +189,29 @@ it.each(['browser-phone','native-tablet','linked-native-phone'] as const)('prese
   if(mode==='linked-native-phone'){workspace.appointment_id=uuid(860);workspace.private_draft={...workspace.private_draft!,state:'linked',link_receipt_id:uuid(861),linked_at:'2026-10-21T00:00:00Z'};}
   await open();await click(mode==='native-tablet'?'Workspace view':'Open private note');expect(host.querySelector('.workspace-notebook')?.getAttribute('data-native-private-note')).toBe('false');
   for(const label of ['Encounter stage','Note progress','Current task'])expect(host.querySelector<HTMLElement>(`[aria-label="${label}"]`)!.hidden,label).toBe(false);
-  expect(host.querySelector('.private-draft-link-compact')).toBeNull();expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(host.querySelector('.private-draft-link-compact')).toBeNull();const editor=host.querySelector<HTMLTextAreaElement>('#team-notebook')!;expect(editor.value).toBe(workingNote);
+  expect(editor.compareDocumentPosition(host.querySelector('.team-material-content > .team-task-actions')!)&Node.DOCUMENT_POSITION_PRECEDING).toBeTruthy();expect(editor.rows).toBe(14);
+});
+
+it.each(['saved','unconfirmed'] as const)('keeps the notes-first native editor and exact save semantics when Save notes is %s',async outcome=>{
+  vi.useFakeTimers();vi.stubGlobal('matchMedia',()=>({matches:true}));identity=nativeOwner();await open();await click('Open private note');
+  const editor=host.querySelector<HTMLTextAreaElement>('#team-notebook')!;
+  await act(async()=>{await vi.runOnlyPendingTimersAsync();});
+  const healthy=host.querySelector<HTMLElement>('.workspace-draft-save-status>p:not([role])');expect(healthy).toBeTruthy();expect(healthy!.hidden).toBe(true);
+  let finish!:(value:Awaited<ReturnType<typeof workspaceApi.append>>)=>void,fail!:(cause:unknown)=>void;
+  vi.mocked(workspaceApi.append).mockImplementation(()=>new Promise((resolve,reject)=>{finish=resolve;fail=reject;}));
+  await click('Save notes');await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.append).toHaveBeenCalledOnce();});
+  const body=vi.mocked(workspaceApi.append).mock.calls[0][2];expect(body).toMatchObject({kind:'scratchpad',expected_revision:1,content:workingNote});
+  expect(editor.disabled).toBe(true);expect(editor.value).toBe(workingNote);expect(button('Save notes')!.disabled).toBe(true);expect(workspaceApi.ask).not.toHaveBeenCalled();
+  if(outcome==='saved'){
+    const latest=structuredClone(workspace);latest.revision=2;latest.entries=[{id:uuid(862),revision:2,kind:'scratchpad',content:workingNote,origin:'human',source_label:null,ticket:null,created_at:'2026-10-21T00:00:00Z'}];
+    await act(async()=>finish({entry_id:uuid(862),entry_revision:2,workspace:latest}));await vi.waitFor(async()=>{await act(async()=>{});expect(editor.disabled).toBe(false);});
+    expect(host.querySelector('#team-notebook')).toBe(editor);expect(editor.value).toBe(workingNote);expect(host.querySelector('.team-material-content form .team-pill')?.textContent).toBe('Saved');
+    expect(button('Save notes')!.disabled).toBe(true);
+  }else{
+    await act(async()=>fail(new WorkspaceApiError(503)));await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[role="alert"]')).toBeTruthy();});
+    expect(host.querySelector('#team-notebook')).toBe(editor);expect(editor.value).toBe(workingNote);expect(editor.disabled).toBe(true);expect(button('Save notes')!.disabled).toBe(true);
+    expect(host.querySelector('.team-material-content form .team-pill')?.textContent).toBe('Not saved to notebook');
+  }
+  expect(workspaceApi.append).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
 });

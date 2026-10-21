@@ -1815,6 +1815,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onClick={()=>void replaceModelRequest()}>Send new attempt</button><button disabled={busy} onClick={()=>setReplacementDraft(null)}>Keep previous request</button></div>}
       </section>}
   </>;
+  const notebookHeading=<div className="team-notebook-title"><h2>{nativePrivateNote?'Notes':'Jotted notes'}</h2><span className="team-pill">{note === latestNote ? "Saved" : "Not saved to notebook"}</span></div>;
+  const notebookActions=<div key="notebook-actions" className="team-task-actions">{!nativePrivateNote&&notebookHeading}
+    <button className="team-primary" disabled={locked || !note.trim()||note===latestNote} onClick={()=>append("scratchpad",note)}>{nativePrivateNote?'Save notes':'Save notebook revision'}</button>
+    <button className="team-primary" disabled={locked||!note.trim()||!scribe?.enabled||scribe.retired||!scribe.include_notebook||!team?.llm.enabled||!!scribe.blocked_capabilities?.includes('model_answer')} onClick={requestScribeDraft}>{nativePrivateNote?'Create draft note':'Draft note from my notes'}</button></div>;
+  const notebookEditor=<form key="notebook-editor" onSubmit={event => { event.preventDefault(); append("scratchpad", note); }}>{nativePrivateNote&&notebookHeading}<label className="team-sr-only" htmlFor="team-notebook">Jotted notes</label>
+    <textarea ref={notebookRef} id="team-notebook" className="workspace-notepad team-notepad" rows={nativePrivateNote?8:14} maxLength={20000} value={note} disabled={recoveryBlocked||conflict||!!pending&&pending.type!=='team'} onChange={e => setNote(e.target.value)} placeholder={nativePrivateNote?'Write your notes…':'Type or paste intake details, visit notes, or questions…'} />
+    <p className="team-fine">{nativePrivateNote?'Save notes to make them available to your bots. Create draft note saves them first and asks Scribe for a draft to review.':'Your bots use saved notebook entries. Working copies on this device are separate from saved entries.'}</p></form>;
   return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-native-home={nativeHome} data-native-chat={nativeChat} data-native-workspace={nativeWorkspace} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
     <aside className="team-sidebar" hidden={nativeWorkspace}>
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span></div>
@@ -1890,7 +1897,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         <button disabled={busy} onClick={() => void recheckRecovery()}>Recheck draft recovery</button></div>}
       <div className="workspace-draft-save-status">
         {recoveryState === "saving" && <p className="team-fine" role="status">Saving notebook and team drafts on this device…</p>}
-        {recoveryState === "saved" && <p hidden={!!privateRecordingEntry||nativeChat||phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen} className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
+        {recoveryState === "saved" && <p hidden={!!privateRecordingEntry||nativeChat||nativePrivateNote&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen||phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen} className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
       </div>
       {practiceOpen && error && <div className="team-banner error" role="alert">{error}</div>}
       {practiceOpened && (authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><fieldset disabled={recoveryBlocked} hidden={!practiceOpen} style={{border:0,padding:0,margin:0,minWidth:0}}><PracticeHub identity={(authenticated || identity)!} onDenied={failure} onBusyChange={reportInboxBusy} onDraftInbox={authenticated?selection=>{setInboxNavigation({selection,identity:authenticated,generation:generation.current});}:undefined}><PracticeWork identity={(authenticated || identity)!}
@@ -2286,14 +2293,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             {visitLinked&&<div hidden={panel !== "Work"}><FollowUpWork key={workspace.id} workspace={reviewWorkspace!} locked={locked || captureDraftLocked}
               onSave={operation => void save(operation)} onReview={() => {setPanel("Review");setMobilePanel("Review");}} /></div>}
             {panel === "Notebook" && <>
-              <div className="team-task-actions"><div className="team-notebook-title"><h2>Jotted notes</h2><span className="team-pill">{note === latestNote ? "Saved" : "Not saved to notebook"}</span></div>
-                <button className="team-primary" disabled={locked || !note.trim()||note===latestNote} onClick={()=>append("scratchpad",note)}>Save notebook revision</button>
-                <button className="team-primary" disabled={locked||!note.trim()||!scribe?.enabled||scribe.retired||!scribe.include_notebook||!team?.llm.enabled||!!scribe.blocked_capabilities?.includes('model_answer')} onClick={requestScribeDraft}>Draft note from my notes</button></div>
+              {nativePrivateNote&&notebookEditor}
+              {notebookActions}
               {visitLinked && stage === "During" && !(CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled) && <div className="team-capture"><span>Recording awaits Scribe connection</span><button disabled>Start recording</button><button disabled>Voice instruction</button></div>}
-              <p className="team-fine">Your working notebook. Shape the visit note in Review when you are ready.</p>
-              <form onSubmit={event => { event.preventDefault(); append("scratchpad", note); }}><label className="team-sr-only" htmlFor="team-notebook">Jotted notes</label>
-                <textarea ref={notebookRef} id="team-notebook" className="workspace-notepad team-notepad" rows={14} maxLength={20000} value={note} disabled={recoveryBlocked||conflict||!!pending&&pending.type!=='team'} onChange={e => setNote(e.target.value)} placeholder="Type or paste intake details, visit notes, or questions…" />
-                <p className="team-fine">Your bots use saved notebook entries. Working copies on this device are separate from saved entries.</p></form>
+              {!nativePrivateNote&&<p className="team-fine">Your working notebook. Shape the visit note in Review when you are ready.</p>}
+              {!nativePrivateNote&&notebookEditor}
               <details className="team-history"><summary>Saved notebook history</summary>{workspace.entries.filter(e => e.kind === "scratchpad").map(e => <article key={e.id}><small>Revision {e.revision}</small><p>{e.content}</p></article>)}</details>
             </>}
             {faxSourceOffer&&authenticated===faxSourceOffer.identity&&generation.current===faxSourceOffer.generation&&workspace.id===faxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><EFaxSourceReviewMount identity={faxSourceOffer.identity} offered={faxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='efax_inbound_source'&&e.fax_source_state).map(e=>({entry_id:e.id,state:e.fax_source_state!}))} onBusyChange={reportFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareFaxChief(value)} onRefreshDocument={refreshFaxDocument}/></div>}
