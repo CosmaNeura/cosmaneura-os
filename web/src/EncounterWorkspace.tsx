@@ -148,7 +148,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [privateRecordings,setPrivateRecordings]=useState<{identity:AuthenticatedWorkspaceIdentity;scope:string;generation:number;rows:PrivateRecordingSnapshot[]}|null>(null);
   const [privateRecordingListEpoch,setPrivateRecordingListEpoch]=useState(0);
   const [privateRecordingRequest,setPrivateRecordingRequest]=useState(0);
-  const recordingHome=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
+  const recordingHome=useRef<HTMLDivElement|null>(null),recordingHost=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
   const [faxSourceOffer,setFaxSourceOffer]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null>(null);
@@ -187,6 +187,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       target?.focus({preventScroll:true});target?.scrollIntoView?.({block:'start'});
     }
   },[privateRecordingEntry,authenticated,practicePage,settingsOpen,practiceOpen]);
+  useLayoutEffect(()=>{
+    if(!privateRecordingEntry||recordingMinimized||!phoneLayout())return;
+    // Opening or returning to the same pane changes presentation only. The
+    // recorder stays mounted and its consent, audio and pending work stay put.
+    recordingHost.current?.querySelector<HTMLElement>('h1')?.focus({preventScroll:true});
+    recordingHost.current?.scrollIntoView?.({block:'start'});
+  },[privateRecordingEntry,recordingMinimized]);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
   const [scribeRecordingOpen,setScribeRecordingOpen]=useState(false);
   const [selected, setSelected] = useState<string>("visit_prep");
@@ -1422,6 +1429,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const row=privateRecordings?.identity===authenticated&&privateRecordings.generation===generation.current&&privateRecordings.scope===current.scope?privateRecordings.rows.find(value=>value.recordingId===recordingId):undefined;
     if(!row)return;
     const owner=authenticated;
+    setRecordingMinimized(false);
     setPrivateRecordingEntry({identity:owner,journal:current.value,scope:current.scope,serverScope:current.serverScope,generation:generation.current,title:row.title,recordingId,
       authorize:accountAccess.authorize,...(row.workspaceId?{prepareNotebook:()=>workspaceApi.openPrivateDraft(owner,row.workspaceId!)}:{})});
   }
@@ -1729,7 +1737,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     modelEnabled={team.llm.enabled&&!bot.blocked_capabilities?.includes('model_answer')} sourceAllowed={bot.include_notebook||bot.include_evidence}
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
     canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}/>;
-  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-native-home={nativeHome} data-native-chat={nativeChat} data-recording-open={!!privateRecordingEntry} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
+  return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" data-native-home={nativeHome} data-native-chat={nativeChat} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-navigation-locked={connectionNavigationLocked}>
     <aside className="team-sidebar">
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span></div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
@@ -1805,7 +1813,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         onChanged={() => { if (workspace) setConflict(true); }} onAccessLost={failure} />
         {ROUTINES_BUILD && authenticated && team && team.revision > 0 && <WorkRoutines identity={authenticated} team={team} onAccessLost={failure} onRefreshTeam={refreshRoutineTeam} />}
         {authenticated && team?.revision === 0 && <div className="team-banner"><p>Set up your private team to schedule work briefs.</p><button onClick={() => void openSettings()}>Set up your team</button></div>}</PracticeHub></fieldset></AccountRecoveryContext.Provider>}
-      <div hidden={practiceOpen}>
+      <div className="workspace-main-content" hidden={practiceOpen}>
       {connectionError&&connectionError.identity===(authenticated??identity)&&<div className="team-banner error" role="alert">{connectionError.message}</div>}
       {error && <div className="team-banner error" role="alert">{error}</div>}
       {message && <div className="team-banner" role="status">{message}</div>}
@@ -1913,7 +1921,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </fieldset>
         </AccountRecoveryContext.Provider> : undefined}
       /></AccountRecoveryContext.Provider>}
-      {privateRecordingEntry&&<PrivateRecordingPanel minimized={recordingMinimized} onExpand={()=>setRecordingMinimized(false)} onMinimize={()=>setRecordingMinimized(true)} identity={privateRecordingEntry.identity} scope={privateRecordingEntry.scope}
+      {privateRecordingEntry&&<div className="private-recording-host" ref={recordingHost}><PrivateRecordingPanel minimized={recordingMinimized} onExpand={()=>setRecordingMinimized(false)} onMinimize={()=>setRecordingMinimized(true)} identity={privateRecordingEntry.identity} scope={privateRecordingEntry.scope}
         platform={privateRecordingEntry.identity.mode==='clerk_jwt'&&privateRecordingEntry.identity.nativeSession?'ios':'desktop'}
         isCurrent={()=>recordingCurrent(privateRecordingEntry)} authorize={privateRecordingEntry.authorize}
         title={privateRecordingEntry.title} recordingId={privateRecordingEntry.recordingId} prepareNotebook={privateRecordingEntry.prepareNotebook}
@@ -1936,7 +1944,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         onClose={()=>{const returnToNotebook=!!privateRecordingEntry.returnWorkspaceId&&workspace?.id===privateRecordingEntry.returnWorkspaceId&&recordingCurrent(privateRecordingEntry);
           setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setSettingsOpen(false);setPracticeOpen(false);setPracticePage(returnToNotebook?'notebook':'home');setPrivateRecordingListEpoch(value=>value+1);}}
         onNotebook={async result=>{if(!recordingCurrent(privateRecordingEntry))throw new WorkspaceApiError(403);
-          await returnPrivateRecordingNotebook(privateRecordingEntry,result);setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setPrivateRecordingListEpoch(value=>value+1);}}/>}
+          await returnPrivateRecordingNotebook(privateRecordingEntry,result);setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setPrivateRecordingListEpoch(value=>value+1);}}/></div>}
       {authenticated&&<div ref={recordingHome} tabIndex={-1} hidden={!!privateRecordingEntry&&!recordingMinimized||settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
         nativeCompact={nativeHome}
         locked={!!privateRecordingEntry||busy||!!pending||conflict||recoveryState==="failed"||recoveryBlocked||captureNavigationLocked||captureDraftLocked} onBusyChange={setHomeBusy} onAccessLost={failure}

@@ -1,18 +1,23 @@
-import {act} from 'react';
+import {act,useEffect} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {memoryDraftStorage} from './draft-test-fixture';
 import type {PrivateNotebookResult,PrivateRecordingPanelProps} from './PrivateRecordingPanel';
 import {workspaceApi,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
+import {listPrivateRecordings,type PrivateRecordingSnapshot} from './private-recording-runtime';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
-const panel=vi.hoisted(()=>({props:null as PrivateRecordingPanelProps|null}));
+const panel=vi.hoisted(()=>({props:null as PrivateRecordingPanelProps|null,mounts:0,holdClose:false,completeClose:null as (()=>void)|null}));
 // No microphone adapter is constructed in this navigation test. The production
 // recording panel's consent/runtime behavior has its own adapter integration tests.
 vi.mock('./PrivateRecordingPanel',()=>({PrivateRecordingPanel:(props:PrivateRecordingPanelProps)=>{
   panel.props=props;
-  return <section aria-label="Private Scribe recording"><h2>Start a private recording</h2>
-    <button onClick={props.onClose}>Close recording</button></section>;
+  useEffect(()=>{panel.mounts++;},[]);
+  return <><aside hidden={!props.minimized}><button onClick={props.onExpand}>Return to recording</button></aside>
+    <section hidden={props.minimized} className="private-recording-panel" aria-label="Private Scribe recording"><header>
+      <button onClick={props.onMinimize}>Browse workspace</button><h1 tabIndex={-1}>Start a private recording</h1>
+      <button onClick={()=>{if(panel.holdClose)panel.completeClose=props.onClose;else props.onClose();}}>Close recording</button>
+    </header></section></>;
 }}));
 vi.mock('./capture-api',async original=>({...await original<typeof import('./capture-api')>(),CAPTURE_WORKSPACE_BUILD:true}));
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(scope:string)=>scope}));
@@ -45,7 +50,7 @@ async function open(){
 }
 const notebookResult=():PrivateNotebookResult=>({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
 beforeEach(()=>{
-  vi.clearAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);panel.props=null;
+  vi.clearAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);panel.props=null;panel.mounts=0;panel.holdClose=false;panel.completeClose=null;
   identity={mode:'clerk_jwt',getToken:vi.fn()};
   workspace={id:uuid(800),appointment_id:null,label:'Invented private note',revision:1,entries:[],work_candidates:[],
     private_draft:{title:'Invented private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
@@ -120,4 +125,39 @@ it('keeps both private recording entry points visibly locked while an exact conv
   expect(scribe.disabled).toBe(true);await act(async()=>scribe.click());
   expect(host.querySelector('[aria-label="Private Scribe recording"]')).toBeNull();
   expect(workspaceApi.openPrivateDraft).not.toHaveBeenCalled();
+});
+
+it('returns between the focused phone recorder and the same working notebook without remounting the recorder',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true}));await open();await click('Start a private recording');
+  const pane=host.querySelector('[aria-label="Private Scribe recording"]'),owner=panel.props!.identity;
+  expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('true');expect(panel.mounts).toBe(1);
+  await click('Browse workspace');
+  expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('false');
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(workingQuestion);
+  expect(panel.props!.identity).toBe(owner);expect(panel.props!.minimized).toBe(true);expect(panel.mounts).toBe(1);
+  await click('Return to recording');
+  expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('true');
+  expect(host.querySelector('[aria-label="Private Scribe recording"]')).toBe(pane);expect(panel.mounts).toBe(1);
+  await click('Close recording');
+  expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('false');
+  expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
+});
+
+it('reopens the exact retained clip expanded after an earlier close completes while browsing',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true}));
+  const row:PrivateRecordingSnapshot={recordingId:uuid(850),title:'Invented retained clip',phase:'sealed',elapsedSeconds:23,recordedChunks:3,
+    recordedBytes:736132,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};
+  vi.mocked(listPrivateRecordings).mockResolvedValue([row]);
+  await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Start recording')?.disabled).toBe(false);});await click('Start recording');
+  panel.holdClose=true;await click('Close recording');await click('Browse workspace');
+  expect(panel.props!.minimized).toBe(true);await act(async()=>panel.completeClose!());
+  const retained=()=>[...host.querySelectorAll<HTMLButtonElement>('.practice-home-recordings button')].find(b=>b.querySelector('strong')?.textContent===row.title);
+  await vi.waitFor(async()=>{await act(async()=>{});expect(retained()?.disabled).toBe(false);});await act(async()=>retained()!.click());
+  expect(panel.props!.recordingId).toBe(row.recordingId);expect(panel.props!.identity).toBe(identity);
+  expect(panel.props!.minimized).toBe(false);expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('true');
+  expect(host.querySelector('[aria-label="Private Scribe recording"]')?.hasAttribute('hidden')).toBe(false);
+  expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
 });

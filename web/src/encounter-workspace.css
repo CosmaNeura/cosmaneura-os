@@ -468,3 +468,20 @@
   .workspace-notebook-body[data-native-chat=true] .team-composer textarea { box-sizing:border-box; height:58px; min-height:58px; max-height:58px; resize:none; }
   .workspace-notebook-body[data-native-chat=true] .team-composer-wrap > .team-fine { display:none; }
 }
+
+/* Expanded recordings get the phone screen; Browse keeps the same pane alive. */
+@media (max-width:600px) {
+  .team-workspace[data-recording-focused=true] { display:block; }
+  .team-workspace[data-recording-focused=true] > .team-sidebar,
+  .team-workspace[data-recording-focused=true] .team-topbar,
+  .team-workspace[data-recording-focused=true] .native-home-header,
+  .team-workspace[data-recording-focused=true] .workspace-draft-save-status,
+  .team-workspace[data-recording-focused=true] .workspace-main-content > .workspace-notebook,
+  .team-workspace[data-recording-focused=true] .workspace-main-content > .team-welcome,
+  .team-workspace[data-recording-focused=true] .workspace-main-content > .team-settings { display:none; }
+  .team-workspace[data-recording-focused=true] > .team-main,
+  .team-workspace[data-recording-focused=true] .workspace-main-content { display:flex; flex-direction:column; min-width:0; }
+  .team-workspace[data-recording-focused=true] .workspace-main-content,
+  .team-workspace[data-recording-focused=true] .private-recording-host { order:-1; }
+  .team-workspace[data-recording-focused=true] .private-recording-panel { margin:0; max-width:none; }
+}
