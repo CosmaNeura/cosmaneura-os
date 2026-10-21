@@ -23,6 +23,7 @@ async function shared(w=workspace):Promise<Workspace>{
 const button=(text:string)=>[...host.querySelectorAll('button')].find(b=>b.textContent===text)!;
 const click=(text:string)=>act(async()=>button(text).click());
 const mount=()=>act(async()=>root.render(<ClinicalTeamDraftsPanel workspace={workspace} team={team} locked={false} onShare={share} onAskChief={ask} onReview={review} onRetry={retry}/>));
+const mountCompact=(prepare=vi.fn().mockResolvedValue(undefined),directions='')=>act(async()=>root.render(<ClinicalTeamDraftsPanel workspace={workspace} team={team} locked={false} compactPlan onPrepare={prepare} ownerDirections={directions} onDirectionsChange={vi.fn()} onShare={share} onAskChief={ask} onReview={review} onRetry={retry}/>));
 function chiefRequest() {
   const entry:WorkspaceEntry={id:id(10),revision:4,kind:'conversation',content:clinicalTeamRequest(currentSharedNote(workspace)!),source_label:null,origin:'authenticated_human',ticket:null,created_at:time,
     reply:{agent_name:'Chief',role:'chief',backend:'invented',content:'Saved private assignments',context_revision:3,citations:[]}};
@@ -46,6 +47,45 @@ beforeEach(async()=>{
     ({role:role as 'chief'|'follow_up'|'research',name:role,enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}))}};
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.unstubAllGlobals();});
+it('puts phone directions and Prepare before a collapsed exact-note preview while retaining separate sharing consent',async()=>{
+  const prepare=vi.fn().mockResolvedValue(undefined);await mountCompact(prepare);
+  const directions=host.querySelector<HTMLTextAreaElement>('.clinical-team-directions')!,preview=host.querySelector<HTMLDetailsElement>('.clinical-team-note-preview')!;
+  expect(preview.open).toBe(false);expect(preview.textContent).toContain(workspace.note!.latest!.content);
+  expect(directions.compareDocumentPosition(button('Prepare Follow-up and Research'))&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(button('Prepare Follow-up and Research').compareDocumentPosition(preview)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(host.querySelector('[aria-label="Team draft steps"]')).toBeNull();expect(host.querySelector('[aria-label="Follow-up drafts"]')).toBeNull();
+  await act(async()=>preview.querySelector('summary')!.click());expect(preview.open).toBe(true);
+  expect(preview.querySelector('pre')!.textContent).toBe(workspace.note!.latest!.content);expect(share).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();
+  await click('Prepare Follow-up and Research');expect(prepare).toHaveBeenCalledOnce();expect(prepare.mock.calls[0][0]).toEqual({...noteSelection(workspace.note!.latest!,workspace.revision,'expected-key'),idempotency_key:expect.any(String)});
+  const options=[...host.querySelectorAll<HTMLDetailsElement>('details')].find(d=>d.querySelector('summary')?.textContent==='More options')!;
+  await act(async()=>options.querySelector('summary')!.click());await click('Preview saved note for team');
+  const consent=options.querySelector<HTMLInputElement>('input[type=checkbox]')!;expect(consent.checked).toBe(false);expect(button('Share saved note with team').disabled).toBe(true);
+  await act(async()=>consent.click());await click('Share saved note with team');expect(share).toHaveBeenCalledOnce();expect(ask).not.toHaveBeenCalled();
+});
+it.each(['changed_source','unsupported_directions','specialist_disabled'] as const)('keeps a real phone plan blocker outside collapsed options: %s',async blocker=>{
+  const prepare=vi.fn().mockResolvedValue(undefined);
+  if(blocker==='changed_source')workspace.note!.latest!.sources_changed=true;
+  if(blocker==='specialist_disabled')team.configuration.bots.find(b=>b.role==='research')!.enabled=false;
+  await mountCompact(prepare,blocker==='unsupported_directions'?'Use my exact directions.':'');
+  expect(button('Prepare Follow-up and Research').disabled).toBe(true);
+  const message=blocker==='changed_source'?'Source material changed':blocker==='unsupported_directions'?'practice service needs an update':'Enable Chief, Follow-up and Research';
+  const notice=[...host.querySelectorAll('p')].find(p=>p.textContent?.includes(message))!;expect(notice).toBeTruthy();expect(notice.closest('details')).toBeNull();
+  expect(prepare).not.toHaveBeenCalled();expect(share).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();
+});
+it('retains phone source acknowledgment, held preparation status and a failed outcome beside the editable plan',async()=>{
+  workspace=await shared();let reject!:(cause:Error)=>void;const held=new Promise<void>((_resolve,no)=>{reject=no;});const prepare=vi.fn().mockReturnValue(held);
+  await mountCompact(prepare);const sourceStatus=[...host.querySelectorAll('p')].find(p=>p.textContent?.includes('is shared with this private team'))!;
+  expect(sourceStatus.closest('details')).toBeNull();await click('Prepare Follow-up and Research');
+  expect(button('Prepare Follow-up and Research').disabled).toBe(true);expect(host.querySelector('[aria-busy=true]')).toBeTruthy();
+  expect([...host.querySelectorAll('[role=status]')].some(p=>p.textContent?.includes('Preparing private drafts'))).toBe(true);
+  await act(async()=>reject(new Error('Invented unavailable outcome')));expect(host.querySelector('[role=alert]')).toBeTruthy();expect(host.querySelector('[role=alert]')!.closest('details')).toBeNull();
+  expect(host.querySelector<HTMLTextAreaElement>('.clinical-team-directions')!.disabled).toBe(false);
+});
+it('keeps saved phone draft results and their human review control after reducing empty framing',async()=>{
+  workspace=await shared();const origin=chiefRequest();workspace.handoffs=[draft('follow_up',20,origin.id,'Private email draft and provider actions.')];
+  await mountCompact();expect(host.querySelector('[aria-label="Follow-up drafts"]')?.textContent).toContain('Private email draft and provider actions.');
+  expect(host.querySelector('[aria-label="Research assessment"]')?.textContent).toContain('No saved assignment');await click('Review follow-up draft');expect(review).toHaveBeenCalledWith(workspace.handoffs[0].id);
+});
 it('requires full preview and explicit sharing, and only shows sharing after an acknowledged snapshot',async()=>{
   await mount();expect(share).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();expect(button('Share saved note with team').disabled).toBe(true);
   await click('Preview saved note for team');expect(host.querySelector('[role=group]')?.textContent).toContain(workspace.note!.latest!.content);

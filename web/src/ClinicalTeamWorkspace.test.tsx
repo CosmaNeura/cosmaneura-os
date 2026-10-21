@@ -121,7 +121,9 @@ it('opens the exact saved-note plan directly from native Chief without sharing o
   const plan=host.querySelector<HTMLTextAreaElement>('.clinical-team-directions')!;
   expect(plan).toBeTruthy();expect(plan.closest('[hidden]')).toBeNull();expect(plan.disabled).toBe(false);expect(plan.value).toBe(question.value);
   expect(button('Prepare Follow-up and Research')?.disabled).toBe(false);
-  expect(host.querySelector('[aria-label="Your directions for Chief"]')?.textContent).toContain('Add optional directions here.');
+  const preview=host.querySelector<HTMLDetailsElement>('.clinical-team-note-preview')!;
+  expect(preview.open).toBe(false);expect(plan.closest('[data-compact-plan=true]')).toBeTruthy();
+  expect(plan.compareDocumentPosition(preview)&Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
   await click('Back to chat');expect(host.querySelector<HTMLTextAreaElement>('#team-question')).toBe(question);
   expect(question.value).toBe('My next directions, still editable');expect(question.disabled).toBe(false);

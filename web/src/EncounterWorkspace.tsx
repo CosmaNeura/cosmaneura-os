@@ -1235,7 +1235,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     clinicalTeamFocus.current=null;
     if(request.owner!==authenticated||request.owner!==previousIdentity.current||request.workspaceId!==workspace?.id||request.generation!==generation.current)return;
     const heading=clinicalTeamRef.current?.querySelector<HTMLElement>('h3');
-    heading?.scrollIntoView?.({block:'start'});heading?.focus({preventScroll:true});
+    const scrollHeading=nativeChat&&phoneChiefToolsVisible?clinicalTeamRef.current?.closest('.team-conversation-tools')?.querySelector<HTMLElement>('.chief-tools-heading'):heading;
+    scrollHeading?.scrollIntoView?.({block:'start'});heading?.focus({preventScroll:true});
   },[authenticated,workspace?.id,selected,clinicalTeamExpanded,mobilePanel,settingsOpen,practiceOpen,phoneChiefToolsVisible]);
   function openClinicalTeamDrafts(noteId:string,prepare=true,expected?:{owner:AuthenticatedWorkspaceIdentity;scope:string;generation:number;selection:ShareSavedNoteInput;content:string}){
     if(expected){
@@ -2208,11 +2209,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             role={nativeChat?'region':undefined} aria-label={nativeChat?(phoneChiefToolsVisible?'Chief tools':'Conversation history'):undefined} tabIndex={nativeChat?0:undefined}>
           <div id={`chief-tools-${workspace.id}`} className="team-conversation-tools" hidden={phoneChiefConversation&&!phoneChiefToolsVisible}>
           {phoneChiefConversation&&<header className="chief-tools-heading"><h3>Chief tools</h3><button className="team-subtle" disabled={viewNavigationLocked} onClick={returnToPhoneChat}>Back to chat</button></header>}
-          {phoneChiefToolsVisible&&thought!==''&&<p className="team-fine chief-tools-draft" role="status">Your directions are kept in this plan. Prepare Follow-up and Research includes them with the saved note.</p>}
+          {phoneChiefToolsVisible&&thought!==''&&!(nativeChat&&clinicalTeamExpanded)&&<p className="team-fine chief-tools-draft" role="status">Your directions are kept in this plan. Prepare Follow-up and Research includes them with the saved note.</p>}
           {(nativeChat||phoneChiefConversation)&&teamDrafts}
           {bot?.role==='chief'&&authenticated&&team&&<details ref={clinicalTeamRef} className="clinical-team-disclosure" open={clinicalTeamExpanded} onToggle={event=>setClinicalTeamExpanded(event.currentTarget.open)}><summary>Saved note for follow-up and research</summary>
             <ClinicalTeamDraftsPanel workspace={workspace} team={team} locked={locked||captureNavigationLocked||captureDraftLocked||note!==latestNote}
-              ownerDirections={thought} onDirectionsChange={phoneChiefConversation?updateThought:undefined}
+              ownerDirections={thought} onDirectionsChange={phoneChiefConversation?updateThought:undefined} compactPlan={nativeChat&&phoneChiefToolsVisible}
               directionsLocked={(nativeChatOwner?!nativeComposerEditable:locked)||!bot.enabled||!!bot.retired} preparing={clinicalPreparing} onPrepare={prepareClinicalDrafts} authority={authenticated}
               onRetry={retryTeamTask}
               onShare={async body=>{await save({type:'clinicalNoteShare',body});}}
