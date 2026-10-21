@@ -281,12 +281,18 @@ function renderTranscript(view: CreatorReviewView, phase: Phase): string {
       const pending = progress.get(segment.source_segment_id);
       const englishText = review?.translated_content ?? english?.content;
       const spanish = segment.source_locale === "es-US";
+      const hasEdits = (view.review_edits?.length ?? 0) > 0;
+      const editedEnglish = hasEdits && segment.source_locale === "en-US" && english?.resolution === "english_source"
+        && english.content !== segment.content;
+      const currentRole = hasEdits ? english?.speaker_role ?? segment.speaker_role : segment.speaker_role;
       return `<li class="creator-segment">
-        <div class="creator-segment-heading"><strong>${speakerCopy(segment.speaker_role)}</strong>
+        <div class="creator-segment-heading"><strong>${speakerCopy(currentRole)}</strong>
           <span>${time(segment.start_ms)}–${time(segment.end_ms)}</span></div>
+        ${currentRole === segment.speaker_role ? "" : `<p class="creator-help">Original speaker: ${speakerCopy(segment.speaker_role)}</p>`}
         <div class="creator-language-grid ${spanish ? "creator-bilingual" : ""}">
-          <div><h3>${spanish ? "Spanish · original" : segment.source_locale === "en-US" ? "English · original" : "Original · language unconfirmed"}</h3>
-            <p lang="${spanish ? "es" : segment.source_locale === "en-US" ? "en" : "und"}">${escape(segment.content)}</p></div>
+          <div><h3>${editedEnglish ? "English · current text" : spanish ? "Spanish · original" : segment.source_locale === "en-US" ? "English · original" : "Original · language unconfirmed"}</h3>
+            <p lang="${spanish ? "es" : segment.source_locale === "en-US" ? "en" : "und"}">${escape(editedEnglish ? english!.content! : segment.content)}</p>
+            ${editedEnglish ? `<details><summary>Original English words</summary><p lang="en">${escape(segment.content)}</p></details>` : ""}</div>
           ${spanish ? `<div><h3>English · ${review ? "proposed translation" : english?.resolution === "spanish_translation" ? "accepted translation" : "not ready"}</h3>
             <p lang="en">${englishText == null ? "Translation is not ready for use." : escape(englishText)}</p></div>` : ""}
         </div>

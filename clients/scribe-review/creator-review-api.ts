@@ -5,7 +5,19 @@ import type { components } from "./capture-api";
 import { readBoundedJson } from "./beta-api";
 import { isUuid } from "./contracts";
 
-export type CreatorReviewView = components["schemas"]["CreatorReviewViewV1"];
+type CreatorRole = "clinician" | "patient" | "other" | "unknown";
+export type CreatorTranscriptEdit = Readonly<{
+  edit_id: string; working_transcript_version: number; created_at: string;
+  request: Readonly<{
+    schema_version: "1.0"; expected_source_transcript_version: number;
+    expected_working_transcript_id: string; expected_working_transcript_version: number;
+    corrections: readonly Readonly<{source_segment_id: string; expected_source_segment_version: number; content: string}>[];
+    speakers: readonly Readonly<{speaker_id: string; role: CreatorRole; display_name?: string | null; detail?: "interpreter" | "other" | null}>[];
+  }>;
+}>;
+export type CreatorReviewView = components["schemas"]["CreatorReviewViewV1"] & {
+  editing_allowed?: true; review_edits?: readonly CreatorTranscriptEdit[];
+};
 export type ReviewItem = components["schemas"]["CreatorTranslationReviewItemV1"];
 export type ReviewDecision = components["schemas"]["CreatorTranslationDecisionBodyV1"];
 export type ReviewReceipt = components["schemas"]["CreatorDecisionReceiptV1"];
@@ -157,10 +169,13 @@ export function parseCreatorReview(value: unknown, sessionId: string): CreatorRe
   const view = record(value);
   requireValue(view.schema_version === "1.0" && view.session_id === sessionId);
   requireValue(typeof view.status === "string");
+  requireValue(!Object.hasOwn(view, "editing_allowed") || view.editing_allowed === true);
+  const edits = parseCreatorEdits(view.review_edits);
   if (Object.hasOwn(view, "capture_continuity")) parseCaptureContinuity(view.capture_continuity);
   const progress = view.translation_progress === undefined ? [] : array(view.translation_progress);
   if (view.source === null && view.working === null && view.review_queue === null) {
-    requireValue(progress.length === 0 && !Object.hasOwn(view, "capture_continuity"));
+    requireValue(progress.length === 0 && !Object.hasOwn(view, "capture_continuity")
+      && edits.length === 0 && !Object.hasOwn(view, "editing_allowed"));
     requireValue([
       "created", "capturing", "uploaded", "processing", "speech_failed", "speech_retryable", "handed_off",
     ].includes(view.status));
@@ -194,6 +209,20 @@ export function parseCreatorReview(value: unknown, sessionId: string): CreatorRe
     byId.set(segment.source_segment_id, segment);
   }
   const workingIds = new Set<string>();
+  const corrections = new Map<string, string>(), speakers = new Map<string, CreatorRole>();
+  const sourceSpeakers = new Set(sources.map(item => record(item).speaker_id));
+  for (const edit of edits) {
+    requireValue(edit.request.expected_source_transcript_version === source.source_transcript_version
+      && edit.request.expected_working_transcript_id === working.working_transcript_id
+      && edit.working_transcript_version <= Number(working.working_transcript_version));
+    for (const correction of edit.request.corrections) {
+      requireValue(byId.get(correction.source_segment_id)?.source_segment_version === correction.expected_source_segment_version);
+      corrections.set(correction.source_segment_id, correction.content);
+    }
+    for (const speaker of edit.request.speakers) {
+      requireValue(sourceSpeakers.has(speaker.speaker_id)); speakers.set(speaker.speaker_id, speaker.role);
+    }
+  }
   for (const item of segments) {
     const segment = record(item);
     requireValue(isUuid(segment.source_segment_id) && !workingIds.has(segment.source_segment_id));
@@ -202,6 +231,14 @@ export function parseCreatorReview(value: unknown, sessionId: string): CreatorRe
     requireValue(original !== undefined && segment.source_segment_version === original.source_segment_version);
     requireValue(["english_source", "spanish_translation", "unresolved"].includes(String(segment.resolution)));
     requireValue(segment.resolution === "unresolved" ? segment.content === null : content(segment.content));
+    if (edits.length || Object.hasOwn(view, "editing_allowed")) {
+      requireValue(["source_locale", "speaker_id", "start_ms", "end_ms"].every(key => segment[key] === original[key])
+        && segment.speaker_role === (speakers.get(String(original.speaker_id)) ?? original.speaker_role));
+      const correction = corrections.get(segment.source_segment_id);
+      requireValue(correction === undefined || segment.resolution !== "unresolved" && segment.content === correction);
+      if (original.source_locale === "en-US") requireValue(segment.resolution === "english_source"
+        && segment.content === (correction ?? original.content));
+    }
   }
   const blockers = array(working.blockers);
   const unresolvedIds = new Set(segments.filter((item) => record(item).resolution === "unresolved")
@@ -248,6 +285,53 @@ export function parseCreatorReview(value: unknown, sessionId: string): CreatorRe
     requireValue(content(review.translated_content));
   }
   return view as unknown as CreatorReviewView;
+}
+
+/** Exact read-only Core creator-edit history; it grants no editing permission. */
+function parseCreatorEdits(value: unknown): readonly CreatorTranscriptEdit[] {
+  if (value === undefined) return [];
+  const edits = array(value); requireValue(edits.length <= 1024);
+  const ids = new Set<string>(); let previousVersion = 1, historyCharacters = 0;
+  for (const item of edits) {
+    const edit = record(item);
+    requireValue(Object.keys(edit).sort().join(",") === "created_at,edit_id,request,working_transcript_version"
+      && isUuid(edit.edit_id) && !ids.has(edit.edit_id)
+      && positive(edit.working_transcript_version) && Number(edit.working_transcript_version) > previousVersion
+      && typeof edit.created_at === "string" && /(?:Z|[+-]\d{2}:?\d{2})$/u.test(edit.created_at)
+      && Number.isFinite(Date.parse(edit.created_at)));
+    ids.add(edit.edit_id); previousVersion = Number(edit.working_transcript_version);
+    const request = record(edit.request);
+    requireValue(Object.keys(request).sort().join(",") === "corrections,expected_source_transcript_version,expected_working_transcript_id,expected_working_transcript_version,schema_version,speakers"
+      && request.schema_version === "1.0" && positive(request.expected_source_transcript_version)
+      && isUuid(request.expected_working_transcript_id) && positive(request.expected_working_transcript_version)
+      && edit.working_transcript_version === Number(request.expected_working_transcript_version) + 1);
+    const corrections = array(request.corrections), speakers = array(request.speakers);
+    requireValue(corrections.length <= 128 && speakers.length <= 128 && corrections.length + speakers.length > 0);
+    const segments = new Set<string>(), speakerIds = new Set<string>(); let requestCharacters = 0;
+    for (const item of corrections) {
+      const correction = record(item);
+      requireValue(Object.keys(correction).sort().join(",") === "content,expected_source_segment_version,source_segment_id"
+        && isUuid(correction.source_segment_id) && !segments.has(correction.source_segment_id)
+        && positive(correction.expected_source_segment_version) && content(correction.content));
+      segments.add(correction.source_segment_id); requestCharacters += characters(correction.content as string);
+    }
+    historyCharacters += requestCharacters;
+    requireValue(requestCharacters <= 500_000 && historyCharacters <= 1_000_000
+      && new TextEncoder().encode(JSON.stringify(request)).length <= 1_048_576);
+    for (const item of speakers) {
+      const speaker = record(item);
+      requireValue(Object.keys(speaker).every(key => ["speaker_id", "role", "display_name", "detail"].includes(key))
+        && isUuid(speaker.speaker_id) && !speakerIds.has(speaker.speaker_id)
+        && ["clinician", "patient", "other", "unknown"].includes(String(speaker.role)));
+      speakerIds.add(speaker.speaker_id);
+      requireValue(speaker.detail == null || speaker.role === "other" && ["interpreter", "other"].includes(String(speaker.detail)));
+      requireValue(speaker.display_name == null || typeof speaker.display_name === "string"
+        && validTranscriptText(speaker.display_name) && speaker.display_name.trim().length > 0
+        && characters(speaker.display_name) <= 120 && !/[\u0000-\u001f]/u.test(speaker.display_name)
+        && speaker.role !== "unknown");
+    }
+  }
+  return edits as unknown as readonly CreatorTranscriptEdit[];
 }
 
 function requireValue(condition: unknown): asserts condition {
