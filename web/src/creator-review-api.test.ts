@@ -6,6 +6,7 @@ import { creatorReviewApi } from "./creator-review-api";
 import { CreatorReviewError, creatorReviewFailure } from "../../clients/scribe-review/creator-review-api";
 import {request as captureRequest} from "./capture-api";
 import {BffResponseError} from "../../clients/capture/src/bff/http-client";
+import {mountCreatorReview} from "../../clients/scribe-review/creator-review-panel";
 
 afterEach(() => { vi.unstubAllGlobals(); vi.unstubAllEnvs(); });
 
@@ -54,6 +55,21 @@ it.each([
   expect(error.message).toBe("Creator transcript request failed.");expect(JSON.stringify(error)).not.toContain("untrusted-private-body-marker");
   expect(fetcher).toHaveBeenCalledOnce();
   expect(JSON.parse(fetcher.mock.calls[0][1].body).operation).toEqual({kind:"creator_review"});
+});
+
+it.each([
+  ["capture_access_unavailable","authorization","access_unavailable","Your access to this workspace could not be confirmed. Check your session, then choose Refresh."],
+  ["untrusted-private-body-marker","read","request_unavailable","The transcript could not be retrieved. Choose Refresh to check again."],
+]as const)("classifies OS403 %s through the real capture request and existing review recovery message",async(detail,phase,reason,message)=>{
+  const {api,fetcher}=open(Response.json({detail,private_detail:"untrusted-private-body-marker"},{status:403,headers:jsonHeaders}));
+  const host=document.createElement("div");document.body.append(host);const dispose=mountCreatorReview(host,api);
+  try{
+    await vi.waitFor(()=>expect(host.textContent).toContain(message));
+    expect(host.querySelector("code")?.textContent).toBe(`${phase}_response_403_${reason}`);
+    expect(host.textContent).not.toContain("untrusted-private-body-marker");expect(fetcher).toHaveBeenCalledOnce();
+    expect(fetcher.mock.calls[0][0]).toBe(`http://127.0.0.1:8018/workspaces/${workspace}/capture/operations`);
+    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toMatchObject({session_id:golden.ready.session_id,operation:{kind:"creator_review"}});
+  }finally{dispose();host.remove();}
 });
 
 it.each([
