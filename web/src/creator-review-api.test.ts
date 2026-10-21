@@ -96,7 +96,7 @@ it.each([
 
 it("keeps a rejected transport unconfirmed without claiming response parsing failed",async()=>{
   const {api}=open(new Error("untrusted-private-transport-detail"));
-  expect((await failure(api)).failure).toEqual({phase:"read",reason:"request_unavailable",status:503});
+  expect((await failure(api)).failure).toEqual({phase:"read",reason:"client_transport_unavailable",status:null});
 });
 
 it("refuses a successful response without no-store metadata before reading its transcript",async()=>{

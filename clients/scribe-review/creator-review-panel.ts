@@ -244,6 +244,11 @@ function failureCopy(value: CreatorReviewFailure): string {
   if (failure.phase === "response") return "The transcript response could not be verified. Choose Refresh to retrieve it again.";
   if (failure.phase === "authorization") return "Your access to this workspace could not be confirmed. Check your session, then choose Refresh.";
   if (failure.phase === "recovery") return "Your review recovery could not be checked. Choose Refresh to try again. Review decisions stay closed until recovery is available.";
+  if (failure.reason === "client_timeout") return "The transcript check timed out. Your audio is retained. Choose Refresh to check the same recording again.";
+  if (failure.reason === "client_cancelled") return "The transcript check was interrupted. Choose Refresh to check the same recording again.";
+  if (failure.reason === "client_transport_unavailable"||failure.reason === "workspace_connection_paused") return "The transcript connection could not be confirmed. Check the workspace connection, then choose Refresh.";
+  if (failure.reason === "core_identity_unavailable") return "The secure Scribe service connection is unavailable. Your audio is retained. Choose Refresh to check again.";
+  if (failure.reason === "core_context_invalid"||failure.reason === "core_receipt_invalid") return "Scribe's response could not be verified. Your audio is retained. Choose Refresh to check again.";
   if (failure.reason === "core_access_unavailable") return "Scribe could not verify access to this transcript. Check your Core connection and selected visit, then choose Refresh.";
   if (failure.reason === "connection_required") return "Check your Core connection and selected visit, then choose Refresh to retrieve the transcript.";
   if (failure.reason === "source_changed") return "The recording's session or visit connection changed. Reopen the saved recording before checking its transcript.";
@@ -253,7 +258,7 @@ function failureCopy(value: CreatorReviewFailure): string {
 
 function failureDetails(value: CreatorReviewFailure): string {
   const failure = creatorReviewFailure(value);
-  const reference = `${failure.phase}_${failure.status === null ? "unconfirmed" : `response_${failure.status}`}_${failure.reason}`;
+  const reference = `${failure.phase}_${failure.status === null ? "unconfirmed" : `response_${failure.status}`}_${failure.reason}${failure.corePhase?`_${failure.corePhase}`:""}`;
   return `<details><summary>Support details</summary><p>Transcript check: <code>${reference}</code></p></details>`;
 }
 

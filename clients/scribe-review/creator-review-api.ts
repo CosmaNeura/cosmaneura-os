@@ -65,11 +65,17 @@ export type AuthorizedReviewRequest = (
 
 export type CreatorReviewFailurePhase = "read" | "response" | "authorization" | "recovery";
 export type CreatorReviewFailureReason = "request_unavailable" | "access_unavailable" | "core_access_unavailable"
-  | "connection_required" | "source_changed" | "invalid_response" | "recovery_unavailable" | "recovery_invalid";
-export type CreatorReviewFailure = Readonly<{phase: CreatorReviewFailurePhase; reason: CreatorReviewFailureReason; status: number | null}>;
+  | "connection_required" | "source_changed" | "invalid_response" | "recovery_unavailable" | "recovery_invalid"
+  | "client_timeout"|"client_cancelled"|"client_transport_unavailable"|"workspace_connection_paused"
+  | "core_identity_unavailable"|"core_context_invalid"|"core_receipt_invalid"|"core_request_unconfirmed";
+type CoreFailurePhase="context_exchange"|"context_resolution"|"binding_resolution"|"session_verification"|"review";
+export type CreatorReviewFailure = Readonly<{phase: CreatorReviewFailurePhase; reason: CreatorReviewFailureReason; status: number | null;corePhase?:CoreFailurePhase}>;
 const failurePhases = new Set(["read", "response", "authorization", "recovery"]);
 const failureReasons = new Set(["request_unavailable", "access_unavailable", "core_access_unavailable", "connection_required",
-  "source_changed", "invalid_response", "recovery_unavailable", "recovery_invalid"]);
+  "source_changed", "invalid_response", "recovery_unavailable", "recovery_invalid","client_timeout","client_cancelled","client_transport_unavailable","workspace_connection_paused",
+  "core_identity_unavailable","core_context_invalid","core_receipt_invalid","core_request_unconfirmed"]);
+const coreFailureReasons=new Set(["core_identity_unavailable","core_context_invalid","core_receipt_invalid","core_request_unconfirmed"]);
+const coreFailurePhases=new Set(["context_exchange","context_resolution","binding_resolution","session_verification","review"]);
 const failureStatuses = new Set([200, 202, 401, 403, 404, 409, 422, 426, 429, 500, 502, 503, 504]);
 
 /** Only closed operation metadata survives a failure; never retain an error body or message. */
@@ -81,7 +87,8 @@ export function creatorReviewFailure(value: unknown, fallback: CreatorReviewFail
   const reason = typeof candidate.reason === "string" && failureReasons.has(candidate.reason)
     ? candidate.reason as CreatorReviewFailureReason : defaultReason;
   const status = typeof candidate.status === "number" && failureStatuses.has(candidate.status) ? candidate.status : null;
-  return Object.freeze({phase, reason, status});
+  const corePhase=phase==="read"&&status===503&&coreFailureReasons.has(reason)&&typeof candidate.corePhase==="string"&&coreFailurePhases.has(candidate.corePhase)?candidate.corePhase as CoreFailurePhase:undefined;
+  return Object.freeze({phase, reason, status,...(corePhase?{corePhase}:{})});
 }
 
 export class CreatorReviewError extends Error {

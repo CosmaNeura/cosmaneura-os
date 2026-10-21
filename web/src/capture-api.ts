@@ -5,7 +5,7 @@ import { MAX_CAPTURE_SOURCE_BYTES } from "../../clients/capture/src/bff/transcri
 import { BffResponseError } from "../../clients/capture/src/bff/http-client";
 import type { AuthenticatedWorkspaceIdentity, CaptureBotSelection } from "./workspace-api";
 import { assertCurrentDesktopSession, workspaceAuthHeaders } from "./workspace-auth-headers";
-import { WORKSPACE_AUTHENTICATED_BUILD, WORKSPACE_BUILD } from "./workspace-api";
+import { WORKSPACE_AUTHENTICATED_BUILD, WORKSPACE_BUILD, WorkspaceApiError } from "./workspace-api";
 
 export const CAPTURE_WORKSPACE_BUILD = WORKSPACE_BUILD && WORKSPACE_AUTHENTICATED_BUILD &&
   import.meta.env.VITE_WORKSPACE_CAPTURE_ENABLED === "true";
@@ -43,6 +43,14 @@ const SAFE_CODES = new Set(["capture_access_unavailable", "capture_consent_requi
   "capture_note_conflict", "capture_source_unavailable", "capture_notes_unavailable", "capture_notebook_changed", "capture_saved_recording_changed",
   "bot_paused", "team_revision_conflict", "bot_source_unavailable", "scribe_source_changed",
   "scribe_source_packet_too_large", "scribe_source_already_saved", "workspace_revision_conflict", "workspace_history_limit", "idempotency_conflict"]);
+const CORE_FAILURE_CODES=new Set(["core_capture_identity_unavailable","core_capture_context_invalid","core_capture_receipt_invalid","core_capture_request_unconfirmed"]);
+for(const code of CORE_FAILURE_CODES)SAFE_CODES.add(code);
+type CoreFailurePhase="context_exchange"|"context_resolution"|"binding_resolution"|"session_verification"|"review";
+const CORE_FAILURE_PHASES=new Set(["context_exchange","context_resolution","binding_resolution","session_verification","review"]);
+export type CaptureFailureObservation=Readonly<{origin:"http_response"|"client_timeout"|"client_cancelled"|"client_transport"|"workspace_paused";status:number|null;corePhase?:CoreFailurePhase}>;
+const failures=new WeakMap<BffResponseError,CaptureFailureObservation>();
+/** Closed metadata only; shared capture errors retain their existing retry/control-flow status. */
+export const captureFailureObservation=(error:unknown)=>error instanceof BffResponseError?failures.get(error)??null:null;
 
 export async function request(workspaceId: string, action: "admission" | "operations" | "notes" | "prep" | "existing" | "source-packets",
   identity: AuthenticatedWorkspaceIdentity, body: unknown, signal?: AbortSignal,
@@ -56,7 +64,8 @@ export async function request(workspaceId: string, action: "admission" | "operat
     throw new BffResponseError(422,'capture_request_invalid',null);
   const controller = new AbortController();
   const abort = () => controller.abort();
-  const timer = setTimeout(abort, timeoutMs);
+  let timedOut=false,responseStatus:number|null=null,corePhase:CoreFailurePhase|undefined;
+  const timer = setTimeout(()=>{timedOut=true;abort();}, timeoutMs);
   signal?.addEventListener("abort", abort, { once: true });
   if (signal?.aborted) abort();
   let cancelAuth: (() => void) | undefined;
@@ -83,6 +92,7 @@ export async function request(workspaceId: string, action: "admission" | "operat
       headers,
       body: JSON.stringify(body),
     });
+    responseStatus=response.status;
     if (response.headers.get("content-type")?.split(";", 1)[0].trim() !== "application/json" ||
         !response.headers.get("cache-control")?.split(",").some(value => value.trim().toLowerCase() === "no-store")) {
       throw new BffResponseError(response.status, "capture_request_unconfirmed", null);
@@ -114,12 +124,17 @@ export async function request(workspaceId: string, action: "admission" | "operat
     if (!response.ok || response.status === 202) {
       const code = isRecord(value) && typeof value.detail === "string" && SAFE_CODES.has(value.detail)
         ? value.detail : "capture_request_unconfirmed";
+      if(response.status===503&&CORE_FAILURE_CODES.has(code)&&isRecord(value)&&typeof value.capture_phase==="string"&&CORE_FAILURE_PHASES.has(value.capture_phase))corePhase=value.capture_phase as CoreFailurePhase;
       throw new BffResponseError(response.status, code, null);
     }
     return value;
   } catch (error) {
-    if (error instanceof BffResponseError) throw error;
-    throw new BffResponseError(503, "capture_request_unconfirmed", null);
+    const selected=error instanceof BffResponseError?error:new BffResponseError(503, "capture_request_unconfirmed", null);
+    const origin=timedOut?"client_timeout":controller.signal.aborted?"client_cancelled":
+      error instanceof WorkspaceApiError&&error.code==="workspace_protocol_required"?"workspace_paused":
+      error instanceof BffResponseError&&responseStatus!==null?"http_response":"client_transport";
+    failures.set(selected,Object.freeze({origin,status:origin==="http_response"?responseStatus:null,...(corePhase?{corePhase}:{})}));
+    throw selected;
   } finally {
     if (cancelAuth) controller.signal.removeEventListener("abort", cancelAuth);
     clearTimeout(timer);
