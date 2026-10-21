@@ -22,17 +22,17 @@ beforeEach(async()=>{vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);vi.stu
  host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{await act(async()=>root.unmount());recovery.journal.close();host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
-async function mount(account=identity){await act(async()=>root.render(<PrivateDraftLinkPanel identity={account} workspace={draft} recovery={recovery} locked={false} onSaved={saved} onAccessLost={denied} onBusyChange={busyChanged} onPendingChange={pendingChanged}/>));}
+async function mount(account=identity,compact=false){await act(async()=>root.render(<PrivateDraftLinkPanel compact={compact} identity={account} workspace={draft} recovery={recovery} locked={false} onSaved={saved} onAccessLost={denied} onBusyChange={busyChanged} onPendingChange={pendingChanged}/>));}
 async function click(label:string){const button=[...host.querySelectorAll('button')].find(b=>b.textContent===label)!;expect(button,label).toBeTruthy();expect(button.disabled).toBe(false);await act(async()=>button.click());}
 async function choose(){await click('Load available visits');await act(async()=>{const select=host.querySelector('select')!;Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype,'value')!.set!.call(select,id(2));select.dispatchEvent(new Event('change',{bubbles:true}));});
  expect([...host.querySelectorAll('button')].find(b=>b.textContent==='Link this visit')!.disabled).toBe(true);await act(async()=>host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());}
-it('retains an uncertain reviewed link across remount, then retries only the original key after explicit lookup',async()=>{
- await mount();expect(workspaceApi.catalog).not.toHaveBeenCalled();await choose();await click('Link this visit');
+it.each([false,true])('retains an uncertain reviewed link across remount, then retries only the original key after explicit lookup (compact=%s)',async compact=>{
+ await mount(identity,compact);expect(workspaceApi.catalog).not.toHaveBeenCalled();await choose();await click('Link this visit');
  const body=vi.mocked(workspaceApi.linkAppointment).mock.calls[0][2];expect(body).toMatchObject({expected_revision:1,appointment_id:id(2),appointment_link_confirmed:true});
  const prior=await recovery.journal.load(editorAddress(draft.id,'private-draft-link'));expect(prior?.pending).toBe(body.idempotency_key);
  expect(busyChanged).toHaveBeenLastCalledWith(false);expect(pendingChanged).toHaveBeenLastCalledWith(true);
  expect(host.textContent).toContain('You can return Home and reopen this notebook to continue.');
- await act(async()=>root.unmount());root=createRoot(host);await mount();expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();
+ await act(async()=>root.unmount());root=createRoot(host);await mount(identity,compact);expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();
  await click('Check saved visit link');expect(workspaceApi.resolveAppointmentLink).toHaveBeenCalledExactlyOnceWith(identity,draft.id,body);
  expect(await recovery.journal.load(editorAddress(draft.id,'private-draft-link'))).toEqual(prior);expect(saved).not.toHaveBeenCalled();
  vi.mocked(workspaceApi.linkAppointment).mockResolvedValue({entry_revision:2,link_receipt_id:id(3),workspace:linked});await click('Retry same visit link');

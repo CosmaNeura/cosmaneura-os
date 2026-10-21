@@ -43,8 +43,8 @@ async function write(selector:string,value:string){const field=host.querySelecto
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function open(){
   await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
-  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Start a private note')?.disabled).toBe(false);});
-  await click('Start a private note');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector<HTMLButtonElement>('.practice-quick-start button[type=submit]')?.disabled).toBe(false);});
+  await act(async()=>host.querySelector<HTMLButtonElement>('.practice-quick-start button[type=submit]')!.click());
   await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false);});
   await click('Conversation view');await write('#team-notebook',workingNote);await write('#team-question',workingQuestion);
 }
@@ -160,4 +160,32 @@ it('reopens the exact retained clip expanded after an earlier close completes wh
   expect(panel.props!.minimized).toBe(false);expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('true');
   expect(host.querySelector('[aria-label="Private Scribe recording"]')?.hasAttribute('hidden')).toBe(false);
   expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
+});
+
+const nativeOwner=():AuthenticatedWorkspaceIdentity=>({mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:'invented-private-phone-owner',isCurrent:()=>true}});
+async function privatePanel(name:string){
+  const selected=host.querySelector<HTMLButtonElement>(`.team-mobile-tabs button[data-panel="${name}"]`)!;
+  expect(selected.disabled).toBe(false);await act(async()=>selected.click());
+}
+it('opens an unlinked native phone note without visit-phase or duplicate progress chrome, retaining working words and real review/recording routes',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true}));identity=nativeOwner();await open();await click('Open private note');
+  expect(host.querySelector('.workspace-notebook')?.getAttribute('data-native-private-note')).toBe('true');
+  for(const label of ['Encounter stage','Note progress','Current task'])expect(host.querySelector<HTMLElement>(`[aria-label="${label}"]`)!.hidden,label).toBe(true);
+  const editor=host.querySelector<HTMLTextAreaElement>('#team-notebook')!;expect(editor.value).toBe(workingNote);
+  const link=host.querySelector('.private-draft-link')!;expect(link.classList.contains('private-draft-link-compact')).toBe(true);
+  expect(link.querySelector('details>summary')).toBeTruthy();expect(link.querySelector('h2')).toBeNull();
+  await privatePanel('Review');expect(host.querySelector('.team-note-review')?.closest('[hidden]')).toBeNull();
+  await privatePanel('Sources');expect(host.querySelector('.team-content')?.getAttribute('data-mobile-panel')).toBe('Sources');
+  await privatePanel('Notebook');expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe(workingQuestion);
+  await click('Start a private recording');expect(panel.props!.isCurrent()).toBe(true);expect((await panel.props!.prepareNotebook!()).workspace.id).toBe(workspace.id);
+  await click('Close recording');expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
+  expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+});
+it.each(['browser-phone','native-tablet','linked-native-phone'] as const)('preserves existing visit/progress presentation for %s',async mode=>{
+  vi.stubGlobal('matchMedia',()=>({matches:mode!=='native-tablet'}));if(mode!=='browser-phone')identity=nativeOwner();
+  if(mode==='linked-native-phone'){workspace.appointment_id=uuid(860);workspace.private_draft={...workspace.private_draft!,state:'linked',link_receipt_id:uuid(861),linked_at:'2026-10-21T00:00:00Z'};}
+  await open();await click(mode==='native-tablet'?'Workspace view':'Open private note');expect(host.querySelector('.workspace-notebook')?.getAttribute('data-native-private-note')).toBe('false');
+  for(const label of ['Encounter stage','Note progress','Current task'])expect(host.querySelector<HTMLElement>(`[aria-label="${label}"]`)!.hidden,label).toBe(false);
+  expect(host.querySelector('.private-draft-link-compact')).toBeNull();expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(workingNote);
 });

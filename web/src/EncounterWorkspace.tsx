@@ -1615,6 +1615,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   }
   const localModelPending=pending?.type==='ask'||pending?.type==='retry'?pending:null;
   const nativeChatOwner=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?authenticated:null;
+  const nativePrivateNote=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&workspace?.private_draft?.state==='unlinked'&&!visitLinked;
   const nativeHome=!!nativeChatOwner&&phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&!savedRecordingEntry;
   const nativeConversationPending=bot?.role==='chief'&&localModelPending?.type==='ask'&&localModelPending.body.role===selected&&
     !localModelPending.body.research_analysis&&!localModelPending.body.inbox_analysis&&!localModelPending.body.membership_analysis&&!localModelPending.body.session_prep_analysis;
@@ -2029,14 +2030,14 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           onConnections={()=>void openSettings('core')}/>}
         <p className="team-fine">Notes and private drafts do not need email or calendar setup.</p>
       </section>
-      {workspace&&<div className="workspace-notebook" hidden={practicePage!=="notebook"}>
+      {workspace&&<div className="workspace-notebook" data-native-private-note={nativePrivateNote} hidden={practicePage!=="notebook"}>
         <section hidden={settingsOpen||savedRecordingFocused} className="team-encounter-heading"><div><p className="team-kicker">{workspace.private_draft?.state==='unlinked'?'PRIVATE NOTE':'ENCOUNTER NOTEBOOK'}</p><h1>{workspace.notebook?.title??workspace.label}</h1>
           <p>{workspace.private_draft?.state==='unlinked'?'No patient yet · Unlinked note':workspace.label+' · Linked visit'}{workspace.notebook?.created_at?' · '+new Date(workspace.notebook.created_at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):''}</p>
           <button className="team-subtle" disabled={busy || !!pending || handoffReviewPending || !!privateRecordingEntry || privateRecordingBusy} onClick={() => void refresh()}>Refresh encounter</button>
           {import.meta.env.VITE_COSMANEURA_RECORD_ENABLED === "true" && authenticated && visitLinked && team?.capture?.enabled &&
             <CoreRecordLink key={workspace.id} identity={authenticated} workspaceId={workspace.id}
               locked={busy || !!pending || captureNavigationLocked || recoveryBlocked} onDenied={failure} />}</div>
-          <nav aria-label="Encounter stage" className="team-stages">{["Before", "During", "After"].map(value => <button key={value} aria-pressed={stage === value} onClick={() => {
+          <nav aria-label="Encounter stage" className="team-stages" hidden={nativePrivateNote}>{["Before", "During", "After"].map(value => <button key={value} aria-pressed={stage === value} onClick={() => {
             setStage(value);const role=({Before:'visit_prep',During:'scribe',After:'follow_up'})[value];
             const helper=team?.configuration.bots.find(bot=>bot.role===role&&!bot.retired&&!bot.instance_id);if(helper)setSelected(botAddress(helper));
             setPanel(value==='After'?'Review':'Notebook');setMobilePanel(value==='After'?'Review':'Notebook');
@@ -2062,7 +2063,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onRecordings={goHome} onNavigationLock={setCaptureNavigationLocked}
             taskBot={scribe?{selection:{address:botAddress(scribe),team_revision:team.revision},name:scribe.name,enabled:scribe.enabled&&team.revision>0,includeNotebook:scribe.include_notebook}:undefined}/>}
         </div>
-        {authenticated&&workspace.private_draft&&!savedRecordingEntry&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry}
+        {authenticated&&workspace.private_draft&&!savedRecordingEntry&&<PrivateDraftLinkPanel identity={authenticated} workspace={workspace} recovery={editorAccess??null} forTranscription={!!savedRecordingEntry} compact={nativePrivateNote}
           recoveryLocked={busy||!!pending||recoveryBlocked||captureNavigationLocked||captureDraftLocked}
           locked={busy||homeBusy||!!pending||conflict||recoveryOffers.some(offer=>offer.address===`workspace:${workspace.id}`)||recoveryBlocked||captureNavigationLocked||captureDraftLocked||note!==latestNote}
           onAccessLost={failure} onSaved={latest=>{setWorkspace(latest);setMessage('Private draft linked to the confirmed visit. Your saved history is retained.');}}/>}
@@ -2126,13 +2127,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             onSaved={latest=>setWorkspace(previous=>previous?.id===latest.id&&previous.revision<=latest.revision?latest:previous)}
             onClose={()=>{if(!handoffReviewPending)setReviewHandoffId(null);}}
             onRevisionPrepared={id=>{setReviewHandoffId(id);setHandoffReviewPending(false);}}/>}
-        <nav className="team-mobile-tabs team-scribe-tabs" aria-label="Visit view">
+        <nav className="team-mobile-tabs team-scribe-tabs" aria-label={nativePrivateNote?"Private note view":"Visit view"}>
           {(bot?.role === "scribe" ? ["Notebook", "Conversation", "Review"] : ["Conversation", "Notebook", "Sources", "Review", "Work"]).map(value => <button key={value} data-panel={value} aria-pressed={mobilePanel === value}
-            onClick={() => { setMobilePanel(value); if (value !== "Conversation") setPanel(value); }}>{bot?.role === "scribe" ? ({Notebook:"Visit notes",Conversation:"Ask Scribe",Review:"Review note"})[value] : value}</button>)}
+            onClick={() => { setMobilePanel(value); if (value !== "Conversation") setPanel(value); }}>{bot?.role === "scribe" ? ({Notebook:nativePrivateNote?"Notes":"Visit notes",Conversation:"Ask Scribe",Review:"Review note"})[value] : nativePrivateNote&&value==="Notebook"?"Notes":value}</button>)}
           {bot?.role === "scribe" && <details data-menu className="team-visit-more"><summary>More</summary><div>{["Sources", "Work"].map(value => <button key={value} aria-pressed={mobilePanel === value}
             onClick={event => {setPanel(value); setMobilePanel(value); const menu = event.currentTarget.closest('details'); if (menu) menu.open = false;}}>{value === "Sources" ? "Saved sources" : "Follow-up work"}</button>)}</div></details>}
         </nav>
-        <ol className="notebook-progress" aria-label="Note progress">
+        <ol className="notebook-progress" aria-label="Note progress" hidden={nativePrivateNote}>
           {['Notes','Draft','Review','Saved'].map((step,index)=><li key={step} aria-current={index===(reviewState==='saved'?3:busy&&pending?.type==='ask'?1:panel==='Review'?2:0)?'step':undefined}>{step}</li>)}
         </ol>
         <div className="team-content" data-mobile-panel={mobilePanel} data-scribe-focus="true"><section className="team-conversation" aria-label="Encounter conversation">
@@ -2272,7 +2273,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           </div>
         </section><aside className="team-notebook-panel">
           <nav aria-label="Encounter materials" className="team-material-tabs">{["Notebook", "Sources", "Review", "Work"].map(value => <button key={value} aria-pressed={panel === value} onClick={() => setPanel(value)}>{value}</button>)}</nav>
-          <div className="team-task-context" aria-label="Current task"><strong>{({Notebook:"Visit notebook",Sources:"Check saved sources",Review:"Review visit note",Work:"Drafts and human follow-up"} as Record<string,string>)[panel]}</strong>
+          <div className="team-task-context" aria-label="Current task" hidden={nativePrivateNote}><strong>{({Notebook:"Visit notebook",Sources:"Check saved sources",Review:"Review visit note",Work:"Drafts and human follow-up"} as Record<string,string>)[panel]}</strong>
             <span>{panel==='Work'?'Confirm who owns the next action.':panel==='Sources'?'Read the material behind the note.':panel==='Review'?'Save the note, then record your review.':'Save your jottings, then review the visit note.'}</span></div>
           <div className="team-material-content" ref={materialRef}>
             {panel==='Work'&&<EncounterWorkSummary workspace={reviewWorkspace!} identity={authenticated||identity||undefined} locked={locked||connectionNavigationLocked}

@@ -502,3 +502,16 @@
   .team-workspace[data-recording-focused=true] .private-recording-host { order:-1; }
   .team-workspace[data-recording-focused=true] .private-recording-panel { margin:0; max-width:none; }
 }
+
+/* Private notes on an iPhone need no visit-phase or duplicate progress frame. */
+@media (max-width:600px) {
+  .workspace-notebook[data-native-private-note=true] > .team-encounter-heading { padding:12px 16px 8px; }
+  .workspace-notebook[data-native-private-note=true] > .team-encounter-heading .team-kicker { margin-bottom:4px; }
+  .workspace-notebook[data-native-private-note=true] > .team-encounter-heading h1 { font-size:22px; }
+  .workspace-notebook[data-native-private-note=true] > .private-draft-link-compact { margin:0 12px 8px; padding:8px 4px; }
+  .workspace-notebook[data-native-private-note=true] > .private-draft-link-compact > p { margin-bottom:4px; font-size:13px; color:var(--team-muted); }
+  .workspace-notebook[data-native-private-note=true] input,
+  .workspace-notebook[data-native-private-note=true] select,
+  .workspace-notebook[data-native-private-note=true] textarea { font-size:16px; }
+  .workspace-notebook[data-native-private-note=true] > .private-draft-link-compact > details > summary { min-height:44px; box-sizing:border-box; padding:10px 0; cursor:pointer; }
+}
