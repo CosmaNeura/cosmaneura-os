@@ -109,6 +109,9 @@ def migrate_beta_database_forward(
             runtime_url,
             require_verify_full=require_verify_full,
         )
+        runtime_role = runtime.username
+        if not isinstance(runtime_role, str) or not runtime_role:
+            raise DatabaseMigrationError(FAILURE)
         if EXPECTED_SCHEMA_REVISION != TO_REVISION:
             raise DatabaseMigrationError(FAILURE)
         config_path = alembic_config_path or Path(__file__).resolve().parents[3] / "alembic.ini"
@@ -140,7 +143,7 @@ def migrate_beta_database_forward(
                 "SELECT version_num FROM public.alembic_version ORDER BY version_num"
             )).scalars()) != (FROM_REVISION,):
                 raise DatabaseMigrationError(FAILURE)
-            role_before, memberships_before = _role_state(connection, runtime.username)
+            role_before, memberships_before = _role_state(connection, runtime_role)
             catalog_before = _catalog_state(connection)
 
             command.upgrade(config, TO_REVISION)
@@ -148,7 +151,7 @@ def migrate_beta_database_forward(
             current = tuple(connection.execute(text(
                 "SELECT version_num FROM public.alembic_version ORDER BY version_num"
             )).scalars())
-            role_after, memberships_after = _role_state(connection, runtime.username)
+            role_after, memberships_after = _role_state(connection, runtime_role)
             catalog_after = _catalog_state(connection)
             role_equal = role_before == role_after
             memberships_equal = memberships_before == memberships_after
