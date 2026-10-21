@@ -5,6 +5,7 @@ import {EncounterWorkspace} from './EncounterWorkspace';
 import {DraftStoreError,type DraftStore,type DraftRecord} from './draft-store';
 import type {NotebookDraft} from './draft-journal';
 import {modelReceipt,modelUuid,modelTimestamp} from './model-work-test-fixture';
+import {modelWorkApi} from './model-work-api';
 import {teamFixture} from './team-setup-test-fixture';
 import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 import {listPrivateRecordings} from './private-recording-runtime';
@@ -15,6 +16,7 @@ vi.mock('./team-setup-api',async()=>{const {WorkspaceApiError}=await import('./w
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(scope:string)=>scope}));
 vi.mock('./private-recording-runtime',async original=>({...await original<typeof import('./private-recording-runtime')>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
 vi.mock('./capture-api',async original=>({...await original<typeof import('./capture-api')>(),CAPTURE_WORKSPACE_BUILD:true}));
+vi.mock('./model-work-api',async original=>({...await original<typeof import('./model-work-api')>(),modelWorkApi:{resolve:vi.fn()}}));
 vi.mock('./PrivateRecordingPanel',()=>({PrivateRecordingPanel:({identity,onTranscribe}:PrivateRecordingPanelProps)=><button onClick={()=>void onTranscribe?.({identity,workspace,team},modelUuid(989))}>Finish synthetic saved recording</button>}));
 vi.mock('./RecordingVisitPanel',()=>({RecordingVisitPanel:({origin,onSelected}:Parameters<typeof import('./RecordingVisitPanel').RecordingVisitPanel>[0])=><button onClick={()=>void onSelected(origin,null)}>Open synthetic saved transcript</button>}));
 vi.mock('./SavedRecordingTranscriptionPanel',()=>({SavedRecordingTranscriptionPanel:()=> <section aria-label="Saved recording transcription"><h2>Review your transcript</h2><p role="alert">Your transcript cannot currently be retrieved. Choose Refresh to check again.</p><button>Refresh</button></section>}));
@@ -36,7 +38,7 @@ const send=()=>host.querySelector<HTMLButtonElement>('[aria-label="Send message"
 async function positionConversation(top:number){
   const scroller=host.querySelector<HTMLDivElement>('.mobile-chat-scroll')!;
   Object.defineProperties(scroller,{
-    scrollHeight:{configurable:true,get:()=>scroller.querySelector('.team-human-message')?1400:1000},
+    scrollHeight:{configurable:true,get:()=>(scroller.querySelector('.team-human-message')?1400:1000)+(scroller.querySelector('[aria-label="Unconfirmed model request"]')?600:0)},
     clientHeight:{configurable:true,get:()=>200},
   });
   await act(async()=>{scroller.scrollTop=top;scroller.dispatchEvent(new Event('scroll',{bubbles:true}));});
@@ -92,10 +94,40 @@ it('keeps new typing and keyboard focus while the old exact request saves, with 
 });
 it('retains the new working question alongside the immutable old request after a lost reply',async()=>{
   let reject!:(cause:unknown)=>void;vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));
-  await type('Original exact request');await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);
+  const scroller=await positionConversation(200);
+  await type('Original exact request');question().focus();const input=question();await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);
   await type('Unsent next question');await act(async()=>reject(new WorkspaceApiError(503)));await ready(()=>expect(host.textContent).toContain('unconfirmed'));
+  expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
+  expect(host.querySelector('.mobile-chat-scroll')).toBe(scroller);expect(scroller.scrollTop).toBe(200);
+  const recovery=host.querySelector('[aria-label="Unconfirmed model request"]');
+  expect(host.querySelectorAll('[aria-label="Unconfirmed model request"]')).toHaveLength(1);expect(scroller.contains(recovery)).toBe(true);
+  expect(question()).toBe(input);expect(document.activeElement).toBe(input);
   await act(async()=>notifyNativeWorkspaceForeground(access,false));await ready(()=>expect(draft()?.thought).toBe('Unsent next question'));
   expect(draft()?.pending).toMatchObject({type:'ask',body:sent});expect(send().disabled).toBe(true);expect(workspaceApi.ask).toHaveBeenCalledOnce();notifyNativeWorkspaceForeground(access,true);
+});
+it('reveals native recovery at the bottom and permits only explicit same-key send after a verified missing result',async()=>{
+  let reject!:(cause:unknown)=>void;
+  vi.mocked(workspaceApi.ask).mockImplementationOnce(()=>new Promise((_resolve,fail)=>{reject=fail;})).mockImplementation((_identity,id,body)=>modelReceipt(body,id));
+  vi.mocked(modelWorkApi.resolve).mockImplementation(async(_identity,id,operation)=>{
+    if(operation.type!=='ask')throw new Error('Invented conversation required');
+    return {...await modelReceipt(operation.body,id),outcome:'not_found',saved_entry:null,admission:null,reason:null};
+  });
+  const scroller=await positionConversation(800);await type('Original exact request');question().focus();const input=question();
+  await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);
+  expect(scroller.scrollTop).toBe(1200);await type('Next unsent question');await act(async()=>reject(new WorkspaceApiError(503)));
+  await ready(()=>expect(scroller.querySelector('[aria-label="Unconfirmed model request"]')).toBeTruthy());
+  expect(scroller.scrollTop).toBe(1800);expect(question()).toBe(input);expect(document.activeElement).toBe(input);
+  expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();expect(send().disabled).toBe(true);
+  expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Send this saved request')).toBe(false);
+  await click('Check saved result');await ready(()=>expect([...host.querySelectorAll('button')].some(button=>button.textContent==='Send this saved request'&&!button.disabled)).toBe(true));
+  expect(modelWorkApi.resolve).toHaveBeenCalledExactlyOnceWith(access,workspace.id,expect.objectContaining({type:'ask',body:sent}));
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(draft()?.pending).toMatchObject({type:'ask',body:sent});
+  expect(host.querySelector('.mobile-chat-scroll')).toBe(scroller);expect(scroller.scrollTop).toBe(1800);
+  await type('Next unsent question after checking');expect(scroller.scrollTop).toBe(1800);
+  await click('Send this saved request');await ready(()=>expect(draft()?.pending).toBeNull());
+  expect(workspaceApi.ask).toHaveBeenNthCalledWith(2,access,workspace.id,sent);expect(workspaceApi.ask).toHaveBeenCalledTimes(2);
+  expect(question()).toBe(input);expect(question().value).toBe('Next unsent question after checking');expect(document.activeElement).toBe(input);
+  expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
 });
 it('preserves typing that arrives while the settled encrypted write is in flight',async()=>{
   let release!:(receipt:Awaited<ReturnType<typeof modelReceipt>>)=>void,finishWrite!:()=>void,held=false;
