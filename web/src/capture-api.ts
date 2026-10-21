@@ -104,7 +104,12 @@ export async function request(workspaceId: string, action: "admission" | "operat
     const contents = new Uint8Array(bytes);
     let offset = 0;
     for (const chunk of chunks) { contents.set(chunk, offset); offset += chunk.byteLength; }
-    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(contents));
+    let value: unknown;
+    try {
+      value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(contents));
+    } catch {
+      throw new BffResponseError(503, "capture_receipt_invalid", null);
+    }
     assertCurrentDesktopSession(identity);
     if (!response.ok || response.status === 202) {
       const code = isRecord(value) && typeof value.detail === "string" && SAFE_CODES.has(value.detail)

@@ -1,12 +1,13 @@
 import { useContext, useEffect, useRef, useState } from "react";
 import { mountCreatorReview, type CreatorReviewAvailability } from "../../clients/scribe-review/creator-review-panel";
 import { parsePendingReviewDecision, type PendingReviewDecision } from "../../clients/scribe-review/creator-review-journal";
-import type { CreatorReviewView } from "../../clients/scribe-review/creator-review-api";
+import { CreatorReviewError, type CreatorReviewView } from "../../clients/scribe-review/creator-review-api";
 import { creatorReviewApi } from "./creator-review-api";
 import { EditorRecoveryContext, editorDraft } from "./editor-recovery";
 import { editorAddress } from "./draft-journal";
 import { DraftStoreError } from "./draft-store";
 import type { AuthenticatedWorkspaceIdentity } from "./workspace-api";
+import { WorkspaceApiError } from "./workspace-api";
 import { useUnsavedWork } from "./unsaved-work";
 
 /** Reuse Scribe's clinician review UI with the workspace's encrypted recovery store. */
@@ -33,22 +34,36 @@ export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, o
     const report = () => {
       if (current) { setRetained(pending !== null || working > 0); callbacks.current.onLock(pending !== null || working > 0); }
     };
-    const requireCurrent = () => { if (!current || controller.signal.aborted) throw new DraftStoreError("unavailable"); };
+    const requireCurrent = () => { if (!current || controller.signal.aborted) throw new CreatorReviewError("unavailable", {phase: "authorization"}); };
     const authorize = async () => {
-      requireCurrent();
-      const workspace = await access.authorize();
-      requireCurrent();
-      if (workspace.id !== workspaceId) throw new DraftStoreError("integrity");
+      try {
+        requireCurrent();
+        const workspace = await access.authorize();
+        requireCurrent();
+        if (workspace.id !== workspaceId) throw new CreatorReviewError("unavailable", {phase: "authorization"});
+      } catch (error) {
+        if (error instanceof CreatorReviewError) throw error;
+        throw new CreatorReviewError("unavailable", {phase: "authorization",
+          status: error instanceof WorkspaceApiError ? error.status : null});
+      }
     };
     const load = async (): Promise<PendingReviewDecision | null> => {
       await authorize();
-      const record = await access.journal.load(address);
-      requireCurrent();
-      if (record === null) return null;
-      if (record.kind !== "editor" || record.workspaceId !== workspaceId || record.editor !== kind) throw new DraftStoreError("integrity");
-      const result = parsePendingReviewDecision(record.data);
-      if (record.pending !== result.key) throw new DraftStoreError("integrity");
-      return result;
+      try {
+        const record = await access.journal.load(address);
+        requireCurrent();
+        if (record === null) return null;
+        if (record.kind !== "editor" || record.workspaceId !== workspaceId || record.editor !== kind) throw new DraftStoreError("integrity");
+        let result: PendingReviewDecision;
+        try { result = parsePendingReviewDecision(record.data); }
+        catch { throw new DraftStoreError("integrity"); }
+        if (record.pending !== result.key) throw new DraftStoreError("integrity");
+        return result;
+      } catch (error) {
+        if (error instanceof CreatorReviewError) throw error;
+        throw new CreatorReviewError("unavailable", {phase: "recovery", reason: error instanceof DraftStoreError && error.code !== "unavailable"
+          ? "recovery_invalid" : "recovery_unavailable"});
+      }
     };
     const journal = {
       load: async () => { pending = await load(); report(); return pending; },
@@ -91,6 +106,7 @@ export function CreatorReviewPanel({ workspaceId, sessionId, identity, locked, o
       },
     }, {journal, onAvailability: availability => {
       if (!current || controller.signal.aborted) return;
+      if (availability === "unavailable" && refreshTimer) { clearTimeout(refreshTimer); refreshTimer = undefined; }
       if (availability !== "ready") callbacks.current.onSource(null);
       callbacks.current.onAvailability?.(availability);
     }, continueToNote: async () => {

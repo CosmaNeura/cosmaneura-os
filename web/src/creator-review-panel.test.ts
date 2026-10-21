@@ -15,7 +15,7 @@ it('reports unavailable after a failed read and ready only after an explicit suc
   expect(availability.mock.calls).toEqual([['loading']]);
   reject(new Error('private vendor/session detail'));
   await vi.waitFor(()=>expect(availability).toHaveBeenLastCalledWith('unavailable'));
-  expect(host.textContent).toContain('This recording is unavailable');expect(host.textContent).not.toContain('private vendor/session detail');
+  expect(host.textContent).toContain('The transcript could not be retrieved. Choose Refresh to check again.');expect(host.textContent).not.toContain('private vendor/session detail');
   refresh();expect(availability).toHaveBeenLastCalledWith('loading');
   await vi.waitFor(()=>expect(availability).toHaveBeenLastCalledWith('ready'));
   expect(availability.mock.calls).toEqual([['loading'],['unavailable'],['loading'],['ready']]);expect(api.decide).not.toHaveBeenCalled();
