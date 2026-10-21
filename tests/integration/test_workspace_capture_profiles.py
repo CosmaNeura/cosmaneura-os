@@ -101,5 +101,5 @@ def test_wrong_profile_never_reaches_final_operation(capture_case, fault):
     f.profile = capabilities() if fault == "type" else f.profile.model_copy(update={
         "session_id" if fault == "session" else "receipt_id": uuid4()})
     response = perform(f, operation=request)
-    assert response.status_code == 503 and response.json()["detail"] == "capture_request_unconfirmed"
+    assert response.status_code == 503 and response.json()["detail"] == "core_capture_receipt_invalid"
     assert f.port.calls[-1] == "profile" and "operation" not in f.port.calls
