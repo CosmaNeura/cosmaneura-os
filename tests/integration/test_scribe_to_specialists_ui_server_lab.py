@@ -35,6 +35,7 @@ from tests.integration.test_workspace_capture_operations import capabilities
 from cosmas_os.adapters.gpt41 import ENDPOINT, _context
 from cosmas_os.api import app as api
 from cosmas_os.api.auth import ClerkTokenVerifier
+from cosmas_os.application import clinical_note_share
 from cosmas_os.application import model_work as work
 from cosmas_os.application import note_review as notes
 from cosmas_os.application import provider_team as team
@@ -597,7 +598,18 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
         context = _context(claim.envelope["context"])
         selection = claim.envelope["tool_selection"]
         started = time.monotonic()
-        if context.draft_only and context.role in {"research", "visit_prep", "follow_up"}:
+        shared_note = next((source for source in context.sources if source.label == clinical_note_share.LABEL), None)
+        directions = "  Keep the patient email brief.\nResearch: identify missing treatment evidence. 界🩺  "
+        if shared_note is not None:
+            public = current(cases[claim.workspace_id])
+            saved_note = public["note"]["latest"]
+            assert shared_note.content.endswith(saved_note["content"])
+            if context.role == "chief":
+                assert "Human drafting directions (not clinical facts or permission)" in context.question
+                assert json.dumps(directions, ensure_ascii=False) in context.question
+            else:
+                assert json.dumps(directions, ensure_ascii=False) in context.question
+        if shared_note is None and context.draft_only and context.role in {"research", "visit_prep", "follow_up"}:
             assert "Accepted Scribe summary copied from the exact tool receipt:" in context.question
             assert "confirm missing DOB and owner without inventing facts" in context.question
         assert claim.envelope["contract"] == (
@@ -656,7 +668,7 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
                         )
                 else:
                     selected = [p for p in selection["sources"] if p["kind"] == "evidence"]
-                    assert len(selected) == 1
+                    assert len(selected) == (2 if shared_note is not None else 1)
                     for i, p in enumerate(selected):
                         calls.append(
                             {
@@ -670,7 +682,7 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
                                 },
                             }
                         )
-                    if selection["teammate_drafts"]:
+                    if shared_note is None and selection["teammate_drafts"]:
                         p = max(
                             (p for p in selection["teammate_drafts"] if p["role"] == "scribe"),
                             key=lambda p: p["revision"],
@@ -744,6 +756,8 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
                     if "Collect the revised" in context.question
                     else ["scribe"]
                     if "Ask Scribe only" in context.question
+                    else ["follow_up", "research"]
+                    if shared_note is not None
                     else ["research", "visit_prep", "follow_up"]
                 )
                 collected = [json.loads(m["content"])["data"] for m in tool_messages
@@ -761,6 +775,8 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
                             "brief": "Prepare an independent "
                             + role
                             + " draft from the exact saved Scribe transcript and summary; preserve unknown heart history and do not send or book."
+                            + ("\nHuman drafting directions (not clinical facts or permission)\n" + json.dumps(directions, ensure_ascii=False)
+                                if shared_note is not None else "")
                             + ("\nAccepted Scribe summary copied from the exact tool receipt:\n" + summary
                                 if role != "scribe" and summary is not None else ""),
                             "requirements": REQUIREMENTS,
@@ -786,6 +802,10 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
                     + "Provider must confirm heart history, medications, responsible owner and due date. Trial eligibility unknown; no public search, booking or delivery occurred.",
                     "source_ids": [p.entry_id for p in context.sources],
                 }
+            if shared_note is not None and context.role == "follow_up":
+                content["answer"] = "Patient email draft\nSubject: Your provider review\nBody: Please confirm the missing information with your provider.\n\nProvider action items\nOwner: provider; next: confirm documented plan. Private draft; no email sent."
+            elif shared_note is not None and context.role == "research":
+                content["answer"] = "Source-supported findings\nThe saved Scribe note retains missing information.\n\nDrug and treatment questions\nCurrent treatment evidence is unavailable.\n\nMissing evidence / next checks\nProvider to review missing treatment evidence. No public search occurred."
             if context.role == "chief" and claim.envelope["baseline"]["flags"]["work_status"]:
                 content["intent"] = "conversation"
             return httpx.Response(200, json=provider_response(content=content))
@@ -1074,7 +1094,7 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
                                 )
                             )
                         )
-                    assert len(reserved) in {1, 3}, len(reserved)
+                    assert len(reserved) in {1, 2, 3}, len(reserved)
                     parallel_barrier = threading.Barrier(3) if len(reserved) == 3 else None
                     with ThreadPoolExecutor(max_workers=len(reserved)) as pool:
                         outcomes = list(
@@ -1151,17 +1171,23 @@ def test_actual_recording_to_reviewed_source_and_four_specialist_ui_graphs(
         evidence = json.loads((report_root / "ui-server-lab.json").read_text())
         expected_cases = 1 if selected_test else 6
         assert evidence["total"] == evidence["completed"] == expected_cases
+        directed = sum(any(json.loads(entry["content"]).get("contract") == clinical_note_share.DIRECTIONS_REQUEST_CONTRACT
+            for entry in case["workspace"]["entries"] if entry["kind"] == "conversation" and entry["content"].startswith("{"))
+            for case in report["cases"])
+        assert directed == sum(case["persona"] == "physician" and case["round"] == "1" for case in cases.values())
         assert (
             len(cases) == expected_cases
-            and len(dispatches) == 11 * expected_cases
-            and len(rounds) == 22 * expected_cases
-            and len(reads) == 15 * expected_cases
+            and len(dispatches) == 11 * expected_cases + 3 * directed
+            and len(rounds) == 22 * expected_cases + 6 * directed
+            and len(reads) == 15 * expected_cases + 6 * directed
         )
         for case in report["cases"]:
-            assert len(case["admissions"]) == 11 and all(
+            has_directions = any(json.loads(entry["content"]).get("contract") == clinical_note_share.DIRECTIONS_REQUEST_CONTRACT
+                for entry in case["workspace"]["entries"] if entry["kind"] == "conversation" and entry["content"].startswith("{"))
+            assert len(case["admissions"]) == 11 + (3 if has_directions else 0) and all(
                 p["state"] == "completed" for p in case["admissions"]
             )
-            assert len(case["tool_receipts"]) == 15
+            assert len(case["tool_receipts"]) == 15 + (6 if has_directions else 0)
     finally:
         server.shutdown()
         # Revoke only this fixture's human account, then let the product claim

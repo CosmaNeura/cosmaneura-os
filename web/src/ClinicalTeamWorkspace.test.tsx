@@ -6,11 +6,13 @@ import {clinicalTeamApi} from './clinical-team-api';
 import {memoryDraftStorage} from './draft-test-fixture';
 import {CLINICAL_NOTE_LABEL,clinicalTeamRequest,currentSharedNote,noteSelection,type ClinicalNoteShareReceipt,type ShareSavedNoteInput} from './clinical-team-contract';
 import {modelCanonical} from './model-work-request';
+import {modelWorkApi} from './model-work-api';
 import {modelReceipt,pendingWorkspace} from './model-work-test-fixture';
 import {vendorSha256} from './vendor-contract';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type BotRole,type PrivateNote,type ProviderTeam,type Workspace} from './workspace-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 
+vi.mock('./model-work-api',async original=>{const actual=await original<typeof import('./model-work-api')>();return {...actual,modelWorkApi:{...actual.modelWorkApi,resolve:vi.fn()}};});
 vi.mock('./clinical-team-api',()=>({clinicalTeamApi:{share:vi.fn(),resolve:vi.fn()}}));
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(scope:string)=>scope}));
 vi.mock('./private-recording-runtime',async original=>({...await original<typeof import('./private-recording-runtime')>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
@@ -83,6 +85,7 @@ function preparationServer(base=workspace){
 }
 beforeEach(async()=>{
   vi.clearAllMocks();vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);
+  team.members.find(member=>member.role==='chief')!.capabilities=[{key:'workspace.clinical.drafts',label:'Saved-note drafts',state:'enabled',connector:'Provider Team',contract:'clinical-team-drafts.request.v2'}];
   storage=memoryDraftStorage();identity={mode:'clerk_jwt',getToken:vi.fn()};
   const content='Invented saved sleep note for private provider review.';
   const note:PrivateNote={id:uuid(951),version:1,workspace_revision:2,content,
@@ -113,11 +116,15 @@ it('opens the exact saved-note plan directly from native Chief without sharing o
   expect(host.querySelector('[aria-label="Saved note for Follow-up and Research"]')?.textContent).toBe(workspace.note!.latest!.content);
   expect(host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')?.open).toBe(true);
   expect(host.querySelector<HTMLTextAreaElement>('#team-question')).toBe(question);
-  expect(question.value).toBe('My next directions, still editable');expect(question.disabled).toBe(false);
-  expect(button('Prepare Follow-up and Research')?.disabled).toBe(true);
+  expect(question.value).toBe('My next directions, still editable');expect(question.disabled).toBe(true);
+  expect(question.closest('[hidden]')).toBeTruthy();
+  const plan=host.querySelector<HTMLTextAreaElement>('.clinical-team-directions')!;
+  expect(plan).toBeTruthy();expect(plan.closest('[hidden]')).toBeNull();expect(plan.disabled).toBe(false);expect(plan.value).toBe(question.value);
+  expect(button('Prepare Follow-up and Research')?.disabled).toBe(false);
+  expect(host.querySelector('[aria-label="Your directions for Chief"]')?.textContent).toContain('Add optional directions here.');
   expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
   await click('Back to chat');expect(host.querySelector<HTMLTextAreaElement>('#team-question')).toBe(question);
-  expect(question.value).toBe('My next directions, still editable');
+  expect(question.value).toBe('My next directions, still editable');expect(question.disabled).toBe(false);
 });
 
 it('refuses the native saved-note shortcut when the captured native session expires',async()=>{
@@ -311,4 +318,160 @@ it('does not duplicate a Chief request discovered in the fresh source read',asyn
   });
   await click('Prepare Follow-up and Research');await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('Chief’s request is already saved');});
   expect(clinicalTeamApi.share).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
+});
+
+
+async function enterDirections(value:string){
+  const question=[...host.querySelectorAll<HTMLTextAreaElement>('.clinical-team-directions,#team-question')].find(field=>!field.closest('[hidden]'))!;
+  expect(question).toBeTruthy();expect(question.disabled).toBe(false);
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question,value);question.dispatchEvent(new Event('input',{bubbles:true}));});
+  return question;
+}
+function nativeChief(){
+  vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener(){},removeEventListener(){}}));
+  if(identity.mode!=='clerk_jwt')throw Error('Invented native identity required');
+  identity.nativeSession={revision:uuid(970),isCurrent:()=>true};
+}
+it('binds exact owner directions and saved-note identity before clearing the native composer, then preserves an identical next draft',async()=>{
+  nativeChief();const server=preparationServer(),reply=deferred<Awaited<ReturnType<typeof modelReceipt>>>();
+  vi.mocked(workspaceApi.ask).mockReturnValue(reply.promise);
+  await open(storage,false,false);await click('Plan from saved visit note version 1');const directions='  Keep the patient email brief.\nAsk Research about missing evidence. 界🩺  ';
+  const question=await enterDirections(directions);
+  expect(button('Prepare Follow-up and Research')?.disabled).toBe(false);
+  await click('Prepare Follow-up and Research');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledOnce();});
+  const body=vi.mocked(workspaceApi.ask).mock.calls[0][2],source=currentSharedNote(server.current)!;
+  expect(JSON.parse(body.content)).toEqual({contract:'clinical-team-drafts.request.v2',source_entry_id:source.entry.id,
+    note_id:source.snapshot.note.id,note_version:1,content_hash:source.snapshot.note.content_hash,owner_directions:directions});
+  expect(question.value).toBe('');expect(question.disabled).toBe(false);
+  expect((await retained())?.pending).toMatchObject({type:'ask',body});
+  await enterDirections(directions);
+  const result=await modelReceipt(body,workspace.id,server.current.revision+1);
+  server.current={...server.current,revision:server.current.revision+1,entries:[...server.current.entries,{id:result.saved_entry!.id,revision:server.current.revision+1,
+    kind:'conversation',source_label:null,origin:'human',ticket:null,created_at:'2026-10-20T12:00:00Z',content:body.content,
+    reply:{agent_name:'Chief',role:'chief',backend:'invented',content:'Private drafts queued.',context_revision:body.expected_revision,citations:[]}}]};
+  await act(async()=>reply.resolve(result));
+  await vi.waitFor(async()=>{await act(async()=>{});expect((await retained())?.pending??null).toBeNull();});
+  expect(question.value).toBe(directions);expect(host.querySelector('.clinical-team-directions')).toBe(question);
+  expect(clinicalTeamApi.share).toHaveBeenCalledOnce();
+});
+it('retains v2 directions under an exact lost Chief response and remount only checks that same request',async()=>{
+  nativeChief();const server=preparationServer();vi.mocked(workspaceApi.ask).mockRejectedValueOnce(new WorkspaceApiError(503));
+  await open(storage,false,false);await click('Plan from saved visit note version 1');const directions='Use the stated plan only; medicine list remains unknown.\n界';await enterDirections(directions);
+  await click('Prepare Follow-up and Research');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[aria-label="Unconfirmed model request"]')).toBeTruthy();});
+  const body=vi.mocked(workspaceApi.ask).mock.calls[0][2];expect(JSON.parse(body.content).owner_directions).toBe(directions);
+  expect((await retained())?.pending).toMatchObject({type:'ask',body});
+  await act(async()=>root.unmount());root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Restore notebook draft')).toBeTruthy();});await click('Restore notebook draft');
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect((await retained())?.pending).toMatchObject({type:'ask',body});
+  const observation={...await modelReceipt(body,workspace.id),outcome:'not_found' as const,saved_entry:null};
+  vi.mocked(modelWorkApi.resolve).mockResolvedValue(observation);
+  await click(button('Check message')?'Check message':'Check saved result');
+  expect(modelWorkApi.resolve).toHaveBeenCalledExactlyOnceWith(identity,workspace.id,expect.objectContaining({type:'ask',body}));
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(clinicalTeamApi.share).toHaveBeenCalledOnce();
+  const older=structuredClone(team);older.members.find(member=>member.role==='chief')!.capabilities=[];vi.mocked(workspaceApi.team).mockResolvedValue(older);
+  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Retry message')??button('Send this saved request')).toBeTruthy();});
+  await click(button('Retry message')?'Retry message':'Send this saved request');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('cannot confirm saved-note directions support');});
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect((await retained())?.pending).toMatchObject({type:'ask',body});
+  await click(button('Check message')?'Check message':'Check saved result');expect(modelWorkApi.resolve).toHaveBeenCalledTimes(2);
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect((await retained())?.pending).toMatchObject({type:'ask',body});expect(server.current.note!.latest!.content).toBe(workspace.note!.latest!.content);
+});
+it('returns from the phone plan to native chat during a held Chief dispatch and keeps identical next typing after its lost reply',async()=>{
+  nativeChief();preparationServer();const dispatch=deferred<Awaited<ReturnType<typeof modelReceipt>>>();vi.mocked(workspaceApi.ask).mockReturnValue(dispatch.promise);
+  await open(storage,false,false);await click('Plan from saved visit note version 1');const directions='Keep the email brief. 界🩺';
+  await enterDirections(directions);await click('Prepare Follow-up and Research');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(button('Back to chat')?.disabled).toBe(false);});
+  const body=vi.mocked(workspaceApi.ask).mock.calls[0][2];expect((await retained())?.pending).toMatchObject({type:'ask',body});
+  await click('Back to chat');expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"][data-chief-tools="false"]')).toBeTruthy();
+  const question=await enterDirections(directions);expect(question.id).toBe('team-question');expect(question.closest('[hidden]')).toBeNull();
+  expect(button('Send message')?.disabled).toBe(true);
+  await act(async()=>dispatch.reject(new WorkspaceApiError(503)));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[aria-label="Unconfirmed model request"]')?.closest('[hidden]')).toBeNull();
+    expect((await retained())?.pending).toMatchObject({type:'ask',body});});
+  expect(question.value).toBe(directions);expect(question.disabled).toBe(false);expect(host.querySelector('#team-question')).toBe(question);
+  const probe=await storage({scope});try{await vi.waitFor(async()=>{await act(async()=>{});expect((await probe.read(`workspace:${workspace.id}`)).value?.body).toMatchObject({thought:directions,pending:{type:'ask',body}});});}finally{probe.close();}
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(JSON.parse(body.content).owner_directions).toBe(directions);
+});
+it('keeps clinical uncertainty out of generic chat replacement and explicitly reselects the current note and directions',async()=>{
+  nativeChief();const server=preparationServer();vi.mocked(workspaceApi.ask).mockRejectedValueOnce(new WorkspaceApiError(503));
+  await open(storage,false,false);await click('Plan from saved visit note version 1');await enterDirections('Original human drafting directions.');
+  await click('Prepare Follow-up and Research');await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[aria-label="Unconfirmed model request"]')).toBeTruthy();});
+  const old=vi.mocked(workspaceApi.ask).mock.calls[0][2];
+  const updated={...server.current.note!.latest!,id:uuid(956),version:2,content:'Updated invented saved Scribe note; diagnosis remains unverified.'};
+  updated.content_hash=await vendorSha256(new TextEncoder().encode(modelCanonical({content:updated.content})));
+  server.current={...server.current,revision:server.current.revision+1,note:{latest:updated,history:[updated,server.current.note!.latest!]}};
+  const older=structuredClone(team);older.members.find(member=>member.role==='chief')!.capabilities=[];vi.mocked(workspaceApi.team).mockResolvedValue(older);
+  vi.mocked(modelWorkApi.resolve).mockResolvedValue({...await modelReceipt(old,workspace.id),outcome:'not_found',saved_entry:null});
+  await click('Check message');await vi.waitFor(async()=>{await act(async()=>{});expect(button('Retry message')).toBeTruthy();});
+  expect(button('Start another attempt')).toBeUndefined();expect(host.querySelector('label')?.textContent).not.toBe('Review new question');
+  await click('Retry message');await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('cannot confirm saved-note directions support');});
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect((await retained())?.pending).toMatchObject({type:'ask',body:old});
+  vi.mocked(workspaceApi.team).mockResolvedValue(structuredClone(team));await click('Check message');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Review saved note and directions for a new request')?.disabled).toBe(true);});
+  await enterDirections('Use this updated note, with a shorter email. 界');
+  const acknowledge=[...host.querySelectorAll<HTMLInputElement>('[aria-label="Unconfirmed model request"] input[type=checkbox]')][0];
+  await act(async()=>acknowledge.click());await click('Review saved note and directions for a new request');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[aria-label="Saved note for Follow-up and Research"]')?.textContent).toBe(updated.content);expect(button('Prepare Follow-up and Research')?.disabled).toBe(false);});
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(clinicalTeamApi.share).toHaveBeenCalledOnce();
+  const probe=await storage({scope});try{expect((await probe.read(`workspace:${workspace.id}`)).value?.body).toMatchObject({pending:null,previous_model_request:{operation:{type:'ask',body:old}}});}finally{probe.close();}
+  await click('Prepare Follow-up and Research');await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledTimes(2);});
+  const next=vi.mocked(workspaceApi.ask).mock.calls[1][2];expect(next.idempotency_key).not.toBe(old.idempotency_key);
+  expect(JSON.parse(next.content)).toMatchObject({contract:'clinical-team-drafts.request.v2',note_id:updated.id,note_version:2,content_hash:updated.content_hash,owner_directions:'Use this updated note, with a shorter email. 界'});
+});
+it('does not send captured directions if the owner edits while the fresh saved-note read is held',async()=>{
+  nativeChief();const server=preparationServer(),fresh=deferred<Workspace>();await open(storage,false,false);await click('Plan from saved visit note version 1');
+  vi.mocked(workspaceApi.read).mockReturnValueOnce(fresh.promise);await enterDirections('Keep the email concise.');
+  await click('Prepare Follow-up and Research');await vi.waitFor(()=>expect(clinicalTeamApi.share).toHaveBeenCalledOnce());
+  await enterDirections('Ask a different question instead.');
+  await act(async()=>fresh.resolve(server.current));
+  await vi.waitFor(async()=>{await act(async()=>{});expect(button('Prepare Follow-up and Research')?.disabled).toBe(false);});
+  expect(workspaceApi.ask).not.toHaveBeenCalled();expect(host.querySelector<HTMLTextAreaElement>('.clinical-team-directions')?.value).toBe('Ask a different question instead.');
+});
+
+it('keeps directions visible and sends no share when an older service has not advertised v2',async()=>{
+  nativeChief();const old=structuredClone(team);old.members.find(member=>member.role==='chief')!.capabilities=[];
+  vi.mocked(workspaceApi.team).mockResolvedValue(old);vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(workspace),team:old});await open(storage,false,false);await click('Plan from saved visit note version 1');
+  const question=await enterDirections('My exact directions.');
+  expect(button('Prepare Follow-up and Research')?.disabled).toBe(true);expect(host.textContent).toContain('service needs an update');
+  expect(question.value).toBe('My exact directions.');expect(workspaceApi.ask).not.toHaveBeenCalled();expect(clinicalTeamApi.share).not.toHaveBeenCalled();
+  await enterDirections('');expect(button('Prepare Follow-up and Research')?.disabled).toBe(false);
+});
+it('retains the exact v2 request and visible words when deployed support disappears after its journal acknowledgement',async()=>{
+  nativeChief();let downgraded=false;preparationServer();
+  vi.mocked(workspaceApi.team).mockImplementation(async()=>{const latest=structuredClone(team);if(downgraded)latest.members.find(member=>member.role==='chief')!.capabilities=[];return latest;});
+  const factory:typeof storage=async options=>{const store=await storage(options);return {...store,write:async(address,revision,value)=>{
+    const result=await store.write(address,revision,value);if((value?.body as {pending?:{type?:string}})?.pending?.type==='ask')downgraded=true;return result;
+  }};};
+  await open(factory,false,false);await click('Plan from saved visit note version 1');const directions='Keep the documented plan exact. 界';
+  const question=await enterDirections(directions);await click('Prepare Follow-up and Research');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('cannot confirm saved-note directions support');});
+  expect(clinicalTeamApi.share).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
+  const pending=(await retained())?.pending;expect(pending).toMatchObject({type:'ask'});
+  expect(JSON.parse((pending as unknown as {body:{content:string}}).body.content).owner_directions).toBe(directions);
+  expect(question.value).toBe(directions);expect(host.querySelector('.clinical-team-directions')).toBe(question);
+});
+it.each(['new_words','edit_back_to_same'] as const)('preserves newer words during the initial v2 journal write: %s',async change=>{
+  nativeChief();preparationServer();const ack=deferred<void>();let written=false;
+  const factory:typeof storage=async options=>{const store=await storage(options);return {...store,write:async(address,revision,value)=>{
+    if((value?.body as {pending?:{type?:string}})?.pending?.type==='ask'&&!written){written=true;await ack.promise;}return store.write(address,revision,value);
+  }};};
+  await open(factory,false,false);await click('Plan from saved visit note version 1');const directions='Keep exact provider directions.';
+  const question=await enterDirections(directions);await click('Prepare Follow-up and Research');await vi.waitFor(()=>expect(written).toBe(true));
+  expect(workspaceApi.ask).not.toHaveBeenCalled();expect(question.value).toBe(directions);
+  await enterDirections('A different next draft.');if(change==='edit_back_to_same')await enterDirections(directions);
+  const next=question.value;await act(async()=>ack.resolve());
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('prepared request is retained');});
+  expect(question.value).toBe(next);expect(workspaceApi.ask).not.toHaveBeenCalled();
+  expect((await retained())?.pending).toMatchObject({type:'ask'});
+});
+it('keeps the original composer and sends nothing when the exact v2 pending write fails',async()=>{
+  nativeChief();preparationServer();const factory:typeof storage=async options=>{const store=await storage(options);return {...store,write:async(address,revision,value)=>{
+    if((value?.body as {pending?:{type?:string}})?.pending?.type==='ask')throw new Error('Invented local write failure');return store.write(address,revision,value);
+  }};};
+  await open(factory,false,false);await click('Plan from saved visit note version 1');const question=await enterDirections('Retain these directions after failed storage.');
+  await click('Prepare Follow-up and Research');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.textContent).toContain('No new request was sent');});
+  expect(question.value).toBe('Retain these directions after failed storage.');expect(workspaceApi.ask).not.toHaveBeenCalled();
 });

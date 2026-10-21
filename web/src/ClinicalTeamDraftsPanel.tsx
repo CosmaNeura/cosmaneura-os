@@ -1,13 +1,13 @@
 import {useEffect,useRef,useState} from 'react';
 import type {DraftHandoff,ProviderTeam,Workspace} from './workspace-api';
 import {WorkspaceMarkdown} from './WorkspaceMarkdown';
-import {clinicalNoteSnapshotSize,clinicalTeamRequest,currentSharedNote,noteSelection,type ShareSavedNoteInput} from './clinical-team-contract';
+import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamRequest,parseClinicalTeamRequest,currentSharedNote,noteSelection,type ShareSavedNoteInput} from './clinical-team-contract';
 import {clinicalDraftAccepted,clinicalDraftEntry,clinicalDraftLineage,clinicalDraftRetryable,clinicalDraftSections} from './clinical-team-workflow';
 
 export type ClinicalTeamDraftsPanelProps={workspace:Workspace;team:ProviderTeam;locked:boolean;
   onShare:(body:ShareSavedNoteInput)=>Promise<void>;onAskChief:(content:string)=>Promise<void>;onReview:(handoffId:string)=>void;
-  onRetry?:(handoff:DraftHandoff)=>void;onPrepare?:(body:ShareSavedNoteInput)=>Promise<void>;authority?:object};
-export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChief,onReview,onRetry,onPrepare,authority}:ClinicalTeamDraftsPanelProps) {
+  ownerDirections?:string;onDirectionsChange?:(value:string)=>void;directionsLocked?:boolean;preparing?:boolean;onRetry?:(handoff:DraftHandoff)=>void;onPrepare?:(body:ShareSavedNoteInput)=>Promise<void>;authority?:object};
+export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChief,onReview,onRetry,onPrepare,authority,ownerDirections='',onDirectionsChange,directionsLocked=locked,preparing=true}:ClinicalTeamDraftsPanelProps) {
   const [preview,setPreview]=useState(false),[checked,setChecked]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const live=useRef({workspace,authority}),inFlight=useRef<object|null>(null);live.current={workspace,authority};
   const note=workspace.note?.latest,source=currentSharedNote(workspace);
@@ -16,11 +16,21 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
   useEffect(()=>{inFlight.current=null;setBusy(false);setPreview(false);setChecked(false);setError('');},[authority,team.recovery_scope,workspace.id,note?.id,note?.version,note?.content_hash]);
   const bots=team.configuration.bots.filter(b=>b.enabled&&!b.retired&&!b.blocked_capabilities?.includes('model_answer'));
   const handoffReady=team.llm.enabled&&['chief','follow_up','research'].every(role=>bots.some(b=>b.role===role&&b.include_evidence&&!b.blocked_capabilities?.includes('private_draft_handoff')));
+  const directionsError=clinicalTeamDirectionsError(ownerDirections);
+  const directionsUnsupported=ownerDirections!==''&&!clinicalTeamDirectionsSupported(team);
   const content=source?clinicalTeamRequest(source):null;
-  const origin=content?[...workspace.entries].reverse().find(e=>e.kind==='conversation'&&e.content===content&&
-    (e.reply?.role==='chief'||e.model_request?.bot.role==='chief')):undefined;
-  const chiefWithoutAssignments=!!origin?.reply&&(!origin.model_request||origin.model_request.admission.state==='completed')&&
-    !(workspace.handoffs??[]).some(h=>h.origin_entry_id===origin.id);
+  const prepareContent=source&&!directionsError?clinicalTeamRequest(source,ownerDirections):null;
+  const chiefEntry=(entry:Workspace['entries'][number])=>entry.kind==='conversation'&&(entry.reply?.role==='chief'||entry.model_request?.bot.role==='chief');
+  const requested=onPrepare?prepareContent:content;
+  const requestedOrigin=requested?[...workspace.entries].reverse().find(e=>chiefEntry(e)&&e.content===requested):undefined;
+  const origin=source?[...workspace.entries].reverse().find(entry=>{
+    if(!chiefEntry(entry))return false;const request=parseClinicalTeamRequest(entry.content);
+    return !!request&&request.source_entry_id===source.entry.id&&request.note_id===source.snapshot.note.id&&
+      request.note_version===source.snapshot.note.version&&request.content_hash===source.snapshot.note.content_hash;
+  }):undefined;
+  const savedRequest=origin?parseClinicalTeamRequest(origin.content):null;
+  const chiefWithoutAssignments=!!requestedOrigin?.reply&&(!requestedOrigin.model_request||requestedOrigin.model_request.admission.state==='completed')&&
+    !(workspace.handoffs??[]).some(h=>h.origin_entry_id===requestedOrigin.id);
   async function run(action:()=>Promise<void>) {
     if(locked||busy||inFlight.current)return;
     const current=workspace,owner=authority,episode={};inFlight.current=episode;setBusy(true);setError('');
@@ -45,10 +55,16 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
       {tooLarge&&<p role="status">This saved note is too large for one team snapshot. Keep this saved version and create a shorter note before sharing it.</p>}
       {onPrepare&&<>
         <div role="group" aria-label="Saved note for Follow-up and Research"><pre style={{whiteSpace:'pre-wrap'}}>{note.content}</pre></div>
+        <div role="group" aria-label="Your directions for Chief"><p>{onDirectionsChange?'Add optional directions here.':'Use the message box below for optional directions.'} Prepare includes those exact words with this saved note. Your directions guide drafting; they do not add clinical facts or authorize sending.</p>
+          {onDirectionsChange?<label>Directions for Chief<textarea className="clinical-team-directions" rows={4} value={ownerDirections} disabled={directionsLocked}
+            onChange={event=>onDirectionsChange(event.target.value)} placeholder="For example: keep the patient email brief and identify missing treatment evidence."/></label>:
+            ownerDirections!==''?<pre style={{whiteSpace:'pre-wrap'}}>{ownerDirections}</pre>:<p>No additional directions.</p>}</div>
+        {directionsError&&<p role="status">{directionsError}</p>}
+        {directionsUnsupported&&<p role="status">This practice service needs an update to include your directions with the saved note. Your text is kept; no team request will be sent.</p>}
         <p>Choosing Prepare Follow-up and Research shares this exact saved note, version {note.version}, with your private team and asks Chief to prepare both sets of drafts. It does not edit or sign the note, send a patient email, or run a public search.</p>
-        <button type="button" className="team-primary" disabled={locked||busy||note.sources_changed||tooLarge||!linked||historyFull||!handoffReady||!!origin&&!chiefWithoutAssignments}
+        <button type="button" className="team-primary" disabled={locked||busy||note.sources_changed||tooLarge||!linked||historyFull||!handoffReady||!!directionsError||directionsUnsupported||!!requestedOrigin&&!chiefWithoutAssignments}
           onClick={()=>void run(()=>onPrepare(noteSelection(note,workspace.revision)))}>Prepare Follow-up and Research</button>
-        {busy&&<p role="status">Confirming the exact saved note and preparing your private team request…</p>}
+        {busy&&<p role="status">{preparing?'Confirming the exact saved note and preparing your private team request…':'Chief is working on your private drafts. You can return to chat.'}</p>}
       </>}
       <details open={onPrepare?undefined:true}><summary hidden={!onPrepare}>Separate sharing and request controls</summary>
       <button type="button" disabled={locked||busy} aria-expanded={preview} onClick={()=>setPreview(v=>!v)}>Preview saved note for team</button>
@@ -67,6 +83,8 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
       {origin&&!origin.reply&&<p role="status">Chief’s request is saved. Its outcome is still being checked; no second request is needed.</p>}
       {chiefWithoutAssignments&&<p role="status">Chief’s reply did not save any team assignments. You can ask again using this exact shared note.</p>}
     </>}
+    {savedRequest?.contract==='clinical-team-drafts.request.v2'&&<details><summary>Directions used for these drafts</summary>
+      <pre style={{whiteSpace:'pre-wrap'}}>{savedRequest.owner_directions}</pre></details>}
     {(['follow_up','research'] as const).map(role=>{
       const chain=origin?clinicalDraftLineage(workspace,origin.id,role):[],row=chain.at(-1),entry=row?clinicalDraftEntry(workspace,row):undefined;
       const sections=entry?.reply?clinicalDraftSections(role,entry.reply.content):null;

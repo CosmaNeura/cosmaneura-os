@@ -4,6 +4,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterAll,afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_CAPTURE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_CAPTURE_NOTES_ENABLED','true');});
 import {EncounterWorkspace} from './EncounterWorkspace';
+import {currentSharedNote,parseClinicalTeamRequest} from './clinical-team-contract';
 import {workspaceApi,type Workspace,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import type {ReviewableHandoff} from './handoff-review-api';
 import {memoryDraftStorage} from './draft-test-fixture';
@@ -35,7 +36,7 @@ const trials:Trial[]=[];let mounted:Episode|undefined,terminalFailure:string|und
 const note=(w:Workspace)=>JSON.stringify(w.note,(_key,value)=>_key==='sources_changed'?undefined:value),sources=(w:Workspace)=>JSON.stringify(w.entries.filter(e=>['scratchpad','evidence'].includes(e.kind)));
 function controls(ep:Episode){
  const act=async <T,>(callback:()=>T|Promise<T>):Promise<T>=>{ep.lifecycle.check();const result=await reactAct(callback);ep.lifecycle.check();return result;};
-async function wait(check:()=>void){const until=performance.now()+15000;while(performance.now()<until){ep.lifecycle.check();let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));ep.lifecycle.check();try{check();done=true;}catch{}});if(done)return;}ep.lifecycle.check();check();}
+async function wait(check:()=>void|Promise<void>){const until=performance.now()+15000;while(performance.now()<until){ep.lifecycle.check();let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));ep.lifecycle.check();try{await check();done=true;}catch{}});if(done)return;}ep.lifecycle.check();await check();}
 function button(label:string){const result=[...ep.host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===label||b.textContent?.replace(/^📄\s*/u,'').trim()===label||b.getAttribute('aria-label')===label);expect(result,label).toBeTruthy();return result!;}
 async function click(label:string){await wait(()=>expect(button(label).disabled,label).toBe(false));await act(async()=>button(label).click());}
 async function input(selector:string,value:string){await wait(()=>expect(ep.host.querySelector(selector)).toBeTruthy());const field=ep.host.querySelector<HTMLTextAreaElement>(selector)!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
@@ -80,7 +81,7 @@ afterEach(async()=>{if(!base||!mounted)return;const ep=mounted;ep.lifecycle.clos
  finally{ep.host.remove();mounted=undefined;generatedSource.create=null;Reflect.deleteProperty(navigator,'locks');vi.restoreAllMocks();vi.unstubAllGlobals();vi.unstubAllEnvs();await saveReport();}
 },20000);
 it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitioner',round:1},{persona:'physician_assistant',round:1},{persona:'physician',round:2},{persona:'nurse_practitioner',round:2},{persona:'physician_assistant',round:2}])('$persona round $round records generated audio, reviews it and accepts four actual specialist loops',async({persona,round})=>{
- const ep=mounted!;const {act,wait,button,click,read,ask,workers,review,coworker}=controls(ep);
+ const ep=mounted!;const {act,wait,button,click,input,read,ask,workers,review,coworker}=controls(ep);
  const began=performance.now(),trial:Trial={persona,round,workspace_id:'',steps:[],wire:[],passed:false};ep.trial=trial;trials.push(trial);const step=(name:string)=>{ep.lifecycle.check();trial.steps.push({name,elapsed_ms:Math.round(performance.now()-began)});};
  return ep.lifecycle.run(async()=>{try{
  const seeded=await ep.lifecycle.fetch(realFetch,`${base}/lab/case?persona=${persona}&round=${round}`,{cache:'no-store',credentials:'omit',redirect:'error'});expect(seeded.status,await seeded.clone().text()).toBe(200);
@@ -122,7 +123,36 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
     expect(ep.host.querySelector(`#turn-${h.result_entry_id} .team-bot-message header`)?.textContent).not.toContain('Unreviewed draft');
   }
   expect(trial.wire.filter(x=>x.path.endsWith('/review')||x.path.endsWith('/revision'))).toHaveLength(reviewRequests);
-  step('reopened_each_specialist_conversation_shows_exact_saved_human_acceptance');trial.passed=true;
+  step('reopened_each_specialist_conversation_shows_exact_saved_human_acceptance');
+  if(persona==='physician'&&round===1){
+    await coworker('Chief');await click('Workspace view');await click('Review');await click('Use latest Scribe draft');await click('Replace editor with draft');
+    const exactDraft=ep.host.querySelector<HTMLTextAreaElement>('#private-note-text')!.value;
+    const reconcile=[...ep.host.querySelectorAll<HTMLLabelElement>('.team-note-review label')].find(label=>label.textContent?.includes('I checked the newer sources and reconciled this note.'));
+    if(reconcile)await act(async()=>reconcile.querySelector<HTMLInputElement>('input')!.click());
+    await click('Save note version');
+    let latest=await workspaceApi.read(ep.identity,ep.wid);await wait(async()=>{latest=await workspaceApi.read(ep.identity,ep.wid);expect(latest.note!.latest!.content).toBe(exactDraft);expect(latest.note!.latest!.source_reply_id).toBe(accepted[0].result_entry_id);});
+    expect(latest.note!.latest!.source_reply_id).toBe(accepted[0].result_entry_id);expect(latest.note!.latest!.sources_changed).toBe(false);
+    ep.noteBefore=note(latest);ep.sourcesBefore=sources(latest);const exactNote=structuredClone(latest.note);
+    await click('Conversation view');await act(async()=>{ep.host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')!.open=true;});
+    const directions='  Keep the patient email brief.\nResearch: identify missing treatment evidence. 界🩺  ';
+    await input('#team-question',directions);await click('Prepare Follow-up and Research');
+    await wait(()=>expect(ep.host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toBe(''));
+    latest=await read();const shared=currentSharedNote(latest)!;expect(shared.snapshot.note.content).toBe(exactDraft);
+    const origin=[...latest.entries].reverse().find(entry=>parseClinicalTeamRequest(entry.content)?.contract==='clinical-team-drafts.request.v2')!;
+    expect(parseClinicalTeamRequest(origin.content)).toEqual({contract:'clinical-team-drafts.request.v2',source_entry_id:shared.entry.id,
+      note_id:latest.note!.latest!.id,note_version:latest.note!.latest!.version,content_hash:latest.note!.latest!.content_hash,owner_directions:directions});
+    const requests=latest.handoffs!.filter(row=>row.origin_entry_id===origin.id);expect(requests).toHaveLength(2);
+    expect(new Set(requests.map(row=>row.recipient_role))).toEqual(new Set(['follow_up','research']));step('exact_saved_scribe_note_and_owner_directions_admitted');
+    latest=await workers();expect(note(latest)).toBe(note({...latest,note:exactNote}));
+    for(const task of requests){const completed=latest.handoffs!.find(row=>row.id===task.id)!;expect(completed.status).toBe('completed');
+      expect(completed.origin_entry_id).toBe(origin.id);expect(completed.task_brief!.source_versions.some(version=>version.entry_id===shared.entry.id)).toBe(true);
+      const result=latest.entries.find(entry=>entry.id===completed.result_entry_id)!;expect(result.reply?.content).toContain(task.recipient_role==='follow_up'?'Subject:':'Source-supported findings');
+    }
+    expect(ep.host.querySelector('[aria-label="Follow-up drafts"]')?.textContent).toContain('Subject:');
+    expect(ep.host.querySelector('[aria-label="Research assessment"]')?.textContent).toContain('Source-supported findings');
+    expect(ep.host.textContent).toContain(directions);step('owner_directed_follow_up_and_research_saved_from_exact_note');
+  }
+  trial.passed=true;
  }catch(e){trial.failure=(e instanceof Error?e.message:String(e))+'\nDOM: '+ep.host.textContent;terminalFailure=trial.failure.split('\n')[0];throw e;}},120000).catch(error=>{if(!trial.failure)trial.failure=(error instanceof Error?error.message:String(error))+'\nDOM: '+ep.host.textContent;terminalFailure=trial.failure.split('\n')[0];throw error;});
 },130000);
 async function saveReport(){if(!base||!environment?.COSMAS_SCRIBE_LAB_REPORT)return;const fs='node:fs/promises';const {writeFile}=await import(/* @vite-ignore */fs) as {writeFile:(p:string,s:string)=>Promise<void>};await writeFile(environment.COSMAS_SCRIBE_LAB_REPORT,JSON.stringify({schema:'cosmabot.scribe-to-specialists-signed-product-ui.v1',synthetic_only:true,source_adapter:'actual recording controller/queue/transport and v6 with offline MockTransport',hardware:'deterministic generated PCM only',speech_recognition:'simulated only after independently verified capture completes',personas_are_scripted_not_real_users:true,trials,total:trials.length,completed:trials.filter(t=>t.passed).length},null,2)+'\n');}

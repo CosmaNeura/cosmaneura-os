@@ -465,11 +465,16 @@ def test_database_guard_rejects_forged_snapshot_even_when_app_route_is_bypassed(
         assert ws.read(s, f.box, f.actor, w.id)["revision"] == f.share_body["expected_revision"]
 
 
-@pytest.mark.parametrize("tamper", ["stale", "content", "revision", "missing_context", "missing_all_descriptors", "descriptor_digest", "generic_conversation", "reserved_descriptor_label", "ordinary_text", "ordinary_malformed_json"])
-def test_database_model_source_guard_preserves_ordinary_text_and_refuses_changed_clinical_context(clinical, tamper):
+@pytest.mark.parametrize("contract", [share.REQUEST_CONTRACT, share.DIRECTIONS_REQUEST_CONTRACT])
+@pytest.mark.parametrize("tamper", ["stale", "content", "revision", "missing_context", "missing_all_descriptors", "descriptor_digest", "generic_conversation", "reserved_descriptor_label", "ordinary_text", "ordinary_malformed_json", "request_note_id", "request_note_version", "request_note_hash", "request_source", "request_extra_field"])
+def test_database_model_source_guard_preserves_ordinary_text_and_refuses_changed_clinical_context(clinical, tamper, contract):
     f = clinical
     receipt = shared(f)
-    aid = reserve(f, receipt, claim=False)
+    content = json.loads(request(receipt))
+    content["contract"] = contract
+    if contract == share.DIRECTIONS_REQUEST_CONTRACT:
+        content["owner_directions"] = "  Keep the email brief.\n界🩺  "
+    aid = reserve(f, receipt, content=json.dumps(content, ensure_ascii=False), claim=False)
     def verified(s, envelope, command):
         return s.scalar(text("""SELECT public.selected_google_model_sources_current(jsonb_populate_record(
           NULL::public.model_work_admissions,to_jsonb(m)||jsonb_build_object(
@@ -484,6 +489,18 @@ def test_database_model_source_guard_preserves_ordinary_text_and_refuses_changed
         if tamper in {"ordinary_text", "ordinary_malformed_json"}:
             command["content"] = "Invented ordinary conversation." if tamper == "ordinary_text" else "{Invented unfinished ordinary message"
             assert verified(s, envelope, command) is True
+            return
+        if tamper.startswith("request_"):
+            selected = json.loads(command["content"])
+            selected.update({"request_note_id": {"note_id": str(uuid4())}, "request_note_version": {"note_version": 2},
+                "request_note_hash": {"content_hash": "f" * 64}, "request_source": {"source_entry_id": str(uuid4())},
+                "request_extra_field": {"send_email": True}}[tamper])
+            command["content"] = json.dumps(selected, ensure_ascii=False)
+            # The contract itself must retain exact source binding even when
+            # every optional selected-source descriptor is omitted.
+            envelope["tool_selection"]["sources"] = []
+            envelope["source_delivery"] = []
+            assert verified(s, envelope, command) is False
             return
         note_source = next(p for p in envelope["context"]["sources"] if p["entry_id"] == receipt["source_entry_id"])
         if tamper == "stale":

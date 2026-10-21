@@ -2,7 +2,9 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import {ClinicalTeamDraftsPanel} from './ClinicalTeamDraftsPanel';
-import {CLINICAL_NOTE_LABEL,clinicalRequestDisplay,clinicalTeamRequest,currentSharedNote,noteSelection,verifyClinicalNoteShareReceipt,type SharedClinicalNote} from './clinical-team-contract';
+import {CLINICAL_NOTE_LABEL,clinicalRequestDisplay,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamRequest,parseClinicalTeamRequest,currentSharedNote,noteSelection,verifyClinicalNoteShareReceipt,type SharedClinicalNote} from './clinical-team-contract';
+import {teamFixture} from './team-setup-test-fixture';
+import {validProviderTeam} from './team-setup-validators';
 import {EncounterSources} from './EncounterSources';
 import {modelCanonical} from './model-work-request';
 import {vendorSha256} from './vendor-contract';
@@ -158,4 +160,37 @@ it('shows cited shared-note text with attribution, version and hash instead of i
   workspace.note!.latest!.sources_changed=true;await render();expect(article.textContent).toContain('Historical saved-note snapshot');
   expect(clinicalRequestDisplay(clinicalTeamRequest(source))).toContain('patient email draft, provider action items');
   const malformed=JSON.stringify({...JSON.parse(clinicalTeamRequest(source)),send:true});expect(clinicalRequestDisplay(malformed)).toBe(malformed);
+});
+
+it('preserves exact whitespace and Unicode directions, rejects closed request forgeries, and keeps empty requests at v1',async()=>{
+  workspace=await shared();const source=currentSharedNote(workspace)!,directions=' \n界🩺\t ';
+  const v1=clinicalTeamRequest(source);expect(JSON.parse(v1).contract).toBe('clinical-team-drafts.request.v1');
+  const v2=clinicalTeamRequest(source,directions);expect(parseClinicalTeamRequest(v2)).toMatchObject({contract:'clinical-team-drafts.request.v2',owner_directions:directions});
+  expect(clinicalRequestDisplay(v2)).toContain(directions);
+  expect(parseClinicalTeamRequest(JSON.stringify({...JSON.parse(v2),send_email:true}))).toBeNull();
+  expect(parseClinicalTeamRequest(JSON.stringify({...JSON.parse(v2),owner_directions:''}))).toBeNull();
+  expect(clinicalTeamDirectionsError('x'.repeat(2001))).toContain('2,000');expect(clinicalTeamDirectionsError('\x00'.repeat(700))).toContain('request fits');
+  expect(()=>clinicalTeamRequest(source,'x'.repeat(2001))).toThrow();
+});
+it('accepts the advertised capability within the existing strict team shape while legacy v1 teams remain valid',()=>{
+  const legacy=teamFixture();expect(validProviderTeam(legacy)).toBe(true);expect(clinicalTeamDirectionsSupported(legacy)).toBe(false);
+  const chief=legacy.members.find(member=>member.role==='chief')!;
+  chief.capabilities.push({key:'workspace.clinical.drafts',label:'Saved-note drafts',state:'enabled',connector:'Provider Team',contract:'clinical-team-drafts.request.v2'});
+  expect(validProviderTeam(legacy)).toBe(true);expect(clinicalTeamDirectionsSupported(legacy)).toBe(true);
+  chief.capabilities.at(-1)!.state='awaiting_connection';expect(clinicalTeamDirectionsSupported(legacy)).toBe(false);
+});
+it('keeps saved v2 directions and specialist results separate from the editable next request',async()=>{
+  workspace=await shared();const source=currentSharedNote(workspace)!,sent='Use the stated plan. Missing medicines stay unknown.';
+  const origin=chiefRequest();origin.content=clinicalTeamRequest(source,sent);
+  workspace.handoffs=[draft('follow_up',20,origin.id,'Retained patient email draft.')];
+  team.members=[{role:'chief',agent_id:id(98),name:'Chief',initials:'CH',description:'Invented',prompt:'Invented',capabilities:[
+    {key:'workspace.clinical.drafts',label:'Saved-note drafts',state:'enabled',connector:'Provider Team',contract:'clinical-team-drafts.request.v2'}]}];
+  const prepare=vi.fn();
+  const render=(directions:string)=>act(async()=>root.render(<ClinicalTeamDraftsPanel workspace={workspace} team={team} locked={false} ownerDirections={directions}
+    onPrepare={prepare} onShare={share} onAskChief={ask} onReview={review}/>));
+  await render('');expect(host.querySelector('[aria-label="Follow-up drafts"]')?.textContent).toContain('Retained patient email draft.');
+  expect([...host.querySelectorAll('details')].find(d=>d.querySelector('summary')?.textContent==='Directions used for these drafts')?.textContent).toContain(sent);
+  await render('A different next request.');expect(host.querySelector('[aria-label="Your directions for Chief"]')?.textContent).toContain('A different next request.');
+  expect(host.querySelector('[aria-label="Follow-up drafts"]')?.textContent).toContain('Retained patient email draft.');
+  await click('Review follow-up draft');expect(review).toHaveBeenCalledExactlyOnceWith(id(20));expect(prepare).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();
 });
