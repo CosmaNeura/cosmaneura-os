@@ -226,6 +226,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [reviewState,setReviewState]=useState<'editing'|'review'|'saved'>('editing');
   const [thought, setThought] = useState("");
   const currentThought=useRef(thought);currentThought.current=thought;
+  const thoughtEditVersion=useRef(0);
   const [prepSelection,setPrepSelection]=useState<{scope:symbol;selection:SessionPrepAnalysis}|null>(null);
   const [prepEpoch,setPrepEpoch]=useState(0);
   const questionRef=useRef<HTMLTextAreaElement|null>(null);
@@ -887,17 +888,27 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const currentRequest=()=>current===generation.current&&(!confirmed||confirmed.isCurrent());
     modelBusy.current=true;
     const current=generation.current,id=requestWorkspace.id,active=journal.current?.value;
+    const native=authenticated?.mode==='clerk_jwt'&&!!authenticated.nativeSession;
+    const submittedThought=thought;
+    const submittedThoughtEdit=thoughtEditVersion.current;
+    const clearNativeSubmission=native&&mode==='submit'&&operation.type==='ask'&&!pending&&submittedThought===operation.body.content;
     setBusy(true);setError('');setMessage('');let transmitted=false;
     try{
       if(authenticated){
         if(!active||journal.current?.serverScope!==requireRecoveryScope(requestTeam)||recoveryOffers.some(offer=>offer.address===`workspace:${id}`)||recoveryState==='failed')throw new Error('Private draft storage unavailable');
-        await active.persist(`workspace:${id}`,notebookDraft(requestWorkspace,note,thought,evidence,source,operation));
+        // The immutable pending body retains the outgoing message. Store its
+        // separate empty composer before clearing the visible native field.
+        await active.persist(`workspace:${id}`,notebookDraft(requestWorkspace,note,clearNativeSubmission?'':thought,evidence,source,operation));
         if(!currentRequest())return;
         if(confirmed&&!confirmed.canSend()){
           setPending(operation);setError('Your text or sources changed before Chief was asked. The prepared request is retained; check its saved result before continuing.');return;
         }
       }
       setPending(operation);setModelObservation(null);setReplacementDraft(null);transmitted=true;
+      if(clearNativeSubmission){
+        if(thoughtEditVersion.current===submittedThoughtEdit&&currentThought.current===submittedThought)currentThought.current='';
+        setThought(previous=>thoughtEditVersion.current===submittedThoughtEdit&&previous===submittedThought?'':previous);
+      }
       if(operation.previous_model_request)setPreviousModelRequest(operation.previous_model_request);
       const receipt=mode==='resolve'?await modelWorkApi.resolve(requestIdentity,id,operation):operation.type==='ask'?await workspaceApi.ask(requestIdentity,id,operation.body):await workspaceApi.retryHandoff(requestIdentity,id,operation.handoffId,operation.body);
       if(!currentRequest())return;
@@ -909,7 +920,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       const anchor='saved_entry' in receipt?receipt.saved_entry?.revision:receipt.recorded?Math.max(receipt.recorded.workspace_revision,receipt.recorded.result_entry?.revision??0):null;
       if(latest.id!==id||latest.revision<requestWorkspace.revision||anchor!==null&&anchor!==undefined&&latest.revision<anchor)throw new WorkspaceApiError(503);
       const settled=receipt.outcome==='saved'||receipt.outcome==='recorded';
-      const native=authenticated?.mode==='clerk_jwt'&&!!authenticated.nativeSession;
       if(settled&&active&&native){
         // Finish any edit carrying the exact pending body before the settled
         // receipt removes it. Later typing is saved once busy clears.
@@ -919,10 +929,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         await queued?.drain();if(!currentRequest())return;
       }
       const workingThought=native?currentThought.current:thought;
-      const nextThought=settled&&operation.type==='ask'&&workingThought===operation.body.content?'':workingThought;
+      const nextThought=settled&&!native&&operation.type==='ask'&&workingThought===operation.body.content?'':workingThought;
       if(settled&&active){await active.persist(`workspace:${id}`,makeNotebookDraft(latest,note,nextThought,evidence,source,null,operation.previous_model_request??previousModelRequest));if(!currentRequest())return;}
       mergeModelRead(latest,latestTeam);
-      if(settled){setPending(null);setThought(previous=>native&&operation.type==='ask'?previous===operation.body.content?'':previous:nextThought);setModelObservation(null);setMessage(receipt.outcome==='saved'?'Conversation saved.':'Draft request recorded. Its current lifecycle is shown separately.');}
+      if(settled){setPending(null);setThought(previous=>native?previous:nextThought);setModelObservation(null);setMessage(receipt.outcome==='saved'?'Conversation saved.':'Draft request recorded. Its current lifecycle is shown separately.');}
       else {setModelObservation({receipt,observedAt:latest.model_observed_at??new Date().toISOString()});setMessage('The exact request is retained. Checking a result does not start model work.');}
     }catch(cause){if(currentRequest()){if(!transmitted){setRecoveryState('failed');setError('No new request was sent. The previous request and your forms are retained. Recheck private draft storage.');}else modelFailure(cause);}}
     finally{if(currentRequest()){nativeModelSettling.current=false;modelBusy.current=false;setBusy(false);}}
@@ -2252,7 +2262,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
                   inlineModelRecovery?'Your last message is unconfirmed. Check its saved result in the conversation.':nativeChat?message:''}
               </p>}
               <label className="team-sr-only" htmlFor="team-question">Thought or question</label>
-              <textarea ref={questionRef} id="team-question" aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?"team-request-progress":undefined} rows={2} maxLength={4000} disabled={(nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => {currentThought.current=e.target.value;setThought(e.target.value);}} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
+              <textarea ref={questionRef} id="team-question" aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?"team-request-progress":undefined} rows={2} maxLength={4000} disabled={(nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => {thoughtEditVersion.current+=1;currentThought.current=e.target.value;setThought(e.target.value);}} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
                 onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&
                   !(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession)){event.preventDefault();if(!locked&&thought.trim())ask();}}}/>
               <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={locked || !!nativeChatOwner&&!nativeComposerEditable || !thought.trim() || !bot?.enabled}
