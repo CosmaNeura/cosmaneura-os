@@ -1188,14 +1188,21 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const heading=clinicalTeamRef.current?.querySelector<HTMLElement>('h3');
     heading?.scrollIntoView?.({block:'start'});heading?.focus({preventScroll:true});
   },[authenticated,workspace?.id,selected,clinicalTeamExpanded,mobilePanel,settingsOpen,practiceOpen,phoneChiefToolsVisible]);
-  function openClinicalTeamDrafts(noteId:string){
+  function openClinicalTeamDrafts(noteId:string,prepare=true,expected?:{owner:AuthenticatedWorkspaceIdentity;scope:string;generation:number;selection:ShareSavedNoteInput;content:string}){
+    if(expected){
+      const latest=recoveryView.current.workspace,saved=latest?.note?.latest,selection=expected.selection;
+      if(expected.owner!==authenticated||expected.owner!==previousIdentity.current||currentIdentity.current!==identity||expected.generation!==generation.current||
+        expected.scope!==journal.current?.scope||!latest||latest.id!==workspace?.id||!saved||latest.revision!==selection.expected_revision||
+        saved.id!==selection.note_id||saved.version!==selection.note_version||saved.content_hash!==selection.content_hash||saved.source_fingerprint!==selection.source_fingerprint||saved.content!==expected.content)return;
+      try{assertCurrentDesktopSession(expected.owner);if(expected.owner.mode==='clerk_jwt'&&expected.owner.nativeSession&&!expected.owner.nativeSession.isCurrent())return;}catch{return;}
+    }
     if(!authenticated||!team||!workspace||locked||captureNavigationLocked||captureDraftLocked||note!==latestNote||workspace.note?.latest?.id!==noteId||workspace.note.latest.sources_changed)return;
     const chief=team.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
     if(!chief)return;
     clinicalTeamFocus.current={owner:authenticated,workspaceId:workspace.id,generation:generation.current};
     setSelected(botAddress(chief));setReviewHandoffId(null);setSettingsOpen(false);setPracticeOpen(false);setSelectedResult(null);
     setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setClinicalTeamExpanded(true);
-    void prepareClinicalDrafts(noteSelection(workspace.note.latest,workspace.revision)).catch(()=>{});
+    if(prepare)void prepareClinicalDrafts(noteSelection(workspace.note.latest,workspace.revision)).catch(()=>{});
   }
   async function prepareClinicalDrafts(input:ShareSavedNoteInput){
     if(!authenticated||!identity||!workspace||!team||locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked||clinicalPreparation.current)return;
@@ -1608,6 +1615,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const nativeChat=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!!workspace&&practicePage==='notebook'&&mobilePanel==='Conversation'&&
     !settingsOpen&&!practiceOpen&&!privateRecordingEntry&&(!savedRecordingEntry||savedRecordingNotebookOpen)&&!scribeRecordingOpen&&!scribeSourceBusy&&!reviewHandoffId&&!conflict&&!recoveryBlocked&&!recoveryOffers.length&&(!pending||busy||nativeConversationPending);
   const nativeWorkspace=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!nativeHome&&!nativeChat&&!privateRecordingEntry&&!settingsOpen&&!practiceOpen;
+  const nativeClinicalPlan=nativeChat&&bot?.role==='chief'&&!!workspace?.appointment_id&&!!workspace.note?.latest&&authenticated===identity&&authenticated===previousIdentity.current&&
+    !!authenticated&&!!journal.current&&journal.current.serverScope===team?.recovery_scope?{
+      owner:authenticated,scope:journal.current.scope,generation:generation.current,selection:noteSelection(workspace.note.latest,workspace.revision),
+      content:workspace.note.latest.content,sourcesChanged:workspace.note.latest.sources_changed}:null;
   useLayoutEffect(()=>{
     if(!savedRecordingFocused||!nativeChatOwner||!savedRecordingEntry)return;
     const owner=nativeChatOwner,current=generation.current,host=savedRecordingHost.current;
@@ -1868,7 +1879,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         <button disabled={busy} onClick={() => void recheckRecovery()}>Recheck draft recovery</button></div>}
       <div className="workspace-draft-save-status">
         {recoveryState === "saving" && <p className="team-fine" role="status">Saving notebook and team drafts on this device…</p>}
-        {recoveryState === "saved" && <p hidden={!!privateRecordingEntry} className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
+        {recoveryState === "saved" && <p hidden={!!privateRecordingEntry||nativeChat||phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen} className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
       </div>
       {practiceOpen && error && <div className="team-banner error" role="alert">{error}</div>}
       {practiceOpened && (authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><fieldset disabled={recoveryBlocked} hidden={!practiceOpen} style={{border:0,padding:0,margin:0,minWidth:0}}><PracticeHub identity={(authenticated || identity)!} onDenied={failure} onBusyChange={reportInboxBusy} onDraftInbox={authenticated?selection=>{setInboxNavigation({selection,identity:authenticated,generation:generation.current});}:undefined}><PracticeWork identity={(authenticated || identity)!}
@@ -2122,6 +2133,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
             {phoneChiefConversation?<button className="team-subtle" aria-controls={`chief-tools-${workspace.id}`} aria-expanded={phoneChiefToolsVisible}
               disabled={viewNavigationLocked} onClick={()=>phoneChiefToolsVisible?returnToPhoneChat():openPhoneChatTools()}>Tools</button>:
               <button className="team-subtle" onClick={() => setSettingsOpen(true)}>Skills & settings</button>}</header>
+          {nativeClinicalPlan&&<section className="chief-saved-note-shortcut" aria-label="Saved visit note next steps">
+            <span>Saved visit note · version {nativeClinicalPlan.selection.note_version}</span>
+            <button type="button" aria-label={`Plan from saved visit note version ${nativeClinicalPlan.selection.note_version}`} disabled={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked||note!==latestNote||nativeClinicalPlan.sourcesChanged}
+              onClick={()=>openClinicalTeamDrafts(nativeClinicalPlan.selection.note_id,false,nativeClinicalPlan)}>Follow-up + Research</button>
+          </section>}
           <div className="mobile-chat-scroll" ref={mobileChatFrame.scrollRef} onScroll={mobileChatFrame.onScroll}
             role={nativeChat?'region':undefined} aria-label={nativeChat?(phoneChiefToolsVisible?'Chief tools':'Conversation history'):undefined} tabIndex={nativeChat?0:undefined}>
           <div id={`chief-tools-${workspace.id}`} className="team-conversation-tools" hidden={phoneChiefConversation&&!phoneChiefToolsVisible}>

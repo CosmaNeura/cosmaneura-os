@@ -50,7 +50,7 @@ function notFound(revision=workspace.revision):ClinicalNoteShareReceipt {
 }
 const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>!b.closest('[hidden]')&&(b.textContent?.trim()===name||b.getAttribute('aria-label')===name));
 async function click(name:string) {const selected=button(name);expect(selected,name).toBeTruthy();expect(selected!.disabled,name).toBe(false);await act(async()=>selected!.click());}
-async function open(factory=storage,recovering=false) {
+async function open(factory=storage,recovering=false,showPlan=true) {
   await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={factory}/>));
   await click('Visits and notes');
   await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
@@ -60,7 +60,7 @@ async function open(factory=storage,recovering=false) {
   const chief=[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='Chief')!;
   await act(async()=>chief.click());
   await click('Conversation view');
-  await act(async()=>{host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')!.open=true;});
+  if(showPlan)await act(async()=>{host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')!.open=true;});
 }
 async function selectNote() {
   await click('Preview saved note for team');
@@ -99,6 +99,55 @@ beforeEach(async()=>{
   host=document.createElement('div');document.body.append(host);root=createRoot(host);
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.useRealTimers();vi.unstubAllGlobals();});
+
+it('opens the exact saved-note plan directly from native Chief without sharing or replacing the owner’s directions',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener(){},removeEventListener(){}}));
+  if(identity.mode!=='clerk_jwt')throw Error('Invented native identity required');
+  identity.nativeSession={revision:uuid(970),isCurrent:()=>true};
+  await open(storage,false,false);
+  const question=host.querySelector<HTMLTextAreaElement>('#team-question')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question,'My next directions, still editable');question.dispatchEvent(new Event('input',{bubbles:true}));});
+  expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
+  expect(host.querySelector('.chief-saved-note-shortcut')?.textContent).toContain('version 1');
+  await click('Plan from saved visit note version 1');
+  expect(host.querySelector('[aria-label="Saved note for Follow-up and Research"]')?.textContent).toBe(workspace.note!.latest!.content);
+  expect(host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')?.open).toBe(true);
+  expect(host.querySelector<HTMLTextAreaElement>('#team-question')).toBe(question);
+  expect(question.value).toBe('My next directions, still editable');expect(question.disabled).toBe(false);
+  expect(button('Prepare Follow-up and Research')?.disabled).toBe(true);
+  expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+  await click('Back to chat');expect(host.querySelector<HTMLTextAreaElement>('#team-question')).toBe(question);
+  expect(question.value).toBe('My next directions, still editable');
+});
+
+it('refuses the native saved-note shortcut when the captured native session expires',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener(){},removeEventListener(){}}));
+  if(identity.mode!=='clerk_jwt')throw Error('Invented native identity required');
+  let current=true;identity.nativeSession={revision:uuid(970),isCurrent:()=>current};
+  await open(storage,false,false);const shortcut=button('Plan from saved visit note version 1')!;expect(shortcut).toBeTruthy();
+  current=false;await act(async()=>shortcut.click());
+  expect(host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')?.open).toBe(false);
+  expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
+});
+
+it('keeps the saved-note shortcut locked beside the exact unconfirmed native message',async()=>{
+  vi.stubGlobal('matchMedia',()=>({matches:true,addEventListener(){},removeEventListener(){}}));
+  if(identity.mode!=='clerk_jwt')throw Error('Invented native identity required');
+  identity.nativeSession={revision:uuid(970),isCurrent:()=>true};
+  vi.mocked(workspaceApi.ask).mockRejectedValueOnce(new WorkspaceApiError(503));
+  await open(storage,false,false);const question=host.querySelector<HTMLTextAreaElement>('#team-question')!;
+  await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question,'Keep this exact message');question.dispatchEvent(new Event('input',{bubbles:true}));});
+  await click('Send message');
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('[aria-label="Unconfirmed model request"]')).toBeTruthy();});
+  const sent=vi.mocked(workspaceApi.ask).mock.calls[0][2];
+  expect((await retained())?.pending).toMatchObject({type:'ask',body:sent});
+  const shortcut=button('Plan from saved visit note version 1')!;expect(shortcut.disabled).toBe(true);await act(async()=>shortcut.click());
+  expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
+  expect(host.querySelector<HTMLTextAreaElement>('#team-question')).toBe(question);expect(question.disabled).toBe(false);
+  expect(host.querySelector<HTMLDetailsElement>('.clinical-team-disclosure')?.open).toBe(false);
+  expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(workspaceApi.ask).toHaveBeenCalledOnce();
+  expect((await retained())?.pending).toMatchObject({type:'ask',body:sent});
+});
 
 it('acknowledges the exact share in the draft journal before making any network request',async()=>{
   const ack=deferred<void>();let captured:unknown;

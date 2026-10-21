@@ -381,6 +381,9 @@
 .workspace-notebook-body > .handoff-review { order:-1; }
 .workspace-draft-save-status:empty { display:none; }
 .mobile-chat-scroll { display:contents; }
+.chief-saved-note-shortcut { flex:none; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid var(--team-line); background:#f3f6f1; }
+.chief-saved-note-shortcut>span { font-size:12px; line-height:1.35; min-width:0; }
+.team-workspace .chief-saved-note-shortcut>button { min-height:44px; max-width:170px; padding:6px 8px; font-size:12px; }
 .mobile-chat-scroll > details > summary { box-sizing:border-box; min-height:44px; padding:12px 16px; cursor:pointer; }
 .team-conversation-tools { display:contents; }
 .team-conversation-tools > details > summary { box-sizing:border-box; min-height:44px; padding:12px 16px; cursor:pointer; }
