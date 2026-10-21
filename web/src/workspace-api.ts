@@ -423,9 +423,19 @@ export const workspaceApi = {
   },
   async openPrivateDraft(identity:AuthenticatedWorkspaceIdentity,workspaceId:string) {
     if(!teamUuid(workspaceId))throw new WorkspaceApiError(422);
-    const team=await requestTeam(identity),workspace=await modelWorkApi.readWorkspace(identity,workspaceId);
-    if(!validPrivateWorkspace(workspace,workspaceId))throw new WorkspaceApiError(503);
-    return {identity,workspace,team};
+    const controller=new AbortController();
+    try{
+      // Both reads independently check fresh authority. Neither needs the
+      // other's result; retain the full workspace review projection.
+      const [team,workspace]=await Promise.all([
+        requestTeam(identity,undefined,controller.signal),
+        modelWorkApi.readWorkspace(identity,workspaceId,controller.signal),
+      ]);
+      if(!validPrivateWorkspace(workspace,workspaceId))throw new WorkspaceApiError(503);
+      try{assertCurrentDesktopSession(identity);}catch{throw new WorkspaceApiError(401);}
+      if(identity.mode==='clerk_jwt'&&identity.nativeSession&&!identity.nativeSession.isCurrent())throw new WorkspaceApiError(401);
+      return {identity,workspace,team};
+    }finally{controller.abort();}
   },
   linkAppointment: (identity:AuthenticatedWorkspaceIdentity,workspaceId:string,body:PrivateDraftLinkInput)=>{
     if(!teamUuid(workspaceId)||!validPrivateDraftLink(body))throw new WorkspaceApiError(422);
