@@ -2,6 +2,7 @@
 
 import hashlib
 from collections.abc import Callable
+from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
@@ -44,6 +45,33 @@ from cosmas_os.private_recording_models import (
     PrivateRecordingTransferRejection,
     PrivateRecordingTransferSession,
 )
+
+CORE_CAPTURE_FAILURE_CODES = frozenset({
+    "core_capture_identity_unavailable",
+    "core_capture_context_invalid",
+    "core_capture_receipt_invalid",
+    "core_capture_request_unconfirmed",
+})
+
+
+class CoreCaptureReadPhase(StrEnum):
+    CONTEXT_EXCHANGE = "context_exchange"
+    CONTEXT_RESOLUTION = "context_resolution"
+    BINDING_RESOLUTION = "binding_resolution"
+    SESSION_VERIFICATION = "session_verification"
+    REVIEW = "review"
+
+
+class CoreCaptureFailure(ws.WorkspaceError):
+    """Closed adapter failure with an optional creator-review read phase."""
+
+    def __init__(self, code: str, capture_phase: CoreCaptureReadPhase | None = None):
+        if code not in CORE_CAPTURE_FAILURE_CODES:
+            raise ValueError("invalid_capture_failure_code")
+        if capture_phase is not None and not isinstance(capture_phase, CoreCaptureReadPhase):
+            raise ValueError("invalid_capture_phase")
+        super().__init__(code, 503)
+        self.capture_phase = capture_phase
 
 
 def notebook_snapshot(session, workspace_id, entry_id):
@@ -97,6 +125,8 @@ def admit(
 
     transfer_id = None
     transfer_sha = None
+    creator_review = operation is not None and operation.kind == "creator_review"
+    capture_phase: CoreCaptureReadPhase | None = None
     def selection(*, finalizing: bool = False):
         nonlocal transfer_id, transfer_sha
         check_capture_deadline()
@@ -265,12 +295,18 @@ def admit(
         if note_selection is not None and note_selection.scratch_notes is not None:
             raise ws.WorkspaceError("invalid_capture_request", 422)
         expected = selection()
+        if creator_review:
+            capture_phase = CoreCaptureReadPhase.CONTEXT_EXCHANGE
         token = port.exchange_context(expected[1], bearer)
         if selection() != expected:
             raise ws.WorkspaceError("capture_context_changed", 409)
+        if creator_review:
+            capture_phase = CoreCaptureReadPhase.CONTEXT_RESOLUTION
         credential = port.resolve_context(expected[1], token)
         if selection() != expected:
             raise ws.WorkspaceError("capture_context_changed", 409)
+        if creator_review:
+            capture_phase = CoreCaptureReadPhase.BINDING_RESOLUTION
         binding = port.resolve_binding(expected[1], credential)
         if selection() != expected:
             raise ws.WorkspaceError("capture_context_changed", 409)
@@ -320,6 +356,8 @@ def admit(
             if selection() != expected:
                 raise ws.WorkspaceError("capture_context_changed", 409)
             return result
+        if creator_review:
+            capture_phase = CoreCaptureReadPhase.SESSION_VERIFICATION
         receipt = port.admit_capture(
             binding,
             credential,
@@ -379,6 +417,8 @@ def admit(
                         capture_profile=profile,
                     )
                 else:
+                    if creator_review:
+                        capture_phase = CoreCaptureReadPhase.REVIEW
                     result = port.perform_capture_operation(
                         binding, credential, receipt.session_id, operation, idempotency_key
                     )
@@ -441,6 +481,8 @@ def admit(
             "capture_notes_unavailable": 503,
         }
         code = str(error)
+        if code in CORE_CAPTURE_FAILURE_CODES:
+            raise CoreCaptureFailure(code, capture_phase) from None
         if code == "capture_recording_consent_required" and saved_recording is not None:
             if selection(finalizing=True) != expected or transfer_id is None or transfer_sha is None:
                 raise ws.WorkspaceError("capture_context_changed", 409) from None
