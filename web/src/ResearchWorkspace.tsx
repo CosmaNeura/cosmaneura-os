@@ -9,6 +9,8 @@ import {validConversation} from './model-work-request';
 import {teamStrip} from './team-setup-request';
 import type {EditorDraft} from './draft-journal';
 import {validateResearchSavedHistory,type ResearchSaved,type ResearchSavedPacket} from './research-contract';
+import {NoteResearchPanel,useNoteResearchPlan} from './NoteResearchPanel';
+import {noteResearchSelectionMatches,type NoteResearchSelection} from './note-research-workflow';
 import './research-workspace.css';
 
 const blank=(bot:string):ResearchDraft=>({version:1,bot,topic:'literature',query:'',sources:[],pending:null});
@@ -26,17 +28,21 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const [savedReceipt,setSavedReceipt]=useState<ResearchSaved|null>(null);
  const [replacement,setReplacement]=useState<ResearchPrevious|null>(null),[replaceAcknowledged,setReplaceAcknowledged]=useState(false),[previousResult,setPreviousResult]=useState<ResearchObservation|null>(null);
  const [showSavedChat,setShowSavedChat]=useState(false); // Reserved only for the focused view's explanation; no query forwarding.
+ const notePlan=useNoteResearchPlan(analysis?.workspace.id===workspaceId?analysis.workspace:undefined,bot.address,identity);
+ const noteQuestionCurrent=!draft.note_question||noteResearchSelectionMatches(notePlan,draft.note_question);
+ const queryField=useRef<HTMLTextAreaElement|null>(null);
  const catalogRequest=useRef<AbortController|null>(null);
  const inFlight=useRef(false),operation=useRef<AbortController|null>(null),generation=useRef(0);
- const live=useRef({identity,workspaceId,bot,enabled,locked,analysis});live.current={identity,workspaceId,bot,enabled,locked,analysis};
+ const live=useRef({identity,workspaceId,bot,enabled,locked,analysis,notePlan});live.current={identity,workspaceId,bot,enabled,locked,analysis,notePlan};
  const kind=`research:${bot.address}` as const;
- const value=draft.query||draft.sources.length||draft.pending||draft.previous_request||draft.saved_packet||draft.analysis_draft?editorDraft(workspaceId,kind,draft,draft.pending?.request.idempotency_key??null):null;
+ const value=draft.query||draft.sources.length||draft.pending||draft.previous_request||draft.saved_packet||draft.analysis_draft||draft.note_question?editorDraft(workspaceId,kind,draft,draft.pending?.request.idempotency_key??null):null;
  const recovery=useEditorRecovery(workspaceId,kind,value,busy,{required:true,identity,scopeKey:bot.address});
  const blocked=locked||busy||recovery.blocked,canSearch=enabled&&!blocked&&!draft.pending;
  useUnsavedWork(!!draft.pending||!!draft.query||!!draft.analysis_draft?.question||busy);
  useEffect(()=>{generation.current++;inFlight.current=false;setBusy(false);setCancellable(false);setProgress('');return()=>{generation.current++;operation.current?.abort();};},[identity,workspaceId,bot.address]);
  useEffect(()=>{setSavedReceipt(null);setObservation(null);setHistory([]);setPackets([]);setHistoryMore(false);setPacketsMore(false);},[identity,workspaceId,bot.address]);
  useEffect(()=>{setReview(null);setConfirmed(false);},[workspaceRevision,bot.team_revision,enabled,locked]);
+ useEffect(()=>{setReview(null);setConfirmed(false);},[noteQuestionCurrent,draft.note_question]);
  function current(n:number,controller:AbortController){return n===generation.current&&!controller.signal.aborted&&live.current.identity===identity&&live.current.workspaceId===workspaceId&&live.current.bot.address===bot.address;}
  function beginProgress(label:string,readOnly=false){setBusy(true);setProgress(label);setCancellable(readOnly);}
  function cancelRead(){if(!cancellable||!operation.current)return;operation.current.abort();operation.current=null;inFlight.current=false;setBusy(false);setCancellable(false);setMessage('Stopped waiting for this read. Your saved work and retained requests are unchanged.');}
@@ -51,16 +57,23 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  function edit(update:Partial<ResearchDraft>){if(!canSearch)return;setDraft(d=>({...d,...update}));setReview(null);setConfirmed(false);setMessage('');}
  const sources=catalog?.sources.filter(s=>s.topics.includes(draft.topic))??[];
  const selectedAvailable=!!catalog?.enabled&&draft.sources.length>0&&draft.sources.every(id=>sources.some(s=>s.id===id&&s.state==='enabled'));
- function reviewQuery(){if(!canSearch||!selectedAvailable||!teamStrip(draft.query))return;const query=teamStrip(draft.query);setDraft(d=>({...d,query}));const request={contract_version:1 as const,idempotency_key:crypto.randomUUID(),expected_revision:workspaceRevision,team_revision:bot.team_revision,bot:bot.address,topic:draft.topic,sources:[...draft.sources],query,public_query_confirmed:true as const};if(!validResearchSearch(request)){setMessage('Use one general question without line breaks or control characters.');return;}setReview(request);setConfirmed(false);}
+ function reviewQuery(){if(!canSearch||!noteQuestionCurrent||!selectedAvailable||!teamStrip(draft.query))return;const query=teamStrip(draft.query);setDraft(d=>({...d,query}));const request={contract_version:1 as const,idempotency_key:crypto.randomUUID(),expected_revision:workspaceRevision,team_revision:bot.team_revision,bot:bot.address,topic:draft.topic,sources:[...draft.sources],query,public_query_confirmed:true as const};if(!validResearchSearch(request)){setMessage('Use one general question without line breaks or control characters.');return;}setReview(request);setConfirmed(false);}
+ function chooseNoteQuestion(selection:NoteResearchSelection,proposedQuery:string|null){
+  if(!canSearch||draft.query!==''||!noteResearchSelectionMatches(notePlan,selection))return;
+  setDraft(value=>({...value,note_question:selection,query:proposedQuery??''}));setReview(null);setConfirmed(false);
+  setMessage(proposedQuery?'Proposed query placed in the editor. Check it for patient details and review the selected public sources.':'Write a general public query for this private question. Only your reviewed public wording will be sent.');
+  queryField.current?.focus();
+ }
  function snapshot(next:ResearchDraft):EditorDraft{return editorDraft(workspaceId,kind,next,next.pending?.request.idempotency_key??null);}
  async function execute(pending:ResearchPending,resolve=false){
-  if(inFlight.current||blocked||!resolve&&(!enabled||draft.pending))return;
+  if(inFlight.current||blocked||!resolve&&(!enabled||draft.pending||pending.kind==='search'&&!noteQuestionCurrent))return;
   inFlight.current=true;beginProgress(resolve?'Checking the saved result…':pending.kind==='search'?'Searching selected public sources…':'Saving selected excerpts to this encounter…');setMessage('');setReview(null);setConfirmed(false);
   const controller=new AbortController(),n=generation.current;operation.current=controller;
   const retained={...draft,pending};
   try{
    // The exact intent is durable before any public lookup or internal evidence save.
    await recovery.commit(snapshot(retained));if(!current(n,controller))return;setDraft(retained);if(!resolve&&!live.current.enabled||live.current.locked)return;
+   if(!resolve&&pending.kind==='search'&&retained.note_question&&!noteResearchSelectionMatches(live.current.notePlan,retained.note_question))return;
    if(pending.kind==='search'){
     const raw=await (resolve?port.resolve:port.search)(identity,workspaceId,pending.request,controller.signal);
     const result=await validateResearchObservation(raw,workspaceId,pending.request,bot.address);if(!current(n,controller))return;
@@ -169,18 +182,21 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
   <EditorRecoveryNotice recovery={recovery} label="Research" onRestore={async(saved,_workspace,isCurrent)=>{const next=validateResearchDraft(saved.data,bot.address);if(isCurrent()){setDraft(next);setReview(null);setConfirmed(false);setObservation(null);setSelected([]);}}}/>
   {!enabled&&<p className="research-status" role="status">Research is paused or not yet saved to your team. Saved work is retained.</p>}
   {!catalog?.enabled&&<div className="research-status" role="status"><strong>{catalogError?'Research connection could not be checked':'Public research is not connected'}</strong><p>Source availability does not confirm a working Cosmas connection. You can keep a question here while the connection is being prepared.</p><button disabled={blocked} onClick={()=>void loadCatalog()}>Check connection</button></div>}
+  {notePlan&&<NoteResearchPanel plan={notePlan} selection={draft.note_question} locked={!canSearch||draft.query!==''} onChoose={chooseNoteQuestion}/>}
+  {draft.note_question&&!noteQuestionCurrent&&<section className="research-status" aria-label="Saved note research source changed"><p>The saved note or Research assessment changed. Your public question is kept; this earlier selection cannot start a new lookup.</p>
+    <button type="button" disabled={!canSearch} onClick={()=>{const next={...draft};delete next.note_question;setDraft(next);setReview(null);setConfirmed(false);queryField.current?.focus();}}>Keep as a separate general question</button></section>}
   <form onSubmit={event=>{event.preventDefault();reviewQuery();}}>
    <fieldset disabled={!canSearch}><legend className="team-sr-only">Public research question</legend>
     <div className="research-topic-row">{RESEARCH_TOPICS.slice(0,4).map(topic=><button key={topic} type="button" aria-pressed={draft.topic===topic} onClick={()=>edit({topic,sources:topic==='trials'&&catalog?.sources.some(source=>source.id==='clinical_trials'&&source.state==='enabled')?['clinical_trials']:[]})}>{TOPIC_LABELS[topic]}</button>)}</div>
     <details className="research-provider-topic"><summary>Provider information</summary><button type="button" aria-pressed={draft.topic==='provider_data'} onClick={()=>edit({topic:'provider_data',sources:[]})}>Provider data</button></details>
-    <label className="research-question">Public question<textarea rows={3} maxLength={500} value={draft.query} onChange={event=>edit({query:event.target.value})} placeholder={draft.topic==='trials'?'For example, myocardial infarction AND stem cell':'For example, recent reviews of treatment options…'}/></label>
+    <label className="research-question">Public question<textarea ref={queryField} rows={3} maxLength={500} value={draft.query} onChange={event=>edit({query:event.target.value})} placeholder={draft.topic==='trials'?'For example, myocardial infarction AND stem cell':'For example, recent reviews of treatment options…'}/></label>
     <p className="team-fine">Write a general question without patient identifiers. Your encounter, notebook and private conversation are not automatically included.</p>
     {draft.topic==='trials'&&<p className="team-fine">Compare recruitment status, trial locations and eligibility. A registry listing does not establish treatment benefit or confirm that someone qualifies.</p>}
     <details className="research-source-picker"><summary>{draft.sources.length ? `Sources · ${draft.sources.length} selected` : "Choose sources to continue"}</summary>{sources.length?sources.map(source=><label key={source.id}><input type="checkbox" disabled={source.state!=='enabled'||!draft.sources.includes(source.id)&&draft.sources.length>=3} checked={draft.sources.includes(source.id)} onChange={event=>edit({sources:event.target.checked?[...draft.sources,source.id]:draft.sources.filter(id=>id!==source.id)})}/><span>{source.label}<small>{source.state==='enabled'?'Connection configured':'Not connected'}</small></span></label>):<p>No source connection is confirmed for this topic.</p>}</details>
-    <button className="team-primary" disabled={!selectedAvailable||!teamStrip(draft.query)}>Review query</button>
+    <button className="team-primary" disabled={!noteQuestionCurrent||!selectedAvailable||!teamStrip(draft.query)}>Review query</button>
    </fieldset>
   </form>
-  {review&&<section className="research-query-review" aria-label="Review public query"><h3>Check what will be sent</h3><p>{review.query}</p><p>To: {review.sources.map(id=>sourceLabel(id,catalog)).join(', ')}</p><label><input type="checkbox" checked={confirmed} disabled={blocked} onChange={event=>setConfirmed(event.target.checked)}/>This is a general public question, with no patient identifiers.</label><div><button disabled={blocked} onClick={()=>{setReview(null);setConfirmed(false);}}>Edit query</button><button className="team-primary" disabled={!confirmed||!canSearch||!selectedAvailable} onClick={()=>{if(confirmed&&canSearch&&selectedAvailable&&review.expected_revision===workspaceRevision&&review.team_revision===bot.team_revision)void execute({kind:'search',request:review});}}>Search selected sources</button></div></section>}
+  {review&&noteQuestionCurrent&&<section className="research-query-review" aria-label="Review public query"><h3>Check what will be sent</h3><p>{review.query}</p><p>To: {review.sources.map(id=>sourceLabel(id,catalog)).join(', ')}</p>{draft.note_question&&<p>Private note version {draft.note_question.note_version} and its assessment stay in this workspace. Only the public question above and selected sources are sent.</p>}<label><input type="checkbox" checked={confirmed} disabled={blocked} onChange={event=>setConfirmed(event.target.checked)}/>This is a general public question, with no patient identifiers.</label><div><button disabled={blocked} onClick={()=>{setReview(null);setConfirmed(false);}}>Edit query</button><button className="team-primary" disabled={!confirmed||!canSearch||!selectedAvailable} onClick={()=>{if(confirmed&&canSearch&&selectedAvailable&&review.expected_revision===workspaceRevision&&review.team_revision===bot.team_revision)void execute({kind:'search',request:review});}}>Search selected sources</button></div></section>}
   {draft.pending&&!busy&&<section className="research-status" aria-label="Unconfirmed research request"><strong>{draft.pending.kind==='search'?'Research request retained':'Evidence save retained'}</strong><p>Check the saved result. This does not start another lookup or save.</p><button disabled={blocked} onClick={()=>draft.pending&&void execute(draft.pending,true)}>Check saved result</button></section>}
   {replacement&&draft.pending?.kind==='search'&&<section className="research-status" aria-label="Prepare replacement search"><p>The previous request is retained and may still finish. A new search is a separate public lookup.</p><label><input type="checkbox" checked={replaceAcknowledged} disabled={blocked} onChange={event=>setReplaceAcknowledged(event.target.checked)}/>I understand the previous request may still finish.</label><button disabled={blocked||!enabled||!replaceAcknowledged} onClick={()=>void replaceSearch()}>Start a new search</button></section>}
   {draft.previous_request&&<details className="research-history"><summary>Previous request retained</summary><p>{draft.previous_request.request.query}</p><p className="team-fine">Its outcome was {draft.previous_request.outcome==='not_found'?'not found when checked':'interrupted when checked'}. This does not confirm that a prior upstream request stopped.</p><button disabled={blocked} onClick={()=>void checkPrevious()}>Check previous result</button>{previousResult&&<><p>{stateLabel[previousResult.state]}</p><ul>{previousResult.results.map(result=><li key={result.sha256}>{result.title}</li>)}</ul></>}</details>}
