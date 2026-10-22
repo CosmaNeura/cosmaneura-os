@@ -1,16 +1,22 @@
 import {act} from 'react';
-import {expect} from 'vitest';
+import {expect,vi} from 'vitest';
 
 /** Real visible navigation shared by the existing owner/recovery integration suites. */
 export function settingsNavigation(container: HTMLElement) {
   const visible = (element: Element) => !element.closest('[hidden]');
   const text = (element: Element) => element.textContent?.replace(/[←→›↗]/g, '').trim();
   async function click(name: string) {
-    const scope = name === 'Team settings' ? container : container.querySelector('.settings-hub') ?? container;
-    const button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => visible(button) &&
-      (text(button) === name || button.getAttribute('aria-label') === name || [...button.querySelectorAll('strong')].some(child => text(child) === name)));
-    expect(button, `Visible settings button: ${name}`).toBeTruthy();
-    expect(button!.matches(':disabled'), `Enabled settings button: ${name}`).toBe(false);
+    let button:HTMLButtonElement|undefined;
+    // Connection cards wait for their availability read. Re-resolve the control
+    // after that read, just as a browser click waits until it is enabled.
+    await vi.waitFor(async()=>{
+      await act(async()=>{});
+      const scope = name === 'Team settings' ? container : container.querySelector('.settings-hub') ?? container;
+      button = [...scope.querySelectorAll<HTMLButtonElement>('button')].find(button => visible(button) &&
+        (text(button) === name || button.getAttribute('aria-label') === name || [...button.querySelectorAll('strong')].some(child => text(child) === name)));
+      expect(button, `Visible settings button: ${name}`).toBeTruthy();
+      expect(button!.matches(':disabled'), `Enabled settings button: ${name}`).toBe(false);
+    },{timeout:1000});
     await act(async () => button!.click());
   }
   const page = () => container.querySelector('.team-configuration-flow')?.getAttribute('data-page');

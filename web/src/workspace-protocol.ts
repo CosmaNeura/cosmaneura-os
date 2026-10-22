@@ -57,16 +57,24 @@ function currentIdentity(identity:WorkspaceIdentity) {
 }
 function cancel(response:Response){try{void response.body?.cancel().catch(()=>{});}catch{/* Do not wait on a discarded response. */}}
 
+async function fetchWorkspace(url:string,init:RequestInit):Promise<Response> {
+  try { return await fetch(url,init); }
+  catch(cause) {
+    if(cause instanceof TypeError&&!init.signal?.aborted)throw new WorkspaceApiError(503,'workspace_unreachable');
+    throw cause;
+  }
+}
+
 /** Shared API dispatch guard; local editing, encrypted custody and recording Stop stay available. */
 export async function workspaceFetch(identity:WorkspaceIdentity|undefined,url:string,init:RequestInit,compatibility=false):Promise<Response> {
-  if(!hostedWorkspaceRequested())return fetch(url,init);
+  if(!hostedWorkspaceRequested())return fetchWorkspace(url,init);
   if(!identity || !('mode' in identity) || !currentIdentity(identity))throw new WorkspaceApiError(401);
   const mismatch=compatibility?updateRequired:workPaused;
   if(!compatibility)requireWorkspaceProtocol(identity);
   const generation=state(identity).generation;
   if(new Headers(init.headers).get(WORKSPACE_PROTOCOL_HEADER)!=='1'){block(identity);throw mismatch();}
   init.signal?.throwIfAborted();
-  const response=await fetch(url,init);
+  const response=await fetchWorkspace(url,init);
   if(init.signal?.aborted || !currentIdentity(identity)){cancel(response);throw new WorkspaceApiError(401);}
   // An upstream outage may return a proxy error without application headers.
   // It is not proof of an incompatible server. Successful data must be identified.

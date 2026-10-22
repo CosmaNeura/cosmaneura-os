@@ -413,7 +413,7 @@ export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
 export function App({ runtimeMode: selectedMode = runtimeMode }: { runtimeMode?: AppRuntimeMode }) {
   const [showProof, setShowProof] = useState(false);
   if (selectedMode !== "synth_os") return <BlockedRuntime mode={selectedMode} />;
-  if (WORKSPACE_BUILD && !showProof) return <EncounterWorkspace onExit={() => setShowProof(true)} />;
+  if (WORKSPACE_BUILD && !showProof) return <EncounterWorkspace onExit={import.meta.env.VITE_SHOW_EXECUTION_PROOF==='true'?() => setShowProof(true):undefined} />;
   if (WORKSPACE_BUILD) return <><div className="workspace-return"><button onClick={() => setShowProof(false)}>Open encounter notebook</button></div><SyntheticQueue /></>;
   return <SyntheticQueue />;
 }

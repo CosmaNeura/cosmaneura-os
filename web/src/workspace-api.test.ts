@@ -11,6 +11,20 @@ const json = (value: unknown) => new Response(JSON.stringify(value), {
 describe("signed workspace transport", () => {
   beforeEach(() => vi.stubEnv("VITE_API_BASE", "http://127.0.0.1:8018"));
   afterEach(() => { vi.unstubAllEnvs(); vi.unstubAllGlobals(); vi.useRealTimers(); });
+  it('maps fetch network rejection without promising an unchanged write outcome',async()=>{
+    vi.stubGlobal('fetch',vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(workspaceApi.catalog({mode:'clerk_jwt',getToken:async()=>'invented-token'})).rejects.toMatchObject({status:503,code:'workspace_unreachable'});
+    const error=new WorkspaceApiError(503,'workspace_unreachable');
+    expect(error.message).toContain('can’t reach your workspace service');
+    expect(error.message).not.toContain('Nothing was changed');
+  });
+  it('checks synthetic service recovery with a read and no demo-seeding request',async()=>{
+    const transport=vi.fn().mockResolvedValue(json({status:'ok',env:'synth_os'}));vi.stubGlobal('fetch',transport);
+    await expect(workspaceApi.checkSyntheticConnection()).resolves.toBeUndefined();
+    expect(transport).toHaveBeenCalledOnce();
+    expect(transport.mock.calls[0][0]).toBe('http://127.0.0.1:8018/health');
+    expect(transport.mock.calls[0][1]).toMatchObject({method:'GET',body:undefined});
+  });
   it('uses operation-neutral copy for unavailable reads and describes a connection pause without inventing a save',()=>{
     const pause=new WorkspaceApiError(503,'workspace_protocol_required');
     expect(pause.message).toContain('workspace connection is paused');

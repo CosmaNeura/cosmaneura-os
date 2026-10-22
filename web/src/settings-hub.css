@@ -78,7 +78,7 @@
   .connection-state-help dl > div { grid-template-columns:1fr; gap:3px; }
 }
 @media (max-width: 600px) {
-  .team-workspace[data-settings-open="true"]:not([data-settings-navigation-locked="true"]) .team-topbar { display: none; }
+  .team-workspace[data-settings-rendered="true"]:not([data-settings-navigation-locked="true"]) .team-topbar { display: none; }
 }
 .connection-setup-guide { padding:18px; }
 .connection-setup-guide h3 { margin:18px 0 6px; font-size:15px; }
