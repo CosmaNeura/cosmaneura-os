@@ -1,0 +1,1800 @@
+
+ RUN  v3.2.7 /private/tmp/cosmas-apple-src/os/web
+
+ ✓ src/VendorSetupWorkspace.test.tsx (2 tests) 251ms
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > opens Research from the initial dashboard after choosing the encounter, without starting a lookup
+An update to ResearchPanelLoader inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > opens Research from the initial dashboard after choosing the encounter, without starting a lookup
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > opens Research from the initial dashboard after choosing the encounter, without starting a lookup
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > opens Research from the initial dashboard after choosing the encounter, without starting a lookup
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > opens Research from the initial dashboard after choosing the encounter, without starting a lookup
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > keeps unsaved notebook typing when opening and returning from shared work
+An update to DeferredPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > keeps unsaved notebook typing when opening and returning from shared work
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > lets the clinician explicitly replace a Chief request that expired before starting, with a fresh key and current revision
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/EncounterWorkspace.test.tsx > private encounter workspace > lets the clinician explicitly replace a Chief request that expired before starting, with a fresh key and current revision
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/EncounterWorkspace.test.tsx (76 tests) 3826ms
+   ✓ private encounter workspace > retires an added bot only on exact save and preserves access to its history  338ms
+ ✓ src/EncounterDraftRecovery.test.tsx (24 tests) 8617ms
+   ✓ offers stored drafts after remount without submitting them and restores exact text  675ms
+   ✓ preserves long clinical text, focus and selection while a refresh is waiting  618ms
+   ✓ restores an authorized notebook route on reload and uses Back without losing its draft  583ms
+   ✓ persists the exact request before sending and recovers a lost reply only through explicit retry  481ms
+   ✓ requires comparison when saved history changed while the device was closed  464ms
+   ✓ recovers standalone team settings without creating a notebook  354ms
+   ✓ rechecks encounter access when restoring an offered draft  457ms
+   ✓ recovers private editor text and its parent save as one exact retry after remount  451ms
+   ✓ retains notebook and clinical drafts when recovery scope disappears, then restores after recheck  678ms
+   ✓ rechecks a missing-scope team response without discarding the pending save or changing its key  380ms
+   ✓ rejects a changed private owner scope without copying existing drafts into it  303ms
+   ✓ journals and explicitly retries the exact approve decision through remount  371ms
+   ✓ replays the exact historical team request, then displays the fresh paused team while preserving the independent notebook  716ms
+   ✓ retains the exact pending team save if its receipt succeeds but the required current-team read fails  348ms
+ ✓ src/AiActivityWorkspace.test.tsx (27 tests) 4437ms
+   ✓ selects activity in the same encounter without replacing the mounted notebook or losing unsaved text  516ms
+   ✓ blocks another encounter while unsaved notebook text remains, preserving the current controller  348ms
+   ✓ does not bypass a failed nested private-note write when changing encounters  370ms
+stderr | src/NativeChatStability.test.tsx > preserves new typing "Next message while storage is busy" while the outgoing local write is held
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > preserves new typing "Next message while storage is busy" while the outgoing local write is held
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/ClinicalTeamWorkspace.test.tsx > keeps the same native composer and scroll while preparing drafts, then retains next typing after a lost reply
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/ClinicalTeamWorkspace.test.tsx > keeps the same native composer and scroll while preparing drafts, then retains next typing after a lost reply
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > preserves new typing "Original message before local save" while the outgoing local write is held
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > preserves new typing "Original message before local save" while the outgoing local write is held
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > reveals native recovery at the bottom and permits only explicit same-key send after a verified missing result
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > reveals native recovery at the bottom and permits only explicit same-key send after a verified missing result
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/ClinicalTeamWorkspace.test.tsx (38 tests) 3084ms
+   ✓ returns from a reviewed native Follow-up result to Chief and its paired Research result with retained directions (tools)  378ms
+   ✓ keeps clinical uncertainty out of generic chat replacement and explicitly reselects the current note and directions  466ms
+stderr | src/NativeChatStability.test.tsx > preserves typing that arrives while the settled encrypted write is in flight
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > preserves typing that arrives while the settled encrypted write is in flight
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > does not let an old settling receipt block or overwrite the next owner’s local draft
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/NativeChatStability.test.tsx > does not let an old settling receipt block or overwrite the next owner’s local draft
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/NativeChatStability.test.tsx (19 tests) 3013ms
+   ✓ preserves new typing "Next message while storage is busy" while the outgoing local write is held  370ms
+   ✓ releases native conversation containment for a saved transcription review and its recovery controls  459ms
+ ✓ src/InboxHandoffPanel.test.tsx (46 tests) 2377ms
+ ✓ src/AiActivityContextNavigation.test.tsx (6 tests) 2213ms
+   ✓ retains team edits through an optional context failure, close-settings and a fresh retry  410ms
+   ✓ still clears private views on optional context denial 401 while retaining saved team input  345ms
+   ✓ still clears private views on optional context denial 403 while retaining saved team input  339ms
+   ✓ keeps team text focused and exact while slow local storage saves the working copy  844ms
+stderr | src/PrivateRecordingPanel.test.tsx > Private Scribe recording controls with encrypted local PCM > prewarms without microphone or HTTP and starts before a held notebook response, then saves/reopens verified PCM
+An update to PrivateRecordingPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PrivateRecordingPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PrivateRecordingPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PrivateRecordingPanel.test.tsx > Private Scribe recording controls with encrypted local PCM > prewarms without microphone or HTTP and starts before a held notebook response, then saves/reopens verified PCM
+An update to PrivateRecordingPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PrivateRecordingPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/PrivateRecordingPanel.test.tsx (57 tests) 2277ms
+stderr | src/ModelRecovery.test.tsx > hands the compact selected-source consent panel into the actual model journal and preserves its selection on response loss
+An update to ResearchAnalysisPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/ModelRecovery.test.tsx > hands the compact selected-source consent panel into the actual model journal and preserves its selection on response loss
+An update to ResearchAnalysisPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to ResearchAnalysisPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/ModelRecovery.test.tsx (16 tests) 1647ms
+   ✓ retains an exact lost ask across remount and settles an old saved receipt omitted from the current projection  416ms
+ ✓ src/EncounterWorkspace.handoff-review.test.tsx (12 tests) 2029ms
+   ✓ completes the product Team work → full draft → changes → revised assignment → acceptance path through actual DOM controls  400ms
+   ✓ retains an unconfirmed review in the actual product and blocks navigation and concurrent workspace writes until exact retry  324ms
+   ✓ reopens a persisted review/revision and does not issue duplicate commands on reload  383ms
+ ✓ src/EncounterWorkspace.efax-source.test.tsx (15 tests) 1966ms
+stderr | src/VendorSetupPanel.test.tsx > clears recipient activation confirmations when an allowed Spruce channel changes
+An update to VendorSetupEditor inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/VendorSetupPanel.test.tsx > keeps restored consent unchecked and resets confirmation after an edit
+An update to VendorSetupEditor inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/EncounterWorkspace.fax-source.test.tsx (13 tests) 1509ms
+   ✓ requires a fresh exact current source before preparing Chief: changed text  305ms
+ ✓ src/VendorSetupPanel.test.tsx (33 tests) 1745ms
+ ✓ src/ResearchWorkspace.test.tsx (28 tests) 1741ms
+ ✓ src/InboxPanel.test.tsx (28 tests) 1724ms
+stderr | src/ConnectionNavigationRecovery.test.tsx > preserves a durable nested account-editor command when closing the notebook
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/ConnectionNavigationRecovery.test.tsx > preserves a durable nested account-editor command when closing the notebook
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/ConnectionNavigationRecovery.test.tsx (5 tests) 1661ms
+   ✓ blocks an already visible Close anyway choice after a connection write fails  542ms
+   ✓ retains one scoped connector controller through a delayed parent failure and recheck plus exact local retry  539ms
+ ✓ src/InboxPanelFocused.test.tsx (19 tests) 1607ms
+ ✓ src/SchedulingPatientPanel.test.tsx (31 tests) 1307ms
+ ✓ src/PortalWorkPanel.test.tsx (23 tests) 1501ms
+ ✓ src/VendorWorkPanel.test.tsx (34 tests) 1273ms
+ ✓ src/PrivateNotebookRecording.test.tsx (20 tests) 1194ms
+stderr | src/InboxWorkspaceRecovery.test.tsx > loads Inbox only on demand before encounter selection and preserves its encrypted draft across views and close
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/InboxWorkspaceRecovery.test.tsx > loads Inbox only on demand before encounter selection and preserves its encrypted draft across views and close
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/InboxWorkspaceRecovery.test.tsx > retains a nested exact pending Inbox action and offers it after reopening without sending or retrying
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/InboxWorkspaceRecovery.test.tsx > retains a nested exact pending Inbox action and offers it after reopening without sending or retrying
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/GoogleMessagePanel.test.tsx (43 tests) 1216ms
+ ✓ src/InboxWorkspaceRecovery.test.tsx (7 tests) 1065ms
+stderr | src/InboxHandoffWorkspaceRecovery.test.tsx > retains an exact pending handoff through workspace close and reopen without recovering or retrying it automatically
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/InboxHandoffWorkspaceRecovery.test.tsx > retains an exact pending handoff through workspace close and reopen without recovering or retrying it automatically
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/InboxHandoffWorkspaceRecovery.test.tsx > clears rendered follow-up when signed account authority is lost, preserving its encrypted record
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/InboxHandoffWorkspaceRecovery.test.tsx > clears rendered follow-up when signed account authority is lost, preserving its encrypted record
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHome inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/InboxHandoffWorkspaceRecovery.test.tsx (5 tests) 1008ms
+ ✓ src/EncounterWorkspace.foreground.test.tsx (18 tests) 1020ms
+ ✓ src/FinanceWorkPanel.test.tsx (22 tests) 1048ms
+ ✓ src/ConnectionSetupFlow.test.tsx (21 tests) 1082ms
+ ✓ src/EncounterWorkspace.google-calendar.test.tsx (3 tests) 515ms
+stderr | src/FinanceSetupPanel.test.tsx > requires saved revised settings and a fresh review after editing the current configuration
+An update to FinanceSetupEditor inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/FinanceSetupPanel.test.tsx (21 tests) 910ms
+ ✓ src/EncounterWorkspace.connector-tools.test.tsx (2 tests) 516ms
+   ✓ reaches bot query review through the actual Research workspace, saves approval, and composes a later explicit request  466ms
+ ✓ src/MembershipSavedEvidence.test.tsx (13 tests) 978ms
+ ✓ src/PortalSetupPanel.test.tsx (14 tests) 1189ms
+ ✓ src/GoogleCalendarPanel.test.tsx (26 tests) 821ms
+ ✓ src/PortalResultReview.test.tsx (9 tests) 757ms
+ ✓ src/SavedRecordingTranscriptionPanel.test.tsx (52 tests) 725ms
+ ✓ src/HandoffReviewPanel.test.tsx (30 tests) 703ms
+ ✓ src/HandoffReviewPanel.recovery.test.tsx (15 tests) 708ms
+ ✓ src/MembershipWorkPanel.test.tsx (15 tests) 696ms
+ ✓ src/RecordingTranscriptionWorkspace.test.tsx (4 tests) 718ms
+ ✓ src/EFaxInboundPanel.test.tsx (20 tests) 613ms
+ ✓ src/EncounterCaptureLifecycle.test.tsx (3 tests) 505ms
+   ✓ keeps recording and scratch-note saving in the same encounter across notebook, bot and settings navigation  431ms
+ ✓ src/private-recording-runtime.test.ts (32 tests) 446ms
+ ✓ src/EncounterWorkspace.google-message.test.tsx (2 tests) 739ms
+   ✓ opens operational email from product settings and prepares Chief without replacing unfinished notes or sending  332ms
+   ✓ offers Chief starters for a current reviewed email without copying it into the notebook  407ms
+ ✓ src/EncounterWorkspace.fax-source-mounted.test.tsx (1 test) 558ms
+   ✓ ordinary Connections offer reaches the real Sources review, saves encrypted passage and prepares an editable Chief request  558ms
+ ✓ src/WorkRoutines.test.tsx (22 tests) 388ms
+ ✓ src/ConfiguredProviderJourney.test.tsx (4 tests) 465ms
+ ✓ src/WorkRoutinesCompact.test.tsx (24 tests) 480ms
+ ✓ src/runtime.test.tsx (48 tests) 244ms
+ ✓ src/InboxFocusedRecovery.test.tsx (6 tests) 424ms
+ ✓ src/EncounterWorkspace.fax.test.tsx (2 tests) 387ms
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to DeferredPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to PracticeHub inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHub inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHub inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeHub inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to DeferredPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to PracticeWork inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to DeferredPanel inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to EncounterWorkspace inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+stderr | src/PracticeRoutinesIntegration.test.tsx > opens private briefs before selecting or writing any encounter
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+An update to WorkRoutines inside a test was not wrapped in act(...).
+
+When testing, code that causes React state updates should be wrapped into act(...):
+
+act(() => {
+  /* fire events that update state */
+});
+/* assert on the output */
+
+This ensures that you're testing the behavior the user would see in the browser. Learn more at https://react.dev/link/wrap-tests-with-act
+
+ ✓ src/creator-review-panel.test.ts (5 tests) 381ms
+ ✓ src/PracticeRoutinesIntegration.test.tsx (3 tests) 363ms
+ ✓ src/TeamConfigurationFlow.test.tsx (24 tests) 430ms
+ ✓ src/MembershipEncounterIntegration.test.tsx (2 tests) 405ms
+ ✓ src/NativeAuthenticatedWorkspace.test.tsx (28 tests) 383ms
+ ✓ src/connector-recovery-initialization.test.tsx (13 tests) 397ms
+ ✓ src/ClinicalDraftRecovery.test.tsx (18 tests) 184ms
+ ✓ src/RecordingVisitPanel.test.tsx (26 tests) 414ms
+ ✓ src/inbox-storage-boundary.test.ts (4 tests) 345ms
+ ✓ src/VisitPrepEntry.test.tsx (3 tests) 354ms
+ ✓ src/AppointmentRecovery.test.tsx (25 tests) 327ms
+ ✓ src/PracticeHome.test.tsx (18 tests) 326ms
+ ✓ src/workspace-api.test.ts (39 tests) 302ms
+ ✓ src/InboxHandoffMount.test.tsx (18 tests) 326ms
+ ✓ src/AppointmentPanel.test.tsx (27 tests) 314ms
+ ✓ src/creator-review-api.test.ts (18 tests) 313ms
+ ✓ src/SchedulingEnrollmentPanel.test.tsx (6 tests) 259ms
+ ✓ src/PracticeWorkRecovery.test.tsx (36 tests) 273ms
+ ✓ src/ConnectionDirectory.test.tsx (23 tests) 286ms
+ ✓ src/FaxSourceReviewPanel.test.tsx (14 tests) 282ms
+ ✓ src/TeamSetupPanel.test.tsx (12 tests) 244ms
+ ✓ src/CapturePanel.test.tsx (41 tests) 243ms
+ ✓ src/EFaxSourceReviewPanel.test.tsx (13 tests) 224ms
+ ✓ src/AiActivityWorkspaceActual.test.tsx (1 test) 218ms
+ ✓ src/GoogleConnectionPanel.operational.test.tsx (18 tests) 210ms
+ ✓ src/CoreNotebookWorkspace.test.tsx (1 test) 232ms
+ ✓ src/VendorSetupMount.test.tsx (11 tests) 227ms
+ ✓ src/InboxRecoveryCapacityMount.test.tsx (3 tests) 202ms
+ ✓ src/FaxSourceReviewMount.test.tsx (15 tests) 205ms
+ ✓ src/FollowUpDraftRecovery.test.tsx (14 tests) 206ms
+ ✓ src/vendor-setup-contract.test.ts (22 tests) 192ms
+ ✓ src/EFaxSourceReviewMount.test.tsx (15 tests) 206ms
+ ✓ src/routine-lanes.test.tsx (21 tests) 221ms
+ ✓ src/PrivateRecordingNavigation.test.tsx (18 tests) 216ms
+ ✓ src/private-recording-desktop.test.ts (7 tests) 164ms
+ ✓ src/PreparationWorkRecovery.test.tsx (14 tests) 178ms
+ ✓ src/ResearchPanelLoader.test.tsx (10 tests) 161ms
+ ✓ src/prep-work-api.test.ts (35 tests) 158ms
+ ✓ src/ResearchAnalysisPanel.test.tsx (8 tests) 163ms
+ ✓ src/appointment-api.test.ts (61 tests) 150ms
+ ✓ src/GoogleMessageMount.test.tsx (12 tests) 142ms
+ ✓ src/MembershipWorkMount.test.tsx (9 tests) 144ms
+ ✓ src/SettingsHub.efax-inbound.test.tsx (5 tests) 146ms
+ ✓ src/SettingsHub.fax-inbound.test.tsx (5 tests) 141ms
+ ✓ src/ConnectionReturnCheck.test.tsx (18 tests) 137ms
+ ✓ src/GoogleConnectionPanel.test.tsx (18 tests) 151ms
+ ✓ src/InboxRecoveryCapacity.test.ts (13 tests) 128ms
+ ✓ src/GoogleCalendarMount.test.tsx (10 tests) 139ms
+ ✓ src/capture-api.test.ts (24 tests) 124ms
+ ✓ src/FaxInboundMount.test.tsx (11 tests) 136ms
+ ✓ src/AiActivityPanel.test.tsx (16 tests) 97ms
+ ✓ src/personal-connection-recovery.test.tsx (13 tests) 111ms
+ ✓ src/ClinicalTeamDraftsPanel.test.tsx (24 tests) 106ms
+ ✓ src/NotebookTitleEditor.test.tsx (3 tests) 107ms
+ ✓ src/BetaIdentityAdmin.test.tsx (7 tests) 79ms
+ ✓ src/SchedulingPanel.test.tsx (15 tests) 129ms
+ ✓ src/membership-saved-evidence-mount.test.tsx (3 tests) 112ms
+ ✓ src/membership-retirement.test.tsx (5 tests) 103ms
+ ✓ src/team-setup-api.test.ts (18 tests) 96ms
+ ✓ src/PrivatePdfViewer.test.tsx (17 tests) 104ms
+ ✓ src/inbox-handoff-recovery.test.ts (13 tests) 94ms
+ ✓ src/PracticeInvitationPanel.test.tsx (3 tests) 90ms
+ ✓ src/vendor-retirement.test.ts (11 tests) 96ms
+ ✓ src/MembershipAnalysisPanel.test.tsx (4 tests) 69ms
+ ✓ src/routine-api.test.ts (28 tests) 99ms
+ ✓ src/SettingsHub.test.tsx (9 tests) 94ms
+ ✓ src/PracticeWork.test.tsx (9 tests) 81ms
+ ✓ src/EFaxInboundMount.test.tsx (10 tests) 83ms
+ ✓ src/scheduling-api.test.ts (25 tests) 93ms
+ ✓ src/research-api.test.ts (16 tests) 80ms
+ ✓ src/workspace-protocol.test.tsx (11 tests) 81ms
+ ✓ src/clinical-team-api.test.ts (15 tests) 77ms
+ ✓ src/PersonalConnectionHealth.test.tsx (10 tests) 80ms
+ ✓ src/App.test.ts (10 tests) 54ms
+ ✓ src/NoteReview.test.tsx (13 tests) 81ms
+ ✓ src/private-recording-api.test.ts (14 tests) 77ms
+ ✓ src/membership-saved-evidence.test.ts (20 tests) 80ms
+ ✓ src/CreatorReviewPanel.test.tsx (10 tests) 80ms
+ ✓ src/creator-review-edits.test.ts (15 tests) 72ms
+ ✓ src/core-record-api.test.ts (15 tests) 72ms
+ ✓ src/PracticeMembersPanel.test.tsx (6 tests) 77ms
+ ✓ src/MicrosoftConnectionPanel.test.tsx (8 tests) 76ms
+ ✓ src/DesktopAuthenticatedWorkspace.test.tsx (9 tests) 70ms
+ ✓ src/PrivateTranscriptPanel.test.tsx (26 tests) 74ms
+ ✓ src/account-identity-api.test.ts (109 tests) 68ms
+ ✓ src/TeamWorkPanel.test.tsx (21 tests) 72ms
+ ✓ src/RoutineIncomingBriefCompact.test.tsx (8 tests) 37ms
+ ✓ src/FollowUpWork.test.tsx (9 tests) 71ms
+ ✓ src/SampleVisit.test.tsx (5 tests) 58ms
+ ✓ src/AiActivityPresentation.test.tsx (9 tests) 65ms
+ ✓ src/AthenaVisitLinkPanel.test.tsx (5 tests) 68ms
+ ✓ src/ExistingScribeSourcePanel.test.tsx (10 tests) 72ms
+ ✓ src/private-transcription.test.ts (7 tests) 64ms
+ ✓ src/ProviderTeamSettings.test.tsx (2 tests) 70ms
+ ✓ src/private-recording-native.test.ts (7 tests) 62ms
+ ✓ src/PracticeAccess.test.tsx (8 tests) 67ms
+ ✓ src/desktop-clinical-microphone.test.ts (6 tests) 59ms
+ ✓ src/CaptureTranscriptEditor.test.tsx (8 tests) 64ms
+ ✓ src/inbox-contract.test.ts (48 tests) 62ms
+ ✓ src/capture-working-api.test.ts (19 tests) 60ms
+ ✓ src/SessionPrepPanel.test.tsx (6 tests) 55ms
+ ✓ src/InboxDueDateInput.test.tsx (51 tests) 65ms
+ ✓ src/model-activity-actual.test.tsx (3 tests) 58ms
+ ✓ src/handoff-review-api.test.ts (67 tests) 84ms
+ ✓ src/CoreConnectionPanel.test.tsx (9 tests) 60ms
+ ✓ src/inbox-api.test.ts (33 tests) 53ms
+ ✓ src/PrivateDraftLinkPanel.test.tsx (6 tests) 68ms
+ ✓ src/model-activity-api.test.ts (41 tests) 56ms
+ ✓ src/PracticeQuickSetup.test.tsx (6 tests) 62ms
+ ✓ src/VendorWorkMount.test.tsx (2 tests) 53ms
+ ✓ src/CaptureDraftEditor.test.tsx (7 tests) 50ms
+ ✓ src/inbox-handoff-api.test.ts (34 tests) 54ms
+ ✓ src/configured-capture-runtime.test.ts (14 tests) 41ms
+ ✓ src/NativeAuthenticatedWorkspace.foreground.test.tsx (11 tests) 46ms
+ ✓ src/CoreRecordLink.test.tsx (13 tests) 50ms
+ ✓ src/model-work-api.test.ts (28 tests) 40ms
+ ✓ src/saved-recording-runtime.test.ts (16 tests) 50ms
+ ✓ src/AthenaConnectionPanel.test.tsx (6 tests) 43ms
+ ✓ src/BotAvatar.test.tsx (12 tests) 49ms
+ ✓ src/CaptureDraftPanel.test.tsx (7 tests) 41ms
+ ✓ src/membership-evidence-adapter.test.ts (11 tests) 43ms
+ ✓ src/EncounterPrepPanel.test.tsx (7 tests) 39ms
+ ✓ src/vendor-preparation-retirement.test.ts (10 tests) 43ms
+ ✓ src/CaptureInputSignal.test.tsx (20 tests) 33ms
+ ✓ src/vendor-setup-api.test.ts (18 tests) 42ms
+ ✓ src/SchedulingConnectionPanel.test.tsx (7 tests) 39ms
+ ✓ src/inbox-handoff-contract.test.ts (64 tests) 38ms
+ ✓ src/InboxAnalysisPanel.test.tsx (2 tests) 40ms
+ ✓ src/FaxFollowthroughCard.test.tsx (8 tests) 38ms
+ ✓ src/inbox-handoff-preparation.test.ts (8 tests) 37ms
+ ✓ src/hosted-workspace.test.tsx (4 tests) 37ms
+ ✓ src/CoreAppointmentSetupPanel.test.tsx (7 tests) 32ms
+ ✓ src/RoutineTimeInput.test.tsx (5 tests) 32ms
+ ✓ src/AgentResearchReviewPanel.test.tsx (4 tests) 32ms
+ ✓ src/vendor-api.test.ts (13 tests) 36ms
+ ✓ src/membership-api.test.ts (18 tests) 30ms
+ ✓ src/membership-contract.test.ts (18 tests) 31ms
+ ✓ src/FaxConnectionOverview.test.tsx (6 tests) 32ms
+ ✓ src/ChiefStartActions.test.tsx (10 tests) 28ms
+ ✓ src/portal-result-review-contract.test.ts (20 tests) 34ms
+ ✓ src/PracticeIncomingBriefNavigation.test.tsx (3 tests) 29ms
+ ✓ src/routine-inbox-contract.test.ts (93 tests) 29ms
+ ✓ src/PracticeHub.tasks.test.tsx (2 tests) 29ms
+ ✓ src/finance-setup-api.test.ts (12 tests) 33ms
+ ✓ src/WorkspaceShell.test.tsx (3 tests) 32ms
+ ✓ src/EncounterSources.fax.test.tsx (1 test) 27ms
+ ✓ src/practice-work-catalog.test.ts (4 tests) 27ms
+ ✓ src/athena-visit-link-api.test.ts (6 tests) 28ms
+ ✓ src/HandoffCard.test.tsx (5 tests) 26ms
+ ✓ src/google-calendar-api.test.ts (22 tests) 26ms
+ ✓ src/efax-inbound-api.test.ts (13 tests) 26ms
+ ✓ src/capture-notes-api.test.ts (32 tests) 26ms
+ ✓ src/inbox-analysis-contract.test.ts (4 tests) 26ms
+ ✓ src/EncounterWorkSummary.test.tsx (6 tests) 24ms
+ ✓ src/google-message-api.test.ts (9 tests) 24ms
+ ✓ src/portal-work-contract.test.ts (16 tests) 25ms
+ ✓ src/research-analysis-contract.test.ts (41 tests) 22ms
+ ✓ src/inbox-recovery.test.ts (17 tests) 23ms
+ ✓ src/research-template.test.tsx (4 tests) 25ms
+ ✓ src/efax-inbound-source-api.test.ts (9 tests) 25ms
+ ✓ src/capture-runtime.test.ts (5 tests) 29ms
+ ✓ src/practice-access-api.test.ts (5 tests) 22ms
+ ✓ src/fax-inbound-source-api.test.ts (9 tests) 24ms
+ ✓ src/use-google-native-foreground.test.tsx (4 tests) 18ms
+ ✓ src/DeferredWorkspacePanel.test.tsx (3 tests) 27ms
+ ✓ src/finance-api.test.ts (10 tests) 24ms
+ ✓ src/vendor-recovery.test.ts (8 tests) 25ms
+ ✓ src/connection-catalog-api.test.ts (15 tests) 15ms
+ ✓ src/WorkspaceRuntimeRecovery.test.tsx (2 tests) 24ms
+ ✓ src/finance-contract.test.ts (10 tests) 23ms
+ ✓ src/finance-setup-contract.test.ts (9 tests) 29ms
+ ✓ src/google-connection-api.test.ts (9 tests) 23ms
+ ✓ src/research-contract.test.ts (11 tests) 23ms
+ ✓ src/ConnectorToolsPanel.test.tsx (2 tests) 22ms
+ ✓ src/athena-connection-contract.test.ts (13 tests) 22ms
+ ✓ src/scribe-source-api.test.ts (7 tests) 20ms
+ ✓ src/team-setup-request.test.ts (35 tests) 20ms
+ ✓ src/MobileChatFrame.test.tsx (5 tests) 47ms
+ ✓ src/private-recording-ledger.test.ts (3 tests) 55ms
+ ✓ src/handoff-review-recovery.test.ts (5 tests) 82ms
+ ✓ src/fax-readiness-api.test.ts (16 tests) 19ms
+ ✓ src/membership-journal-integration.test.ts (2 tests) 15ms
+ ✓ src/portal-setup-api.test.ts (8 tests) 17ms
+ ✓ src/vendor-setup-actual.test.ts (9 tests) 18ms
+ ✓ src/portal-work-api.test.ts (6 tests) 19ms
+ ✓ src/membership-recovery.test.ts (5 tests) 18ms
+ ✓ src/fax-inbound-api.test.ts (8 tests) 17ms
+ ✓ src/apple-transport.test.ts (9 tests) 16ms
+ ✓ src/creator-review-failure-origin.test.ts (13 tests) 17ms
+ ✓ src/membership-evidence.test.ts (7 tests) 17ms
+ ✓ src/model-activity-contract.test.ts (44 tests) 13ms
+ ✓ src/vendor-contract.test.ts (18 tests) 17ms
+ ✓ src/practice-members-api.test.ts (3 tests) 16ms
+ ✓ src/connector-tools-api.test.ts (4 tests) 17ms
+ ✓ src/membership-analysis-journal.test.ts (2 tests) 18ms
+ ✓ src/unsaved-work.test.tsx (3 tests) 14ms
+ ✓ src/fax-status-api.test.ts (4 tests) 16ms
+ ✓ src/scribe-lab-episode.test.ts (8 tests) 13ms
+ ✓ src/portal-work-journal-integration.test.ts (2 tests) 14ms
+ ✓ src/native-capture-runtime.test.ts (4 tests) 14ms
+ ✓ src/inbox-journal-integration.test.ts (2 tests) 13ms
+ ✓ src/inbox-handoff-journal-integration.test.ts (2 tests) 14ms
+ ✓ src/research-analysis-journal.test.ts (2 tests) 14ms
+ ✓ src/finance-recovery.test.ts (5 tests) 13ms
+ ✓ src/finance-setup-actual.test.ts (6 tests) 13ms
+ ✓ src/vendor-setup-journal-integration.test.ts (3 tests) 21ms
+ ✓ src/microsoft-connection-api.test.ts (3 tests) 13ms
+ ✓ src/note-research-workflow.test.ts (16 tests) 17ms
+ ✓ src/draft-journal.test.ts (15 tests) 13ms
+ ✓ src/model-work-request.test.ts (33 tests) 13ms
+ ✓ src/portal-setup-contract.test.ts (12 tests) 11ms
+ ✓ src/team-policy.test.ts (17 tests) 11ms
+ ✓ src/membership-analysis-contract.test.ts (5 tests) 11ms
+ ✓ src/core-appointment-setup-contract.test.ts (12 tests) 14ms
+ ✓ src/core-connection-contract.test.ts (14 tests) 10ms
+ ✓ src/workspace-team-read.test.ts (9 tests) 10ms
+ ✓ src/connection-summary.test.ts (16 tests) 10ms
+ ✓ src/core-open-contract.test.ts (5 tests) 9ms
+ ✓ src/finance-setup-journal-integration.test.ts (2 tests) 10ms
+ ✓ src/scheduling-login-api.test.ts (2 tests) 10ms
+ ✓ src/core-record-location.test.ts (31 tests) 9ms
+ ✓ src/workspace-origin.test.ts (24 tests) 9ms
+ ✓ src/vendor-journal-integration.test.ts (2 tests) 9ms
+ ✓ src/connection-operation-health.test.ts (10 tests) 9ms
+ ✓ src/workspace-lifecycle.test.ts (14 tests) 8ms
+ ✓ src/finance-journal-integration.test.ts (1 test) 8ms
+ ✓ src/vendor-efax-contract.test.ts (2 tests) 8ms
+ ✓ src/inbox-handoff-owner-review-actual.test.ts (3 tests) 8ms
+ ✓ src/w35-signed-contract.test.ts (4 tests) 8ms
+ ✓ src/portal-journal-integration.test.ts (2 tests) 8ms
+ ✓ src/session-prep-api.test.ts (12 tests) 8ms
+ ✓ src/encounter-prep-api.test.ts (6 tests) 7ms
+ ✓ src/session-prep-analysis-contract.test.ts (3 tests) 7ms
+ ✓ src/compact.test.ts (2 tests) 7ms
+ ✓ src/appointment-request.test.ts (14 tests) 6ms
+ ✓ src/lab-obsolete-read.test.ts (30 tests) 7ms
+ ✓ src/capture-continuity.test.ts (8 tests) 6ms
+ ✓ src/recording-preferences.test.ts (4 tests) 5ms
+ ✓ src/team-configuration-diff.test.ts (2 tests) 5ms
+ ✓ src/capture-review-state.test.ts (3 tests) 5ms
+ ✓ src/PrivatePdfSecurity.test.ts (1 test) 4ms
+ ↓ src/AppointmentPanel.hosted-actual.test.tsx (7 tests | 7 skipped)
+ ↓ src/EFaxInbound.signed-api.test.tsx (6 tests | 6 skipped)
+ ↓ src/EFaxAgentWorkflow.signed-api.test.tsx (6 tests | 6 skipped)
+ ↓ src/EFaxSourceReview.signed-api.test.tsx (6 tests | 6 skipped)
+ ↓ src/FaxInbound.signed-api.test.tsx (6 tests | 6 skipped)
+ ↓ src/GoogleCalendarServerLab.test.tsx (8 tests | 8 skipped)
+ ↓ src/FaxOperationalServerLab.test.tsx (6 tests | 6 skipped)
+ ↓ src/GoogleMessageServerLab.test.tsx (8 tests | 8 skipped)
+ ↓ src/GoogleFullWorkspaceServerLab.test.tsx (10 tests | 10 skipped)
+ ↓ src/HandoffReviewServerLab.test.tsx (6 tests | 6 skipped)
+ ↓ src/MultiSpecialistServerLab.test.tsx (6 tests | 6 skipped)
+ ↓ src/PracticeAccessServerLab.test.tsx (1 test | 1 skipped)
+ ↓ src/PracticeHomeServerLab.test.tsx (1 test | 1 skipped)
+ ↓ src/PrivateScribeServerLab.test.tsx (1 test | 1 skipped)
+ ↓ src/SchedulingFullWorkspaceServerLab.test.tsx (11 tests | 11 skipped)
+ ↓ src/SchedulingPatientUiServerLab.test.tsx (8 tests | 8 skipped)
+ ↓ src/ScribeToSpecialistsServerLab.test.tsx (6 tests | 6 skipped)
+ ✓ src/membership-storage.test.ts (2 tests) 48ms
+ ✓ src/vendor-setup-storage.test.ts (2 tests) 48ms
+ ✓ flow-checks/saved-recording-source.test.ts (3 tests) 518ms
+   ✓ imports 91 verified private chunks through actual encrypted queue, preserves original audio and resumes the same transfer  394ms
+ ✓ scripts/render-beta-nginx.test.mjs (4 tests) 1ms
+
+ Test Files  296 passed | 17 skipped (313)
+      Tests  4232 passed | 103 skipped (4335)
+   Start at  18:43:27
+   Duration  105.90s (transform 3.56s, setup 568ms, collect 27.75s, tests 92.23s, environment 48.55s, prepare 8.34s)
