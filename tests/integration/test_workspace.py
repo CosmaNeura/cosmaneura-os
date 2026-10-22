@@ -377,7 +377,7 @@ def test_additive_migration_readiness_and_data_preserving_recovery():
             )
         with pytest.raises(
             RuntimeError,
-            match="Retain immutable human-shared note custody and review history",
+            match="Retain exact saved-note custody and immutable drafting instructions",
         ):
             migrate("0002_external_identities", downgrade=True)
         with Session(target) as s:
