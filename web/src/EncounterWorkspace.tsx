@@ -914,6 +914,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     try{
       if(authenticated){
         if(!active||journal.current?.serverScope!==requireRecoveryScope(requestTeam)||recoveryOffers.some(offer=>offer.address===`workspace:${id}`)||recoveryState==='failed')throw new Error('Private draft storage unavailable');
+        // Retire the pre-submit snapshot before recording the immutable request.
+        // A background flush must not enqueue its empty pending body afterward.
+        const queued=scheduledDraftSave.current;queued?.cancel();
+        if(scheduledDraftSave.current===queued)scheduledDraftSave.current=null;
+        await queued?.drain();if(!currentRequest())return;
         // The immutable pending body retains the outgoing message. Store its
         // separate empty composer before clearing the visible native field.
         await active.persist(`workspace:${id}`,notebookDraft(requestWorkspace,note,clearNativeSubmission?'':thought,evidence,source,operation));
