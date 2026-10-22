@@ -5,7 +5,7 @@ import {PrivateRecordingLedgerController} from './private-recording-ledger';
 import {privateRecordingApi,parsePrivateRecordingReceipt,parseRecordingVisitBinding,type RecordingVisitBinding,type RecordingVisitRequest,type PrivateRecordingLinkRequest,type PrivateRecordingReceipt} from './private-recording-api';
 import {prepareCapture,type PreparedCapture,type CaptureAttestation,type CaptureLanguage,type SavedRecordingSelection} from './capture-api';
 import {openSavedRecordingRuntime} from './saved-recording-runtime';
-import type {Workspace,ProviderTeam,AuthenticatedWorkspaceIdentity,CaptureTaskBot} from './workspace-api';
+import {validPrivateWorkspace,type Workspace,type ProviderTeam,type AuthenticatedWorkspaceIdentity,type CaptureTaskBot} from './workspace-api';
 import {WorkspaceApiError} from './workspace-api';
 import {CreatorReviewPanel} from './CreatorReviewPanel';
 import {CaptureDraftPanel} from './CaptureDraftPanel';
@@ -14,6 +14,7 @@ import type {CreatorReviewView} from '../../clients/scribe-review/creator-review
 import type {SavedScratchpad} from './notebook-source';
 import {vendorUuid,vendorCanonical,vendorSha256} from './vendor-contract';
 import {savedTranscriptionRecovery} from './saved-transcription-recovery';
+import {readExistingScribeSource} from './scribe-source-api';
 import './capture-panel.css';
 
 export type VisitTranscriptionIntent={contract:'cosmas.visit-transcription.intent.v1';scope:string;owner_id:string;box_id:string;recovery_scope:string;
@@ -98,6 +99,21 @@ function validate(value:unknown,entry:SavedRecordingEntry,wid:string):Transfer{
   return v;
 }
 
+/** Recover only an already admitted legacy transfer, never consent from a saved clip. */
+export function parseLegacySavedRecordingTransfer(value:unknown,entry:SavedRecordingEntry,origin:Workspace,team:ProviderTeam,receipt:PrivateRecordingReceipt):Transfer{
+  need(!entry.binding&&value&&typeof value==='object'&&'workspace_id'in value&&vendorUuid(value.workspace_id));
+  const transfer=validate(value,{...entry,originWorkspace:origin},value.workspace_id);
+  need(transfer.admitted&&transfer.admission&&transfer.receipt&&receipt.link&&receipt.finish&&
+    receipt.local_recording_id===entry.recordingId&&receipt.workspace_id===origin.id&&receipt.recovery_scope===team.recovery_scope&&
+    vendorUuid(receipt.owner_id)&&vendorUuid(receipt.box_id)&&vendorCanonical(transfer.receipt)===vendorCanonical(receipt));
+  return transfer;
+}
+export function requireLegacySavedRecordingTarget(transfer:Transfer,workspace:Workspace){
+  need(validPrivateWorkspace(workspace,transfer.workspace_id)&&workspace.private_draft?.state==='linked'&&
+    workspace.private_draft.link_receipt_id===transfer.receipt?.link?.workspace_link_receipt_id&&
+    workspace.appointment_id&&transfer.admitted?.workspace_id===workspace.id);
+}
+
 export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,isCurrent,taskBot,locked,notesEnabled,
   onDraftLock,onReviewDraft,onCurrentDraft,scratchpad,notebookDirty,onNotebook,onRecordings,onNavigationLock}:{entry:SavedRecordingEntry;identity:AuthenticatedWorkspaceIdentity;
   workspace:Workspace;team:ProviderTeam;isCurrent:()=>boolean;taskBot?:CaptureTaskBot;locked:boolean;notesEnabled:boolean;
@@ -111,6 +127,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const [privateBusy,setPrivateBusy]=useState(false),[privateDirty,setPrivateDirty]=useState(false),[privateTransition,setPrivateTransition]=useState(false);
   const [recovery,setRecovery]=useState<ReturnType<typeof savedTranscriptionRecovery>>(null);
   const [transfer,setTransfer]=useState<Transfer|null>(null),[snapshot,setSnapshot]=useState<Runtime['controller']['snapshot']|null>(null);
+  const [retainedReviewSession,setRetainedReviewSession]=useState<string|null>(null);
   const [reviewAvailability,setReviewAvailability]=useState<'loading'|'ready'|'unavailable'>('loading');
   const [review,setReview]=useState<CreatorReviewView|null>(null),[reviewLock,setReviewLock]=useState(false),[showDraft,setShowDraft]=useState(false),[draftLocked,setDraftLocked]=useState(false);
   const live=useRef({identity,entry,workspace,team,isCurrent,locked,taskBot});live.current={identity,entry,workspace,team,isCurrent,locked,taskBot};
@@ -142,7 +159,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     need(current(selected));if(privatePreparation.current?.owner===selected)await privatePreparation.current.prepare();need(current(selected));
   }
   useEffect(()=>{let alive=true;
-    setReady(false);setBusy(false);setPrivateBusy(false);setPrivateDirty(false);setPrivateTransition(false);privatePreparation.current=null;privateTransitionOwner.current=null;setConsented(false);setRenewConsent(false);setRecovery(null);setUploadProgress(null);setReviewLock(false);setDraftLocked(false);setReview(null);setReviewAvailability('loading');setShowDraft(false);setClipDate(null);setTransfer(null);setSnapshot(null);setError('');saved.current=null;flight.current=null;openingFailure.current=null;
+    setReady(false);setBusy(false);setPrivateBusy(false);setPrivateDirty(false);setPrivateTransition(false);privatePreparation.current=null;privateTransitionOwner.current=null;setConsented(false);setRenewConsent(false);setRecovery(null);setUploadProgress(null);setReviewLock(false);setDraftLocked(false);setReview(null);setReviewAvailability('loading');setShowDraft(false);setClipDate(null);setTransfer(null);setSnapshot(null);setRetainedReviewSession(null);setError('');saved.current=null;flight.current=null;openingFailure.current=null;
     const gesture=entry.transcriptionGesture,prior=continuation.current;
     if(gesture&&(!prior||prior.gesture!==gesture||prior.identity!==identity||prior.recordingId!==entry.recordingId||prior.scope!==entry.scope||prior.authority!==authorityKey)){
       // Claim before async readiness. StrictMode's repeated setup uses this same
@@ -165,7 +182,22 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       saved.current=value===null?null:validate(value,entry,workspace.id);
       if(saved.current?.receipt){const ledger=new PrivateRecordingLedgerController({identity,team,workspace:origin,store,scope:entry.scope,isCurrent:check});const original=await ledger.readCurrent(entry.recordingId);need(original?.state==='finished');await parsePrivateRecordingReceipt(saved.current.receipt,original.attach);need(check());if(entry.binding)await parseRecordingVisitBinding(entry.binding,saved.current.receipt);need(check());}
       setTransfer(saved.current);
-      if(saved.current?.admitted)await openRuntime(saved.current.admitted,selected);
+      if(saved.current?.admitted){
+        if(!entry.binding&&!origin.appointment_id){
+          // This path reopens historical metadata whose origin notebook is
+          // unlinked. Read the retained session; never restore recorder work,
+          // issue a lease or import saved chunks just to show its transcript.
+          const ledger=new PrivateRecordingLedgerController({identity,team,workspace:origin,store,scope:entry.scope,isCurrent:check});
+          const original=await ledger.readCurrent(entry.recordingId);need(original?.state==='finished'&&original.receipt);
+          const receipt=await privateRecordingApi.read(identity,original.attach,team,original.receipt.recording_id);need(check());
+          const transfer=parseLegacySavedRecordingTransfer(saved.current,entry,origin,team,receipt);
+          need(audioDetails.phase==='sealed'&&audioDetails.recordingId===entry.recordingId&&audioDetails.manifestSHA256===receipt.finish!.manifest_sha256&&
+            audioDetails.chunks===receipt.finish!.chunks&&audioDetails.frames===receipt.finish!.frames);
+          requireLegacySavedRecordingTarget(transfer,workspace);
+          const existing=await readExistingScribeSource(workspace.id,identity);need(check()&&existing.status==='available'&&existing.review?.session_id===transfer.admitted!.session_id);
+          setRetainedReviewSession(transfer.admitted!.session_id);
+        }else await openRuntime(saved.current.admitted,selected);
+      }
       if(check())setReady(true);
     })().catch(()=>{if(alive&&authorityCurrent()){openingFailure.current={identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId};setClaimedContinuation(false);setError('This saved recording could not be opened for transcription. Your original audio is retained.');}});
     return()=>{alive=false;const selected=owner.current;if(selected){selected.alive=false;selected.unsubscribe?.();void(async()=>{try{await selected.runtime?.close();}finally{await selected.recording.close();}})();}owner.current=null;};
@@ -276,10 +308,11 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   }
   if(!current())return <section className="capture-panel saved-transcription" aria-label="Saved recording transcription"><h2>Opening saved recording…</h2>
     {openingFailure.current?.identity===identity&&openingFailure.current.authorityKey===authorityKey&&openingFailure.current.scope===entry.scope&&openingFailure.current.recordingId===entry.recordingId&&error&&<p role="alert">{error}</p>}</section>;
-  const processing=!!transfer?.admitted&&(snapshot?.state==='processing'||review!==null);
+  const retainedReview=!!transfer?.admitted&&retainedReviewSession===transfer.admitted.session_id;
+  const processing=!!transfer?.admitted&&(snapshot?.state==='processing'||review!==null||retainedReview);
   return <section ref={transcriptionSection} className="capture-panel saved-transcription" aria-label="Saved recording transcription" data-english-only={transfer?.admission?.language==='en-US'}>
     <h2>{showDraft?'Review your visit note':processing?'Review your transcript':'Transcribe your saved recording'}</h2>
-    {workspace.appointment_id&&<><ol aria-label="Transcription steps"><li>Visit confirmed</li><li>{processing?'Audio uploaded':'Send recording to Scribe'}</li><li>Review transcript and save your note</li></ol>
+    {workspace.appointment_id&&<><ol aria-label="Transcription steps"><li>Visit confirmed</li><li>{retainedReview?'Recording connected to Scribe':processing?'Audio uploaded':'Send recording to Scribe'}</li><li>Review transcript and save your note</li></ol>
     <p>Your original recording stays on this device. Find it under Home → Recordings on this device.</p></>}
     {!workspace.appointment_id?<p role="status">Choose a visit below, then send this recording to Scribe.</p>:<>
       <p><strong>{workspace.label}</strong> · {owner.current?.recording.snapshot.title}</p>

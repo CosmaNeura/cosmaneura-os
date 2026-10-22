@@ -3,8 +3,9 @@ import {PrivateRecordingRuntime,openPrivateRecordingStore,type PrivateRecordingS
 import {PrivateRecordingLedgerController} from './private-recording-ledger';
 import {privateRecordingApi,type RecordingVisitBinding,type RecordingVisitRequest} from './private-recording-api';
 import {workspaceApi,WorkspaceApiError,botAddress,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace,type WorkspaceEncounter,type CaptureTaskBot} from './workspace-api';
-import {parseVisitTranscriptionIntent,visitTranscriptionCommand,visitTranscriptionIntentHash,requireVisitTranscriptionSource,requireVisitTranscriptionConsent,type RecordingTranscriptionGesture,type SavedRecordingEntry} from './SavedRecordingTranscriptionPanel';
+import {parseVisitTranscriptionIntent,visitTranscriptionCommand,visitTranscriptionIntentHash,requireVisitTranscriptionSource,requireVisitTranscriptionConsent,parseLegacySavedRecordingTransfer,requireLegacySavedRecordingTarget,type RecordingTranscriptionGesture,type SavedRecordingEntry} from './SavedRecordingTranscriptionPanel';
 import {vendorCanonical} from './vendor-contract';
+import {readExistingScribeSource} from './scribe-source-api';
 
 /** Visit association and transcription have separate exact requests under one explicit consent gesture. */
 export function RecordingVisitPanel({entry,identity,origin,team,locked,isCurrent,onSelected,taskBot}:{entry:SavedRecordingEntry;
@@ -62,7 +63,17 @@ export function RecordingVisitPanel({entry,identity,origin,team,locked,isCurrent
       const binding=await privateRecordingApi.readVisitBinding(identity,record.attach,team,receipt);if(!check())return;
       // Ordinary reopening recovers a saved visit, but never creates a send gesture.
       if(binding){if(stored&&vendorCanonical(stored.command)!==vendorCanonical(binding.request))throw new WorkspaceApiError(409);await selected(binding,check);return;}
-      if(origin.appointment_id&&await opened.read('transfer:'+entry.recordingId)!==null){if(check())await onSelected(origin,null);return;}
+      const transferValue=await opened.read('transfer:'+entry.recordingId);if(!check())return;
+      if(origin.appointment_id&&transferValue!==null){if(check())await onSelected(origin,null);return;}
+      if(transferValue!==null){
+        const transfer=parseLegacySavedRecordingTransfer(transferValue,entry,origin,team,receipt);
+        const target=await workspaceApi.openPrivateDraft(identity,transfer.workspace_id);if(!check())return;
+        need(target.identity===identity);sameAuthority(target.team);requireLegacySavedRecordingTarget(transfer,target.workspace);
+        if(stored)need(stored.command.target_workspace_id===target.workspace.id&&stored.command.appointment_id===target.workspace.appointment_id);
+        const existing=await readExistingScribeSource(target.workspace.id,identity);if(!check())return;
+        need(existing.status==='available'&&existing.review?.session_id===transfer.admitted!.session_id);
+        await onSelected(target.workspace,null);return;
+      }
       if(stored){const target=await workspaceApi.openExisting(identity,{workspace_id:stored.command.target_workspace_id,appointment_id:stored.command.appointment_id});
         need(target.identity===identity&&target.workspace.id===stored.command.target_workspace_id&&target.workspace.appointment_id===stored.command.appointment_id);sameAuthority(target.team);
         if(check()){setPending(true);setChoice(stored.command.appointment_id);setTargetLabel(target.workspace.label);}return;}

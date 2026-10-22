@@ -6,6 +6,8 @@ import {prepareCapture} from './capture-api';
 import {BffResponseError} from '../../clients/capture/src/bff/http-client';
 import {workspaceApi,type ProviderTeam,type Workspace} from './workspace-api';
 import {RecordingVisitPanel} from './RecordingVisitPanel';
+import {readExistingScribeSource} from './scribe-source-api';
+vi.mock('./scribe-source-api',async original=>({...await original<typeof import('./scribe-source-api')>(),readExistingScribeSource:vi.fn()}));
 import type {RecordingVisitBinding} from './private-recording-api';
 const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn(),bindVisit:vi.fn(),continueReview:null as null|(()=>Promise<void>),review:null as unknown,availability:null as 'loading'|'ready'|'unavailable'|null,privateBegin:vi.fn(),privateAppend:vi.fn(),privateFinish:vi.fn(),privateCancel:vi.fn()}));
 vi.mock('./CreatorReviewPanel',()=>({CreatorReviewPanel:({onSource,onAvailability,onContinue}:{onSource:(view:unknown)=>void;onAvailability?:(v:'loading'|'ready'|'unavailable')=>void;onContinue:()=>Promise<void>})=>{mocks.continueReview=onContinue;useEffect(()=>{onAvailability?.(mocks.availability??(mocks.review?'ready':'loading'));onSource(mocks.review);},[onSource,onAvailability,mocks.availability,mocks.review]);return null;}}));
@@ -86,6 +88,46 @@ it('shows a finished transcription failure and a route back to the preserved rec
   await act(async()=>button('Return to recordings')!.click());expect(back).toHaveBeenCalledOnce();
   expect(mocks.write).not.toHaveBeenCalled();
   expect((stored as {admission:unknown}).admission).toEqual((original as {admission:unknown}).admission);
+});
+
+function legacyReview(){
+  const origin={...workspace,id:id(10),appointment_id:null,private_draft:{title:'Invented original private notebook',state:'unlinked' as const,link_receipt_id:null,linked_at:null}};
+  const savedReceipt={...receipt,workspace_id:origin.id,owner_id:id(11),box_id:id(12),recovery_scope:'d'.repeat(64),finish:{...receipt.finish,chunks:3,frames:368000}};
+  const savedAdmission={...admission,source:{...admission.source,chunks:3,frames:368000}};
+  const admitted={status:'prepared',workspace_id:workspace.id,session_id:id(7),consent_record_id:id(8),configured_capture:{schema_version:'1.0',language_mode:'en-US'}};
+  activeReceipt=savedReceipt;stored={contract:'cosmas.saved-transfer.v1',recording_id:id(3),workspace_id:workspace.id,scope:'c'.repeat(64),link_request:null,receipt:savedReceipt,admission:savedAdmission,admitted};
+  mocks.ledger.mockResolvedValue({state:'finished',attach:{},receipt:savedReceipt});
+  mocks.open.mockResolvedValue({snapshot:{workspaceId:origin.id,phase:'sealed',recordedChunks:3,elapsedSeconds:23},close:mocks.runtimeClose,
+    snapshotForLedger:async()=>({recordingId:id(3),phase:'sealed',manifestSHA256:'b'.repeat(64),chunks:3,frames:368000})});
+  // A created session proves this read must not claim that audio was uploaded,
+  // nor prepare its recorder merely to open review.
+  vi.mocked(readExistingScribeSource).mockResolvedValue({contract_version:1,workspace_id:workspace.id,status:'available',selection:null,
+    review:{schema_version:'1.0',session_id:id(7),status:'created',source:null,working:null,review_queue:null,translation_progress:[]}} as never);
+  mocks.savedRuntime.mockResolvedValue({controller:{snapshot:{state:'ready',recordedChunks:0},subscribe:(listener:(value:unknown)=>void)=>{listener({state:'ready',recordedChunks:0});return()=>{};}},close:async()=>{}});
+  return {origin,team:{revision:1,recovery_scope:'d'.repeat(64)} as ProviderTeam};
+}
+async function mountLegacyReview(origin:Workspace,team:ProviderTeam){
+  await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'desktop',originWorkspace:origin,visitResolved:true}}
+    identity={identity} workspace={workspace} team={team} isCurrent={()=>true} locked={false} notesEnabled={false} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}}
+    notebookDirty={false} onNotebook={()=>{}} taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}/>));
+}
+it('opens the retained legacy session review without preparing a recorder or uploading the original 23-second audio',async()=>{
+  const {origin,team}=legacyReview();await mountLegacyReview(origin,team);
+  await waitFor(()=>expect(host.textContent).toContain('Review your transcript'));
+  expect(readExistingScribeSource).toHaveBeenCalledWith(workspace.id,identity);
+  expect(mocks.savedRuntime).not.toHaveBeenCalled();expect(prepareCapture).not.toHaveBeenCalled();expect(mocks.bindVisit).not.toHaveBeenCalled();
+  expect(mocks.write).not.toHaveBeenCalled();expect(mocks.privateBegin).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('Recording connected to Scribe');expect(host.textContent).not.toContain('Audio uploaded');
+  expect(button('Continue transcription')).toBeUndefined();expect(mocks.continueReview).toBeTypeOf('function');
+});
+it.each(['session','audio'] as const)('revalidates retained legacy %s after visit routing instead of restoring changed work',async change=>{
+  const {origin,team}=legacyReview();
+  if(change==='session')vi.mocked(readExistingScribeSource).mockResolvedValue({status:'available',review:{session_id:id(99)}} as never);
+  if(change==='audio')mocks.open.mockResolvedValue({snapshot:{workspaceId:origin.id,phase:'sealed',recordedChunks:3,elapsedSeconds:23},close:mocks.runtimeClose,
+    snapshotForLedger:async()=>({recordingId:id(3),phase:'sealed',manifestSHA256:'0'.repeat(64),chunks:3,frames:368000})});
+  await mountLegacyReview(origin,team);await waitFor(()=>expect(host.querySelector('[role=alert]')).toBeTruthy());
+  expect(mocks.savedRuntime).not.toHaveBeenCalled();expect(prepareCapture).not.toHaveBeenCalled();expect(mocks.write).not.toHaveBeenCalled();
+  expect(mocks.continueReview).toBeNull();expect(button('Continue transcription')?.disabled).toBe(true);
 });
 
 it('requires fresh explicit consent only after a definite no-admission result and retains earlier intent across reopen',async()=>{
