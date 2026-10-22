@@ -23,6 +23,9 @@ const uuid=(n:number)=>`00000000-0000-4000-8000-${String(n).padStart(12,'0')}`;
 const scope='b'.repeat(64);
 let root:Root,host:HTMLDivElement,props:PrivateRecordingPanelProps,runtimes:Controller[],events:string[],mapping:PrivateNotebookResult;
 const closed=vi.fn(),opened=vi.fn(),transcribed=vi.fn();
+// This seam skips ledger parsing, but a finished handoff must still carry the
+// exact sealed source receipt consumed by the real navigation component.
+function finishedLedger(){return {state:'finished',receipt:{finish:{manifest_sha256:'c'.repeat(64),chunks:3,frames:368000}}};}
 function runtime(recordingId:string):Controller{
   const snapshot:PrivateRecordingSnapshot={recordingId,title:'Invented saved recording',phase:'sealed',elapsedSeconds:23,recordedChunks:3,recordedBytes:736132,workspaceId:uuid(2),busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};
   return {snapshot,subscribe:listener=>{listener(snapshot);return()=>{};},start:vi.fn(),pause:vi.fn(),stop:vi.fn(),rename:vi.fn(),
@@ -33,7 +36,7 @@ function runtime(recordingId:string):Controller{
 }
 beforeEach(()=>{
   Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();child.registrations=[];child.sources=[];runtimes=[];events=[];
-  child.prepare.mockImplementation(async()=>{events.push('saved-words');});ledger.read.mockResolvedValue({state:'finished'});
+  child.prepare.mockImplementation(async()=>{events.push('saved-words');});ledger.read.mockResolvedValue(finishedLedger());
   const identity={mode:'clerk_jwt' as const,getToken:vi.fn(),nativeSession:{revision:'invented-native-session',isCurrent:()=>true}};
   mapping={identity,workspace:{id:uuid(2),appointment_id:null,label:'Invented private notebook',revision:1,entries:[],work_candidates:[],private_draft:{title:'Invented private notebook',state:'unlinked',link_receipt_id:null,linked_at:null}},team:{revision:1,recovery_scope:scope,template_version:'provider-team-v1',llm:{enabled:false,model:'gpt-4.1'},configuration:{practice_context:'',bots:[]},members:[]}};
   const store:PrivateRecordingStore={read:vi.fn(),write:vi.fn(),keys:vi.fn(async()=>[]),close:vi.fn()};
@@ -73,6 +76,21 @@ it.each(['close','notebook','scribe'] as const)('keeps edited words mounted afte
   await click(action);await vi.waitFor(()=>expect(navigation(action)).toHaveBeenCalledOnce());expect(child.prepare).toHaveBeenCalledTimes(2);
 });
 
+it.each(['missing','manifest','chunks','frames'] as const)('withholds Scribe on a %s finish receipt and retries only after the exact sealed receipt is available',async mismatch=>{
+  await render();const receipt=finishedLedger();
+  if(mismatch==='manifest')receipt.receipt.finish.manifest_sha256='d'.repeat(64);
+  if(mismatch==='chunks')receipt.receipt.finish.chunks++;
+  if(mismatch==='frames')receipt.receipt.finish.frames++;
+  ledger.read.mockResolvedValue(mismatch==='missing'?{state:'finished'}:receipt);
+  await click('scribe');expect(transcribed).not.toHaveBeenCalled();expect(runtimes[0].close).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('The recording details need to finish saving before transcription');
+  expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Invented unsaved private words.');
+  expect(host.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(false);expect(child.prepare).toHaveBeenCalledOnce();
+  ledger.read.mockResolvedValue(finishedLedger());await act(async()=>{});expect(transcribed).not.toHaveBeenCalled();expect(child.prepare).toHaveBeenCalledOnce();
+  await click('scribe');expect(transcribed).toHaveBeenCalledExactlyOnceWith(mapping,uuid(1));expect(runtimes[0].close).toHaveBeenCalledOnce();
+  expect(child.prepare).toHaveBeenCalledTimes(2);expect(ledger.attach).not.toHaveBeenCalled();expect(ledger.finish).not.toHaveBeenCalled();
+});
+
 it.each([false,true])('withholds an obsolete transcript-save completion after same-owner recording replacement (%s)',async fails=>{
   await render();let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);
   child.prepare.mockImplementationOnce(async()=>{await held;if(fails)throw new Error('Synthetic old save failed');});
@@ -94,13 +112,21 @@ it('locks further transcript typing after preparation while runtime close remain
   await act(async()=>{finishClose();await closing;});expect(closed).toHaveBeenCalledOnce();
 });
 
-it('releases the transcript transition lock after close fails so the same editor can recover',async()=>{
+it('retains the transcript lock after failed close until the same explicit Close retry is confirmed',async()=>{
   await render();let finishClose!:()=>void;const closing=new Promise<void>(resolve=>finishClose=resolve);
   vi.mocked(runtimes[0].close).mockImplementationOnce(async()=>{await closing;throw new Error('Synthetic close result lost');});
   await click('close');expect(host.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(true);
-  await act(async()=>{finishClose();await closing;});expect(closed).not.toHaveBeenCalled();expect(host.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(false);
+  await act(async()=>{finishClose();await closing;});expect(closed).not.toHaveBeenCalled();expect(host.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(true);
+  expect(host.textContent).toContain('The microphone stop remains unconfirmed');expect(button(names.close).disabled).toBe(false);
+  expect(button(names.notebook).disabled).toBe(true);expect(button(names.scribe).disabled).toBe(true);expect(button('Rename recording').disabled).toBe(true);
   expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Invented unsaved private words.');
-  await click('close');expect(child.prepare).toHaveBeenCalledTimes(2);expect(closed).toHaveBeenCalledOnce();
+  await click('notebook');await click('scribe');expect(opened).not.toHaveBeenCalled();expect(transcribed).not.toHaveBeenCalled();expect(child.prepare).toHaveBeenCalledOnce();
+  let confirmClose!:()=>void;const confirming=new Promise<void>(resolve=>confirmClose=resolve);
+  vi.mocked(runtimes[0].close).mockImplementationOnce(async()=>{await confirming;});
+  await act(async()=>{button(names.close).click();button(names.close).click();});
+  expect(child.prepare).toHaveBeenCalledTimes(2);expect(runtimes[0].close).toHaveBeenCalledTimes(2);expect(runtimes).toHaveLength(1);expect(closed).not.toHaveBeenCalled();
+  expect(host.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(true);expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe('Invented unsaved private words.');
+  await act(async()=>{confirmClose();await confirming;});expect(closed).toHaveBeenCalledOnce();expect(opened).not.toHaveBeenCalled();expect(transcribed).not.toHaveBeenCalled();
 });
 
 it('withholds notebook navigation when access changes while private words are saving',async()=>{
