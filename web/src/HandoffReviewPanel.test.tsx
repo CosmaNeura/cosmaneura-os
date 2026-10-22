@@ -41,10 +41,10 @@ function installService(){const fetcher=vi.fn(async(url:string,init:RequestInit)
     exchanges.push({kind:'revision',request:structuredClone(body),response:structuredClone(reply)});return json(reply);}
   const body=JSON.parse(init.body as string) as HandoffReviewInput;requests.push(body);const reply=await response(body);
   exchanges.push({kind:'review',request:structuredClone(body),response:structuredClone(reply)});return json(reply);});vi.stubGlobal('fetch',fetcher);return fetcher;}
-function Harness({initial,locked=false,recoveryLocked}:{initial:Workspace;locked?:boolean;recoveryLocked?:boolean}) {
+function Harness({initial,locked=false,recoveryLocked,closeLocked=false,closeLabel}:{initial:Workspace;locked?:boolean;recoveryLocked?:boolean;closeLocked?:boolean;closeLabel?:string}) {
   const [current,setCurrent]=useState(initial),[selected,setSelected]=useState(initial.handoffs![0].id);workspace=current;replaceWorkspace=setCurrent;
   return <EditorRecoveryContext.Provider value={recoveryAccess}><HandoffReviewPanel workspace={current} handoff={current.handoffs!.find(h=>h.id===selected)??current.handoffs![0]} identity={access} locked={locked}
-    onSaved={value=>{saved(value);setCurrent(value);}} onClose={close} onPendingChange={pendingChanged} onRevisionPrepared={setSelected}
+    onSaved={value=>{saved(value);setCurrent(value);}} onClose={close} closeLocked={closeLocked} closeLabel={closeLabel} onPendingChange={pendingChanged} onRevisionPrepared={setSelected}
     onRefresh={refresh} onAccessLost={accessLost} recoveryLocked={recoveryLocked} onFreshAssignment={freshAssignment}/></EditorRecoveryContext.Provider>;
 }
 function button(text:string){const found=[...element.querySelectorAll('button')].find(b=>b.textContent===text);expect(found,text).toBeTruthy();return found!;}
@@ -135,6 +135,16 @@ it.each(['accepted','changes_requested'] as const)('confirms a masked %s review 
  expect(hasUnsavedWork()).toBe(false);expect(freshAssignment).not.toHaveBeenCalled();
  const restored=structuredClone(workspace);await act(async()=>root.unmount());root=createRoot(element);await mount(restored);
  expect(element.querySelector('[aria-label="Complete saved draft"]')).toBeNull();expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Ask Chief for fresh work')).toBe(false);
+});
+it('keeps a ready Chief return disabled while parent navigation is locked, then restores the same reviewed result',async()=>{
+  await act(async()=>root.render(<Harness initial={workspace} locked closeLocked closeLabel="Return to Chief"/>));
+  await until(()=>element.querySelector('.handoff-review')?.getAttribute('aria-busy')==='false');
+  const result=element.querySelector('[aria-label="Complete saved draft"]')?.textContent;
+  expect(result).toBe(workspace.entries[0].reply!.content);expect(button('Return to Chief').disabled).toBe(true);
+  await act(async()=>button('Return to Chief').click());expect(close).not.toHaveBeenCalled();expect(requests).toHaveLength(0);
+  await act(async()=>root.render(<Harness initial={workspace} closeLabel="Return to Chief"/>));
+  expect(element.querySelector('[aria-label="Complete saved draft"]')?.textContent).toBe(result);
+  await click('Return to Chief');expect(close).toHaveBeenCalledOnce();expect(requests).toHaveLength(0);
 });
 it('admits only one review during a pending save and does not claim acceptance before confirmation',async()=>{
   let release!:(value:Response)=>void;const fetcher=vi.fn(async(_url:string,init:RequestInit)=>{requests.push(JSON.parse(init.body as string));return new Promise<Response>(resolve=>{release=resolve;});});vi.stubGlobal('fetch',fetcher);
