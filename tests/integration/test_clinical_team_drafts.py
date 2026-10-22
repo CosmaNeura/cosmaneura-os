@@ -21,14 +21,24 @@ from tests.integration.test_scribe_source_bridge import post
 
 from cosmas_os.api import app as api
 from cosmas_os.api.clinical_note_share_schemas import ShareSavedNote
+from cosmas_os.application import agent_connector_tools as research_tools
 from cosmas_os.application import agent_tools, conversation, handoff_review, handoffs, note_review
 from cosmas_os.application import clinical_note_share as share
 from cosmas_os.application import model_work as work
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import canonical_json
-from cosmas_os.models import ModelWorkAdmission, PatientLink, Principal, WorkspaceEntry
+from cosmas_os.models import (
+    ActionRevision,
+    Decision,
+    ModelWorkAdmission,
+    Operation,
+    PatientLink,
+    Principal,
+    WorkspaceEntry,
+)
 from cosmas_os.ports.bot_capabilities import BotReply, ModelCallFailure
+from cosmas_os.research_models import ResearchRun
 
 SOAP = ("Subjective: Invented person reports a lingering cough.\n"
     "Objective: Examination details unavailable.\n"
@@ -148,6 +158,109 @@ def dispatch(f, claim, calls):
             "choices": [{"finish_reason": "stop", "message": {"role": "assistant", "content": json.dumps(answer)}}]})
     assert note_handle["entry_id"] in {p["entry_id"] for p in context["sources"]}
     return work.dispatch_claim(claim, session_factory=lambda: sessions(f.engine), transport=httpx.MockTransport(respond))
+
+
+def research_proposal_from_directions(f, monkeypatch):
+    """Persist the actual signed Scribe → Chief → Research source chain."""
+    monkeypatch.setattr(research_tools, "PublicResearch", lambda *_: pytest.fail("public lookup attempted"))
+    receipt = shared(f)
+    clinical_request = json.loads(request(receipt))
+    clinical_request.update(contract=share.DIRECTIONS_REQUEST_CONTRACT,
+        owner_directions="Focus on general cough medicine safety and monitoring; retain missing facts.")
+    content = json.dumps(clinical_request)
+    with Session(f.engine) as s:
+        aid, _ = work.reserve_conversation(s, f.box, f.actor, f.workspace["id"],
+            expected=receipt["workspace"]["revision"], team_revision=f.team_revision,
+            key="invented-chief-research-query", role="chief", content=content,
+            external_identity_id=f.binding.id)
+        chief = work.claim(s, f.box, f.actor, aid)
+        assert chief is not None
+        assert clinical_request["owner_directions"] in chief.envelope["context"]["question"]
+    result = dispatch(f, chief, [])
+    with Session(f.engine) as s:
+        work.settle(s, chief, result)
+        parent = s.get(ModelWorkAdmission, chief.admission_id)
+        assert parent is not None and parent.request_body["content"] == content
+        # Editing drafting directions cannot replay the original paid-work intent.
+        changed = {**clinical_request, "owner_directions": "Focus on alternatives instead."}
+        with pytest.raises(ws.WorkspaceError, match="idempotency_conflict"):
+            work.reserve_conversation(s, f.box, f.actor, f.workspace["id"],
+                expected=parent.request_body["expected_revision"], team_revision=f.team_revision,
+                key="invented-chief-research-query", role="chief", content=json.dumps(changed),
+                external_identity_id=f.binding.id)
+        s.rollback()
+        child = s.scalar(select(ModelWorkAdmission).where(ModelWorkAdmission.workspace_id == f.workspace["id"],
+            ModelWorkAdmission.kind == "private_handoff", ModelWorkAdmission.request_body["role"].astext == f.research_id))
+        assert child is not None and child.state == "reserved"
+        claimed = work.claim(s, f.box, f.actor, child.id)
+        assert claimed is not None and claimed.envelope["contract"] == "cosmas-gpt41-prepared.v7"
+        task = child.request_body["task_brief"]
+        assert task["version"] == 2 and task["depends_on"]["entry_id"] == parent.request_entry_id
+        assert f.packet_ids | {receipt["source_entry_id"]} <= {source["entry_id"] for source in task["source_versions"]}
+        saved_source = s.get(WorkspaceEntry, receipt["source_entry_id"])
+        assert saved_source is not None
+        snapshot = json.loads(saved_source.content)["note"]
+        note = receipt["workspace"]["note"]["latest"]
+        assert {key: snapshot[key] for key in ("id", "version", "content_hash", "source_fingerprint")} == {
+            key: note[key] for key in ("id", "version", "content_hash", "source_fingerprint")}
+        proposal = agent_tools.AgentToolExecutor(s, claimed).execute({"tool": "propose_research_query",
+            "topic": "drug_safety", "sources": ["dailymed"],
+            "query": "cough medicine contraindications interactions monitoring evidence"})["data"]
+        assert proposal["state"] == "pending_approval"
+        intent = s.get(ActionRevision, proposal["revision_id"])
+        assert intent is not None and intent.payload["origin_admission_id"] == child.id
+        assert intent.payload["origin_source_sha256"] == child.source_sha256
+        assert s.scalar(select(ResearchRun).where(ResearchRun.workspace_id == f.workspace["id"])) is None
+    return receipt, proposal
+
+
+def test_saved_scribe_note_and_chief_directions_reach_reviewable_research_query(clinical, monkeypatch):
+    f = clinical
+    receipt, proposal = research_proposal_from_directions(f, monkeypatch)
+    path = f.base + "/agent-research"
+    headers = {"Authorization": "Bearer " + f.token(), "X-Cosmas-Research-Contract": "1"}
+    listed = f.client.get(path, headers=headers)
+    assert listed.status_code == 200 and listed.json()["proposals"] == [proposal]
+    body = {key: proposal[key] for key in ("revision_id", "payload_hash")}
+    body["public_query_confirmed"] = True
+    approved = f.client.post(path + f"/{proposal['ticket_id']}/review", headers=headers, json=body)
+    assert approved.status_code == 200 and approved.json()["state"] == "approved", approved.text
+    replay = f.client.post(path + f"/{proposal['ticket_id']}/review", headers=headers, json=body)
+    assert replay.status_code == 200 and replay.json() == approved.json()
+    with Session(f.engine) as s:
+        assert ws.read(s, f.box, f.actor, f.workspace["id"])["note"] == receipt["workspace"]["note"]
+        assert len(s.scalars(select(Decision).where(Decision.action_revision_id == proposal["revision_id"])).all()) == 1
+        operations = s.scalars(select(Operation).where(Operation.action_revision_id == proposal["revision_id"])).all()
+        assert len(operations) == 1 and operations[0].attempt_count == 0 and operations[0].status == "pending"
+        assert s.scalar(select(ResearchRun).where(ResearchRun.workspace_id == f.workspace["id"])) is None
+
+
+@pytest.mark.parametrize("change", ["new_note", "transcript"])
+def test_changed_clinical_source_revokes_research_handoff_query_review(clinical, monkeypatch, change):
+    f = clinical
+    _, proposal = research_proposal_from_directions(f, monkeypatch)
+    with Session(f.engine) as s:
+        current = ws.read(s, f.box, f.actor, f.workspace["id"])
+        if change == "new_note":
+            note_review.save(s, f.box, f.actor, f.workspace["id"], expected=current["revision"],
+                key="invented-note-after-research-query", base_note_id=f.share_body["note_id"],
+                source_reply_id=None, content=SOAP + "\nProvider corrected the saved note.")
+        else:
+            ws.append(s, f.box, f.actor, f.workspace["id"], expected=current["revision"],
+                key="invented-transcript-after-research-query", kind="evidence",
+                content="Invented corrected transcript", source_label="Corrected transcript")
+    path = f.base + "/agent-research"
+    headers = {"Authorization": "Bearer " + f.token(), "X-Cosmas-Research-Contract": "1"}
+    listed = f.client.get(path, headers=headers)
+    assert listed.status_code == 200 and listed.json()["proposals"][0]["state"] == "source_changed"
+    body = {key: proposal[key] for key in ("revision_id", "payload_hash")}
+    body["public_query_confirmed"] = True
+    rejected = f.client.post(path + f"/{proposal['ticket_id']}/review", headers=headers, json=body)
+    assert rejected.status_code == 409 and rejected.json()["detail"] == "source_changed"
+    with Session(f.engine) as s:
+        assert s.scalar(select(Decision).where(Decision.action_revision_id == proposal["revision_id"])) is None
+        assert s.scalar(select(Operation).where(Operation.action_revision_id == proposal["revision_id"])) is None
+        assert s.scalar(select(ResearchRun).where(ResearchRun.workspace_id == f.workspace["id"])) is None
 
 
 def test_exact_saved_soap_and_scribe_reach_chief_both_specialists_and_human_review(clinical):

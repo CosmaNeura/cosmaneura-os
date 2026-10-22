@@ -170,6 +170,7 @@ def _current_evidence(session, workspace, revision):
         "agent_connector_intent_changed")
     assert origin is not None
     context = work._context_for(session, workspace, version, preferences, bot, origin.request_body,
+        draft_only=origin.kind == "private_handoff",
         prepared_contract=origin.envelope_contract)
     _require(evidence_digest(context) == payload["evidence_sha256"], "source_changed")
 

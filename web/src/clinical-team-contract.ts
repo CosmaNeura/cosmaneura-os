@@ -94,6 +94,13 @@ export function clinicalTeamRequest(source:{entry:WorkspaceEntry;snapshot:Shared
   return JSON.stringify(directions===''?{contract:'clinical-team-drafts.request.v1',...selected}:
     {contract:'clinical-team-drafts.request.v2',...selected,owner_directions:directions});
 }
+export function clinicalTeamRequestAlreadySaved(workspace:Workspace,directions:string):boolean {
+  const source=currentSharedNote(workspace);if(!source||clinicalTeamDirectionsError(directions))return false;
+  const content=clinicalTeamRequest(source,directions),origin=[...workspace.entries].reverse().find(entry=>entry.kind==='conversation'&&
+    (entry.reply?.role==='chief'||entry.model_request?.bot.role==='chief')&&entry.content===content);
+  return !!origin&&(!origin.reply||!!origin.model_request&&origin.model_request.admission.state!=='completed'||
+    (workspace.handoffs??[]).some(handoff=>handoff.origin_entry_id===origin.id));
+}
 export function clinicalRequestDisplay(content:string):string {
   const value=parseClinicalTeamRequest(content);
   return value?`Prepare a patient email draft, provider action items, and a drug and treatment assessment from shared saved note version ${value.note_version}.`+

@@ -1,6 +1,7 @@
 import {teamCanonical,teamClosed as closed,teamHash,teamLiteral,teamNatural,teamStrip,teamText,teamUuid} from './team-setup-request';
 import {modelTime} from './model-work-request';
 import {validResearchAnchor,validResearchAnalysisDraft,type ResearchEvidenceAnchor,type ResearchAnalysisDraft} from './research-analysis-contract';
+import {validNoteResearchSelection,type NoteResearchSelection} from './note-research-workflow';
 
 export const RESEARCH_SOURCES=['pubmed','clinical_trials','dailymed','rxnorm','openfda','cms_coverage','cms_open_data','medicare_care_compare','npi_registry'] as const;
 export const RESEARCH_TOPICS=['literature','drug_safety','trials','coverage','provider_data'] as const;
@@ -19,7 +20,7 @@ export type ResearchSavedPacket={query:string;saved:ResearchSaved};
 export type ResearchSavedHistory={contract:'research.saved_history.v1';workspace_id:string;bot:string;packets:ResearchSavedPacket[]};
 export type ResearchPending={kind:'search';request:ResearchSearch}|{kind:'save';run_id:string;request:ResearchSave};
 export type ResearchPrevious={request:ResearchSearch;outcome:'interrupted'|'not_found';observed_at:string};
-export type ResearchDraft={version:1;bot:string;topic:ResearchTopic;query:string;sources:ResearchSource[];pending:ResearchPending|null;previous_request?:ResearchPrevious;saved_packet?:ResearchEvidenceAnchor;analysis_draft?:ResearchAnalysisDraft};
+export type ResearchDraft={version:1;bot:string;topic:ResearchTopic;query:string;sources:ResearchSource[];pending:ResearchPending|null;previous_request?:ResearchPrevious;saved_packet?:ResearchEvidenceAnchor;analysis_draft?:ResearchAnalysisDraft;note_question?:NoteResearchSelection};
 export class ResearchContractError extends Error{constructor(){super('The research response could not be verified.');}}
 const fail=():never=>{throw new ResearchContractError();};
 const bytes=(v:unknown)=>new TextEncoder().encode(JSON.stringify(v)).byteLength;
@@ -69,7 +70,7 @@ export async function validateResearchSavedHistory(v:unknown,workspace:string,bo
  if(new Set(history.packets.map(packet=>packet.saved.entry_id)).size!==history.packets.length)fail();return history;
 }
 export function validateResearchDraft(v:unknown,bot:string):ResearchDraft{
- if(!closed(v,'version,bot,topic,query,sources,pending','previous_request,saved_packet,analysis_draft')||v.version!==1||v.bot!==bot||!teamUuid(bot)||!teamLiteral(v.topic,RESEARCH_TOPICS)||!text(v.query,500)||!list(v.sources,RESEARCH_SOURCES,0,3)||'saved_packet' in v&&!validResearchAnchor(v.saved_packet)||'analysis_draft' in v&&(!validResearchAnalysisDraft(v.analysis_draft)||!validResearchAnchor(v.saved_packet)))fail();
+ if(!closed(v,'version,bot,topic,query,sources,pending','previous_request,saved_packet,analysis_draft,note_question')||v.version!==1||v.bot!==bot||!teamUuid(bot)||!teamLiteral(v.topic,RESEARCH_TOPICS)||!text(v.query,500)||!list(v.sources,RESEARCH_SOURCES,0,3)||'saved_packet' in v&&!validResearchAnchor(v.saved_packet)||'analysis_draft' in v&&(!validResearchAnalysisDraft(v.analysis_draft)||!validResearchAnchor(v.saved_packet))||'note_question' in v&&!validNoteResearchSelection(v.note_question))fail();
  const d=v as ResearchDraft,p=d.pending,previous=d.previous_request;
  if(previous!==undefined&&(!closed(previous,'request,outcome,observed_at')||!validResearchSearch(previous.request)||previous.request.bot!==bot||!teamLiteral(previous.outcome,['interrupted','not_found'])||!modelTime(previous.observed_at)))fail();
  if(p!==null){if(!closed(p,p.kind==='search'?'kind,request':'kind,run_id,request'))fail();if(p.kind==='search'){if(!validResearchSearch(p.request))fail();}else if(p.kind!=='save'||!teamUuid(p.run_id)||!validResearchSave(p.request))fail();}

@@ -10,6 +10,7 @@ import type {ResearchPort} from './research-api';
 import {researchDigest,type ResearchObservation,type ResearchSaved} from './research-contract';
 import {researchSavedText} from './research-analysis-contract';
 import {WorkspaceApiError,type Workspace} from './workspace-api';
+import {noteResearchWorkspace} from './note-research-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let element:HTMLDivElement,root:Root,port:ResearchPort,access:EditorRecoveryAccess,factory:ReturnType<typeof memoryDraftStorage>,journal:DraftJournal;
 const changed=vi.fn(),denied=vi.fn(),workspace:Workspace={id:researchWorkspaceId,appointment_id:'invented-appointment',label:'Invented encounter',revision:2,entries:[],work_candidates:[]};
@@ -32,6 +33,57 @@ it('keeps four primary topic choices, an explicit reviewed public input and sepa
  expect(port.search).toHaveBeenCalledTimes(1);const request=vi.mocked(port.search).mock.calls[0][2];expect(Object.keys(request).sort()).toEqual(['bot','contract_version','expected_revision','idempotency_key','public_query_confirmed','query','sources','team_revision','topic']);expect(request).toMatchObject({query:'Invented general public question',sources:['pubmed'],bot:researchBotId,public_query_confirmed:true});
  expect(element.textContent).toContain('No AI synthesis or clinical inference');expect(element.textContent).toContain('Source dateNot supplied');expect(element.textContent).toContain('VersionNot supplied');expect(element.textContent).toContain('Excerpt shortened');expect(element.textContent).toContain('Limited result set');expect(port.save).not.toHaveBeenCalled();
  await check('Select excerpt to save');await click('Save selected excerpts');await workSettled();expect(port.save).toHaveBeenCalledTimes(1);const save=vi.mocked(port.save).mock.calls[0][3];expect(Object.keys(save).sort()).toEqual(['contract_version','expected_revision','idempotency_key','source_hashes']);expect(changed).toHaveBeenCalledWith(3);expect(element.textContent).toContain('Clinical review and any follow-up remain separate');
+});
+async function notePlanReady(){await vi.waitFor(async()=>{await settle();expect(element.querySelector('[aria-label="Research from saved note"]')).not.toBeNull();});}
+it('turns an exact saved-note assessment question into a reviewed public lookup without forwarding private source data',async()=>{
+ const note=await noteResearchWorkspace(),onSubmit=vi.fn();await mount({workspaceRevision:4,analysis:{workspace:note,model:{enabled:true,model:'Configured model'},onSubmit}});await notePlanReady();
+ expect(element.textContent).toContain('Synthetic Person');expect(element.textContent).toContain('Saved note · version 1');expect(port.search).not.toHaveBeenCalled();
+ await click('Prepare proposed public query');expect(element.querySelector<HTMLTextAreaElement>('textarea')!.value).toBe('DrugA interaction evidence');expect(document.activeElement).toBe(element.querySelector('textarea'));
+ await check('PubMed');await click('Review query');expect(button('Search selected sources').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();
+ await check('This is a general public question');await click('Search selected sources');await workSettled();
+ const request=vi.mocked(port.search).mock.calls[0][2];expect(request.query).toBe('DrugA interaction evidence');
+ expect(Object.keys(request).sort()).toEqual(['bot','contract_version','expected_revision','idempotency_key','public_query_confirmed','query','sources','team_revision','topic']);
+ expect(JSON.stringify(request)).not.toContain('Synthetic Person');expect(JSON.stringify(request)).not.toContain('Private-only');expect(JSON.stringify(request)).not.toContain(note.note!.latest!.content_hash);
+ expect(element.textContent).toContain('Invented source title');expect(element.textContent).toContain('Source details & citation');expect(element.textContent).toContain('https://pubmed.ncbi.nlm.nih.gov/12345/');
+ const retained=await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`));expect(retained).toMatchObject({data:{note_question:{note_id:note.note!.latest!.id,note_version:1,source_fingerprint:note.note!.latest!.source_fingerprint},query:request.query}});
+ expect(onSubmit).not.toHaveBeenCalled();expect(port.save).not.toHaveBeenCalled();
+});
+it('does not overwrite an existing public question when assessment proposals are available',async()=>{
+ const note=await noteResearchWorkspace();await mount({workspaceRevision:4,analysis:{workspace:note,model:{enabled:true,model:'Configured model'},onSubmit:vi.fn()}});await notePlanReady();
+ await fill('Keep my public wording');expect(button('Prepare proposed public query').disabled).toBe(true);expect(element.querySelector('textarea')!.value).toBe('Keep my public wording');expect(port.search).not.toHaveBeenCalled();
+});
+it('retains an exact private question without inventing public wording or starting a lookup',async()=>{
+ const note=await noteResearchWorkspace(),{vendorSha256}=await import('./vendor-contract');
+ note.entries[2].reply!.content=note.entries[2].reply!.content.replace('\nGeneral public query: DrugA interaction evidence','');
+ note.handoffs![0].result_sha256=await vendorSha256(new TextEncoder().encode(note.entries[2].reply!.content));
+ await mount({workspaceRevision:4,analysis:{workspace:note,model:{enabled:true,model:'Configured model'},onSubmit:vi.fn()}});await notePlanReady();
+ await click('Write a public query for this question');await workSettled();
+ expect(element.querySelector('textarea')!.value).toBe('');expect(document.activeElement).toBe(element.querySelector('textarea'));expect(button('Review query').disabled).toBe(true);
+ expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({data:{query:'',note_question:{note_id:note.note!.latest!.id,question_index:0}}});
+ expect(port.search).not.toHaveBeenCalled();expect(port.save).not.toHaveBeenCalled();
+});
+it('invalidates a reviewed note-linked query when its exact source changes while preserving the wording',async()=>{
+ const note=await noteResearchWorkspace(),analysis={workspace:note,model:{enabled:true,model:'Configured model'},onSubmit:vi.fn()};await mount({workspaceRevision:4,analysis});await notePlanReady();
+ await click('Prepare proposed public query');await check('PubMed');await click('Review query');await check('This is a general public question');
+ const changedNote=structuredClone(note);changedNote.note!.latest!.sources_changed=true;
+ await mount({workspaceRevision:4,analysis:{...analysis,workspace:changedNote}});
+ expect(element.querySelector('[aria-label="Review public query"]')).toBeNull();expect(element.querySelector('[aria-label="Research from saved note"]')).toBeNull();
+ expect(element.querySelector('textarea')!.value).toBe('DrugA interaction evidence');expect(button('Review query').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();
+ await click('Keep as a separate general question');await click('Review query');expect(button('Search selected sources').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();
+});
+it('resolves the exact uncertain lookup after note source changes without repeating the public search',async()=>{
+ const note=await noteResearchWorkspace(),analysis={workspace:note,model:{enabled:true,model:'Configured model'},onSubmit:vi.fn()};
+ vi.mocked(port.search).mockRejectedValue(new Error('lost synthetic acknowledgement'));await mount({workspaceRevision:4,analysis});await notePlanReady();
+ await click('Prepare proposed public query');await check('PubMed');await click('Review query');await check('This is a general public question');await click('Search selected sources');await workSettled();
+ const exact=vi.mocked(port.search).mock.calls[0][2],changedNote=structuredClone(note);changedNote.note!.latest!.sources_changed=true;
+ await mount({workspaceRevision:5,analysis:{...analysis,workspace:changedNote}});await click('Check saved result');await workSettled();
+ expect(port.search).toHaveBeenCalledOnce();expect(vi.mocked(port.resolve).mock.calls[0][2]).toEqual(exact);expect(port.save).not.toHaveBeenCalled();
+ expect(element.textContent).toContain('The saved note or Research assessment changed');
+});
+it('hides private assessment words immediately under a replaced identity until fresh owner data arrives',async()=>{
+ const note=await noteResearchWorkspace(),analysis={workspace:note,model:{enabled:true,model:'Configured model'},onSubmit:vi.fn()};await mount({workspaceRevision:4,analysis});await notePlanReady();
+ expect(element.textContent).toContain('Synthetic Person');await mount({identity:{mode:'clerk_jwt',getToken:async()=> 'other-invented-session'},workspaceRevision:4,analysis});
+ expect(element.querySelector('[aria-label="Research from saved note"]')).toBeNull();expect(element.textContent).not.toContain('Synthetic Person');expect(port.search).not.toHaveBeenCalled();
 });
 it('reports not connected honestly while preserving a question without public dispatch',async()=>{
  vi.mocked(port.catalog).mockResolvedValue(researchCatalog(false));await mount();await fill('Retain this general question');expect(element.textContent).toContain('Public research is not connected');expect(button('Review query').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();expect(port.history).not.toHaveBeenCalled();

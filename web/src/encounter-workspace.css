@@ -473,8 +473,21 @@
     position:static; flex:none; padding:8px; padding-bottom:max(8px,env(safe-area-inset-bottom,0px));
     background:#fffdf7; border-top:1px solid var(--team-line);
   }
-  .workspace-notebook-body[data-native-chat=true] .team-composer { padding:8px; }
-  .workspace-notebook-body[data-native-chat=true] .native-chat-progress { box-sizing:border-box; height:36px; min-height:36px; margin:0 0 4px; overflow:hidden; font-size:12px; line-height:18px; }
+  .workspace-notebook-body[data-native-chat=true] .team-composer {
+    display:grid; grid-template-columns:minmax(0,1fr) 44px; gap:6px; padding:8px; border-radius:20px;
+  }
+  .workspace-notebook-body[data-native-chat=true] .team-composer > :not(textarea):not(div:last-child) { grid-column:1 / -1; }
+  .workspace-notebook-body[data-native-chat=true] .team-composer textarea { grid-column:1; margin:0; padding:4px; font-size:16px; }
+  .workspace-notebook-body[data-native-chat=true] .team-composer > div:last-child { grid-column:2; align-self:end; }
+  .workspace-notebook-body[data-native-chat=true] .team-send { border-radius:50%; }
+  .workspace-notebook-body[data-native-chat=true] .chief-note-compose-context { gap:8px; padding:0 4px; color:#24533c; font-size:12px; }
+  .workspace-notebook-body[data-native-chat=true] .chief-note-compose-context > span { min-width:0; }
+  .workspace-notebook-body[data-native-chat=true] .chief-note-compose-context > button { min-height:44px; padding:4px; font-size:12px; flex-shrink:0; }
+  .workspace-notebook-body[data-native-chat=true] .chief-note-compose-attention { margin:0 4px; padding:6px 8px; border-radius:8px; background:#fff1d5; font-size:12px; line-height:1.4; }
+  .workspace-notebook-body[data-native-chat=true] .team-messages > .clinical-team-disclosure { margin-top:12px; border-top:1px solid var(--team-line); }
+  .workspace-notebook-body[data-native-chat=true] .team-messages .clinical-team-drafts { padding:12px 0; border:0; }
+  .workspace-notebook-body[data-native-chat=true] .clinical-team-disclosure[open]:has(> .clinical-team-drafts[data-compact-plan=true]) > summary { display:none; }
+  .workspace-notebook-body[data-native-chat=true] .mobile-chat-scroll > .native-chat-progress { margin:8px 12px; font-size:12px; line-height:18px; }
   .workspace-notebook-body[data-native-chat=true] .team-composer textarea { box-sizing:border-box; height:58px; min-height:58px; max-height:58px; resize:none; }
   .workspace-notebook-body[data-native-chat=true] .team-composer-wrap > .team-fine { display:none; }
 }
