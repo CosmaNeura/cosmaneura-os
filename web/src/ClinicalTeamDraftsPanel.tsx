@@ -1,13 +1,13 @@
 import {useEffect,useRef,useState} from 'react';
 import type {DraftHandoff,ProviderTeam,Workspace} from './workspace-api';
 import {WorkspaceMarkdown} from './WorkspaceMarkdown';
-import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamRequest,parseClinicalTeamRequest,currentSharedNote,noteSelection,type ShareSavedNoteInput} from './clinical-team-contract';
+import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamRequest,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,noteSelection,type ShareSavedNoteInput} from './clinical-team-contract';
 import {clinicalDraftAccepted,clinicalDraftEntry,clinicalDraftLineage,clinicalDraftRetryable,clinicalDraftSections} from './clinical-team-workflow';
 
 export type ClinicalTeamDraftsPanelProps={workspace:Workspace;team:ProviderTeam;locked:boolean;
   onShare:(body:ShareSavedNoteInput)=>Promise<void>;onAskChief:(content:string)=>Promise<void>;onReview:(handoffId:string)=>void;
-  ownerDirections?:string;onDirectionsChange?:(value:string)=>void;directionsLocked?:boolean;preparing?:boolean;compactPlan?:boolean;onRetry?:(handoff:DraftHandoff)=>void;onPrepare?:(body:ShareSavedNoteInput)=>Promise<void>;authority?:object};
-export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChief,onReview,onRetry,onPrepare,authority,ownerDirections='',onDirectionsChange,directionsLocked=locked,preparing=true,compactPlan=false}:ClinicalTeamDraftsPanelProps) {
+  ownerDirections?:string;onDirectionsChange?:(value:string)=>void;directionsLocked?:boolean;preparing?:boolean;compactPlan?:boolean;composerPlan?:boolean;onRetry?:(handoff:DraftHandoff)=>void;onPrepare?:(body:ShareSavedNoteInput)=>Promise<void>;authority?:object};
+export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChief,onReview,onRetry,onPrepare,authority,ownerDirections='',onDirectionsChange,directionsLocked=locked,preparing=true,compactPlan=false,composerPlan=false}:ClinicalTeamDraftsPanelProps) {
   const [preview,setPreview]=useState(false),[checked,setChecked]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const live=useRef({workspace,authority}),inFlight=useRef<object|null>(null);live.current={workspace,authority};
   const note=workspace.note?.latest,source=currentSharedNote(workspace);
@@ -29,7 +29,7 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
       request.note_version===source.snapshot.note.version&&request.content_hash===source.snapshot.note.content_hash;
   }):undefined;
   const savedRequest=origin?parseClinicalTeamRequest(origin.content):null;
-  const compact=compactPlan&&!!onPrepare&&!!onDirectionsChange;
+  const compact=compactPlan&&!!onPrepare&&(!!onDirectionsChange||composerPlan);
   const chiefWithoutAssignments=!!requestedOrigin?.reply&&(!requestedOrigin.model_request||requestedOrigin.model_request.admission.state==='completed')&&
     !(workspace.handoffs??[]).some(h=>h.origin_entry_id===requestedOrigin.id);
   async function run(action:()=>Promise<void>) {
@@ -39,7 +39,7 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
     finally{if(inFlight.current===episode){inFlight.current=null;if(live.current.workspace.id===current.id&&live.current.authority===owner)setBusy(false);}}
   }
   return <section className="clinical-team-drafts" data-compact-plan={compact} aria-label="Clinical team drafts" aria-busy={busy}>
-    <h3 tabIndex={-1}>{compact?'Draft next steps':'From saved note to next steps'}</h3>
+    <h3 tabIndex={-1}>{composerPlan?'Private team drafts':compact?'Draft next steps':'From saved note to next steps'}</h3>
     {!compact&&<>
     <p>Chief uses your shared Scribe material. Follow-up prepares a patient email draft and provider action items. Research prepares drug and treatment questions for provider review.</p>
     <ol aria-label="Team draft steps">
@@ -56,7 +56,7 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
       <p>Saved note · version {note.version}{note.review?' · Privately reviewed':' · Draft, awaiting review'}</p>
       {note.sources_changed&&<p role="status">Source material changed. Reconcile and save the note before starting fresh team drafts.</p>}
       {tooLarge&&<p role="status">This saved note is too large for one team snapshot. Keep this saved version and create a shorter note before sharing it.</p>}
-      {onPrepare&&<>
+      {onPrepare&&!composerPlan&&<>
         {!compact&&<div role="group" aria-label="Saved note for Follow-up and Research"><pre style={{whiteSpace:'pre-wrap'}}>{note.content}</pre></div>}
         {compact&&<p>Use this note and your directions to prepare private Follow-up and Research drafts for review.</p>}
         <div role="group" aria-label="Your directions for Chief">{!compact&&<p>{onDirectionsChange?'Add optional directions here.':'Use the message box below for optional directions.'} Prepare includes those exact words with this saved note. Your directions guide drafting; they do not add clinical facts or authorize sending.</p>}
@@ -66,15 +66,18 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
         {directionsError&&<p role="status">{directionsError}</p>}
         {directionsUnsupported&&<p role="status">This practice service needs an update to include your directions with the saved note. Your text is kept; no team request will be sent.</p>}
         {!compact&&<p>Choosing Prepare Follow-up and Research shares this exact saved note, version {note.version}, with your private team and asks Chief to prepare both sets of drafts. It does not edit or sign the note, send a patient email, or run a public search.</p>}
-        <button type="button" className="team-primary" disabled={locked||busy||note.sources_changed||tooLarge||!linked||historyFull||!handoffReady||!!directionsError||directionsUnsupported||!!requestedOrigin&&!chiefWithoutAssignments}
+        <button type="button" className="team-primary" disabled={locked||busy||note.sources_changed||tooLarge||!linked||historyFull||!handoffReady||!!directionsError||directionsUnsupported||clinicalTeamRequestAlreadySaved(workspace,ownerDirections)}
           onClick={()=>void run(()=>onPrepare(noteSelection(note,workspace.revision)))}>Prepare Follow-up and Research</button>
         {busy&&<p role="status">{compact?preparing?'Preparing private drafts…':'Chief is preparing private drafts. You can return to chat.':preparing?'Confirming the exact saved note and preparing your private team request…':'Chief is working on your private drafts. You can return to chat.'}</p>}
         {compact&&<details className="clinical-team-note-preview"><summary>Preview saved note · version {note.version}</summary>
           <div role="group" aria-label="Saved note for Follow-up and Research"><pre style={{whiteSpace:'pre-wrap'}}>{note.content}</pre></div></details>}
       </>}
+      {composerPlan&&<p>Private patient email draft, provider actions and treatment assessment for review.</p>}
+      {composerPlan&&<details className="clinical-team-note-preview"><summary>Preview saved note · version {note.version}</summary>
+        <div role="group" aria-label="Saved note for Follow-up and Research"><pre style={{whiteSpace:'pre-wrap'}}>{note.content}</pre></div></details>}
       {compact&&source&&<p role="status">Saved note version {source.snapshot.note.version} is shared with this private team.</p>}
       {compact&&!handoffReady&&<p>Enable Chief, Follow-up and Research with private draft handoffs to prepare this set of drafts.</p>}
-      <details open={onPrepare?undefined:true}><summary hidden={!onPrepare}>{compact?'More options':'Separate sharing and request controls'}</summary>
+      {!composerPlan&&<details open={onPrepare?undefined:true}><summary hidden={!onPrepare}>{compact?'More options':'Separate sharing and request controls'}</summary>
       <button type="button" disabled={locked||busy} aria-expanded={preview} onClick={()=>setPreview(v=>!v)}>Preview saved note for team</button>
       {preview&&<div role="group" aria-label="Exact saved note to share"><pre style={{whiteSpace:'pre-wrap'}}>{note.content}</pre>
         <p>The saved note text is shared with your private team. This does not edit or sign the clinical note.</p>
@@ -87,7 +90,7 @@ export function ClinicalTeamDraftsPanel({workspace,team,locked,onShare,onAskChie
       {!compact&&!handoffReady&&<p>Enable Chief, Follow-up and Research with private draft handoffs to prepare this set of drafts.</p>}
       <button type="button" disabled={locked||busy||!source||!handoffReady||!!origin&&!chiefWithoutAssignments||!linked||historyFull}
         onClick={()=>{if(content)void run(()=>onAskChief(content));}}>{chiefWithoutAssignments?'Ask Chief again for both drafts':'Ask Chief for follow-up and research drafts'}</button>
-      </details>
+      </details>}
       {origin&&!origin.reply&&<p role="status">Chief’s request is saved. Its outcome is still being checked; no second request is needed.</p>}
       {chiefWithoutAssignments&&<p role="status">Chief’s reply did not save any team assignments. You can ask again using this exact shared note.</p>}
     </>}

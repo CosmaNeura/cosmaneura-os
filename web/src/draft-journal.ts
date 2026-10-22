@@ -36,8 +36,9 @@ import {validateAgentResearchRecovery} from './agent-research-recovery';
 import {validatePrivateDraftRecovery,validatePrivateDraftLinkRecovery} from './private-draft-recovery';
 
 export type TeamDraft = { kind: "team"; baseRevision: number; configuration: TeamConfiguration; pending: TeamSaveInput | null };
+export type ChiefNoteTaskDraft={contract:'chief-note-task.compose.v1';note_id:string;note_version:number;content_hash:string;source_fingerprint:string};
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
-  note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest };
+  note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest;chief_note_task?:ChiefNoteTaskDraft };
 export type EditorKind = "notebook-title" | "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
@@ -58,13 +59,13 @@ const validEditor = (kind: unknown) => typeof kind === "string" &&
 const operations = ["entry", "ask", "retry", "note", "coreNoteLink", "review", "followUpPropose", "followUpDecision", "followUpComplete", "clinicalNoteShare", "link"];
 
 export function notebookDraft(workspace: Workspace, note: string, thought: string, evidence: string, source: string,
-  pending: PendingSave | null,previous:PreviousModelRequest|null=null): NotebookDraft | null {
+  pending: PendingSave | null,previous:PreviousModelRequest|null=null,chiefNoteTask:ChiefNoteTaskDraft|null=null): NotebookDraft | null {
   const operation = pending?.type === "team" ? null : pending;
   const latest = workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "";
-  if (!operation && !previous && note === latest && !thought && !evidence && !source) return null;
+  if (!operation && !previous && !chiefNoteTask && note === latest && !thought && !evidence && !source) return null;
   const history=operation&&(operation.type==='ask'||operation.type==='retry')&&operation.previous_model_request?null:previous;
   return { kind: "workspace", workspaceId: workspace.id, baseRevision: workspace.revision,
-    note, thought, evidence, source, pending: operation,...(history?{previous_model_request:history}:{}) };
+    note, thought, evidence, source, pending: operation,...(history?{previous_model_request:history}:{}),...(chiefNoteTask?{chief_note_task:chiefNoteTask}:{}) };
 }
 export function teamDraft(team: ProviderTeam, configuration: TeamConfiguration, pending: PendingSave | null): TeamDraft | null {
   const operation = pending?.type === "team" ? pending.body : null;
@@ -128,9 +129,15 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
         draft.pending !== null && (!validTeamSave(draft.pending) || draft.pending.expected_revision !== draft.baseRevision || !same(draft.pending.configuration, draft.configuration))) throw new DraftStoreError("integrity");
   } else if (draft.kind === "workspace") {
     if (!UUID.test(draft.workspaceId) || address !== `workspace:${draft.workspaceId}` ||
-        Object.keys(draft).filter(k=>k!=='previous_model_request').sort().join(",") !== "baseRevision,evidence,kind,note,pending,source,thought,workspaceId" ||
+        Object.keys(draft).filter(k=>!['previous_model_request','chief_note_task'].includes(k)).sort().join(",") !== "baseRevision,evidence,kind,note,pending,source,thought,workspaceId" ||
         [draft.note, draft.thought, draft.evidence, draft.source].some(text => typeof text !== "string") ||
         draft.pending !== null && !pendingRequest(draft.pending)) throw new DraftStoreError("integrity");
+    if(draft.chief_note_task!==undefined){
+      const task=draft.chief_note_task;
+      if(!task||typeof task!=='object'||Array.isArray(task)||Object.keys(task).sort().join(',')!=='content_hash,contract,note_id,note_version,source_fingerprint'||
+        task.contract!=='chief-note-task.compose.v1'||typeof task.note_id!=='string'||!UUID.test(task.note_id)||!Number.isSafeInteger(task.note_version)||task.note_version<1||task.note_version>50||
+        typeof task.content_hash!=='string'||!/^[a-f0-9]{64}$/.test(task.content_hash)||typeof task.source_fingerprint!=='string'||!/^[a-f0-9]{64}$/.test(task.source_fingerprint))throw new DraftStoreError('integrity');
+    }
     if((draft.pending?.type==='ask'||draft.pending?.type==='retry')&&draft.pending.previous_model_request&&draft.pending.previous_model_request.workspace_id!==draft.workspaceId)throw new DraftStoreError('integrity');
     if(draft.previous_model_request!==undefined&&(!validPreviousModelRequest(draft.previous_model_request)||draft.previous_model_request.workspace_id!==draft.workspaceId||
       (draft.pending?.type==='ask'||draft.pending?.type==='retry')&&draft.pending.previous_model_request))throw new DraftStoreError('integrity');

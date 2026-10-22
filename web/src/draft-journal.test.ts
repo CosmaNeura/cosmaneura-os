@@ -58,3 +58,16 @@ it('retains only the exact reviewed Scribe request metadata and rejects added tr
  await expect(reopened.persist(where,{...retained,pending:revision_id})).rejects.toMatchObject({code:'integrity'});
  expect(await reopened.load(where)).toEqual(retained);reopened.close();
 });
+
+it('round-trips only saved-note compose identity beside unsent words, rejecting extra authority or altered source metadata',async()=>{
+  const task={contract:'chief-note-task.compose.v1' as const,note_id:revision_id,note_version:2,content_hash:'a'.repeat(64),source_fingerprint:'b'.repeat(64)};
+  const retained={...draft(null),thought:'Verbatim invented owner directions. 界',chief_note_task:task};
+  const factory=memoryDraftStorage(),options={scope:'d'.repeat(64)},journal=new DraftJournal(await factory(options));await journal.load(address);
+  await journal.persist(address,retained);journal.close();const reopened=new DraftJournal(await factory(options));
+  expect(await reopened.load(address)).toEqual(retained);
+  for(const changed of [{...task,share_with_team:true},{...task,content:'Extra note content'},{...task,note_id:'unbound-note'},
+    {...task,note_version:0},{...task,content_hash:'wrong'},{...task,source_fingerprint:'wrong'},
+    {...task,note_id:[task.note_id]},{...task,content_hash:[task.content_hash]},{...task,source_fingerprint:[task.source_fingerprint]}])
+    await expect(reopened.persist(address,{...retained,chief_note_task:changed as typeof task})).rejects.toMatchObject({code:'integrity'});
+  expect(await reopened.load(address)).toEqual(retained);reopened.close();
+});
