@@ -302,7 +302,13 @@ def _workspace_gate(response: Response, request: Request) -> None:
 
 @app.exception_handler(ws.WorkspaceError)
 async def workspace_error(_: Request, exc: ws.WorkspaceError):
-    return JSONResponse(status_code=exc.status, content={"detail": exc.code},
+    content = {"detail": exc.code}
+    if (isinstance(exc, workspace_capture.CoreCaptureFailure)
+        and exc.status == 503
+        and exc.code in workspace_capture.CORE_CAPTURE_FAILURE_CODES
+        and isinstance(exc.capture_phase, workspace_capture.CoreCaptureReadPhase)):
+        content["capture_phase"] = exc.capture_phase.value
+    return JSONResponse(status_code=exc.status, content=content,
                         headers={"Cache-Control": "no-store"})
 
 
