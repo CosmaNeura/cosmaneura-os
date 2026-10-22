@@ -53,6 +53,39 @@ type Action=keyof typeof names;
 async function click(action:Action){await act(async()=>button(names[action]).click());}
 const navigation=(action:Action)=>action==='close'?closed:action==='notebook'?opened:transcribed;
 
+it('opens and returns to the exact native clip at its controls while progress and typing retain the same pane, transcript and runtime',async()=>{
+  let release!:()=>void;props={...props,authorize:()=>new Promise<void>(resolve=>release=resolve)};
+  await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+  const pane=host.querySelector<HTMLElement>('[aria-label="Private Scribe recording"]')!,heading=pane.querySelector('h1')!;
+  expect(pane.getAttribute('data-native-recording')).toBe('true');expect(pane.scrollTop).toBe(0);expect(document.activeElement).toBe(heading);
+  expect(host.textContent).toContain('Opening saved recording…');expect(host.querySelector('input[type=checkbox]')).toBeNull();
+  const documentScroll=vi.fn();pane.scrollIntoView=documentScroll;heading.scrollIntoView=documentScroll;
+  pane.scrollTop=240;await act(async()=>release());
+  await vi.waitFor(async()=>{await act(async()=>{});expect(host.querySelector('textarea')).not.toBeNull();});
+  expect(pane.scrollTop).toBe(240);expect(host.querySelector('[aria-label="Private Scribe recording"]')).toBe(pane);
+  const transcript=host.querySelector('textarea')!,recording=runtimes[0];
+  props={...props,minimized:true};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));expect(pane.hidden).toBe(true);
+  props={...props,minimized:false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+  expect(pane.hidden).toBe(false);expect(pane.scrollTop).toBe(0);expect(document.activeElement).toBe(heading);expect(documentScroll).not.toHaveBeenCalled();
+  expect(host.querySelector('textarea')).toBe(transcript);expect(runtimes).toEqual([recording]);expect(recording.snapshot.recordingId).toBe(props.recordingId);
+  pane.scrollTop=180;transcript.focus();await act(async()=>{
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(transcript,'Invented words retained after returning.');
+    transcript.dispatchEvent(new Event('input',{bubbles:true}));
+  });
+  expect(transcript.value).toBe('Invented words retained after returning.');expect(pane.scrollTop).toBe(180);expect(document.activeElement).toBe(transcript);
+  expect(recording.start).not.toHaveBeenCalled();expect(recording.pause).not.toHaveBeenCalled();expect(recording.stop).not.toHaveBeenCalled();expect(recording.close).not.toHaveBeenCalled();
+  expect(opened).not.toHaveBeenCalled();expect(transcribed).not.toHaveBeenCalled();expect(closed).not.toHaveBeenCalled();
+});
+
+it('does not refocus or reset the native pane on return after the recording owner is no longer current',async()=>{
+  let current=true;props={...props,isCurrent:()=>current};await render();
+  props={...props,minimized:true};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+  current=false;props={...props,minimized:false};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+  const pane=host.querySelector<HTMLElement>('[aria-label="Private Scribe recording"]')!;expect(pane.getAttribute('data-native-recording')).toBe('true');
+  expect(pane.textContent).toContain('Recording access changed');expect(host.querySelector('textarea')).toBeNull();
+  expect(pane.contains(document.activeElement)).toBe(false);expect(opened).not.toHaveBeenCalled();expect(transcribed).not.toHaveBeenCalled();
+});
+
 it.each(['close','notebook','scribe'] as const)('saves edited private words before one %s action and ignores duplicate gestures during the save',async action=>{
   await render();events=[];
   let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);
