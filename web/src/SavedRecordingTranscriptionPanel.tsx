@@ -331,11 +331,13 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     </div>}
     {showDraft&&<button disabled={locked||busy||privateBusy||privateTransition||reviewLock||draftLocked} onClick={()=>void(async()=>{try{await preparePrivateNavigation();setShowDraft(false);}catch{/* Keep the current editor open. */}})()}>Return to transcript review</button>}
     {processing&&transfer?.admitted&&<section className="saved-transcript-review" aria-label="Scribe transcript review" hidden={showDraft}><CreatorReviewPanel workspaceId={workspace.id} sessionId={transfer.admitted.session_id} identity={identity}
-      locked={locked||busy||privateBusy||privateTransition||draftLocked} onLock={setReviewLock} onAvailability={reportReviewAvailability} onSource={reportReview} onContinue={async()=>{const selected=owner.current;if(!current(selected)||!selected?.runtime||privateTransitionOwner.current===selected)return;
+      locked={locked||busy||privateBusy||privateTransition||draftLocked} onLock={setReviewLock} onAvailability={reportReviewAvailability} onSource={reportReview} onContinue={async()=>{const selected=owner.current;if(!current(selected)||!selected||privateTransitionOwner.current===selected)return;
+        const retainedNoteReady=retainedReview&&reviewAvailability==='ready'&&review?.session_id===transfer.admitted!.session_id&&review.working?.note_ready;
+        if(!selected.runtime&&!retainedNoteReady)return;
         await preparePrivateNavigation(selected);
         if(!current(selected)||privateTransitionOwner.current===selected)return;
         privateTransitionOwner.current=selected;setPrivateTransition(true);
-        try{await selected.runtime.releaseUploadedCapture();if(current(selected))setShowDraft(true);}
+        try{if(selected.runtime)await selected.runtime.releaseUploadedCapture();if(current(selected))setShowDraft(true);}
         finally{if(privateTransitionOwner.current===selected){privateTransitionOwner.current=null;if(current(selected))setPrivateTransition(false);}}}}/></section>}
     {showDraft&&review?.working?.note_ready&&notesEnabled&&transfer?.admitted&&<div ref={noteSection}><CaptureDraftPanel workspaceId={workspace.id} sessionId={transfer.admitted.session_id}
       sourceId={review.working.working_transcript_id} identity={identity} onDraftLock={reportDraftLock} onReviewDraft={onReviewDraft} onCurrentDraft={onCurrentDraft}
