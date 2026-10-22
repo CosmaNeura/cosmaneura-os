@@ -14,7 +14,7 @@ export function SampleVisit({onClose}:{onClose:()=>void}) {
     dialog.current?.focus();
     return()=>{if(previous instanceof HTMLElement&&previous.isConnected)previous.focus();};
   },[]);
-  useEffect(()=>{if(showTeam){teamResult.current?.scrollIntoView?.({block:'start'});teamResult.current?.focus();}},[showTeam]);
+  useEffect(()=>{if(showTeam){teamResult.current?.scrollIntoView?.({block:'start'});teamResult.current?.focus({preventScroll:true});}},[showTeam]);
   return <div className="sample-visit-backdrop"><section ref={dialog} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby="sample-visit-title" className="sample-visit" onKeyDown={event=>{
     if(event.key==='Escape'){event.preventDefault();onClose();}
     if(event.key==='Tab'){
@@ -25,6 +25,7 @@ export function SampleVisit({onClose}:{onClose:()=>void}) {
     }
   }}>
     <header><div><p className="team-kicker">PRACTICE WITH AN INVENTED VISIT</p><h2 id="sample-visit-title">See how your team helps</h2></div><button onClick={onClose} aria-label="Close sample visit">✕</button></header>
+    <div className="sample-visit-content">
     <p className="sample-visit-notice">This example works offline. The note and teammate drafts are prepared examples. Your microphone is off, and sample edits stay in this screen.</p>
     <div className="sample-visit-patient"><strong>Jordan Cypress · sample visit</strong><span>Date of birth: not supplied</span></div>
     <p>You can start a real recording without a date of birth. Add it when you have it.</p>
@@ -39,8 +40,11 @@ export function SampleVisit({onClose}:{onClose:()=>void}) {
         <li><BotAvatar role="visit_prep"/><div><strong>Visit Prep · sample agenda</strong><ol><li>Confirm the visit date and Jordan’s details.</li><li>Review the one-week sleep diary Jordan agreed to bring.</li><li>Ask what Jordan noticed about their sleep routine.</li><li>Agree on next steps together.</li></ol><details><summary>Source for this agenda</summary><p>{source}</p></details></div></li>
         <li><BotAvatar role="research"/><div><strong>Research · optional sample brief</strong><p>Public question: What is a sleep diary?</p><p>A sleep diary records sleep and wake times and related observations. Jordan agreed to bring a week of entries; discuss those observations at follow-up.</p><p><a href="https://www.nhlbi.nih.gov/health/sleep/studies" target="_blank" rel="noreferrer">NHLBI · Sleep studies and sleep diary</a></p><small>Prepared educational example. This screen does not run a search or fetch the reference. A real search requires your reviewed public question.</small></div></li>
         <li><BotAvatar role="follow_up"/><div><strong>Follow-up · sample message draft</strong><label htmlFor="sample-follow-up">Message for Jordan</label><textarea id="sample-follow-up" value={followUp} maxLength={2000} onChange={event=>{setFollowUp(event.target.value);setFollowUpReviewed(false);}}/><label className="sample-visit-check"><input type="checkbox" checked={followUpReviewed} disabled={!followUp.trim()} onChange={event=>setFollowUpReviewed(event.target.checked)}/>I checked this sample message against the agreed next step.</label><p role="status">{followUpReviewed?'Sample message reviewed.':'Needs your review.'}</p><small>Recipient, visit date and delivery channel still need confirmation in a real visit. This sample has no delivery action.</small></div></li>
-      </ul><p role="status">Sample review complete. In your own visits, check each saved result before using it.</p>
+      </ul><p role="status">{followUpReviewed
+        ? 'Sample review complete. In your own visits, check each saved result before using it.'
+        : 'One step left: check the follow-up message above.'}</p>
     </section>}
+    </div>
     <footer><button onClick={onClose}>{showTeam?'Return to my workspace':'Close sample'}</button></footer>
   </section></div>;
 }
