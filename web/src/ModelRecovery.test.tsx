@@ -64,6 +64,25 @@ it('retains an exact lost ask across remount and settles an old saved receipt om
   await click('Check saved result');expect(modelWorkApi.resolve).toHaveBeenCalledWith(access,id,saved.pending);
   expect(currentDraft()?.pending).toBeNull();expect(currentDraft()?.note).toBe('Keep invented notebook');expect(element.textContent).toContain('Conversation saved.');expect(workspaceApi.ask).toHaveBeenCalledOnce();
 });
+it('keeps an admitted model request when a background flush races its deferred notebook autosave',async()=>{
+  await open();await input('#team-notebook','Keep notes while asking');await input('#team-question','Invented background interruption');
+  const persist=DraftJournal.prototype.persist;let flushed=false;
+  vi.spyOn(DraftJournal.prototype,'persist').mockImplementation(function(this:DraftJournal,address,body){
+    const saved=persist.call(this,address,body);
+    // Page suspension can flush the pre-submit snapshot before React renders busy.
+    // Place that flush immediately after the immutable request enters the journal.
+    if(!flushed&&body?.kind==='workspace'&&body.pending?.type==='ask'){
+      flushed=true;window.dispatchEvent(new Event('pagehide'));
+    }
+    return saved;
+  });
+  vi.mocked(workspaceApi.ask).mockRejectedValue(new WorkspaceApiError(503));await click('Send message');
+  expect(flushed).toBe(true);expect(workspaceApi.ask).toHaveBeenCalledOnce();
+  const operation={type:'ask',model_contract:1,origin:'durable_admission_v1',body:vi.mocked(workspaceApi.ask).mock.calls[0][2]};
+  expect(currentDraft()?.pending).toEqual(operation);expect(currentDraft()?.note).toBe('Keep notes while asking');
+  await restart();await click('Restore notebook draft');
+  expect(currentDraft()?.pending).toEqual(operation);expect(workspaceApi.ask).toHaveBeenCalledOnce();
+});
 it('keeps the pending body when an exact saved receipt is followed by a failed current read',async()=>{
   const operation:ModelOperation={type:'ask',body:conversationFixture,model_contract:1,origin:'durable_admission_v1'};await restore(operation);
   vi.mocked(modelWorkApi.resolve).mockResolvedValue(await modelReceipt(conversationFixture,id));vi.mocked(workspaceApi.read).mockRejectedValue(new WorkspaceApiError(503));
