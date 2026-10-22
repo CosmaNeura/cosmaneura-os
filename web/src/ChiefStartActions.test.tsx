@@ -23,7 +23,7 @@ describe('Chief first-use controls',()=>{
   });
   it('blocks only team assignments when Chief cannot delegate',async()=>{
     await act(async()=>root.render(<ChiefStartActions {...ready} canDelegate={false} onChoose={vi.fn()}/>));
-    expect([...container.querySelectorAll('button')].map(button=>button.disabled)).toEqual([false,false,true]);
+    expect([...container.querySelectorAll('button')].map(button=>button.disabled)).toEqual([false,false,true,true]);
     expect(container.textContent).toContain('Private team assignments are off');
   });
   it('accepts the displayed default team only after an explicit click',async()=>{

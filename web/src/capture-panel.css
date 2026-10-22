@@ -86,3 +86,8 @@
 .saved-visit-selection select { display: block; width: 100%; min-height: 44px; font-size: 16px; margin-top: 6px; }
 .saved-visit-selection button { min-height: 44px; font-size: 16px; }
 .saved-transcription .capture-note button, .saved-transcription .capture-note select { min-height: 44px; }
+@media (max-width: 600px) {
+  .saved-transcription { margin-inline: 0; padding: 14px; }
+  .saved-transcription .capture-creator-review { margin: 0; padding: 0; border: 0; }
+  .saved-transcription .creator-review { padding: 0; background: transparent; }
+}

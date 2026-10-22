@@ -1,5 +1,8 @@
 import {
   CreatorReviewError,
+  creatorReviewFailure,
+  type CreatorReviewFailure,
+  type CreatorReviewFailurePhase,
   type CreatorReviewApi,
   type CreatorReviewView,
 } from "./creator-review-api";
@@ -16,6 +19,7 @@ export interface CreatorReviewState {
   readonly phase: Phase;
   readonly view: CreatorReviewView | null;
   readonly notice: string;
+  readonly failure?: CreatorReviewFailure;
 }
 
 export interface CreatorReviewOptions {
@@ -62,13 +66,16 @@ export function mountCreatorReview(
   const refresh = async (): Promise<void> => {
     if (disposed || pending !== null) return;
     const request = ++generation;
-    state = { ...state, phase: "loading", view: null };
+    state = { ...state, phase: "loading", view: null, failure: undefined,
+      notice: state.phase === "unavailable" ? "" : state.notice };
     render();
+    let failurePhase: CreatorReviewFailurePhase = "read";
     try {
       const view = await api.read();
       if (disposed || request !== generation) return;
       // A fresh authorized read must succeed before opening local recovery metadata.
       if (!recovered && options.journal) {
+        failurePhase = "recovery";
         const saved = await options.journal.load();
         if (disposed || request !== generation) return;
         pending = saved === null ? null : parsePendingReviewDecision(saved);
@@ -81,12 +88,13 @@ export function mountCreatorReview(
         reportAvailability("ready");
         return;
       }
-      state = { ...state, phase: "ready", view };
-    } catch {
+      state = { ...state, phase: "ready", view, failure: undefined };
+    } catch (error) {
       if (disposed || request !== generation) return;
+      const failure = creatorReviewFailure(error instanceof CreatorReviewError ? error.failure : undefined, failurePhase);
       state = {
         phase: "unavailable", view: null,
-        notice: "This recording is unavailable. Check your session or access, then refresh.",
+        notice: failureCopy(failure), failure,
       };
     }
     render();
@@ -144,8 +152,9 @@ export function mountCreatorReview(
       } else {
         await options.continueToNote();
       }
-    } catch {
-      state = { phase: "unavailable", view: null, notice: "The note could not be opened. Check access and refresh before trying again." };
+    } catch (error) {
+      const failure = creatorReviewFailure(error instanceof CreatorReviewError ? error.failure : undefined);
+      state = { phase: "unavailable", view: null, notice: "The note could not be opened. Check access and refresh before trying again.", failure };
     } finally {
       continuing = false;
       render();
@@ -226,7 +235,31 @@ export function renderCreatorReview(state: CreatorReviewState): string {
     ${state.phase === "retry" ? `<button type="button" data-review-action="retry">Retry the same decision</button>` : ""}
     ${state.phase === "loading" ? '<p aria-busy="true">Loading the current recording…</p>' : ""}
     ${view?.source != null && view.working != null ? renderTranscript(view, state.phase) : ""}
+    ${state.failure ? failureDetails(state.failure) : ""}
   </section>`;
+}
+
+function failureCopy(value: CreatorReviewFailure): string {
+  const failure = creatorReviewFailure(value);
+  if (failure.phase === "response") return "The transcript response could not be verified. Choose Refresh to retrieve it again.";
+  if (failure.phase === "authorization") return "Your access to this workspace could not be confirmed. Check your session, then choose Refresh.";
+  if (failure.phase === "recovery") return "Your review recovery could not be checked. Choose Refresh to try again. Review decisions stay closed until recovery is available.";
+  if (failure.reason === "client_timeout") return "The transcript check timed out. Your audio is retained. Choose Refresh to check the same recording again.";
+  if (failure.reason === "client_cancelled") return "The transcript check was interrupted. Choose Refresh to check the same recording again.";
+  if (failure.reason === "client_transport_unavailable"||failure.reason === "workspace_connection_paused") return "The transcript connection could not be confirmed. Check the workspace connection, then choose Refresh.";
+  if (failure.reason === "core_identity_unavailable") return "The secure Scribe service connection is unavailable. Your audio is retained. Choose Refresh to check again.";
+  if (failure.reason === "core_context_invalid"||failure.reason === "core_receipt_invalid") return "Scribe's response could not be verified. Your audio is retained. Choose Refresh to check again.";
+  if (failure.reason === "core_access_unavailable") return "Scribe could not verify access to this transcript. Check your Core connection and selected visit, then choose Refresh.";
+  if (failure.reason === "connection_required") return "Check your Core connection and selected visit, then choose Refresh to retrieve the transcript.";
+  if (failure.reason === "source_changed") return "The recording's session or visit connection changed. Reopen the saved recording before checking its transcript.";
+  if (failure.reason === "access_unavailable") return "Your transcript access could not be confirmed. Check your session, then choose Refresh.";
+  return "The transcript could not be retrieved. Choose Refresh to check again.";
+}
+
+function failureDetails(value: CreatorReviewFailure): string {
+  const failure = creatorReviewFailure(value);
+  const reference = `${failure.phase}_${failure.status === null ? "unconfirmed" : `response_${failure.status}`}_${failure.reason}${failure.corePhase?`_${failure.corePhase}`:""}`;
+  return `<details><summary>Support details</summary><p>Transcript check: <code>${reference}</code></p></details>`;
 }
 
 function renderTranscript(view: CreatorReviewView, phase: Phase): string {

@@ -1,4 +1,4 @@
-import {act,useEffect,useState,StrictMode} from 'react';
+import {act,useEffect,useState,useLayoutEffect,StrictMode} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {SavedRecordingTranscriptionPanel,parseVisitTranscriptionIntent,visitTranscriptionIntentHash,type SavedRecordingEntry,type RecordingTranscriptionGesture} from './SavedRecordingTranscriptionPanel';
@@ -135,14 +135,27 @@ async function combined(){
   mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe,
     uploadProgress:async()=>({confirmed:0,total:1,reference:null}),close:async()=>{}});
   vi.mocked(prepareCapture).mockResolvedValue({status:'prepared',workspace_id:workspace.id,session_id:id(16),consent_record_id:id(17),configured_capture:{schema_version:'1.0',language_mode:'en-US'}});
-  async function render(options:{entry?:SavedRecordingEntry;workspace?:Workspace;identity?:typeof identity;locked?:boolean;strict?:boolean;current?:()=>boolean;team?:ProviderTeam;taskBot?:{selection:{address:string;team_revision:number};name:string;enabled:boolean;includeNotebook:boolean}}={}){
+  async function render(options:{entry?:SavedRecordingEntry;workspace?:Workspace;identity?:typeof identity;locked?:boolean;strict?:boolean;current?:()=>boolean;team?:ProviderTeam;onCommit?:()=>void;taskBot?:{selection:{address:string;team_revision:number};name:string;enabled:boolean;includeNotebook:boolean}}={}){
     const panel=<SavedRecordingTranscriptionPanel entry={options.entry??entry} identity={options.identity??identity} workspace={options.workspace??workspace} team={options.team??team}
       isCurrent={options.current??(()=>true)} locked={options.locked??false} notesEnabled={false} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}} notebookDirty={false} onNotebook={()=>{}}
       taskBot={options.taskBot??{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}/>;
-    await act(async()=>root.render(options.strict?<StrictMode>{panel}</StrictMode>:panel));
+    const observed=<>{panel}<CommitProbe capture={options.onCommit}/></>;
+    await act(async()=>root.render(options.strict?<StrictMode>{observed}</StrictMode>:observed));
   }
   return {entry,intent,binding,source,recording,render,claim,transcribe,origin,team};
 }
+function CommitProbe({capture}:{capture?:()=>void}){useLayoutEffect(()=>{capture?.();});return null;}
+it.each(['identity','scope','recording','authority'] as const)('the first committed %s replacement cannot display the previous saved recording or Scribe session',async change=>{
+ const c=await combined();const snapshot={state:'processing',recordedChunks:1};mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:c.transcribe,close:async()=>{}});
+ await c.render();await waitFor(()=>expect(host.textContent).toContain('Invented combined test clip'));const commits:string[]=[];const onCommit=()=>commits.push(host.innerHTML);
+ mocks.open.mockImplementation(()=>new Promise(()=>{}));
+ if(change==='identity')await c.render({identity:{...identity},onCommit});
+ if(change==='scope')await c.render({entry:{...c.entry,scope:'f'.repeat(64)},onCommit});
+ if(change==='recording')await c.render({entry:{...c.entry,recordingId:id(99)},onCommit});
+ if(change==='authority')await c.render({workspace:{...workspace,revision:workspace.revision+1},onCommit});
+ expect(commits[0]).toContain('Opening saved recording');expect(commits[0]).not.toContain('Invented combined test clip');expect(commits[0]).not.toContain('Scribe transcript review');expect(commits[0]).not.toContain('2026-10-20T12:00:00Z');
+ expect(c.transcribe).toHaveBeenCalledOnce();expect(prepareCapture).toHaveBeenCalledOnce();
+});
 it('one combined gesture starts existing admission/upload without another consent or send action',async()=>{
   const c=await combined();await c.render();await waitFor(()=>expect(c.transcribe).toHaveBeenCalledOnce());
   expect(prepareCapture).toHaveBeenCalledOnce();expect(c.claim).toHaveBeenCalledOnce();
@@ -236,6 +249,7 @@ it('reopens an already admitted uploaded transfer in review without a consent, a
   await c.render();await waitFor(()=>expect(c.transcribe).toHaveBeenCalledOnce());const retained=structuredClone(stored);const admittedCalls=vi.mocked(prepareCapture).mock.calls.length;
   await act(async()=>root.unmount());root=createRoot(host);await c.render({entry:{...c.entry,transcriptionGesture:undefined}});
   await waitFor(()=>expect(host.textContent).toContain('Review your transcript'));expect(host.querySelector('input[type=checkbox]')).toBeNull();expect(button('Continue transcription')).toBeUndefined();
+  const reviewSection=host.querySelector('section[aria-label="Scribe transcript review"]');expect(reviewSection).not.toBeNull();expect(reviewSection!.closest('details')).toBeNull();
   expect(c.transcribe).toHaveBeenCalledOnce();expect(prepareCapture).toHaveBeenCalledTimes(admittedCalls);expect(stored).toEqual(retained);
 });
 it('reports an unavailable transcript honestly across reopen without repeating admission/upload, then adopts a ready review',async()=>{
@@ -243,10 +257,10 @@ it('reports an unavailable transcript honestly across reopen without repeating a
   mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:c.transcribe,close:async()=>{}});
   await c.render();await waitFor(()=>expect(c.transcribe).toHaveBeenCalledOnce());const retained=structuredClone(stored);
   await act(async()=>root.unmount());root=createRoot(host);mocks.availability='unavailable';mocks.review={working:{note_ready:true}};
-  await c.render({entry:{...c.entry,transcriptionGesture:undefined}});await waitFor(()=>expect(host.textContent).toContain('Your transcript cannot currently be retrieved'));
-  expect(host.textContent).toContain('Open Review transcript and choose Refresh');expect(host.textContent).not.toContain('Transcript ready.');expect(host.textContent).not.toContain('Scribe is preparing your transcript');
+  await c.render({entry:{...c.entry,transcriptionGesture:undefined}});await waitFor(()=>expect(host.textContent).toContain('Your Scribe transcript cannot currently be retrieved'));
+  expect(host.textContent).toContain('Choose Refresh in the review below');expect(host.textContent).not.toContain('Scribe transcript ready.');expect(host.textContent).not.toContain('Scribe is preparing your transcript');
   expect(host.textContent).not.toContain('could not finish transcription');expect(button('Continue transcription')).toBeUndefined();expect(stored).toEqual(retained);expect(c.transcribe).toHaveBeenCalledOnce();expect(prepareCapture).toHaveBeenCalledOnce();
-  mocks.availability='ready';await c.render({entry:{...c.entry,transcriptionGesture:undefined}});await waitFor(()=>expect(host.textContent).toContain('Transcript ready.'));
+  mocks.availability='ready';await c.render({entry:{...c.entry,transcriptionGesture:undefined}});await waitFor(()=>expect(host.textContent).toContain('Scribe transcript ready.'));
   expect(stored).toEqual(retained);expect(c.transcribe).toHaveBeenCalledOnce();expect(prepareCapture).toHaveBeenCalledOnce();
 });
 it('the real visit selector hands off one exact consent directly to the real saved transcription panel',async()=>{
@@ -270,13 +284,14 @@ it('the real visit selector hands off one exact consent directly to the real sav
   expect(intent.request.expected_target_revision).toBe(7);expect(c.origin.appointment_id).toBeNull();expect((stored as {admission:{source:{origin_workspace_id:string}}}).admission.source.origin_workspace_id).toBe(c.origin.id);
 });
 
-it('a held review release cannot show a note after replacement ownership returns to the original workspace',async()=>{
+it('simultaneous clean Continue callbacks release once and cannot show a note after owner replacement',async()=>{
   const c=await combined();let release!:()=>void,held!:Promise<void>;const snapshot={state:'processing',recordedChunks:1};
-  const runtime={controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:c.transcribe,close:async()=>{},releaseUploadedCapture:()=>held=new Promise<void>(resolve=>release=resolve)};
+  const releaseUploaded=vi.fn(()=>held=new Promise<void>(resolve=>release=resolve));
+  const runtime={controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:c.transcribe,close:async()=>{},releaseUploadedCapture:releaseUploaded};
   mocks.savedRuntime.mockResolvedValue(runtime);await c.render();await waitFor(()=>expect(mocks.continueReview).toBeTypeOf('function'));
-  let continuation!:Promise<void>;await act(async()=>{continuation=mocks.continueReview!();});await waitFor(()=>expect(release).toBeTypeOf('function'));
+  let continuations!:Promise<void>[];await act(async()=>{continuations=[mocks.continueReview!(),mocks.continueReview!()];});await waitFor(()=>expect(release).toBeTypeOf('function'));expect(releaseUploaded).toHaveBeenCalledOnce();
   await c.render({workspace:{...workspace,id:id(99)}});await c.render();await waitFor(()=>expect(host.textContent).toContain('Review your transcript'));
-  await act(async()=>{release();await held;await continuation;});expect(host.textContent).not.toContain('Review your visit note');
+  await act(async()=>{release();await held;await Promise.all(continuations);});expect(host.textContent).not.toContain('Review your visit note');
   expect(c.transcribe).toHaveBeenCalledOnce();expect(prepareCapture).toHaveBeenCalledOnce();
 });
 it('held failed-upload progress cannot write an old error after replacement ownership returns',async()=>{
@@ -315,8 +330,8 @@ it('transcribes unavailable Scribe review locally from the same retained source 
     snapshotForPrivateTranscript:async()=>({recordingId:id(3),scope:'c'.repeat(64),phase:'sealed',audioSHA256:'e'.repeat(64),chunks:1,frames:1,consent:{language:'en-US'}}),
     savedChunks:async function*(){const wavBytes=new Uint8Array(46);wavBytes[44]=1;yield{sequence:0,sha256:'f'.repeat(64),wavBytes};}});
   mocks.privateBegin.mockResolvedValue({runId:id(30)});mocks.privateAppend.mockImplementation(async v=>({sequence:v.sequence}));mocks.privateFinish.mockResolvedValue({runId:id(30),recordingId:id(3),audioSHA256:'e'.repeat(64),frames:1,text:'Invented private fallback words.',engine:'ios-speech-on-device-v1',language:'en-US'});mocks.privateCancel.mockResolvedValue(undefined);
-  const upload=vi.fn(),snapshot={state:'processing',recordedChunks:1};mocks.availability='unavailable';mocks.review=null;
-  mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:upload,close:async()=>{}});
+  const upload=vi.fn(),releaseUploaded=vi.fn(),snapshot={state:'processing',recordedChunks:1};mocks.availability='unavailable';mocks.review=null;
+  mocks.savedRuntime.mockResolvedValue({controller:{snapshot,subscribe:(listener:(value:unknown)=>void)=>{listener(snapshot);return()=>{};}},transcribe:upload,close:async()=>{},releaseUploadedCapture:releaseUploaded});
   const render=()=>act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'ios'}} identity={localIdentity} workspace={workspace} team={{revision:1} as ProviderTeam}
     isCurrent={()=>true} locked={false} notesEnabled={false} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}} notebookDirty={false} onNotebook={()=>{}} onNavigationLock={navigation}
     taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}/>));
@@ -324,6 +339,20 @@ it('transcribes unavailable Scribe review locally from the same retained source 
   await act(async()=>button('Transcribe on this iPhone')!.click());await waitFor(()=>expect(host.querySelector('textarea')?.value).toBe('Invented private fallback words.'));
   expect(mocks.privateBegin).toHaveBeenCalledOnce();expect(mocks.privateBegin).toHaveBeenCalledWith(expect.objectContaining({scope:'c'.repeat(64),recordingId:id(3),audioSHA256:'e'.repeat(64),chunks:1,frames:1}));
   expect(prepareCapture).not.toHaveBeenCalled();expect(upload).not.toHaveBeenCalled();expect(stored).toEqual(original);expect(privateRows.get('private-transcript:'+id(3))).toMatchObject({workspaceId:id(1),working:'Invented private fallback words.'});
-  await act(async()=>root.unmount());root=createRoot(host);await render();await waitFor(()=>expect(button('Transcribe on this iPhone')?.disabled).toBe(false));expect(mocks.privateBegin).toHaveBeenCalledOnce();
-  await act(async()=>button('Transcribe on this iPhone')!.click());await waitFor(()=>expect(host.querySelector('textarea')?.value).toBe('Invented private fallback words.'));expect(mocks.privateBegin).toHaveBeenCalledOnce();expect(stored).toEqual(original);
+  await act(async()=>root.unmount());root=createRoot(host);mocks.availability='loading';await render();
+  await waitFor(()=>expect(host.querySelector('textarea')?.value).toBe('Invented private fallback words.'));expect(button('Transcribe on this iPhone')).toBeUndefined();
+  expect(host.textContent).toContain('Checking your existing Scribe transcript');expect(host.textContent).not.toContain('Scribe transcript ready');
+  const reviewSection=host.querySelector('section[aria-label="Scribe transcript review"]');expect(reviewSection).not.toBeNull();expect(reviewSection!.closest('details')).toBeNull();
+  expect(mocks.privateBegin).toHaveBeenCalledOnce();expect(prepareCapture).not.toHaveBeenCalled();expect(upload).not.toHaveBeenCalled();expect(stored).toEqual(original);
+  const textarea=host.querySelector('textarea')!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(textarea,'Invented edits before opening note.');textarea.dispatchEvent(new Event('input',{bubbles:true}));});
+  expect(navigation).toHaveBeenLastCalledWith(true);mocks.availability='ready';mocks.review={working:{note_ready:true}};await render();
+  mocks.write.mockRejectedValueOnce(new Error('Local encrypted save unavailable'));
+  await act(async()=>{await expect(mocks.continueReview!()).rejects.toThrow();});expect(releaseUploaded).not.toHaveBeenCalled();expect(host.textContent).not.toContain('Review your visit note');expect(host.querySelector('textarea')?.value).toBe('Invented edits before opening note.');
+  let release!:()=>void,continuation!:Promise<void>;releaseUploaded.mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+  await act(async()=>{continuation=mocks.continueReview!();});await waitFor(()=>expect(release).toBeTypeOf('function'));
+  expect(releaseUploaded).toHaveBeenCalledOnce();expect(privateRows.get('private-transcript:'+id(3))).toMatchObject({working:'Invented edits before opening note.'});
+  expect(host.querySelector('textarea')?.disabled).toBe(true);expect(navigation).toHaveBeenLastCalledWith(true);expect(host.textContent).not.toContain('Review your visit note');
+  await act(async()=>mocks.continueReview!());expect(releaseUploaded).toHaveBeenCalledOnce();
+  await act(async()=>{release();await continuation;});
+  expect(host.textContent).toContain('Review your visit note');expect(stored).toEqual(original);expect(mocks.privateBegin).toHaveBeenCalledOnce();expect(upload).not.toHaveBeenCalled();
 });

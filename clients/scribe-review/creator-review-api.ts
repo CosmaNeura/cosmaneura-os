@@ -63,10 +63,41 @@ export type AuthorizedReviewRequest = (
   request: { readonly method: "GET" | "POST"; readonly body?: ReviewDecision; readonly key?: string },
 ) => Promise<Response>;
 
+export type CreatorReviewFailurePhase = "read" | "response" | "authorization" | "recovery";
+export type CreatorReviewFailureReason = "request_unavailable" | "access_unavailable" | "core_access_unavailable"
+  | "connection_required" | "source_changed" | "invalid_response" | "recovery_unavailable" | "recovery_invalid"
+  | "client_timeout"|"client_cancelled"|"client_transport_unavailable"|"workspace_connection_paused"
+  | "core_identity_unavailable"|"core_context_invalid"|"core_receipt_invalid"|"core_request_unconfirmed";
+type CoreFailurePhase="context_exchange"|"context_resolution"|"binding_resolution"|"session_verification"|"review";
+export type CreatorReviewFailure = Readonly<{phase: CreatorReviewFailurePhase; reason: CreatorReviewFailureReason; status: number | null;corePhase?:CoreFailurePhase}>;
+const failurePhases = new Set(["read", "response", "authorization", "recovery"]);
+const failureReasons = new Set(["request_unavailable", "access_unavailable", "core_access_unavailable", "connection_required",
+  "source_changed", "invalid_response", "recovery_unavailable", "recovery_invalid","client_timeout","client_cancelled","client_transport_unavailable","workspace_connection_paused",
+  "core_identity_unavailable","core_context_invalid","core_receipt_invalid","core_request_unconfirmed"]);
+const coreFailureReasons=new Set(["core_identity_unavailable","core_context_invalid","core_receipt_invalid","core_request_unconfirmed"]);
+const coreFailurePhases=new Set(["context_exchange","context_resolution","binding_resolution","session_verification","review"]);
+const failureStatuses = new Set([200, 202, 401, 403, 404, 409, 422, 426, 429, 500, 502, 503, 504]);
+
+/** Only closed operation metadata survives a failure; never retain an error body or message. */
+export function creatorReviewFailure(value: unknown, fallback: CreatorReviewFailurePhase = "read"): CreatorReviewFailure {
+  const candidate = value && typeof value === "object" ? value as Record<string, unknown> : {};
+  const phase = typeof candidate.phase === "string" && failurePhases.has(candidate.phase) ? candidate.phase as CreatorReviewFailurePhase : fallback;
+  const defaultReason = phase === "response" ? "invalid_response" : phase === "authorization" ? "access_unavailable"
+    : phase === "recovery" ? "recovery_unavailable" : "request_unavailable";
+  const reason = typeof candidate.reason === "string" && failureReasons.has(candidate.reason)
+    ? candidate.reason as CreatorReviewFailureReason : defaultReason;
+  const status = typeof candidate.status === "number" && failureStatuses.has(candidate.status) ? candidate.status : null;
+  const corePhase=phase==="read"&&status===503&&coreFailureReasons.has(reason)&&typeof candidate.corePhase==="string"&&coreFailurePhases.has(candidate.corePhase)?candidate.corePhase as CoreFailurePhase:undefined;
+  return Object.freeze({phase, reason, status,...(corePhase?{corePhase}:{})});
+}
+
 export class CreatorReviewError extends Error {
-  public constructor(public readonly kind: "unavailable" | "conflict" | "invalid_response") {
+  public readonly failure: CreatorReviewFailure;
+  public constructor(public readonly kind: "unavailable" | "conflict" | "invalid_response", failure?: unknown) {
     super("Creator transcript request failed.");
     this.name = "CreatorReviewError";
+    this.failure = creatorReviewFailure(failure ?? {phase: kind === "invalid_response" ? "response" : "read",
+      reason: kind === "conflict" ? "source_changed" : undefined});
   }
 }
 
@@ -103,11 +134,15 @@ export class HttpCreatorReviewApi implements CreatorReviewApi {
     let response: Response;
     try {
       response = await this.authorizedRequest(this.path, request);
-    } catch {
+    } catch (error) {
+      if (error instanceof CreatorReviewError) throw error;
       throw new CreatorReviewError("unavailable");
     }
     if (!response.ok) {
-      throw new CreatorReviewError(response.status === 409 ? "conflict" : "unavailable");
+      throw new CreatorReviewError(response.status === 409 ? "conflict" : "unavailable", {
+        phase: "read", status: response.status,
+        reason: response.status === 409 ? "source_changed" : [401, 403].includes(response.status) ? "access_unavailable" : "request_unavailable",
+      });
     }
     requireValue(response.headers.get("content-type")?.split(";", 1)[0] === "application/json");
     try {

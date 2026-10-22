@@ -23,7 +23,17 @@
 .creator-review-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 20px; }
 .creator-blocker { color: #805520; font-size: 14px; }
 @media (max-width: 600px) {
-  .creator-review-header { align-items: flex-start; }
+  .creator-review { padding: 12px; }
+  .creator-review-header { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 0 12px; align-items: center; }
+  .creator-review-header > div { display: contents; }
+  .creator-review-header .creator-eyebrow, .creator-review-header h1 { grid-column: 1 / -1; }
+  .creator-review-header .creator-eyebrow { margin: 0 0 4px; }
+  .creator-review-header h1 { font-size: 26px; line-height: 1.2; margin: 0 0 8px; }
+  .creator-review-header p:last-child { margin: 0; font-size: 13px; }
+  .creator-review-header button { min-height: 44px; padding: 8px 12px; }
+  .creator-status { padding: 12px; margin: 16px 0; }
+  .creator-review h2 { font-size: 20px; margin-top: 20px; }
+  .creator-segment { padding: 14px; }
   .creator-bilingual { grid-template-columns: 1fr; }
   .creator-review-actions { flex-direction: column; }
   .creator-review-actions button { width: 100%; }

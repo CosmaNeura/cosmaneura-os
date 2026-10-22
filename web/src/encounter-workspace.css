@@ -328,6 +328,8 @@
 .team-workspace [hidden] { display:none !important; }
 .native-home-header { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:56px; padding:6px 16px; box-sizing:border-box; border-bottom:1px solid var(--team-line); background:#faf8f2; }
 .native-home-header>strong { font-size:20px; letter-spacing:-.5px; }
+.native-workspace-actions { display:flex; align-items:center; gap:6px; min-width:0; }
+.saved-recording-flow { display:contents; }
 .native-home-menu { position:relative; }
 .native-home-menu>summary { display:flex; align-items:center; justify-content:center; min-height:44px; padding:0 12px; box-sizing:border-box; border:1px solid var(--team-line); border-radius:8px; background:#fff; font-size:14px; cursor:pointer; list-style:none; }
 .native-home-menu>summary::-webkit-details-marker { display:none; }
@@ -392,7 +394,7 @@
   .workspace-notebook:has(> .workspace-notebook-body[data-view=conversation]) .team-encounter-heading h1 { font-size:22px; }
   .workspace-notebook:has(> .workspace-notebook-body[data-view=conversation]) .team-stages { display:none; }
   /* The shared recorder stays mounted; the Record action reveals its setup. */
-  .workspace-notebook:has(> .workspace-notebook-body[data-view=conversation]) > div > .capture-panel:not(:has(.capture-details)) { display:none; }
+  .workspace-notebook:has(> .workspace-notebook-body[data-view=conversation]) > div:not(.saved-recording-flow) > .capture-panel:not(:has(.capture-details)) { display:none; }
   .workspace-notebook-body[data-view=conversation] > .team-content { min-height:0; }
   .team-conversation-header { padding:12px; scroll-margin-top:calc(64px + env(safe-area-inset-top,0px)); }
   .workspace-notebook-body:has(.team-view-switch button[aria-label="Open visit recorder"]) .team-conversation-header { scroll-margin-top:calc(116px + env(safe-area-inset-top,0px)); }
@@ -467,4 +469,32 @@
   .workspace-notebook-body[data-native-chat=true] .native-chat-progress { box-sizing:border-box; height:36px; min-height:36px; margin:0 0 4px; overflow:hidden; font-size:12px; line-height:18px; }
   .workspace-notebook-body[data-native-chat=true] .team-composer textarea { box-sizing:border-box; height:58px; min-height:58px; max-height:58px; resize:none; }
   .workspace-notebook-body[data-native-chat=true] .team-composer-wrap > .team-fine { display:none; }
+}
+
+/* Expanded recordings get the phone screen; Browse keeps the same pane alive. */
+@media (max-width:600px) {
+  .team-workspace[data-native-workspace=true] { display:block; width:100%; max-width:100%; min-width:0; }
+  .team-workspace[data-native-workspace=true] .native-home-header { position:sticky; top:0; z-index:10; gap:6px; min-width:0; }
+  .team-workspace[data-native-workspace=true] .native-home-header>strong { font-size:17px; }
+  .team-workspace[data-native-workspace=true] .native-home-header button { min-height:44px; }
+  .team-workspace[data-native-workspace=true] .saved-recording-flow { display:block; min-width:0; max-width:100%; box-sizing:border-box; padding:12px; scroll-margin-top:64px; }
+  .team-workspace[data-native-workspace=true] .saved-recording-flow .capture-panel { width:100%; min-width:0; max-width:100%; box-sizing:border-box; margin:0; }
+  .team-workspace[data-native-workspace=true] .saved-recording-flow h2 { scroll-margin-top:64px; }
+  .team-workspace[data-native-workspace=true] .saved-recording-flow select,
+  .team-workspace[data-native-workspace=true] .saved-recording-flow textarea,
+  .team-workspace[data-native-workspace=true] .saved-recording-flow input:not([type=checkbox]) { box-sizing:border-box; min-width:0; max-width:100%; }
+  .team-workspace[data-native-workspace=true] .saved-recording-flow pre { white-space:pre-wrap; overflow-wrap:anywhere; }
+  .team-workspace[data-recording-focused=true] { display:block; }
+  .team-workspace[data-recording-focused=true] > .team-sidebar,
+  .team-workspace[data-recording-focused=true] .team-topbar,
+  .team-workspace[data-recording-focused=true] .native-home-header,
+  .team-workspace[data-recording-focused=true] .workspace-draft-save-status,
+  .team-workspace[data-recording-focused=true] .workspace-main-content > .workspace-notebook,
+  .team-workspace[data-recording-focused=true] .workspace-main-content > .team-welcome,
+  .team-workspace[data-recording-focused=true] .workspace-main-content > .team-settings { display:none; }
+  .team-workspace[data-recording-focused=true] > .team-main,
+  .team-workspace[data-recording-focused=true] .workspace-main-content { display:flex; flex-direction:column; min-width:0; }
+  .team-workspace[data-recording-focused=true] .workspace-main-content,
+  .team-workspace[data-recording-focused=true] .private-recording-host { order:-1; }
+  .team-workspace[data-recording-focused=true] .private-recording-panel { margin:0; max-width:none; }
 }
