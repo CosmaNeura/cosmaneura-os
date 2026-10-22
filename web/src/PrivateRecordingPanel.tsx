@@ -1,5 +1,5 @@
 import type {NotebookSummaries} from './notebook-metadata-contract';
-import {useEffect,useMemo,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {PrivateRecordingRuntime,openPrivateRecordingStore,prewarmPrivateRecordingNative,consumePrivateRecordingNativeReceipt,type PrivateRecordingNativeReceipt,type PrivateRecordingOptions,type PrivateRecordingSnapshot,type PrivateRecordingStore} from './private-recording-runtime';
 import {PrivateRecordingLedgerController,type PrivateRecordingLedger} from './private-recording-ledger';
 import {readPrivateRecordingLanguage,savePrivateRecordingLanguage} from './recording-preferences';
@@ -61,8 +61,15 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   const audioRef=useRef<string|null>(null),notebookRef=useRef<PrivateNotebookResult|null>(null);
   const audioElement=useRef<HTMLAudioElement|null>(null),playbackEpoch=useRef(0);
   const starting=useRef(false);
-  const heading=useRef<HTMLHeadingElement|null>(null);
-  useEffect(()=>{heading.current?.focus({preventScroll:true});heading.current?.scrollIntoView?.({block:'start'});},[identity,scope,recordingId]);
+  const heading=useRef<HTMLHeadingElement|null>(null),recordingPane=useRef<HTMLElement|null>(null);
+  useLayoutEffect(()=>{
+    if(platform!=='ios'||props.minimized||!props.isCurrent())return;
+    heading.current?.focus({preventScroll:true});
+    // Native entry has its own scroll region. Keep navigation above the heading
+    // visible without moving the document or restarting the mounted recorder.
+    if(recordingPane.current)recordingPane.current.scrollTop=0;
+  },[identity,scope,recordingId,platform,props.minimized]);
+  useEffect(()=>{if(platform!=='ios'){heading.current?.focus({preventScroll:true});heading.current?.scrollIntoView?.({block:'start'});}},[identity,scope,recordingId,platform]);
   const [ledger,setLedger]=useState<PrivateRecordingLedger|null>(null),[ledgerBusy,setLedgerBusy]=useState(false),[ledgerError,setLedgerError]=useState('');
   const ledgerOwner=useRef<{selected:NonNullable<typeof owner.current>;id:string;store:PrivateRecordingStore|null;controller:PrivateRecordingLedgerController|null;chain:Promise<void>;attachAttempted:boolean;finishAttempted:boolean;loaded:boolean}|null>(null);
   const nativeReceipt=useRef<PrivateRecordingNativeReceipt|null>(null),nativeConsumed=useRef(false);
@@ -468,7 +475,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     try{await selected.runtime.rename(renameTitle);if(current())setRenameOpen(false);}catch{if(current())setError('The device title could not be confirmed. Reopen the saved recording to check its title; audio is retained.');}finally{if(current())setWorking(false);}}
   const mayResume=snapshot&&['paused','interrupted'].includes(snapshot.phase);
   const nativeResume=platform==='ios'&&!!mayResume;
-  if(owner.current&&!current())return <section className="private-recording-panel" aria-label="Private Scribe recording">
+  if(owner.current&&!current())return <section ref={recordingPane} className="private-recording-panel" data-native-recording={platform==='ios'} aria-label="Private Scribe recording">
     <h1>Recording access changed</h1><p>Private recording details are hidden. Retained audio remains encrypted for its original account.</p>
     <p role="status">{activeAudio?'Checking microphone stop':'Microphone stopped'}</p>{error&&<p role="alert">{error}</p>}
     {activeAudio&&<button className="team-primary" onClick={()=>void halt(true)}>Stop and save recording</button>}
@@ -477,7 +484,7 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
   return <><aside hidden={!props.minimized} className="recording-persistent-bar" aria-label="Ongoing private recording">
     <strong>{snapshot?.phase==='recording'?'Recording':snapshot?.phase==='paused'?'Recording paused':snapshot?.phase==='sealed'?'Recording saved on this device':'Check recording controls'}</strong><span>{snapshot?elapsed(Math.max(snapshot.elapsedSeconds,liveSeconds)):''} · {snapshot?.title??title}</span>
     <button onClick={props.onExpand}>Return to recording</button>{activeAudio&&<button disabled={snapshot?.phase!=='recording'} onClick={()=>void halt(false)}>Pause</button>}{snapshot&&snapshot.phase!=='sealed'&&<button className="team-primary" disabled={working} onClick={()=>void halt(true)}>Stop and save</button>}
-  </aside><section hidden={props.minimized} className="private-recording-panel" aria-label="Private Scribe recording">
+  </aside><section ref={recordingPane} hidden={props.minimized} className="private-recording-panel" data-native-recording={platform==='ios'} aria-label="Private Scribe recording">
     <header>{props.onMinimize&&<button onClick={props.onMinimize}>Browse workspace</button>}<div><p className="team-kicker">SCRIBE</p><h1 ref={heading} tabIndex={-1}>{snapshot||recordingId?'Private recording':'Start a private recording'}</h1></div><button className="private-recording-close" disabled={activeAudio||working} onClick={()=>void close()}>Close recording</button></header>
     {(platform!=='ios'||activeAudio)&&<p className="private-recording-return">{platform==='ios'?'Stop and save before closing.':<>Close recording to return Home and find your saved recordings.{activeAudio?' Stop and save before closing.':''}</>}</p>}
     <p>{recordingId?platform==='ios'?'Play your saved recording or open its transcript. Audio stays on this iPhone.':'Play your saved recording or send it to Scribe for transcription. Your original audio stays encrypted on this device.':platform==='ios'?'Audio saves on this iPhone. Choose a visit later.':'Record now. Choose a patient or confirmed visit later. This recording stays encrypted on this device and is not synced to another device.'}</p>

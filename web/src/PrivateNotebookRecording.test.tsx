@@ -145,8 +145,9 @@ it('returns between the focused phone recorder and the same working notebook wit
   expect(workspaceApi.createPrivateDraft).toHaveBeenCalledOnce();expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
 });
 
-it('reopens the exact retained clip expanded after an earlier close completes while browsing',async()=>{
+it.each(['browser','native'] as const)('reopens the exact retained %s clip expanded after an earlier close completes while browsing',async mode=>{
   vi.stubGlobal('matchMedia',()=>({matches:true}));
+  if(mode==='native')identity=nativeOwner();
   const row:PrivateRecordingSnapshot={recordingId:uuid(850),title:'Invented retained clip',phase:'sealed',elapsedSeconds:23,recordedChunks:3,
     recordedBytes:736132,workspaceId:null,busy:false,localOnly:true,transcription:'not_requested',failure:null,startupStage:null};
   vi.mocked(listPrivateRecordings).mockResolvedValue([row]);
@@ -159,6 +160,10 @@ it('reopens the exact retained clip expanded after an earlier close completes wh
   expect(panel.props!.recordingId).toBe(row.recordingId);expect(panel.props!.identity).toBe(identity);
   expect(panel.props!.minimized).toBe(false);expect(host.querySelector('.team-workspace')?.getAttribute('data-recording-focused')).toBe('true');
   expect(host.querySelector('[aria-label="Private Scribe recording"]')?.hasAttribute('hidden')).toBe(false);
+  const recorderHost=host.querySelector<HTMLElement>('.private-recording-host')!,documentScroll=vi.fn();recorderHost.scrollIntoView=documentScroll;
+  await click('Browse workspace');await click('Return to recording');
+  expect(host.querySelector('.private-recording-host')).toBe(recorderHost);expect(panel.props!.recordingId).toBe(row.recordingId);
+  expect(documentScroll).toHaveBeenCalledTimes(mode==='native'?0:1);
   expect(workspaceApi.createPrivateDraft).not.toHaveBeenCalled();expect(workspaceApi.linkAppointment).not.toHaveBeenCalled();
 });
 

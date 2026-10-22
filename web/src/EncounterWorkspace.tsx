@@ -191,6 +191,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[privateRecordingEntry,authenticated,practicePage,settingsOpen,practiceOpen]);
   useLayoutEffect(()=>{
     if(!privateRecordingEntry||recordingMinimized||!phoneLayout())return;
+    // The native pane owns entry focus and scrolling inside its safe-area frame.
+    if(privateRecordingEntry.identity.mode==='clerk_jwt'&&privateRecordingEntry.identity.nativeSession)return;
     // Opening or returning to the same pane changes presentation only. The
     // recorder stays mounted and its consent, audio and pending work stay put.
     recordingHost.current?.querySelector<HTMLElement>('h1')?.focus({preventScroll:true});
