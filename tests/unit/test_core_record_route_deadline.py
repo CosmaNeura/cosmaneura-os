@@ -6,7 +6,7 @@ import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import UTC, datetime
-from threading import get_ident
+from threading import Event, get_ident
 from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
@@ -129,6 +129,9 @@ def fixture(monkeypatch):
         patient_valid=True,
         slow=None,
         after=lambda path: None,
+        cleanup_gate=None,
+        cleanup_entered=Event(),
+        closed=Event(),
         selected=selected,
         marker=ContextVar("invented_request_resource", default=None),
     )
@@ -174,6 +177,7 @@ def fixture(monkeypatch):
 
         def close(self):
             self.check("close")
+            f.closed.set()
 
     @contextmanager
     def no_database(_session, budget):
@@ -231,6 +235,9 @@ def fixture(monkeypatch):
         try:
             yield port
         finally:
+            if f.cleanup_gate is not None:
+                f.cleanup_entered.set()
+                assert f.cleanup_gate.wait(2), "invented cleanup was not released"
             port.close()
             f.events.append(("port_closed", get_ident()))
 
@@ -308,11 +315,23 @@ def test_timeout_of_each_dispatched_phase_never_starts_the_next(fixture, monkeyp
     f = fixture
     monkeypatch.setattr(route, "DEADLINE_SECONDS", 0.08)
     f.slow = phase
+    f.cleanup_gate = Event()
     with TestClient(f.app) as client:
-        response = client.get(f.path, headers=f.headers)
-    assert response.status_code == 504
+        try:
+            response = client.get(f.path, headers=f.headers)
+            assert response.status_code == 504
+            assert f.dispatches == PATHS[: PATHS.index(phase) + 1]
+            # The public deadline responds while the canceled worker still owns
+            # its resources. Hold cleanup to make that ordering deterministic.
+            assert f.cleanup_entered.wait(1), "canceled reader did not begin cleanup"
+            assert not f.closed.is_set()
+        finally:
+            f.cleanup_gate.set()
+            assert f.closed.wait(1), "owned reader cleanup did not finish"
+    # Inspect settled worker events, including dispatches after the timeout.
     assert f.dispatches == PATHS[: PATHS.index(phase) + 1]
     names = [name for name, thread in f.events]
+    assert names.count("port_closed") == names.count("close") == 1
     assert names.index("port_closed") < names.index("close")
     assert len({thread for name, thread in f.events}) == 1
 
