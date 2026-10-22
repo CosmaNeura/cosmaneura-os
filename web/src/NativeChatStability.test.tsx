@@ -69,12 +69,66 @@ it('reveals the submitted native message before its saved reply arrives without 
   const scroller=await positionConversation(800);
   await type('Invented outgoing message');expect(scroller.scrollTop).toBe(800);
   question().focus();await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());
+  expect(question().value).toBe('');
   expect(scroller.querySelector('.team-human-message')?.textContent).toContain('Invented outgoing message');
   expect(scroller.scrollTop).toBe(1200);expect(document.activeElement).toBe(question());
   const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);
   await act(async()=>{scroller.scrollTop=1180;scroller.dispatchEvent(new Event('scroll',{bubbles:true}));});
   await type('Next unsent question');expect(scroller.scrollTop).toBe(1180);
   expect(draft()?.pending).toMatchObject({type:'ask',body:sent});expect(workspaceApi.ask).toHaveBeenCalledOnce();
+});
+it('keeps the outgoing text until its exact local request is stored, then clears only that text',async()=>{
+  let finishWrite!:()=>void,held=false;
+  vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
+  await type('Safely store this exact request');question().focus();
+  intercept=async value=>{if(!held&&value?.pending?.type==='ask'){held=true;await new Promise<void>(resolve=>{finishWrite=resolve;});}};
+  await click('Send message');await ready(()=>expect(held).toBe(true));
+  expect(question().value).toBe('Safely store this exact request');expect(workspaceApi.ask).not.toHaveBeenCalled();
+  await act(async()=>finishWrite());await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());
+  expect(question().value).toBe('');expect(document.activeElement).toBe(question());
+  const sent=vi.mocked(workspaceApi.ask).mock.calls[0][2];
+  expect(draft()?.pending).toMatchObject({type:'ask',body:sent});expect(sent.content).toBe('Safely store this exact request');
+  expect(host.querySelector('.team-human-message')?.textContent).toContain(sent.content);expect(send().disabled).toBe(true);
+});
+it('keeps the composer text and sends nothing if storing the outgoing request fails',async()=>{
+  await type('Never lose this unsent message');
+  intercept=async value=>{if(value?.pending?.type==='ask')throw new DraftStoreError('conflict');};
+  await click('Send message');await ready(()=>expect(question().disabled).toBe(true));
+  expect(question().value).toBe('Never lose this unsent message');expect(workspaceApi.ask).not.toHaveBeenCalled();
+  expect(host.textContent).toContain('No new request was sent.');
+});
+it.each(['Next message while storage is busy','Original message before local save'])('preserves new typing %j while the outgoing local write is held',async next=>{
+  let finishWrite!:()=>void,held=false;
+  vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
+  await type('Original message before local save');
+  intercept=async value=>{if(!held&&value?.pending?.type==='ask'){held=true;await new Promise<void>(resolve=>{finishWrite=resolve;});}};
+  await click('Send message');await ready(()=>expect(held).toBe(true));await type('An intermediate edit');await type(next);
+  await act(async()=>finishWrite());await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());
+  expect(question().value).toBe(next);
+  await ready(()=>expect(draft()?.thought).toBe(question().value));
+  expect(draft()?.pending).toMatchObject({type:'ask',body:{content:'Original message before local save'}});expect(send().disabled).toBe(true);
+});
+it.each(['Same next question',' Same next question\n'])('keeps a new identical draft after settling the old native request %j',async original=>{
+  let release!:(receipt:Awaited<ReturnType<typeof modelReceipt>>)=>void;
+  vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(resolve=>{release=resolve;}));
+  await type(original);await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());
+  expect(question().value).toBe('');const sent=vi.mocked(workspaceApi.ask).mock.calls[0][2];expect(sent.content).toBe(original);
+  await type(sent.content);await act(async()=>release(await modelReceipt(sent,workspace.id)));
+  await ready(()=>expect(draft()?.pending).toBeNull());
+  expect(question().value).toBe(sent.content);expect(draft()?.thought).toBe(sent.content);expect(workspaceApi.ask).toHaveBeenCalledOnce();
+});
+it('restores an unconfirmed outgoing native message separately from its empty composer without sending again',async()=>{
+  vi.mocked(workspaceApi.ask).mockRejectedValue(new WorkspaceApiError(503));
+  await type('Recover this exact outgoing message');await click('Send message');
+  await ready(()=>expect(host.querySelector('[aria-label="Unconfirmed model request"]')).toBeTruthy());
+  const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);expect(question().value).toBe('');
+  await act(async()=>notifyNativeWorkspaceForeground(access,false));await ready(()=>expect(draft()?.thought).toBe(''));
+  await act(async()=>root.unmount());root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={access} draftStorage={storage}/>));
+  await click('Visits and notes');await ready(()=>expect(host.querySelector('.team-encounter-option')).toBeTruthy());
+  await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await click('Restore notebook draft');
+  expect(question().value).toBe('');expect(host.textContent).toContain(sent.content);
+  expect(draft()?.pending).toMatchObject({type:'ask',body:sent});expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(send().disabled).toBe(true);
+  notifyNativeWorkspaceForeground(access,true);
 });
 it('preserves an older native message position when an outgoing question is submitted away from the bottom',async()=>{
   vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));

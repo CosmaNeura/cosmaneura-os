@@ -17,10 +17,11 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false}:{
+export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false}:{
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
   onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onConnections:()=>void;onPracticeWork:()=>void;
   onOpened:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
+  onNoteOpened?:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onAccessLost:(cause:unknown)=>void;onBusyChange:(busy:boolean)=>void;
   onRecord?:(value:StartPrivateRecording)=>void;recordings?:PrivateRecordingSnapshot[];onReopenRecording?:(recordingId:string)=>void;
   openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;
@@ -31,6 +32,8 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   const [sample,setSample]=useState(false);
   const [title,setTitle]=useState('Private note'),[pending,setPending]=useState<PrivateDraftCreate|null>(null),[ready,setReady]=useState(false);
   const [busy,setBusy]=useState(false),[retryAllowed,setRetryAllowed]=useState(false),[error,setError]=useState(''),[message,setMessage]=useState('');
+  const [opening,setOpening]=useState<{identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess;epoch:number;workspaceId:string}|null>(null);
+  const openingFlight=useRef<typeof opening>(null);
   const [drafts,setDrafts]=useState<Awaited<ReturnType<typeof workspaceApi.privateDraftSummaries>>|null>(null);
   const [listError,setListError]=useState('');
   const [search,setSearch]=useState(''),[needsReview,setNeedsReview]=useState(false),[renaming,setRenaming]=useState<string|null>(null);
@@ -56,7 +59,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
     listRead.current=flight;return flight.promise;
   }
   useEffect(()=>{
-    const epoch=++live.current.epoch;setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');
+    const epoch=++live.current.epoch;openingFlight.current=null;setOpening(null);setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');
     if(!recovery)return;
     const promise=loadPrivateDraftRecovery(recovery);initialRecovery.current={epoch,promise};
     void(async()=>{const saved=await promise;if(!current(epoch))return;
@@ -147,11 +150,13 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
     finally{if(current(epoch))setBusy(false);}
   }
   async function reopen(id:string){
-    if(!recovery||!ready||busy||locked)return;const epoch=live.current.epoch;setBusy(true);setError('');
-    try{await recovery.authorize();if(!current(epoch))return;const value=await workspaceApi.openPrivateDraft(identity,id);if(current(epoch))await onOpened(value);}
+    if(!recovery||!ready||busy||locked||openingFlight.current)return;const epoch=live.current.epoch;
+    const request={identity,recovery,epoch,workspaceId:id};openingFlight.current=request;setOpening(request);setBusy(true);setError('');
+    try{await recovery.authorize();if(!current(epoch))return;const value=await workspaceApi.openPrivateDraft(identity,id);if(current(epoch))await (onNoteOpened??onOpened)(value);}
     catch(cause){if(current(epoch)){setError('This private note could not be opened. Check current access and try again.');deny(cause);}}
-    finally{if(current(epoch))setBusy(false);}
+    finally{if(openingFlight.current===request)openingFlight.current=null;if(current(epoch)){setOpening(previous=>previous===request?null:previous);setBusy(false);}}
   }
+  const openingNoteId=opening&&opening.identity===identity&&opening.recovery===recovery&&current(opening.epoch)?opening.workspaceId:null;
   const query=search.trim().toLocaleLowerCase(),today=new Date().toDateString();
   const todaysVisits=visits?.filter(visit=>visit.start_at&&new Date(visit.start_at).toDateString()===today)??[];
   const names=team?.configuration.bots.filter(bot=>bot.enabled&&!bot.retired).map(bot=>bot.name)??[];
@@ -195,7 +200,8 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
           <span>{draft.patient_label??'No patient yet'} · {draft.note_state==='reviewed'?'Reviewed':draft.note_state==='needs_review'?'Needs review':'Draft notes'}</span>
           <time dateTime={draft.updated_at}>{new Date(draft.updated_at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'})}</time>
           <span>{draft.duration_seconds!==null?`${Math.floor(draft.duration_seconds/60)}:${String(Math.floor(draft.duration_seconds)%60).padStart(2,'0')} recording · `:''}Notebook saved · {draft.link_state==='linked'?'Linked to a visit':'Unlinked note'}</span></button>
-        <div className="notebook-row-actions"><button disabled={busy||locked} onClick={()=>void reopen(draft.workspace_id)}>Open</button><button onClick={()=>setRenaming(draft.workspace_id)}>Rename</button>{draft.link_state==='unlinked'&&<button disabled={busy||locked} onClick={()=>void reopen(draft.workspace_id)}>Link a visit</button>}</div>
+        <div className="notebook-row-actions"><button disabled={busy||locked} onClick={()=>void reopen(draft.workspace_id)}>{openingNoteId===draft.workspace_id?'Opening…':'Open note'}</button><button onClick={()=>setRenaming(draft.workspace_id)}>Rename</button>{draft.link_state==='unlinked'&&<button disabled={busy||locked} onClick={()=>void reopen(draft.workspace_id)}>Link a visit</button>}</div>
+        {openingNoteId===draft.workspace_id&&<p className="team-fine" role="status">Opening note…</p>}
         {renaming===draft.workspace_id&&<NotebookTitleEditor identity={identity} recovery={recovery} workspaceId={draft.workspace_id} title={draft.title} titleRevision={draft.title_revision} onClose={()=>setRenaming(null)} onAccessLost={onAccessLost}
           onSaved={receipt=>{setDrafts(current=>current?{...current,drafts:current.drafts.map(row=>row.workspace_id===receipt.workspace_id?{...row,title:receipt.title,title_revision:receipt.title_revision}:row)}:current);setRenaming(null);setMessage('Notebook title saved. Audio and original notes are retained.');}}/>}
       </article>)}

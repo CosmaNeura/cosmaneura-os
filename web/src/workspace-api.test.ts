@@ -39,6 +39,56 @@ describe("signed workspace transport", () => {
     expect(new Headers(create[1]?.headers).get('Authorization')).toBe('Bearer invented-token');
   });
 
+  it('starts the exact private workspace read while its fresh team response is still pending',async()=>{
+    let finishTeam!:(value:Response)=>void;
+    const teamResponse=new Promise<Response>(resolve=>{finishTeam=resolve;});
+    const draft={id:workspace,appointment_id:null,label:'Private note',revision:1,entries:[],work_candidates:[],
+      model_contract_version:1,model_observed_at:'2026-10-21T18:00:00Z',
+      private_draft:{title:'Private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
+    const fetchMock=vi.fn<typeof fetch>((url)=>String(url).endsWith('/provider-team')?teamResponse:Promise.resolve(json(draft)));
+    vi.stubGlobal('fetch',fetchMock);
+    let settled=false;
+    const result=workspaceApi.openPrivateDraft({mode:'clerk_jwt',getToken:async()=>'invented-token'},workspace).finally(()=>{settled=true;});
+    try{
+      await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2),{timeout:500});
+      expect(settled).toBe(false);
+      const read=fetchMock.mock.calls.find(([url])=>String(url).endsWith(`/workspaces/${workspace}`))!;
+      expect(read[1]?.method).toBe('GET');
+      expect(new Headers(read[1]?.headers).get('X-Cosmas-Model-Contract')).toBe('1');
+      expect(new Headers(read[1]?.headers).get('Authorization')).toBe('Bearer invented-token');
+    }finally{finishTeam(json(teamFixture()));await result.catch(()=>undefined);}
+    await expect(result).resolves.toMatchObject({workspace:draft,team:teamFixture()});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it.each(['team','workspace'])('withholds the note and cancels its sibling read when the %s read fails',async failed=>{
+    const fetchMock=vi.fn<typeof fetch>((url)=>{
+      const kind=String(url).endsWith('/provider-team')?'team':'workspace';
+      return kind===failed?Promise.resolve(new Response(null,{status:403})):new Promise(()=>{});
+    });
+    vi.stubGlobal('fetch',fetchMock);
+    await expect(workspaceApi.openPrivateDraft({mode:'clerk_jwt',getToken:async()=>'invented-token'},workspace)).rejects.toMatchObject({status:403});
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls.every(([,request])=>request?.signal?.aborted)).toBe(true);
+    expect(fetchMock.mock.calls.every(([,request])=>request?.method==='GET')).toBe(true);
+  });
+
+  it('withholds concurrent private-note reads when the native owner session changes before completion',async()=>{
+    let current=true,finishTeam!:(value:Response)=>void;
+    const teamResponse=new Promise<Response>(resolve=>{finishTeam=resolve;});
+    const draft={id:workspace,appointment_id:null,label:'Private note',revision:1,entries:[],work_candidates:[],
+      model_contract_version:1,model_observed_at:'2026-10-21T18:00:00Z',
+      private_draft:{title:'Private note',state:'unlinked',link_receipt_id:null,linked_at:null}};
+    const fetchMock=vi.fn<typeof fetch>((url)=>String(url).endsWith('/provider-team')?teamResponse:Promise.resolve(json(draft)));
+    vi.stubGlobal('fetch',fetchMock);
+    const result=workspaceApi.openPrivateDraft({mode:'clerk_jwt',getToken:async()=>'invented-token',
+      nativeSession:{revision:'00000000-0000-4000-8000-000000000010',isCurrent:()=>current}},workspace);
+    const rejected=expect(result).rejects.toMatchObject({status:401});
+    try{await vi.waitFor(()=>expect(fetchMock).toHaveBeenCalledTimes(2),{timeout:500});}
+    finally{current=false;finishTeam(json(teamFixture()));await rejected;}
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
   it('dispatches one exact create without waiting for the independent fresh team response',async()=>{
     let finishTeam!:(value:Response)=>void;
     const teamResponse=new Promise<Response>(resolve=>{finishTeam=resolve;});

@@ -381,6 +381,10 @@
 .workspace-notebook-body > .handoff-review { order:-1; }
 .workspace-draft-save-status:empty { display:none; }
 .mobile-chat-scroll { display:contents; }
+.chief-saved-note-shortcut { flex:none; display:grid; grid-template-columns:minmax(0,1fr) auto; align-items:center; gap:8px; padding:6px 8px; border-bottom:1px solid var(--team-line); background:#f3f6f1; }
+.chief-saved-note-shortcut>span { font-size:12px; line-height:1.35; min-width:0; }
+.chief-saved-note-shortcut>span>small { display:block; margin-top:2px; font-size:inherit; }
+.team-workspace .chief-saved-note-shortcut>button { min-height:44px; max-width:170px; padding:6px 8px; font-size:12px; }
 .mobile-chat-scroll > details > summary { box-sizing:border-box; min-height:44px; padding:12px 16px; cursor:pointer; }
 .team-conversation-tools { display:contents; }
 .team-conversation-tools > details > summary { box-sizing:border-box; min-height:44px; padding:12px 16px; cursor:pointer; }
@@ -413,6 +417,10 @@
   .chief-tools-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:12px; border-bottom:1px solid var(--team-line); }
   .chief-tools-heading h3 { margin:0; font-size:16px; }
   .chief-tools-draft { margin:12px; }
+  .team-workspace .clinical-team-drafts .clinical-team-directions-label { display:block; }
+  .workspace-notebook-body[data-native-chat=true] .clinical-team-disclosure[open]:has(> .clinical-team-drafts[data-compact-plan=true]) > summary { display:none; }
+  .clinical-team-drafts[data-compact-plan=true] .clinical-team-note-preview > summary { min-height:44px; padding:10px 0; cursor:pointer; }
+  .clinical-team-directions { display:block; box-sizing:border-box; width:100%; min-height:104px; margin-top:8px; padding:12px; font-size:16px; line-height:1.5; resize:vertical; }
   .workspace-notebook-body[data-chief-phone=true] .clinical-team-drafts h3 { scroll-margin-top:calc(64px + env(safe-area-inset-top,0px)); }
   .team-workspace .chief-tools-heading button,.team-workspace .chief-tools-settings { min-height:44px; }
   .chief-tools-settings { margin:12px; }
@@ -497,4 +505,17 @@
   .team-workspace[data-recording-focused=true] .workspace-main-content,
   .team-workspace[data-recording-focused=true] .private-recording-host { order:-1; }
   .team-workspace[data-recording-focused=true] .private-recording-panel { margin:0; max-width:none; }
+}
+
+/* Private notes on an iPhone need no visit-phase or duplicate progress frame. */
+@media (max-width:600px) {
+  .workspace-notebook[data-native-private-note=true] > .team-encounter-heading { padding:12px 16px 8px; }
+  .workspace-notebook[data-native-private-note=true] > .team-encounter-heading .team-kicker { margin-bottom:4px; }
+  .workspace-notebook[data-native-private-note=true] > .team-encounter-heading h1 { font-size:22px; }
+  .workspace-notebook[data-native-private-note=true] > .private-draft-link-compact { margin:0 12px 8px; padding:8px 4px; }
+  .workspace-notebook[data-native-private-note=true] > .private-draft-link-compact > p { margin-bottom:4px; font-size:13px; color:var(--team-muted); }
+  .workspace-notebook[data-native-private-note=true] input,
+  .workspace-notebook[data-native-private-note=true] select,
+  .workspace-notebook[data-native-private-note=true] textarea { font-size:16px; }
+  .workspace-notebook[data-native-private-note=true] > .private-draft-link-compact > details > summary { min-height:44px; box-sizing:border-box; padding:10px 0; cursor:pointer; }
 }

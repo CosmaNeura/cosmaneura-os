@@ -1,4 +1,4 @@
-import type {PrivateNote, Workspace, WorkspaceEntry} from './workspace-api';
+import type {PrivateNote, ProviderTeam, Workspace, WorkspaceEntry} from './workspace-api';
 import {modelCanonical} from './model-work-request';
 import {vendorSha256} from './vendor-contract';
 
@@ -58,19 +58,46 @@ export function currentSharedNote(workspace:Workspace):{entry:WorkspaceEntry;sna
   }
   return null;
 }
-export function clinicalTeamRequest(source:{entry:WorkspaceEntry;snapshot:SharedClinicalNote}):string {
-  return JSON.stringify({contract:'clinical-team-drafts.request.v1',source_entry_id:source.entry.id,
-    note_id:source.snapshot.note.id,note_version:source.snapshot.note.version,content_hash:source.snapshot.note.content_hash});
+export const CLINICAL_DIRECTIONS_LIMIT=2000;
+export function clinicalTeamDirectionsSupported(team:ProviderTeam):boolean {
+  return team.members.some(member=>member.role==='chief'&&member.capabilities.some(cap=>cap.key==='workspace.clinical.drafts'&&
+    cap.contract==='clinical-team-drafts.request.v2'&&cap.state==='enabled'));
+}
+export function clinicalTeamUsesDirections(content:string):boolean {
+  try {const value:unknown=JSON.parse(content);return record(value)&&value.contract==='clinical-team-drafts.request.v2';}catch{return false;}
+}
+type ClinicalTeamSourceSelection={source_entry_id:string;note_id:string;note_version:number;content_hash:string};
+export type ClinicalTeamDraftRequest=ClinicalTeamSourceSelection&({contract:'clinical-team-drafts.request.v1'}|
+  {contract:'clinical-team-drafts.request.v2';owner_directions:string});
+export function clinicalTeamDirectionsError(directions:string):string|null {
+  if(Array.from(directions).length>CLINICAL_DIRECTIONS_LIMIT)return 'Shorten your directions to 2,000 characters before preparing drafts. Your text is kept.';
+  const id='00000000-0000-4000-8000-000000000000';
+  if(JSON.stringify({contract:'clinical-team-drafts.request.v2',source_entry_id:id,note_id:id,note_version:50,content_hash:'a'.repeat(64),owner_directions:directions}).length>4000)
+    return 'Shorten your directions so the saved-note request fits. Your text is kept.';
+  return null;
+}
+export function parseClinicalTeamRequest(content:string):ClinicalTeamDraftRequest|null {
+  try {
+    const v:unknown=JSON.parse(content);
+    if(!record(v))return null;
+    const withDirections=v.contract==='clinical-team-drafts.request.v2';
+    if(!keys(v,withDirections?'contract,source_entry_id,note_id,note_version,content_hash,owner_directions':'contract,source_entry_id,note_id,note_version,content_hash')||
+      !withDirections&&v.contract!=='clinical-team-drafts.request.v1'||!uuid(v.source_entry_id)||!uuid(v.note_id)||
+      !Number.isSafeInteger(v.note_version)||(v.note_version as number)<1||(v.note_version as number)>50||!hash(v.content_hash)||
+      withDirections&&(typeof v.owner_directions!=='string'||v.owner_directions===''||clinicalTeamDirectionsError(v.owner_directions)!==null||content.length>4000))return null;
+    return v as ClinicalTeamDraftRequest;
+  }catch{return null;}
+}
+export function clinicalTeamRequest(source:{entry:WorkspaceEntry;snapshot:SharedClinicalNote},directions=''):string {
+  const error=clinicalTeamDirectionsError(directions);if(error)throw new Error(error);
+  const selected={source_entry_id:source.entry.id,note_id:source.snapshot.note.id,note_version:source.snapshot.note.version,content_hash:source.snapshot.note.content_hash};
+  return JSON.stringify(directions===''?{contract:'clinical-team-drafts.request.v1',...selected}:
+    {contract:'clinical-team-drafts.request.v2',...selected,owner_directions:directions});
 }
 export function clinicalRequestDisplay(content:string):string {
-  try {
-    const value:unknown=JSON.parse(content);
-    if(keys(value,'contract,source_entry_id,note_id,note_version,content_hash')&&value.contract==='clinical-team-drafts.request.v1'&&
-      uuid(value.source_entry_id)&&uuid(value.note_id)&&Number.isSafeInteger(value.note_version)&&(value.note_version as number)>=1&&
-      (value.note_version as number)<=50&&hash(value.content_hash))
-      return `Prepare a patient email draft, provider action items, and a drug and treatment assessment from shared saved note version ${value.note_version}.`;
-  }catch{/* Ordinary conversation text retains its original display. */}
-  return content;
+  const value=parseClinicalTeamRequest(content);
+  return value?`Prepare a patient email draft, provider action items, and a drug and treatment assessment from shared saved note version ${value.note_version}.`+
+    (value.contract==='clinical-team-drafts.request.v2'?`\n\nMy drafting directions\n${value.owner_directions}`:''):content;
 }
 export async function verifyClinicalNoteShareReceipt(v:unknown,workspaceId:string,body:ShareSavedNoteInput):Promise<ClinicalNoteShareReceipt> {
   if(!validShareSavedNoteInput(body)||!keys(v,'contract,outcome,source_entry_id,source_entry_revision,workspace')||

@@ -89,6 +89,19 @@ it('prepares navigation by saving exact current edits once without recognizing, 
  await act(async()=>prepare!());expect(rows.get('private-transcript:'+id)).toMatchObject({working:'Invented last private words.',raw:saved().raw});expect(dirty).toHaveBeenLastCalledWith(false);
  await act(async()=>prepare!());expect(mocks.write).toHaveBeenCalledOnce();expect(mocks.begin).not.toHaveBeenCalled();
 });
+it('keeps dirty locked words unsaved but allows a clean Close retry after their exact save without another write',async()=>{
+ rows.set('private-transcript:'+id,saved());let prepare:(()=>Promise<void>)|null=null;const register=(value:(()=>Promise<void>)|null)=>{prepare=value;};
+ await render(undefined,{allow:false,prepare:register});await wait(()=>expect(host.querySelector('textarea')).not.toBeNull());await edit('Invented words retained during Close.');
+ await render(undefined,{allow:false,locked:true,prepare:register});await act(async()=>{await expect(prepare!()).rejects.toThrow();});
+ expect(host.querySelector('textarea')?.disabled).toBe(true);expect(host.querySelector('textarea')?.value).toBe('Invented words retained during Close.');
+ expect(mocks.write).not.toHaveBeenCalled();expect(rows.get('private-transcript:'+id)).toEqual(saved());
+ await render(undefined,{allow:false,locked:false,prepare:register});await act(async()=>prepare!());
+ const confirmed=structuredClone(rows.get('private-transcript:'+id));expect(confirmed).toMatchObject({working:'Invented words retained during Close.',revision:3,raw:saved().raw});
+ const reads=mocks.read.mock.calls.length;await render(undefined,{allow:false,locked:true,prepare:register});await act(async()=>prepare!());
+ expect(host.querySelector('textarea')?.disabled).toBe(true);expect(host.querySelector('textarea')?.value).toBe('Invented words retained during Close.');
+ expect(rows.get('private-transcript:'+id)).toEqual(confirmed);expect(mocks.write).toHaveBeenCalledOnce();expect(mocks.read).toHaveBeenCalledTimes(reads);
+ expect(mocks.begin).not.toHaveBeenCalled();expect(mocks.append).not.toHaveBeenCalled();expect(mocks.finish).not.toHaveBeenCalled();
+});
 it('refuses navigation on encrypted save failure and retains dirty words for the same explicit retry',async()=>{
  rows.set('private-transcript:'+id,saved());let prepare:(()=>Promise<void>)|null=null;const dirty=vi.fn();
  await render(undefined,{allow:false,prepare:value=>{prepare=value;},dirty});await wait(()=>expect(host.querySelector('textarea')).not.toBeNull());await edit('Invented unsaved words.');

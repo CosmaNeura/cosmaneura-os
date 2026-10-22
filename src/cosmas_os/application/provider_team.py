@@ -147,6 +147,9 @@ def read(s: Session, box: str, owner: str, *, version: ProviderTeamRevision | No
             capabilities.append({"key": "workspace.draft.handoff", "label": "Private bot draft handoffs",
                 "state": "enabled" if llm_enabled else "awaiting_connection",
                 "connector": "Provider Team", "contract": "workspace.draft.handoff.v1"})
+            capabilities.append({"key": "workspace.clinical.drafts", "label": "Saved-note drafts with provider directions",
+                "state": "enabled" if llm_enabled else "awaiting_connection",
+                "connector": "Provider Team", "contract": "clinical-team-drafts.request.v2"})
         templates[role] = {"role": role, "agent_id": None, **template, "capabilities": capabilities}
     skills = [{"key": key, **value} for key, value in CUSTOM_SKILLS.items()]
     for skill in skills:
@@ -162,6 +165,13 @@ def read(s: Session, box: str, owner: str, *, version: ProviderTeamRevision | No
     def member(bot):
         descriptor = {**templates[bot["role"]], "agent_id": members.get(bot_address(bot)),
                       **({"instance_id": bot["instance_id"]} if bot.get("instance_id") else {})}
+        if bot["role"] == "chief":
+            descriptor["capabilities"] = [dict(capability) for capability in descriptor["capabilities"]]
+            for capability in descriptor["capabilities"]:
+                if capability["key"] == "workspace.clinical.drafts":
+                    capability["state"] = "enabled" if (llm_enabled and bot["enabled"] and not bot.get("retired")
+                        and bot.get("include_evidence", True) and not blocked(bot, "model_answer")
+                        and not blocked(bot, "private_draft_handoff")) else "awaiting_connection"
         if bot["role"] == "custom":
             descriptor.update(name=bot["name"], description=bot["job_focus"],
                 capabilities=[skill for skill in skills if skill["key"] in bot.get("skills", ())]
