@@ -10,11 +10,13 @@ import {modelCanonical} from './model-work-request';
 import {modelWorkApi} from './model-work-api';
 import {modelReceipt,pendingWorkspace} from './model-work-test-fixture';
 import {vendorSha256} from './vendor-contract';
-import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type BotRole,type PrivateNote,type ProviderTeam,type Workspace} from './workspace-api';
+import {saveHandoffReview,handoffReviewHash,type HandoffReviewInput} from './handoff-review-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type BotRole,type DraftHandoff,type PrivateNote,type ProviderTeam,type Workspace} from './workspace-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 
 vi.mock('./model-work-api',async original=>{const actual=await original<typeof import('./model-work-api')>();return {...actual,modelWorkApi:{...actual.modelWorkApi,resolve:vi.fn()}};});
 vi.mock('./clinical-team-api',()=>({clinicalTeamApi:{share:vi.fn(),resolve:vi.fn()}}));
+vi.mock('./handoff-review-api',async original=>({...await original<typeof import('./handoff-review-api')>(),saveHandoffReview:vi.fn()}));
 vi.mock('./draft-store',async original=>({...await original<typeof import('./draft-store')>(),privateDraftScope:async(scope:string)=>scope}));
 vi.mock('./private-recording-runtime',async original=>({...await original<typeof import('./private-recording-runtime')>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
 vi.mock('./team-setup-api',async()=>{
@@ -337,6 +339,86 @@ function nativeChief(){
   if(identity.mode!=='clerk_jwt')throw Error('Invented native identity required');
   identity.nativeSession={revision:uuid(970),isCurrent:()=>true};
 }
+async function pairedChiefResults(){
+  workspace=saved(noteSelection(workspace.note!.latest!,workspace.revision)).workspace;
+  const source=currentSharedNote(workspace)!,origin={id:uuid(980),revision:++workspace.revision,kind:'conversation' as const,
+    content:clinicalTeamRequest(source,'Prepare private patient and provider drafts.'),source_label:null,origin:'human',ticket:null,created_at:'2026-10-20T12:00:00Z',
+    reply:{agent_name:'Chief',role:'chief' as const,backend:'invented',content:'Both private team drafts are saved.',context_revision:source.entry.revision,citations:[]}};
+  workspace.entries.push(origin);workspace.handoffs=[];
+  for(const [index,role] of (['follow_up','research'] as const).entries()){
+    const member=team.members.find(item=>item.role===role)!,content=role==='follow_up'?'## Patient email draft\nSubject: Invented follow-up\nBody: Follow the saved visit plan.\n## Provider action items\n- Confirm the medicine list.':'## Source-supported findings\nThe note asks for medicine confirmation.\n## Drug and treatment questions\nWhich medicines need further review?\n## Missing evidence / next checks\nThe medicine list is unknown.';
+    const result={id:uuid(982+index*10),revision:++workspace.revision,kind:'handoff_result' as const,content:'Saved specialist work',source_label:null,origin:'agent_handoff',ticket:null,created_at:'2026-10-20T12:00:00Z',
+      reply:{agent_id:member.agent_id!,agent_name:member.name,role,backend:'invented',content,context_revision:source.entry.revision,citations:[]}};
+    const handoff:DraftHandoff={id:uuid(981+index*10),origin_entry_id:origin.id,recipient_role:role,recipient_name:member.name,recipient_agent_id:member.agent_id!,
+      recipient_key:role==='research'?`research:${uuid(930)}`:'follow_up',brief:'Prepare the assigned private draft from this exact shared note.',context_revision:source.entry.revision,
+      status:'completed',attempt_id:uuid(983+index*10),attempt_count:1,result_entry_id:result.id,result_sha256:await vendorSha256(new TextEncoder().encode(content)),
+      error_code:null,attempts:[],review_status:'not_reviewed'};
+    workspace.entries.push(result);workspace.handoffs.push(handoff);
+  }
+  vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(workspace),team:structuredClone(team)});
+  vi.mocked(workspaceApi.read).mockResolvedValue(structuredClone(workspace));
+  vi.mocked(saveHandoffReview).mockImplementation(async(_owner,wid,hid,body)=>reviewReply(wid,hid,body));
+}
+async function reviewReply(wid:string,hid:string,body:HandoffReviewInput){
+  const next=structuredClone(workspace);next.revision++;
+  next.handoffs=next.handoffs!.map(handoff=>handoff.id===hid?{...handoff,review_status:'current',review:{id:uuid(999),attempt_id:body.attempt_id,
+    result_entry_id:body.result_entry_id,result_sha256:body.result_sha256,decision:body.decision,feedback:body.feedback,created_at:'2026-10-20T12:00:00Z'}}:handoff);
+  return {entry_revision:next.revision,request_sha256:await handoffReviewHash(wid,hid,body),feedback_withheld:false,workspace:next};
+}
+async function readyDraftReview(){await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(button('Accept draft for next work')?.disabled).toBe(false);});}
+it.each(['task','tools'] as const)('returns from a reviewed native Follow-up result to Chief and its paired Research result with retained directions (%s)',async mode=>{
+  nativeChief();await pairedChiefResults();await open(storage,false,false);
+  if(mode==='task')await click('Plan from saved visit note version 1');else await click('Tools');
+  const directions='My next Chief directions remain unsent. 界🩺';await enterDirections(directions);
+  await click('Review follow-up draft');await readyDraftReview();expect(button('Return to Chief')).toBeTruthy();
+  await click('Accept draft for next work');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(button('Return to Chief')?.disabled).toBe(false);expect(host.textContent).toContain('Draft accepted');});
+  await click('Return to Chief');expect(host.querySelector('.handoff-review')).toBeNull();
+  expect(host.querySelector('.workspace-notebook-body[data-chief-phone="true"][data-native-chat="true"]')).toBeTruthy();
+  expect(document.activeElement).toBe(host.querySelector('.clinical-team-drafts h3'));
+  expect((mode==='task'?host.querySelector<HTMLTextAreaElement>('#team-question'):host.querySelector<HTMLTextAreaElement>('.team-conversation-tools .clinical-team-directions'))?.value).toBe(directions);
+  expect(host.querySelector(`[data-chief-tools="${mode==='tools'}"]`)).toBeTruthy();
+  expect(host.querySelector('[aria-label="Follow-up drafts"]')?.textContent).toContain('Accepted private draft');
+  await click('Review research draft');await readyDraftReview();expect(button('Return to Chief')).toBeTruthy();await click('Return to Chief');
+  expect(workspaceApi.ask).not.toHaveBeenCalled();expect(clinicalTeamApi.share).not.toHaveBeenCalled();expect(saveHandoffReview).toHaveBeenCalledOnce();
+});
+it('keeps Return to Chief locked through an uncertain review save and same-key recovery',async()=>{
+  nativeChief();await pairedChiefResults();await open(storage,false,false);await click('Plan from saved visit note version 1');
+  await enterDirections('Retain these unsent Chief directions.');await click('Review follow-up draft');await readyDraftReview();
+  const response=deferred<Awaited<ReturnType<typeof saveHandoffReview>>>();vi.mocked(saveHandoffReview).mockReturnValueOnce(response.promise);
+  await click('Accept draft for next work');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(saveHandoffReview).toHaveBeenCalledOnce();});expect(button('Return to Chief')!.disabled).toBe(true);
+  await act(async()=>response.reject(new WorkspaceApiError(503)));await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(host.textContent).toContain('Review save unconfirmed');});
+  expect(button('Return to Chief')!.disabled).toBe(true);expect(host.querySelector('.handoff-review')).toBeTruthy();
+  await click('Check saved review status');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(button('Retry same review save')?.disabled).toBe(false);});
+  await click('Retry same review save');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(button('Return to Chief')?.disabled).toBe(false);});
+  expect(vi.mocked(saveHandoffReview).mock.calls[1].slice(0,4)).toEqual(vi.mocked(saveHandoffReview).mock.calls[0].slice(0,4));
+  await click('Return to Chief');expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe('Retain these unsent Chief directions.');
+});
+it('withholds the old Chief task when saved note sources change during draft review',async()=>{
+  nativeChief();await pairedChiefResults();await open(storage,false,false);await click('Plan from saved visit note version 1');await click('Review follow-up draft');await readyDraftReview();
+  vi.mocked(saveHandoffReview).mockImplementation(async(_owner,wid,hid,body)=>{const response=await reviewReply(wid,hid,body);response.workspace.note!.latest!.sources_changed=true;return response;});
+  await click('Accept draft for next work');await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(button('Close draft review')?.disabled).toBe(false);});
+  expect(button('Return to Chief')).toBeUndefined();await click('Close draft review');expect(host.querySelector('.chief-note-compose-context')).toBeNull();
+  expect(host.querySelector('.workspace-notebook-body[data-chief-phone="true"]')).toBeNull();
+});
+it.each(['owner','workspace'] as const)('does not carry a Chief return target into a replacement %s',async replacement=>{
+  nativeChief();await pairedChiefResults();await open(storage,false,false);await click('Plan from saved visit note version 1');await click('Review follow-up draft');await readyDraftReview();
+  const next={...structuredClone(workspace),id:replacement==='workspace'?uuid(1001):workspace.id,label:'Different invented visit'};
+  if(replacement==='owner')identity={mode:'clerk_jwt',getToken:vi.fn(),nativeSession:{revision:uuid(1002),isCurrent:()=>true}};
+  vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:next,team:structuredClone(team)});vi.mocked(workspaceApi.read).mockResolvedValue(next);
+  vi.mocked(workspaceApi.catalog).mockResolvedValue([{workspace_id:next.id,appointment_id:next.appointment_id!,label:next.label}]);
+  if(replacement==='owner')await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));else await click('Home');
+  await click('Visits and notes');await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
+  await vi.waitFor(async()=>{await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));});expect(host.textContent).toContain(next.label);});
+  expect(button('Return to Chief')).toBeUndefined();expect(host.querySelector('.chief-note-compose-context')).toBeNull();expect(saveHandoffReview).not.toHaveBeenCalled();
+});
+it('keeps general team draft reviews on their existing close path after returning from Chief',async()=>{
+  nativeChief();await pairedChiefResults();await open(storage,false,false);await click('Plan from saved visit note version 1');
+  await click('Review follow-up draft');await readyDraftReview();await click('Return to Chief');await click('Tools');
+  await act(async()=>{host.querySelector<HTMLDetailsElement>('.team-work-disclosure')!.open=true;});
+  await click('Review follow_up result');await readyDraftReview();expect(button('Return to Chief')).toBeUndefined();
+  await click('Close draft review');expect(host.querySelector('.handoff-review')).toBeNull();
+  expect(host.querySelector('.workspace-notebook-body[data-chief-phone="true"]')).toBeNull();expect(saveHandoffReview).not.toHaveBeenCalled();
+});
 it('binds exact owner directions and saved-note identity before clearing the native composer, then preserves an identical next draft',async()=>{
   nativeChief();const server=preparationServer(),reply=deferred<Awaited<ReturnType<typeof modelReceipt>>>();
   vi.mocked(workspaceApi.ask).mockReturnValue(reply.promise);

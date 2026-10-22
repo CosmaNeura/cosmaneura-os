@@ -11,13 +11,13 @@ import {handoffRecoveryAnchor,handoffRecoveryMatches,handoffRevisionHash,validat
 import {handoffReviewHash} from './handoff-review-api';
 
 export type HandoffReviewPanelProps = {workspace:Workspace;handoff:DraftHandoff;identity:WorkspaceIdentity;locked:boolean;
-  onSaved:(workspace:Workspace)=>void;onClose?:()=>void;onPendingChange?:(pending:boolean)=>void;onRevisionPrepared?:(handoffId:string)=>void;
+  onSaved:(workspace:Workspace)=>void;onClose?:()=>void;closeLabel?:string;closeLocked?:boolean;onPendingChange?:(pending:boolean)=>void;onRevisionPrepared?:(handoffId:string)=>void;
   onAccessLost?:(error:WorkspaceApiError)=>void;onRefresh?:()=>Promise<void>;recoveryLocked?:boolean;onFreshAssignment?:(feedback:string)=>void};
 type PendingReview={kind:'review';workspaceId:string;handoffId:string;recipientName:string;identity:WorkspaceIdentity;body:HandoffReviewInput;result:VerifiedHandoffResult};
 type PendingRevision={kind:'revision';workspaceId:string;handoffId:string;recipientName:string;identity:WorkspaceIdentity;body:HandoffRevisionInput;result:VerifiedHandoffResult;feedback:string};
 type Pending=PendingReview|PendingRevision;
 
-export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLocked,onSaved,onClose,onPendingChange,onRevisionPrepared,onAccessLost,onRefresh,onFreshAssignment}:HandoffReviewPanelProps) {
+export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLocked,onSaved,onClose,closeLabel='Close draft review',closeLocked=false,onPendingChange,onRevisionPrepared,onAccessLost,onRefresh,onFreshAssignment}:HandoffReviewPanelProps) {
   const [checked,setChecked]=useState<{workspace:Workspace;handoff:DraftHandoff;result:VerifiedHandoffResult|null}|null>(null),[checking,setChecking]=useState(true);
   const [feedback,setFeedback]=useState(''),[askingChanges,setAskingChanges]=useState(false),[pending,setPending]=useState<Pending|null>(null);
   const [busy,setBusy]=useState(false),[error,setError]=useState(''),[saved,setSaved]=useState<HandoffReviewReceipt|null>(null);
@@ -215,6 +215,6 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
     {refusal&&!pending&&onRefresh&&<button type="button" disabled={(recoveryLocked??locked)||busy} onClick={()=>void refreshForReview()}>Refresh draft to review</button>}
     {pending&&!busy&&!replayCompared&&<button type="button" disabled={(recoveryLocked??locked)||recovery.blocked} onClick={()=>void comparePending()}>Check saved review status</button>}
     {pending&&!busy&&<button type="button" disabled={(recoveryLocked??locked)||recoveryUnresolved||!replayCompared} onClick={()=>void persist(pending)}>{pending.kind==='review'?'Retry same review save':'Retry same revised assignment'}</button>}
-    {onClose&&<button type="button" disabled={busy||pending!==null||feedback.length>0||recoveryUnresolved} onClick={onClose}>Close draft review</button>}
+    {onClose&&<button type="button" disabled={closeLocked||busy||pending!==null||feedback.length>0||recoveryUnresolved} onClick={onClose}>{closeLabel}</button>}
   </section>;
 }
