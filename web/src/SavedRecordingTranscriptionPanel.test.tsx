@@ -9,11 +9,19 @@ import {RecordingVisitPanel} from './RecordingVisitPanel';
 import {readExistingScribeSource} from './scribe-source-api';
 vi.mock('./scribe-source-api',async original=>({...await original<typeof import('./scribe-source-api')>(),readExistingScribeSource:vi.fn()}));
 import type {RecordingVisitBinding} from './private-recording-api';
-const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn(),bindVisit:vi.fn(),draft:vi.fn(),continueReview:null as null|(()=>Promise<void>),review:null as unknown,availability:null as 'loading'|'ready'|'unavailable'|null,privateBegin:vi.fn(),privateAppend:vi.fn(),privateFinish:vi.fn(),privateCancel:vi.fn()}));
+const mocks=vi.hoisted(()=>({read:vi.fn(),write:vi.fn(),close:vi.fn(),ledger:vi.fn(),runtimeClose:vi.fn(),open:vi.fn(),savedRuntime:vi.fn(),bindVisit:vi.fn(),draft:vi.fn(),privateNavigation:null as null|(()=>Promise<void>),continueReview:null as null|(()=>Promise<void>),review:null as unknown,availability:null as 'loading'|'ready'|'unavailable'|null,privateBegin:vi.fn(),privateAppend:vi.fn(),privateFinish:vi.fn(),privateCancel:vi.fn()}));
 vi.mock('./CreatorReviewPanel',()=>({CreatorReviewPanel:({onSource,onAvailability,onContinue}:{onSource:(view:unknown)=>void;onAvailability?:(v:'loading'|'ready'|'unavailable')=>void;onContinue:()=>Promise<void>})=>{mocks.continueReview=onContinue;useEffect(()=>{onAvailability?.(mocks.availability??(mocks.review?'ready':'loading'));onSource(mocks.review);},[onSource,onAvailability,mocks.availability,mocks.review]);return null;}}));
 // Verify the real recovery/review handoff supplies the exact existing source to
 // draft presentation; draft generation has its own API/component suite.
 vi.mock('./CaptureDraftPanel',()=>({CaptureDraftPanel:(props:{workspaceId:string;sessionId:string;sourceId:string})=>{mocks.draft(props);return <h3>Review the retained visit note</h3>;}}));
+vi.mock('./PrivateTranscriptPanel',async original=>{
+  const actual=await original<typeof import('./PrivateTranscriptPanel')>();
+  function DeferredPrivateWords(props:Parameters<typeof actual.PrivateTranscriptPanel>[0]){
+    useEffect(()=>{props.onPrepareNavigation?.(mocks.privateNavigation);return()=>props.onPrepareNavigation?.(null);},[props.onPrepareNavigation]);
+    return <textarea aria-label="Invented private words" defaultValue="Invented retained private edits."/>;
+  }
+  return {...actual,PrivateTranscriptPanel:(props:Parameters<typeof actual.PrivateTranscriptPanel>[0])=>mocks.privateNavigation?<DeferredPrivateWords {...props}/>:<actual.PrivateTranscriptPanel {...props}/>};
+});
 vi.mock('./private-transcription-native',async original=>({...await original<typeof import('./private-transcription-native')>(),privateSpeechNative:{begin:mocks.privateBegin,append:mocks.privateAppend,finish:mocks.privateFinish,cancel:mocks.privateCancel}}));
 vi.mock('./saved-recording-runtime',()=>({openSavedRecordingRuntime:mocks.savedRuntime}));
 vi.mock('./private-recording-runtime',()=>({openPrivateRecordingStore:async()=>({read:mocks.read,write:mocks.write,close:mocks.close}),PrivateRecordingRuntime:{open:mocks.open}}));
@@ -29,7 +37,7 @@ let root:Root,host:HTMLDivElement,stored:unknown,activeReceipt:unknown,activeBin
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const back=vi.fn(),navigation=vi.fn();
 beforeEach(()=>{
-  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);mocks.review=null;mocks.availability=null;mocks.continueReview=null;activeReceipt=receipt;activeBinding=null;
+  Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();vi.stubGlobal('crypto',webcrypto);mocks.review=null;mocks.availability=null;mocks.privateNavigation=null;mocks.continueReview=null;activeReceipt=receipt;activeBinding=null;
   HTMLElement.prototype.scrollIntoView=vi.fn();
   stored={contract:'cosmas.saved-transfer.v1',recording_id:id(3),workspace_id:id(1),scope:'c'.repeat(64),link_request:null,receipt,admission:structuredClone(admission),admitted:null};
   mocks.read.mockImplementation(async()=>structuredClone(stored));
@@ -109,9 +117,9 @@ function legacyReview(){
   mocks.savedRuntime.mockResolvedValue({controller:{snapshot:{state:'ready',recordedChunks:0},subscribe:(listener:(value:unknown)=>void)=>{listener({state:'ready',recordedChunks:0});return()=>{};}},close:async()=>{}});
   return {origin,team:{revision:1,recovery_scope:'d'.repeat(64)} as ProviderTeam};
 }
-async function mountLegacyReview(origin:Workspace,team:ProviderTeam,notesEnabled=false,isCurrent=()=>true){
-  await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform:'desktop',originWorkspace:origin,visitResolved:true}}
-    identity={identity} workspace={workspace} team={team} isCurrent={isCurrent} locked={false} notesEnabled={notesEnabled} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}}
+async function mountLegacyReview(origin:Workspace,team:ProviderTeam,notesEnabled=false,isCurrent=()=>true,platform:'desktop'|'ios'='desktop',owner=identity){
+  await act(async()=>root.render(<SavedRecordingTranscriptionPanel entry={{recordingId:id(3),scope:'c'.repeat(64),platform,originWorkspace:origin,visitResolved:true}}
+    identity={owner} workspace={workspace} team={team} isCurrent={isCurrent} locked={false} notesEnabled={notesEnabled} onDraftLock={()=>{}} onReviewDraft={()=>{}} onCurrentDraft={()=>{}}
     notebookDirty={false} onNotebook={()=>{}} taskBot={{selection:{address:'scribe',team_revision:1},name:'Scribe',enabled:true,includeNotebook:false}}/>));
 }
 it('opens the retained legacy session review without preparing a recorder or uploading the original 23-second audio',async()=>{
@@ -124,7 +132,7 @@ it('opens the retained legacy session review without preparing a recorder or upl
   expect(button('Continue transcription')).toBeUndefined();expect(mocks.continueReview).toBeTypeOf('function');
 });
 it('continues a ready retained legacy transcript into its exact note source without creating or releasing capture work',async()=>{
-  const {origin,team}=legacyReview();mocks.review={session_id:id(7),status:'transcript_ready',working:{note_ready:true,working_transcript_id:id(13)}};
+  const {origin,team}=legacyReview();mocks.review={session_id:id(7),status:'transcript_ready',source:{source_transcript_version:1},working:{note_ready:true,working_transcript_id:id(13),working_transcript_version:1,source_transcript_version:1}};
   const retained=structuredClone(stored);await mountLegacyReview(origin,team,true);
   await waitFor(()=>expect(mocks.continueReview).toBeTypeOf('function'));
   await act(async()=>{await Promise.all([mocks.continueReview!(),mocks.continueReview!()]);});
@@ -136,13 +144,33 @@ it('continues a ready retained legacy transcript into its exact note source with
 });
 it.each(['not-ready','other-session','unavailable','owner-lost'] as const)('withholds the retained legacy note handoff for %s',async state=>{
   const {origin,team}=legacyReview();let current=true;
-  mocks.review={session_id:state==='other-session'?id(99):id(7),status:'transcript_ready',working:{note_ready:state!=='not-ready',working_transcript_id:id(13)}};
+  mocks.review={session_id:state==='other-session'?id(99):id(7),status:'transcript_ready',source:{source_transcript_version:1},working:{note_ready:state!=='not-ready',working_transcript_id:id(13),working_transcript_version:1,source_transcript_version:1}};
   if(state==='unavailable')mocks.availability='unavailable';
   await mountLegacyReview(origin,team,true,()=>current);await waitFor(()=>expect(mocks.continueReview).toBeTypeOf('function'));
   if(state==='owner-lost')current=false;
   await act(async()=>mocks.continueReview!());
   expect(mocks.draft).not.toHaveBeenCalled();expect(host.textContent).not.toContain('Review your visit note');
   expect(mocks.savedRuntime).not.toHaveBeenCalled();expect(prepareCapture).not.toHaveBeenCalled();expect(mocks.write).not.toHaveBeenCalled();
+});
+it.each(['unchanged','unavailable','not-ready','source','version','owner-lost'] as const)('rechecks retained legacy review currency after a deferred private-word save (%s)',async change=>{
+  const {origin,team}=legacyReview();let current=true,release!:()=>void,pending!:Promise<void>;
+  const owner={...identity,nativeSession:{revision:'invented-retained-review-owner',isCurrent:()=>current}};
+  const view={session_id:id(7),status:'transcript_ready',source:{source_transcript_version:1},working:{note_ready:true,working_transcript_id:id(13),working_transcript_version:1,source_transcript_version:1}};
+  mocks.review=view;const prepare=vi.fn(()=>new Promise<void>(resolve=>release=resolve));mocks.privateNavigation=prepare;
+  const retained=structuredClone(stored);await mountLegacyReview(origin,team,true,()=>current,'ios',owner);
+  await waitFor(()=>expect(host.querySelector('[aria-label="Invented private words"]')).toBeTruthy());
+  await act(async()=>{pending=mocks.continueReview!();});await waitFor(()=>expect(prepare).toHaveBeenCalledOnce());
+  if(change==='unavailable')mocks.availability='unavailable';
+  if(change==='not-ready')mocks.review={...view,working:{...view.working,note_ready:false}};
+  if(change==='source')mocks.review={...view,working:{...view.working,working_transcript_id:id(14)}};
+  if(change==='version')mocks.review={...view,working:{...view.working,working_transcript_version:2}};
+  if(change==='owner-lost')current=false;
+  await mountLegacyReview(origin,team,true,()=>current,'ios',owner);
+  await act(async()=>{release();if(change==='owner-lost')await expect(pending).rejects.toThrow();else await pending;});
+  if(change==='unchanged')expect(mocks.draft.mock.calls.at(-1)?.[0]).toMatchObject({workspaceId:workspace.id,sessionId:id(7),sourceId:id(13)});
+  else{expect(mocks.draft).not.toHaveBeenCalled();expect(host.textContent).not.toContain('Review your visit note');expect(host.querySelector('[aria-label="Scribe transcript review"]')?.hasAttribute('hidden')).not.toBe(true);}
+  expect(mocks.savedRuntime).not.toHaveBeenCalled();expect(prepareCapture).not.toHaveBeenCalled();expect(mocks.bindVisit).not.toHaveBeenCalled();
+  expect(mocks.write).not.toHaveBeenCalled();expect(stored).toEqual(retained);expect(mocks.privateBegin).not.toHaveBeenCalled();
 });
 it.each(['session','audio'] as const)('revalidates retained legacy %s after visit routing instead of restoring changed work',async change=>{
   const {origin,team}=legacyReview();

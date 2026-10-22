@@ -132,6 +132,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
   const [review,setReview]=useState<CreatorReviewView|null>(null),[reviewLock,setReviewLock]=useState(false),[showDraft,setShowDraft]=useState(false),[draftLocked,setDraftLocked]=useState(false);
   const live=useRef({identity,entry,workspace,team,isCurrent,locked,taskBot});live.current={identity,entry,workspace,team,isCurrent,locked,taskBot};
   const owner=useRef<{alive:boolean;identity:AuthenticatedWorkspaceIdentity;authorityKey:string;scope:string;recordingId:string;store:PrivateRecordingStore;recording:PrivateRecordingRuntime;runtime:Runtime|null;unsubscribe?:()=>void}|null>(null);
+  const latestReview=useRef<{owner:typeof owner.current;availability:typeof reviewAvailability;view:CreatorReviewView|null}>({owner:null,availability:'loading',view:null});
   const openingFailure=useRef<{identity:AuthenticatedWorkspaceIdentity;authorityKey:string;scope:string;recordingId:string}|null>(null);
   const privatePreparation=useRef<{owner:NonNullable<typeof owner.current>;prepare:()=>Promise<void>}|null>(null);
   const privateTransitionOwner=useRef<NonNullable<typeof owner.current>|null>(null);
@@ -149,8 +150,8 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     vendorCanonical(live.current.entry.binding??null)===vendorCanonical(entry.binding??null)&&vendorCanonical(live.current.taskBot?.selection??null)===vendorCanonical(taskBot?.selection??null)&&live.current.taskBot?.enabled===taskBot?.enabled&&live.current.isCurrent();
   const current=(selected=owner.current)=>!!selected?.alive&&owner.current===selected&&selected.identity===identity&&selected.authorityKey===authorityKey&&
     selected.scope===entry.scope&&selected.recordingId===entry.recordingId&&authorityCurrent();
-  const reportReviewAvailability=useCallback((value:'loading'|'ready'|'unavailable')=>{if(current())setReviewAvailability(value);},[identity,entry.scope,entry.recordingId,authorityKey]);
-  const reportReview=useCallback((value:CreatorReviewView|null)=>{if(current())setReview(value);},[identity,entry.scope,entry.recordingId,authorityKey]);
+  const reportReviewAvailability=useCallback((value:'loading'|'ready'|'unavailable')=>{if(current()){latestReview.current={...latestReview.current,owner:owner.current,availability:value};setReviewAvailability(value);}},[identity,entry.scope,entry.recordingId,authorityKey]);
+  const reportReview=useCallback((value:CreatorReviewView|null)=>{if(current()){latestReview.current={...latestReview.current,owner:owner.current,view:value};setReview(value);}},[identity,entry.scope,entry.recordingId,authorityKey]);
   const reportPrivateDirty=useCallback((value:boolean)=>{if(current())setPrivateDirty(value);},[identity,entry.scope,entry.recordingId,authorityKey]);
   const registerPrivatePreparation=useCallback((prepare:(()=>Promise<void>)|null)=>{const selected=owner.current;if(current(selected)&&selected){
     if(prepare)privatePreparation.current={owner:selected,prepare};else if(privatePreparation.current?.owner===selected)privatePreparation.current=null;
@@ -173,7 +174,7 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
       let recording:PrivateRecordingRuntime;
       try{recording=await PrivateRecordingRuntime.open({scope:entry.scope,platform:entry.platform,isCurrent:()=>alive&&authorityCurrent(),openStore:async()=>store},{recordingId:entry.recordingId,title:'Saved recording'});}catch(cause){store.close();throw cause;}
       if(!alive||!authorityCurrent()){await recording.close();return;}
-      const selected={alive:true,identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId,store,recording,runtime:null as Runtime|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;
+      const selected={alive:true,identity,authorityKey,scope:entry.scope,recordingId:entry.recordingId,store,recording,runtime:null as Runtime|null,unsubscribe:undefined as (()=>void)|undefined};owner.current=selected;latestReview.current={owner:selected,availability:'loading',view:null};
       need(recording.snapshot.workspaceId===origin.id&&recording.snapshot.phase==='sealed'&&recording.snapshot.recordedChunks>0);
       const check=()=>alive&&current(selected);
       const audioDetails=await recording.snapshotForLedger();if(!check())return;
@@ -332,10 +333,17 @@ export function SavedRecordingTranscriptionPanel({entry,identity,workspace,team,
     {showDraft&&<button disabled={locked||busy||privateBusy||privateTransition||reviewLock||draftLocked} onClick={()=>void(async()=>{try{await preparePrivateNavigation();setShowDraft(false);}catch{/* Keep the current editor open. */}})()}>Return to transcript review</button>}
     {processing&&transfer?.admitted&&<section className="saved-transcript-review" aria-label="Scribe transcript review" hidden={showDraft}><CreatorReviewPanel workspaceId={workspace.id} sessionId={transfer.admitted.session_id} identity={identity}
       locked={locked||busy||privateBusy||privateTransition||draftLocked} onLock={setReviewLock} onAvailability={reportReviewAvailability} onSource={reportReview} onContinue={async()=>{const selected=owner.current;if(!current(selected)||!selected||privateTransitionOwner.current===selected)return;
-        const retainedNoteReady=retainedReview&&reviewAvailability==='ready'&&review?.session_id===transfer.admitted!.session_id&&review.working?.note_ready;
-        if(!selected.runtime&&!retainedNoteReady)return;
+        const retainedSource=()=>{const latest=latestReview.current,view=latest.view,working=view?.working;
+          if(!retainedReview||latest.owner!==selected||latest.availability!=='ready'||view?.session_id!==transfer.admitted!.session_id||view.status!=='transcript_ready'||!working?.note_ready||
+            !vendorUuid(working.working_transcript_id)||!Number.isSafeInteger(working.working_transcript_version)||working.working_transcript_version<1||
+            !Number.isSafeInteger(working.source_transcript_version)||working.source_transcript_version<1||working.source_transcript_version!==view.source?.source_transcript_version)return null;
+          return vendorCanonical({session_id:view.session_id,working_transcript_id:working.working_transcript_id,working_transcript_version:working.working_transcript_version,source_transcript_version:working.source_transcript_version});};
+        const source=selected.runtime?null:retainedSource();
+        if(!selected.runtime&&!source)return;
         await preparePrivateNavigation(selected);
-        if(!current(selected)||privateTransitionOwner.current===selected)return;
+        // Saving private edits can outlast a review refresh. Continue only from
+        // the same still-ready source that the owner selected before that save.
+        if(!current(selected)||privateTransitionOwner.current===selected||!selected.runtime&&retainedSource()!==source)return;
         privateTransitionOwner.current=selected;setPrivateTransition(true);
         try{if(selected.runtime)await selected.runtime.releaseUploadedCapture();if(current(selected))setShowDraft(true);}
         finally{if(privateTransitionOwner.current===selected){privateTransitionOwner.current=null;if(current(selected))setPrivateTransition(false);}}}}/></section>}
