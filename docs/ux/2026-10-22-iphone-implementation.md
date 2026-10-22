@@ -47,6 +47,7 @@ The Desktop checkout and its missing Git index were not changed.
 | Real local backend, stopped and restarted | Unreachable error, safe health retry, then explicit open succeeded without relaunch | [Offline screen](screenshots/2026-10-22-iphone/phone-offline.jpg) |
 | Phone Settings at 390 × 844 | Done visible; three 64 px tabs at y=780; Settings current; no horizontal overflow; both scroll offsets 0; header overflow visible | [Final Settings](screenshots/2026-10-22-iphone/phone-settings-final.jpg) |
 | Sample review at 390 × 844 | Close target 44 × 44.67 px; handoff jump visible; completion gated by checkbox | [Reviewed sample](screenshots/2026-10-22-iphone/phone-sample-complete.jpg) |
+| Native sample click-through after unlocking the Mac | Sample opened by tap; content swipe kept header/footer visible; note checkbox enabled handoffs; jump placed heading below header; header close returned to workspace | [Native handoffs](screenshots/2026-10-22-iphone/iphone-sample-handoffs-native.png), [Dismissed](screenshots/2026-10-22-iphone/iphone-sample-dismissed-native.png) |
 
 Tests cover hidden pages, active Settings and Done, phone scroll reset, account
 controls, developer flag gating, network classification, safe read retries and
@@ -73,9 +74,10 @@ Compose and build the Apple shell using the original handoff's R section and
 
 ## Remaining handoff work
 
-- Verify actual VoiceOver access and implement/test native Dynamic Type. The Mac
-  was locked during the requested native sample click-through, so browser checks
-  and simulator launch/screenshots do not establish native accessibility behavior.
+- Verify actual VoiceOver access and implement/test native Dynamic Type. Native
+  sample taps and swiping passed after the owner unlocked the Mac. Device Hub's
+  automation tree still omitted the embedded web controls; that observation does
+  not establish whether VoiceOver can read or activate them.
 - Measure cold and warm starts on a physical iPhone before performance changes.
   No launch-time improvement is claimed.
 - Confirm which original scroll container hid the old header. The revised layout
