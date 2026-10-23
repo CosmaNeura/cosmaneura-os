@@ -1,5 +1,5 @@
 import {assertCurrentDesktopSession} from '../workspace-auth-headers';
-import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamRequest,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,validShareSavedNoteInput,verifySharedClinicalNote,type ShareSavedNoteInput,type ClinicalNoteShareReceipt} from '../clinical-team-contract';
+import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamRequest,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,validShareSavedNoteInput,verifySharedClinicalNote,noteSelection,type ShareSavedNoteInput,type ClinicalNoteShareReceipt} from '../clinical-team-contract';
 import {modelRequestHash,type ModelOperation,type PreviousModelRequest} from '../model-work-request';
 import {workspaceApi,WorkspaceApiError,requireRecoveryScope,botAddress,type AuthenticatedWorkspaceIdentity,type WorkspaceIdentity,type Workspace,type ProviderTeam} from '../workspace-api';
 import type {WorkspaceSession} from './workspace-session';
@@ -28,6 +28,27 @@ export class WorkspaceClinical {
   private readonly api:Pick<typeof workspaceApi,'read'|'team'>;
   constructor(private readonly session:WorkspaceSession,deps:ClinicalDependencies={}) {
     this.api={read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),...deps};
+  }
+  open(noteId:string,prepare:boolean,expected:import('./model').ChiefNoteTask|Omit<import('./model').ChiefNoteTask,'workspaceId'>|undefined,inComposer:boolean,context:ClinicalContext,host:{focus:(value:{owner:AuthenticatedWorkspaceIdentity;workspaceId:string;generation:number})=>void;show:(inComposer:boolean)=>void;focusQuestion:()=>void}){
+    const {workspace,identity,team,note}=this.session.getSnapshot();
+    const {generation,setSelected,setReviewHandoffId,setSettingsOpen,setPracticeOpen,setSelectedResult,setMobilePanel,setPhoneNoteTask}=this.session;
+    const {journal}=this.session.recovery;
+    const {authenticated,previousIdentity,currentIdentity,recoveryView,locked,captureNavigationLocked,captureDraftLocked,latestNote}=context;
+    if(expected){
+      const latest=recoveryView.current.workspace,saved=latest?.note?.latest,selection=expected.selection;
+      if(expected.owner!==authenticated||expected.owner!==previousIdentity.current||currentIdentity.current!==identity||expected.generation!==generation.current||
+        expected.scope!==journal.current?.scope||!latest||latest.id!==workspace?.id||!saved||latest.revision!==selection.expected_revision||
+        saved.id!==selection.note_id||saved.version!==selection.note_version||saved.content_hash!==selection.content_hash||saved.source_fingerprint!==selection.source_fingerprint||saved.content!==expected.content)return;
+      try{assertCurrentDesktopSession(expected.owner);if(expected.owner.mode==='clerk_jwt'&&expected.owner.nativeSession&&!expected.owner.nativeSession.isCurrent())return;}catch{return;}
+    }
+    if(!authenticated||!team||!workspace||locked||captureNavigationLocked||captureDraftLocked||note!==latestNote||workspace.note?.latest?.id!==noteId||workspace.note.latest.sources_changed)return;
+    const chief=team.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
+    if(!chief)return;
+    host.focus({owner:authenticated,workspaceId:workspace.id,generation:generation.current});
+    setSelected(botAddress(chief));setReviewHandoffId(null);setSettingsOpen(false);setPracticeOpen(false);setSelectedResult(null);
+    setMobilePanel('Conversation');host.show(inComposer);
+    if(inComposer&&expected){setPhoneNoteTask({...expected,workspaceId:workspace.id});host.focusQuestion();}
+    if(prepare)void this.prepare(noteSelection(workspace.note.latest,workspace.revision),context).catch(()=>{});
   }
   async prepare(input:ShareSavedNoteInput,context:ClinicalContext){
     const {workspace,identity,team,note,previousModelRequest}=this.session.getSnapshot();

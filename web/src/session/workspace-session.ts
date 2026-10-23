@@ -1,3 +1,4 @@
+import {WorkspaceComposer} from './composer';
 import {WorkspaceActivity,type ActivityDependencies} from './activity';
 import {WorkspaceSources,type SourceDependencies} from './sources';
 import {WorkspaceObservations} from './observations';
@@ -33,6 +34,7 @@ export class WorkspaceSession {
   readonly observations:WorkspaceObservations;
   readonly sources:WorkspaceSources;
   readonly activity:WorkspaceActivity;
+  readonly composer:WorkspaceComposer;
   constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];observationRead?:ConstructorParameters<typeof WorkspaceObservations>[1];sources?:SourceDependencies;activity?:ActivityDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
@@ -47,6 +49,7 @@ export class WorkspaceSession {
     this.observations=new WorkspaceObservations(this,deps.observationRead);
     this.sources=new WorkspaceSources(this,deps.sources);
     this.activity=new WorkspaceActivity(this,deps.activity);
+    this.composer=new WorkspaceComposer(this);
     this.setPracticePage(deps.initialPage??'visits');
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
@@ -147,6 +150,7 @@ export class WorkspaceSession {
   /** Withhold private view state; the journal retains exact unconfirmed work. */
   readonly clear = ():void => {
     this.review.returnTarget.current=null;
+    this.composer.reset();
     this.team.exitAction.current=null;this.clinical.preparation.current=null;
     this.invalidate();this.activityNavigation.current?.abort();this.activityNavigation.current=null;
     this.recovery.close();this.recovery.nativeModelSettling.current=false;this.models.reset();

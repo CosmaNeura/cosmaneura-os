@@ -1,3 +1,6 @@
+import {projectConversation} from './session/entries';
+import {ConversationEntries} from './ConversationEntries';
+import {hasSavedBotContext,latestNotebookText} from './session/composer';
 import {WorkspaceDialog} from './WorkspaceDialog';
 import {WorkspaceSession} from './session/workspace-session';
 import {useWorkspaceSession} from './session/use-workspace-session';
@@ -8,7 +11,6 @@ import {teamConfigurationChanged} from './team-configuration-diff';
 import {VisitCatalog} from './VisitCatalog';
 import {consumeWorkspaceStartupTeam} from './workspace-team-read';
 import {workspaceProtocolGeneration} from './workspace-protocol';
-import {WorkspaceMarkdown} from './WorkspaceMarkdown';
 import {readWorkspaceRoute,workspaceRouteHash,type WorkspaceRoute} from './workspace-route';
 import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
@@ -16,7 +18,6 @@ import {PracticeAccessPanel} from './PracticeAccessPanel';
 import {WorkspaceConnectionRecoveryContext,type PracticeAccessContext} from './PracticeAccessGate';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { TeamConfigurationFlow } from "./TeamConfigurationFlow";
-import {assertCurrentDesktopSession} from "./workspace-auth-headers";
 import {subscribeNativeWorkspaceForeground} from './native-workspace-foreground';
 import {useMobileChatFrame} from './MobileChatFrame';
 import type {AiActivitySelection} from "./model-activity-contract";
@@ -41,7 +42,7 @@ import { supportsSkill, validRecoveryScope } from "./workspace-api";
 import { BotAvatar } from "./BotAvatar";
 import { TeamWorkPanel } from "./TeamWorkPanel";
 import { HandoffReviewPanel } from "./HandoffReviewPanel";
-import {modelActive, modelStateLabel, type ModelOperation} from "./model-work-request";
+import {modelActive, type ModelOperation} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
 import { FollowUpWork } from "./FollowUpWork";
 import { VendorWorkspaceMount } from "./VendorWorkMount";
@@ -191,7 +192,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const clinicalTeamRef=useRef<HTMLDetailsElement|null>(null);
   const clinicalTeamFocus=useRef<{owner:AuthenticatedWorkspaceIdentity;workspaceId:string;generation:number}|null>(null);
   useEffect(()=>{setPhoneChatToolsOpen(false);setClinicalTeamExpanded(false);setPhoneNoteTask(null);clinicalTeamFocus.current=null;chiefReviewReturn.current=null;chiefReviewReturnFocus.current=null;clinicalPreparation.current=null;setClinicalPreparing(false);},[authenticated,workspace?.id]);
-  const [draftNoteIntent,setDraftNoteIntent]=useState<{workspaceId:string;content:string}|null>(null);
   const [reviewState,setReviewState]=useState<'editing'|'review'|'saved'>('editing');
   const {currentThought,modelBusy}=session.models;currentThought.current=thought;
   function updateThought(value:string){session.models.updateThought(value);}
@@ -466,12 +466,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   function useCoreDraft(draft:CaptureDraft){void session.saves.useCoreDraft(draft,saveContext());}
   function append(kind:AppendInput['kind'],content:string,sourceLabel?:string){void session.saves.append(kind,content,sourceLabel,saveContext());}
   function ask(content=thought){void session.models.ask(selected,selectedPrep,modelContext(),content);}
-  function prepareChiefQuestion(prompt:string){
-    if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!team?.revision||!team.llm.enabled||
-      bot?.role!=='chief'||!bot.enabled||bot.retired||bot.blocked_capabilities?.includes('model_answer')||thought.trim()||
-      note!==latestNote||!chiefSavedContext)return;
-    setPhoneNoteTask(null);setThought(prompt);setMobilePanel('Conversation');setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);
-  }
+  function composerContext():import('./session/composer').ComposerContext{return {locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,focus:()=>setQuestionFocus(value=>value+1),closeTools:()=>setPhoneChatToolsOpen(false),save:saveContext()};}
+  function prepareChiefQuestion(prompt:string){session.composer.prepareChief(prompt,composerContext());}
   function loadingContext(){return {authenticated,failure,recoverAfterRead,prepareRecovery};}
   function refresh(){return session.loading.refresh({...loadingContext(),recordingBlocked:!!privateRecordingEntry||privateRecordingBusy,
     invalidateSetup:()=>{setSetupApproval(null);setSetupEpoch(value=>value+1);},invalidatePrep:()=>setPrepEpoch(value=>value+1)});}
@@ -531,7 +527,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     if (bot?.role === "scribe" && !settingsOpen && !practiceOpen && !focusFaxWork)
       document.querySelector('[aria-label="Scribe recording"]')?.scrollIntoView?.({block: "start"});
   }, [selected, workspace?.id, settingsOpen, practiceOpen]);
-  const latestNote = workspace?.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "";
+  const latestNote = latestNotebookText(workspace);
   useEffect(()=>{
     const request=clinicalTeamFocus.current;
     if(!request||!clinicalTeamExpanded||bot?.role!=='chief'||mobilePanel!=='Conversation'||settingsOpen||practiceOpen)return;
@@ -543,37 +539,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     scrollHeading?.scrollIntoView?.({block:'start'});heading?.focus({preventScroll:true});
   },[authenticated,workspace?.id,selected,clinicalTeamExpanded,mobilePanel,settingsOpen,practiceOpen,phoneChiefToolsVisible,chiefNoteCompose]);
   function openClinicalTeamDrafts(noteId:string,prepare=true,expected?:{owner:AuthenticatedWorkspaceIdentity;scope:string;generation:number;selection:ShareSavedNoteInput;content:string},inComposer=false){
-    if(expected){
-      const latest=recoveryView.current.workspace,saved=latest?.note?.latest,selection=expected.selection;
-      if(expected.owner!==authenticated||expected.owner!==previousIdentity.current||currentIdentity.current!==identity||expected.generation!==generation.current||
-        expected.scope!==journal.current?.scope||!latest||latest.id!==workspace?.id||!saved||latest.revision!==selection.expected_revision||
-        saved.id!==selection.note_id||saved.version!==selection.note_version||saved.content_hash!==selection.content_hash||saved.source_fingerprint!==selection.source_fingerprint||saved.content!==expected.content)return;
-      try{assertCurrentDesktopSession(expected.owner);if(expected.owner.mode==='clerk_jwt'&&expected.owner.nativeSession&&!expected.owner.nativeSession.isCurrent())return;}catch{return;}
-    }
-    if(!authenticated||!team||!workspace||locked||captureNavigationLocked||captureDraftLocked||note!==latestNote||workspace.note?.latest?.id!==noteId||workspace.note.latest.sources_changed)return;
-    const chief=team.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
-    if(!chief)return;
-    clinicalTeamFocus.current={owner:authenticated,workspaceId:workspace.id,generation:generation.current};
-    setSelected(botAddress(chief));setReviewHandoffId(null);setSettingsOpen(false);setPracticeOpen(false);setSelectedResult(null);
-    setMobilePanel('Conversation');setPhoneChatToolsOpen(!inComposer);setClinicalTeamExpanded(true);
-    if(inComposer&&expected){setPhoneNoteTask({...expected,workspaceId:workspace.id});setQuestionFocus(value=>value+1);}
-    if(prepare)void prepareClinicalDrafts(noteSelection(workspace.note.latest,workspace.revision)).catch(()=>{});
+    session.clinical.open(noteId,prepare,expected,inComposer,clinicalContext(),{focus:value=>{clinicalTeamFocus.current=value;},show:compose=>{setPhoneChatToolsOpen(!compose);setClinicalTeamExpanded(true);},focusQuestion:()=>setQuestionFocus(value=>value+1)});
   }
   function clinicalContext():import('./session/clinical').ClinicalContext {return {...modelContext(),locked,viewNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,latestNote,previousIdentity,privateRecordingLive,currentIdentity,recoveryView,currentTeam,failure,save,saveModel,showReplacement:role=>{setSelected(role);setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setClinicalTeamExpanded(true);}};}
   function prepareClinicalDrafts(input:ShareSavedNoteInput){return session.clinical.prepare(input,clinicalContext());}
   function returnToPhoneChat(){setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);}
-  function requestScribeDraft(){
-    if(!workspace||!scribe?.enabled||scribe.retired||!scribe.include_notebook||scribe.blocked_capabilities?.includes('model_answer')||!team?.llm.enabled||locked||!note.trim()||captureNavigationLocked||captureDraftLocked)return;
-    if(note!==latestNote){setDraftNoteIntent({workspaceId:workspace.id,content:note});append('scratchpad',note);return;}
-    setSelected(botAddress(scribe));setPanel('Review');setMobilePanel('Review');
-    void saveModel({type:'ask',model_contract:1,origin:'durable_admission_v1',body:{expected_revision:workspace.revision,team_revision:team.revision,
-      idempotency_key:crypto.randomUUID(),role:botAddress(scribe),content:'Draft a clinical note from my saved notebook notes. Preserve the stated facts and uncertainty, do not invent missing information, and flag anything requiring my review.'}},'submit');
-  }
-  useEffect(()=>{
-    if(!draftNoteIntent||busy)return;
-    setDraftNoteIntent(null);
-    if(workspace?.id===draftNoteIntent.workspaceId&&latestNote===draftNoteIntent.content&&!pending&&!conflict&&!recoveryBlocked)requestScribeDraft();
-  },[draftNoteIntent,busy,workspace?.revision,pending,conflict,recoveryBlocked]);
+  function requestScribeDraft(){session.composer.requestScribe(composerContext());}
+  useEffect(()=>{session.composer.continueScribe(composerContext());},[busy,workspace?.revision,pending,conflict,recoveryBlocked]);
   const {ready:routeReady,applying:routeApplying,sequence:routeSequence,route}=session.navigation;
   function applyRoute(target:WorkspaceRoute){return session.navigation.applyRoute(target,navigationContext());}
   useEffect(()=>{
@@ -596,11 +568,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     document.addEventListener('click',closeMenus);document.addEventListener('keydown',closeMenus);
     return()=>{document.removeEventListener('click',closeMenus);document.removeEventListener('keydown',closeMenus);};
   },[]);
-  const chiefSavedContext=!!bot&&!!workspace?.entries.some(entry=>entry.content.trim()&&
-    (entry.kind==='scratchpad'&&entry.content===latestNote&&bot.include_notebook||
-      (entry.kind==='evidence'||entry.kind==='synthetic_source'||
-        entry.kind==='google_message'&&entry.google_source_state==='current'||entry.kind==='google_calendar'&&entry.calendar_source_state==='current'||
-        entry.kind==='efax_inbound_source'&&entry.fax_source_state==='current'||entry.kind==='fax_inbound_source'&&entry.practice_fax_source_state==='current')&&bot.include_evidence));
+  const chiefSavedContext=hasSavedBotContext(workspace,bot);
   const initialTeamUnchanged=!!team&&!!teamDraft&&JSON.stringify(teamDraft)===JSON.stringify(team.configuration);
   useEffect(()=>{if(questionFocus)questionRef.current?.focus(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?{preventScroll:true}:undefined);},[questionFocus]);
   useEffect(()=>{
@@ -673,19 +641,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     editorJournal?.has(`editor:${editorWorkspace}:${kind}`));
   const editorAccess=useMemo(()=>session.recovery.editorAccess(authenticated,editorScope,editorJournal,editorWorkspace,editorReady,recoveryBlocked,failure),[authenticated,editorScope,editorJournal,editorWorkspace,editorReady,recoveryBlocked]);
   const agentResearchRecovery=useMemo(()=>session.recovery.agentResearchAccess(editorAccess,editorWorkspace),[editorAccess,editorWorkspace]);
-  const turns = workspace?.entries.filter(e => ["conversation", "handoff_result"].includes(e.kind)
-    && (e.model_request?e.model_request.bot.address===selected:e.reply&&(e.reply.agent_id ? e.reply.agent_id === template?.agent_id
-      : !bot?.instance_id && e.reply.role === bot?.role))) ?? [];
-  function savedDraftReviewLabel(entry:WorkspaceEntry):string {
-    const matches=workspace?.handoffs?.filter(h=>h.result_entry_id===entry.id)??[];
-    if(matches.length!==1)return "Unreviewed draft";
-    const handoff=matches[0],review=handoff.review;
-    if(handoff.review_status==='stale')return "Review needs updating";
-    if(handoff.status!=='completed'||handoff.review_status!=='current'||!review||
-      review.attempt_id!==handoff.attempt_id||review.result_entry_id!==entry.id||
-      review.result_sha256!==handoff.result_sha256)return "Unreviewed draft";
-    return review.decision==='accepted'?"Draft accepted":"Changes requested";
-  }
+  const conversation=projectConversation(workspace,team,selected),turns=conversation.turns;
   const localModelPending=pending?.type==='ask'||pending?.type==='retry'?pending:null;
   const clinicalModelPending=localModelPending?.type==='ask'?parseClinicalTeamRequest(localModelPending.body.content):null;
   const nativeChatOwner=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?authenticated:null;
@@ -787,9 +743,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               directionsLocked={(nativeChatOwner?!nativeComposerEditable:locked)||!bot.enabled||!!bot.retired} preparing={clinicalPreparing} onPrepare={prepareClinicalDrafts} authority={authenticated}
               onRetry={retryTeamTask}
               onShare={async body=>{await save({type:'clinicalNoteShare',body});}}
-              onAskChief={async content=>{if(locked||captureNavigationLocked||captureDraftLocked||note!==latestNote||thought.trim()||!team.revision)return;
-                await saveModel({type:'ask',model_contract:1,origin:'durable_admission_v1',body:{expected_revision:workspace.revision,team_revision:team.revision,
-                  idempotency_key:crypto.randomUUID(),role:botAddress(bot),content}},'submit');}}
+              onAskChief={content=>session.composer.askChief(content,composerContext())}
               onReview={id=>{const handoff=workspace.handoffs?.find(item=>item.id===id);if(handoff)reviewTeamResult(handoff,true);}}/>
           </details>;
   const teamDrafts=workspace&&<details className="team-work-disclosure" open={teamWorkExpanded} onToggle={event=>setTeamWorkExpanded(event.currentTarget.open)}>
@@ -1242,19 +1196,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
               <h3>{phoneChiefConversation?"What would you like to work on?":stage === "Before" ? "A clear start to the visit" : stage === "During" ? "Space to think and take notes" : "Keep the next step in view"}</h3>
               <p>{team?.llm.enabled ? phoneChiefConversation?"Write naturally. Chief can help organize your notes and coordinate your team.":"Ask a question, organize your notes, or think through the next step. Your team works from the saved context you choose." : "Review saved sources with your team. Advanced skills will connect here as their services become ready."}</p>
               {bot?.role!=='chief'&&<button disabled={locked || !team?.revision || !bot?.enabled} onClick={() => ask(template?.prompt)}>{template?.prompt ?? "Review this encounter"}<span aria-hidden="true"> ↗</span></button>}</div>}
-            {turns.map(entry => <div className="team-turn" key={entry.id} id={`turn-${entry.id}`} tabIndex={-1}><article className="team-human-message"><small>{entry.kind === "handoff_result" ? "Brief from Chief" : "You"}</small><p>{clinicalRequestDisplay(entry.content)}</p></article>
-              {entry.reply && <article className="team-bot-message"><header><BotAvatar role={entry.reply.role} />
-                <strong>{entry.reply.agent_name}</strong><span className="team-pill">{entry.reply.backend === "azure_gpt41_work_status_v1" ? "Saved work status" : entry.reply.backend === "azure_gpt41_unavailable" ? "GPT-4.1 unavailable" : entry.reply.backend.startsWith("azure_gpt41") ? "GPT-4.1" : "Local review"}</span>{(entry.kind === "handoff_result" || entry.model_request?.request.kind==='conversation'&&(entry.model_request.request.inbox_analysis||entry.model_request.request.membership_analysis)) && <span className="team-pill pending">{entry.kind === "handoff_result" ? savedDraftReviewLabel(entry) : "Unreviewed draft"}</span>}</header>
-                <WorkspaceMarkdown content={entry.reply.content}/><div className="team-citations">{entry.reply.citations.map((citation) => ["membership_work","payment_work"].includes(citation.kind)?<button key={citation.entry_id} onClick={()=>{setPanel("Work");setMobilePanel("Work");}}>{citation.label} · r{citation.revision}</button>:["inbox_message","inbox_triage","session_prep"].includes(citation.kind)?<span key={citation.entry_id}>{citation.label} · r{citation.revision}</span>:<button key={citation.entry_id}
-                  onClick={() => { setPanel("Sources"); setMobilePanel("Sources"); setSelectedSource(citation.entry_id); }}>{citation.label}</button>)}</div>
-                <details className="team-fine"><summary>{latestSourceRevision > entry.reply.context_revision ? "Newer sources available — ask again to review them" : "Source details"}</summary>Saved context through revision {entry.reply.context_revision}</details>
-              </article>}
-              {!entry.reply&&entry.model_request&&<article className="team-bot-message"><header><BotAvatar role={entry.model_request.bot.role} active={modelActive(entry)}/>
-                <strong>{entry.model_request.bot.name}</strong></header><p>{modelStateLabel(entry.model_request.admission.state)}</p>
-                <p className="team-fine">A saved request is not a completed draft or clinical evidence.</p>
-                {entry.model_request.request.kind==='conversation'&&<button disabled={busy||recoveryBlocked} onClick={()=>void checkEntryResult(entry)}>Check saved result</button>}</article>}
-
-            </div>)}
+            <ConversationEntries projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked}
+              onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={id=>{setPanel('Sources');setMobilePanel('Sources');setSelectedSource(id);}}
+              onCheck={checkEntryResult} onAction={action=>{
+                if(action.kind==='review_note'){setPanel('Review');setMobilePanel('Review');}
+                else if(action.kind==='review_work'){setPanel('Work');setMobilePanel('Work');}
+                else {const handoff=workspace.handoffs?.find(item=>item.id===action.id);if(handoff){if(action.kind==='retry_handoff')retryTeamTask(handoff);else reviewTeamResult(handoff,true);}}
+              }}/>
             {pending?.type === "ask" && !localQuestionRepresented && <div className="team-turn"><article className="team-human-message"><small>You · {busy?'request in progress':'unconfirmed request'}</small><p>{clinicalRequestDisplay(pending.body.content)}</p></article>
               {busy && <p className="team-thinking" role="status">{team?.configuration.bots.find(b => botAddress(b) === pending.body.role)?.name} is {team?.llm.enabled ? "thinking" : "reviewing"}…</p>}</div>}
             {(!chiefNoteCompose||!phoneNoteMatches)&&nativeNoteShortcut}
