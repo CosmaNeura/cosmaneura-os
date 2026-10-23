@@ -36,7 +36,7 @@ vi.mock('./VendorWorkMount',async original=>({...await original<typeof import('.
 let draftStorage: ReturnType<typeof memoryDraftStorage>;
 vi.mock("./workspace-api", async importOriginal => {
   const actual = await importOriginal<typeof import("./workspace-api")>();
-  return { ...actual, workspaceApi: { practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn(), privateDraftSummaries:vi.fn(),createPrivateDraft:vi.fn(),linkAppointment:vi.fn(),resolveAppointmentLink:vi.fn() } };
+  return { ...actual, workspaceApi: { checkSyntheticConnection:vi.fn(), practiceWorkItem: vi.fn().mockRejectedValue(new Error("Unavailable fixture")), practiceWork: vi.fn(), workHandoff: vi.fn(), completeWork: vi.fn(), catalog: vi.fn(), open: vi.fn(), read: vi.fn(), append: vi.fn(), link: vi.fn(), team: vi.fn(), saveTeam: vi.fn(), ask: vi.fn(), retryHandoff: vi.fn(), saveNote: vi.fn(), reviewNote: vi.fn(), proposeFollowUp: vi.fn(), decideFollowUp: vi.fn(), completeFollowUp: vi.fn(), privateDraftSummaries:vi.fn(),createPrivateDraft:vi.fn(),linkAppointment:vi.fn(),resolveAppointmentLink:vi.fn() } };
 });
 
 const fixture: Workspace & {appointment_id:string} = {
@@ -62,13 +62,14 @@ describe("private encounter workspace", () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     vi.stubGlobal('crypto',webcrypto);
     vi.clearAllMocks(); draftStorage = memoryDraftStorage();
+    vi.mocked(workspaceApi.checkSyntheticConnection).mockResolvedValue(undefined);
     vi.mocked(workspaceApi.open).mockResolvedValue({ identity, workspace: structuredClone(fixture), team: structuredClone(team) });
     vi.mocked(workspaceApi.team).mockResolvedValue(structuredClone(team));
     vi.mocked(workspaceApi.read).mockResolvedValue({...structuredClone(fixture),revision:2});
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
     await act(async () => root.render(<EncounterWorkspace draftStorage={draftStorage} />));
   });
-  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); });
+  afterEach(async () => { await act(async () => root.unmount()); container.remove(); vi.useRealTimers(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
   async function click(text: string) {
     const visits = () => [...container.querySelectorAll<HTMLButtonElement>('[aria-label="Workspace navigation"] button')].find(button=>button.textContent==='Visits and notes')!;
     if(text==='Choose an encounter'){await act(async()=>visits().click());return;}
@@ -79,6 +80,74 @@ describe("private encounter workspace", () => {
     await act(async () => button!.click());
   }
   const settings = () => settingsNavigation(container);
+  it('hides pages that cannot render until their required identity is available',async()=>{
+    const labels=()=>[...container.querySelectorAll('[aria-label="Workspace navigation"] button')].map(button=>button.textContent);
+    expect(labels()).toEqual(['Visits and notes']);
+    await click('Choose an encounter');
+    expect(labels()).toEqual(['Visits and notes','Current notebook','Practice work','Settings']);
+    expect(labels()).not.toContain('Home');
+  });
+  it('marks Settings active and returns to the previous notebook with Done',async()=>{
+    await click('Choose an encounter');await click('Settings');
+    expect(container.querySelector('[aria-label="Workspace navigation"] [aria-current="page"]')?.textContent).toBe('Settings');
+    await act(async()=>container.querySelector<HTMLButtonElement>('.settings-done')!.click());
+    expect(container.querySelector('[data-settings-open="false"]')).not.toBeNull();
+    expect(container.querySelector('[aria-label="Workspace navigation"] [aria-current="page"]')?.textContent).toBe('Current notebook');
+  });
+  it('resets phone page and sidebar scrolling on accepted Settings navigation',async()=>{
+    vi.stubGlobal('matchMedia',vi.fn(()=>({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()})));
+    const scroll=vi.spyOn(window,'scrollTo').mockImplementation(()=>{});
+    await click('Choose an encounter');
+    container.querySelector<HTMLElement>('.team-sidebar')!.scrollTop=90;scroll.mockClear();
+    await click('Settings');
+    expect(scroll).toHaveBeenCalledWith({top:0,left:0,behavior:'instant'});
+    expect(container.querySelector<HTMLElement>('.team-sidebar')!.scrollTop).toBe(0);
+    scroll.mockRestore();
+  });
+  it('requires the developer flag before showing execution proof',async()=>{
+    const exit=vi.fn();vi.stubEnv('VITE_SHOW_EXECUTION_PROOF','false');
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} onExit={exit}/>));
+    expect(container.textContent).not.toContain('Open execution proof');
+    vi.stubEnv('VITE_SHOW_EXECUTION_PROOF','true');
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} onExit={exit}/>));
+    await click('Open execution proof');expect(exit).toHaveBeenCalledOnce();
+  });
+  it('keeps account controls reachable in the phone header',async()=>{
+    vi.stubGlobal('matchMedia',vi.fn(()=>({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()})));
+    const account=vi.fn(),access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access} accountControls={<button onClick={account}>Account menu</button>}/>));
+    expect(container.querySelector('.team-phone-account-controls button')).not.toBeNull();
+    await click('Account menu');expect(account).toHaveBeenCalledOnce();
+  });
+  it('rechecks a failed synthetic bootstrap without repeating its writes and can connect afterward',async()=>{
+    vi.mocked(workspaceApi.open).mockRejectedValueOnce(new WorkspaceApiError(0,'workspace_unreachable'));
+    await click('Choose an encounter');
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('can’t reach your workspace service');
+    await click('Try again');
+    expect(workspaceApi.open).toHaveBeenCalledOnce();expect(workspaceApi.checkSyntheticConnection).toHaveBeenCalledOnce();
+    expect(container.textContent).toContain('Your workspace service is available.');
+    await click('Choose an encounter');expect(container.querySelector('[data-page="notebook"]')).not.toBeNull();
+  });
+  it('retries a failed visit read and clears page errors when navigating to Settings',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    vi.mocked(workspaceApi.catalog).mockClear().mockRejectedValueOnce(new WorkspaceApiError(0,'workspace_unreachable')).mockResolvedValueOnce([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
+    await click('Visits and notes');await click('Try again');
+    expect(workspaceApi.catalog).toHaveBeenCalledTimes(2);expect(workspaceApi.open).not.toHaveBeenCalled();
+    vi.mocked(workspaceApi.catalog).mockRejectedValueOnce(new WorkspaceApiError(0,'workspace_unreachable'));
+    await click('Visits and notes');await click('Settings');
+    expect(container.querySelector('.workspace-error-banner')).toBeNull();
+  });
+  it('keeps an unconfirmed save recoverable after dismissing its banner and never offers a general write retry',async()=>{
+    await click('Choose an encounter');await input('Jotted notes','Retained invented notes');
+    vi.mocked(workspaceApi.append).mockRejectedValueOnce(new WorkspaceApiError(0,'workspace_unreachable'));
+    await click('Save notebook revision');
+    const banner=container.querySelector('.workspace-error-banner')!;
+    expect(banner.textContent).not.toContain('Try again');
+    await click('Dismiss');expect(container.querySelector('.workspace-error-banner')).toBeNull();
+    expect(container.textContent).toContain('Retry same save');
+    expect(workspaceApi.append).toHaveBeenCalledOnce();
+  });
   it.each([false,true])('keeps account recovery scoped to the owner after notebook navigation (scope changed: %s)',async scopeChanged=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
     let release!:(value:ProviderTeam)=>void,held=false;
@@ -228,7 +297,7 @@ describe("private encounter workspace", () => {
     expect(workspaceApi.append).toHaveBeenCalledOnce();
     expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Invented working text retained through reconnect.');
     if(kind==='protocol pause')expect(container.querySelector('.team-banner.error')).toBeNull();
-    else expect(container.querySelector('.team-banner.error')?.textContent).toBe(failure.message);
+    else expect(container.querySelector('.team-banner.error p')?.textContent).toBe(failure.message);
     if(kind==='conflict')expect(container.textContent).toContain('Your text has not been overwritten');
     else{
       expect(container.textContent).toContain('previous save is unconfirmed');

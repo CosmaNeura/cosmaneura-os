@@ -217,7 +217,8 @@ export type AppendInput = {
 
 export class WorkspaceApiError extends Error {
   constructor(public status: number, public code?: string) {
-    super(status === 503 && code === "workspace_protocol_required" ? "The workspace connection is paused. Retry the connection to continue. Your saved work is retained." :
+    super(code === 'workspace_unreachable' ? "Cosmas can’t reach your workspace service right now. Check the connection and try again." :
+      status === 503 && code === "workspace_protocol_required" ? "The workspace connection is paused. Retry the connection to continue. Your saved work is retained." :
       code === "workspace_recovery_unavailable" ? "The workspace service could not confirm private draft recovery. Existing drafts are retained. Recheck recovery before continuing." :
       code === "handoff_source_context_too_large" ? "The selected sources are too large for a complete team handoff. Your recording and saved notes are retained. Select fewer saved sources before asking Chief to delegate." :
       code === "handoff_source_contract_unavailable" ? "Team handoffs need the source-reading tools enabled for this request. Your recording and saved notes are retained. Check Chief’s tools before preparing a new assignment." :
@@ -386,6 +387,11 @@ function legacyPracticeWork(value: PracticeWorkEntry): PracticeWorkItem {
 }
 
 export const workspaceApi = {
+  async checkSyntheticConnection():Promise<void> {
+    if(WORKSPACE_AUTHENTICATED_BUILD)throw new WorkspaceApiError(401);
+    const result=await request<{status:string;env:string}>('/health');
+    if(result.status!=='ok'||result.env!=='synth_os')throw new WorkspaceApiError(503);
+  },
   privateDraftSummaries:(identity:AuthenticatedWorkspaceIdentity)=>privateDraftRequest<NotebookSummaries>(identity,'/workspaces/private-drafts/summary',undefined,validNotebookSummaries),
   renameNotebook:(identity:AuthenticatedWorkspaceIdentity,workspaceId:string,body:NotebookRename)=>{
     if(!teamUuid(workspaceId)||!validNotebookRename(body))throw new WorkspaceApiError(422);

@@ -311,9 +311,9 @@
 .workspace-markdown h1,.workspace-markdown h2,.workspace-markdown h3 { font-size:17px; margin:16px 0 8px; }
 .workspace-markdown li { margin-bottom:6px; }
 .workspace-markdown a { color:#24573c; text-decoration:underline; }
-.workspace-dialog-backdrop { position:fixed; inset:0; z-index:30; display:grid; place-items:center; padding:20px; background:#152b2380; }
-.workspace-dialog { width:min(520px,100%); max-height:85dvh; overflow:auto; background:#fffdf7; border:1px solid var(--team-line); border-radius:16px; padding:24px; box-sizing:border-box; box-shadow:0 18px 60px #172f2330; }
-.workspace-dialog button { margin:6px 8px 0 0; }
+.workspace-dialog-backdrop { position:fixed; inset:0; z-index:80; display:grid; place-items:center; padding:calc(20px + env(safe-area-inset-top,0px)) calc(20px + env(safe-area-inset-right,0px)) calc(20px + env(safe-area-inset-bottom,0px)) calc(20px + env(safe-area-inset-left,0px)); background:#152b2380; }
+.workspace-dialog { width:min(520px,100%); max-height:min(85dvh,calc(100dvh - 40px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px))); overflow:auto; background:#fffdf7; border:1px solid var(--team-line); border-radius:16px; padding:24px; box-sizing:border-box; box-shadow:0 18px 60px #172f2330; }
+.workspace-dialog button { min-height:44px; margin:6px 8px 0 0; }
 .private-draft-link input[type=search] { display:block; width:100%; box-sizing:border-box; padding:10px; border:1px solid var(--team-line); border-radius:8px; }
 @media (max-width:700px) {
   .team-topbar { position:static; padding:10px 16px; }
@@ -346,9 +346,29 @@
 .practice-invitations form { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }.practice-invitations label { display:flex; flex-direction:column; gap:6px; }.practice-invitations form label:first-child { flex:1; }
 .practice-invitations li { padding:10px 0; }.practice-invitations button { min-height:44px; margin:6px; }
 .connection-service-summary div { display:flex; justify-content:space-between; gap:12px; }.connection-service-summary dt { font-weight:600; }.connection-service-summary dd { margin:0; }
+.team-nav-icon,.team-phone-preview,.team-phone-notebook-return,.team-phone-account-controls { display:none; }
+.workspace-error-banner p { margin:0; }
+.workspace-error-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:10px; }
+.team-workspace .workspace-error-actions button { min-height:44px; padding:8px 14px; }
 @media (max-width:600px) {
-  .team-workspace .practice-navigation { flex-wrap:wrap; overflow:visible; }
-  .team-workspace .practice-navigation .team-nav-item { flex:1 1 auto; white-space:normal; text-align:center; }
+  .team-workspace .team-sidebar { position:sticky; top:env(safe-area-inset-top,0px); z-index:20; overflow:visible; max-height:none; }
+  .team-workspace .team-brand { display:flex; align-items:center; margin:0; gap:4px; }
+  .team-workspace .team-brand .team-logo { margin-right:4px; }
+  .team-phone-preview { display:block; margin-left:auto; font-size:.75rem; font-weight:400; letter-spacing:0; color:var(--team-muted); }
+  .team-phone-account-controls { display:flex; align-items:center; gap:6px; font-size:.875rem; }
+  .team-workspace .team-roster-heading { display:none; }
+  .team-workspace .practice-navigation { position:fixed; inset:auto 0 0; z-index:30; display:grid; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); gap:0; margin:0; padding:4px env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px); border-top:1px solid var(--team-line); background:#f2f1e8; overflow:visible; }
+  .team-workspace .practice-navigation .team-nav-item { display:flex; flex-direction:column; align-items:center; justify-content:center; gap:4px; width:100%; min-width:0; min-height:64px; padding:6px 4px; border:0; border-radius:0; white-space:normal; overflow-wrap:anywhere; text-align:center; font-size:.75rem; line-height:1.25; }
+  .team-workspace .practice-navigation .team-nav-secondary { display:none; }
+  .team-workspace .team-nav-icon { display:block; flex:none; width:22px; height:22px; }
+  .team-workspace .team-phone-notebook-return { display:block; min-height:44px; margin:12px 0; }
+  .team-workspace .team-main { padding-bottom:calc(var(--workspace-nav-height,80px) + 16px); }
+  .team-workspace .team-topbar { display:none; }
+  .team-workspace:not([data-page="notebook"]) .team-roster,.team-workspace:not([data-page="notebook"]) .team-roster-heading { display:none; }
+  .team-workspace .team-roster { grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); grid-template-columns:none; margin-top:10px; }
+  .team-workspace .team-roster strong { font-size:.75rem; overflow-wrap:anywhere; }
+  .team-workspace[data-recording-focused="true"] .practice-navigation { display:none; }
+  .team-workspace .workspace-execution-proof { display:none; }
 }
 
 /* A view switch changes presentation over the same notebook and operation. */

@@ -25,23 +25,7 @@ body {
   padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
     env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
 }
-body::before, body::after {
-  content: "";
-  position: fixed;
-  left: 0;
-  right: 0;
-  z-index: 1000;
-  background: Canvas;
-  pointer-events: none;
-}
-body::before {
-  top: 0;
-  height: env(safe-area-inset-top, 0px);
-}
-body::after {
-  bottom: 0;
-  height: env(safe-area-inset-bottom, 0px);
-}
+body:has(.team-workspace) { background: #faf8f2; }
 button, input, textarea {
   font: inherit;
 }

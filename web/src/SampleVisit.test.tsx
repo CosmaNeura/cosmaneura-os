@@ -34,7 +34,10 @@ it('shows actual prepared agenda, research reference and editable follow-up arti
   await click('Try a sample');await act(async()=>host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());await click('See the sample handoffs');
   expect(host.querySelectorAll('.sample-visit-tasks ol li')).toHaveLength(4);expect(host.querySelector('.sample-visit-tasks a')?.getAttribute('href')).toContain('nhlbi.nih.gov');
   const followup=host.querySelector<HTMLTextAreaElement>('#sample-follow-up')!;expect(followup.value).toContain('one-week sleep diary');
+  expect(host.textContent).toContain('One step left: check the follow-up message above.');expect(host.textContent).not.toContain('Sample review complete.');
   const checked=host.querySelector<HTMLInputElement>('.sample-visit-tasks input')!;await act(async()=>checked.click());expect(host.textContent).toContain('Sample message reviewed.');
+  expect(host.textContent).toContain('Sample review complete.');
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(followup,'Changed sample message');followup.dispatchEvent(new Event('input',{bubbles:true}));});expect(checked.checked).toBe(false);
+  expect(host.textContent).toContain('One step left: check the follow-up message above.');expect(host.textContent).not.toContain('Sample review complete.');
   expect(fetch).not.toHaveBeenCalled();for(const callback of Object.values(callbacks))expect(callback).not.toHaveBeenCalled();
 });
