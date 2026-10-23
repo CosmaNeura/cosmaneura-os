@@ -1,3 +1,4 @@
+import type {InboxDraftSelection} from '../inbox-analysis-contract';
 import type {PrivateRecordingEntry,SessionSavedRecording,RecordingCatalog} from './recording-model';
 import type {SetupProjection,SetupReview} from '../team-setup-request';
 import type {ClinicalNoteShareReceipt,ShareSavedNoteInput} from '../clinical-team-contract';
@@ -25,6 +26,18 @@ export type ChiefNoteTask = {
 export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
 
 export type WorkspaceSessionState = {
+  settingsOpen:boolean;
+  practicePage:'home'|'visits'|'notebook';
+  practiceOpen:boolean;
+  practiceOpened:boolean;
+  selected:string;
+  panel:string;
+  mobilePanel:string;
+  stage:string;
+  entryIntent:'record'|'recording'|'chief'|'fax'|null;
+  researchEntry:boolean;
+  settingsEntry:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';
+  inboxSelection:InboxDraftSelection|null;
   privateRecordingBusy:boolean;
   privateRecordingEntry:PrivateRecordingEntry|null;
   savedRecordingEntry:SessionSavedRecording|null;

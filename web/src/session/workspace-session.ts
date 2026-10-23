@@ -1,3 +1,4 @@
+import {WorkspaceNavigation,type NavigationDependencies} from './navigation';
 import {WorkspaceRecording,type RecordingDependencies} from './recording';
 import {WorkspaceClinical,type ClinicalDependencies} from './clinical';
 import {WorkspaceLoading,type LoadingDependencies} from './loading';
@@ -23,7 +24,8 @@ export class WorkspaceSession {
   readonly team:WorkspaceTeam;
   readonly clinical:WorkspaceClinical;
   readonly recording:WorkspaceRecording;
-  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
+  readonly navigation:WorkspaceNavigation;
+  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
     this.saves=new WorkspaceSaves(this,deps.saves);
@@ -32,8 +34,11 @@ export class WorkspaceSession {
     this.team=new WorkspaceTeam(this,deps.teamRead);
     this.clinical=new WorkspaceClinical(this,deps.clinical);
     this.recording=new WorkspaceRecording(this,deps.recording);
+    this.navigation=new WorkspaceNavigation(this,deps.navigation);
+    this.setPracticePage(deps.initialPage??'visits');
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
+    settingsOpen:false,practicePage:'visits',practiceOpen:false,practiceOpened:false,selected:'visit_prep',panel:'Notebook',mobilePanel:'Conversation',stage:'Before',entryIntent:null,researchEntry:false,settingsEntry:'home',inboxSelection:null,
     privateRecordingBusy:false,privateRecordingEntry:null,savedRecordingEntry:null,savedRecordingNotebook:null,privateRecordings:null,privateRecordingListEpoch:0,privateRecordingRequest:0,
     clinicalPreparing:false,homeBusy:false,setupApproval:null,setupProjection:null,setupEpoch:0,confirmTeamExit:false,teamSaveExit:false,
     identity:null,connectionError:null,busy:false,pending:null,conflict:false,
@@ -52,6 +57,18 @@ export class WorkspaceSession {
     return ()=>{this.listeners.delete(listener);};
   };
 
+  readonly setSettingsOpen = this.setter('settingsOpen');
+  readonly setPracticePage = this.setter('practicePage');
+  readonly setPracticeOpen = this.setter('practiceOpen');
+  readonly setPracticeOpened = this.setter('practiceOpened');
+  readonly setSelected = this.setter('selected');
+  readonly setPanel = this.setter('panel');
+  readonly setMobilePanel = this.setter('mobilePanel');
+  readonly setStage = this.setter('stage');
+  readonly setEntryIntent = this.setter('entryIntent');
+  readonly setResearchEntry = this.setter('researchEntry');
+  readonly setSettingsEntry = this.setter('settingsEntry');
+  readonly setInboxSelection = this.setter('inboxSelection');
   readonly setPrivateRecordingBusy = this.setter('privateRecordingBusy');
   readonly setPrivateRecordingEntry = this.setter('privateRecordingEntry');
   readonly setSavedRecordingEntry = this.setter('savedRecordingEntry');

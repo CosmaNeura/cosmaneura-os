@@ -3,15 +3,34 @@ import {describe,expect,it,vi} from 'vitest';
 import type {AuthenticatedWorkspaceIdentity,ProviderTeam,Workspace} from '../workspace-api';
 import {WorkspaceApiError} from '../workspace-api';
 import {WorkspaceSession} from './workspace-session';
-import type {RefreshContext} from './loading';
+import type {RefreshContext,OpenContext} from './loading';
 
 const workspace:Workspace={id:'00000000-0000-4000-8000-000000000031',label:'Invented visit',appointment_id:null,revision:3,entries:[],work_candidates:[]};
 const team:ProviderTeam={revision:1,recovery_scope:'a'.repeat(64),template_version:'provider-team-v1',llm:{enabled:false,model:'gpt-4.1'},configuration:{practice_context:'DPC',bots:[{role:'chief',name:'Chief',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}]},members:[]};
 const authenticated:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null};
 function context():RefreshContext{return {authenticated,failure:vi.fn(),recoverAfterRead:vi.fn(async()=>{}),prepareRecovery:vi.fn(async()=>{}),recordingBlocked:false,invalidateSetup:vi.fn(),invalidatePrep:vi.fn()};}
 function opened(session:WorkspaceSession){session.setIdentity(authenticated);session.setWorkspace(workspace);session.setTeam(team);session.setTeamDraft(team.configuration);}
+function openContext():OpenContext{return {...context(),locked:false,captureNavigationLocked:false,captureDraftLocked:false,hasUnsavedWork:()=>false,begin:vi.fn(),resetCapture:vi.fn(),focusChief:vi.fn(),focusFax:vi.fn(),showResearch:vi.fn(),afterOpen:vi.fn(),retryRead:vi.fn(async()=>{})};}
 
 describe('shared workspace loading',()=>{
+  it('does not replay a notebook-opening write through a general retry',async()=>{
+    const open=vi.fn().mockRejectedValue(new Error('Lost response')),session=new WorkspaceSession({loading:{open}}),host=openContext();
+    await session.loading.open(host,'invented-appointment');
+    expect(open).toHaveBeenCalledOnce();expect(host.failure).toHaveBeenCalledWith(expect.any(Error),host.retryRead);
+    await host.retryRead();expect(open).toHaveBeenCalledOnce();
+  });
+  it('drops a late notebook open after identity invalidation',async()=>{
+    let finish!:(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>void;
+    const session=new WorkspaceSession({loading:{open:()=>new Promise(resolve=>{finish=resolve;})}}),host=openContext();
+    const opening=session.loading.open(host,'invented-appointment');session.clear();finish({identity:authenticated,workspace,team});await opening;
+    expect(session.getSnapshot()).toMatchObject({identity:null,workspace:null});expect(host.recoverAfterRead).not.toHaveBeenCalled();
+  });
+  it('preserves edited team settings while opening a saved visit',async()=>{
+    const session=new WorkspaceSession({loading:{open:async()=>({identity:authenticated,workspace,team})}});opened(session);
+    const draft={...team.configuration,practice_context:'Invented unsaved edit'};session.setTeamDraft(draft);session.setEntryIntent('chief');
+    const host=openContext();await session.loading.open(host,'invented-appointment');
+    expect(session.getSnapshot()).toMatchObject({teamDraft:draft,selected:'chief',practicePage:'notebook'});expect(host.focusChief).toHaveBeenCalledWith(workspace.id,1);
+  });
   it('refreshes saved history without replacing working text or team edits',async()=>{
     const latest={...workspace,revision:4},latestTeam={...team,revision:2};
     const session=new WorkspaceSession({loading:{read:async()=>latest,team:async()=>latestTeam}});opened(session);

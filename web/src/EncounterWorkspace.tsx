@@ -30,7 +30,6 @@ import {RecordingVisitPanel} from './RecordingVisitPanel';
 import {PrivateDraftLinkPanel} from './PrivateDraftLinkPanel';
 import {SavedRecordingTranscriptionPanel} from './SavedRecordingTranscriptionPanel';
 import {ChiefStartActions,InitialTeamAction} from './ChiefStartActions';
-import {coreConnectionApi} from './core-connection-api';
 import type {CoreConnectionCommand} from './core-connection-contract';
 import { CoreConnectionPanel, CORE_CONNECTION_BUILD, CONNECTION_ONBOARDING_BUILD } from "./CoreConnectionPanel";
 import { setupChange, validTeamConfiguration, type SetupProjection } from "./team-setup-request";
@@ -117,18 +116,15 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   practiceAccess?:PracticeAccessContext;
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
-  const [session]=useState(()=>new WorkspaceSession());
-  const {privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
+  const [session]=useState(()=>new WorkspaceSession({initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
+  const {settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
     workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
-  const {setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setIdentity,setConnectionError,setBusy,setConflict,setMessage,setError,generation,
+  const {setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setIdentity,setConnectionError,setBusy,setConflict,setMessage,setError,generation,
     setWorkspace,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
-  const [inboxSelection,setInboxSelection]=useState<InboxDraftSelection|null>(null);
   const [inboxNavigation,setInboxNavigation]=useState<{selection:InboxDraftSelection;identity:WorkspaceIdentity;generation:number}|null>(null);
   const inboxNavigationConsumed=useRef<object|null>(null);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [practicePage,setPracticePage]=useState<"home"|"visits"|"notebook">(authenticated?"home":"visits");
   const [recordingMinimized,setRecordingMinimized]=useState(false);
   const savedRecordingHost=useRef<HTMLDivElement>(null);
   const recordingHome=useRef<HTMLDivElement|null>(null),recordingHost=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
@@ -142,7 +138,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
-  const [settingsEntry,setSettingsEntry]=useState<'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'>('home');
   const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const [activityProof,setActivityProof] = useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number;context:AiActivityContext}|null>(null);
@@ -159,8 +154,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
   const viewNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy || clinicalPreparing;
   const connectionNavigationLocked = !!privateRecordingEntry || privateRecordingBusy || viewNavigationLocked;
-  const [practiceOpen, setPracticeOpen] = useState(false);
-  const [practiceOpened, setPracticeOpened] = useState(false);
   const sidebar=useRef<HTMLElement>(null),navigation=useRef<HTMLElement>(null);
   const [navigationHeight,setNavigationHeight]=useState(80);
   useLayoutEffect(()=>{
@@ -193,9 +186,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[privateRecordingEntry,recordingMinimized]);
   const [captureNavigationLocked, setCaptureNavigationLocked] = useState(false);
   const [scribeRecordingOpen,setScribeRecordingOpen]=useState(false);
-  const [selected, setSelected] = useState<string>("visit_prep");
-  const [researchEntry,setResearchEntry]=useState(false);
-  const [entryIntent,setEntryIntent]=useState<"record"|"recording"|"chief"|"fax"|null>(null);
   const faxWorkRef=useRef<HTMLDivElement|null>(null);
   const [focusFaxWork,setFocusFaxWork]=useState(false);
   const notebookRef=useRef<HTMLTextAreaElement|null>(null);
@@ -203,12 +193,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [questionFocus,setQuestionFocus]=useState(0);
   const [recordingSourceRequest,setRecordingSourceRequest]=useState(0);
   const [savedResearchChat,setSavedResearchChat]=useState(false);
-  const [stage, setStage] = useState("Before");
-  const [panel, setPanel] = useState("Notebook");
   const materialRef=useRef<HTMLDivElement>(null);
   const materialScroll=useRef<Record<string,number>>({});
   const [briefViewed,setBriefViewed]=useState<{workspace:string;owner:AuthenticatedWorkspaceIdentity;teamRevision:number;at:string}|null>(null);
-  const [mobilePanel, setMobilePanel] = useState("Conversation");
   const conversationHeaderRef=useRef<HTMLElement|null>(null);
   const [teamWorkExpanded,setTeamWorkExpanded]=useState(()=>!phoneLayout());
   const [phoneChatToolsOpen,setPhoneChatToolsOpen]=useState(false);
@@ -239,7 +226,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [observedCaptureDraft, setObservedCaptureDraft] = useState<CaptureDraft | null>(null);
   const [captureRequest, setCaptureRequest] = useState(0);
   const [confirmCaptureExit, setConfirmCaptureExit] = useState(false);
-  const {journal,scheduledDraftSave,draftsSuspended}=session.recovery;
+  const {journal,draftsSuspended}=session.recovery;
   useLayoutEffect(()=>{recoveredConnection.current={identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0};setConnectionError(null);},[authenticated]);
   useEffect(()=>{
     if(!authenticated||connectionRecovery?.identity!==authenticated||recoveredConnection.current.identity!==authenticated||
@@ -431,7 +418,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     return () => { cancelled = true; clearTimeout(timer);controller?.abort();removeNative?.();document.removeEventListener('visibilitychange',visibility);window.removeEventListener?.('focus',foreground); };
   }, [workspace, identity, authenticated, busy, pending, conflict, handoffReviewPending]);
 
-  function checkRecoveryOwner(value:ProviderTeam){session.recovery.checkOwner(authenticated,value);}
   function recoveryRead(value:ProviderTeam,currentWorkspace:Workspace|null,current:number,reloadParent=false){
     return {authenticated,team:value,workspace:currentWorkspace,generation:current,reloadParent,
       apiBase:import.meta.env.VITE_API_BASE||'http://127.0.0.1:8000',
@@ -505,17 +491,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   function recheckSyntheticConnection(){
     return session.lifecycle.recheckSyntheticConnection(lifecycleContext(),connectionNavigationLocked||captureNavigationLocked||captureDraftLocked);
   }
-  function goHome(){
-    routeSequence.current++;routeApplying.current=false;routeReady.current=true;
-    if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
-    setRecordingMinimized(true);
-    void scheduledDraftSave.current?.run().catch(()=>{});
-    leaveTeamSettings(()=>{clearPageError();setSettingsOpen(false);setPracticeOpen(false);setPracticePage('home');});
-  }
-  function clearPageError(){if(!pending&&!conflict&&recoveryState!=='failed'&&!hasUnsavedWork())setError('');}
-  function goNotebook(){
-    leaveTeamSettings(()=>{routeSequence.current++;routeApplying.current=false;routeReady.current=true;clearPageError();setRecordingMinimized(true);setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');});
-  }
+  function navigationContext():import('./session/navigation').NavigationContext{return {...loadingContext(),viewNavigationLocked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,minimizeRecording:()=>setRecordingMinimized(true),hasUnsavedWork,replaceRoute:target=>history.replaceState(history.state,'',workspaceRouteHash(target)),openPrivateNotebook,loadEncounters,currentTeam};}
+  function goHome(){session.navigation.goHome(navigationContext());}
+  function clearPageError(){session.navigation.clearPageError({hasUnsavedWork});}
+  function goNotebook(){session.navigation.goNotebook(navigationContext());}
   function openPrivateNotebook(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam},view:'default'|'notebook'='default'){
     return session.loading.openPrivate(result,{authenticated,recoverAfterRead,beforeOpen:()=>setSavedRecordingEntry(null),show:current=>{
       setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(0);setRecordingSourceRequest(0);
@@ -532,75 +511,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       currentNavigation:()=>routeSequence.current,refreshRecordings:()=>setPrivateRecordingListEpoch(value=>value+1),
       show:()=>{setPracticePage('visits');setSettingsOpen(false);setPracticeOpen(false);}});
   }
-  async function open(appointmentId?: string, coreSelection?: CoreConnectionCommand, incoming?:InboxDraftSelection, recordVisit = false) {
-    if (pending || busy || privateRecordingEntry || privateRecordingBusy) {if(privateRecordingEntry)setError('Stop and save your recording before opening another notebook.');return;}
-    if ((coreSelection || incoming) && (locked || captureNavigationLocked || captureDraftLocked || hasUnsavedWork())) {
-      setError('Save or recover unfinished work before opening a notebook. Your text and requests are retained.'); return;
-    }
-    recordVisit = recordVisit || !incoming && entryIntent === "record";
-    const useRecording = !recordVisit && !incoming && entryIntent === "recording";
-    const startChief = !recordVisit && !useRecording && !incoming && entryIntent === "chief";
-    const startFax = !recordVisit && !useRecording && !incoming && entryIntent === "fax";
-    chiefNotebookFocus.current=null;
-    const preserveTeamDraft = !!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft);
-    const current = ++generation.current; setBusy(true); setError(""); setMessage("");
-    try {
-      let selected: {workspace_id:string;appointment_id:string}|undefined;
-      if (coreSelection) {
-        if (!authenticated) throw new WorkspaceApiError(401);
-        const opened = await coreConnectionApi.read(authenticated,coreSelection);
-        if (current !== generation.current) return;
-        if (!opened.workspace) throw new WorkspaceApiError(502);
-        selected = opened.workspace;
-      }
-      const result = incoming && authenticated ? {identity:authenticated,workspace:await workspaceApi.read(authenticated,incoming.workspace_id),team:await workspaceApi.team(authenticated)} : authenticated ? selected ? await workspaceApi.openExisting(authenticated,selected) : await workspaceApi.open(authenticated, appointmentId) : await workspaceApi.open();
-      if (current !== generation.current) return;
-      checkRecoveryOwner(result.team);
-      if(incoming&&(result.workspace.id!==incoming.workspace_id||result.workspace.revision!==incoming.expected_revision))throw new WorkspaceApiError(409,'source_changed');
-      setInboxSelection(incoming??null);
-      if(incoming){
-        const coworker=result.team.configuration.bots.find(b=>b.role==='custom'&&b.skills?.includes('inbox_review')&&b.enabled&&!b.retired&&!b.blocked_capabilities?.includes('model_answer'));
-        if(coworker)setSelected(botAddress(coworker));
-        setPracticeOpen(false);setMobilePanel('Conversation');
-      }
-      setIdentity(result.identity); setWorkspace(result.workspace); setTeam(result.team);setPracticePage("notebook");
-      setPreviousModelRequest(null);
-      setThought('');setEvidence('');setSource('');setModelObservation(null);setReplacementDraft(null);setModelHashes({});
-      setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(recordVisit ? 1 : 0);setRecordingSourceRequest(useRecording?1:0);setEntryIntent(null);setStage('Before');setPanel('Notebook');
-      if (recordVisit || useRecording) {
-        const recorder = result.team.configuration.bots.find(item => item.role === "scribe" && !item.retired && !item.instance_id);
-        if (recorder) setSelected(botAddress(recorder));
-        setMobilePanel("Notebook");
-      }
-      if(startChief){
-        const chief=result.team.configuration.bots.find(item=>item.role==='chief'&&!item.instance_id&&!item.retired);
-        if(chief){setSelected(botAddress(chief));chiefNotebookFocus.current={workspace:result.workspace.id,generation:current};}
-        else setMessage('Chief is not available on this team. Your notebook is still available.');
-        setMobilePanel('Notebook');
-      }
-      if(startFax){setPanel('Work');setMobilePanel('Work');setFocusFaxWork(true);}
-      if (researchEntry && !recordVisit && !useRecording && !incoming) {
-        const researcher=result.team.configuration.bots.find(item=>item.role==='research'&&!item.retired);
-        if(researcher){setSelected(botAddress(researcher));setMobilePanel('Conversation');setSavedResearchChat(false);}
-        else setMessage('Research is not on this team yet. Add it in Team settings.');
-      }
-      if (!preserveTeamDraft) setTeamDraft(structuredClone(result.team.configuration));
-      setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
-      setSettingsOpen(false);
-      await recoverAfterRead(result.team, result.workspace, current);
-      if(googleVisitSelection.current&&current===generation.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}
-    } catch (cause) { if (current === generation.current) {
-      // Opening can seed a demo or create a notebook. A general Retry must only
-      // recheck the service or saved history; exact writes keep their own UI.
-      failure(cause,authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection);
-      if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
-        setError('The Scribe recording does not match this visit’s notebook. Ask your practice administrator to review the match.');
-      else if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_scribe_encounter_unavailable')
-        setError('Scribe encounters could not be loaded. Try again, or open your saved visit from the encounter list.');
-      else if (coreSelection && !(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status)))
-        setError('The notebook could not be confirmed. View your appointments and select it again; an existing notebook will be reused.');
-    } }
-    finally { if (current === generation.current) setBusy(false); }
+  function open(appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false){
+    return session.loading.open({...loadingContext(),locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,
+      begin:()=>{chiefNotebookFocus.current=null;},resetCapture:(record,useRecording)=>{setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(record?1:0);setRecordingSourceRequest(useRecording?1:0);},
+      focusChief:(workspace,generation)=>{chiefNotebookFocus.current={workspace,generation};},focusFax:()=>setFocusFaxWork(true),showResearch:()=>setSavedResearchChat(false),
+      afterOpen:()=>{if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}},
+      retryRead:authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection,
+    },appointmentId,coreSelection,incoming,recordVisit);
   }
   function saveContext():import('./session/saves').SaveContext {
     const savedRecordingForSave=savedRecordingEntry;
@@ -634,25 +551,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     invalidateSetup:()=>{setSetupApproval(null);setSetupEpoch(value=>value+1);},invalidatePrep:()=>setPrepEpoch(value=>value+1)});}
   function refreshHandoffReview(){return session.loading.refreshHandoff({authenticated,failure,blocked:captureNavigationLocked||captureDraftLocked||recoveryBlocked});}
   function recheckRecovery(){return session.loading.recheckRecovery(loadingContext());}
-  async function openSettings(entry:'home'|'connections'|'core'='home') {
-    if (viewNavigationLocked) return;
-    clearPageError();
-    routeSequence.current++;routeApplying.current=false;routeReady.current=true;
-    if(settingsOpen&&entry!==settingsEntry&&team&&teamDraft&&teamConfigurationChanged(team.configuration,teamDraft)){leaveTeamSettings(()=>{setSettingsEntry(entry);setPracticeOpen(false);setSettingsOpen(true);});return;}
-    setRecordingMinimized(true);
-    setSettingsEntry(entry); setPracticeOpen(false); setSettingsOpen(true);
-    if (team && teamDraft) return;
-    const access = authenticated || identity;
-    if (!access) return;
-    const current = generation.current; setBusy(true); setError("");
-    try {
-      const value = await workspaceApi.team(access);
-      if (current !== generation.current) return;
-      setTeam(value); setTeamDraft(structuredClone(value.configuration));
-      await recoverAfterRead(value, null, current);
-    } catch (cause) { if (current === generation.current) failure(cause,()=>openSettings(entry)); }
-    finally { if (current === generation.current) setBusy(false); }
-  }
+  function openSettings(entry:'home'|'connections'|'core'='home'){return session.navigation.openSettings(navigationContext(),entry);}
   async function refreshRoutineTeam(){await session.team.refresh({authenticated,failure});currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function receiveSetupTeam(value:ProviderTeam,projection:SetupProjection){session.team.receive(value,{authenticated},projection);currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function saveTeam(){void session.team.save(saveContext());}
@@ -749,34 +648,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setDraftNoteIntent(null);
     if(workspace?.id===draftNoteIntent.workspaceId&&latestNote===draftNoteIntent.content&&!pending&&!conflict&&!recoveryBlocked)requestScribeDraft();
   },[draftNoteIntent,busy,workspace?.revision,pending,conflict,recoveryBlocked]);
-  const routeReady=useRef(!readWorkspaceRoute(window.location.hash)),routeApplying=useRef(false),routeSequence=useRef(0);
-  const route=():WorkspaceRoute=>({page:practiceOpen?'work':settingsOpen?'settings':practicePage,
-    ...(practicePage==='notebook'&&workspace?{workspaceId:workspace.id,helper:selected,material:mobilePanel}:{})});
-  async function applyRoute(target:WorkspaceRoute){
-    if(settingsOpen&&target.page!=='settings'&&team&&teamDraft&&teamConfigurationChanged(team.configuration,teamDraft)){history.replaceState(history.state,'',workspaceRouteHash(route()));leaveTeamSettings(()=>void applyRoute(target));return;}
-    const routeToken=++routeSequence.current;routeApplying.current=true;
-    try{
-      if(target.page==='notebook'&&target.workspaceId!==workspace?.id){
-        if(!authenticated||busy||pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)throw new Error('Retained operation');
-        await scheduledDraftSave.current?.run();
-        const current=generation.current,latest=await workspaceApi.read(authenticated,target.workspaceId!);
-        if(current!==generation.current||routeToken!==routeSequence.current)return;
-        const latestTeam=await workspaceApi.team(authenticated);if(current!==generation.current||routeToken!==routeSequence.current)return;
-        await openPrivateNotebook({identity:authenticated,workspace:latest,team:latestTeam});
-      }
-      if(target.page==='home')goHome();
-      else if(target.page==='visits')await loadEncounters();
-      else if(target.page==='settings')await openSettings();
-      else if(target.page==='work'){setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);}
-      else if(target.page==='notebook'){
-        setPracticePage('notebook');setPracticeOpen(false);setSettingsOpen(false);
-        if(target.helper&&(currentTeam.current??team)?.configuration.bots.some(bot=>botAddress(bot)===target.helper))setSelected(target.helper);
-        if(target.material){setMobilePanel(target.material);if(target.material!=='Conversation')setPanel(target.material);}
-      }
-    }catch(cause){if(routeToken!==routeSequence.current)return;setError('Finish or recover the current action before opening another notebook. Your text is retained.');
-      if(cause instanceof WorkspaceApiError)failure(cause);history.replaceState(history.state,'',workspaceRouteHash(route()));}
-    finally{if(routeToken===routeSequence.current){routeApplying.current=false;routeReady.current=true;}}
-  }
+  const {ready:routeReady,applying:routeApplying,sequence:routeSequence,route}=session.navigation;
+  function applyRoute(target:WorkspaceRoute){return session.navigation.applyRoute(target,navigationContext());}
   useEffect(()=>{
     if(!team||recoveryBlocked||routeReady.current||routeApplying.current)return;
     const target=readWorkspaceRoute(window.location.hash);if(target)void applyRoute(target);else routeReady.current=true;

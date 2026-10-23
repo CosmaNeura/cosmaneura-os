@@ -1,9 +1,13 @@
+import {coreConnectionApi} from '../core-connection-api';
+import type {CoreConnectionCommand,CoreConnectionResult} from '../core-connection-contract';
+import type {InboxDraftSelection} from '../inbox-analysis-contract';
 import {teamConfigurationChanged} from '../team-configuration-diff';
-import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from '../workspace-api';
+import {workspaceApi,WorkspaceApiError,botAddress,type AuthenticatedWorkspaceIdentity,type WorkspaceIdentity,type ProviderTeam,type Workspace} from '../workspace-api';
 import type {WorkspaceSession} from './workspace-session';
 
-type LoadingApi=Pick<typeof workspaceApi,'read'|'team'|'catalog'>;
-export type LoadingDependencies=Partial<LoadingApi>;
+type LoadingApi=Pick<typeof workspaceApi,'read'|'team'|'catalog'|'open'|'openExisting'>;
+type CoreRead=(identity:WorkspaceIdentity,command:CoreConnectionCommand)=>Promise<CoreConnectionResult>;
+export type LoadingDependencies=Partial<LoadingApi>&{coreRead?:CoreRead};
 export type LoadingContext={
   authenticated?:AuthenticatedWorkspaceIdentity;
   failure:(cause:unknown,retry?:()=>Promise<void>)=>void;
@@ -17,11 +21,93 @@ export type RefreshContext=LoadingContext&{
 };
 export type OpenedNotebook={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam};
 
+export type OpenContext=LoadingContext&{
+  locked:boolean;captureNavigationLocked:boolean;captureDraftLocked:boolean;hasUnsavedWork:()=>boolean;
+  begin:()=>void;resetCapture:(recordVisit:boolean,useRecording:boolean)=>void;focusChief:(workspaceId:string,generation:number)=>void;focusFax:()=>void;showResearch:()=>void;afterOpen:()=>void;retryRead:()=>Promise<void>;
+};
+
 /** Reads publish only inside the initiating workspace and navigation lifetime. */
 export class WorkspaceLoading {
   private readonly api:LoadingApi;
+  private readonly coreRead:CoreRead;
   constructor(private readonly session:WorkspaceSession,deps:LoadingDependencies={}) {
-    this.api={read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),catalog:(...args)=>workspaceApi.catalog(...args),...deps};
+    this.coreRead=deps.coreRead??((...args)=>coreConnectionApi.read(...args));
+    this.api={open:(...args)=>workspaceApi.open(...args),openExisting:(...args)=>workspaceApi.openExisting(...args),read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),catalog:(...args)=>workspaceApi.catalog(...args),...deps};
+  }
+
+  async open(context:OpenContext,appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false){
+    const {team,teamDraft,busy,pending,privateRecordingEntry,privateRecordingBusy,entryIntent,researchEntry}=this.session.getSnapshot();
+    const {generation,setBusy,setError,setMessage,setInboxSelection,setSelected,setPracticeOpen,setMobilePanel,setIdentity,setWorkspace,setTeam,setPracticePage,setPreviousModelRequest,setThought,setEvidence,setSource,setModelObservation,setReplacementDraft,setModelHashes,setEntryIntent,setStage,setPanel,setTeamDraft,setNote,setSettingsOpen}=this.session;
+    const {authenticated,locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,recoverAfterRead,failure}=context;
+    const checkRecoveryOwner=(value:ProviderTeam)=>this.session.recovery.checkOwner(authenticated,value);
+    if (pending || busy || privateRecordingEntry || privateRecordingBusy) {if(privateRecordingEntry)setError('Stop and save your recording before opening another notebook.');return;}
+    if ((coreSelection || incoming) && (locked || captureNavigationLocked || captureDraftLocked || hasUnsavedWork())) {
+      setError('Save or recover unfinished work before opening a notebook. Your text and requests are retained.'); return;
+    }
+    recordVisit = recordVisit || !incoming && entryIntent === "record";
+    const useRecording = !recordVisit && !incoming && entryIntent === "recording";
+    const startChief = !recordVisit && !useRecording && !incoming && entryIntent === "chief";
+    const startFax = !recordVisit && !useRecording && !incoming && entryIntent === "fax";
+    context.begin();
+    const preserveTeamDraft = !!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft);
+    const current = ++generation.current; setBusy(true); setError(""); setMessage("");
+    try {
+      let selected: {workspace_id:string;appointment_id:string}|undefined;
+      if (coreSelection) {
+        if (!authenticated) throw new WorkspaceApiError(401);
+        const opened = await this.coreRead(authenticated,coreSelection);
+        if (current !== generation.current) return;
+        if (!opened.workspace) throw new WorkspaceApiError(502);
+        selected = opened.workspace;
+      }
+      const result = incoming && authenticated ? {identity:authenticated,workspace:await this.api.read(authenticated,incoming.workspace_id),team:await this.api.team(authenticated)} : authenticated ? selected ? await this.api.openExisting(authenticated,selected) : await this.api.open(authenticated, appointmentId) : await this.api.open();
+      if (current !== generation.current) return;
+      checkRecoveryOwner(result.team);
+      if(incoming&&(result.workspace.id!==incoming.workspace_id||result.workspace.revision!==incoming.expected_revision))throw new WorkspaceApiError(409,'source_changed');
+      setInboxSelection(incoming??null);
+      if(incoming){
+        const coworker=result.team.configuration.bots.find(b=>b.role==='custom'&&b.skills?.includes('inbox_review')&&b.enabled&&!b.retired&&!b.blocked_capabilities?.includes('model_answer'));
+        if(coworker)setSelected(botAddress(coworker));
+        setPracticeOpen(false);setMobilePanel('Conversation');
+      }
+      setIdentity(result.identity); setWorkspace(result.workspace); setTeam(result.team);setPracticePage("notebook");
+      setPreviousModelRequest(null);
+      setThought('');setEvidence('');setSource('');setModelObservation(null);setReplacementDraft(null);setModelHashes({});
+      context.resetCapture(recordVisit,useRecording);setEntryIntent(null);setStage('Before');setPanel('Notebook');
+      if (recordVisit || useRecording) {
+        const recorder = result.team.configuration.bots.find(item => item.role === "scribe" && !item.retired && !item.instance_id);
+        if (recorder) setSelected(botAddress(recorder));
+        setMobilePanel("Notebook");
+      }
+      if(startChief){
+        const chief=result.team.configuration.bots.find(item=>item.role==='chief'&&!item.instance_id&&!item.retired);
+        if(chief){setSelected(botAddress(chief));context.focusChief(result.workspace.id,current);}
+        else setMessage('Chief is not available on this team. Your notebook is still available.');
+        setMobilePanel('Notebook');
+      }
+      if(startFax){setPanel('Work');setMobilePanel('Work');context.focusFax();}
+      if (researchEntry && !recordVisit && !useRecording && !incoming) {
+        const researcher=result.team.configuration.bots.find(item=>item.role==='research'&&!item.retired);
+        if(researcher){setSelected(botAddress(researcher));setMobilePanel('Conversation');context.showResearch();}
+        else setMessage('Research is not on this team yet. Add it in Team settings.');
+      }
+      if (!preserveTeamDraft) setTeamDraft(structuredClone(result.team.configuration));
+      setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
+      setSettingsOpen(false);
+      await recoverAfterRead(result.team, result.workspace, current);
+      if(current===generation.current)context.afterOpen();
+    } catch (cause) { if (current === generation.current) {
+      // Opening can seed a demo or create a notebook. A general Retry must only
+      // recheck the service or saved history; exact writes keep their own UI.
+      failure(cause,context.retryRead);
+      if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
+        setError('The Scribe recording does not match this visit’s notebook. Ask your practice administrator to review the match.');
+      else if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_scribe_encounter_unavailable')
+        setError('Scribe encounters could not be loaded. Try again, or open your saved visit from the encounter list.');
+      else if (coreSelection && !(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status)))
+        setError('The notebook could not be confirmed. View your appointments and select it again; an existing notebook will be reused.');
+    } }
+    finally { if (current === generation.current) setBusy(false); }
   }
 
   async refresh(context:RefreshContext):Promise<void> {
