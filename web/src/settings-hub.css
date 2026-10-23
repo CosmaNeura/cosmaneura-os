@@ -35,7 +35,7 @@
 .connection-directory-status button { flex-shrink:0; }
 .connection-group { margin-top:22px; }
 .connection-group h2 { font-size:15px; font-weight:600; margin:0 0 12px; }
-.connection-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
+.connection-cards { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); align-items:start; gap:12px; }
 .connection-card-box { display:flex; flex-direction:column; min-width:0; background:#fff; border:1px solid var(--team-line); border-radius:12px; overflow:hidden; }
 .team-workspace .connection-card { flex:1; display:grid; grid-template-columns:30px minmax(0,1fr); align-content:start; align-items:start; gap:10px; min-width:0; padding:14px; background:#fff; border:0; border-radius:0; }
 .connection-card .settings-card-icon { width:36px; height:36px; border-radius:9px; font-size:21px; }
