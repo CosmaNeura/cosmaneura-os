@@ -1,3 +1,5 @@
+import {WorkspaceLoading,type LoadingDependencies} from './loading';
+import {WorkspaceTeam} from './team';
 import type {StateUpdate, WorkspaceSessionSnapshot, WorkspaceSessionState} from './model';
 import {WorkspaceLifecycle,type LifecycleDependencies} from './lifecycle';
 import {WorkspaceRecovery,type RecoveryDependencies} from './recovery';
@@ -15,13 +17,18 @@ export class WorkspaceSession {
   readonly lifecycle:WorkspaceLifecycle;
   readonly saves:WorkspaceSaves;
   readonly models:WorkspaceModelActions;
-  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies}={}) {
+  readonly loading:WorkspaceLoading;
+  readonly team:WorkspaceTeam;
+  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
     this.saves=new WorkspaceSaves(this,deps.saves);
     this.models=new WorkspaceModelActions(this,deps.models);
+    this.loading=new WorkspaceLoading(this,deps.loading);
+    this.team=new WorkspaceTeam(this,deps.teamRead);
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
+    homeBusy:false,setupApproval:null,setupProjection:null,setupEpoch:0,confirmTeamExit:false,teamSaveExit:false,
     identity:null,connectionError:null,busy:false,pending:null,conflict:false,
     message:'',error:'',readRetry:null,clinicalShareCheck:null,modelObservation:null,replacementDraft:null,modelHashes:{},schedulingObservation:0,
     workspace:null,encounters:null,team:null,teamDraft:null,note:'',thought:'',evidence:'',source:'',previousModelRequest:null,recoveryOffers:[],recoveryState:'',recoveryEpoch:0,
@@ -38,6 +45,12 @@ export class WorkspaceSession {
     return ()=>{this.listeners.delete(listener);};
   };
 
+  readonly setHomeBusy = this.setter('homeBusy');
+  readonly setSetupApproval = this.setter('setupApproval');
+  readonly setSetupProjection = this.setter('setupProjection');
+  readonly setSetupEpoch = this.setter('setupEpoch');
+  readonly setConfirmTeamExit = this.setter('confirmTeamExit');
+  readonly setTeamSaveExit = this.setter('teamSaveExit');
   readonly setWorkspace = this.setter('workspace');
   readonly setEncounters = this.setter('encounters');
   readonly setTeam = this.setter('team');
@@ -71,9 +84,10 @@ export class WorkspaceSession {
 
   /** Withhold private view state; the journal retains exact unconfirmed work. */
   readonly clear = ():void => {
+    this.team.exitAction.current=null;
     this.invalidate();this.activityNavigation.current?.abort();this.activityNavigation.current=null;
     this.recovery.close();this.recovery.nativeModelSettling.current=false;this.models.reset();
-    this.patch({identity:null,connectionError:null,workspace:null,encounters:null,team:null,teamDraft:null,
+    this.patch({homeBusy:false,setupApproval:null,setupProjection:null,confirmTeamExit:false,teamSaveExit:false,identity:null,connectionError:null,workspace:null,encounters:null,team:null,teamDraft:null,
       note:'',thought:'',evidence:'',source:'',previousModelRequest:null,recoveryOffers:[],recoveryState:'',
       pending:null,conflict:false,message:'',error:'',readRetry:null,busy:false,clinicalShareCheck:null,
       modelObservation:null,replacementDraft:null,modelHashes:{}});

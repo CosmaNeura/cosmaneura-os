@@ -1,3 +1,4 @@
+import type {SetupProjection,SetupReview} from '../team-setup-request';
 import type {ClinicalNoteShareReceipt,ShareSavedNoteInput} from '../clinical-team-contract';
 import type {RecoveryOffer} from '../draft-journal';
 import type {ModelOperation,PreviousModelRequest,ModelRequestObservation,HandoffRetryObservation} from '../model-work-request';
@@ -20,7 +21,15 @@ export type ChiefNoteTask = {
 };
 
 /** State whose lifetime belongs to the workspace, rather than its presentation. */
+export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
+
 export type WorkspaceSessionState = {
+  homeBusy:boolean;
+  setupApproval:ReviewedTeamDraft|null;
+  setupProjection:SetupProjection|null;
+  setupEpoch:number;
+  confirmTeamExit:boolean;
+  teamSaveExit:boolean;
   workspace: Workspace|null;
   encounters: WorkspaceEncounter[]|null;
   team: ProviderTeam|null;
