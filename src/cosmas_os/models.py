@@ -662,7 +662,7 @@ class WorkspaceReply(Base):
     context_revision: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
     citations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
 
 
 class WorkspaceNote(Base):

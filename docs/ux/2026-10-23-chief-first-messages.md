@@ -86,46 +86,45 @@ Concrete QC stop criteria:
 - Each visible milestone supplies narrow-phone screenshots and completed
   workflow evidence. Component tests alone do not establish visual acceptance.
 
-## Current checkpoint
+## Current implementation
 
-The session now owns pending-request/connection state, loaded workspace/team/
-catalog data, working text, recovery offers and the lifetime cell. Its lifecycle
-controller handles connection checks and ordinary/model failure mapping. Its
-recovery controller owns journal preparation, account-scope checks, scheduled
-local writes, restore/discard/exit, and journal close. Restoring produces a typed
-destination for the host to display. Clearing withholds shared private state
-and aborts old activity while retaining durable unconfirmed requests.
+The plain TypeScript session owns lifecycle, durable saves and model requests,
+loading, team settings, clinical preparation, recording descriptors, navigation,
+review return routing, selected-source verification and recovery access. The
+remaining shell work keeps child workflow instances above presentation changes.
 
-`PendingSave` and the Chief note-task descriptor live in the session model. The
-legacy `PendingSave` export remains compatible. Screen markup and existing
-workspace and browser assertions are unchanged. Host ports remain explicit
-until their dependent slices move; this is not the completed D1 session.
+The shared conversation projection now renders the existing Workspace history
+and attributed review cards. Chief receives specialist results as cards without
+adding their internal brief/reply transcript. Exact attempt/result/hash matching
+controls review labels. Composer preparation and note-save continuations use the
+same shared actions.
 
-Loading/navigation actions, saves/model requests, child-panel controllers,
-recording ownership and the final shell remain to be extracted. The shared
-entry projection, inbox/server contract, Messages presentation and permanent
-presentation setting follow those checkpoints. No Messages release is enabled.
+The additive server inbox identifies one bot within a visit or private note.
+Only human-opened chats and existing direct conversations enter the inbox;
+delegations do not automatically add specialist chats. Replies use their actual
+arrival time, independently of workspace revisions. Read watermarks are monotonic
+and manual unread has a separate versioned flag. Bounded pages use batch reads and
+retain current owner/patient-reference checks. Previews for workspaces with
+selected connector sources are deliberately withheld until the conversation's
+full source checks run. Unconfirmed model states remain needs-check.
 
-## Validation of this checkpoint
+Messages layout, device preference, per-chat draft switching, workflow-host
+separation and end-to-end parity are still in progress. The rollout remains off;
+no Messages build has been released to the phone.
 
-- TypeScript build and Vite production build passed.
-- Final focused run: 110 tests passed, comprising all 76 unchanged workspace
-  tests plus 34 session tests running without React or a browser environment.
-- Full web run: 4,261 passed, 103 skipped, and two saved-recording tests failed
-  because the sandbox denied their loopback server. The complete three-test
-  saved-recording file passed when rerun with loopback access. Three additional
-  recovery-destination cases were then added and passed in the final focused run.
-- Independent workflow QC passed: unchanged recovery destinations, exact
-  requests, approval bindings, local acknowledgments and close/discard behavior.
-- Manual browser check used invented data: Home to visit selection to Notebook,
-  local working-copy acknowledgment, and confirmed notebook save all worked.
-  This does not qualify native keyboard, VoiceOver or cold-start performance.
+## Validation
 
-The existing browser acceptance gate is **not passed**. The workspace driver
-still clicks an exact `Open` button on Home; current Home leads through visit
-selection and `Open saved notes`. The same missing-button failure was reproduced
-against untouched `b1a76cc`. The Connections driver also expects the older
-`Gmail inbox` row/status vocabulary. Those assertions and their fixture sources
-are unchanged by this extraction. Record this as test maintenance needed before
-merging the extraction or starting visible Messages rollout; do not weaken the
-assertions or claim browser acceptance from the component tests.
+- Session and screen extraction checks retain existing assertions. The latest
+  focused screen/session run passed 343 tests; seven focused composer/projection
+  cases also passed. TypeScript and Vite production builds passed.
+- Independent browser QC passed Workspace 21/21 on the unchanged baseline and
+  extracted candidate; 27 Axe scans reported zero violations. Connections passed
+  12/12 after preserving the existing checks and correcting current UI selectors
+  plus a real stretched-row layout issue.
+- Ten real PostgreSQL inbox integration tests passed, covering owner/human access,
+  revoked visits and selected sources, private notes, bounded paging, delegation,
+  unknown model outcomes, exact per-bot watermarks, stale read/manual-unread races,
+  arrival clocks, no-store responses and database monotonicity.
+- Physical VoiceOver, first-install cold start and final Messages keyboard/layout
+  acceptance still require their dedicated checks. Earlier browser evidence does
+  not establish Messages or native acceptance.

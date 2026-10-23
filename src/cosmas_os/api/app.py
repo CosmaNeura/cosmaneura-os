@@ -333,6 +333,14 @@ def workspace_catalog(session: Session = Depends(get_session), identity: Request
     return ws.catalog(session, identity.box_id, identity.principal_id)
 
 
+from cosmas_os.api.conversation_inbox_routes import (  # noqa: E402
+    router as conversation_inbox_router,
+)
+
+app.include_router(conversation_inbox_router(workspace_gate=_workspace_gate, get_session=get_session, identity=_identity,
+    fence=lambda request, session, identity: _refresh_model_identity(request, session, identity)))
+
+
 from cosmas_os.api.private_draft_routes import router as private_draft_router  # noqa: E402
 
 app.include_router(private_draft_router(workspace_gate=_workspace_gate, get_session=get_session, identity=_identity,
@@ -2162,6 +2170,7 @@ from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: 
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")
 allowed_headers.append("X-Cosmas-Clinical-Team")
+allowed_headers.append("X-Cosmas-Conversations")
 # Origin policy covers compatibility failures before any inner handler runs.
 app.add_middleware(
     CORSMiddleware,
