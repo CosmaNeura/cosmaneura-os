@@ -1,3 +1,4 @@
+import type {ActivityProof} from './activity';
 import type {EFaxSourceOffer} from '../efax-inbound-source-api';
 import type {FaxSourceOffer} from '../fax-inbound-source-api';
 import type {EFaxPending} from '../efax-inbound-api';
@@ -30,6 +31,11 @@ export type ChiefNoteTask = {
 export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
 
 export type WorkspaceSessionState = {
+  activityProof:ActivityProof|null;
+  activityBusy:boolean;
+  activityContextBusy:boolean;
+  activityContextError:string;
+  activityAttempt:number;
   selectedSource:string|null;
   faxSourceOffer:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null;
   providerFaxSourceOffer:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:FaxSourceOffer;request:Extract<FaxPending,{kind:'acquire'}>}|null;

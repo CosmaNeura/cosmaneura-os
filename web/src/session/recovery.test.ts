@@ -21,6 +21,21 @@ const input=(session:WorkspaceSession,draftStorage=memoryDraftStorage()):Recover
 afterEach(()=>{vi.useRealTimers();vi.restoreAllMocks();});
 
 describe('session-owned draft recovery',()=>{
+  it('retains account editor access across notebook navigation but rejects a replaced journal',async()=>{
+    const session=new WorkspaceSession({recovery:{team:async()=>team}});await session.recovery.prepare(input(session));
+    const access=session.recovery.accountAccess(authenticated,team.recovery_scope,session.recovery.journal.current!.value,true)!;
+    session.invalidate();await expect(access.authorize()).resolves.toBeUndefined();session.recovery.close();
+    await expect(access.authorize()).rejects.toMatchObject({status:403});
+  });
+
+  it('does not publish a late editor recovery read into a newer notebook',async()=>{
+    let finish!:(value:Workspace)=>void;const read=vi.fn(()=>new Promise<Workspace>(resolve=>{finish=resolve;}));
+    const session=new WorkspaceSession({recovery:{team:async()=>team,read}});session.setWorkspace(workspace);await session.recovery.prepare(input(session));
+    const access=session.recovery.editorAccess(authenticated,team.recovery_scope!,session.recovery.journal.current!.value,workspace.id,true,false,vi.fn())!;
+    const checking=access.authorize();await vi.waitFor(()=>expect(read).toHaveBeenCalledOnce());session.clear();finish(workspace);
+    await expect(checking).rejects.toMatchObject({status:403});expect(session.getSnapshot().workspace).toBeNull();
+  });
+
   it('offers the exact draft and request after a session reload without replaying it',async()=>{
     const factory=memoryDraftStorage(),first=new WorkspaceSession();
     await first.recovery.prepare(input(first,factory));

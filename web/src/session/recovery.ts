@@ -1,5 +1,8 @@
 import {DraftJournal,editorAddress,teamDraft as recoveryTeamDraft,type NotebookDraft,type RecoveryOffer} from '../draft-journal';
-import {privateDraftScope,type DraftStore} from '../draft-store';
+import {privateDraftScope,DraftStoreError,type DraftStore} from '../draft-store';
+import type {AccountRecoveryAccess} from '../account-recovery';
+import type {EditorRecoveryAccess} from '../editor-recovery';
+import {validateAgentResearchRecovery,type AgentResearchRecoveryAccess} from '../agent-research-recovery';
 import {botAddress,workspaceApi,requireRecoveryScope,validRecoveryScope,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from '../workspace-api';
 import type {ChiefNoteTask} from './model';
 import type {WorkspaceSession} from './workspace-session';
@@ -34,6 +37,45 @@ export class WorkspaceRecovery {
   private readonly api:RecoveryDependencies;
   constructor(private readonly session:WorkspaceSession,deps:Partial<RecoveryDependencies>={}) {
     this.api={team:(...args)=>workspaceApi.team(...args),read:(...args)=>workspaceApi.read(...args),...deps};
+  }
+
+  accountAccess(authenticated:AuthenticatedWorkspaceIdentity|undefined,editorScope:string|null|undefined,editorJournal:DraftJournal|undefined,ready:boolean):AccountRecoveryAccess|null|undefined {
+    if(!authenticated)return undefined;
+    if(!ready||!editorJournal||!validRecoveryScope(editorScope))return null;
+    return {journal:editorJournal,recoveryScope:editorScope,authorize:async()=>{
+      const latest=await this.api.team(authenticated);
+      // Account editors follow the account scope across notebook navigation.
+      if(requireRecoveryScope(latest)!==editorScope||this.journal.current?.value!==editorJournal)throw new WorkspaceApiError(403);
+    }};
+  }
+
+  editorAccess(authenticated:AuthenticatedWorkspaceIdentity|undefined,editorScope:string|undefined,editorJournal:DraftJournal|undefined,editorWorkspace:string|undefined,ready:boolean,blocked:boolean,failure:(cause:unknown)=>void):EditorRecoveryAccess|null|undefined {
+    if(!authenticated)return undefined;
+    if(blocked||!editorJournal||!editorWorkspace||!ready)return null;
+    return {journal:editorJournal,workspaceId:editorWorkspace,recoveryScope:editorScope,authorize:async()=>{
+      const current=this.session.generation.current;
+      const team=await this.api.team(authenticated);
+      if(current!==this.session.generation.current||team.recovery_scope!==editorScope)throw new WorkspaceApiError(403);
+      const latest=await this.api.read(authenticated,editorWorkspace);
+      if(current!==this.session.generation.current||this.journal.current?.value!==editorJournal)throw new WorkspaceApiError(403);
+      const view=this.session.getSnapshot();
+      if(view.workspace?.id!==latest.id)throw new WorkspaceApiError(403);
+      const saved=view.workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
+      if(latest.revision!==view.workspace.revision&&view.note!==saved&&(latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'')!==saved)this.session.setConflict(true);
+      this.session.setWorkspace(latest);return latest;
+    },denied:cause=>{
+      if(cause&&typeof cause==='object'&&'status' in cause&&[401,403,404].includes(Number(cause.status)))failure(new WorkspaceApiError(Number(cause.status)));
+    }};
+  }
+
+  agentResearchAccess(editorAccess:EditorRecoveryAccess|null|undefined,workspaceId:string|undefined):AgentResearchRecoveryAccess|null {
+    if(!editorAccess||!workspaceId)return null;
+    const address=editorAddress(workspaceId,'agent-research-review');
+    return {authorize:async()=>{await editorAccess.authorize();},load:async()=>{
+      const value=await editorAccess.journal.load(address);if(value===null)return null;
+      if(value?.kind!=='editor'||value.editor!=='agent-research-review')throw new DraftStoreError('integrity');
+      return validateAgentResearchRecovery(value.data,workspaceId);
+    },persist:async value=>{await editorAccess.journal.persist(address,value===null?null:{kind:'editor',workspaceId,editor:'agent-research-review',data:value,pending:value.pending?.revision_id??null});}};
   }
 
   close():void {

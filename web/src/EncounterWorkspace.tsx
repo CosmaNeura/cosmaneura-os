@@ -16,11 +16,10 @@ import {PracticeAccessPanel} from './PracticeAccessPanel';
 import {WorkspaceConnectionRecoveryContext,type PracticeAccessContext} from './PracticeAccessGate';
 import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { TeamConfigurationFlow } from "./TeamConfigurationFlow";
-import {accountIdentityApi} from "./account-identity-api";
 import {assertCurrentDesktopSession} from "./workspace-auth-headers";
 import {subscribeNativeWorkspaceForeground} from './native-workspace-foreground';
 import {useMobileChatFrame} from './MobileChatFrame';
-import {validActivityContext,type AiActivityContext,type AiActivitySelection} from "./model-activity-contract";
+import type {AiActivitySelection} from "./model-activity-contract";
 import { SettingsHub } from "./SettingsHub";
 import { WelcomeActions } from './WelcomeActions';
 import {PracticeHome} from './PracticeHome';
@@ -34,11 +33,11 @@ import type {CoreConnectionCommand} from './core-connection-contract';
 import { CoreConnectionPanel, CORE_CONNECTION_BUILD, CONNECTION_ONBOARDING_BUILD } from "./CoreConnectionPanel";
 import { setupChange, validTeamConfiguration, type SetupProjection } from "./team-setup-request";
 import { hasUnsavedWork, useUnsavedWork } from "./unsaved-work";
-import { openDraftStore, DraftStoreError, type DraftStore } from "./draft-store";
-import { DraftJournal, editorAddress, notebookDraft as makeNotebookDraft, type RecoveryOffer } from "./draft-journal";
-import { EditorRecoveryContext, type EditorRecoveryAccess } from "./editor-recovery";
-import { AccountRecoveryContext, type AccountRecoveryAccess } from "./account-recovery";
-import { supportsSkill, requireRecoveryScope, validRecoveryScope } from "./workspace-api";
+import { openDraftStore, type DraftStore } from "./draft-store";
+import { notebookDraft as makeNotebookDraft, type RecoveryOffer } from "./draft-journal";
+import { EditorRecoveryContext } from "./editor-recovery";
+import { AccountRecoveryContext } from "./account-recovery";
+import { supportsSkill, validRecoveryScope } from "./workspace-api";
 import { BotAvatar } from "./BotAvatar";
 import { TeamWorkPanel } from "./TeamWorkPanel";
 import { HandoffReviewPanel } from "./HandoffReviewPanel";
@@ -64,7 +63,6 @@ import type {InboxDraftSelection} from "./inbox-analysis-contract";
 import {ResearchPanelLoader} from "./ResearchPanelLoader";
 import {ConnectorToolsPanel} from './ConnectorToolsPanel';
 import {AgentResearchReviewPanel} from './AgentResearchReviewPanel';
-import {validateAgentResearchRecovery, type AgentResearchRecoveryAccess} from './agent-research-recovery';
 import { CoreRecordLink } from "./CoreRecordLink";
 import { SchedulingPanel } from "./SchedulingPanel";
 import { SCHEDULING_BUILD } from "./scheduling-api";
@@ -95,7 +93,7 @@ import { ENCOUNTER_PREP_BUILD } from "./encounter-prep-api";
 import { CAPTURE_CORRECTIONS_BUILD, CAPTURE_NOTES_BUILD, CAPTURE_WORKSPACE_BUILD } from "./capture-api";
 import type { CaptureDraft } from "./capture-notes-api";
 import { withObservedCaptureDraft } from "./capture-review-state";
-import { workspaceApi, WorkspaceApiError, botAddress, type AppendInput,
+import { WorkspaceApiError, botAddress, type AppendInput,
   type AuthenticatedWorkspaceIdentity, type DraftHandoff, type ProviderTeam, type Workspace, type WorkspaceEntry, type WorkspaceIdentity } from "./workspace-api";
 import "./encounter-workspace.css";
 
@@ -115,10 +113,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
   const [session]=useState(()=>new WorkspaceSession({initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
-  const {selectedSource,faxSourceOffer,providerFaxSourceOffer,faxSourceBusy,providerFaxSourceBusy,phoneNoteTask,reviewHandoffId,handoffReviewPending,selectedResult,savedResearchChat,settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
+  const {activityProof,activityBusy,activityContextBusy,activityContextError,activityAttempt,selectedSource,faxSourceOffer,providerFaxSourceOffer,faxSourceBusy,providerFaxSourceBusy,phoneNoteTask,reviewHandoffId,handoffReviewPending,selectedResult,savedResearchChat,settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
     workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
-  const {setSelectedSource,setFaxSourceBusy,setProviderFaxSourceBusy,setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setIdentity,setConnectionError,setConflict,setMessage,setError,generation,
-    setWorkspace,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
+  const {setActivityProof,setActivityBusy,setActivityContextBusy,setActivityContextError,setActivityAttempt,setSelectedSource,setFaxSourceBusy,setProviderFaxSourceBusy,setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setConnectionError,setConflict,setMessage,setError,generation,
+    setWorkspace,setTeamDraft,setNote,setThought,setEvidence,setSource,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryState}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
   const [inboxNavigation,setInboxNavigation]=useState<{selection:InboxDraftSelection;identity:WorkspaceIdentity;generation:number}|null>(null);
@@ -134,10 +132,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
   const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
-  const [activityProof,setActivityProof] = useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number;context:AiActivityContext}|null>(null);
-  const [activityBusy,setActivityBusy] = useState(false),[activityContextBusy,setActivityContextBusy] = useState(false);
   const {activityNavigation}=session;
-  const [activityContextError,setActivityContextError] = useState(''),[activityAttempt,setActivityAttempt] = useState(0);
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
   const [accessBusy,setAccessBusy]=useState(false);
   const [scribeSourceBusy,setScribeSourceBusy]=useState(false);
@@ -641,18 +636,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const editorJournal = journal.current?.value;
   const editorWorkspace = workspace?.id, editorScope = team?.recovery_scope;
   const accountScopeReady = !!editorJournal && validRecoveryScope(editorScope) && journal.current?.serverScope === editorScope;
-  const accountAccess = useMemo<AccountRecoveryAccess | null | undefined>(() => {
-    if (!authenticated) return undefined;
-    // A transient parent write failure disables editing, but must not replace this scoped controller.
-    if (!accountScopeReady || !editorJournal || !validRecoveryScope(editorScope)) return null;
-    return {journal:editorJournal, recoveryScope:editorScope, async authorize() {
-      const latest = await workspaceApi.team(authenticated);
-      // This controller follows the owner/API scope across encounter navigation.
-      // A notebook change does not revoke an in-flight Home recovery check.
-      if (requireRecoveryScope(latest) !== editorScope ||
-          journal.current?.value !== editorJournal) throw new WorkspaceApiError(403);
-    }};
-  }, [authenticated, editorJournal, editorScope, accountScopeReady]);
+  const accountAccess=useMemo(()=>session.recovery.accountAccess(authenticated,editorScope,editorJournal,accountScopeReady),[authenticated,editorJournal,editorScope,accountScopeReady]);
   const privateRecordingPlatform = authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?'ios':'desktop';
   const privateRecordingLive=session.recording.live;
   privateRecordingLive.current={authenticated,editorJournal,editorScope,generation:generation.current};
@@ -679,145 +663,16 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     activityProof.journal === editorJournal && activityProof.generation === generation.current &&
     activityProof.context.recovery_scope === editorScope && accountScopeReady ? activityProof.context : null;
   const activityBlocked = locked || connectionEditorsLocked || captureNavigationLocked || captureDraftLocked || recoveryState === "saving";
-  const activityLive = useRef({authenticated,editorJournal,editorScope,settingsOpen,practiceOpen,activityContext,activityBlocked,workspace,note});
+  const activityLive=session.activity.live;
   activityLive.current = {authenticated,editorJournal,editorScope,settingsOpen,practiceOpen,activityContext,activityBlocked,workspace,note};
-  useEffect(() => {
-    let cancelled=false;const current=generation.current,controller=new AbortController();
-    setActivityProof(null);setActivityContextError('');setActivityContextBusy(false);
-    const isCurrent=()=>!cancelled && current===generation.current && activityLive.current.authenticated===authenticated &&
-      activityLive.current.editorJournal===editorJournal && activityLive.current.editorScope===editorScope;
-    if(activityEnabled && authenticated && accountAccess && editorJournal && validRecoveryScope(editorScope) && settingsOpen && !practiceOpen){
-      setActivityContextBusy(true);
-      void(async()=>{
-        await accountAccess.authorize();if(!isCurrent())return;
-        const account=await accountIdentityApi.read(authenticated,controller.signal);if(!isCurrent())return;
-        if(account.recovery_scope!==editorScope)throw new WorkspaceApiError(403);
-        const context={box_id:account.box_id,owner_id:account.actor_id,recovery_scope:account.recovery_scope};
-        if(!validActivityContext(context))throw new WorkspaceApiError(503);
-        setActivityProof({identity:authenticated,journal:editorJournal,generation:current,context});
-      })().catch(cause=>{if(!isCurrent())return;
-        setActivityContextError('AI activity access could not be checked. Your current drafts are retained.');
-        if(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status))failure(cause);
-      }).finally(()=>{if(isCurrent())setActivityContextBusy(false);});
-    }
-    return()=>{cancelled=true;controller.abort();};
-  },[activityEnabled,authenticated,accountAccess,editorJournal,editorScope,settingsOpen,practiceOpen,connectionGeneration,activityAttempt]);
+  function activityContextHost():import('./session/activity').ActivityContext{return {authenticated,activityContext,activityEnabled,accountAccess,editorJournal,editorScope,currentTeam,currentTeamDraft,hasUnsavedWork,failure,resetCapture:()=>{setObservedCaptureDraft(null);setCaptureRequest(0);}};}
+  useEffect(()=>session.activity.watch(activityContextHost()),[activityEnabled,authenticated,accountAccess,editorJournal,editorScope,settingsOpen,practiceOpen,connectionGeneration,activityAttempt]);
 
-  async function openActivityEncounter(selection:AiActivitySelection) {
-    const auth=authenticated,context=activityContext,active=editorJournal,current=generation.current;
-    const origin=workspace?.id;
-    if(!auth || !context || !active)throw new WorkspaceApiError(403);
-    const navigation=new AbortController();activityNavigation.current?.abort();activityNavigation.current=navigation;
-    const sameAccount=()=>current===generation.current && activityLive.current.authenticated===auth &&
-      activityLive.current.editorJournal===active && activityLive.current.editorScope===context.recovery_scope;
-    const check=()=>{
-      if(navigation.signal.aborted)throw new WorkspaceApiError(503);
-      if(!sameAccount() || activityLive.current.activityContext!==context)throw new WorkspaceApiError(403);
-      try{assertCurrentDesktopSession(auth);}catch{throw new WorkspaceApiError(401);}
-      const view=activityLive.current;
-      if(!view.settingsOpen || view.practiceOpen || view.activityBlocked || view.workspace?.id!==origin)throw new WorkspaceApiError(503);
-      if(selection.workspace_id!==origin && hasUnsavedWork()){
-        setError('Save or recover unfinished work before opening another encounter. Your current text and requests are retained.');
-        throw new WorkspaceApiError(503);
-      }
-    };
-    const authorize=async()=>{
-      check();const latestTeam=await workspaceApi.team(auth,navigation.signal);check();
-      if(requireRecoveryScope(latestTeam)!==context.recovery_scope)throw new WorkspaceApiError(403);
-      const account=await accountIdentityApi.read(auth,navigation.signal);check();
-      if(account.box_id!==context.box_id || account.actor_id!==context.owner_id || account.recovery_scope!==context.recovery_scope)throw new WorkspaceApiError(403);
-      return latestTeam;
-    };
-    const existingEntry=(value:Workspace)=>{
-      if(value.id!==selection.workspace_id || value.appointment_id!==selection.appointment_id)throw new WorkspaceApiError(403);
-      const entry=value.entries.find(item=>item.id===selection.entry_id);
-      if(!entry || !['conversation','handoff_result'].includes(entry.kind))throw new WorkspaceApiError(503);
-      return entry;
-    };
-    try{
-      let latestTeam=await authorize();
-      let latest=await workspaceApi.read(auth,selection.workspace_id,navigation.signal);check();existingEntry(latest);
-      const offers:RecoveryOffer[]=[];
-      if(selection.workspace_id!==origin){
-        const addresses=[`workspace:${latest.id}`,editorAddress(latest.id,'private-note'),editorAddress(latest.id,'core-note'),editorAddress(latest.id,'transcript')];
-        for(const address of addresses){
-          const draft=await active.load(address);check();
-          if(draft && (draft.kind==='team'||draft.kind==='workspace'))offers.push({address,draft});
-        }
-        // Device reads confer no authority. Recheck the account and source after them.
-        latestTeam=await authorize();latest=await workspaceApi.read(auth,selection.workspace_id,navigation.signal);check();
-      }
-      const entry=existingEntry(latest);
-      const finalAccount=await accountIdentityApi.read(auth,navigation.signal);check();
-      if(finalAccount.box_id!==context.box_id || finalAccount.actor_id!==context.owner_id || finalAccount.recovery_scope!==context.recovery_scope)throw new WorkspaceApiError(403);
-      const before=currentTeam.current,draft=currentTeamDraft.current;
-      if(before && latestTeam.revision<before.revision)throw new WorkspaceApiError(503);
-      if(before && draft && latestTeam.revision!==before.revision && JSON.stringify(draft)!==JSON.stringify(before.configuration)){
-        setConflict(true);setError('Your saved team changed. Unsaved settings are retained; load the latest team and compare before opening activity.');
-        throw new WorkspaceApiError(503);
-      }
-      const member=latestTeam.members.find(item=>entry.reply?.agent_id
-        ? item.agent_id===entry.reply.agent_id && item.role===entry.reply.role
-        : !item.instance_id && item.role===entry.reply?.role);
-      const address=entry.model_request?.bot.address ?? (member ? botAddress(member) : undefined);
-      if(!address || !latestTeam.configuration.bots.some(bot=>botAddress(bot)===address))throw new WorkspaceApiError(503);
-      if(selection.workspace_id===origin && latest.revision<(activityLive.current.workspace?.revision??0))throw new WorkspaceApiError(503);
-      check();currentTeam.current=latestTeam;setTeam(latestTeam);
-      if(!draft || JSON.stringify(draft)===JSON.stringify(before?.configuration)){
-        currentTeamDraft.current=structuredClone(latestTeam.configuration);setTeamDraft(currentTeamDraft.current);
-      }
-      if(selection.workspace_id!==origin){
-        setIdentity(auth);setNote(latest.entries.filter(item=>item.kind==='scratchpad').at(-1)?.content??'');
-        setThought('');setEvidence('');setSource('');setPreviousModelRequest(null);setModelObservation(null);setReplacementDraft(null);setModelHashes({});
-        setObservedCaptureDraft(null);setSelectedSource(null);setCaptureRequest(0);setStage('Before');setPanel('Notebook');
-        setRecoveryOffers(previous=>[...previous,...offers]);setRecoveryEpoch(value=>value+1);
-      }else{
-        const savedBefore=activityLive.current.workspace?.entries.filter(item=>item.kind==='scratchpad').at(-1)?.content??'';
-        const savedAfter=latest.entries.filter(item=>item.kind==='scratchpad').at(-1)?.content??'';
-        if(savedBefore!==savedAfter && activityLive.current.note!==savedBefore)setConflict(true);
-        else if(activityLive.current.note===savedBefore)setNote(savedAfter);
-      }
-      setWorkspace(latest);setSelected(address);if(entry.reply?.role==='research'||entry.model_request?.bot.role==='research')setSavedResearchChat(true);setSelectedResult(entry.id);setMobilePanel('Conversation');setSettingsOpen(false);setPracticeOpen(false);setPracticePage('notebook');setError('');
-    }catch(cause){
-      if(sameAccount() && cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status))failure(cause);
-      else if(sameAccount() && cause instanceof DraftStoreError)setRecoveryState('failed');
-      throw cause;
-    }finally{navigation.abort();if(activityNavigation.current===navigation)activityNavigation.current=null;}
-  }
+  function openActivityEncounter(selection:AiActivitySelection){return session.activity.open(selection,activityContextHost());}
   const editorReady = !!editorWorkspace && ["private-note","core-note","transcript"].every(kind =>
     editorJournal?.has(`editor:${editorWorkspace}:${kind}`));
-  const editorAccess = useMemo<EditorRecoveryAccess | null | undefined>(() => {
-    if (!authenticated) return undefined;
-    if (recoveryBlocked || !editorJournal || !editorWorkspace || !editorReady) return null;
-    return {journal:editorJournal,workspaceId:editorWorkspace,recoveryScope:editorScope, async authorize() {
-      const current = generation.current;
-      const team = await workspaceApi.team(authenticated);
-      if (current !== generation.current || team.recovery_scope !== editorScope) throw new WorkspaceApiError(403);
-      const latest = await workspaceApi.read(authenticated,editorWorkspace);
-      if (current !== generation.current || journal.current?.value !== editorJournal) throw new WorkspaceApiError(403);
-      const view = recoveryView.current;
-      if (view.workspace?.id !== latest.id) throw new WorkspaceApiError(403);
-      const saved = view.workspace.entries.filter(e=>e.kind === "scratchpad").at(-1)?.content ?? "";
-      if (latest.revision !== view.workspace.revision && view.note !== saved && (latest.entries.filter(e=>e.kind === "scratchpad").at(-1)?.content ?? "") !== saved) setConflict(true);
-      setWorkspace(latest);
-      return latest;
-    }, denied(cause) {
-      if (cause && typeof cause === "object" && "status" in cause && [401,403,404].includes(Number(cause.status))) {
-        failure(new WorkspaceApiError(Number(cause.status)));
-      }
-    }};
-  },[authenticated,editorScope,editorJournal,editorWorkspace,editorReady,recoveryBlocked]);
-  const agentResearchRecovery = useMemo<AgentResearchRecoveryAccess | null>(() => {
-    if (!editorAccess || !editorWorkspace) return null;
-    const address = editorAddress(editorWorkspace,'agent-research-review');
-    return {async authorize(){await editorAccess.authorize();}, async load(){
-      const value=await editorAccess.journal.load(address);
-      if(value===null)return null;
-      if(value?.kind!=='editor'||value.editor!=='agent-research-review')throw new DraftStoreError('integrity');
-      return validateAgentResearchRecovery(value.data,editorWorkspace);
-    },async persist(value){await editorAccess.journal.persist(address,value===null?null:{kind:'editor',
-      workspaceId:editorWorkspace,editor:'agent-research-review',data:value,pending:value.pending?.revision_id??null});}};
-  },[editorAccess,editorWorkspace]);
+  const editorAccess=useMemo(()=>session.recovery.editorAccess(authenticated,editorScope,editorJournal,editorWorkspace,editorReady,recoveryBlocked,failure),[authenticated,editorScope,editorJournal,editorWorkspace,editorReady,recoveryBlocked]);
+  const agentResearchRecovery=useMemo(()=>session.recovery.agentResearchAccess(editorAccess,editorWorkspace),[editorAccess,editorWorkspace]);
   const turns = workspace?.entries.filter(e => ["conversation", "handoff_result"].includes(e.kind)
     && (e.model_request?e.model_request.bot.address===selected:e.reply&&(e.reply.agent_id ? e.reply.agent_id === template?.agent_id
       : !bot?.instance_id && e.reply.role === bot?.role))) ?? [];
@@ -1195,7 +1050,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         {workspace&&practicePage==='visits'&&!settingsOpen&&<button className="team-phone-notebook-return" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
         {authenticated&&encounters&&<VisitCatalog identity={authenticated} visits={encounters} locked={busy||!!pending} recordingActive={!!privateRecordingEntry}
           onOpen={appointmentId=>void open(appointmentId)} onRecord={CAPTURE_WORKSPACE_BUILD&&(!team||team.capture?.enabled)?appointmentId=>void open(appointmentId,undefined,undefined,true):undefined}
-          onPrivateNote={workspaceId=>{if(privateRecordingEntry||pending||busy)return;void workspaceApi.openPrivateDraft(authenticated,workspaceId).then(openPrivateNotebook).catch(failure);}}
+          onPrivateNote={workspaceId=>{void session.loading.openSavedPrivate(workspaceId,{authenticated,failure,opened:openPrivateNotebook});}}
           onConnections={()=>void openSettings('core')}/>}
         <p className="team-fine">Notes and private drafts do not need email or calendar setup.</p>
       </section>

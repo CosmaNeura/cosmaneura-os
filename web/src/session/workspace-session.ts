@@ -1,3 +1,4 @@
+import {WorkspaceActivity,type ActivityDependencies} from './activity';
 import {WorkspaceSources,type SourceDependencies} from './sources';
 import {WorkspaceObservations} from './observations';
 import {WorkspaceReview} from './review';
@@ -31,7 +32,8 @@ export class WorkspaceSession {
   readonly review:WorkspaceReview;
   readonly observations:WorkspaceObservations;
   readonly sources:WorkspaceSources;
-  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];observationRead?:ConstructorParameters<typeof WorkspaceObservations>[1];sources?:SourceDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
+  readonly activity:WorkspaceActivity;
+  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];observationRead?:ConstructorParameters<typeof WorkspaceObservations>[1];sources?:SourceDependencies;activity?:ActivityDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
     this.saves=new WorkspaceSaves(this,deps.saves);
@@ -44,9 +46,11 @@ export class WorkspaceSession {
     this.review=new WorkspaceReview(this);
     this.observations=new WorkspaceObservations(this,deps.observationRead);
     this.sources=new WorkspaceSources(this,deps.sources);
+    this.activity=new WorkspaceActivity(this,deps.activity);
     this.setPracticePage(deps.initialPage??'visits');
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
+    activityProof:null,activityBusy:false,activityContextBusy:false,activityContextError:'',activityAttempt:0,
     selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,faxSourceBusy:false,providerFaxSourceBusy:false,
     phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
     settingsOpen:false,practicePage:'visits',practiceOpen:false,practiceOpened:false,selected:'visit_prep',panel:'Notebook',mobilePanel:'Conversation',stage:'Before',entryIntent:null,researchEntry:false,settingsEntry:'home',inboxSelection:null,
@@ -68,6 +72,11 @@ export class WorkspaceSession {
     return ()=>{this.listeners.delete(listener);};
   };
 
+  readonly setActivityProof = this.setter('activityProof');
+  readonly setActivityBusy = this.setter('activityBusy');
+  readonly setActivityContextBusy = this.setter('activityContextBusy');
+  readonly setActivityContextError = this.setter('activityContextError');
+  readonly setActivityAttempt = this.setter('activityAttempt');
   readonly setSelectedSource = this.setter('selectedSource');
   readonly setFaxSourceOffer = this.setter('faxSourceOffer');
   readonly setProviderFaxSourceOffer = this.setter('providerFaxSourceOffer');
@@ -141,7 +150,14 @@ export class WorkspaceSession {
     this.team.exitAction.current=null;this.clinical.preparation.current=null;
     this.invalidate();this.activityNavigation.current?.abort();this.activityNavigation.current=null;
     this.recovery.close();this.recovery.nativeModelSettling.current=false;this.models.reset();
-    this.patch({clinicalPreparing:false,homeBusy:false,setupApproval:null,setupProjection:null,confirmTeamExit:false,teamSaveExit:false,identity:null,connectionError:null,workspace:null,encounters:null,team:null,teamDraft:null,
+    // The recorder descriptor remains mounted long enough to stop/retain audio.
+    // Its generation and journal checks already deny access synchronously.
+    this.patch({activityProof:null,activityBusy:false,activityContextBusy:false,activityContextError:'',
+      selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,faxSourceBusy:false,providerFaxSourceBusy:false,
+      phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
+      settingsOpen:false,practiceOpen:false,practiceOpened:false,entryIntent:null,researchEntry:false,inboxSelection:null,
+      savedRecordingEntry:null,savedRecordingNotebook:null,privateRecordings:null,
+      clinicalPreparing:false,homeBusy:false,setupApproval:null,setupProjection:null,confirmTeamExit:false,teamSaveExit:false,identity:null,connectionError:null,workspace:null,encounters:null,team:null,teamDraft:null,
       note:'',thought:'',evidence:'',source:'',previousModelRequest:null,recoveryOffers:[],recoveryState:'',
       pending:null,conflict:false,message:'',error:'',readRetry:null,busy:false,clinicalShareCheck:null,
       modelObservation:null,replacementDraft:null,modelHashes:{}});

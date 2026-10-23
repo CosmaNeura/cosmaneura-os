@@ -5,7 +5,7 @@ import {teamConfigurationChanged} from '../team-configuration-diff';
 import {workspaceApi,WorkspaceApiError,botAddress,type AuthenticatedWorkspaceIdentity,type WorkspaceIdentity,type ProviderTeam,type Workspace} from '../workspace-api';
 import type {WorkspaceSession} from './workspace-session';
 
-type LoadingApi=Pick<typeof workspaceApi,'read'|'team'|'catalog'|'open'|'openExisting'>;
+type LoadingApi=Pick<typeof workspaceApi,'read'|'team'|'catalog'|'open'|'openExisting'|'openPrivateDraft'>;
 type CoreRead=(identity:WorkspaceIdentity,command:CoreConnectionCommand)=>Promise<CoreConnectionResult>;
 export type LoadingDependencies=Partial<LoadingApi>&{coreRead?:CoreRead};
 export type LoadingContext={
@@ -32,7 +32,7 @@ export class WorkspaceLoading {
   private readonly coreRead:CoreRead;
   constructor(private readonly session:WorkspaceSession,deps:LoadingDependencies={}) {
     this.coreRead=deps.coreRead??((...args)=>coreConnectionApi.read(...args));
-    this.api={open:(...args)=>workspaceApi.open(...args),openExisting:(...args)=>workspaceApi.openExisting(...args),read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),catalog:(...args)=>workspaceApi.catalog(...args),...deps};
+    this.api={open:(...args)=>workspaceApi.open(...args),openExisting:(...args)=>workspaceApi.openExisting(...args),openPrivateDraft:(...args)=>workspaceApi.openPrivateDraft(...args),read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),catalog:(...args)=>workspaceApi.catalog(...args),...deps};
   }
 
   startup(context:LoadingContext,consume:()=>ProviderTeam|null|undefined):(()=>void)|undefined {
@@ -171,12 +171,26 @@ export class WorkspaceLoading {
     finally{if(current===this.session.generation.current)this.session.setBusy(false);}
   }
 
+  async openSavedPrivate(workspaceId:string,context:Pick<LoadingContext,'authenticated'|'failure'>&{opened:(result:OpenedNotebook)=>Promise<void>}):Promise<void> {
+    const {privateRecordingEntry,privateRecordingBusy,pending,busy}=this.session.getSnapshot();
+    if(!context.authenticated||privateRecordingEntry||privateRecordingBusy||pending||busy)return;
+    const current=this.session.generation.current;
+    this.session.setBusy(true);
+    try {
+      const result=await this.api.openPrivateDraft(context.authenticated,workspaceId);
+      if(current!==this.session.generation.current)return;
+      await context.opened(result);
+    }catch(cause){if(current===this.session.generation.current)context.failure(cause);}
+    finally{if(current===this.session.generation.current)this.session.setBusy(false);}
+  }
+
   async openPrivate(result:OpenedNotebook,context:Pick<LoadingContext,'authenticated'|'recoverAfterRead'>&{beforeOpen:()=>void;show:(current:number)=>void}):Promise<void> {
     context.beforeOpen();
     if(result.identity!==context.authenticated)throw new WorkspaceApiError(403);
     const {team,teamDraft}=this.session.getSnapshot();
     const preserveTeamDraft=!!team&&!!teamDraft&&teamConfigurationChanged(team.configuration,teamDraft);
-    const current=++this.session.generation.current;this.session.recovery.checkOwner(context.authenticated,result.team);
+    this.session.recovery.checkOwner(context.authenticated,result.team);
+    const current=++this.session.generation.current;this.session.setBusy(false);
     this.session.setIdentity(result.identity);this.session.setWorkspace(result.workspace);this.session.setTeam(result.team);
     if(!preserveTeamDraft)this.session.setTeamDraft(structuredClone(result.team.configuration));
     this.session.setNote(result.workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'');

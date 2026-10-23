@@ -13,6 +13,13 @@ function opened(session:WorkspaceSession){session.setIdentity(authenticated);ses
 function openContext():OpenContext{return {...context(),locked:false,captureNavigationLocked:false,captureDraftLocked:false,hasUnsavedWork:()=>false,begin:vi.fn(),resetCapture:vi.fn(),focusChief:vi.fn(),focusFax:vi.fn(),showResearch:vi.fn(),afterOpen:vi.fn(),retryRead:vi.fn(async()=>{})};}
 
 describe('shared workspace loading',()=>{
+  it('withholds a late saved private notebook after the owner changes',async()=>{
+    let finish!:(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>void;
+    const session=new WorkspaceSession({loading:{openPrivateDraft:()=>new Promise(resolve=>{finish=resolve;})}}),opened=vi.fn(async()=>{});
+    const request=session.loading.openSavedPrivate(workspace.id,{authenticated,failure:vi.fn(),opened});
+    session.clear();finish({identity:authenticated,workspace,team});await request;
+    expect(opened).not.toHaveBeenCalled();expect(session.getSnapshot().busy).toBe(false);
+  });
   it('does not replay a notebook-opening write through a general retry',async()=>{
     const open=vi.fn().mockRejectedValue(new Error('Lost response')),session=new WorkspaceSession({loading:{open}}),host=openContext();
     await session.loading.open(host,'invented-appointment');
