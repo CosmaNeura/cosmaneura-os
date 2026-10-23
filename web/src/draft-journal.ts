@@ -4,7 +4,7 @@ import {parsePendingReviewDecision} from "../../clients/scribe-review/creator-re
 import {validScribeSourceRequest} from './scribe-source-api';
 import {validateResearchDraft} from './research-contract';
 import { DraftStoreError, type DraftRecord, type DraftStore, type DraftValue } from "./draft-store";
-import type { PendingSave } from "./EncounterWorkspace";
+import type { PendingSave } from "./session/model";
 import {validShareSavedNoteInput} from './clinical-team-contract';
 import type { ProviderTeam, TeamConfiguration, TeamSaveInput, Workspace } from "./workspace-api";
 import { validTeamConfiguration, validTeamSave } from "./team-setup-request";

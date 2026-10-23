@@ -70,10 +70,62 @@ with a specific screen, reproduction and smallest correction.
 - New replies preserve the reader's position when reading older content.
 - Layout parity must not turn Details into a second application inside a sheet.
 
+Concrete QC stop criteria:
+
+- A second permanent mode strip, bot-filter row or duplicated navigation system
+  stops the milestone for redesign.
+- Details starts with Review, Notes and sources, and Activity. Additional
+  top-level groups require QC review. Opening a task must not stack sheets.
+- A review card reaches its complete review screen in one tap. Every sheet has
+  a visible way back and restores its originating chat.
+- Outstanding human decisions remain discoverable without opening Activity.
+  Unread and needs review remain distinct.
+- Clipped Send, Back or review controls, lost drafts, changed context,
+  interrupted recording, or unconfirmed work labelled complete are release
+  blockers, including with the keyboard open and enlarged text.
+- Each visible milestone supplies narrow-phone screenshots and completed
+  workflow evidence. Component tests alone do not establish visual acceptance.
+
 ## Current checkpoint
 
-The first extraction moves shared pending-request/connection state and the
-session lifetime cell out of `EncounterWorkspace`, and moves `PendingSave` into
-the presentation-independent model. The legacy export remains compatible.
-Screen markup and existing tests are unchanged. Feature action extraction,
-inbox/server work and the Messages presentation are subsequent checkpoints.
+The session now owns pending-request/connection state, loaded workspace/team/
+catalog data, working text, recovery offers and the lifetime cell. Its lifecycle
+controller handles connection checks and ordinary/model failure mapping. Its
+recovery controller owns journal preparation, account-scope checks, scheduled
+local writes, restore/discard/exit, and journal close. Restoring produces a typed
+destination for the host to display. Clearing withholds shared private state
+and aborts old activity while retaining durable unconfirmed requests.
+
+`PendingSave` and the Chief note-task descriptor live in the session model. The
+legacy `PendingSave` export remains compatible. Screen markup and existing
+workspace and browser assertions are unchanged. Host ports remain explicit
+until their dependent slices move; this is not the completed D1 session.
+
+Loading/navigation actions, saves/model requests, child-panel controllers,
+recording ownership and the final shell remain to be extracted. The shared
+entry projection, inbox/server contract, Messages presentation and permanent
+presentation setting follow those checkpoints. No Messages release is enabled.
+
+## Validation of this checkpoint
+
+- TypeScript build and Vite production build passed.
+- Final focused run: 110 tests passed, comprising all 76 unchanged workspace
+  tests plus 34 session tests running without React or a browser environment.
+- Full web run: 4,261 passed, 103 skipped, and two saved-recording tests failed
+  because the sandbox denied their loopback server. The complete three-test
+  saved-recording file passed when rerun with loopback access. Three additional
+  recovery-destination cases were then added and passed in the final focused run.
+- Independent workflow QC passed: unchanged recovery destinations, exact
+  requests, approval bindings, local acknowledgments and close/discard behavior.
+- Manual browser check used invented data: Home to visit selection to Notebook,
+  local working-copy acknowledgment, and confirmed notebook save all worked.
+  This does not qualify native keyboard, VoiceOver or cold-start performance.
+
+The existing browser acceptance gate is **not passed**. The workspace driver
+still clicks an exact `Open` button on Home; current Home leads through visit
+selection and `Open saved notes`. The same missing-button failure was reproduced
+against untouched `b1a76cc`. The Connections driver also expects the older
+`Gmail inbox` row/status vocabulary. Those assertions and their fixture sources
+are unchanged by this extraction. Record this as test maintenance needed before
+merging the extraction or starting visible Messages rollout; do not weaken the
+assertions or claim browser acceptance from the component tests.

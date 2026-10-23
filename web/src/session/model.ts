@@ -1,7 +1,8 @@
 import type {ShareSavedNoteInput} from '../clinical-team-contract';
-import type {ModelOperation} from '../model-work-request';
+import type {RecoveryOffer} from '../draft-journal';
+import type {ModelOperation,PreviousModelRequest} from '../model-work-request';
 import type {
-  AppendInput, FollowUpOperation, NoteOperation, TeamSaveInput, WorkspaceIdentity,
+  AppendInput, FollowUpOperation, NoteOperation, TeamSaveInput, WorkspaceIdentity, Workspace, WorkspaceEncounter, ProviderTeam, TeamConfiguration,
 } from '../workspace-api';
 
 export type PendingSave = NoteOperation | FollowUpOperation | {type:'entry';body:AppendInput} | ModelOperation |
@@ -12,8 +13,25 @@ export type PendingSave = NoteOperation | FollowUpOperation | {type:'entry';body
 export type ConnectionFailure = {identity:WorkspaceIdentity;generation:number;message:string};
 export type ReadRetry = {run:()=>Promise<void>};
 
+export type ChiefNoteTask = {
+  owner:import('../workspace-api').AuthenticatedWorkspaceIdentity;
+  scope:string;generation:number;workspaceId:string;selection:ShareSavedNoteInput;content:string;
+};
+
 /** State whose lifetime belongs to the workspace, rather than its presentation. */
 export type WorkspaceSessionState = {
+  workspace: Workspace|null;
+  encounters: WorkspaceEncounter[]|null;
+  team: ProviderTeam|null;
+  teamDraft: TeamConfiguration|null;
+  note: string;
+  thought: string;
+  evidence: string;
+  source: string;
+  previousModelRequest: PreviousModelRequest|null;
+  recoveryOffers: RecoveryOffer[];
+  recoveryState: ''|'saving'|'saved'|'failed';
+  recoveryEpoch: number;
   identity: WorkspaceIdentity|null;
   connectionError: ConnectionFailure|null;
   busy: boolean;

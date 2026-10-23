@@ -59,4 +59,17 @@ describe('workspace session ownership',()=>{
     expect(observed[0]).toMatchObject({error:'Workspace access is unavailable.',readRetry:null});
     expect(retry).not.toHaveBeenCalled();
   });
+
+  it('withholds all shared private state together and invalidates old activity when cleared',()=>{
+    const session=new WorkspaceSession(),activity=new AbortController();
+    session.activityNavigation.current=activity;
+    session.setIdentity({boxId:'invented-box',actorId:'invented-human'});
+    session.setNote('Invented private text');session.setThought('Invented unsent question');session.setPending(operation);
+    const before=session.generation.current,observed:ReturnType<WorkspaceSession['getSnapshot']>[]=[];
+    session.subscribe(()=>observed.push(session.getSnapshot()));
+    session.clear();
+    expect(activity.signal.aborted).toBe(true);expect(session.generation.current).toBe(before+1);
+    expect(observed).toHaveLength(1);
+    expect(observed[0]).toMatchObject({identity:null,workspace:null,team:null,note:'',thought:'',pending:null,readRetry:null,busy:false});
+  });
 });

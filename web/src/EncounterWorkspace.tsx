@@ -1,13 +1,13 @@
 import {WorkspaceDialog} from './WorkspaceDialog';
 import {WorkspaceSession} from './session/workspace-session';
 import {useWorkspaceSession} from './session/use-workspace-session';
-import type {PendingSave} from './session/model';
+import type {ChiefNoteTask,PendingSave} from './session/model';
 export type {PendingSave} from './session/model';
 import {WorkspaceNavIcon} from './WorkspaceNavIcon';
 import {teamConfigurationChanged} from './team-configuration-diff';
 import {VisitCatalog} from './VisitCatalog';
 import {consumeWorkspaceStartupTeam} from './workspace-team-read';
-import {workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
+import {workspaceProtocolGeneration} from './workspace-protocol';
 import {WorkspaceMarkdown} from './WorkspaceMarkdown';
 import {readWorkspaceRoute,workspaceRouteHash,type WorkspaceRoute} from './workspace-route';
 import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
@@ -36,7 +36,7 @@ import type {CoreConnectionCommand} from './core-connection-contract';
 import { CoreConnectionPanel, CORE_CONNECTION_BUILD, CONNECTION_ONBOARDING_BUILD } from "./CoreConnectionPanel";
 import { normalizeTeamConfiguration, setupChange, validTeamConfiguration, type SetupProjection } from "./team-setup-request";
 import { hasUnsavedWork, useUnsavedWork } from "./unsaved-work";
-import { openDraftStore, privateDraftScope, DraftStoreError, type DraftStore } from "./draft-store";
+import { openDraftStore, DraftStoreError, type DraftStore } from "./draft-store";
 import { DraftJournal, editorAddress, notebookDraft as makeNotebookDraft, teamDraft as recoveryTeamDraft, type RecoveryOffer } from "./draft-journal";
 import { EditorRecoveryContext, type EditorRecoveryAccess } from "./editor-recovery";
 import { AccountRecoveryContext, type AccountRecoveryAccess } from "./account-recovery";
@@ -102,7 +102,7 @@ import { CAPTURE_CORRECTIONS_BUILD, CAPTURE_NOTES_BUILD, CAPTURE_WORKSPACE_BUILD
 import type { CaptureDraft } from "./capture-notes-api";
 import { withObservedCaptureDraft } from "./capture-review-state";
 import { workspaceApi, WorkspaceApiError, botAddress, type AppendInput,
-  type AuthenticatedWorkspaceIdentity, type DraftHandoff, type ProviderTeam, type TeamConfiguration, type Workspace, type WorkspaceEntry, type WorkspaceEncounter, type WorkspaceIdentity } from "./workspace-api";
+  type AuthenticatedWorkspaceIdentity, type DraftHandoff, type ProviderTeam, type Workspace, type WorkspaceEntry, type WorkspaceIdentity } from "./workspace-api";
 import "./encounter-workspace.css";
 
 type PrivateRecordingEntry={identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;scope:string;serverScope:string;generation:number;title:string;recordingId?:string;returnWorkspaceId?:string;prepareNotebook?:(title?:string)=>Promise<PrivateNotebookResult>;authorize:()=>Promise<void>};
@@ -124,17 +124,15 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
   const [session]=useState(()=>new WorkspaceSession());
-  const {identity,connectionError,busy,pending,conflict,message,error,readRetry}=useWorkspaceSession(session);
-  const {setIdentity,setConnectionError,setBusy,setPending,setConflict,setMessage,setError,setReadRetry,generation}=session;
+  const {identity,connectionError,busy,pending,conflict,message,error,readRetry,
+    workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
+  const {setIdentity,setConnectionError,setBusy,setPending,setConflict,setMessage,setError,generation,
+    setWorkspace,setEncounters,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
   const [inboxSelection,setInboxSelection]=useState<InboxDraftSelection|null>(null);
   const [inboxNavigation,setInboxNavigation]=useState<{selection:InboxDraftSelection;identity:WorkspaceIdentity;generation:number}|null>(null);
   const inboxNavigationConsumed=useRef<object|null>(null);
-  const [workspace, setWorkspace] = useState<Workspace | null>(null);
-  const [encounters, setEncounters] = useState<WorkspaceEncounter[] | null>(null);
-  const [team, setTeam] = useState<ProviderTeam | null>(null);
-  const [teamDraft, setTeamDraft] = useState<TeamConfiguration | null>(null);
   const [setupApproval, setSetupApproval] = useState<ReviewedTeamDraft | null>(null);
   const [setupProjection, setSetupProjection] = useState<SetupProjection | null>(null);
   const [setupEpoch, setSetupEpoch] = useState(0);
@@ -168,7 +166,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const [activityProof,setActivityProof] = useState<{identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number;context:AiActivityContext}|null>(null);
   const [activityBusy,setActivityBusy] = useState(false),[activityContextBusy,setActivityContextBusy] = useState(false);
-  const activityNavigation = useRef<AbortController|null>(null);
+  const {activityNavigation}=session;
   const [activityContextError,setActivityContextError] = useState(''),[activityAttempt,setActivityAttempt] = useState(0);
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
   const [accessBusy,setAccessBusy]=useState(false);
@@ -236,25 +234,21 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [teamWorkExpanded,setTeamWorkExpanded]=useState(()=>!phoneLayout());
   const [phoneChatToolsOpen,setPhoneChatToolsOpen]=useState(false);
   const [clinicalTeamExpanded,setClinicalTeamExpanded]=useState(false);
-  const [phoneNoteTask,setPhoneNoteTask]=useState<{owner:AuthenticatedWorkspaceIdentity;scope:string;generation:number;workspaceId:string;selection:ShareSavedNoteInput;content:string}|null>(null);
+  const [phoneNoteTask,setPhoneNoteTask]=useState<ChiefNoteTask|null>(null);
   const chiefReviewReturn=useRef<{owner:AuthenticatedWorkspaceIdentity;scope:string;serverScope:string;journal:DraftJournal;generation:number;workspaceId:string;address:string;
     task:typeof phoneNoteTask;toolsOpen:boolean;sourceEntryId:string;note:{id:string;version:number;content_hash:string;source_fingerprint:string;content:string}}|null>(null);
   const chiefReviewReturnFocus=useRef<typeof chiefReviewReturn.current>(null);
   const clinicalTeamRef=useRef<HTMLDetailsElement|null>(null);
   const clinicalTeamFocus=useRef<{owner:AuthenticatedWorkspaceIdentity;workspaceId:string;generation:number}|null>(null);
   useEffect(()=>{setPhoneChatToolsOpen(false);setClinicalTeamExpanded(false);setPhoneNoteTask(null);clinicalTeamFocus.current=null;chiefReviewReturn.current=null;chiefReviewReturnFocus.current=null;clinicalPreparation.current=null;setClinicalPreparing(false);},[authenticated,workspace?.id]);
-  const [note, setNote] = useState("");
   const [draftNoteIntent,setDraftNoteIntent]=useState<{workspaceId:string;content:string}|null>(null);
   const [reviewState,setReviewState]=useState<'editing'|'review'|'saved'>('editing');
-  const [thought, setThought] = useState("");
   const currentThought=useRef(thought);currentThought.current=thought;
   const thoughtEditVersion=useRef(0);
   function updateThought(value:string){thoughtEditVersion.current+=1;currentThought.current=value;setThought(value);}
   const [prepSelection,setPrepSelection]=useState<{scope:symbol;selection:SessionPrepAnalysis}|null>(null);
   const [prepEpoch,setPrepEpoch]=useState(0);
   const questionRef=useRef<HTMLTextAreaElement|null>(null);
-  const [evidence, setEvidence] = useState("");
-  const [source, setSource] = useState("");
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<string | null>(null);
   const [schedulingObservation,setSchedulingObservation]=useState(0);
@@ -263,7 +257,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [replacementDraft,setReplacementDraft]=useState<{content:string;role:string;acknowledged:boolean}|null>(null);
   const [modelHashes,setModelHashes]=useState<Record<string,string>>({});
   const modelBusy=useRef(false);
-  const [previousModelRequest,setPreviousModelRequest]=useState<PreviousModelRequest|null>(null);
   const notebookDraft=(w:Workspace,n:string,t:string,e:string,s:string,p:PendingSave|null,previous=previousModelRequest)=>{
     const task=phoneNoteTask&&phoneNoteTask.owner===authenticated&&phoneNoteTask.owner===previousIdentity.current&&phoneNoteTask.generation===generation.current&&
       phoneNoteTask.workspaceId===w.id&&phoneNoteTask.scope===journal.current?.scope?phoneNoteTask:null;
@@ -274,13 +267,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [observedCaptureDraft, setObservedCaptureDraft] = useState<CaptureDraft | null>(null);
   const [captureRequest, setCaptureRequest] = useState(0);
   const [confirmCaptureExit, setConfirmCaptureExit] = useState(false);
-  const journal = useRef<{ scope: string; serverScope: string; value: DraftJournal } | null>(null);
-  const scheduledDraftSave = useRef<{run:()=>Promise<void>;cancel:()=>void;drain:()=>Promise<void>}|null>(null);
-  const nativeModelSettling=useRef(false);
-  const draftsSuspended = useRef(false);
-  const [recoveryOffers, setRecoveryOffers] = useState<RecoveryOffer[]>([]);
-  const [recoveryState, setRecoveryState] = useState<"" | "saving" | "saved" | "failed">("");
-  const [recoveryEpoch, setRecoveryEpoch] = useState(0);
+  const {journal,scheduledDraftSave,nativeModelSettling,draftsSuspended}=session.recovery;
   useLayoutEffect(()=>{recoveredConnection.current={identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0};setConnectionError(null);},[authenticated]);
   useEffect(()=>{
     if(!authenticated||connectionRecovery?.identity!==authenticated||recoveredConnection.current.identity!==authenticated||
@@ -352,13 +339,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const currentTeamDraft = useRef(teamDraft);
   currentTeamDraft.current = teamDraft;
   const conversationEnd = useRef<HTMLDivElement>(null);
-  function closeDraftJournal() {
-    const old=journal.current?.value,save=scheduledDraftSave.current;
-    journal.current=null;scheduledDraftSave.current=null;
-    // Finish the latest local snapshot before closing its account-scoped store.
-    // Private views can be hidden immediately on sign-out or account change.
-    void (save?.run()??Promise.resolve()).catch(()=>{}).finally(()=>old?.close());
-  }
+  function closeDraftJournal(){session.recovery.close();}
   useEffect(() => {
     const previousTitle = document.title;
     document.title = "CosmasOS · Provider Team";
@@ -479,51 +460,20 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     return () => { cancelled = true; clearTimeout(timer);controller?.abort();removeNative?.();document.removeEventListener('visibilitychange',visibility);window.removeEventListener?.('focus',foreground); };
   }, [workspace, identity, authenticated, busy, pending, conflict, handoffReviewPending]);
 
-  function checkRecoveryOwner(value: ProviderTeam) {
-    if (!authenticated) return;
-    const scope = requireRecoveryScope(value);
-    if (journal.current && journal.current.serverScope !== scope) throw new WorkspaceApiError(403);
+  function checkRecoveryOwner(value:ProviderTeam){session.recovery.checkOwner(authenticated,value);}
+  function recoveryRead(value:ProviderTeam,currentWorkspace:Workspace|null,current:number,reloadParent=false){
+    return {authenticated,team:value,workspace:currentWorkspace,generation:current,reloadParent,
+      apiBase:import.meta.env.VITE_API_BASE||'http://127.0.0.1:8000',
+      native:import.meta.env.VITE_WORKSPACE_NATIVE_AUTH_ENABLED==='true',draftStorage};
   }
-  async function prepareRecovery(currentTeam: ProviderTeam, currentWorkspace: Workspace | null, current: number, reloadParent = false) {
-    if (!authenticated) return;
-    checkRecoveryOwner(currentTeam);
-    const serverScope = requireRecoveryScope(currentTeam);
-    const scope = await privateDraftScope(serverScope, import.meta.env.VITE_API_BASE || "http://127.0.0.1:8000");
-    if (current !== generation.current) return;
-    if (journal.current?.scope !== scope) {
-      journal.current?.value.close(); journal.current = null;
-      const store = await draftStorage({ scope, native: import.meta.env.VITE_WORKSPACE_NATIVE_AUTH_ENABLED === "true" });
-      if (current !== generation.current) { store.close(); return; }
-      journal.current = { scope, serverScope, value: new DraftJournal(store) };
-    }
-    const active = journal.current.value;
-    const addresses = ["team", ...(currentWorkspace ? [`workspace:${currentWorkspace.id}`,
-      editorAddress(currentWorkspace.id,"private-note"),editorAddress(currentWorkspace.id,"core-note"),editorAddress(currentWorkspace.id,"transcript")] : [])];
-    const offers: RecoveryOffer[] = [];
-    for (const address of addresses) {
-      if (active.has(address) && !reloadParent) continue;
-      const draft = await active.load(address);
-      if (current !== generation.current || journal.current?.value !== active) return;
-      if (draft && (draft.kind === "team" || draft.kind === "workspace")) offers.push({ address, draft });
-    }
-    setRecoveryOffers(previous => [...previous.filter(offer => !reloadParent || !addresses.includes(offer.address)), ...offers]);
-    setRecoveryState(""); setRecoveryEpoch(value => value + 1);
+  function prepareRecovery(value:ProviderTeam,currentWorkspace:Workspace|null,current:number,reloadParent=false){
+    return session.recovery.prepare(recoveryRead(value,currentWorkspace,current,reloadParent));
   }
-  async function recoverAfterRead(value: ProviderTeam, currentWorkspace: Workspace | null, current: number, reloadParent = false) {
-    try { await prepareRecovery(value, currentWorkspace, current, reloadParent); }
-    catch (cause) { if (current === generation.current) {
-      if (cause instanceof WorkspaceApiError && cause.status === 403) failure(cause);
-      else setRecoveryState("failed");
-    } }
+  function recoverAfterRead(value:ProviderTeam,currentWorkspace:Workspace|null,current:number,reloadParent=false){
+    return session.recovery.afterRead(recoveryRead(value,currentWorkspace,current,reloadParent),failure);
   }
-  function flushScheduledDraft() {
-    if (previousIdentity.current !== authenticated ||
-        authenticated?.mode === 'clerk_jwt' && authenticated.nativeSession && !authenticated.nativeSession.isCurrent()) return;
-    if (authenticated && (!validRecoveryScope(currentTeam.current?.recovery_scope) ||
-        journal.current?.serverScope !== currentTeam.current?.recovery_scope)) return;
-    // This is a local, acknowledged storage write. It never submits or retries work.
-    void scheduledDraftSave.current?.run().catch(() => {});
-  }
+  function recoveryOwner(){return {authenticated,currentAuthenticated:()=>previousIdentity.current,currentTeam:()=>currentTeam.current};}
+  function flushScheduledDraft(){session.recovery.flush(recoveryOwner());}
   useEffect(() => {
     draftsSuspended.current = false;
     const suspend = (inactive:boolean) => { draftsSuspended.current = inactive; if(inactive)flushScheduledDraft(); };
@@ -541,165 +491,48 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       window.removeEventListener?.('pageshow', visibility);
     };
   }, [authenticated]);
-  useEffect(() => {
-    // A previous acknowledgment covers the previous text, not the new inputs.
-    setRecoveryState(previous=>previous==='saved'?'':previous);
-    const active = journal.current?.value;
-    const nativePending=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession&&pending?.type==='ask'?pending:null;
-    if (!active || nativeModelSettling.current || (busy||pending)&&!nativePending || recoveryState === "failed" ||
-        authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession&&!authenticated.nativeSession.isCurrent() ||
-        authenticated && (!validRecoveryScope(team?.recovery_scope) || journal.current?.serverScope !== team?.recovery_scope)) return;
-    const current = generation.current;
-    let canceled = false,flight:Promise<void>|null=null;
-    const writes: Array<()=>Promise<void>> = [];
-    if (!busy&&!pending&&team && teamDraft && active.has("team")&&!recoveryOffers.some(offer=>offer.address==='team')) writes.push(()=>active.persist("team", recoveryTeamDraft(team, teamDraft, null)));
-    if (workspace && active.has(`workspace:${workspace.id}`)&&!recoveryOffers.some(offer=>offer.address===`workspace:${workspace.id}`)) writes.push(()=>active.persist(`workspace:${workspace.id}`, notebookDraft(workspace, note, thought, evidence, source, nativePending)));
-    if (!writes.length) return;
-    const run=()=>{
-      clearTimeout(timer);
-      if(!flight){
-        // Saving the current draft cannot verify a failed target recovery read.
-        if(current===generation.current)setRecoveryState(previous=>previous==="failed"?previous:"saving");
-        flight=Promise.all(writes.map(write=>write())).then(()=>{
-          if(!canceled&&current===generation.current)setRecoveryState(previous=>previous==="failed"?previous:"saved");
-        }).catch(error=>{if(!canceled&&current===generation.current)setRecoveryState("failed");throw error;});
-      }
-      return flight;
-    };
-    const timer=setTimeout(()=>{void run().catch(()=>{});},180);
-    const save={run,cancel:()=>{clearTimeout(timer);canceled=true;},drain:()=>flight??Promise.resolve()};
-    scheduledDraftSave.current=save;
-    // Readiness or a final input update may arrive after the suspension hint.
-    if(draftsSuspended.current)flushScheduledDraft();
-    return () => {save.cancel();if(scheduledDraftSave.current===save)scheduledDraftSave.current=null;};
+  useEffect(() => session.recovery.schedule(recoveryOwner(),retained=>notebookDraft(workspace!,note,thought,evidence,source,retained)),
   // State transitions do not trigger another storage write. The inputs do.
-  }, [workspace, team, teamDraft, note, thought, evidence, source, busy, pending, recoveryOffers, recoveryEpoch, phoneNoteTask]);
+  [workspace, team, teamDraft, note, thought, evidence, source, busy, pending, recoveryOffers, recoveryEpoch, phoneNoteTask]);
 
-  async function restoreDraft(offer: RecoveryOffer) {
-    if (busy || pending || !authenticated) return;
-    const draft = offer.draft, current = generation.current;
-    setBusy(true);
-    try {
-      // Access can change while the offer is on screen. Recheck before displaying
-      // its private contents, including the current encounter/patient boundary.
-      const latestTeam = await workspaceApi.team(authenticated);
-      if (current !== generation.current) return;
-      if (!latestTeam.recovery_scope || latestTeam.recovery_scope !== team?.recovery_scope) throw new WorkspaceApiError(403);
-      const latest = draft.kind === "workspace" ? await workspaceApi.read(authenticated, draft.workspaceId) : null;
-      if (current !== generation.current) return;
-      setTeam(latestTeam);
-      if (draft.kind === "team") {
-        setTeamDraft(draft.configuration); setSettingsOpen(true); setPracticeOpen(false);
-        if (draft.pending) setPending({ type: "team", body: draft.pending });
-        else if (latestTeam.revision !== draft.baseRevision) setConflict(true);
-      } else if (latest && workspace?.id === draft.workspaceId) {
-        setPracticePage("notebook");setWorkspace(latest); setNote(draft.note); setThought(draft.thought); setEvidence(draft.evidence); setSource(draft.source);
-        if(draft.chief_note_task&&journal.current){
-          const task=draft.chief_note_task,saved=latest.note?.latest,chief=latestTeam.configuration.bots.find(item=>item.role==='chief');
-          const matches=!!saved&&saved.id===task.note_id&&saved.version===task.note_version&&saved.content_hash===task.content_hash&&saved.source_fingerprint===task.source_fingerprint;
-          setPhoneNoteTask({owner:authenticated,scope:journal.current.scope,generation:current,workspaceId:latest.id,
-            selection:{expected_revision:latest.revision,idempotency_key:crypto.randomUUID(),note_id:task.note_id,note_version:task.note_version,
-              content_hash:task.content_hash,source_fingerprint:task.source_fingerprint,share_with_team:true},content:matches?saved.content:''});
-          if(chief)setSelected(botAddress(chief));setPhoneChatToolsOpen(false);setClinicalTeamExpanded(true);
-        }
-        const material = draft.chief_note_task?'Conversation':isFollowUpRecovery(draft) ? "Work" : draft.pending && ["note","review","coreNoteLink"].includes(draft.pending.type) ? "Review" : "Notebook";
-        setSettingsOpen(false); setPracticeOpen(false); setPanel(material==='Conversation'?'Notebook':material); setMobilePanel(material);
-        if (draft.pending) setPending(draft.pending);
-        else if (latest.revision !== draft.baseRevision) setConflict(true);
-        setPreviousModelRequest(draft.previous_model_request??((draft.pending?.type==='ask'||draft.pending?.type==='retry')?draft.pending.previous_model_request:null)??null);
-      } else return;
-      setRecoveryOffers(previous => previous.filter(value => value.address !== offer.address));
-      setMessage("Recovered this device's draft. Check it against the current saved history before continuing. Unconfirmed requests are retried only when you choose.");
-    } catch (cause) { if (current === generation.current) failure(cause); }
-    finally { if (current === generation.current) setBusy(false); }
-  }
-  async function discardRecovered(offer: RecoveryOffer) {
-    if (busy || pending || offer.draft.pending) return;
-    const current = generation.current; setBusy(true);
-    try {
-      await journal.current?.value.persist(offer.address, null);
-      if (current === generation.current) setRecoveryOffers(previous => previous.filter(value => value.address !== offer.address));
-    } catch { if (current === generation.current) setRecoveryState("failed"); }
-    finally { if (current === generation.current) setBusy(false); }
-  }
-  async function exitWorkspace(discard: boolean) {
-    if (connectionNavigationLocked) {
-      setError("Save or recover your unfinished edits before closing. Unconfirmed requests are retained.");
-      return;
-    }
-    if (!discard && (hasUnsavedWork() || recoveryOffers.length)) { setConfirmCaptureExit(true); return; }
-    const active = journal.current?.value, current = generation.current;
-    if (active) {
-      // Deliberately discarded drafts must not be recreated by the deferred flush.
-      scheduledDraftSave.current?.cancel();scheduledDraftSave.current=null;
-      setBusy(true);
-      try {
-        // Keep unconfirmed requests for explicit reconciliation after reopening.
-        for (const [address, record] of active.records) {
-          const body = record.value?.body as { kind?: unknown; pending?: unknown } | undefined;
-          // Editors own nested requests and proof history; workspace close cannot discard them.
-          if (body?.kind === "account-editor" || body?.kind === "editor") continue;
-          if (!body?.pending) await active.persist(address, null);
-        }
-      } catch { if (current === generation.current) { setRecoveryState("failed"); setBusy(false); } return; }
-    }
-    if (current === generation.current) { clear(); onExit?.(); }
-  }
+  function restoreDraft(offer:RecoveryOffer){return session.recovery.restore(offer,{authenticated,failure,show:view=>{
+    if(view.kind==='team'){setSettingsOpen(true);setPracticeOpen(false);return;}
+    setPracticePage('notebook');
+    if(view.noteTask){setPhoneNoteTask(view.noteTask);if(view.helper)setSelected(view.helper);setPhoneChatToolsOpen(false);setClinicalTeamExpanded(true);}
+    setSettingsOpen(false);setPracticeOpen(false);setPanel(view.material==='Conversation'?'Notebook':view.material);setMobilePanel(view.material);
+  }});}
+  function discardRecovered(offer:RecoveryOffer){return session.recovery.discard(offer);}
+  function exitWorkspace(discard:boolean){return session.recovery.exit(discard,{
+    navigationLocked:connectionNavigationLocked,hasUnsavedWork,confirm:()=>setConfirmCaptureExit(true),clear,onExit,
+  });}
 
   function clear() {
     setConnectionError(null);
     setSavedRecordingEntry(null);
-    session.invalidate();activityNavigation.current?.abort();activityNavigation.current=null;
-    closeDraftJournal(); setRecoveryOffers([]); setRecoveryState("");
+    session.clear();
     setSetupApproval(null); setSetupProjection(null);
-    setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
+    setInboxSelection(null);setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
-    setEntryIntent(null);setRecordingSourceRequest(0);setNote(""); setThought(""); setEvidence(""); setSource(""); setSelectedSource(null); setSelectedResult(null);
-    setPending(null); setClinicalShareCheck(null); setConflict(false); setMessage(""); setError(""); setBusy(false);
+    setEntryIntent(null);setRecordingSourceRequest(0);setSelectedSource(null); setSelectedResult(null);
+    setClinicalShareCheck(null);
     setModelObservation(null);setReplacementDraft(null);setModelHashes({});
-    setPreviousModelRequest(null);
-    nativeModelSettling.current=false;
     modelBusy.current=false;
     setCaptureDraftLocked(false); setConfirmCaptureExit(false);
     setCaptureRequest(0); setObservedCaptureDraft(null);
     setResearchEntry(false);
     setReviewHandoffId(null);setHandoffReviewPending(false);
   }
-  function failure(cause: unknown,retry?:()=>Promise<void>) {
-    if(transientConnectionFailure(cause))return;
-    setMessage("");
-    if (cause instanceof WorkspaceApiError && [401, 403, 404, 426].includes(cause.status)) {
-      clear(); setError(cause.status === 426 ? "Update required for this team configuration. Private content is withheld; encrypted drafts and exact unconfirmed requests remain on this device." : "Workspace access is unavailable. Private content has been cleared from this view.");
-    } else {
-      if (cause instanceof WorkspaceApiError && cause.code === "workspace_recovery_unavailable") setRecoveryState("failed");
-      setError(cause instanceof WorkspaceApiError ? cause.message : "The request could not be confirmed. Retry when the local service is available.");
-      if(retry)setReadRetry({run:retry});
-      if (cause instanceof WorkspaceApiError && cause.status === 409) { setConflict(true); setPending(null); setSetupApproval(null); setSetupEpoch(value => value + 1); }
-      if (cause instanceof WorkspaceApiError && [400, 422].includes(cause.status)) setPending(null);
-    }
-  }
-  async function recheckSyntheticConnection(){
-    if(authenticated||identity||busy||pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
-    const current=generation.current;setBusy(true);setError('');
-    try{
-      await workspaceApi.checkSyntheticConnection();
-      if(current===generation.current)setMessage('Your workspace service is available. Open a synthetic encounter to continue.');
-    }catch(cause){if(current===generation.current)failure(cause,recheckSyntheticConnection);}
-    finally{if(current===generation.current)setBusy(false);}
-  }
-  function transientConnectionFailure(cause:unknown){
-    if(!(cause instanceof WorkspaceApiError)||cause.status!==503||cause.code!=='workspace_protocol_required')return false;
-    const owner=authenticated??identity;
-    // A discarded pre-reconnect reply can arrive after the connection is ready.
-    // It cannot adopt old data or restore a warning for an already recovered pause.
-    if(owner&&(workspaceProtocolPhase(owner)!=='ready'||connectionRecovery?.identity===owner&&connectionRecovery.phase!=='ready'))
-      setConnectionError({identity:owner,generation:workspaceProtocolGeneration(owner),message:cause.message});
-    return true;
+  function lifecycleContext(){return {authenticated,connectionRecovery,clear,
+    recoveryFailed:()=>setRecoveryState('failed'),
+    invalidateSetup:()=>{setSetupApproval(null);setSetupEpoch(value=>value+1);}};}
+  function failure(cause:unknown,retry?:()=>Promise<void>){session.lifecycle.failure(cause,lifecycleContext(),retry);}
+  function recheckSyntheticConnection(){
+    return session.lifecycle.recheckSyntheticConnection(lifecycleContext(),connectionNavigationLocked||captureNavigationLocked||captureDraftLocked);
   }
   function goHome(){
     routeSequence.current++;routeApplying.current=false;routeReady.current=true;
@@ -914,11 +747,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     }catch{if(current===generation.current){setRecoveryState('failed');setError('The rejected request is retained. Recheck local recovery before continuing.');}}
     finally{if(current===generation.current)setBusy(false);}
   }
-  function modelFailure(cause:unknown){
-    if(transientConnectionFailure(cause))return;
-    if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status)){failure(cause);return;}
-    setError(cause instanceof WorkspaceApiError?cause.message:"The model request could not be confirmed. Its exact request is retained; check the saved result.");
-  }
+  function modelFailure(cause:unknown){session.lifecycle.modelFailure(cause,lifecycleContext());}
   function mergeModelRead(latest:Workspace,latestTeam:ProviderTeam){
     const savedNote=(value:Workspace|null)=>value?.entries.filter(e=>e.kind==='scratchpad').at(-1)?.content??'';
     const noteChanged=savedNote(latest)!==savedNote(workspace)&&note!==savedNote(latest);
