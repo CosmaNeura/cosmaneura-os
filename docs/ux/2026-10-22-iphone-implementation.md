@@ -86,5 +86,7 @@ Compose and build the Apple shell using the original handoff's R section and
 - Resolve the remaining product wording, theme, landing and avatar decisions from
   the handoff, and revisit the opt-in execution-proof screen's style and copy.
 
-This is the first batch of improvements. No remote push, PR or production
-deployment was performed.
+This is the first batch of improvements; the full handoff remains open. The
+October 22 checkpoint was local. The owner requested GitHub publication on
+October 23. Publishing this source branch does not update the physical iPhone;
+that requires a subsequent signed device build and installation.
