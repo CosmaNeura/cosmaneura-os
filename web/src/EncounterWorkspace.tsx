@@ -43,7 +43,7 @@ import { supportsSkill, requireRecoveryScope, validRecoveryScope } from "./works
 import { BotAvatar } from "./BotAvatar";
 import { TeamWorkPanel } from "./TeamWorkPanel";
 import { HandoffReviewPanel } from "./HandoffReviewPanel";
-import {modelActive, modelRequestHash, modelStateLabel, type ModelOperation, type PreviousModelRequest} from "./model-work-request";
+import {modelActive, modelStateLabel, type ModelOperation} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
 import { FollowUpWork } from "./FollowUpWork";
 import { VendorWorkspaceMount } from "./VendorWorkMount";
@@ -59,7 +59,7 @@ import { EncounterSources } from "./EncounterSources";
 import { CapturePanel } from "./CapturePanel";
 import { ExistingScribeSourcePanel } from './ExistingScribeSourcePanel';
 import {ClinicalTeamDraftsPanel} from './ClinicalTeamDraftsPanel';
-import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalRequestDisplay,clinicalTeamRequest,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,noteSelection,validShareSavedNoteInput,verifySharedClinicalNote} from './clinical-team-contract';
+import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalRequestDisplay,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,noteSelection} from './clinical-team-contract';
 import type {ShareSavedNoteInput} from './clinical-team-contract';
 import type {InboxDraftSelection} from "./inbox-analysis-contract";
 import {ResearchPanelLoader} from "./ResearchPanelLoader";
@@ -119,9 +119,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
   const [session]=useState(()=>new WorkspaceSession());
-  const {homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
+  const {clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
     workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
-  const {setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setIdentity,setConnectionError,setBusy,setPending,setConflict,setMessage,setError,generation,
+  const {setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setIdentity,setConnectionError,setBusy,setConflict,setMessage,setError,generation,
     setWorkspace,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
@@ -163,9 +163,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [handoffReviewPending,setHandoffReviewPending]=useState(false);
   const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
   const [agentResearchBusy,setAgentResearchBusy]=useState(false);
-  const [clinicalPreparing,setClinicalPreparing]=useState(false);
-  const clinicalPreparation=useRef<object|null>(null);
-  const clinicalSafety=useRef<{blocked:boolean;busy:boolean;pending:PendingSave|null}>({blocked:true,busy:true,pending:null});
+  const {preparation:clinicalPreparation,safety:clinicalSafety}=session.clinical;
   const [reviewHandoffId,setReviewHandoffId]=useState<string|null>(null);
   const viewNavigationLocked = connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy || clinicalPreparing;
   const connectionNavigationLocked = !!privateRecordingEntry || privateRecordingBusy || viewNavigationLocked;
@@ -232,7 +230,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   useEffect(()=>{setPhoneChatToolsOpen(false);setClinicalTeamExpanded(false);setPhoneNoteTask(null);clinicalTeamFocus.current=null;chiefReviewReturn.current=null;chiefReviewReturnFocus.current=null;clinicalPreparation.current=null;setClinicalPreparing(false);},[authenticated,workspace?.id]);
   const [draftNoteIntent,setDraftNoteIntent]=useState<{workspaceId:string;content:string}|null>(null);
   const [reviewState,setReviewState]=useState<'editing'|'review'|'saved'>('editing');
-  const {currentThought,thoughtEditVersion,modelBusy}=session.models;currentThought.current=thought;
+  const {currentThought,modelBusy}=session.models;currentThought.current=thought;
   function updateThought(value:string){session.models.updateThought(value);}
   const [prepSelection,setPrepSelection]=useState<{scope:symbol;selection:SessionPrepAnalysis}|null>(null);
   const [prepEpoch,setPrepEpoch]=useState(0);
@@ -627,63 +625,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     return session.models.save(operation,mode,modelContext(),confirmed);
   }
   function replaceModelRequest(){return session.models.replace(modelContext());}
-  async function prepareNewSelectedAnalysis(){
-    if(!workspace||!identity||busy||modelBusy.current||pending?.type!=='ask'||!(pending.body.research_analysis||pending.body.inbox_analysis||pending.body.membership_analysis||pending.body.session_prep_analysis)||!modelObservation||!replacementDraft?.acknowledged||!['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome))return;
-    const old=pending,current=generation.current,active=journal.current?.value;if(!active||recoveryBlocked)return;
-    modelBusy.current=true;setBusy(true);
-    try{
-      const prior:PreviousModelRequest={workspace_id:workspace.id,operation:{type:'ask',body:structuredClone(old.body)},request_sha256:await modelRequestHash(old.body),outcome:modelObservation.receipt.outcome,observed_at:modelObservation.observedAt,origin:old.origin??'legacy_unknown',legacy_uncertainty_acknowledged:true};
-      await active.persist(`workspace:${workspace.id}`,notebookDraft(workspace,note,thought,evidence,source,null,prior));if(current!==generation.current)return;
-      setPending(null);setPreviousModelRequest(prior);setModelObservation(null);setReplacementDraft(null);setSelected(old.body.role);setSavedResearchChat(false);
-      if(old.body.session_prep_analysis){setPrepSelection(null);setPrepEpoch(value=>value+1);}
-      if(old.body.inbox_analysis){setInboxSelection(null);setPracticeOpened(true);setPracticeOpen(true);}
-      setMessage(old.body.session_prep_analysis?'Previous request retained. Open the current Session Prep brief and include it in chat before sending a new question. Nothing has been sent.':old.body.membership_analysis?'Previous Membership/Billing request retained. Review the current record and consent to a new review from this coworker.':old.body.inbox_analysis?'Previous Inbox request retained. Review the current message and encounter in Incoming messages, then consent to a new draft.':'Previous analysis request retained. Review a saved source packet and question, then consent to a new model request. Nothing has been sent.');
-    }catch(cause){if(current===generation.current)modelFailure(cause);}finally{if(current===generation.current){modelBusy.current=false;setBusy(false);}}
-  }
-  async function prepareNewClinicalDrafts(){
-    if(!authenticated||!identity||!workspace||!team||busy||modelBusy.current||pending?.type!=='ask'||!parseClinicalTeamRequest(pending.body.content)||
-      !modelObservation||!replacementDraft?.acknowledged||!['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome)||
-      recoveryBlocked||recoveryState==='failed'||recoveryOffers.length||conflict||captureNavigationLocked||captureDraftLocked||viewNavigationLocked)return;
-    const owner=authenticated,access=identity,current=generation.current,id=workspace.id,store=journal.current,old=pending;
-    if(!store||store.serverScope!==requireRecoveryScope(team))return;
-    const isCurrent=()=>previousIdentity.current===owner&&privateRecordingLive.current.authenticated===owner&&currentIdentity.current===access&&generation.current===current&&
-      recoveryView.current.workspace?.id===id&&journal.current?.value===store.value&&journal.current.scope===store.scope&&journal.current.serverScope===store.serverScope;
-    modelBusy.current=true;setBusy(true);
-    try{
-      assertCurrentDesktopSession(owner);if(owner.mode==='clerk_jwt'&&owner.nativeSession&&!owner.nativeSession.isCurrent())return;
-      const prior:PreviousModelRequest={workspace_id:id,operation:{type:'ask',body:structuredClone(old.body)},request_sha256:await modelRequestHash(old.body),
-        outcome:modelObservation.receipt.outcome,observed_at:modelObservation.observedAt,origin:old.origin??'legacy_unknown',legacy_uncertainty_acknowledged:true};
-      if(!isCurrent())return;
-      await store.value.persist(`workspace:${id}`,notebookDraft(workspace,note,currentThought.current,evidence,source,null,prior));
-      if(!isCurrent())return;
-      assertCurrentDesktopSession(owner);if(owner.mode==='clerk_jwt'&&owner.nativeSession&&!owner.nativeSession.isCurrent())return;
-      setPending(null);setPreviousModelRequest(prior);setModelObservation(null);setReplacementDraft(null);setSelected(old.body.role);
-      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setClinicalTeamExpanded(true);
-      setMessage('The previous exact request is retained. Review the current saved note and directions before preparing a new private team request. Nothing has been sent.');
-    }catch(cause){if(isCurrent())modelFailure(cause);}finally{if(isCurrent()){modelBusy.current=false;setBusy(false);}}
-  }
+  function prepareNewSelectedAnalysis(){return session.models.prepareSelectedAnalysis({...modelContext(),recoveryBlocked,show:target=>{setSelected(target.role);setSavedResearchChat(false);if(target.kind==='prep'){setPrepSelection(null);setPrepEpoch(value=>value+1);}if(target.kind==='inbox'){setInboxSelection(null);setPracticeOpened(true);setPracticeOpen(true);}}});}
+  function prepareNewClinicalDrafts(){return session.clinical.prepareReplacement(clinicalContext());}
   function checkEntryResult(entry:WorkspaceEntry){return session.models.checkEntryResult(entry,modelContext());}
-  function useCoreDraft(draft: CaptureDraft) {
-    if (!workspace || busy || pending || conflict || draft.status !== "draft" || !draft.note_ref || !draft.transcript_ref || !draft.note_sha256) return;
-    void save({type: "coreNoteLink", body: {expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(),
-      base_note_id: workspace.note?.latest?.id ?? null, source: {
-        session_id: draft.session_id, scribe_source_id: draft.scribe_source_id, source_sha256: draft.source_sha256,
-        schema_ref: draft.schema_ref, transcript_ref: draft.transcript_ref, note_ref: draft.note_ref, note_sha256: draft.note_sha256,
-        ...(draft.capture_gap_review ? {capture_gap_review: draft.capture_gap_review} : {}),
-        ...(draft.notebook_source ? {notebook_source: draft.notebook_source} : {}),
-        ...(draft.reviewed_source ? {reviewed_source: draft.reviewed_source} : {}),
-      }}});
-  }
-  function append(kind: AppendInput["kind"], content: string, sourceLabel?: string) {
-    if (!workspace || !content.trim() || pending || conflict) return;
-    void save({ type: "entry", body: { expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(), kind, content,
-      ...(sourceLabel ? { source_label: sourceLabel } : {}) } });
-  }
-  function ask(content = thought) {
-    if (!workspace || !team?.revision || !content.trim() || pending || conflict || !team.configuration.bots.find(b => botAddress(b) === selected)?.enabled) return;
-    void save({ type: "ask", model_contract:1,origin:'durable_admission_v1',body: { expected_revision: workspace.revision, team_revision: team.revision,
-      idempotency_key: crypto.randomUUID(), role: selected, content, ...(selectedPrep?{session_prep_analysis:structuredClone(selectedPrep)}:{}) } });
-  }
+  function useCoreDraft(draft:CaptureDraft){void session.saves.useCoreDraft(draft,saveContext());}
+  function append(kind:AppendInput['kind'],content:string,sourceLabel?:string){void session.saves.append(kind,content,sourceLabel,saveContext());}
+  function ask(content=thought){void session.models.ask(selected,selectedPrep,modelContext(),content);}
   function prepareChiefQuestion(prompt:string){
     if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!team?.revision||!team.llm.enabled||
       bot?.role!=='chief'||!bot.enabled||bot.retired||bot.blocked_capabilities?.includes('model_answer')||thought.trim()||
@@ -795,61 +742,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     if(inComposer&&expected){setPhoneNoteTask({...expected,workspaceId:workspace.id});setQuestionFocus(value=>value+1);}
     if(prepare)void prepareClinicalDrafts(noteSelection(workspace.note.latest,workspace.revision)).catch(()=>{});
   }
-  async function prepareClinicalDrafts(input:ShareSavedNoteInput){
-    if(!authenticated||!identity||!workspace||!team||locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked||clinicalPreparation.current)return;
-    const directions=currentThought.current,directionsEdit=thoughtEditVersion.current,directionsError=clinicalTeamDirectionsError(directions);
-    if(directionsError){setError(directionsError);return;}
-    const original=workspace.note?.latest,store=journal.current,owner=authenticated,access=identity,current=generation.current,episode={};
-    if(!original||original.sources_changed||note!==latestNote||!workspace.appointment_id||workspace.revision>=500||clinicalNoteSnapshotSize(original,workspace.revision)>20000||!store||
-      store.serverScope!==requireRecoveryScope(team)||!validShareSavedNoteInput(input)||input.expected_revision!==workspace.revision||
-      input.note_id!==original.id||input.note_version!==original.version||input.content_hash!==original.content_hash||input.source_fingerprint!==original.source_fingerprint)return;
-    const originalText=original.content,teamRevision=team.revision,workspaceId=workspace.id;
-    const shareOperation:Extract<PendingSave,{type:'clinicalNoteShare'}>={type:'clinicalNoteShare',body:structuredClone(input)};
-    const noteMatches=(value:Workspace)=>{const latest=value.note?.latest;return !!latest&&!latest.sources_changed&&latest.id===input.note_id&&latest.version===input.note_version&&
-      latest.content_hash===input.content_hash&&latest.source_fingerprint===input.source_fingerprint&&latest.content===originalText;};
-    const isCurrent=()=>{
-      if(clinicalPreparation.current!==episode||previousIdentity.current!==owner||privateRecordingLive.current.authenticated!==owner||currentIdentity.current!==access||
-        generation.current!==current||recoveryView.current.workspace?.id!==workspaceId||journal.current?.value!==store.value||journal.current.scope!==store.scope||journal.current.serverScope!==store.serverScope)return false;
-      try{assertCurrentDesktopSession(owner);return owner.mode!=='clerk_jwt'||!owner.nativeSession||owner.nativeSession.isCurrent();}catch{return false;}
-    };
-    const ready=(value:ProviderTeam)=>(directions===''||clinicalTeamDirectionsSupported(value))&&value.revision===teamRevision&&value.revision>0&&value.recovery_scope===store.serverScope&&value.llm.enabled&&
-      ['chief','follow_up','research'].every(role=>value.configuration.bots.some(item=>item.role===role&&item.enabled&&!item.retired&&item.include_evidence&&
-        !item.blocked_capabilities?.includes('model_answer')&&!item.blocked_capabilities?.includes('private_draft_handoff')));
-    const canSend=(latest:Workspace)=>{
-      const safety=clinicalSafety.current,live=recoveryView.current,currentConfig=currentTeam.current;
-      return isCurrent()&&!safety.blocked&&(!safety.busy||modelBusy.current||safety.pending===shareOperation)&&(!safety.pending||safety.pending===shareOperation)&&
-        currentThought.current===directions&&thoughtEditVersion.current===directionsEdit&&!!live.workspace&&noteMatches(live.workspace)&&noteMatches(latest)&&latest.revision>=live.workspace.revision&&
-        live.note===(latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'')&&!!currentConfig&&ready(currentConfig);
-    };
-    clinicalPreparation.current=episode;setClinicalPreparing(true);setError('');
-    try{
-      if(!ready(team)||!canSend(workspace))throw new Error('Team or source unavailable');
-      let selectedSource=currentSharedNote(workspace);
-      if(!selectedSource){
-        const receipt=await save(shareOperation,'submit',isCurrent);
-        if(!isCurrent()||!receipt||receipt.outcome!=='saved')return;
-        selectedSource=currentSharedNote(receipt.workspace);
-        if(!selectedSource||selectedSource.entry.id!==receipt.source_entry_id)throw new Error('Shared note mismatch');
-      }
-      if(!isCurrent())return;
-      const latest=await workspaceApi.read(access,workspaceId);if(!isCurrent())return;
-      const latestTeam=await workspaceApi.team(access);if(!isCurrent())return;checkRecoveryOwner(latestTeam);
-      const shared=currentSharedNote(latest);
-      if(!ready(latestTeam)||!canSend(latest)||!shared||shared.entry.id!==selectedSource.entry.id||!await verifySharedClinicalNote(shared.entry))throw new Error('Current source unavailable');
-      if(!isCurrent()||!canSend(latest))return;
-      const content=clinicalTeamRequest(shared,directions);
-      if(clinicalTeamRequestAlreadySaved(latest,directions)){
-        setWorkspace(latest);setMessage('Chief’s request is already saved. Review its current drafts or check the retained result.');return;
-      }
-      const chief=latestTeam.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired)!;
-      const operation:ModelOperation={type:'ask',model_contract:1,origin:'durable_admission_v1',...(previousModelRequest?{previous_model_request:previousModelRequest}:{}),body:{expected_revision:latest.revision,team_revision:latestTeam.revision,
-        idempotency_key:crypto.randomUUID(),role:botAddress(chief),content}};
-      await saveModel(operation,'submit',{workspace:latest,team:latestTeam,identity:access,isCurrent,canSend:()=>canSend(latest),composer:{content:directions,editVersion:directionsEdit},
-        onDispatch:()=>{if(isCurrent())setClinicalPreparing(false);}});
-    }catch(cause){if(isCurrent()){if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status))failure(cause);
-      else setError('The exact saved note or current team could not be confirmed. No new Chief request was sent; review the retained share and current source before continuing.');}}
-    finally{if(clinicalPreparation.current===episode){clinicalPreparation.current=null;setClinicalPreparing(false);}}
-  }
+  function clinicalContext():import('./session/clinical').ClinicalContext {return {...modelContext(),locked,viewNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,latestNote,previousIdentity,privateRecordingLive,currentIdentity,recoveryView,currentTeam,failure,save,saveModel,showReplacement:role=>{setSelected(role);setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setClinicalTeamExpanded(true);}};}
+  function prepareClinicalDrafts(input:ShareSavedNoteInput){return session.clinical.prepare(input,clinicalContext());}
   function returnToPhoneChat(){setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);}
   function requestScribeDraft(){
     if(!workspace||!scribe?.enabled||scribe.retired||!scribe.include_notebook||scribe.blocked_capabilities?.includes('model_answer')||!team?.llm.enabled||locked||!note.trim()||captureNavigationLocked||captureDraftLocked)return;

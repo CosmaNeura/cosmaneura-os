@@ -1,3 +1,4 @@
+import type {SessionPrepAnalysis} from '../session-prep-analysis-contract';
 import {teamConfigurationChanged} from '../team-configuration-diff';
 import {clinicalTeamDirectionsSupported,clinicalTeamUsesDirections,parseClinicalTeamRequest} from '../clinical-team-contract';
 import {modelWorkApi} from '../model-work-api';
@@ -163,6 +164,26 @@ export class WorkspaceModelActions {
       await this.executeSave(base,next,'submit',context);
     }catch(cause){if(current===generation.current)modelFailure(cause);}
     finally{if(current===generation.current){modelBusy.current=false;setBusy(false);}}
+  }
+  ask(selected:string,selectedPrep:SessionPrepAnalysis|null,context:ModelActionContext,content=this.session.getSnapshot().thought){
+    const {workspace,team,pending,conflict}=this.session.getSnapshot();
+    if (!workspace || !team?.revision || !content.trim() || pending || conflict || !team.configuration.bots.find(b => botAddress(b) === selected)?.enabled) return;
+    return this.save({ type: "ask", model_contract:1,origin:'durable_admission_v1',body: { expected_revision: workspace.revision, team_revision: team.revision,
+      idempotency_key: crypto.randomUUID(), role: selected, content, ...(selectedPrep?{session_prep_analysis:structuredClone(selectedPrep)}:{}) } },'submit',context);
+  }
+  async prepareSelectedAnalysis(context:ModelActionContext&{recoveryBlocked:boolean;show:(target:{role:string;kind:'prep'|'membership'|'inbox'|'research'})=>void}){
+    const {workspace,identity,busy,pending,modelObservation,replacementDraft,note,thought,evidence,source}=this.session.getSnapshot();
+    const {setBusy,setPending,setPreviousModelRequest,setModelObservation,setReplacementDraft,setMessage,generation}=this.session;
+    const {modelBusy}=this,{journal}=this.session.recovery,{recoveryBlocked,notebookDraft,modelFailure}=context;
+    if(!workspace||!identity||busy||modelBusy.current||pending?.type!=='ask'||!(pending.body.research_analysis||pending.body.inbox_analysis||pending.body.membership_analysis||pending.body.session_prep_analysis)||!modelObservation||!replacementDraft?.acknowledged||!['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome))return;
+    const old=pending,current=generation.current,active=journal.current?.value;if(!active||recoveryBlocked)return;
+    modelBusy.current=true;setBusy(true);
+    try{
+      const prior:PreviousModelRequest={workspace_id:workspace.id,operation:{type:'ask',body:structuredClone(old.body)},request_sha256:await modelRequestHash(old.body),outcome:modelObservation.receipt.outcome,observed_at:modelObservation.observedAt,origin:old.origin??'legacy_unknown',legacy_uncertainty_acknowledged:true};
+      await active.persist(`workspace:${workspace.id}`,notebookDraft(workspace,note,thought,evidence,source,null,prior));if(current!==generation.current)return;
+      setPending(null);setPreviousModelRequest(prior);setModelObservation(null);setReplacementDraft(null);context.show({role:old.body.role,kind:old.body.session_prep_analysis?'prep':old.body.membership_analysis?'membership':old.body.inbox_analysis?'inbox':'research'});
+      setMessage(old.body.session_prep_analysis?'Previous request retained. Open the current Session Prep brief and include it in chat before sending a new question. Nothing has been sent.':old.body.membership_analysis?'Previous Membership/Billing request retained. Review the current record and consent to a new review from this coworker.':old.body.inbox_analysis?'Previous Inbox request retained. Review the current message and encounter in Incoming messages, then consent to a new draft.':'Previous analysis request retained. Review a saved source packet and question, then consent to a new model request. Nothing has been sent.');
+    }catch(cause){if(current===generation.current)modelFailure(cause);}finally{if(current===generation.current){modelBusy.current=false;setBusy(false);}}
   }
   async checkEntryResult(entry:WorkspaceEntry,context:ModelActionContext){
     const base=this.session.getSnapshot();

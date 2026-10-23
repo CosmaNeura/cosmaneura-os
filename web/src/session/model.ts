@@ -24,6 +24,7 @@ export type ChiefNoteTask = {
 export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
 
 export type WorkspaceSessionState = {
+  clinicalPreparing:boolean;
   homeBusy:boolean;
   setupApproval:ReviewedTeamDraft|null;
   setupProjection:SetupProjection|null;

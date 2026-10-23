@@ -1,3 +1,5 @@
+import type {CaptureDraft} from '../capture-notes-api';
+import type {AppendInput} from '../workspace-api';
 import {clinicalTeamApi} from '../clinical-team-api';
 import type {ClinicalNoteShareReceipt} from '../clinical-team-contract';
 import {DraftStoreError} from '../draft-store';
@@ -24,6 +26,26 @@ export class WorkspaceSaves {
   private readonly clinical:Pick<typeof clinicalTeamApi,'resolve'|'share'>;
   constructor(private readonly session:WorkspaceSession,deps:SaveDependencies={}) {
     this.api=deps.workspace?{...workspaceApi,...deps.workspace}:workspaceApi;this.clinical=deps.clinical?{...clinicalTeamApi,...deps.clinical}:clinicalTeamApi;
+  }
+
+  append(kind:AppendInput['kind'],content:string,sourceLabel:string|undefined,context:SaveContext){
+    const {workspace,pending,conflict}=this.session.getSnapshot();
+    if (!workspace || !content.trim() || pending || conflict) return;
+    return this.save({ type: "entry", body: { expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(), kind, content,
+      ...(sourceLabel ? { source_label: sourceLabel } : {}) } },context);
+  }
+
+  useCoreDraft(draft:CaptureDraft,context:SaveContext){
+    const {workspace,busy,pending,conflict}=this.session.getSnapshot();
+    if (!workspace || busy || pending || conflict || draft.status !== "draft" || !draft.note_ref || !draft.transcript_ref || !draft.note_sha256) return;
+    return this.save({type: "coreNoteLink", body: {expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(),
+      base_note_id: workspace.note?.latest?.id ?? null, source: {
+        session_id: draft.session_id, scribe_source_id: draft.scribe_source_id, source_sha256: draft.source_sha256,
+        schema_ref: draft.schema_ref, transcript_ref: draft.transcript_ref, note_ref: draft.note_ref, note_sha256: draft.note_sha256,
+        ...(draft.capture_gap_review ? {capture_gap_review: draft.capture_gap_review} : {}),
+        ...(draft.notebook_source ? {notebook_source: draft.notebook_source} : {}),
+        ...(draft.reviewed_source ? {reviewed_source: draft.reviewed_source} : {}),
+      }}},context);
   }
 
   async save(operation:PendingSave,context:SaveContext,mode:'submit'|'resolve'='submit',authorityCurrent?:()=>boolean):Promise<ClinicalNoteShareReceipt|undefined> {
