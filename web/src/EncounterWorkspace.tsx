@@ -1,4 +1,8 @@
 import {WorkspaceDialog} from './WorkspaceDialog';
+import {WorkspaceSession} from './session/workspace-session';
+import {useWorkspaceSession} from './session/use-workspace-session';
+import type {PendingSave} from './session/model';
+export type {PendingSave} from './session/model';
 import {WorkspaceNavIcon} from './WorkspaceNavIcon';
 import {teamConfigurationChanged} from './team-configuration-diff';
 import {VisitCatalog} from './VisitCatalog';
@@ -98,13 +102,9 @@ import { CAPTURE_CORRECTIONS_BUILD, CAPTURE_NOTES_BUILD, CAPTURE_WORKSPACE_BUILD
 import type { CaptureDraft } from "./capture-notes-api";
 import { withObservedCaptureDraft } from "./capture-review-state";
 import { workspaceApi, WorkspaceApiError, botAddress, type AppendInput,
-  type AuthenticatedWorkspaceIdentity, type DraftHandoff, type FollowUpOperation, type NoteOperation, type ProviderTeam, type TeamConfiguration, type TeamSaveInput, type Workspace, type WorkspaceEntry, type WorkspaceEncounter, type WorkspaceIdentity } from "./workspace-api";
+  type AuthenticatedWorkspaceIdentity, type DraftHandoff, type ProviderTeam, type TeamConfiguration, type Workspace, type WorkspaceEntry, type WorkspaceEncounter, type WorkspaceIdentity } from "./workspace-api";
 import "./encounter-workspace.css";
 
-export type PendingSave = NoteOperation | FollowUpOperation | { type: "entry"; body: AppendInput } | ModelOperation |
-  {type:'clinicalNoteShare';body:ShareSavedNoteInput} |
-  { type: "team"; body: TeamSaveInput } |
-  { type: "link"; body: { expected_revision: number; idempotency_key: string; ticket_id: string } };
 type PrivateRecordingEntry={identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;scope:string;serverScope:string;generation:number;title:string;recordingId?:string;returnWorkspaceId?:string;prepareNotebook?:(title?:string)=>Promise<PrivateNotebookResult>;authorize:()=>Promise<void>};
 type ConfirmedClinicalModelContext={workspace:Workspace;team:ProviderTeam;identity:WorkspaceIdentity;
   isCurrent:()=>boolean;canSend:()=>boolean;composer?:{content:string;editVersion:number};onDispatch?:()=>void};
@@ -123,15 +123,16 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   practiceAccess?:PracticeAccessContext;
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
+  const [session]=useState(()=>new WorkspaceSession());
+  const {identity,connectionError,busy,pending,conflict,message,error,readRetry}=useWorkspaceSession(session);
+  const {setIdentity,setConnectionError,setBusy,setPending,setConflict,setMessage,setError,setReadRetry,generation}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
-  const [connectionError,setConnectionError]=useState<{identity:WorkspaceIdentity;generation:number;message:string}|null>(null);
   const [inboxSelection,setInboxSelection]=useState<InboxDraftSelection|null>(null);
   const [inboxNavigation,setInboxNavigation]=useState<{selection:InboxDraftSelection;identity:WorkspaceIdentity;generation:number}|null>(null);
   const inboxNavigationConsumed=useRef<object|null>(null);
   const [workspace, setWorkspace] = useState<Workspace | null>(null);
   const [encounters, setEncounters] = useState<WorkspaceEncounter[] | null>(null);
-  const [identity, setIdentity] = useState<WorkspaceIdentity | null>(null);
   const [team, setTeam] = useState<ProviderTeam | null>(null);
   const [teamDraft, setTeamDraft] = useState<TeamConfiguration | null>(null);
   const [setupApproval, setSetupApproval] = useState<ReviewedTeamDraft | null>(null);
@@ -256,14 +257,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [source, setSource] = useState("");
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState("");
-  const [error, setErrorMessage] = useState("");
-  const [readRetry,setReadRetry]=useState<{run:()=>Promise<void>}|null>(null);
-  const setError=useCallback((value:string)=>{setErrorMessage(value);setReadRetry(null);},[]);
-  const [conflict, setConflict] = useState(false);
   const [schedulingObservation,setSchedulingObservation]=useState(0);
-  const [pending, setPending] = useState<PendingSave | null>(null);
   const [clinicalShareCheck,setClinicalShareCheck]=useState<{operation:Extract<PendingSave,{type:'clinicalNoteShare'}>;receipt:ClinicalNoteShareReceipt;owner:WorkspaceIdentity;generation:number}|null>(null);
   const [modelObservation,setModelObservation]=useState<{receipt:ModelRequestObservation|HandoffRetryObservation;observedAt:string}|null>(null);
   const [replacementDraft,setReplacementDraft]=useState<{content:string;role:string;acknowledged:boolean}|null>(null);
@@ -287,7 +281,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [recoveryOffers, setRecoveryOffers] = useState<RecoveryOffer[]>([]);
   const [recoveryState, setRecoveryState] = useState<"" | "saving" | "saved" | "failed">("");
   const [recoveryEpoch, setRecoveryEpoch] = useState(0);
-  const generation = useRef(0);
   useLayoutEffect(()=>{recoveredConnection.current={identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0};setConnectionError(null);},[authenticated]);
   useEffect(()=>{
     if(!authenticated||connectionRecovery?.identity!==authenticated||recoveredConnection.current.identity!==authenticated||
@@ -369,7 +362,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   useEffect(() => {
     const previousTitle = document.title;
     document.title = "CosmasOS · Provider Team";
-    return () => { generation.current++; activityNavigation.current?.abort(); closeDraftJournal(); document.title = previousTitle; };
+    return () => { session.invalidate(); activityNavigation.current?.abort(); closeDraftJournal(); document.title = previousTitle; };
   }, []);
   useEffect(() => {
     if (previousIdentity.current !== authenticated) { previousIdentity.current = authenticated; clear(); }
@@ -656,7 +649,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   function clear() {
     setConnectionError(null);
     setSavedRecordingEntry(null);
-    generation.current++;activityNavigation.current?.abort();activityNavigation.current=null;
+    session.invalidate();activityNavigation.current?.abort();activityNavigation.current=null;
     closeDraftJournal(); setRecoveryOffers([]); setRecoveryState("");
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
