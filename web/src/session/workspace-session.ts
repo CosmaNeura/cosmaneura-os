@@ -2,6 +2,7 @@ import type {StateUpdate, WorkspaceSessionSnapshot, WorkspaceSessionState} from 
 import {WorkspaceLifecycle,type LifecycleDependencies} from './lifecycle';
 import {WorkspaceRecovery,type RecoveryDependencies} from './recovery';
 import {WorkspaceSaves,type SaveDependencies} from './saves';
+import {WorkspaceModelActions,type ModelDependencies} from './model-actions';
 
 /**
  * One owner for session state, shared by every presentation.
@@ -13,14 +14,16 @@ export class WorkspaceSession {
   readonly recovery:WorkspaceRecovery;
   readonly lifecycle:WorkspaceLifecycle;
   readonly saves:WorkspaceSaves;
-  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies}={}) {
+  readonly models:WorkspaceModelActions;
+  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
     this.saves=new WorkspaceSaves(this,deps.saves);
+    this.models=new WorkspaceModelActions(this,deps.models);
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
     identity:null,connectionError:null,busy:false,pending:null,conflict:false,
-    message:'',error:'',readRetry:null,clinicalShareCheck:null,
+    message:'',error:'',readRetry:null,clinicalShareCheck:null,modelObservation:null,replacementDraft:null,modelHashes:{},schedulingObservation:0,
     workspace:null,encounters:null,team:null,teamDraft:null,note:'',thought:'',evidence:'',source:'',previousModelRequest:null,recoveryOffers:[],recoveryState:'',recoveryEpoch:0,
   });
   private readonly listeners = new Set<()=>void>();
@@ -45,6 +48,10 @@ export class WorkspaceSession {
   readonly setSource = this.setter('source');
   readonly setPreviousModelRequest = this.setter('previousModelRequest');
   readonly setClinicalShareCheck = this.setter('clinicalShareCheck');
+  readonly setModelObservation = this.setter('modelObservation');
+  readonly setReplacementDraft = this.setter('replacementDraft');
+  readonly setModelHashes = this.setter('modelHashes');
+  readonly setSchedulingObservation = this.setter('schedulingObservation');
   readonly setRecoveryOffers = this.setter('recoveryOffers');
   readonly setRecoveryState = this.setter('recoveryState');
   readonly setRecoveryEpoch = this.setter('recoveryEpoch');
@@ -65,10 +72,11 @@ export class WorkspaceSession {
   /** Withhold private view state; the journal retains exact unconfirmed work. */
   readonly clear = ():void => {
     this.invalidate();this.activityNavigation.current?.abort();this.activityNavigation.current=null;
-    this.recovery.close();this.recovery.nativeModelSettling.current=false;
+    this.recovery.close();this.recovery.nativeModelSettling.current=false;this.models.reset();
     this.patch({identity:null,connectionError:null,workspace:null,encounters:null,team:null,teamDraft:null,
       note:'',thought:'',evidence:'',source:'',previousModelRequest:null,recoveryOffers:[],recoveryState:'',
-      pending:null,conflict:false,message:'',error:'',readRetry:null,busy:false,clinicalShareCheck:null});
+      pending:null,conflict:false,message:'',error:'',readRetry:null,busy:false,clinicalShareCheck:null,
+      modelObservation:null,replacementDraft:null,modelHashes:{}});
   };
 
   private setter<K extends keyof WorkspaceSessionState>(key:K) {

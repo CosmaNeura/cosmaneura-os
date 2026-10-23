@@ -1,7 +1,7 @@
 import {WorkspaceDialog} from './WorkspaceDialog';
 import {WorkspaceSession} from './session/workspace-session';
 import {useWorkspaceSession} from './session/use-workspace-session';
-import type {ChiefNoteTask,PendingSave} from './session/model';
+import type {ChiefNoteTask,ConfirmedClinicalModelContext,PendingSave} from './session/model';
 export type {PendingSave} from './session/model';
 import {WorkspaceNavIcon} from './WorkspaceNavIcon';
 import {teamConfigurationChanged} from './team-configuration-diff';
@@ -44,8 +44,7 @@ import { supportsSkill, requireRecoveryScope, validRecoveryScope } from "./works
 import { BotAvatar } from "./BotAvatar";
 import { TeamWorkPanel } from "./TeamWorkPanel";
 import { HandoffReviewPanel } from "./HandoffReviewPanel";
-import {modelWorkApi} from "./model-work-api";
-import {conversationFromEntry, exactModelObservation, modelActive, modelRequestHash, modelStateLabel, validModelOperation, type HandoffRetryObservation, type ModelOperation, type ModelRequestObservation, type PreviousModelRequest} from "./model-work-request";
+import {modelActive, modelRequestHash, modelStateLabel, type ModelOperation, type PreviousModelRequest} from "./model-work-request";
 import { NoteReview } from "./NoteReview";
 import { FollowUpWork } from "./FollowUpWork";
 import { VendorWorkspaceMount } from "./VendorWorkMount";
@@ -61,7 +60,7 @@ import { EncounterSources } from "./EncounterSources";
 import { CapturePanel } from "./CapturePanel";
 import { ExistingScribeSourcePanel } from './ExistingScribeSourcePanel';
 import {ClinicalTeamDraftsPanel} from './ClinicalTeamDraftsPanel';
-import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamUsesDirections,clinicalRequestDisplay,clinicalTeamRequest,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,noteSelection,validShareSavedNoteInput,verifySharedClinicalNote} from './clinical-team-contract';
+import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalRequestDisplay,clinicalTeamRequest,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,noteSelection,validShareSavedNoteInput,verifySharedClinicalNote} from './clinical-team-contract';
 import type {ShareSavedNoteInput} from './clinical-team-contract';
 import type {InboxDraftSelection} from "./inbox-analysis-contract";
 import {ResearchPanelLoader} from "./ResearchPanelLoader";
@@ -105,8 +104,6 @@ import { workspaceApi, WorkspaceApiError, botAddress, type AppendInput,
 import "./encounter-workspace.css";
 
 type PrivateRecordingEntry={identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;scope:string;serverScope:string;generation:number;title:string;recordingId?:string;returnWorkspaceId?:string;prepareNotebook?:(title?:string)=>Promise<PrivateNotebookResult>;authorize:()=>Promise<void>};
-type ConfirmedClinicalModelContext={workspace:Workspace;team:ProviderTeam;identity:WorkspaceIdentity;
-  isCurrent:()=>boolean;canSend:()=>boolean;composer?:{content:string;editVersion:number};onDispatch?:()=>void};
 
 const MembershipAnalysisPanel=deferredWorkspacePanel(()=>import('./MembershipAnalysisPanel').then(module=>module.MembershipAnalysisPanel),'Membership review');
 const InboxAnalysisPanel=deferredWorkspacePanel(()=>import('./InboxAnalysisPanel').then(module=>module.InboxAnalysisPanel),'Inbox review');
@@ -124,9 +121,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
 }) {
   const [session]=useState(()=>new WorkspaceSession());
   const {identity,connectionError,busy,pending,conflict,message,error,readRetry,
-    workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
+    workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
   const {setIdentity,setConnectionError,setBusy,setPending,setConflict,setMessage,setError,generation,
-    setWorkspace,setEncounters,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setClinicalShareCheck,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
+    setWorkspace,setEncounters,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
   const [inboxSelection,setInboxSelection]=useState<InboxDraftSelection|null>(null);
@@ -242,19 +239,13 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   useEffect(()=>{setPhoneChatToolsOpen(false);setClinicalTeamExpanded(false);setPhoneNoteTask(null);clinicalTeamFocus.current=null;chiefReviewReturn.current=null;chiefReviewReturnFocus.current=null;clinicalPreparation.current=null;setClinicalPreparing(false);},[authenticated,workspace?.id]);
   const [draftNoteIntent,setDraftNoteIntent]=useState<{workspaceId:string;content:string}|null>(null);
   const [reviewState,setReviewState]=useState<'editing'|'review'|'saved'>('editing');
-  const currentThought=useRef(thought);currentThought.current=thought;
-  const thoughtEditVersion=useRef(0);
-  function updateThought(value:string){thoughtEditVersion.current+=1;currentThought.current=value;setThought(value);}
+  const {currentThought,thoughtEditVersion,modelBusy}=session.models;currentThought.current=thought;
+  function updateThought(value:string){session.models.updateThought(value);}
   const [prepSelection,setPrepSelection]=useState<{scope:symbol;selection:SessionPrepAnalysis}|null>(null);
   const [prepEpoch,setPrepEpoch]=useState(0);
   const questionRef=useRef<HTMLTextAreaElement|null>(null);
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<string | null>(null);
-  const [schedulingObservation,setSchedulingObservation]=useState(0);
-  const [modelObservation,setModelObservation]=useState<{receipt:ModelRequestObservation|HandoffRetryObservation;observedAt:string}|null>(null);
-  const [replacementDraft,setReplacementDraft]=useState<{content:string;role:string;acknowledged:boolean}|null>(null);
-  const [modelHashes,setModelHashes]=useState<Record<string,string>>({});
-  const modelBusy=useRef(false);
   const notebookDraft=(w:Workspace,n:string,t:string,e:string,s:string,p:PendingSave|null,previous=previousModelRequest)=>{
     const task=phoneNoteTask&&phoneNoteTask.owner===authenticated&&phoneNoteTask.owner===previousIdentity.current&&phoneNoteTask.generation===generation.current&&
       phoneNoteTask.workspaceId===w.id&&phoneNoteTask.scope===journal.current?.scope?phoneNoteTask:null;
@@ -265,7 +256,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [observedCaptureDraft, setObservedCaptureDraft] = useState<CaptureDraft | null>(null);
   const [captureRequest, setCaptureRequest] = useState(0);
   const [confirmCaptureExit, setConfirmCaptureExit] = useState(false);
-  const {journal,scheduledDraftSave,nativeModelSettling,draftsSuspended}=session.recovery;
+  const {journal,scheduledDraftSave,draftsSuspended}=session.recovery;
   useLayoutEffect(()=>{recoveredConnection.current={identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0};setConnectionError(null);},[authenticated]);
   useEffect(()=>{
     if(!authenticated||connectionRecovery?.identity!==authenticated||recoveredConnection.current.identity!==authenticated||
@@ -367,8 +358,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     if(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession)return;
     conversationEnd.current?.scrollIntoView?.({ block: "nearest" });
   }, [authenticated,workspace?.revision, pending]);
-  useEffect(()=>{let cancelled=false;if(pending?.type==='ask')void modelRequestHash(pending.body).then(hash=>{if(!cancelled)setModelHashes({[pending.body.idempotency_key]:hash});}).catch(()=>{if(!cancelled)setModelHashes({});});
-    else setModelHashes({});return()=>{cancelled=true;};},[pending]);
+  useEffect(()=>session.models.observePendingHash(),[pending]);
   useEffect(() => {
     if (!authenticated || team) return;
     let cancelled = false;
@@ -651,121 +641,11 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   }
   function closeRejectedClinicalShare(){return session.saves.closeRejectedClinicalShare({authenticated,notebookDraft});}
   function modelFailure(cause:unknown){session.lifecycle.modelFailure(cause,lifecycleContext());}
-  function mergeModelRead(latest:Workspace,latestTeam:ProviderTeam){
-    const savedNote=(value:Workspace|null)=>value?.entries.filter(e=>e.kind==='scratchpad').at(-1)?.content??'';
-    const noteChanged=savedNote(latest)!==savedNote(workspace)&&note!==savedNote(latest);
-    const editedTeam=!!team&&!!teamDraft&&teamConfigurationChanged(team.configuration,teamDraft);
-    const teamChanged=!!team&&latestTeam.revision!==team.revision&&editedTeam;
-    setWorkspace(latest);setTeam(latestTeam);setSchedulingObservation(value=>value+1);
-    if(!editedTeam)setTeamDraft(structuredClone(latestTeam.configuration));
-    if(noteChanged||teamChanged){setConflict(true);setError('The saved notebook or team changed. Your unsaved text and settings are retained; load the latest version and compare before saving.');}
+  function modelContext(){return {authenticated,notebookDraft,modelFailure};}
+  function saveModel(operation:ModelOperation,mode:'submit'|'resolve',confirmed?:ConfirmedClinicalModelContext){
+    return session.models.save(operation,mode,modelContext(),confirmed);
   }
-  async function saveModel(operation:ModelOperation,mode:'submit'|'resolve',confirmed?:ConfirmedClinicalModelContext){
-    const requestWorkspace=confirmed?.workspace??workspace,requestTeam=confirmed?.team??team,requestIdentity=confirmed?.identity??identity;
-    if(!requestWorkspace||!requestIdentity||busy||modelBusy.current||!validModelOperation(operation)||confirmed&&(!confirmed.isCurrent()||!confirmed.canSend()))return;
-    const currentRequest=()=>current===generation.current&&(!confirmed||confirmed.isCurrent());
-    modelBusy.current=true;
-    const current=generation.current,id=requestWorkspace.id,active=journal.current?.value;
-    const native=authenticated?.mode==='clerk_jwt'&&!!authenticated.nativeSession;
-    const submittedComposer=confirmed?.composer;
-    const submittedThought=submittedComposer?.content??thought;
-    const submittedThoughtEdit=submittedComposer?.editVersion??thoughtEditVersion.current;
-    const sameSubmittedComposer=()=>currentThought.current===submittedThought&&thoughtEditVersion.current===submittedThoughtEdit;
-    const clearNativeSubmission=native&&mode==='submit'&&operation.type==='ask'&&!pending&&
-      (submittedComposer?sameSubmittedComposer():submittedThought===operation.body.content);
-    setBusy(true);setError('');setMessage('');let transmitted=false;
-    try{
-      if(authenticated){
-        if(!active||journal.current?.serverScope!==requireRecoveryScope(requestTeam)||recoveryOffers.some(offer=>offer.address===`workspace:${id}`)||recoveryState==='failed')throw new Error('Private draft storage unavailable');
-        // Retire the pre-submit snapshot before recording the immutable request.
-        // A background flush must not enqueue its empty pending body afterward.
-        const queued=scheduledDraftSave.current;queued?.cancel();
-        if(scheduledDraftSave.current===queued)scheduledDraftSave.current=null;
-        await queued?.drain();if(!currentRequest())return;
-        // The immutable pending body retains the outgoing message. Store its
-        // separate empty composer before clearing the visible native field.
-        await active.persist(`workspace:${id}`,notebookDraft(requestWorkspace,note,clearNativeSubmission?'':thought,evidence,source,operation));
-        if(!currentRequest())return;
-        if(confirmed&&!confirmed.canSend()){
-          setPending(operation);setError('Your text or sources changed before Chief was asked. The prepared request is retained; check its saved result before continuing.');return;
-        }
-      }
-      if(mode==='submit'&&operation.type==='ask'&&clinicalTeamUsesDirections(operation.body.content)){
-        try {
-          const advertised=await workspaceApi.team(requestIdentity);
-          if(!currentRequest())return;checkRecoveryOwner(advertised);
-          if(!clinicalTeamDirectionsSupported(advertised)){
-            setPending(operation);setError('The practice service cannot confirm saved-note directions support. Your text and exact request are kept. Check the saved result or retry after the service is updated.');return;
-          }
-        }catch(cause){if(currentRequest()){setPending(operation);modelFailure(cause);}return;}
-      }
-      if(confirmed&&!confirmed.canSend()){
-        setPending(operation);setError('Your text or sources changed before Chief was asked. The prepared request is retained; check its saved result before continuing.');return;
-      }
-      setPending(operation);setModelObservation(null);setReplacementDraft(null);transmitted=true;
-      if(clearNativeSubmission){
-        if(thoughtEditVersion.current===submittedThoughtEdit&&currentThought.current===submittedThought)currentThought.current='';
-        setThought(previous=>thoughtEditVersion.current===submittedThoughtEdit&&previous===submittedThought?'':previous);
-      }
-      if(operation.previous_model_request)setPreviousModelRequest(operation.previous_model_request);
-      confirmed?.onDispatch?.();
-      const receipt=mode==='resolve'?await modelWorkApi.resolve(requestIdentity,id,operation):operation.type==='ask'?await workspaceApi.ask(requestIdentity,id,operation.body):await workspaceApi.retryHandoff(requestIdentity,id,operation.handoffId,operation.body);
-      if(!currentRequest())return;
-      if(!await exactModelObservation(receipt,id,operation))throw new WorkspaceApiError(503);
-      if(!currentRequest())return;
-      const latest=await workspaceApi.read(requestIdentity,id);
-      if(!currentRequest())return;
-      const latestTeam=await workspaceApi.team(requestIdentity);if(!currentRequest())return;checkRecoveryOwner(latestTeam);
-      const anchor='saved_entry' in receipt?receipt.saved_entry?.revision:receipt.recorded?Math.max(receipt.recorded.workspace_revision,receipt.recorded.result_entry?.revision??0):null;
-      if(latest.id!==id||latest.revision<requestWorkspace.revision||anchor!==null&&anchor!==undefined&&latest.revision<anchor)throw new WorkspaceApiError(503);
-      const settled=receipt.outcome==='saved'||receipt.outcome==='recorded';
-      if(settled&&active&&native){
-        // Finish any edit carrying the exact pending body before the settled
-        // receipt removes it. Later typing is saved once busy clears.
-        nativeModelSettling.current=true;
-        const queued=scheduledDraftSave.current;queued?.cancel();
-        if(scheduledDraftSave.current===queued)scheduledDraftSave.current=null;
-        await queued?.drain();if(!currentRequest())return;
-      }
-      const workingThought=native||submittedComposer?currentThought.current:thought;
-      const nextThought=settled&&!native&&operation.type==='ask'&&(submittedComposer?sameSubmittedComposer():workingThought===operation.body.content)?'':workingThought;
-      if(settled&&active){await active.persist(`workspace:${id}`,notebookDraft(latest,note,nextThought,evidence,source,null,operation.previous_model_request??previousModelRequest));if(!currentRequest())return;}
-      mergeModelRead(latest,latestTeam);
-      if(settled){setPending(null);setThought(previous=>native?previous:submittedComposer?thoughtEditVersion.current===submittedThoughtEdit&&previous===submittedThought?'':previous:nextThought);setModelObservation(null);setMessage(receipt.outcome==='saved'?'Conversation saved.':'Draft request recorded. Its current lifecycle is shown separately.');}
-      else {setModelObservation({receipt,observedAt:latest.model_observed_at??new Date().toISOString()});setMessage('The exact request is retained. Checking a result does not start model work.');}
-    }catch(cause){if(currentRequest()){if(!transmitted){setRecoveryState('failed');setError('No new request was sent. The previous request and your forms are retained. Recheck private draft storage.');}else modelFailure(cause);}}
-    finally{if(currentRequest()){nativeModelSettling.current=false;modelBusy.current=false;setBusy(false);}}
-  }
-  async function replaceModelRequest(){
-    if(!workspace||!team||!replacementDraft||!modelObservation||(pending?.type!=='ask'&&pending?.type!=='retry')||busy||modelBusy.current)return;
-    const old=pending,receipt=modelObservation.receipt;
-    if(old.type==='ask'&&(old.body.research_analysis||old.body.inbox_analysis||old.body.membership_analysis||old.body.session_prep_analysis||parseClinicalTeamRequest(old.body.content)))return; // A new selected-source request requires its own source review.
-    if(receipt.outcome!=='not_found'&&!['unknown','failed','abandoned'].includes(receipt.outcome))return;
-    if(old.origin!=='durable_admission_v1'&&!replacementDraft.acknowledged)return;
-    const current=generation.current;
-    modelBusy.current=true;setBusy(true);
-    try{
-      const latestTeam=await workspaceApi.team(identity!);if(current!==generation.current)return;checkRecoveryOwner(latestTeam);
-      const latest=await workspaceApi.read(identity!,workspace.id);if(current!==generation.current)return;
-      const prior:PreviousModelRequest={workspace_id:workspace.id,operation:old.type==='ask'?{type:'ask',body:structuredClone(old.body)}:{type:'retry',handoffId:old.handoffId,body:structuredClone(old.body)},
-        request_sha256:await modelRequestHash(old.body),outcome:receipt.outcome,observed_at:modelObservation.observedAt,origin:old.origin??'legacy_unknown',legacy_uncertainty_acknowledged:replacementDraft.acknowledged};
-      let next:ModelOperation;
-      if(old.type==='ask'){
-        const bot=latestTeam.configuration.bots.find(b=>botAddress(b)===replacementDraft.role);if(!bot?.enabled||bot.retired)throw new WorkspaceApiError(409,'bot_unavailable');
-        next={type:'ask',model_contract:1,origin:'durable_admission_v1',previous_model_request:prior,body:{expected_revision:latest.revision,team_revision:latestTeam.revision,
-          idempotency_key:crypto.randomUUID(),role:replacementDraft.role,content:replacementDraft.content}};
-      }else{
-        const handoff=latest.handoffs?.find(h=>h.id===old.handoffId);if(!handoff||handoff.attempt_count>=3)throw new WorkspaceApiError(409);
-        next={type:'retry',handoffId:old.handoffId,model_contract:1,origin:'durable_admission_v1',previous_model_request:prior,
-          body:{expected_revision:latest.revision,previous_attempt_id:handoff.attempt_id,idempotency_key:crypto.randomUUID()}};
-      }
-      if(current!==generation.current||!validModelOperation(next))return;
-      // saveModel keeps the old pending request until this replacement CAS succeeds.
-      modelBusy.current=false;
-      await saveModel(next,'submit');
-    }catch(cause){if(current===generation.current)modelFailure(cause);}
-    finally{if(current===generation.current){modelBusy.current=false;setBusy(false);}}
-  }
+  function replaceModelRequest(){return session.models.replace(modelContext());}
   async function prepareNewSelectedAnalysis(){
     if(!workspace||!identity||busy||modelBusy.current||pending?.type!=='ask'||!(pending.body.research_analysis||pending.body.inbox_analysis||pending.body.membership_analysis||pending.body.session_prep_analysis)||!modelObservation||!replacementDraft?.acknowledged||!['unknown','failed','abandoned','not_found'].includes(modelObservation.receipt.outcome))return;
     const old=pending,current=generation.current,active=journal.current?.value;if(!active||recoveryBlocked)return;
@@ -801,23 +681,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       setMessage('The previous exact request is retained. Review the current saved note and directions before preparing a new private team request. Nothing has been sent.');
     }catch(cause){if(isCurrent())modelFailure(cause);}finally{if(isCurrent()){modelBusy.current=false;setBusy(false);}}
   }
-  async function checkEntryResult(entry:WorkspaceEntry){
-    if(!workspace||!identity||busy||modelBusy.current||entry.model_request?.request.kind!=='conversation')return;
-    const metadata=entry.model_request,request=metadata.request;
-    if(request.kind!=='conversation')return;
-    const body=conversationFromEntry(entry);if(!body)return;const operation:ModelOperation={type:'ask',body};
-    const current=generation.current;modelBusy.current=true;setBusy(true);setError('');
-    try{
-      if(!validModelOperation(operation)||await modelRequestHash(operation.body)!==metadata.request_sha256)throw new WorkspaceApiError(503);
-      const receipt=await modelWorkApi.resolve(identity,workspace.id,operation);
-      if(current!==generation.current)return;
-      const latest=await workspaceApi.read(identity,workspace.id),latestTeam=await workspaceApi.team(identity);
-      if(current!==generation.current)return;checkRecoveryOwner(latestTeam);
-      if(latest.id!==workspace.id||latest.revision<workspace.revision||'saved_entry' in receipt&&receipt.saved_entry&&latest.revision<receipt.saved_entry.revision)throw new WorkspaceApiError(503);
-      mergeModelRead(latest,latestTeam);setMessage(receipt.outcome==='saved'?'The exact saved response was verified.':'Saved request state checked. No model work was started.');
-    }catch(cause){if(current===generation.current)modelFailure(cause);}
-    finally{if(current===generation.current){modelBusy.current=false;setBusy(false);}}
-  }
+  function checkEntryResult(entry:WorkspaceEntry){return session.models.checkEntryResult(entry,modelContext());}
   function useCoreDraft(draft: CaptureDraft) {
     if (!workspace || busy || pending || conflict || draft.status !== "draft" || !draft.note_ref || !draft.transcript_ref || !draft.note_sha256) return;
     void save({type: "coreNoteLink", body: {expected_revision: workspace.revision, idempotency_key: crypto.randomUUID(),

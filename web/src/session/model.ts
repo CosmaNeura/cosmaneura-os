@@ -1,6 +1,6 @@
 import type {ClinicalNoteShareReceipt,ShareSavedNoteInput} from '../clinical-team-contract';
 import type {RecoveryOffer} from '../draft-journal';
-import type {ModelOperation,PreviousModelRequest} from '../model-work-request';
+import type {ModelOperation,PreviousModelRequest,ModelRequestObservation,HandoffRetryObservation} from '../model-work-request';
 import type {
   AppendInput, FollowUpOperation, NoteOperation, TeamSaveInput, WorkspaceIdentity, Workspace, WorkspaceEncounter, ProviderTeam, TeamConfiguration,
 } from '../workspace-api';
@@ -31,6 +31,10 @@ export type WorkspaceSessionState = {
   source: string;
   previousModelRequest: PreviousModelRequest|null;
   clinicalShareCheck:ClinicalShareCheck|null;
+  modelObservation:{receipt:ModelRequestObservation|HandoffRetryObservation;observedAt:string}|null;
+  replacementDraft:{content:string;role:string;acknowledged:boolean}|null;
+  modelHashes:Record<string,string>;
+  schedulingObservation:number;
   recoveryOffers: RecoveryOffer[];
   recoveryState: ''|'saving'|'saved'|'failed';
   recoveryEpoch: number;
@@ -46,3 +50,6 @@ export type WorkspaceSessionState = {
 
 export type WorkspaceSessionSnapshot = Readonly<WorkspaceSessionState>;
 export type StateUpdate<T> = T|((previous:T)=>T);
+
+export type ConfirmedClinicalModelContext={workspace:Workspace;team:ProviderTeam;identity:WorkspaceIdentity;
+  isCurrent:()=>boolean;canSend:()=>boolean;composer?:{content:string;editVersion:number};onDispatch?:()=>void};
