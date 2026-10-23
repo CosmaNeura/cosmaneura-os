@@ -26,6 +26,11 @@ export type ChiefNoteTask = {
 export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
 
 export type WorkspaceSessionState = {
+  phoneNoteTask:ChiefNoteTask|null;
+  reviewHandoffId:string|null;
+  handoffReviewPending:boolean;
+  selectedResult:string|null;
+  savedResearchChat:boolean;
   settingsOpen:boolean;
   practicePage:'home'|'visits'|'notebook';
   practiceOpen:boolean;

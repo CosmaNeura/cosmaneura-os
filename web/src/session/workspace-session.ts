@@ -1,3 +1,4 @@
+import {WorkspaceReview} from './review';
 import {WorkspaceNavigation,type NavigationDependencies} from './navigation';
 import {WorkspaceRecording,type RecordingDependencies} from './recording';
 import {WorkspaceClinical,type ClinicalDependencies} from './clinical';
@@ -25,6 +26,7 @@ export class WorkspaceSession {
   readonly clinical:WorkspaceClinical;
   readonly recording:WorkspaceRecording;
   readonly navigation:WorkspaceNavigation;
+  readonly review:WorkspaceReview;
   constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
@@ -35,9 +37,11 @@ export class WorkspaceSession {
     this.clinical=new WorkspaceClinical(this,deps.clinical);
     this.recording=new WorkspaceRecording(this,deps.recording);
     this.navigation=new WorkspaceNavigation(this,deps.navigation);
+    this.review=new WorkspaceReview(this);
     this.setPracticePage(deps.initialPage??'visits');
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
+    phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
     settingsOpen:false,practicePage:'visits',practiceOpen:false,practiceOpened:false,selected:'visit_prep',panel:'Notebook',mobilePanel:'Conversation',stage:'Before',entryIntent:null,researchEntry:false,settingsEntry:'home',inboxSelection:null,
     privateRecordingBusy:false,privateRecordingEntry:null,savedRecordingEntry:null,savedRecordingNotebook:null,privateRecordings:null,privateRecordingListEpoch:0,privateRecordingRequest:0,
     clinicalPreparing:false,homeBusy:false,setupApproval:null,setupProjection:null,setupEpoch:0,confirmTeamExit:false,teamSaveExit:false,
@@ -57,6 +61,11 @@ export class WorkspaceSession {
     return ()=>{this.listeners.delete(listener);};
   };
 
+  readonly setPhoneNoteTask = this.setter('phoneNoteTask');
+  readonly setReviewHandoffId = this.setter('reviewHandoffId');
+  readonly setHandoffReviewPending = this.setter('handoffReviewPending');
+  readonly setSelectedResult = this.setter('selectedResult');
+  readonly setSavedResearchChat = this.setter('savedResearchChat');
   readonly setSettingsOpen = this.setter('settingsOpen');
   readonly setPracticePage = this.setter('practicePage');
   readonly setPracticeOpen = this.setter('practiceOpen');
@@ -116,6 +125,7 @@ export class WorkspaceSession {
 
   /** Withhold private view state; the journal retains exact unconfirmed work. */
   readonly clear = ():void => {
+    this.review.returnTarget.current=null;
     this.team.exitAction.current=null;this.clinical.preparation.current=null;
     this.invalidate();this.activityNavigation.current?.abort();this.activityNavigation.current=null;
     this.recovery.close();this.recovery.nativeModelSettling.current=false;this.models.reset();
