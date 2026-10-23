@@ -1,3 +1,4 @@
+import type {PrivateRecordingEntry,SessionSavedRecording,RecordingCatalog} from './recording-model';
 import type {SetupProjection,SetupReview} from '../team-setup-request';
 import type {ClinicalNoteShareReceipt,ShareSavedNoteInput} from '../clinical-team-contract';
 import type {RecoveryOffer} from '../draft-journal';
@@ -24,6 +25,13 @@ export type ChiefNoteTask = {
 export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
 
 export type WorkspaceSessionState = {
+  privateRecordingBusy:boolean;
+  privateRecordingEntry:PrivateRecordingEntry|null;
+  savedRecordingEntry:SessionSavedRecording|null;
+  savedRecordingNotebook:SessionSavedRecording|null;
+  privateRecordings:RecordingCatalog|null;
+  privateRecordingListEpoch:number;
+  privateRecordingRequest:number;
   clinicalPreparing:boolean;
   homeBusy:boolean;
   setupApproval:ReviewedTeamDraft|null;

@@ -4,14 +4,15 @@ import {PrivateRecordingRuntime,openPrivateRecordingStore,prewarmPrivateRecordin
 import {PrivateRecordingLedgerController,type PrivateRecordingLedger} from './private-recording-ledger';
 import {readPrivateRecordingLanguage,savePrivateRecordingLanguage} from './recording-preferences';
 import type {CaptureAttestation,CaptureLanguage} from './capture-api';
-import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import './practice-home.css';
 import {PrivateTranscriptPanel} from './PrivateTranscriptPanel';
 import {IOSPCM} from '../../clients/capture/plugins/ios-pcm';
 import {parseInputSignal,presentInputSignal} from '../../clients/capture/src/native/ios-input-signal';
 import {vendorSha256} from './vendor-contract';
 
-export type PrivateNotebookResult={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam};
+export type {PrivateNotebookResult} from './session/recording-model';
+import type {PrivateNotebookResult} from './session/recording-model';
 type Consent=CaptureAttestation&{language:CaptureLanguage};
 type Controller=Pick<PrivateRecordingRuntime,'snapshot'|'subscribe'|'start'|'pause'|'stop'|'close'|'attachWorkspace'|'exportWav'|'snapshotForLedger'|'savedChunks'|'snapshotForPrivateTranscript'|'rename'>;
 export type PrivateRecordingPanelProps={
