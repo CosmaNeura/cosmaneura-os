@@ -37,7 +37,7 @@ import { CoreConnectionPanel, CORE_CONNECTION_BUILD, CONNECTION_ONBOARDING_BUILD
 import { normalizeTeamConfiguration, setupChange, validTeamConfiguration, type SetupProjection } from "./team-setup-request";
 import { hasUnsavedWork, useUnsavedWork } from "./unsaved-work";
 import { openDraftStore, DraftStoreError, type DraftStore } from "./draft-store";
-import { DraftJournal, editorAddress, notebookDraft as makeNotebookDraft, teamDraft as recoveryTeamDraft, type RecoveryOffer } from "./draft-journal";
+import { DraftJournal, editorAddress, notebookDraft as makeNotebookDraft, type RecoveryOffer } from "./draft-journal";
 import { EditorRecoveryContext, type EditorRecoveryAccess } from "./editor-recovery";
 import { AccountRecoveryContext, type AccountRecoveryAccess } from "./account-recovery";
 import { supportsSkill, requireRecoveryScope, validRecoveryScope } from "./workspace-api";
@@ -61,9 +61,8 @@ import { EncounterSources } from "./EncounterSources";
 import { CapturePanel } from "./CapturePanel";
 import { ExistingScribeSourcePanel } from './ExistingScribeSourcePanel';
 import {ClinicalTeamDraftsPanel} from './ClinicalTeamDraftsPanel';
-import {clinicalTeamApi} from './clinical-team-api';
 import {clinicalNoteSnapshotSize,clinicalTeamDirectionsError,clinicalTeamDirectionsSupported,clinicalTeamUsesDirections,clinicalRequestDisplay,clinicalTeamRequest,clinicalTeamRequestAlreadySaved,parseClinicalTeamRequest,currentSharedNote,noteSelection,validShareSavedNoteInput,verifySharedClinicalNote} from './clinical-team-contract';
-import type {ClinicalNoteShareReceipt,ShareSavedNoteInput} from './clinical-team-contract';
+import type {ShareSavedNoteInput} from './clinical-team-contract';
 import type {InboxDraftSelection} from "./inbox-analysis-contract";
 import {ResearchPanelLoader} from "./ResearchPanelLoader";
 import {ConnectorToolsPanel} from './ConnectorToolsPanel';
@@ -125,9 +124,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
 }) {
   const [session]=useState(()=>new WorkspaceSession());
   const {identity,connectionError,busy,pending,conflict,message,error,readRetry,
-    workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
+    workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
   const {setIdentity,setConnectionError,setBusy,setPending,setConflict,setMessage,setError,generation,
-    setWorkspace,setEncounters,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
+    setWorkspace,setEncounters,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setClinicalShareCheck,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
   const [inboxSelection,setInboxSelection]=useState<InboxDraftSelection|null>(null);
@@ -252,7 +251,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<string | null>(null);
   const [schedulingObservation,setSchedulingObservation]=useState(0);
-  const [clinicalShareCheck,setClinicalShareCheck]=useState<{operation:Extract<PendingSave,{type:'clinicalNoteShare'}>;receipt:ClinicalNoteShareReceipt;owner:WorkspaceIdentity;generation:number}|null>(null);
   const [modelObservation,setModelObservation]=useState<{receipt:ModelRequestObservation|HandoffRetryObservation;observedAt:string}|null>(null);
   const [replacementDraft,setReplacementDraft]=useState<{content:string;role:string;acknowledged:boolean}|null>(null);
   const [modelHashes,setModelHashes]=useState<Record<string,string>>({});
@@ -643,110 +641,15 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     } }
     finally { if (current === generation.current) setBusy(false); }
   }
-  async function save(operation: PendingSave,mode:'submit'|'resolve'='submit',authorityCurrent?:()=>boolean) {
-    if(operation.type==='ask'||operation.type==='retry'){await saveModel(operation,'submit');return;}
-    const access = authenticated || identity;
-    if (!access || busy || (operation.type !== "team" && (!workspace || !identity)) || authorityCurrent&&!authorityCurrent()) return;
-    const current = generation.current;
+  function save(operation:PendingSave,mode:'submit'|'resolve'='submit',authorityCurrent?:()=>boolean){
     const savedRecordingForSave=savedRecordingEntry;
-    const currentSave=()=>current===generation.current&&(!authorityCurrent||authorityCurrent());
-    setPending(operation); setBusy(true); setError(""); setMessage("");
-    if(operation.type==='clinicalNoteShare')setClinicalShareCheck(null);
-    let transmitted = false,confirmedShare:ClinicalNoteShareReceipt|undefined;
-    try {
-      const active = journal.current?.value;
-      if (authenticated) {
-        const scope = requireRecoveryScope(team);
-        if (!active || journal.current?.serverScope !== scope || recoveryOffers.some(offer=>offer.address===(operation.type==='team'?'team':`workspace:${workspace?.id}`)) || recoveryState === "failed") throw new Error("Device draft recovery unavailable");
-        if (operation.type === "team" && team) await active.persist("team", recoveryTeamDraft(team, operation.body.configuration, operation));
-        else if (workspace) await active.persist(`workspace:${workspace.id}`, notebookDraft(workspace, note, thought, evidence, source, operation));
-        if (!currentSave()) return;
-      }
-      transmitted = true;
-      if (operation.type === "team") {
-        const result = await workspaceApi.saveTeam(access, operation.body);
-        if (!currentSave()) return;
-        checkRecoveryOwner(result);
-        // A committed idempotent receipt can describe an older configuration.
-        // Keep its exact request until the current team is independently read.
-        const latest = await workspaceApi.team(access);
-        if (!currentSave()) return;
-        checkRecoveryOwner(latest);
-        if (latest.revision < result.revision) throw new WorkspaceApiError(503);
-        if (active) await active.persist("team", null);
-        if (!currentSave()) return;
-        currentTeam.current = latest; currentTeamDraft.current = structuredClone(latest.configuration);
-        setTeam(latest); setTeamDraft(currentTeamDraft.current); setSettingsOpen(false); setSetupApproval(null); setSetupProjection(null);
-        setMessage(`Team settings saved · revision ${result.revision}.${latest.revision !== result.revision ? ` Current team revision ${latest.revision} is shown.` : ""}`);
-      } else {
-        if (!workspace || !identity) return;
-        let result:{workspace:Workspace;entry_revision:number};
-        if(operation.type==='clinicalNoteShare'){
-          if(!authenticated)throw new WorkspaceApiError(401);
-          const receipt=await clinicalTeamApi[mode==='resolve'?'resolve':'share'](authenticated,workspace.id,operation.body);
-          if(!currentSave())return;
-          if(receipt.outcome==='not_found'){
-            setClinicalShareCheck({operation,receipt,owner:identity,generation:current});
-            setMessage(receipt.workspace.revision>operation.body.expected_revision?
-              'This note share was not saved, and the notebook has advanced. Close this rejected request, then review the current saved note.':
-              'This exact note share was not found. You can retry the same saved request.');
-            return;
-          }
-          result={workspace:receipt.workspace,entry_revision:receipt.source_entry_revision!};
-          confirmedShare=receipt;
-        }else result = operation.type === "entry" ? await workspaceApi.append(identity, workspace.id, operation.body) :
-          operation.type === "note" ? await workspaceApi.saveNote(identity, workspace.id, operation.body) :
-          operation.type === "coreNoteLink" ? await workspaceApi.linkCoreNote(identity, workspace.id, operation.body) :
-          operation.type === "review" ? await workspaceApi.reviewNote(identity, workspace.id, operation.noteId, operation.body) :
-          operation.type === "followUpPropose" ? await workspaceApi.proposeFollowUp(identity, workspace.id, operation.body) :
-          operation.type === "followUpDecision" ? await workspaceApi.decideFollowUp(identity, workspace.id, operation.ticketId, operation.body) :
-          operation.type === "followUpComplete" ? await workspaceApi.completeFollowUp(identity, workspace.id, operation.ticketId, operation.body) :
-          await workspaceApi.link(identity, workspace.id, operation.body);
-        if (!currentSave()) return;
-        if (active && workspace) await active.persist(`workspace:${workspace.id}`, notebookDraft(result.workspace, note,
-          operation.type === "entry" && operation.body.kind === "conversation" ? "" : thought,
-          operation.type === "entry" && operation.body.kind === "evidence" ? "" : evidence,
-          operation.type === "entry" && operation.body.kind === "evidence" ? "" : source, null));
-        if (!currentSave()) return;
-        setWorkspace(result.workspace);
-        if (operation.type === "coreNoteLink") {
-          setPanel("Review"); setMobilePanel("Review");
-          if(savedRecordingForSave?.identity===identity&&savedRecordingForSave.workspaceId===result.workspace.id&&journal.current?.scope===savedRecordingForSave.scope)
-            setSavedRecordingNotebook(savedRecordingForSave);
-        }
-        if (operation.type === "entry" && operation.body.kind === "conversation") setThought("");
-        if (operation.type === "entry" && operation.body.kind === "evidence") { setEvidence(""); setSource(""); }
-        setMessage(operation.type==='clinicalNoteShare'?'This exact saved note is shared with your private team. Ask Chief when you are ready.':`Saved revision ${result.entry_revision}.`);
-      }
-      setPending(null); setConflict(false);
-      return confirmedShare;
-    } catch (cause) {
-      if (currentSave()) {
-        if (!transmitted) { if (!pending) setPending(null); setRecoveryState("failed"); setError("The request was not sent. Recheck this device's draft storage before saving."); }
-        else if(operation.type==='clinicalNoteShare'&&!(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status)))
-          setError('The note share could not be confirmed. Its exact request is retained; check the saved result before continuing.');
-        else failure(cause);
-      }
-    }
-    finally { if (currentSave()) setBusy(false); }
+    return session.saves.save(operation,{authenticated,notebookDraft,failure,saveModel,
+      teamSaved:latest=>{currentTeam.current=latest;currentTeamDraft.current=structuredClone(latest.configuration);setSettingsOpen(false);setSetupApproval(null);setSetupProjection(null);},
+      coreNoteLinked:(latest,owner,scope)=>{setPanel('Review');setMobilePanel('Review');
+        if(savedRecordingForSave?.identity===owner&&savedRecordingForSave.workspaceId===latest.id&&scope===savedRecordingForSave.scope)setSavedRecordingNotebook(savedRecordingForSave);},
+    },mode,authorityCurrent);
   }
-  async function closeRejectedClinicalShare(){
-    const checked=clinicalShareCheck;
-    if(busy||!checked||pending!==checked.operation||checked.owner!==identity||checked.generation!==generation.current||
-      checked.receipt.outcome!=='not_found'||checked.receipt.workspace.revision<=checked.operation.body.expected_revision)return;
-    const current=generation.current,active=journal.current?.value;
-    setBusy(true);
-    try{
-      if(authenticated&&(!active||journal.current?.serverScope!==requireRecoveryScope(team)))throw new DraftStoreError('unavailable');
-      // A locked server read found no share at an advanced monotonic revision.
-      // The old request's expected revision can never be admitted later.
-      await active?.persist(`workspace:${checked.receipt.workspace.id}`,notebookDraft(checked.receipt.workspace,note,thought,evidence,source,null));
-      if(current!==generation.current)return;
-      setWorkspace(checked.receipt.workspace);setPending(null);setClinicalShareCheck(null);setError('');
-      setMessage('Rejected note share closed. Your working text is retained; review the current saved note before sharing again.');
-    }catch{if(current===generation.current){setRecoveryState('failed');setError('The rejected request is retained. Recheck local recovery before continuing.');}}
-    finally{if(current===generation.current)setBusy(false);}
-  }
+  function closeRejectedClinicalShare(){return session.saves.closeRejectedClinicalShare({authenticated,notebookDraft});}
   function modelFailure(cause:unknown){session.lifecycle.modelFailure(cause,lifecycleContext());}
   function mergeModelRead(latest:Workspace,latestTeam:ProviderTeam){
     const savedNote=(value:Workspace|null)=>value?.entries.filter(e=>e.kind==='scratchpad').at(-1)?.content??'';

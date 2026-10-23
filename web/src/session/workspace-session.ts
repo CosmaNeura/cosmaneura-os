@@ -1,6 +1,7 @@
 import type {StateUpdate, WorkspaceSessionSnapshot, WorkspaceSessionState} from './model';
 import {WorkspaceLifecycle,type LifecycleDependencies} from './lifecycle';
 import {WorkspaceRecovery,type RecoveryDependencies} from './recovery';
+import {WorkspaceSaves,type SaveDependencies} from './saves';
 
 /**
  * One owner for session state, shared by every presentation.
@@ -11,13 +12,15 @@ import {WorkspaceRecovery,type RecoveryDependencies} from './recovery';
 export class WorkspaceSession {
   readonly recovery:WorkspaceRecovery;
   readonly lifecycle:WorkspaceLifecycle;
-  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>}={}) {
+  readonly saves:WorkspaceSaves;
+  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
+    this.saves=new WorkspaceSaves(this,deps.saves);
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
     identity:null,connectionError:null,busy:false,pending:null,conflict:false,
-    message:'',error:'',readRetry:null,
+    message:'',error:'',readRetry:null,clinicalShareCheck:null,
     workspace:null,encounters:null,team:null,teamDraft:null,note:'',thought:'',evidence:'',source:'',previousModelRequest:null,recoveryOffers:[],recoveryState:'',recoveryEpoch:0,
   });
   private readonly listeners = new Set<()=>void>();
@@ -41,6 +44,7 @@ export class WorkspaceSession {
   readonly setEvidence = this.setter('evidence');
   readonly setSource = this.setter('source');
   readonly setPreviousModelRequest = this.setter('previousModelRequest');
+  readonly setClinicalShareCheck = this.setter('clinicalShareCheck');
   readonly setRecoveryOffers = this.setter('recoveryOffers');
   readonly setRecoveryState = this.setter('recoveryState');
   readonly setRecoveryEpoch = this.setter('recoveryEpoch');
@@ -64,7 +68,7 @@ export class WorkspaceSession {
     this.recovery.close();this.recovery.nativeModelSettling.current=false;
     this.patch({identity:null,connectionError:null,workspace:null,encounters:null,team:null,teamDraft:null,
       note:'',thought:'',evidence:'',source:'',previousModelRequest:null,recoveryOffers:[],recoveryState:'',
-      pending:null,conflict:false,message:'',error:'',readRetry:null,busy:false});
+      pending:null,conflict:false,message:'',error:'',readRetry:null,busy:false,clinicalShareCheck:null});
   };
 
   private setter<K extends keyof WorkspaceSessionState>(key:K) {

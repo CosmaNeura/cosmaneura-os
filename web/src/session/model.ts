@@ -1,4 +1,4 @@
-import type {ShareSavedNoteInput} from '../clinical-team-contract';
+import type {ClinicalNoteShareReceipt,ShareSavedNoteInput} from '../clinical-team-contract';
 import type {RecoveryOffer} from '../draft-journal';
 import type {ModelOperation,PreviousModelRequest} from '../model-work-request';
 import type {
@@ -12,6 +12,7 @@ export type PendingSave = NoteOperation | FollowUpOperation | {type:'entry';body
 
 export type ConnectionFailure = {identity:WorkspaceIdentity;generation:number;message:string};
 export type ReadRetry = {run:()=>Promise<void>};
+export type ClinicalShareCheck={operation:Extract<PendingSave,{type:'clinicalNoteShare'}>;receipt:ClinicalNoteShareReceipt;owner:WorkspaceIdentity;generation:number};
 
 export type ChiefNoteTask = {
   owner:import('../workspace-api').AuthenticatedWorkspaceIdentity;
@@ -29,6 +30,7 @@ export type WorkspaceSessionState = {
   evidence: string;
   source: string;
   previousModelRequest: PreviousModelRequest|null;
+  clinicalShareCheck:ClinicalShareCheck|null;
   recoveryOffers: RecoveryOffer[];
   recoveryState: ''|'saving'|'saved'|'failed';
   recoveryEpoch: number;
