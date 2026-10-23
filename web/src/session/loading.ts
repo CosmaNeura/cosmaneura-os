@@ -35,6 +35,19 @@ export class WorkspaceLoading {
     this.api={open:(...args)=>workspaceApi.open(...args),openExisting:(...args)=>workspaceApi.openExisting(...args),read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),catalog:(...args)=>workspaceApi.catalog(...args),...deps};
   }
 
+  startup(context:LoadingContext,consume:()=>ProviderTeam|null|undefined):(()=>void)|undefined {
+    const {authenticated}=context;if(!authenticated||this.session.getSnapshot().team)return;
+    let cancelled=false;const current=this.session.generation.current,controller=new AbortController();
+    const startup=consume();
+    void (startup?Promise.resolve(startup):this.api.team(authenticated,controller.signal)).then(value=>{
+      if(!cancelled&&current===this.session.generation.current){
+        this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
+        void context.recoverAfterRead(value,null,current);
+      }
+    }).catch(cause=>{if(!cancelled&&current===this.session.generation.current)context.failure(cause);});
+    return()=>{cancelled=true;controller.abort();};
+  }
+
   async open(context:OpenContext,appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false){
     const {team,teamDraft,busy,pending,privateRecordingEntry,privateRecordingBusy,entryIntent,researchEntry}=this.session.getSnapshot();
     const {generation,setBusy,setError,setMessage,setInboxSelection,setSelected,setPracticeOpen,setMobilePanel,setIdentity,setWorkspace,setTeam,setPracticePage,setPreviousModelRequest,setThought,setEvidence,setSource,setModelObservation,setReplacementDraft,setModelHashes,setEntryIntent,setStage,setPanel,setTeamDraft,setNote,setSettingsOpen}=this.session;

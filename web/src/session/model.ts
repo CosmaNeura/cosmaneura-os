@@ -1,3 +1,7 @@
+import type {EFaxSourceOffer} from '../efax-inbound-source-api';
+import type {FaxSourceOffer} from '../fax-inbound-source-api';
+import type {EFaxPending} from '../efax-inbound-api';
+import type {FaxPending} from '../fax-inbound-api';
 import type {InboxDraftSelection} from '../inbox-analysis-contract';
 import type {PrivateRecordingEntry,SessionSavedRecording,RecordingCatalog} from './recording-model';
 import type {SetupProjection,SetupReview} from '../team-setup-request';
@@ -5,7 +9,7 @@ import type {ClinicalNoteShareReceipt,ShareSavedNoteInput} from '../clinical-tea
 import type {RecoveryOffer} from '../draft-journal';
 import type {ModelOperation,PreviousModelRequest,ModelRequestObservation,HandoffRetryObservation} from '../model-work-request';
 import type {
-  AppendInput, FollowUpOperation, NoteOperation, TeamSaveInput, WorkspaceIdentity, Workspace, WorkspaceEncounter, ProviderTeam, TeamConfiguration,
+  AuthenticatedWorkspaceIdentity, AppendInput, FollowUpOperation, NoteOperation, TeamSaveInput, WorkspaceIdentity, Workspace, WorkspaceEncounter, ProviderTeam, TeamConfiguration,
 } from '../workspace-api';
 
 export type PendingSave = NoteOperation | FollowUpOperation | {type:'entry';body:AppendInput} | ModelOperation |
@@ -26,6 +30,11 @@ export type ChiefNoteTask = {
 export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
 
 export type WorkspaceSessionState = {
+  selectedSource:string|null;
+  faxSourceOffer:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null;
+  providerFaxSourceOffer:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:FaxSourceOffer;request:Extract<FaxPending,{kind:'acquire'}>}|null;
+  faxSourceBusy:boolean;
+  providerFaxSourceBusy:boolean;
   phoneNoteTask:ChiefNoteTask|null;
   reviewHandoffId:string|null;
   handoffReviewPending:boolean;

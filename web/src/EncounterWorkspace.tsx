@@ -80,12 +80,10 @@ import { GOOGLE_MESSAGE_BUILD } from './google-message-api';
 import type {GoogleMessageSaved} from './google-message-recovery';
 import {EFaxSourceReviewMount} from './EFaxSourceReviewMount';
 import {FaxSourceReviewMount} from './FaxSourceReviewMount';
-import {FAX_INBOUND_SOURCE_BUILD,validFaxSourceOffer,type FaxSourceOffer,type FaxSourceReceipt} from './fax-inbound-source-api';
-import {faxInboundApi,type FaxPending} from './fax-inbound-api';
-import {EFAX_INBOUND_SOURCE_BUILD,validEFaxSourceOffer,type EFaxSourceOffer,type EFaxSourceReceipt} from './efax-inbound-source-api';
-import {efaxInboundApi,efaxMissing,type EFaxPending} from './efax-inbound-api';
-import {vendorCanonical} from './vendor-contract';
-import {vendorSha256} from './vendor-contract';
+import {FAX_INBOUND_SOURCE_BUILD,type FaxSourceOffer,type FaxSourceReceipt} from './fax-inbound-source-api';
+import type {FaxPending} from './fax-inbound-api';
+import {EFAX_INBOUND_SOURCE_BUILD,type EFaxSourceOffer,type EFaxSourceReceipt} from './efax-inbound-source-api';
+import type {EFaxPending} from './efax-inbound-api';
 import { GOOGLE_CONNECTION_BUILD } from './google-connection-api';
 import { MicrosoftConnectionPanel } from './MicrosoftConnectionPanel';
 import { MICROSOFT_CONNECTION_BUILD } from './microsoft-connection-api';
@@ -117,9 +115,9 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
   const [session]=useState(()=>new WorkspaceSession({initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
-  const {phoneNoteTask,reviewHandoffId,handoffReviewPending,selectedResult,savedResearchChat,settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
+  const {selectedSource,faxSourceOffer,providerFaxSourceOffer,faxSourceBusy,providerFaxSourceBusy,phoneNoteTask,reviewHandoffId,handoffReviewPending,selectedResult,savedResearchChat,settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
     workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
-  const {setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setIdentity,setConnectionError,setBusy,setConflict,setMessage,setError,generation,
+  const {setSelectedSource,setFaxSourceBusy,setProviderFaxSourceBusy,setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setIdentity,setConnectionError,setConflict,setMessage,setError,generation,
     setWorkspace,setTeam,setTeamDraft,setNote,setThought,setEvidence,setSource,setPreviousModelRequest,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryOffers,setRecoveryState,setRecoveryEpoch}=session;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
   const recoveredConnection=useRef({identity:authenticated,sequence:connectionRecovery&&connectionRecovery.identity===authenticated?connectionRecovery.sequence:0});
@@ -130,10 +128,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const recordingHome=useRef<HTMLDivElement|null>(null),recordingHost=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
-  const [faxSourceOffer,setFaxSourceOffer]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null>(null);
-  const [providerFaxSourceOffer,setProviderFaxSourceOffer]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:FaxSourceOffer;request:Extract<FaxPending,{kind:'acquire'}>}|null>(null);
-  const [providerFaxSourceBusy,setProviderFaxSourceBusy]=useState(false);
-  const [faxSourceBusy,setFaxSourceBusy]=useState(false);
   const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
@@ -209,7 +203,6 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [prepSelection,setPrepSelection]=useState<{scope:symbol;selection:SessionPrepAnalysis}|null>(null);
   const [prepEpoch,setPrepEpoch]=useState(0);
   const questionRef=useRef<HTMLTextAreaElement|null>(null);
-  const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const notebookDraft=(w:Workspace,n:string,t:string,e:string,s:string,p:PendingSave|null,previous=previousModelRequest)=>{
     const task=phoneNoteTask&&phoneNoteTask.owner===authenticated&&phoneNoteTask.owner===previousIdentity.current&&phoneNoteTask.generation===generation.current&&
       phoneNoteTask.workspaceId===w.id&&phoneNoteTask.scope===journal.current?.scope?phoneNoteTask:null;
@@ -323,20 +316,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     conversationEnd.current?.scrollIntoView?.({ block: "nearest" });
   }, [authenticated,workspace?.revision, pending]);
   useEffect(()=>session.models.observePendingHash(),[pending]);
-  useEffect(() => {
-    if (!authenticated || team) return;
-    let cancelled = false;
-    const current = generation.current;
-    const controller=new AbortController();
-    const startup=consumeWorkspaceStartupTeam(practiceAccess?.startupTeam,authenticated);
-    void (startup?Promise.resolve(startup):workspaceApi.team(authenticated,controller.signal)).then(value => {
-      if (!cancelled && current === generation.current) {
-        setTeam(value); setTeamDraft(previous => previous ?? structuredClone(value.configuration));
-        void recoverAfterRead(value, null, current);
-      }
-    }).catch(cause => { if (!cancelled && current === generation.current) failure(cause); });
-    return () => { cancelled = true;controller.abort(); };
-  }, [authenticated, team]);
+  useEffect(()=>session.loading.startup(loadingContext(),()=>authenticated?consumeWorkspaceStartupTeam(practiceAccess?.startupTeam,authenticated):null),[authenticated,team]);
   useLayoutEffect(()=>{
     const element=materialRef.current;if(!element||!workspace)return;
     const key=`${workspace.id}:${panel}`;
@@ -357,60 +337,17 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const heading=document.querySelector<HTMLElement>('.handoff-review h3');
     heading?.scrollIntoView?.({block:'start'});heading?.focus();
   },[reviewHandoffId,workspace?.id,settingsOpen,practiceOpen]);
-  const fastObservationOwner = useRef<{identity:typeof identity;workspaceId:string}|null>(null);
-  useEffect(() => {
-    if (!workspace || !identity || busy || conflict || handoffReviewPending || !(workspace.entries.some(modelActive)||workspace.handoffs?.some(h =>
-      ["queued", "running"].includes(h.status) || (h.result_entry_id && !workspace.entries.some(e => e.id === h.result_entry_id))))) return;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout>|undefined,reading=false,controller:AbortController|null=null;
+  useEffect(()=>{
     const nativeOwner=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?authenticated:null;
     let nativeVisible=nativeOwner?.nativeSession?.isCurrent()??false;
-    const visible=()=>nativeOwner?nativeVisible&&nativeOwner.nativeSession!.isCurrent():document.visibilityState!=='hidden';
-    const poll = async () => {
-      if(cancelled||reading||!visible())return;
-      reading=true;controller=new AbortController();
-      fastObservationOwner.current={identity,workspaceId:workspace.id};
-      try {
-        const latest = await workspaceApi.read(identity, workspace.id,controller.signal);
-        if (cancelled||controller.signal.aborted||!visible()) return;
-        if(latest.id!==workspace.id||latest.revision<workspace.revision)throw new WorkspaceApiError(503);
-        const noteRevision = (value: Workspace) => value.entries.filter(e => e.kind === "scratchpad").at(-1)?.revision ?? 0;
-        if (noteRevision(latest) !== noteRevision(workspace)) {
-          setConflict(true); setError("The saved notebook changed while your bot was working. Load the latest version to compare it with your unsaved text.");
-        }
-        setWorkspace(latest);
-      } catch (cause) { if (!cancelled&&!controller.signal.aborted&&visible()) modelFailure(cause); }
-      finally{
-        reading=false;
-        if (!cancelled&&visible()) {
-          const delay=foregroundRequested?0:5000;foregroundRequested=false;
-          timer = setTimeout(poll,delay);
-        }
-      }
-    };
-    // Reuse a healthy in-flight observation. If returning while an aborted
-    // hidden read settles, request one immediate read after its settlement.
-    let foregroundRequested = false;
-    const foreground=()=>{
-      clearTimeout(timer);
-      if(!visible()){foregroundRequested=false;controller?.abort();return;}
-      if(reading){foregroundRequested=controller?.signal.aborted===true;return;}
-      foregroundRequested=false;void poll();
-    };
-    const visibility=()=>foreground();
-    const removeNative=nativeOwner?subscribeNativeWorkspaceForeground(nativeOwner,()=>{
-      nativeVisible=true;foreground();
-    },()=>{
-      nativeVisible=false;foregroundRequested=false;clearTimeout(timer);controller?.abort();
-    }):null;
-    if(!nativeOwner){
-      document.addEventListener('visibilitychange',visibility);
-      window.addEventListener?.('focus',foreground);
-    }
-    // Surface short completions sooner; unchanged repeats remain bounded at five seconds.
-    if(visible())timer=setTimeout(poll,fastObservationOwner.current?.identity===identity&&fastObservationOwner.current.workspaceId===workspace.id?5000:2000);
-    return () => { cancelled = true; clearTimeout(timer);controller?.abort();removeNative?.();document.removeEventListener('visibilitychange',visibility);window.removeEventListener?.('focus',foreground); };
-  }, [workspace, identity, authenticated, busy, pending, conflict, handoffReviewPending]);
+    return session.observations.watch({modelFailure,
+      visible:()=>nativeOwner?nativeVisible&&nativeOwner.nativeSession!.isCurrent():document.visibilityState!=='hidden',
+      subscribeVisibility:changed=>{
+        if(nativeOwner)return subscribeNativeWorkspaceForeground(nativeOwner,()=>{nativeVisible=true;changed();},()=>{nativeVisible=false;changed();});
+        document.addEventListener('visibilitychange',changed);window.addEventListener?.('focus',changed);
+        return()=>{document.removeEventListener('visibilitychange',changed);window.removeEventListener?.('focus',changed);};
+      }});
+  },[workspace,identity,authenticated,busy,pending,conflict,handoffReviewPending]);
 
   function recoveryRead(value:ProviderTeam,currentWorkspace:Workspace|null,current:number,reloadParent=false){
     return {authenticated,team:value,workspace:currentWorkspace,generation:current,reloadParent,
@@ -970,105 +907,18 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   },[authenticated,workspace?.id,selected,reviewHandoffId,clinicalTeamExpanded]);
   function reviewTeamResult(handoff:DraftHandoff,fromChiefPlan=false){session.review.open(handoff,reviewContext(),fromChiefPlan);}
   function prepareFreshHandoff(feedback:string){session.review.prepareFresh(feedback,reviewContext());}
-  function receiveGoogleSource(latest:Workspace){
-    const current=recoveryView.current;
-    if(current.workspace?.id!==latest.id||current.workspace.revision>latest.revision)return;
-    const before=current.workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
-    const after=latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
-    if(before!==after&&current.note!==before)setConflict(true);
-    else if(current.note===before)setNote(after);
-    setWorkspace(latest);
-  }
-  async function refreshGoogleVisit(){
-    if(!authenticated||!workspace)throw new WorkspaceApiError(403);
-    const current=generation.current,id=workspace.id;
-    const latest=await workspaceApi.read(authenticated,id);
-    if(current!==generation.current||recoveryView.current.workspace?.id!==id)throw new WorkspaceApiError(403);
-    receiveGoogleSource(latest);
-  }
-  async function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){
-    if(!authenticated||!workspace||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
-    const current=generation.current,id=workspace.id;setBusy(true);
-    try{
-      const latest=await workspaceApi.read(authenticated,id);
-      if(current!==generation.current||recoveryView.current.workspace?.id!==id)return;
-      receiveGoogleSource(latest);
-      if(source.workspace_id!==id||source.source_withheld)throw new WorkspaceApiError(409,kind+'_source_changed');
-      const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&item.kind===kind&&(kind==='google_calendar'?item.calendar_source_state==='current':item.google_source_state==='current'));
-      if(!entry||await vendorSha256(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,kind+'_source_changed');
-      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
-      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt=kind==='google_calendar'?'Review the human-selected calendar summary '+source.entry_id+' as an untrusted event snapshot and prepare appropriate private assignments. Preserve the existing clinical note and email sources. Ask me about missing details; do not treat the summary as current availability or a booking.':'Review the human-selected email source '+source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
-      setPhoneNoteTask(null);setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);
-      setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(source.entry_id);
-      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setQuestionFocus(value=>value+1);
-    }catch(cause){if(current===generation.current)failure(cause);}
-    finally{if(current===generation.current)setBusy(false);}
-  }
+  function sourceContext():import('./session/sources').SourceContext{return {authenticated,locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,schedulingPatientBusy,accountAccess,failure,focusQuestion:()=>setQuestionFocus(value=>value+1)};}
+  function receiveGoogleSource(latest:Workspace){return session.sources.receive(latest);}
+  function refreshGoogleVisit(){return session.sources.refresh(sourceContext());}
+  function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){return session.sources.prepareGoogle(sourceContext(),source,kind);}
 
-  function receiveFaxDocument(document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){
-    if(!EFAX_INBOUND_SOURCE_BUILD||!authenticated||!workspace||!validEFaxSourceOffer(document)||locked||captureNavigationLocked||captureDraftLocked)return;
-    setFaxSourceOffer({identity:authenticated,generation:generation.current,workspaceId:workspace.id,document:structuredClone(document),request:structuredClone(request)});
-    setSettingsOpen(false);setPracticeOpen(false);setPanel('Sources');setMobilePanel('Sources');
-  }
-  async function refreshFaxDocument():Promise<EFaxSourceOffer|null>{
-    const offer=faxSourceOffer;if(!offer||offer.identity!==authenticated||offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id||!accountAccess)return null;
-    await accountAccess.authorize();const account=await accountIdentityApi.read(offer.identity);
-    if(offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id)return null;
-    const receipt=await efaxInboundApi.resolve(offer.identity,{box_id:account.box_id,owner_id:account.actor_id},offer.request);
-    if(offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id||efaxMissing(receipt)||receipt.state!=='acquired'||!receipt.content_available||receipt.source_withheld||!receipt.document||!receipt.operation_id)return null;
-    const document={operation_id:receipt.operation_id,document_sha256:receipt.document.sha256,pages:receipt.document.pages};
-    return vendorCanonical(document)===vendorCanonical(offer.document)?document:null;
-  }
-  async function prepareFaxChief(source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
-    if(!authenticated||!workspace||locked||connectionEditorsLocked||activityBusy||accessBusy||scribeSourceBusy||handoffReviewPending||schedulingPatientBusy||captureNavigationLocked||captureDraftLocked)return;
-    const current=generation.current,id=workspace.id;setBusy(true);
-    try{
-      const latest=await workspaceApi.read(authenticated,id);
-      if(current!==generation.current||recoveryView.current.workspace?.id!==id)return;
-      receiveGoogleSource(latest);
-      const receipt=source.receipt,entry=latest.entries.find(e=>e.id===receipt.entry_id);
-      if(receipt.scope.workspace_id!==id||receipt.source_withheld||!entry||entry.kind!=='efax_inbound_source'||entry.fax_source_state!=='current'||entry.revision!==receipt.entry_revision||await vendorSha256(new TextEncoder().encode(entry.content))!==receipt.content_sha256)throw new WorkspaceApiError(409,'efax_inbound_source_unavailable');
-      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
-      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt='Review the human-selected received-fax passage '+receipt.entry_id+' and prepare appropriate private assignments. This is manually entered selected text, without OCR or full-document coverage. Preserve the existing clinical note, email and calendar sources; ask me about missing information before proposing outside actions.';
-      setPhoneNoteTask(null);setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(entry.id);
-      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setQuestionFocus(value=>value+1);
-    }catch(cause){if(current===generation.current)failure(cause);}
-    finally{if(current===generation.current)setBusy(false);}
-  }
+  function receiveFaxDocument(document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){return session.sources.receiveFax(sourceContext(),document,request);}
+  function refreshFaxDocument(){return session.sources.refreshFax(sourceContext());}
+  function prepareFaxChief(source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){return session.sources.prepareFax(sourceContext(),source);}
 
-  function receiveProviderFaxDocument(document:FaxSourceOffer,request:Extract<FaxPending,{kind:'acquire'}>){
-    if(!FAX_INBOUND_SOURCE_BUILD||!authenticated||!workspace||!validFaxSourceOffer(document)||locked||captureNavigationLocked||captureDraftLocked)return;
-    setProviderFaxSourceOffer({identity:authenticated,generation:generation.current,workspaceId:workspace.id,document:structuredClone(document),request:structuredClone(request)});
-    setSettingsOpen(false);setPracticeOpen(false);setPanel('Sources');setMobilePanel('Sources');
-  }
-  async function refreshProviderFaxDocument():Promise<FaxSourceOffer|null>{
-    const offer=providerFaxSourceOffer;if(!offer||offer.identity!==authenticated||offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id||!accountAccess)return null;
-    await accountAccess.authorize();const account=await accountIdentityApi.read(offer.identity);
-    if(offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id)return null;
-    const receipt=await faxInboundApi.resolve(offer.identity,{box_id:account.box_id,owner_id:account.actor_id},offer.request);
-    if(offer.generation!==generation.current||offer.workspaceId!==recoveryView.current.workspace?.id||receipt.state!=='acquired'||receipt.source_withheld||!receipt.document_sha256||!receipt.pages||!receipt.operation_id)return null;
-    const document={operation_id:receipt.operation_id,document_sha256:receipt.document_sha256,pages:receipt.pages};
-    return vendorCanonical(document)===vendorCanonical(offer.document)?document:null;
-  }
-  async function prepareProviderFaxChief(source:{receipt:FaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
-    if(!authenticated||!workspace||locked||connectionEditorsLocked||activityBusy||accessBusy||scribeSourceBusy||handoffReviewPending||schedulingPatientBusy||captureNavigationLocked||captureDraftLocked)return;
-    const current=generation.current,id=workspace.id;setBusy(true);
-    try{
-      const latest=await workspaceApi.read(authenticated,id);
-      if(current!==generation.current||recoveryView.current.workspace?.id!==id)return;
-      receiveGoogleSource(latest);
-      const receipt=source.receipt,entry=latest.entries.find(e=>e.id===receipt.entry_id);
-      if(receipt.scope.workspace_id!==id||receipt.source_withheld||!entry||entry.kind!=='fax_inbound_source'||entry.practice_fax_source_state!=='current'||entry.revision!==receipt.entry_revision||await vendorSha256(new TextEncoder().encode(entry.content))!==receipt.content_sha256)throw new WorkspaceApiError(409,'fax_inbound_source_unavailable');
-      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
-      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt='Review the human-selected received-fax passage '+receipt.entry_id+' and prepare appropriate private assignments. This is manually entered selected text, without OCR or full-document coverage. Preserve the existing clinical note, email and calendar sources; ask me about missing information before proposing outside actions.';
-      setPhoneNoteTask(null);setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(entry.id);
-      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setQuestionFocus(value=>value+1);
-    }catch(cause){if(current===generation.current)failure(cause);}
-    finally{if(current===generation.current)setBusy(false);}
-  }
+  function receiveProviderFaxDocument(document:FaxSourceOffer,request:Extract<FaxPending,{kind:'acquire'}>){return session.sources.receiveProviderFax(sourceContext(),document,request);}
+  function refreshProviderFaxDocument(){return session.sources.refreshProviderFax(sourceContext());}
+  function prepareProviderFaxChief(source:{receipt:FaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){return session.sources.prepareProviderFax(sourceContext(),source);}
 
   const nativeNoteShortcut=nativeClinicalPlan&&<section className="chief-saved-note-shortcut" aria-label="Saved visit note next steps">
             <span>Saved visit note · version {nativeClinicalPlan.selection.note_version}

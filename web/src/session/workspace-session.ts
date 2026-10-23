@@ -1,3 +1,5 @@
+import {WorkspaceSources,type SourceDependencies} from './sources';
+import {WorkspaceObservations} from './observations';
 import {WorkspaceReview} from './review';
 import {WorkspaceNavigation,type NavigationDependencies} from './navigation';
 import {WorkspaceRecording,type RecordingDependencies} from './recording';
@@ -27,7 +29,9 @@ export class WorkspaceSession {
   readonly recording:WorkspaceRecording;
   readonly navigation:WorkspaceNavigation;
   readonly review:WorkspaceReview;
-  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
+  readonly observations:WorkspaceObservations;
+  readonly sources:WorkspaceSources;
+  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];observationRead?:ConstructorParameters<typeof WorkspaceObservations>[1];sources?:SourceDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
     this.saves=new WorkspaceSaves(this,deps.saves);
@@ -38,9 +42,12 @@ export class WorkspaceSession {
     this.recording=new WorkspaceRecording(this,deps.recording);
     this.navigation=new WorkspaceNavigation(this,deps.navigation);
     this.review=new WorkspaceReview(this);
+    this.observations=new WorkspaceObservations(this,deps.observationRead);
+    this.sources=new WorkspaceSources(this,deps.sources);
     this.setPracticePage(deps.initialPage??'visits');
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
+    selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,faxSourceBusy:false,providerFaxSourceBusy:false,
     phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
     settingsOpen:false,practicePage:'visits',practiceOpen:false,practiceOpened:false,selected:'visit_prep',panel:'Notebook',mobilePanel:'Conversation',stage:'Before',entryIntent:null,researchEntry:false,settingsEntry:'home',inboxSelection:null,
     privateRecordingBusy:false,privateRecordingEntry:null,savedRecordingEntry:null,savedRecordingNotebook:null,privateRecordings:null,privateRecordingListEpoch:0,privateRecordingRequest:0,
@@ -61,6 +68,11 @@ export class WorkspaceSession {
     return ()=>{this.listeners.delete(listener);};
   };
 
+  readonly setSelectedSource = this.setter('selectedSource');
+  readonly setFaxSourceOffer = this.setter('faxSourceOffer');
+  readonly setProviderFaxSourceOffer = this.setter('providerFaxSourceOffer');
+  readonly setFaxSourceBusy = this.setter('faxSourceBusy');
+  readonly setProviderFaxSourceBusy = this.setter('providerFaxSourceBusy');
   readonly setPhoneNoteTask = this.setter('phoneNoteTask');
   readonly setReviewHandoffId = this.setter('reviewHandoffId');
   readonly setHandoffReviewPending = this.setter('handoffReviewPending');
