@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import hashlib
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 from sqlalchemy import String, and_, cast, func, literal, or_, select, tuple_, union, union_all
 
+from cosmas_os.application import clinical_note_share, handoff_review, note_review
+from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.encounter_access import patient_visible
 from cosmas_os.conversation_models import ConversationReadMarker as Marker
@@ -20,6 +21,7 @@ from cosmas_os.models import (
     FollowUpSource,
     ModelWorkAdmission,
     PatientLink,
+    Principal,
     ProviderBot,
     ProviderTeamRevision,
     Ticket,
@@ -27,6 +29,7 @@ from cosmas_os.models import (
     WorkspaceHandoff,
     WorkspaceHandoffAttempt,
     WorkspaceHandoffReview,
+    WorkspaceHandoffRevision,
     WorkspaceNote,
     WorkspaceNoteReview,
     WorkspaceReply,
@@ -123,15 +126,6 @@ def _accessible(box, owner, events):
         or_(and_(w.appointment_id.is_(None), w.patient_link_id.is_(None), w.draft_title.is_not(None)), and_(appointment.id.is_not(None), link.id.is_not(None))))
 
 
-def _source_versions(entries, settings):
-    sources = [e for e in entries if e.kind in {'scratchpad', 'evidence', 'synthetic_source'}]
-    chosen = ([e for e in sources if e.kind == 'scratchpad'][-1:] if settings.get('include_notebook') else [])
-    if settings.get('include_evidence'):
-        chosen += [e for e in sources if e.kind in {'evidence', 'synthetic_source'}]
-    return [{'entry_id': e.id, 'revision': e.revision, 'label': e.source_label or 'Your jotted notes', 'kind': e.kind,
-             'sha256': hashlib.sha256(e.content.encode()).hexdigest()} for e in chosen]
-
-
 def read(s, box, owner, *, cursor=None, fence=None, clock=None):
     if fence:
         fence()
@@ -158,7 +152,7 @@ def read(s, box, owner, *, cursor=None, fence=None, clock=None):
     still_visible = {item.workspace_id for item in s.execute(_accessible(box, owner, ranked).where(ranked.c.rank == 1, ranked.c.workspace_id.in_(ids)))}
     if still_visible != ids:
         raise ws.WorkspaceError('conversation_access_changed', 403)
-    # Bulk reads keep page cost independent of the number of conversations.
+    # Batch summary and review inputs; no validator can query per conversation.
     entries = defaultdict(list)
     for entry in s.scalars(select(WorkspaceEntry).where(WorkspaceEntry.box_id == box, WorkspaceEntry.workspace_id.in_(ids)).order_by(WorkspaceEntry.revision)):
         entries[entry.workspace_id].append(entry)
@@ -175,16 +169,34 @@ def read(s, box, owner, *, cursor=None, fence=None, clock=None):
     for title in s.scalars(select(WorkspaceTitleRevision).where(WorkspaceTitleRevision.box_id == box, WorkspaceTitleRevision.owner_id == owner, WorkspaceTitleRevision.workspace_id.in_(ids)).order_by(WorkspaceTitleRevision.version)):
         titles[title.workspace_id] = title.title
     handoffs = list(s.scalars(select(WorkspaceHandoff).where(WorkspaceHandoff.box_id == box, WorkspaceHandoff.owner_id == owner, WorkspaceHandoff.workspace_id.in_(ids))))
+    attempt_rows = list(s.scalars(select(WorkspaceHandoffAttempt).where(WorkspaceHandoffAttempt.box_id == box, WorkspaceHandoffAttempt.owner_id == owner, WorkspaceHandoffAttempt.workspace_id.in_(ids)).order_by(WorkspaceHandoffAttempt.number)))
     attempts = {}
-    for attempt in s.scalars(select(WorkspaceHandoffAttempt).where(WorkspaceHandoffAttempt.box_id == box, WorkspaceHandoffAttempt.owner_id == owner, WorkspaceHandoffAttempt.workspace_id.in_(ids)).order_by(WorkspaceHandoffAttempt.number)):
+    for attempt in attempt_rows:
         attempts[attempt.handoff_id] = attempt
     reviews = {review.attempt_id: review for review in s.scalars(select(WorkspaceHandoffReview).where(WorkspaceHandoffReview.box_id == box, WorkspaceHandoffReview.owner_id == owner, WorkspaceHandoffReview.workspace_id.in_(ids)))}
+    current_reviews = {}
+    note_rows = list(s.scalars(select(WorkspaceNote).where(WorkspaceNote.box_id == box, WorkspaceNote.owner_id == owner, WorkspaceNote.workspace_id.in_(ids)).order_by(WorkspaceNote.version)))
     notes = {}
-    for note in s.scalars(select(WorkspaceNote).where(WorkspaceNote.box_id == box, WorkspaceNote.owner_id == owner, WorkspaceNote.workspace_id.in_(ids)).order_by(WorkspaceNote.version)):
+    for note in note_rows:
         notes[note.workspace_id] = note
     note_reviews = {review.note_id for review in s.scalars(select(WorkspaceNoteReview).where(WorkspaceNoteReview.box_id == box, WorkspaceNoteReview.owner_id == owner, WorkspaceNoteReview.workspace_id.in_(ids)))}
     work = list(s.execute(select(FollowUpSource.workspace_id, Ticket.state).join(Ticket, and_(Ticket.id == FollowUpSource.ticket_id, Ticket.box_id == box)).where(FollowUpSource.box_id == box, FollowUpSource.owner_id == owner, FollowUpSource.workspace_id.in_(ids))))
     query_work = list(s.execute(select(ActionRevision.payload, Ticket.state).join(Ticket, and_(Ticket.current_revision_id == ActionRevision.id, Ticket.box_id == box, Ticket.created_by_principal_id == owner, Ticket.lane == 'encounter_agent_research')).where(ActionRevision.payload['workspace_id'].astext.in_(ids))))
+    review_snapshot = None
+    if reviews:
+        principals = list(s.scalars(select(Principal).where(Principal.box_id == box, Principal.id.in_(bots)).with_for_update(read=True).execution_options(populate_existing=True)))
+        team_versions = list(s.scalars(select(ProviderTeamRevision).where(ProviderTeamRevision.box_id == box, ProviderTeamRevision.owner_id == owner,
+            ProviderTeamRevision.id.in_({h.team_revision_id for h in handoffs} | ({version.id} if version else set())))))
+        model_rows = list(s.scalars(select(ModelWorkAdmission).where(ModelWorkAdmission.box_id == box, ModelWorkAdmission.owner_id == owner,
+            ModelWorkAdmission.workspace_id.in_(ids), ModelWorkAdmission.handoff_attempt_id.in_({attempt.id for attempt in attempt_rows}))))
+        revisions = list(s.scalars(select(WorkspaceHandoffRevision).where(WorkspaceHandoffRevision.box_id == box, WorkspaceHandoffRevision.owner_id == owner,
+            WorkspaceHandoffRevision.workspace_id.in_(ids))))
+        review_snapshot = handoff_review.ReviewReadSnapshot(
+            team=team.TeamReadSnapshot(box, owner, version, {item.id: item for item in team_versions}, tuple(bots.values()), {item.id: item for item in principals}),
+            workspace_ids=frozenset(ids),
+            clinical=clinical_note_share.ClinicalSourceSnapshot({entry.id: entry for local in entries.values() for entry in local}, {note.id: note for note in note_rows}),
+            replies=replies, handoffs={handoff.id: handoff for handoff in handoffs}, attempts=tuple(attempt_rows),
+            reviews=tuple(reviews.values()), revisions=tuple(revisions), admissions={item.handoff_attempt_id: item for item in model_rows})
     output = []
     for row in rows:
         w, agent = row.EncounterWorkspace, bots.get(row.agent_id)
@@ -211,26 +223,20 @@ def read(s, box, owner, *, cursor=None, fence=None, clock=None):
             if attempt.status != 'completed':
                 uncertain = True
                 continue
-            review, result = reviews.get(attempt.id), replies.get(attempt.result_entry_id)
-            recipient = bots[handoff.recipient_agent_id]
-            recipient_config = configs.get(recipient.instance_id or recipient.role, {})
-            chief_config = configs.get('chief', {})
-            admission = next((a for a in admissions if a.handoff_attempt_id == attempt.id), None)
-            current = bool(review and result and version and admission and review.source_sha256 == admission.source_sha256 and handoff.team_revision_id == version.id and
-                review.result_entry_id == attempt.result_entry_id and review.agent_id == result.agent_id and
-                review.result_sha256 == hashlib.sha256(result.content.encode()).hexdigest() and
-                review.source_versions == _source_versions(local, recipient_config) and
-                all(c.get('enabled') and not c.get('retired') and not set(c.get('blocked_capabilities', [])) & {'model_answer', 'private_draft_handoff'} for c in (chief_config, recipient_config)))
             if selected_sources:
                 # Summary never grants source authority. Full review rechecks custody.
                 uncertain = True
-            elif not current:
-                needs_review = True
+            else:
+                if handoff.id not in current_reviews:
+                    current_reviews[handoff.id] = handoff_review.review_for(s, w, handoff, attempt, snapshot=review_snapshot) if attempt.id in reviews else None
+                current = current_reviews[handoff.id]
+                # Changes requested is unfinished human work until the explicit
+                # revision exists. Its own attempt/review then determines status.
+                needs_review |= current is None or current['decision'] == 'changes_requested' and not current.get('revision_handoff_id')
         if agent.role in {'chief', 'scribe'} and w.id in notes:
             note = notes[w.id]
             source_rows = [e for e in local if e.kind in {'scratchpad', 'evidence', 'synthetic_source'}]
-            latest = next((e.id for e in reversed(source_rows) if e.kind == 'scratchpad'), None)
-            fingerprint = payload_hash([{'id': e.id, 'revision': e.revision, 'content': e.content} for e in source_rows if e.kind != 'scratchpad' or e.id == latest])
+            fingerprint = note_review.fingerprint_for_sources(source_rows)
             needs_review |= note.id not in note_reviews or note.source_fingerprint != fingerprint
         if agent.role in {'chief', 'follow_up'}:
             needs_review |= any(item.workspace_id == w.id and item.state not in {'closed', 'completed', 'rejected', 'cancelled'} for item in work)

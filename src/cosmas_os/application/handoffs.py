@@ -20,7 +20,7 @@ from cosmas_os.models import (
 from cosmas_os.ports.bot_capabilities import supports_skill
 
 
-def available_roles(s, box, owner, version, chief_settings):
+def available_roles(s, box, owner, version, chief_settings, *, snapshot: team.TeamReadSnapshot | None = None):
     if any(team.blocked(chief_settings, key) for key in ("private_draft_handoff", "model_answer")):
         return ()
     roles = []
@@ -44,7 +44,7 @@ def available_roles(s, box, owner, version, chief_settings):
         ):
             continue
         try:
-            team.active_bot(s, box, owner, role, version.revision)
+            team.active_bot(s, box, owner, role, version.revision, snapshot=snapshot)
         except ws.WorkspaceError:
             continue
         roles.append(role)

@@ -1,11 +1,14 @@
 """Invented conversations exercise real PostgreSQL ownership and read state."""
 
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import event
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.orm import Session
+from tests.integration import test_clinical_team_drafts as clinical_drafts
 from tests.integration import test_google_message_model_work as google
 from tests.integration import test_handoff_review as handoff
 from tests.integration import test_model_work_admission as model_work
@@ -14,11 +17,13 @@ from tests.integration.test_provider_team import case as provider_case
 from tests.integration.test_workspace_auth import signed_workspace as signed_fixture
 
 from cosmas_os.application import conversation_inbox as inbox
+from cosmas_os.application import handoff_review, note_review
 from cosmas_os.application import model_work as work
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.conversation_models import ConversationReadMarker
 from cosmas_os.models import (
+    AppointmentObservation,
     EncounterWorkspace,
     PatientLink,
     Principal,
@@ -32,6 +37,9 @@ google_case = google.google_case
 review_case = handoff.case
 model = handoff.model
 enabled = model_work.enabled
+clinical = clinical_drafts.clinical
+bridge = clinical_drafts.bridge
+capture_case = clinical_drafts.capture_case
 
 
 def test_only_human_opened_conversations_appear_not_a_default_roster(session, case):
@@ -165,6 +173,137 @@ def test_delegation_is_a_chief_attention_card_not_an_automatic_specialist_chat(s
     assert initial['rows'][0]['attention'] == 'needs_review'
     handoff.review(session, review_case)
     assert inbox.read(session, box, owner)['rows'][0]['attention'] == 'idle'
+
+
+def test_changes_requested_stays_actionable_until_revision_is_queued_and_reviewed(session, review_case, monkeypatch):
+    box, owner, w, _, _, _, _ = review_case
+    original = handoff_review.review_for
+    class NoDatabase:
+        def __getattr__(self, name):
+            pytest.fail(f'Revision snapshot attempted database access: {name}')
+    def checked(s, workspace, assignment, attempt, **options):
+        return original(NoDatabase() if options.get('snapshot') is not None else s,
+            workspace, assignment, attempt, **options)
+    monkeypatch.setattr(handoff_review, 'review_for', checked)
+    response, receipt = handoff.changes_requested(session, review_case)
+    assert inbox.read(session, box, owner)['rows'][0]['attention'] == 'needs_review'
+    revised = handoff.revise(session, review_case, response, receipt)
+    assert inbox.read(session, box, owner)['rows'][0]['attention'] == 'working'
+    assert handoff.shared.worker(session)
+    assert inbox.read(session, box, owner)['rows'][0]['attention'] == 'needs_review'
+    current = ws.read(session, box, owner, w['id'])
+    child = next(h for h in current['handoffs'] if h['id'] == revised['revision_handoff_id'])
+    child_case = box, owner, current, review_case[3], review_case[4], child, child['result_sha256']
+    handoff.review(session, child_case, key='invented-inbox-revision-accepted')
+    assert inbox.read(session, box, owner)['rows'][0]['attention'] == 'idle'
+
+
+def test_reviewed_handoff_query_count_is_constant_across_twenty_conversations(session, review_case):
+    box, owner, _, config, patient, _, _ = review_case
+    handoff.review(session, review_case)
+    def measured():
+        statements = []
+        def counted(*args):
+            statements.append(args[2])
+        event.listen(session.get_bind(), 'before_cursor_execute', counted)
+        try:
+            result = inbox.read(session, box, owner)
+        finally:
+            event.remove(session.get_bind(), 'before_cursor_execute', counted)
+        return result['rows'], len(statements)
+    first, first_count = measured()
+    assert len(first) == 1 and first[0]['attention'] == 'idle'
+    for index in range(19):
+        appointment = AppointmentObservation(box_id=box, patient_link_id=patient,
+            external_id=str(uuid4()), source='synthetic', start_at=datetime.now(UTC),
+            patient_label=f'Invented reviewed visit {index}')
+        session.add(appointment)
+        session.commit()
+        w = ws.create(session, box, owner, appointment.id, f'invented-reviewed-visit-{index}')
+        handoff.shared.assign(session, (box, owner, w, config, patient), key=f'invented-assignment-{index}')
+        assert handoff.shared.worker(session)
+        current = ws.read(session, box, owner, w['id'])
+        h = current['handoffs'][0]
+        handoff.review(session, (box, owner, current, config, patient, h, h['result_sha256']),
+            key=f'invented-reviewed-result-{index}')
+    rows, populated_count = measured()
+    assert len(rows) == 20 and all(row['attention'] == 'idle' for row in rows)
+    assert populated_count == first_count <= 26
+
+
+def test_review_snapshot_matches_sql_and_fails_closed_when_required_inputs_are_missing(session, review_case, monkeypatch):
+    box, owner, _, _, _, _, _ = review_case
+    handoff.review(session, review_case)
+    captured = []
+    original = handoff_review.review_for
+    def remember(s, w, assignment, attempt, **options):
+        result = original(s, w, assignment, attempt, **options)
+        captured.append((w, assignment, attempt, options['snapshot'], result))
+        return result
+    monkeypatch.setattr(handoff_review, 'review_for', remember)
+    assert inbox.read(session, box, owner)['rows'][0]['attention'] == 'idle'
+    w, assignment, attempt, snapshot, expected = captured[0]
+    assert expected == original(session, w, assignment, attempt)
+    class NoDatabase:
+        def __getattr__(self, name):
+            pytest.fail(f'Preloaded review attempted database access: {name}')
+    assert expected == original(NoDatabase(), w, assignment, attempt, snapshot=snapshot)
+    for incomplete in [replace(snapshot, admissions={}), replace(snapshot, replies={}),
+        replace(snapshot, attempts=()), replace(snapshot, clinical=replace(snapshot.clinical, entries={})),
+        replace(snapshot, team=replace(snapshot.team, principals={})),
+        replace(snapshot, team=replace(snapshot.team, current=None))]:
+        assert original(NoDatabase(), w, assignment, attempt, snapshot=incomplete) is None
+
+
+def test_accepted_clinical_drafts_use_shared_review_authority_for_each_open_chat(clinical, monkeypatch):
+    f = clinical
+    receipt = clinical_drafts.shared(f)
+    calls = []
+    chief = clinical_drafts.reserve(f, receipt)
+    result = clinical_drafts.dispatch(f, chief, calls)
+    with Session(f.engine) as s:
+        work.settle(s, chief, result)
+    for _ in range(2):
+        assert work.process_next(lambda: clinical_drafts.sessions(f.engine),
+            dispatch=lambda claim: clinical_drafts.dispatch(f, claim, calls))
+    with Session(f.engine) as s:
+        snapshot = ws.read(s, f.box, f.actor, f.workspace['id'])
+        for h in snapshot['handoffs']:
+            assert receipt['source_entry_id'] in {source['entry_id'] for source in h['task_brief']['source_versions']}
+            reviewed = handoff_review.review(s, f.box, f.actor, f.workspace['id'], h['id'],
+                expected=snapshot['revision'], key='invented-inbox-accept-' + h['recipient_role'],
+                attempt_id=h['attempt_id'], result_entry_id=h['result_entry_id'],
+                result_sha256=h['result_sha256'], decision='accepted', feedback='')
+            snapshot = reviewed['workspace']
+        note = snapshot['note']['latest']
+        reviewed_note = note_review.review(s, f.box, f.actor, f.workspace['id'], note['id'],
+            expected=snapshot['revision'], key='invented-inbox-note-review',
+            content_hash=note['content_hash'], source_hash=note['source_fingerprint'])
+        assert all(h['review_status'] == 'current' for h in reviewed_note['workspace']['handoffs'])
+        for bot in ('follow_up', f.research_id):
+            inbox.update_marker(s, f.box, f.actor, f.workspace['id'], bot)
+        checks = []
+        original = handoff_review.review_for
+        class NoDatabase:
+            def __getattr__(self, name):
+                pytest.fail(f'Clinical snapshot attempted database access: {name}')
+        def counted(session, workspace, assignment, attempt, **options):
+            checks.append(assignment.id)
+            assert options['snapshot'] is not None
+            return original(NoDatabase(), workspace, assignment, attempt, **options)
+        monkeypatch.setattr(handoff_review, 'review_for', counted)
+        statements = []
+        def query_counted(*args):
+            statements.append(args[2])
+        event.listen(s.get_bind(), 'before_cursor_execute', query_counted)
+        try:
+            rows = inbox.read(s, f.box, f.actor)['rows']
+        finally:
+            event.remove(s.get_bind(), 'before_cursor_execute', query_counted)
+        assert {row['bot']['address'] for row in rows} == {'chief', 'follow_up', f.research_id}
+        assert all(row['attention'] == 'idle' for row in rows)
+        assert len(checks) == len(set(checks)) == 2  # Shared review once, not once per chat.
+        assert len(statements) <= 26  # Includes clinical source and locked-principal batches.
 
 
 def test_selected_source_preview_remains_withheld_after_revocation(google_case):

@@ -31,6 +31,11 @@ def source_fingerprint(s: Session, wid: str, revision: int) -> str:
             .order_by(WorkspaceEntry.revision)
         )
     )
+    return fingerprint_for_sources(sources)
+
+
+def fingerprint_for_sources(sources: list[WorkspaceEntry]) -> str:
+    """Hash already-selected, revision-ordered clinical sources without I/O."""
     latest_notebook = next((e.id for e in reversed(sources) if e.kind == "scratchpad"), None)
     return payload_hash(
         [

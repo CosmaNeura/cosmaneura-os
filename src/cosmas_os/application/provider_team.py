@@ -1,5 +1,6 @@
 """Private, versioned Provider Team templates using existing agent principals."""
 
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
@@ -20,6 +21,30 @@ from cosmas_os.ports.bot_capabilities import (
 )
 
 BOT_DEFINITIONS = {**ROLE_TEMPLATES, "custom": CUSTOM_BOT}
+
+
+@dataclass(frozen=True)
+class TeamReadSnapshot:
+    """Owner-scoped team inputs; principal rows must already hold shared locks."""
+
+    box: str
+    owner: str
+    current: ProviderTeamRevision | None
+    versions: dict[str, ProviderTeamRevision]
+    bots: tuple[ProviderBot, ...]
+    principals: dict[str, Principal]
+
+    def __post_init__(self):
+        scope = self.box, self.owner
+        if (self.current is not None and (self.current.box_id, self.current.owner_id) != scope
+                or any(key != row.id or (row.box_id, row.owner_id) != scope for key, row in self.versions.items())
+                or any((bot.box_id, bot.owner_id) != scope for bot in self.bots)
+                or any(key != row.id or row.box_id != self.box for key, row in self.principals.items())):
+            raise WorkspaceError("team_snapshot_unavailable", 503)
+
+    def require_scope(self, box, owner):
+        if (box, owner) != (self.box, self.owner):
+            raise WorkspaceError("team_snapshot_unavailable", 503)
 
 
 def bot_address(settings):
@@ -317,8 +342,10 @@ def save(s: Session, box: str, owner: str, *, expected: int, key: str, configura
     return read(s, box, owner, version=version)
 
 
-def active_bot(s: Session, box: str, owner: str, role: str, expected: int):
-    version = current(s, box, owner)
+def active_bot(s: Session, box: str, owner: str, role: str, expected: int, *, snapshot: TeamReadSnapshot | None = None):
+    if snapshot is not None:
+        snapshot.require_scope(box, owner)
+    version = snapshot.current if snapshot is not None else current(s, box, owner)
     if not version or version.revision != expected:
         raise WorkspaceError("team_revision_conflict")
     settings = next((b for b in version.configuration["bots"] if bot_address(b) == role), None)
@@ -330,7 +357,8 @@ def active_bot(s: Session, box: str, owner: str, role: str, expected: int):
                 raise ValueError()
         except (ValueError, TypeError, AttributeError):
             raise WorkspaceError("bot_paused", 409) from None
-    bot = s.scalar(
+    bot = next((bot for bot in snapshot.bots if bot.box_id == box and bot.owner_id == owner
+        and bot.role == settings["role"] and bot.instance_id == settings.get("instance_id")), None) if snapshot is not None else s.scalar(
         select(ProviderBot).where(
             ProviderBot.box_id == box,
             ProviderBot.owner_id == owner,
@@ -338,28 +366,35 @@ def active_bot(s: Session, box: str, owner: str, role: str, expected: int):
             ProviderBot.instance_id == settings.get("instance_id"),
         )
     )
-    principal = (
-        s.scalar(
-            select(Principal)
-            .where(
-                Principal.id == bot.agent_id,
-                Principal.box_id == box,
-                Principal.principal_type == "agent",
-                Principal.state == "active",
-                Principal.tombstoned_at.is_(None),
+    principal = snapshot.principals.get(bot.agent_id) if snapshot is not None and bot else None
+    if snapshot is not None and principal is not None and (principal.box_id != box or principal.principal_type != "agent"
+            or principal.state != "active" or principal.tombstoned_at is not None):
+        principal = None
+    if snapshot is None:
+        principal = (
+            s.scalar(
+                select(Principal)
+                .where(
+                    Principal.id == bot.agent_id,
+                    Principal.box_id == box,
+                    Principal.principal_type == "agent",
+                    Principal.state == "active",
+                    Principal.tombstoned_at.is_(None),
+                )
+                .with_for_update(read=True)
             )
-            .with_for_update(read=True)
+            if bot
+            else None
         )
-        if bot
-        else None
-    )
     if bot is None or settings.get("retired") or not settings["enabled"] or principal is None:
         raise WorkspaceError("bot_paused", 409)
     return version, bot, settings
 
 
-def address_for_agent(s: Session, box: str, owner: str, agent_id: str):
-    bot = s.scalar(select(ProviderBot).where(ProviderBot.agent_id == agent_id,
+def address_for_agent(s: Session, box: str, owner: str, agent_id: str, *, snapshot: TeamReadSnapshot | None = None):
+    if snapshot is not None:
+        snapshot.require_scope(box, owner)
+    bot = next((bot for bot in snapshot.bots if bot.agent_id == agent_id and bot.box_id == box and bot.owner_id == owner), None) if snapshot is not None else s.scalar(select(ProviderBot).where(ProviderBot.agent_id == agent_id,
         ProviderBot.box_id == box, ProviderBot.owner_id == owner))
     if bot is None:
         raise WorkspaceError("team_member_unavailable")
