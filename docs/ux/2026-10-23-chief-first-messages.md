@@ -437,6 +437,15 @@ layout fixture. Retry is fully visible and enabled; the exact invented note is
 saved once as revision 6, and header, composer and Send return inside the frame.
 This browser fixture does not exercise UIKit or the physical keyboard.
 
+A further compact-screen check with a populated composer found that its 30vh
+growth cap left only 69.4px for a 70.6px review action at 390 × 420 and 200% text.
+Compact Messages now caps the composer at 80px, leaving 115.4px for history there
+and 85.4px at 390 × 390. The frozen browser rehearsal opens the review and returns
+with the exact draft intact; lost-save retry still confirms revision 6. The 37
+affected frame, presentation/parity and history tests pass, and both production
+and synthetic builds pass after this CSS-only change. Full-height composer
+growth keeps its existing limit.
+
 Earlier in this resumed chat, Preview 18's physical software-keyboard layout
 showed Chief, Back, Details, composer and Send unobscured. Device Hub did not apply
 the attempted typing/taps, so this does not establish a completed physical

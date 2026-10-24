@@ -59,6 +59,8 @@
 @media(max-width:600px){
   .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .messages-context-button small{display:none}
   .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .team-composer-wrap>.team-fine{display:none}
+  /* Leave room for a full review action while the keyboard reduces the viewport. */
+  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .team-composer-wrap .team-composer textarea{max-height:min(80px,30dvh)}
 }
 
 .workspace-dialog-heading{position:sticky;top:0;z-index:2;display:flex;align-items:start;gap:12px;padding:16px 0 12px;margin-top:0;background:#fffdf7}
