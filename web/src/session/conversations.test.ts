@@ -4,7 +4,7 @@ import {WorkspaceSession} from './workspace-session';
 import {teamFixture,teamUuid} from '../team-setup-test-fixture';
 import {DraftJournal,editorAddress} from '../draft-journal';
 import {memoryDraftStorage} from '../draft-test-fixture';
-import type {Workspace,WorkspaceIdentity} from '../workspace-api';
+import {WorkspaceApiError,type Workspace,type WorkspaceIdentity} from '../workspace-api';
 import type {ConversationHost} from './conversations';
 import {PRESENTATION_KEY} from './presentation';
 import type {ConversationInbox,ConversationSummary} from '../conversations-api';
@@ -75,6 +75,37 @@ describe('shared conversation state',()=>{
     const f=await fixture(),address=editorAddress(f.workspace.id,'conversation:chief');await f.journal.load(address);await f.journal.persist(address,{kind:'editor',workspaceId:f.workspace.id,editor:'conversation:chief',pending:null,data:{text:'Recover me'}});
     await f.session.conversations.open(f.workspace.id,'follow_up',f.host);await f.session.conversations.open(f.workspace.id,'chief',f.host);expect(f.session.getSnapshot().thought).toBe('Recover me');
     f.session.models.updateThought('');await f.session.conversations.retain(f.host);await f.session.conversations.open(f.workspace.id,'follow_up',f.host);await f.session.conversations.open(f.workspace.id,'chief',f.host);expect(f.session.getSnapshot().thought).toBe('');
+  });
+  it('retains an unhydrated saved-note task with empty directions, but respects its later explicit removal',async()=>{
+    const f=await fixture(),address=editorAddress(f.workspace.id,'conversation:chief');
+    const noteTask={contract:'chief-note-task.compose.v1' as const,note_id:teamUuid(630),note_version:1,content_hash:'a'.repeat(64),source_fingerprint:'b'.repeat(64)};
+    await f.journal.load(address);await f.journal.persist(address,{kind:'editor',workspaceId:f.workspace.id,editor:'conversation:chief',pending:null,data:{text:'',noteTask}});
+    await f.session.conversations.open(f.workspace.id,'follow_up',f.host);
+    expect(await f.journal.load(address)).toMatchObject({data:{text:'',noteTask}});
+    await f.session.conversations.open(f.workspace.id,'chief',f.host);
+    expect(f.session.getSnapshot().phoneNoteTask?.selection.note_id).toBe(noteTask.note_id);
+    f.session.setPhoneNoteTask(null);await f.session.conversations.retain(f.host);
+    await f.session.conversations.open(f.workspace.id,'follow_up',f.host);
+    await f.session.conversations.open(f.workspace.id,'chief',f.host);
+    expect(f.session.getSnapshot().phoneNoteTask).toBeNull();
+    expect(await f.journal.load(address)).toHaveProperty('data',{text:''});
+  });
+  it.each([false,true])('keeps a newly selected note when an older conversation draft loads (selection during load: %s)',async duringLoad=>{
+    const f=await fixture(),address=editorAddress(f.workspace.id,'conversation:chief');
+    const prior={contract:'chief-note-task.compose.v1' as const,note_id:teamUuid(631),note_version:1,content_hash:'a'.repeat(64),source_fingerprint:'b'.repeat(64)};
+    await f.journal.load(address);await f.journal.persist(address,{kind:'editor',workspaceId:f.workspace.id,editor:'conversation:chief',pending:null,data:{text:'Older directions',noteTask:prior}});
+    const selected={owner:f.host.identity,scope:f.host.scope,generation:f.session.generation.current,workspaceId:f.workspace.id,
+      selection:{share_with_team:true as const,expected_revision:f.workspace.revision,idempotency_key:teamUuid(632),note_id:teamUuid(633),note_version:2,content_hash:'c'.repeat(64),source_fingerprint:'d'.repeat(64)},content:'New selected saved note'};
+    if(duringLoad){
+      let release!:()=>void;const original=f.journal.load.bind(f.journal);
+      const load=vi.spyOn(f.journal,'load').mockImplementationOnce(async key=>{const retained=await original(key);await new Promise<void>(done=>{release=done;});return retained;});
+      const observing=f.session.conversations.observe(f.host);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+      f.session.setPhoneNoteTask(selected);release();await observing;load.mockRestore();
+      expect(f.session.getSnapshot().phoneNoteTask).toBe(selected);
+    }else f.session.setPhoneNoteTask(selected);
+    await f.session.conversations.observe(f.host);
+    expect(f.session.getSnapshot()).toMatchObject({thought:'',phoneNoteTask:selected});
+    expect(await f.journal.load(address)).toMatchObject({data:{text:'',noteTask:{note_id:selected.selection.note_id,note_version:2}}});
   });
   it('keeps layout preferences per device and retains them when rollout is disabled',async()=>{
     const f=await fixture();expect(f.session.presentation.current()).toBe('messages');expect(f.session.presentation.choose('workspace',false)).toBe(true);expect(f.values.get(PRESENTATION_KEY)).toBe('workspace');
@@ -176,6 +207,77 @@ describe('read acknowledgment for displayed replies',()=>{
     await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);
     await f.session.conversations.acknowledgeVisible(f.host,()=>true);
     expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark,manual_unread:false,expected_version:3});
+  });
+  it('retains the exact opened-chat acknowledgment after a transient failure until retry succeeds',async()=>{
+    const f=await visibleReply();f.row.manual_unread=true;
+    f.api.mark.mockResolvedValue({contract_version:1,marker_version:4,manual_unread:true,seen_watermark:null});
+    await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();
+    f.api.mark.mockRejectedValueOnce(new Error('Synthetic interrupted read acknowledgment'));
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.session.getSnapshot().conversationError).toContain('Read status could not sync');
+    // A separate automatic watermark update must not hide the failed explicit
+    // clear of the manual-unread flag.
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenCalledOnce();
+    expect(f.session.getSnapshot().conversationError).toContain('Read status could not sync');
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark,manual_unread:false,expected_version:4});
+    expect(f.session.getSnapshot().conversationError).toBe('');
+    const settled=f.api.mark.mock.calls.length;
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenCalledTimes(settled);
+  });
+  it('retries an interrupted opened-chat acknowledgment only while that history is current and visible',async()=>{
+    const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();
+    f.api.mark.mockRejectedValueOnce(new Error('Synthetic interrupted acknowledgment'));
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    await f.session.conversations.acknowledgeVisible(f.host,()=>false);
+    expect(f.api.mark).toHaveBeenCalledOnce();
+    f.session.invalidate();
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenCalledOnce();
+  });
+  it('does not let an older acknowledgment failure replace a newer opened conversation',async()=>{
+    const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();
+    let reject!:(cause:Error)=>void;
+    f.api.mark.mockImplementationOnce(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+    const older=f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    await vi.waitFor(()=>expect(reject).toBeTypeOf('function'));
+    const next={...f.row,bot:{...f.row.bot,address:'follow_up',role:'follow_up' as const,name:'Follow-up'},watermark:'next-observed-watermark',marker_version:8};
+    await f.session.conversations.open(f.workspace.id,'follow_up',f.host,next);
+    reject(new Error('Synthetic late acknowledgment failure'));await older;
+    expect(f.session.getSnapshot().conversationError).toBe('');
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'follow_up',{watermark:next.watermark,manual_unread:false,expected_version:8});
+  });
+  it('shares one failed acknowledgment across simultaneous visibility events, then retries on a later event',async()=>{
+    const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();
+    let reject!:(cause:Error)=>void;
+    f.api.mark.mockImplementationOnce(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+    const notifications=Array.from({length:4},()=>f.session.conversations.acknowledgeVisible(f.host,()=>true));
+    reject(new Error('Synthetic interrupted acknowledgment'));await Promise.all(notifications);
+    expect(f.api.mark).toHaveBeenCalledOnce();
+    expect(f.session.getSnapshot().conversationError).toContain('Read status could not sync');
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenCalledTimes(2);expect(f.session.getSnapshot().conversationError).toBe('');
+  });
+  it.each([401,403])('passes a current opened-chat acknowledgment denial (%s) to the session access handler',async status=>{
+    const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);
+    const denied=new WorkspaceApiError(status);f.api.mark.mockRejectedValueOnce(denied);
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.host.failure).toHaveBeenCalledExactlyOnceWith(denied);
+  });
+  it.each([401,403])('passes a current Mark unread denial (%s) to the session access handler',async status=>{
+    const f=await visibleReply(),denied=new WorkspaceApiError(status);f.api.mark.mockRejectedValueOnce(denied);
+    await f.session.conversations.markUnread(f.row,f.host.identity,f.host.failure);
+    expect(f.host.failure).toHaveBeenCalledExactlyOnceWith(denied);
+  });
+  it('does not apply a late Mark unread denial after the account generation changes',async()=>{
+    const f=await visibleReply();let reject!:(cause:Error)=>void;
+    f.api.mark.mockImplementationOnce(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+    const request=f.session.conversations.markUnread(f.row,f.host.identity,f.host.failure);
+    f.session.invalidate();reject(new WorkspaceApiError(403));await request;
+    expect(f.host.failure).not.toHaveBeenCalled();expect(f.session.getSnapshot().conversationError).toBe('');
   });
   it('serializes duplicate visible notifications before automatic read updates',async()=>{
     const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();

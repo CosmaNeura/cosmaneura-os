@@ -36,14 +36,15 @@ export class WorkspaceConversations {
     finally{if(current===this.session.generation.current&&epoch===this.readEpoch)this.session.setConversationLoading(false);}
   }
   async observe(host:ConversationHost){
-    const view=this.session.getSnapshot(),wid=view.workspace?.id,bot=view.selected;if(!wid||!host.current()||this.opening)return;
+    const view=this.session.getSnapshot(),wid=view.workspace?.id,bot=view.selected,noteTask=view.phoneNoteTask;if(!wid||!host.current()||this.opening)return;
     const address=editorAddress(wid,`conversation:${bot}`),generation=this.session.generation.current,edit=this.session.models.thoughtEditVersion.current,route=this.session.navigation.sequence.current;
     let known=this.prepared.get(host.journal);if(!known){known=new Map();this.prepared.set(host.journal,known);}
     if(known.get(address)!==generation){
       const retained=await host.journal.load(address),live=this.session.getSnapshot();
-      if(!host.current()||generation!==this.session.generation.current||route!==this.session.navigation.sequence.current||edit!==this.session.models.thoughtEditVersion.current||live.workspace?.id!==wid||live.selected!==bot||this.opening)return;
+      if(!host.current()||generation!==this.session.generation.current||route!==this.session.navigation.sequence.current||edit!==this.session.models.thoughtEditVersion.current||live.workspace?.id!==wid||live.selected!==bot||live.phoneNoteTask!==noteTask||this.opening)return;
       known.set(address,generation);
-      if(retained&&retained.kind==='editor'&&!live.thought&&!live.pending&&!live.recoveryOffers.length){const draft=parseConversationDraft(retained.data);this.restore(draft,host,wid,generation);}
+      const selectedTask=noteTask&&noteTask.workspaceId===wid&&noteTask.owner===host.identity&&noteTask.scope===host.scope&&noteTask.generation===generation;
+      if(retained&&retained.kind==='editor'&&!live.thought&&!selectedTask&&!live.pending&&!live.recoveryOffers.length){const draft=parseConversationDraft(retained.data);this.restore(draft,host,wid,generation);}
     }
     await this.retain(host);
   }
@@ -59,15 +60,16 @@ export class WorkspaceConversations {
     if(!workspace||!teamAddress(selected))return true;if(!host.current())return false;
     const generation=this.session.generation.current,edit=this.session.models.thoughtEditVersion.current;
     const address=editorAddress(workspace.id,`conversation:${selected}`);
+    const task=phoneNoteTask&&phoneNoteTask.workspaceId===workspace.id&&phoneNoteTask.owner===host.identity&&phoneNoteTask.scope===host.scope&&phoneNoteTask.generation===generation?phoneNoteTask:null;
     let known=this.prepared.get(host.journal);if(!known){known=new Map();this.prepared.set(host.journal,known);}
-    const current=()=>{const view=this.session.getSnapshot();return host.current()&&generation===this.session.generation.current&&view.workspace?.id===workspace.id&&view.selected===selected&&view.thought===thought&&this.session.models.thoughtEditVersion.current===edit;};
+    const current=()=>{const view=this.session.getSnapshot();return host.current()&&generation===this.session.generation.current&&view.workspace?.id===workspace.id&&view.selected===selected&&view.thought===thought&&view.phoneNoteTask===phoneNoteTask&&this.session.models.thoughtEditVersion.current===edit;};
     if(known.get(address)!==generation){
       const prior=await host.journal.load(address);if(!current())return false;
-      // Opening an existing Workspace must not erase a chat draft not yet restored.
-      if(prior&&prior.kind==='editor'&&parseConversationDraft(prior.data).text&&!thought)return true;
+      // A selected saved note is a draft even when its optional directions
+      // are empty. Preserve it until restored or replaced by a current choice.
+      if(prior&&prior.kind==='editor'&&!thought&&!task){const retained=parseConversationDraft(prior.data);if(retained.text||retained.noteTask)return true;}
       known.set(address,generation);
     }
-    const task=phoneNoteTask&&phoneNoteTask.workspaceId===workspace.id&&phoneNoteTask.owner===host.identity&&phoneNoteTask.generation===generation?phoneNoteTask:null;
     const data:ConversationDraft={text:thought,...(task?{noteTask:{contract:'chief-note-task.compose.v1',note_id:task.selection.note_id,note_version:task.selection.note_version,content_hash:task.selection.content_hash,source_fingerprint:task.selection.source_fingerprint}}:{})};
     if(!current())return false;
     await host.journal.persist(address,{kind:'editor',workspaceId:workspace.id,editor:`conversation:${selected}`,pending:null,data});
@@ -128,14 +130,18 @@ export class WorkspaceConversations {
   /** A task can open a chat without showing its replies. Acknowledge only the
    * exact summary observed before the fresh workspace read, once history opens. */
   async acknowledgeVisible(host:ConversationHost,isVisible:()=>boolean){
-    if(this.visibleAcknowledgment)await this.visibleAcknowledgment;
+    if(this.visibleAcknowledgment)return this.visibleAcknowledgment;
     const retained=this.unreadDisplay,view=this.session.getSnapshot();
     if(!retained||this.opening||!isVisible()||!host.current()||host.identity!==retained.identity||host.journal!==retained.journal||this.session.generation.current!==retained.generation||view.workspace?.id!==retained.row.workspace_id||view.selected!==retained.row.bot.address||view.practicePage!=='notebook'||view.settingsOpen||view.practiceOpen||view.reviewHandoffId||view.mobilePanel!=='Conversation')return;
     const bot=view.team?.configuration.bots.find(item=>(item.instance_id||item.role)===view.selected);
     if(bot?.role==='research'&&!view.savedResearchChat)return;
-    this.unreadDisplay=null;
-    const acknowledgment=(async()=>{try{await this.api.mark(host.identity,retained.row.workspace_id,retained.row.bot.address,{watermark:retained.row.watermark,manual_unread:false,expected_version:retained.row.marker_version});}
-      catch{if(host.current())this.session.setConversationError(READ_SYNC_ERROR);}})();
+    const current=()=>this.unreadDisplay===retained&&host.current()&&this.session.generation.current===retained.generation;
+    const acknowledgment=(async()=>{try{
+      // Retain this exact watermark/version until confirmed. A lost response
+      // can be retried without clearing a newer explicit Mark unread change.
+      await this.api.mark(host.identity,retained.row.workspace_id,retained.row.bot.address,{watermark:retained.row.watermark,manual_unread:false,expected_version:retained.row.marker_version});
+      if(current()){this.unreadDisplay=null;if(this.session.getSnapshot().conversationError===READ_SYNC_ERROR)this.session.setConversationError('');}
+    }catch(cause){if(current()){this.session.setConversationError(READ_SYNC_ERROR);if(cause instanceof WorkspaceApiError&&[401,403].includes(cause.status))host.failure(cause);}}})();
     this.visibleAcknowledgment=acknowledgment;
     try{await acknowledgment;}finally{if(this.visibleAcknowledgment===acknowledgment)this.visibleAcknowledgment=null;}
   }
@@ -145,7 +151,10 @@ export class WorkspaceConversations {
   async acknowledgeDisplayed(host:ConversationHost,isVisible:()=>boolean):Promise<void>{
     const view=this.session.getSnapshot(),workspace=view.workspace,generation=this.session.generation.current;
     if(!workspace||!view.team||this.opening||!host.current()||!isVisible())return;
-    const bot=view.selected,route=this.session.navigation.sequence.current;
+    const bot=view.selected,route=this.session.navigation.sequence.current,opened=this.unreadDisplay;
+    // Finish the explicit opened-chat acknowledgment first. Advancing the
+    // automatic watermark would change the marker version needed by its retry.
+    if(opened?.journal===host.journal&&opened.generation===generation&&opened.row.workspace_id===workspace.id&&opened.row.bot.address===bot)return;
     const projection=()=>JSON.stringify(projectConversation(this.session.getSnapshot().workspace,this.session.getSnapshot().team,bot).entries);
     const content=projection(),key=`${workspace.id}:${bot}:${content}`;
     if(this.displayed?.journal===host.journal&&this.displayed.generation===generation&&this.displayed.key===key)return;
@@ -181,10 +190,10 @@ export class WorkspaceConversations {
     })();
     return read.promise;
   }
-  async markUnread(row:ConversationSummary,identity:AuthenticatedWorkspaceIdentity){
+  async markUnread(row:ConversationSummary,identity:AuthenticatedWorkspaceIdentity,failure?:(cause:unknown)=>void){
     const current=this.session.generation.current;
     try{await this.api.mark(identity,row.workspace_id,row.bot.address,{manual_unread:true,expected_version:row.marker_version});
-      if(current===this.session.generation.current)await this.refresh(identity);
-    }catch{if(current===this.session.generation.current)this.session.setConversationError('Unread status could not be saved. Try again.');}
+      if(current===this.session.generation.current)await this.refresh(identity,false,failure);
+    }catch(cause){if(current===this.session.generation.current){this.session.setConversationError('Unread status could not be saved. Try again.');if(cause instanceof WorkspaceApiError&&[401,403].includes(cause.status))failure?.(cause);}}
   }
 }

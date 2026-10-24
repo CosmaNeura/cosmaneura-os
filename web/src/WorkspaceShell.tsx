@@ -836,6 +836,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   // typing must not move the reader while the same recovery is retained.
   if(!inlineModelRecovery)recoveryAppearance.current=null;
   else if(!busy)recoveryAppearance.current=JSON.stringify([localModelPending.body.idempotency_key,modelObservation?.receipt.outcome??null,!!replacementDraft]);
+  // Blocking recovery can need more vertical space than a keyboard-sized
+  // chat viewport. Keep its actions in document flow until it is resolved.
+  const messagesRecoveryFlow=confirmCaptureExit||recoveryOffers.length>0||recoveryState==='failed'||recoveryBlocked||conflict||!!pending&&!busy;
+  const messagesChat=!!workspace&&messagesMode&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&mobilePanel==='Conversation'&&!messagesTask&&!phoneChiefToolsVisible&&!reviewHandoffId&&(!privateRecordingEntry||recordingMinimized)&&!messagesRecoveryFlow;
   const sharedChatOwner=session.presentation.enabled?authenticated??null:nativeChatOwner;
   const mobileChatFrame=useMobileChatFrame({active:session.presentation.enabled?!!workspace:nativeChat&&!phoneChiefToolsVisible,owner:sharedChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${session.review.returnTarget.current?.address??session.review.conversationReturn.current?.address??selected}`,
     // The jump counts incoming replies, not review cards or their changing
@@ -845,6 +849,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     messages:JSON.stringify([turns.map(entry=>[entry.id,entry.reply?.content??null]),
       pending?.type==='ask'&&pending.body.role===selected&&!localQuestionRepresented?pending.body.idempotency_key:null,recoveryAppearance.current,
       [chiefNoteCompose,phoneNoteTask?.selection.note_id,phoneNoteTask?.selection.note_version,clinicalPreparing,busy,message],
+      messagesChat?[confirmCaptureExit,recoveryOffers.map(offer=>offer.address),recoveryState,error,conversationError,connectionError?.message,conflict,!!clinicalShareCheck,!!replacementDraft,pending?.type??null]:null,
       chiefNoteCompose?workspace?.handoffs?.map(handoff=>[handoff.id,handoff.status,handoff.result_entry_id,handoff.review_status]):null]),
     isCurrent:()=>previousIdentity.current===sharedChatOwner&&generation.current===chatGeneration&&!!sharedChatOwner&&(sharedChatOwner.mode!=='clerk_jwt'||!sharedChatOwner.nativeSession||sharedChatOwner.nativeSession.isCurrent())});
   const historyVisible=useRef<()=>boolean>(()=>false);
@@ -984,7 +989,51 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const errorBanner=error&&<div className="team-banner error workspace-error-banner" role="alert"><p>{error}</p><div className="workspace-error-actions">
     {readRetry&&<button disabled={busy||homeBusy||!!pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void readRetry.run()}>Try again</button>}
     <button onClick={()=>setError('')}>Dismiss</button></div></div>;
-  return <EditorRecoveryContext.Provider value={editorAccess}><main ref={workspaceFrame} className="team-workspace" data-messages-chat={messagesMode&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&mobilePanel==='Conversation'&&!messagesTask&&!phoneChiefToolsVisible&&!reviewHandoffId&&(!privateRecordingEntry||recordingMinimized)} data-recovery-ready={!recoveryBlocked} data-session-pending={pending?.type??''} data-session-conflict={conflict} data-editor-ready={editorReady} data-presentation={messagesMode?'messages':'workspace'} data-native-presentation={!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()} data-messages-task={messagesTask??''} style={{'--workspace-nav-height':`${navigationHeight}px`} as CSSProperties} data-page={practicePage} data-native-home={nativeHome} data-native-chat={nativeChat} data-native-workspace={nativeWorkspace} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-rendered={settingsOpen&&hasWorkspaceIdentity} data-settings-navigation-locked={connectionNavigationLocked}>
+  // Recovery belongs to the scrollable conversation on phones. Keeping
+  // these controls above the fixed chat frame can make them unreachable when
+  // the keyboard or enlarged text leaves little vertical space.
+  const recoveryNotices=<>
+      {confirmCaptureExit && <div className="team-recovery" role="status">
+        <p>There is unsaved or unconfirmed work. Closing can lose unsaved text. Work already submitted may still finish; reopen to check it.</p>
+        <button onClick={() => setConfirmCaptureExit(false)}>Keep editing</button>
+        <button disabled={busy} onClick={() => void exitWorkspace(true)}>Close anyway</button>
+      </div>}
+      {recoveryOffers.map(offer => <div className="team-recovery" role="status" key={offer.address}>
+        <p>{isFollowUpRecovery(offer.draft) ? "A follow-up request was interrupted. Its exact action is retained on this device." : offer.draft.kind === "workspace" && offer.draft.pending?.type === "note" ? "A private note save was interrupted. Its exact request is retained on this device." : <>A {offer.draft.kind === "team" ? "team settings" : "notebook"} draft is saved on this device.</>}
+          {offer.draft.pending ? " Its last save is unconfirmed. Restore it and retry the same request before making changes." : " Restore it to compare with the latest saved version, or discard this local draft."}
+          {" Restoring replaces the current editor text."}</p>
+        <button disabled={busy || !!pending} onClick={() => void restoreDraft(offer)}>{isFollowUpRecovery(offer.draft) ? "Restore follow-up request" : offer.draft.kind === "workspace" && offer.draft.pending?.type === "note" ? "Restore private note save" : `Restore ${offer.draft.kind === "team" ? "team" : "notebook"} draft`}</button>
+        {!offer.draft.pending && <button disabled={busy || !!pending} onClick={() => void discardRecovered(offer)}>Discard local draft</button>}
+      </div>)}
+      {recoveryState === "failed" && <div className="team-recovery" role="alert"><p>This device's draft storage could not be checked. Existing drafts are retained. Recheck recovery before editing or saving.</p>
+        <button disabled={busy} onClick={() => void recheckRecovery()}>Recheck draft recovery</button></div>}
+      <div className="workspace-draft-save-status" hidden={messagesMode&&recoveryState!=='saving'}>
+        {recoveryState === "saving" && <p className="team-fine" role="status">Saving notebook and team drafts on this device…</p>}
+        {recoveryState === "saved" && <p hidden={messagesMode||!!privateRecordingEntry||nativeChat||nativePrivateNote&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen||phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen} className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
+      </div>
+  </>;
+  const workspaceNotices=<>
+      {messagesMode&&conversationError&&practicePage==='notebook'&&!settingsOpen&&<p className="team-banner" role="alert">{conversationError}</p>}
+      {connectionError&&connectionError.identity===(authenticated??identity)&&<div className="team-banner error" role="alert">{connectionError.message}</div>}
+      {errorBanner}
+      {message && !(messagesMode&&message==='Conversation saved.') && <div className={message==='Conversation saved.'?'team-fine':'team-banner'} role="status">{message==='Conversation saved.'?'Delivered':message}</div>}
+      {conflict && <div className="team-recovery"><p>Your text has not been overwritten. Load the latest history and team, compare changes, then save a new revision.</p>
+        <button disabled={busy} onClick={() => void refresh()}>Load latest — keep my text</button></div>}
+      {pending?.type==='clinicalNoteShare'&&!busy&&<section className="team-recovery" aria-label="Unconfirmed saved note share">
+        <p>The exact note share is retained. Checking its saved result does not send another share or ask a bot.</p>
+        <button disabled={recoveryBlocked} onClick={()=>void save(pending,'resolve')}>Check saved note share</button>
+        {clinicalShareCheck?.operation===pending&&clinicalShareCheck.owner===identity&&clinicalShareCheck.generation===generation.current&&
+          clinicalShareCheck.receipt.outcome==='not_found'&&(clinicalShareCheck.receipt.workspace.revision===pending.body.expected_revision?
+            <button disabled={recoveryBlocked} onClick={()=>void save(pending)}>Retry same note share</button>:
+            clinicalShareCheck.receipt.workspace.revision>pending.body.expected_revision&&<button disabled={recoveryBlocked} onClick={()=>void closeRejectedClinicalShare()}>Close rejected note share</button>)}
+      </section>}
+      {pending && pending.type!=='clinicalNoteShare' && !localModelPending && !busy && <div className="team-recovery"><p>The previous save is unconfirmed. Retry before editing; the same request will be reused.</p>
+        <button disabled={recoveryBlocked} onClick={() => void save(pending)}>Retry same save</button></div>}
+      {!inlineModelRecovery&&modelRecovery}
+      {!localModelPending&&previousModelRequest&&<details className="team-recovery"><summary>Previous request retained as superseded history</summary>
+        <p>The previous {previousModelRequest.operation.type==='ask'?'question':'draft retry'} was last checked as {previousModelRequest.outcome.replaceAll('_',' ')} at {previousModelRequest.observed_at}. Its original body and binding remain on this device. A later request does not resolve that earlier provider uncertainty.</p></details>}
+  </>;
+  return <EditorRecoveryContext.Provider value={editorAccess}><main ref={workspaceFrame} className="team-workspace" data-messages-chat={messagesChat} data-recovery-ready={!recoveryBlocked} data-session-pending={pending?.type??''} data-session-conflict={conflict} data-editor-ready={editorReady} data-presentation={messagesMode?'messages':'workspace'} data-native-presentation={!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()} data-messages-task={messagesTask??''} style={{'--workspace-nav-height':`${navigationHeight}px`} as CSSProperties} data-page={practicePage} data-native-home={nativeHome} data-native-chat={nativeChat} data-native-workspace={nativeWorkspace} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-rendered={settingsOpen&&hasWorkspaceIdentity} data-settings-navigation-locked={connectionNavigationLocked}>
     <aside ref={sidebar} className="team-sidebar" hidden={nativeWorkspace&&!messagesMode}>
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span><small className="team-phone-preview">Synthetic preview</small>{accountControls&&phoneLayout()&&!nativeHome&&!nativeWorkspace&&!nativeChat&&<div className="team-phone-account-controls">{accountControls}</div>}</div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
@@ -1046,24 +1095,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         <button onClick={finishTeamExit}>Keep draft and continue</button>
         {team&&teamDraft&&setupChange(team.configuration,teamDraft)&&!(setupApproval?.revision===team.revision&&setupApproval.configurationKey===JSON.stringify(teamDraft))&&<p>Review the current capability changes on the Team review screen to enable Save.</p>}
       </WorkspaceDialog>}
-      {confirmCaptureExit && <div className="team-recovery" role="status">
-        <p>There is unsaved or unconfirmed work. Closing can lose unsaved text. Work already submitted may still finish; reopen to check it.</p>
-        <button onClick={() => setConfirmCaptureExit(false)}>Keep editing</button>
-        <button disabled={busy} onClick={() => void exitWorkspace(true)}>Close anyway</button>
-      </div>}
-      {recoveryOffers.map(offer => <div className="team-recovery" role="status" key={offer.address}>
-        <p>{isFollowUpRecovery(offer.draft) ? "A follow-up request was interrupted. Its exact action is retained on this device." : offer.draft.kind === "workspace" && offer.draft.pending?.type === "note" ? "A private note save was interrupted. Its exact request is retained on this device." : <>A {offer.draft.kind === "team" ? "team settings" : "notebook"} draft is saved on this device.</>}
-          {offer.draft.pending ? " Its last save is unconfirmed. Restore it and retry the same request before making changes." : " Restore it to compare with the latest saved version, or discard this local draft."}
-          {" Restoring replaces the current editor text."}</p>
-        <button disabled={busy || !!pending} onClick={() => void restoreDraft(offer)}>{isFollowUpRecovery(offer.draft) ? "Restore follow-up request" : offer.draft.kind === "workspace" && offer.draft.pending?.type === "note" ? "Restore private note save" : `Restore ${offer.draft.kind === "team" ? "team" : "notebook"} draft`}</button>
-        {!offer.draft.pending && <button disabled={busy || !!pending} onClick={() => void discardRecovered(offer)}>Discard local draft</button>}
-      </div>)}
-      {recoveryState === "failed" && <div className="team-recovery" role="alert"><p>This device's draft storage could not be checked. Existing drafts are retained. Recheck recovery before editing or saving.</p>
-        <button disabled={busy} onClick={() => void recheckRecovery()}>Recheck draft recovery</button></div>}
-      <div className="workspace-draft-save-status" hidden={messagesMode&&recoveryState!=='saving'}>
-        {recoveryState === "saving" && <p className="team-fine" role="status">Saving notebook and team drafts on this device…</p>}
-        {recoveryState === "saved" && <p hidden={messagesMode||!!privateRecordingEntry||nativeChat||nativePrivateNote&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen||phoneLayout()&&practicePage==='home'&&!settingsOpen&&!practiceOpen} className="team-fine">Working copies saved on this device. Save a note version separately for review.</p>}
-      </div>
+      {!messagesChat&&recoveryNotices}
       {practiceOpen && errorBanner}
       {practiceOpened && (authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><fieldset disabled={recoveryBlocked} hidden={!practiceOpen} style={{border:0,padding:0,margin:0,minWidth:0}}><PracticeHub identity={(authenticated || identity)!} onDenied={failure} onBusyChange={reportInboxBusy} onDraftInbox={authenticated?selection=>{setInboxNavigation({selection,identity:authenticated,generation:generation.current});}:undefined}><PracticeWork identity={(authenticated || identity)!}
         onChanged={() => { if (workspace) setConflict(true); }} onAccessLost={failure} />
@@ -1073,7 +1105,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization}
         locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked}
         onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
-        onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>void session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated)}
+        onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>void session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated,failure)}
         onOrganize={(row,change)=>session.inboxPreferences.set(row,change)} onRestoreAll={()=>session.inboxPreferences.restoreAll()} onInspect={row=>void session.inboxPreferences.inspect(row)} onCloseMenu={()=>session.inboxPreferences.closeMenu()}
         onReloadOrganization={()=>void session.inboxPreferences.bind(inboxPreferencesHost(),true)} onRename={target=>setInboxRename({target,identity:authenticated,scope:accountAccess?.recoveryScope})}/>}
       {inboxRename&&inboxRename.identity===authenticated&&accountAccess?.recoveryScope===inboxRename.scope&&<WorkspaceDialog title="Rename notebook" closeLabel="Close rename notebook" onClose={closeInboxRename}>
@@ -1081,27 +1113,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onSaved={receipt=>{setWorkspace(current=>current?.id===receipt.workspace_id&&current.notebook?{...current,notebook:{...current.notebook,title:receipt.title,title_revision:receipt.title_revision}}:current);closeInboxRename();void session.conversations.refresh(inboxRename.identity,false,failure);}}/>
       </WorkspaceDialog>}
       {contextChoice&&!settingsOpen&&(!privateRecordingEntry||recordingMinimized)&&<header className="messages-context-choice"><button disabled={homeBusy||homePending} onClick={()=>{setContextBot(null);goHome();}}>‹ Messages</button><h1>{contextChoice.name}</h1><p>{contextChoice.role==='research'?'Choose the visit for this research.':'Choose the visit or private note for this conversation.'}</p></header>}
-      {messagesMode&&conversationError&&practicePage==='notebook'&&!settingsOpen&&<p className="team-banner" role="alert">{conversationError}</p>}
 
       {settingsOpen&&!hasWorkspaceIdentity&&<section className="settings-hub" aria-labelledby="offline-settings-title"><h1 id="offline-settings-title">Settings</h1><p>Settings are available after your workspace connects.</p><button className="settings-done" onClick={closeSettings}>Done</button></section>}
-      {connectionError&&connectionError.identity===(authenticated??identity)&&<div className="team-banner error" role="alert">{connectionError.message}</div>}
-      {errorBanner}
-      {message && !(messagesMode&&message==='Conversation saved.') && <div className={message==='Conversation saved.'?'team-fine':'team-banner'} role="status">{message==='Conversation saved.'?'Delivered':message}</div>}
-      {conflict && <div className="team-recovery"><p>Your text has not been overwritten. Load the latest history and team, compare changes, then save a new revision.</p>
-        <button disabled={busy} onClick={() => void refresh()}>Load latest — keep my text</button></div>}
-      {pending?.type==='clinicalNoteShare'&&!busy&&<section className="team-recovery" aria-label="Unconfirmed saved note share">
-        <p>The exact note share is retained. Checking its saved result does not send another share or ask a bot.</p>
-        <button disabled={recoveryBlocked} onClick={()=>void save(pending,'resolve')}>Check saved note share</button>
-        {clinicalShareCheck?.operation===pending&&clinicalShareCheck.owner===identity&&clinicalShareCheck.generation===generation.current&&
-          clinicalShareCheck.receipt.outcome==='not_found'&&(clinicalShareCheck.receipt.workspace.revision===pending.body.expected_revision?
-            <button disabled={recoveryBlocked} onClick={()=>void save(pending)}>Retry same note share</button>:
-            clinicalShareCheck.receipt.workspace.revision>pending.body.expected_revision&&<button disabled={recoveryBlocked} onClick={()=>void closeRejectedClinicalShare()}>Close rejected note share</button>)}
-      </section>}
-      {pending && pending.type!=='clinicalNoteShare' && !localModelPending && !busy && <div className="team-recovery"><p>The previous save is unconfirmed. Retry before editing; the same request will be reused.</p>
-        <button disabled={recoveryBlocked} onClick={() => void save(pending)}>Retry same save</button></div>}
-      {!inlineModelRecovery&&modelRecovery}
-      {!localModelPending&&previousModelRequest&&<details className="team-recovery"><summary>Previous request retained as superseded history</summary>
-        <p>The previous {previousModelRequest.operation.type==='ask'?'question':'draft retry'} was last checked as {previousModelRequest.outcome.replaceAll('_',' ')} at {previousModelRequest.observed_at}. Its original body and binding remain on this device. A later request does not resolve that earlier provider uncertainty.</p></details>}
+      {!messagesChat&&workspaceNotices}
       {activityEnabled && settingsOpen && activityContextBusy && <p className="team-fine" role="status">Checking optional AI activity access…</p>}
       {activityEnabled && settingsOpen && activityContextError && <div className="team-banner error" role="alert"><p>{activityContextError}</p><button disabled={locked || activityContextBusy} onClick={()=>setActivityAttempt(value=>value+1)}>Recheck AI activity access</button></div>}
       {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} nativePresentation={nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()?(messagesMode?'messages':'workspace'):undefined} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
@@ -1395,6 +1409,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           {phoneChiefConversation&&<button className="team-subtle chief-tools-settings" disabled={viewNavigationLocked} onClick={()=>void openSettings()}>Skills & settings</button>}
           </div>
           <div className="clinical-plan-host team-conversation-tools" hidden={messagesMode?messagesTask!=='Tools'&&!chiefNoteCompose:phoneChiefConversation&&!phoneChiefToolsVisible&&!chiefNoteCompose}>{clinicalTeamDrafts}</div>
+          {/* Keep transient notices before the transcript so its visible end
+              still proves the latest reply was displayed for read tracking. */}
+          {messagesChat&&<div className="messages-recovery-notices">{recoveryNotices}{workspaceNotices}</div>}
           <div hidden={phoneChiefToolsVisible || bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
             {!turns.length && !visitPrepReader && !chiefNoteCompose && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />

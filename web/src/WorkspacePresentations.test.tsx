@@ -225,6 +225,11 @@ describe('presentation parity',()=>{
     if(mode==='messages'){await click('Details');await click('Notebook and recording');}else await click('Private note');
     await input(host.querySelector('#team-notebook')!,'Save these invented notes exactly once.');await click('Save notebook revision');
     await vi.waitFor(()=>expect(button('Retry same save')?.disabled).toBe(false));
+    if(mode==='messages'){
+      await click('‹ Back to chat');
+      expect(button('Retry same save')?.disabled).toBe(false);
+      expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Save these invented notes exactly once.');
+    }
     const first=structuredClone(save.mock.calls[0][2]);await click('Retry same save');await vi.waitFor(()=>expect(save).toHaveBeenCalledTimes(2));
     expect(save.mock.calls[1][2]).toEqual(first);await vi.waitFor(()=>expect(button('Retry same save')).toBeUndefined());
     const stored=await workspaceApi.read(identity,save.mock.calls[0][1]);expect(stored.entries.filter(entry=>entry.content===first.content)).toHaveLength(1);
