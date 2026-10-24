@@ -82,6 +82,7 @@ export class WorkspaceConversations {
     this.opening=true;this.session.setConversationBusy(true);this.session.setConversationError('');
     const journal=host.journal,originRoute=this.session.navigation.sequence.current;let opened=false,destinationRoute:number|null=null;
     const current=()=>host.current()&&this.session.recovery.journal.current?.value===journal;
+    let destinationCurrent=()=>current()&&originGeneration===this.session.generation.current&&originRoute===this.session.navigation.sequence.current;
     const restoreOrigin=()=>{
       const live=this.session.getSnapshot();
       // A failed same-notebook switch has not restored the destination draft.
@@ -100,7 +101,8 @@ export class WorkspaceConversations {
       if(!current())return false;
       const generation=this.session.generation.current,view=this.session.getSnapshot(),route=this.session.navigation.sequence.current,edit=this.session.models.thoughtEditVersion.current;
       const destination=()=>{const live=this.session.getSnapshot();return current()&&generation===this.session.generation.current&&this.session.navigation.sequence.current===route&&live.workspace?.id===workspaceId&&live.selected===bot&&live.practicePage==='notebook'&&!live.settingsOpen&&!live.practiceOpen;};
-      if(view.workspace?.id!==workspaceId||view.selected!==bot||view.settingsOpen||view.practiceOpen)return false;
+      destinationCurrent=destination;
+      if(!destination())return false;
       const fresh=await this.readWorkspace(host.identity,workspaceId);
       if(!destination())return false;if(fresh.id!==workspaceId||fresh.revision<view.workspace!.revision)throw new WorkspaceApiError(409);
       this.session.setWorkspace(fresh);
@@ -123,9 +125,9 @@ export class WorkspaceConversations {
       if(observed&&this.unreadDisplay?.row===observed&&marker.marker_version===observed.marker_version+1)
         this.unreadDisplay.row={...observed,marker_version:marker.marker_version};
       if(current()&&generation===this.session.generation.current)void this.refresh(host.identity,false,host.failure);
-    }catch(cause){if(current()){this.session.setConversationError(opened?'The conversation is open. Its read status could not sync; try refreshing Messages.':'The conversation could not be opened. Your draft is retained.');if(cause instanceof DraftStoreError)this.session.setRecoveryState('failed');else if(cause instanceof WorkspaceApiError&&[401,403].includes(cause.status))host.failure(cause);}}
+    }catch(cause){if(destinationCurrent()){this.session.setConversationError(opened?'The conversation is open. Its read status could not sync; try refreshing Messages.':'The conversation could not be opened. Your draft is retained.');if(cause instanceof DraftStoreError)this.session.setRecoveryState('failed');else if(cause instanceof WorkspaceApiError&&[401,403].includes(cause.status))host.failure(cause);}}
     finally{this.opening=false;if(current()){if(!opened){restoreOrigin();host.restoreRejectedNavigation?.();}this.session.setConversationBusy(false);}}
-    return opened;
+    return opened&&destinationCurrent();
   }
   /** A task can open a chat without showing its replies. Acknowledge only the
    * exact summary observed before the fresh workspace read, once history opens. */

@@ -465,7 +465,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   }
   function openConversation(workspaceId:string,address:string,row?:ConversationSummary,allowHomeResult=false){
     const host=conversationHost(allowHomeResult);if(!host)return Promise.resolve();setMessagesTask(null);setConversationDetails(false);setPhoneChatToolsOpen(false);
-    return session.conversations.open(workspaceId,address,host,row).then(()=>{const view=session.getSnapshot();if(view.workspace?.id===workspaceId&&view.selected===address&&view.team?.configuration.bots.some(bot=>botAddress(bot)===address&&bot.role==='visit_prep')&&messagesMode)showConversationTask('Tools');});
+    return session.conversations.open(workspaceId,address,host,row).then(opened=>{const view=session.getSnapshot();if(opened&&view.practicePage==='notebook'&&!view.settingsOpen&&!view.practiceOpen&&view.workspace?.id===workspaceId&&view.selected===address&&view.team?.configuration.bots.some(bot=>botAddress(bot)===address&&bot.role==='visit_prep')&&messagesMode)showConversationTask('Tools');});
   }
   async function chooseConversationContext(address:string){
     const host=conversationHost();if(!host||host.blocked()||conversationBusy)return;

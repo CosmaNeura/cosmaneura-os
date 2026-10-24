@@ -420,6 +420,9 @@ The resumed review confirmed four recovery defects and their corrections:
   account clear. The navigation owner now rechecks the route and account lifetime
   after draft flushing and recovery, and ignores stale read failures. A newer
   route or account view wins without starting an obsolete notebook read.
+  Conversation opening also checks the destination before publishing an error
+  or successful completion. A late denial cannot invoke access loss for a newer
+  view, and a superseded opening cannot trigger Visit Prep tools after Home.
 
 Regression tests reproduced the lost acknowledgment, duplicate retry burst,
 note-selection loss/race and swallowed access denials before correction. The
@@ -427,10 +430,13 @@ parity test now returns from Notebook to chat before retrying a lost save. An
 existing connector recovery test waits for its field to finish restoring before
 editing; its controller identity and exact-retry assertions remain intact.
 
-The final full web run passes 4,484 tests with 103 existing skips (324 passing
+The final full web run passes 4,489 tests with 103 existing skips (324 passing
 files, 17 skipped). Both TypeScript configurations, the production build and the
 frozen synthetic rehearsal build pass. The native scene/recovery Swift package
 passes 15 tests. Existing React act and bundle-size warnings are retained.
+The final 102 focused conversation, navigation, frame and presentation tests
+also pass. Three additional regressions reproduced stale opening errors and
+success before correction; two positive cases retain current 401/403 handling.
 
 The frozen browser replay on 2993eda uses 390 × 420, 200% text, long names and the native
 layout fixture. Retry is fully visible and enabled; the exact invented note is

@@ -61,6 +61,32 @@ describe('shared conversation state',()=>{
     f.session.setSelected('scribe');f.session.setPracticePage('home');f.session.models.updateThought('Newer text');resolve();await task;
     expect(f.session.getSnapshot().thought).toBe('Newer text');expect(f.api.mark).not.toHaveBeenCalled();
   });
+  it.each(['navigation','generation'] as const)('ignores an old conversation-opening denial after newer %s',async change=>{
+    const f=await fixture();let reject!:(cause:Error)=>void;
+    f.readWorkspace.mockImplementationOnce(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+    const opening=f.session.conversations.open(f.workspace.id,'follow_up',f.host);
+    await vi.waitFor(()=>expect(reject).toBeTypeOf('function'));
+    if(change==='navigation'){f.session.navigation.sequence.current++;f.session.setPracticePage('home');}
+    else f.session.invalidate();
+    f.session.setConversationError('Newer view status');f.session.models.updateThought('Newer retained directions');
+    reject(new WorkspaceApiError(403));expect(await opening).toBe(false);
+    expect(f.host.failure).not.toHaveBeenCalled();
+    expect(f.session.getSnapshot()).toMatchObject({conversationError:'Newer view status',thought:'Newer retained directions',conversationBusy:false});
+  });
+  it('does not report a completed opening after Home wins during its marker request',async()=>{
+    const f=await fixture();let finish!:()=>void;
+    f.api.mark.mockImplementationOnce(()=>new Promise(resolve=>{finish=()=>resolve({contract_version:1,marker_version:1,manual_unread:false,seen_watermark:null});}));
+    const opening=f.session.conversations.open(f.workspace.id,'visit_prep',f.host);
+    await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
+    f.session.navigation.sequence.current++;f.session.setPracticePage('home');f.session.models.updateThought('Home keeps this draft');
+    finish();expect(await opening).toBe(false);
+    expect(f.session.getSnapshot()).toMatchObject({practicePage:'home',thought:'Home keeps this draft',conversationBusy:false});
+  });
+  it.each([401,403])('retains the current conversation-opening access handler for %s',async status=>{
+    const f=await fixture(),denied=new WorkspaceApiError(status);f.readWorkspace.mockRejectedValueOnce(denied);
+    expect(await f.session.conversations.open(f.workspace.id,'follow_up',f.host)).toBe(false);
+    expect(f.host.failure).toHaveBeenCalledExactlyOnceWith(denied);
+  });
   it('does not overwrite a destination edit made while its journal read settles',async()=>{
     const f=await fixture();let resolve!:()=>void;f.host.authorize=()=>new Promise<void>(done=>{resolve=done;});
     const task=f.session.conversations.open(f.workspace.id,'follow_up',f.host);await vi.waitFor(()=>expect(resolve).toBeTypeOf('function'));f.session.models.updateThought('Typed now');resolve();await task;
