@@ -1,4 +1,7 @@
 import {MessagesInbox,NewMessagePicker,MessagesThreadHeader,ConversationDetails,LayoutSetting} from './MessagesPresentation';
+import {nativePresentationFeedback,setNativePresentation} from './native-presentation';
+import {NotebookTitleEditor} from './NotebookTitleEditor';
+import type {InboxRenameTarget,InboxPreferencesHost} from './session/inbox-preferences';
 import type {ConversationSummary} from './conversations-api';
 import {projectConversation} from './session/entries';
 import {ConversationEntries} from './ConversationEntries';
@@ -18,10 +21,11 @@ import {deferredWorkspacePanel} from './DeferredWorkspacePanel';
 import type {SessionPrepAnalysis} from "./session-prep-analysis-contract";
 import {PracticeAccessPanel} from './PracticeAccessPanel';
 import {WorkspaceConnectionRecoveryContext,type PracticeAccessContext} from './PracticeAccessGate';
-import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { TeamConfigurationFlow } from "./TeamConfigurationFlow";
 import {subscribeNativeWorkspaceForeground} from './native-workspace-foreground';
 import {useMobileChatFrame} from './MobileChatFrame';
+import {useMessageComposerSize} from './useMessageComposerSize';
 import type {AiActivitySelection} from "./model-activity-contract";
 import { SettingsHub } from "./SettingsHub";
 import { WelcomeActions } from './WelcomeActions';
@@ -118,6 +122,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
   const [session]=useState(()=>new WorkspaceSession({presentation:{enabled:import.meta.env.VITE_MESSAGES_ENABLED==='true',phone:phoneLayout(),storage:deviceStorage()},initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
+  const inboxOrganization=useSyncExternalStore(session.inboxPreferences.subscribe,session.inboxPreferences.getSnapshot,session.inboxPreferences.getSnapshot);
+  const [inboxRename,setInboxRename]=useState<{target:InboxRenameTarget;identity:AuthenticatedWorkspaceIdentity;scope:string|undefined}|null>(null);
   const {presentationError,conversationInbox,conversationLoading,conversationError,conversationBusy,recordingTransition,researchPending,activityProof,activityBusy,activityContextBusy,activityContextError,activityAttempt,selectedSource,faxSourceOffer,providerFaxSourceOffer,faxSourceBusy,providerFaxSourceBusy,phoneNoteTask,reviewHandoffId,handoffReviewPending,selectedResult,savedResearchChat,settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
     workspace,encounters,team,teamDraft,note,thought,evidence,source,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
   const {setActivityProof,setActivityBusy,setActivityContextBusy,setActivityContextError,setActivityAttempt,setSelectedSource,setFaxSourceBusy,setProviderFaxSourceBusy,setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setConnectionError,setConflict,setMessage,setError,generation,
@@ -152,19 +158,25 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const viewNavigationLocked = researchPending || connectionEditorsLocked || activityBusy || accessBusy || scribeSourceBusy || handoffReviewPending || schedulingPatientBusy || agentResearchBusy || faxSourceBusy || providerFaxSourceBusy || clinicalPreparing;
   const connectionNavigationLocked = !!privateRecordingEntry || privateRecordingBusy || viewNavigationLocked;
   const workspaceFrame=useRef<HTMLElement>(null);
+  useEffect(()=>{setNativePresentation(messagesMode?'messages':'workspace');return()=>setNativePresentation('workspace');},[messagesMode]);
   const sidebar=useRef<HTMLElement>(null),navigation=useRef<HTMLElement>(null);
   const [navigationHeight,setNavigationHeight]=useState(80);
-  useLayoutEffect(()=>{
-    const root=workspaceFrame.current;if(!root||!messagesMode||!phoneLayout())return;
-    const measure=()=>{const height=Math.max(220,(window.visualViewport?.height??window.innerHeight)-Math.max(0,root.getBoundingClientRect().top));root.style.setProperty('--messages-height',`${height}px`);root.dataset.messagesCompact=String(height<600);};
-    measure();window.addEventListener('resize',measure);window.visualViewport?.addEventListener('resize',measure);
-    return()=>{window.removeEventListener('resize',measure);window.visualViewport?.removeEventListener('resize',measure);};
-  },[messagesMode,settingsOpen,practicePage]);
   useLayoutEffect(()=>{
     if(!phoneLayout())return;
     window.scrollTo?.({top:0,left:0,behavior:'instant'});
     if(sidebar.current)sidebar.current.scrollTop=0;
   },[practicePage,settingsOpen,practiceOpen,workspace?.id]);
+  useLayoutEffect(()=>{
+    const root=workspaceFrame.current;if(!root||!messagesMode)return;
+    // Measure after page focus/scroll restoration. A host notice can also resize
+    // above the app without changing the visual viewport itself.
+    const measure=()=>{if(!phoneLayout())return;const height=Math.max(220,(window.visualViewport?.height??window.innerHeight)-Math.max(0,root.getBoundingClientRect().top)),value=`${height}px`,compact=String(height<600);
+      if(root.style.getPropertyValue('--messages-height')!==value)root.style.setProperty('--messages-height',value);
+      if(root.dataset.messagesCompact!==compact)root.dataset.messagesCompact=compact;};
+    measure();window.addEventListener('resize',measure);window.addEventListener('scroll',measure);window.visualViewport?.addEventListener('resize',measure);
+    const observer=typeof ResizeObserver==='function'?new ResizeObserver(measure):null;if(root.parentElement)observer?.observe(root.parentElement);
+    return()=>{observer?.disconnect();window.removeEventListener('resize',measure);window.removeEventListener('scroll',measure);window.visualViewport?.removeEventListener('resize',measure);};
+  },[messagesMode,settingsOpen,practicePage,workspace?.id]);
   useLayoutEffect(()=>{
     const nav=navigation.current;if(!nav)return;
     const measure=()=>setNavigationHeight(nav.getBoundingClientRect().height);
@@ -214,6 +226,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const [prepSelection,setPrepSelection]=useState<{scope:symbol;selection:SessionPrepAnalysis}|null>(null);
   const [prepEpoch,setPrepEpoch]=useState(0);
   const questionRef=useRef<HTMLTextAreaElement|null>(null);
+  useMessageComposerSize(questionRef,messagesMode,thought,`${workspace?.id??''}:${selected}`);
   const notebookDraft=(w:Workspace,n:string,t:string,e:string,s:string,p:PendingSave|null,previous=previousModelRequest)=>{
     const task=phoneNoteTask&&phoneNoteTask.owner===authenticated&&phoneNoteTask.owner===previousIdentity.current&&phoneNoteTask.generation===generation.current&&
       phoneNoteTask.workspaceId===w.id&&phoneNoteTask.scope===journal.current?.scope?phoneNoteTask:null;
@@ -467,11 +480,6 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   }
   function returnToMessagesChat(){if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;setMessagesTask(null);setMobilePanel('Conversation');setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);}
 
-  useEffect(()=>{
-    if(!session.presentation.enabled||messagesTask||phoneChatToolsOpen)return;
-    const host=conversationHost();if(host)void session.conversations.acknowledgeVisible(host);
-  },[conversationBusy,workspace?.id,selected,mobilePanel,savedResearchChat,settingsOpen,practiceOpen,reviewHandoffId,messagesTask,phoneChatToolsOpen]);
-
   function clearPageError(){session.navigation.clearPageError({hasUnsavedWork});}
   function goNotebook(){session.navigation.goNotebook(navigationContext());}
   function openPrivateNotebook(result:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam},view:'default'|'notebook'='default'){
@@ -518,7 +526,14 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function checkEntryResult(entry:WorkspaceEntry){return session.models.checkEntryResult(entry,modelContext());}
   function useCoreDraft(draft:CaptureDraft){void session.saves.useCoreDraft(draft,saveContext());}
   function append(kind:AppendInput['kind'],content:string,sourceLabel?:string){void session.saves.append(kind,content,sourceLabel,saveContext());}
-  function ask(content=thought){void session.models.ask(selected,selectedPrep,modelContext(),content);}
+  function ask(content=thought){
+    const owner=generation.current,context=workspace?.id;
+    const request=session.models.ask(selected,selectedPrep,modelContext(),content);if(!request)return;
+    if(messagesMode)nativePresentationFeedback('send');
+    void request.then(()=>{
+      if(messagesMode&&generation.current===owner&&session.getSnapshot().workspace?.id===context&&(session.getSnapshot().pending||session.getSnapshot().error))nativePresentationFeedback('warning');
+    });
+  }
   function composerContext():import('./session/composer').ComposerContext{return {locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,focus:()=>setQuestionFocus(value=>value+1),closeTools:()=>setPhoneChatToolsOpen(false),save:saveContext()};}
   function prepareChiefQuestion(prompt:string){session.composer.prepareChief(prompt,composerContext());}
   function loadingContext(){return {authenticated,failure,recoverAfterRead,prepareRecovery};}
@@ -605,9 +620,24 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     if(!team||recoveryBlocked||routeReady.current||routeApplying.current)return;
     const target=readWorkspaceRoute(window.location.hash);if(target)void applyRoute(target);else routeReady.current=true;
   },[team,recoveryBlocked]);
-  useEffect(()=>{const back=()=>{const target=readWorkspaceRoute(window.location.hash);if(target)void applyRoute(target);};
+  const historyNavigation=useRef<(target:WorkspaceRoute)=>Promise<void>>(async()=>{});
+  historyNavigation.current=async target=>{
+    if(messagesMode){
+      const dialog=[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].find(element=>!element.closest('[hidden]'));
+      if(dialog){
+        // Sheets use their existing Escape/dismiss action before history can
+        // change the conversation beneath them. No extra route stack is added.
+        document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+        history.replaceState(history.state,'',workspaceRouteHash(route()));return;
+      }
+      if(messagesTask){returnToMessagesChat();history.replaceState(history.state,'',workspaceRouteHash(route()));return;}
+    }
+    const followed=await session.navigation.followHistory(target,navigationContext(),conversationHost());
+    if(followed){setContextBot(null);setMessagesTask(null);setPhoneChatToolsOpen(false);}
+  };
+  useEffect(()=>{const back=()=>{const target=readWorkspaceRoute(window.location.hash);if(target)void historyNavigation.current(target);};
     window.addEventListener?.('popstate',back);return()=>window.removeEventListener?.('popstate',back);
-  },[authenticated,workspace?.id,team,busy,pending,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked]);
+  },[]);
   useEffect(()=>{
     if(!routeReady.current||routeApplying.current||!team||practicePage==='notebook'&&!workspace)return;
     const hash=workspaceRouteHash(route());if(window.location.hash===hash)return;
@@ -658,6 +688,14 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const editorWorkspace = workspace?.id, editorScope = team?.recovery_scope;
   const accountScopeReady = !!editorJournal && validRecoveryScope(editorScope) && journal.current?.serverScope === editorScope;
   const accountAccess=useMemo(()=>session.recovery.accountAccess(authenticated,editorScope,editorJournal,accountScopeReady),[authenticated,editorJournal,editorScope,accountScopeReady]);
+  function inboxPreferencesHost():InboxPreferencesHost|null{
+    const owner=authenticated,recovery=accountAccess;if(!owner||!recovery)return null;
+    return {identity:owner,recovery,current:()=>previousIdentity.current===owner&&journal.current?.value===recovery.journal&&journal.current?.serverScope===recovery.recoveryScope,
+      denied:cause=>{if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))failure(cause);}};
+  }
+  useEffect(()=>{if(session.presentation.enabled)void session.inboxPreferences.bind(inboxPreferencesHost());},[authenticated,accountAccess]);
+  useEffect(()=>setInboxRename(null),[authenticated]);
+  function closeInboxRename(){setInboxRename(null);queueMicrotask(()=>document.getElementById('messages-title')?.focus());}
   const privateRecordingPlatform = authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?'ios':'desktop';
   const privateRecordingLive=session.recording.live;
   privateRecordingLive.current={authenticated,editorJournal,editorScope,generation:generation.current};
@@ -763,11 +801,38 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   else if(!busy)recoveryAppearance.current=JSON.stringify([localModelPending.body.idempotency_key,modelObservation?.receipt.outcome??null,!!replacementDraft]);
   const sharedChatOwner=session.presentation.enabled?authenticated??null:nativeChatOwner;
   const mobileChatFrame=useMobileChatFrame({active:session.presentation.enabled?!!workspace:nativeChat&&!phoneChiefToolsVisible,owner:sharedChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${session.review.returnTarget.current?.address??session.review.conversationReturn.current?.address??selected}`,
+    arrivals:conversation.entries.flatMap(row=>row.kind==='turn'?(row.entry.reply?[`reply:${row.id}`]:[]):[`review:${row.id}:${row.status}`]),
+    onBottomVisible:()=>void acknowledgeDisplayedConversation(),
     messages:JSON.stringify([turns.map(entry=>[entry.id,entry.reply?.content??null]),
       pending?.type==='ask'&&pending.body.role===selected&&!localQuestionRepresented?pending.body.idempotency_key:null,recoveryAppearance.current,
       [chiefNoteCompose,phoneNoteTask?.selection.note_id,phoneNoteTask?.selection.note_version,clinicalPreparing,busy,message],
       chiefNoteCompose?workspace?.handoffs?.map(handoff=>[handoff.id,handoff.status,handoff.result_entry_id,handoff.review_status]):null]),
     isCurrent:()=>previousIdentity.current===sharedChatOwner&&generation.current===chatGeneration&&!!sharedChatOwner&&(sharedChatOwner.mode!=='clerk_jwt'||!sharedChatOwner.nativeSession||sharedChatOwner.nativeSession.isCurrent())});
+  const historyVisible=useRef<()=>boolean>(()=>false);
+  historyVisible.current=()=>{
+    if(!session.presentation.enabled||document.visibilityState==='hidden'||draftsSuspended.current||conversationBusy||practicePage!=='notebook'||settingsOpen||practiceOpen||reviewHandoffId||selectedResult||messagesTask||phoneChatToolsOpen||conversationDetails||newMessage||contextBot||mobilePanel!=='Conversation'||
+      bot?.role==='research'&&!savedResearchChat||privateRecordingEntry&&!recordingMinimized||savedRecordingEntry&&savedRecordingFocused)return false;
+    if([...document.querySelectorAll('[role="dialog"][aria-modal="true"]')].some(dialog=>!dialog.closest('[hidden]')))return false;
+    const history=mobileChatFrame.scrollRef.current,owner=messagesMode?history:history?.querySelector<HTMLElement>('.team-messages'),end=conversationEnd.current;
+    if(!owner||!end||owner.clientHeight<=0||owner.scrollHeight-owner.clientHeight-owner.scrollTop>2)return false;
+    const bounds=owner.getBoundingClientRect(),last=end.getBoundingClientRect(),viewport=window.visualViewport;
+    const top=viewport?.offsetTop??0,bottom=top+(viewport?.height??window.innerHeight);
+    return last.top>=Math.max(top,bounds.top)&&last.bottom<=Math.min(bottom,bounds.bottom)+1;
+  };
+  async function acknowledgeDisplayedConversation(){
+    const host=conversationHost();if(!host||!historyVisible.current())return;
+    await session.conversations.acknowledgeVisible(host,()=>historyVisible.current());
+    await session.conversations.acknowledgeDisplayed(host,()=>historyVisible.current());
+  }
+  useEffect(()=>{void acknowledgeDisplayedConversation();},[workspace,conversationBusy,selected,mobilePanel,savedResearchChat,settingsOpen,practiceOpen,reviewHandoffId,messagesTask,phoneChatToolsOpen,conversationDetails,newMessage,contextBot,recordingMinimized,messagesMode]);
+  const observeDisplayedHistory=useRef(acknowledgeDisplayedConversation);observeDisplayedHistory.current=acknowledgeDisplayedConversation;
+  useEffect(()=>{
+    const visible=()=>void observeDisplayedHistory.current();
+    document.addEventListener('visibilitychange',visible);document.addEventListener('focusin',visible);window.addEventListener?.('focus',visible);window.addEventListener?.('scroll',visible,true);
+    const nativeOwner=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?authenticated:null;
+    const removeNative=nativeOwner?subscribeNativeWorkspaceForeground(nativeOwner,visible,()=>{}):undefined;
+    return()=>{document.removeEventListener('visibilitychange',visible);document.removeEventListener('focusin',visible);window.removeEventListener?.('focus',visible);window.removeEventListener?.('scroll',visible,true);removeNative?.();};
+  },[authenticated]);
   function openPhoneChatTools(){setPhoneChatToolsOpen(true);if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=0;}
   function reviewContext():import('./session/review').ReviewContext{return {authenticated,previousIdentity,actionLocked,viewNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,phoneChatToolsOpen,setPhoneChatToolsOpen,setClinicalTeamExpanded,focusQuestion:()=>setQuestionFocus(value=>value+1),returnFocus:chiefReviewReturnFocus};}
   function retryTeamTask(handoff:DraftHandoff){session.review.retry(handoff,saveContext());}
@@ -814,7 +879,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     <summary>Team drafts · {(workspace.handoffs??[]).filter(handoff=>handoff.status==='completed').length} saved</summary>
     <TeamWorkPanel handoffs={workspace.handoffs??[]} entries={workspace.entries} locked={locked} onRetry={retryTeamTask} onReview={reviewTeamResult}/>
   </details>;
-  const chiefStarters=bot?.role==='chief'&&!!team?.revision&&<ChiefStartActions compact={phoneLayout()} locked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!bot.enabled||!!bot.retired}
+  const chiefStarters=bot?.role==='chief'&&!!team?.revision&&<ChiefStartActions compact={phoneLayout()} minimal={messagesMode&&!messagesTask} locked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!bot.enabled||!!bot.retired}
     modelEnabled={team.llm.enabled&&!bot.blocked_capabilities?.includes('model_answer')} sourceAllowed={bot.include_notebook||bot.include_evidence}
     hasSavedContext={chiefSavedContext} notesDirty={note!==latestNote} hasQuestion={!!thought.trim()}
     canDelegate={!bot.blocked_capabilities?.includes('private_draft_handoff')} onChoose={prepareChiefQuestion}/>;
@@ -885,10 +950,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       <div className="team-brand"><span className="team-logo" aria-hidden="true">✳</span>cosmas<span>OS</span><small className="team-phone-preview">Synthetic preview</small>{accountControls&&phoneLayout()&&!nativeHome&&!nativeWorkspace&&!nativeChat&&<div className="team-phone-account-controls">{accountControls}</div>}</div>
       <p className="team-sidebar-label">YOUR WORKSPACE</p>
       <nav ref={navigation} className="practice-navigation" aria-label="Workspace navigation">
-        {authenticated&&<button className={`team-nav-item ${(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}><WorkspaceNavIcon page="home"/>{messagesMode?'Messages':'Home'}</button>}
-        <button className={`team-nav-item ${!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'active':''}`} aria-current={!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void (authenticated?loadEncounters():open())}><WorkspaceNavIcon page="visits"/>Visits and notes</button>
+        {authenticated&&<button className={`team-nav-item ${(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={messagesMode?'Messages':undefined} onClick={goHome}><WorkspaceNavIcon page="home"/>{messagesMode?'Chats':'Home'}</button>}
+        <button className={`team-nav-item ${!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'active':''}`} aria-current={!settingsOpen&&!practiceOpen&&(practicePage==='visits'||!messagesMode&&phoneLayout()&&practicePage==='notebook')?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} aria-label={messagesMode?'Visits and notes':undefined} onClick={()=>void (authenticated?loadEncounters():open())}><WorkspaceNavIcon page="visits"/>{messagesMode?'Visits':'Visits and notes'}</button>
         {workspace&&<button className={`team-nav-item team-nav-secondary ${practicePage==='notebook'&&!settingsOpen&&!practiceOpen?'active':''}`} aria-current={practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&!phoneLayout()?'page':undefined} disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
-        {hasWorkspaceIdentity&&<button className={`team-nav-item ${practiceOpen?'active':''}`} aria-current={practiceOpen?'page':undefined} disabled={viewNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>leaveTeamSettings(()=>{routeSequence.current++;routeApplying.current=false;routeReady.current=true;clearPageError();setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}><WorkspaceNavIcon page="work"/>Practice work</button>}
+        {hasWorkspaceIdentity&&<button aria-label={messagesMode?'Practice work':undefined} className={`team-nav-item ${practiceOpen?'active':''}`} aria-current={practiceOpen?'page':undefined} disabled={viewNavigationLocked||busy||!!pending||captureNavigationLocked||captureDraftLocked} onClick={()=>leaveTeamSettings(()=>{routeSequence.current++;routeApplying.current=false;routeReady.current=true;clearPageError();setSettingsOpen(false);setPracticeOpen(true);setPracticeOpened(true);})}><WorkspaceNavIcon page="work"/>{messagesMode?'Work':'Practice work'}</button>}
         {authenticated&&CONNECTION_ONBOARDING_BUILD&&<button className="team-nav-item team-nav-secondary" disabled={viewNavigationLocked||busy||!!pending} onClick={()=>void openSettings('connections')}>Connections</button>}
         {hasWorkspaceIdentity&&<button className={`team-nav-item ${settingsOpen&&!practiceOpen?'active':''}`} aria-current={settingsOpen&&!practiceOpen?'page':undefined} disabled={viewNavigationLocked} onClick={()=>void openSettings()}><WorkspaceNavIcon page="settings"/>Settings</button>}
       </nav>
@@ -966,17 +1031,23 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         {ROUTINES_BUILD && authenticated && team && team.revision > 0 && <WorkRoutines identity={authenticated} team={team} onAccessLost={failure} onRefreshTeam={refreshRoutineTeam} />}
         {authenticated && team?.revision === 0 && <div className="team-banner"><p>Set up your private team to schedule work briefs.</p><button onClick={() => void openSettings()}>Set up your team</button></div>}</PracticeHub></fieldset></AccountRecoveryContext.Provider>}
       <div className="workspace-main-content" hidden={practiceOpen}>
-      {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError}
+      {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization}
         locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked}
         onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
-        onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>void session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated)}/>}
+        onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>void session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated)}
+        onOrganize={(row,change)=>session.inboxPreferences.set(row,change)} onRestoreAll={()=>session.inboxPreferences.restoreAll()} onInspect={row=>void session.inboxPreferences.inspect(row)} onCloseMenu={()=>session.inboxPreferences.closeMenu()}
+        onReloadOrganization={()=>void session.inboxPreferences.bind(inboxPreferencesHost(),true)} onRename={target=>setInboxRename({target,identity:authenticated,scope:accountAccess?.recoveryScope})}/>}
+      {inboxRename&&inboxRename.identity===authenticated&&accountAccess?.recoveryScope===inboxRename.scope&&<WorkspaceDialog title="Rename notebook" closeLabel="Close rename notebook" onClose={closeInboxRename}>
+        <NotebookTitleEditor identity={inboxRename.identity} recovery={accountAccess??null} workspaceId={inboxRename.target.workspaceId} title={inboxRename.target.title} titleRevision={inboxRename.target.titleRevision} onClose={closeInboxRename} onAccessLost={failure}
+          onSaved={receipt=>{setWorkspace(current=>current?.id===receipt.workspace_id&&current.notebook?{...current,notebook:{...current.notebook,title:receipt.title,title_revision:receipt.title_revision}}:current);closeInboxRename();void session.conversations.refresh(inboxRename.identity,false,failure);}}/>
+      </WorkspaceDialog>}
       {contextChoice&&!settingsOpen&&(!privateRecordingEntry||recordingMinimized)&&<header className="messages-context-choice"><button disabled={homeBusy||homePending} onClick={()=>{setContextBot(null);goHome();}}>‹ Messages</button><h1>{contextChoice.name}</h1><p>{contextChoice.role==='research'?'Choose the visit for this research.':'Choose the visit or private note for this conversation.'}</p></header>}
       {messagesMode&&conversationError&&practicePage==='notebook'&&!settingsOpen&&<p className="team-banner" role="alert">{conversationError}</p>}
 
       {settingsOpen&&!hasWorkspaceIdentity&&<section className="settings-hub" aria-labelledby="offline-settings-title"><h1 id="offline-settings-title">Settings</h1><p>Settings are available after your workspace connects.</p><button className="settings-done" onClick={closeSettings}>Done</button></section>}
       {connectionError&&connectionError.identity===(authenticated??identity)&&<div className="team-banner error" role="alert">{connectionError.message}</div>}
       {errorBanner}
-      {message && <div className="team-banner" role="status">{message}</div>}
+      {message && !(messagesMode&&message==='Conversation saved.') && <div className={message==='Conversation saved.'?'team-fine':'team-banner'} role="status">{message==='Conversation saved.'?'Delivered':message}</div>}
       {conflict && <div className="team-recovery"><p>Your text has not been overwritten. Load the latest history and team, compare changes, then save a new revision.</p>
         <button disabled={busy} onClick={() => void refresh()}>Load latest — keep my text</button></div>}
       {pending?.type==='clinicalNoteShare'&&!busy&&<section className="team-recovery" aria-label="Unconfirmed saved note share">
@@ -994,7 +1065,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         <p>The previous {previousModelRequest.operation.type==='ask'?'question':'draft retry'} was last checked as {previousModelRequest.outcome.replaceAll('_',' ')} at {previousModelRequest.observed_at}. Its original body and binding remain on this device. A later request does not resolve that earlier provider uncertainty.</p></details>}
       {activityEnabled && settingsOpen && activityContextBusy && <p className="team-fine" role="status">Checking optional AI activity access…</p>}
       {activityEnabled && settingsOpen && activityContextError && <div className="team-banner error" role="alert"><p>{activityContextError}</p><button disabled={locked || activityContextBusy} onClick={()=>setActivityAttempt(value=>value+1)}>Recheck AI activity access</button></div>}
-      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{session.presentation.choose(value,presentationBlocked);}}/>:undefined} key={generation.current} open={settingsOpen} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
+      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
         onOpenMessagingWork={authenticated?openMessagingWork:undefined} messagingWorkLabel={workspace?'Open fax work for this visit':'Choose a visit for fax work'}
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
         onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveFaxDocument:undefined}
@@ -1196,7 +1267,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             onPendingChange={setHandoffReviewPending}
             onAccessLost={failure} onRefresh={refreshHandoffReview}
             onFreshAssignment={prepareFreshHandoff}
-            onSaved={latest=>setWorkspace(previous=>previous?.id===latest.id&&previous.revision<=latest.revision?latest:previous)}
+            onSaved={latest=>{if(messagesMode&&workspace.id===latest.id&&workspace.revision<=latest.revision)nativePresentationFeedback('success');setWorkspace(previous=>previous?.id===latest.id&&previous.revision<=latest.revision?latest:previous);}}
             closeLabel={currentChiefReviewReturn()?'Return to Chief':session.review.currentConversationReturn(reviewContext())?'Back to chat':undefined}
             closeLocked={!!currentChiefReviewReturn()&&(actionLocked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked)}
             onClose={closeTeamReview}
@@ -1281,17 +1352,18 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               setThought(previous=>previous.trim()?previous+'\n\n'+`Run the reviewed public query for revision ${proposal.revision_id} and report its actual result.`:
                 `Run the reviewed public query for revision ${proposal.revision_id} and report its actual result.`);
               setMobilePanel('Conversation');setQuestionFocus(value=>value+1);}}/>}
-          {(nativeChat||phoneChiefConversation)&&chiefStarters}
+          {(!messagesMode&&(nativeChat||phoneChiefConversation)||messagesMode&&messagesTask==='Tools')&&chiefStarters}
           {phoneChiefConversation&&<button className="team-subtle chief-tools-settings" disabled={viewNavigationLocked} onClick={()=>void openSettings()}>Skills & settings</button>}
           </div>
           <div className="clinical-plan-host team-conversation-tools" hidden={messagesMode?messagesTask!=='Tools'&&!chiefNoteCompose:phoneChiefConversation&&!phoneChiefToolsVisible&&!chiefNoteCompose}>{clinicalTeamDrafts}</div>
           <div hidden={phoneChiefToolsVisible || bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
             {!turns.length && !visitPrepReader && !chiefNoteCompose && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
-              <h3>{phoneChiefConversation?"What would you like to work on?":stage === "Before" ? "A clear start to the visit" : stage === "During" ? "Space to think and take notes" : "Keep the next step in view"}</h3>
+              <h3>{messagesMode?`A private conversation with ${bot?.name??'your teammate'}`:phoneChiefConversation?"What would you like to work on?":stage === "Before" ? "A clear start to the visit" : stage === "During" ? "Space to think and take notes" : "Keep the next step in view"}</h3>
               <p>{team?.llm.enabled ? phoneChiefConversation?"Write naturally. Chief can help organize your notes and coordinate your team.":"Ask a question, organize your notes, or think through the next step. Your team works from the saved context you choose." : "Review saved sources with your team. Advanced skills will connect here as their services become ready."}</p>
+              {messagesMode&&bot?.role==='chief'&&chiefStarters}
               {bot?.role!=='chief'&&<button disabled={locked || !team?.revision || !bot?.enabled} onClick={() => {if(session.presentation.enabled){updateThought(template?.prompt??'Review this encounter');setQuestionFocus(value=>value+1);}else ask(template?.prompt);}}>{template?.prompt ?? "Review this encounter"}<span aria-hidden="true"> ↗</span></button>}</div>}
-            <ConversationEntries projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked}
+            <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked}
               onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={id=>{setPanel('Sources');setMobilePanel('Sources');setSelectedSource(id);}}
               onCheck={checkEntryResult} onAction={action=>{
                 if(action.kind==='review_note'){setPanel('Review');setMobilePanel('Review');}
@@ -1309,8 +1381,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               `Waiting for ${bot?.name??'your teammate'}’s result. You can keep typing.`:inlineModelRecovery?'Your last message is unconfirmed. Check its saved result above.':message}</p>}
           {inlineModelRecovery&&modelRecovery}
           </div>
+          {messagesMode&&mobileChatFrame.newMessages>0&&!messagesTask&&!phoneChiefToolsVisible&&<button className="messages-new-replies" aria-live="polite" onClick={mobileChatFrame.jumpToLatest}>{mobileChatFrame.newMessages} new {mobileChatFrame.newMessages===1?'message':'messages'} ↓</button>}
           <div hidden={phoneChiefToolsVisible || bot?.role==='research'&&!savedResearchChat} className="team-composer-wrap">
-            {!nativeChat&&!phoneChiefConversation&&chiefStarters}
+            {!messagesMode&&!nativeChat&&!phoneChiefConversation&&chiefStarters}
             {!team?.revision ? <p className="team-fine">You can save notes now. Use your team above to start a conversation.</p> :
             <form className="team-composer" onSubmit={event => { event.preventDefault();if(conversationBusy)return;if(chiefNoteCompose)submitPhoneNoteTask();else ask(); }}>
               {chiefNoteCompose&&<div className="chief-note-compose-context" role="status"><span>Follow-up + Research · v{phoneNoteTask!.selection.note_version}</span>
@@ -1322,7 +1395,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
                 {`${authenticated?'Your request is saved on this device. ':''}Waiting for ${bot?.name??'your teammate'}’s result. Keep this visit open; review the answer when it appears.`}
               </p>}
               <label className="team-sr-only" htmlFor="team-question">{chiefNoteCompose?'Directions for Chief':'Thought or question'}</label>
-              <textarea ref={questionRef} id="team-question" className={chiefNoteCompose?'clinical-team-directions':undefined} aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?"team-request-progress":undefined} rows={2} maxLength={4000} disabled={conversationBusy || phoneChiefToolsVisible || (nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => updateThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? chiefNoteCompose?'Optional directions for these drafts…':phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
+              <textarea ref={questionRef} id="team-question" className={chiefNoteCompose?'clinical-team-directions':undefined} aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?"team-request-progress":undefined} rows={messagesMode?1:2} maxLength={4000} disabled={conversationBusy || phoneChiefToolsVisible || (nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => updateThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? chiefNoteCompose?'Optional directions for these drafts…':messagesMode?'Message…':phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
                 onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&
                   !(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession)){event.preventDefault();if(!conversationBusy&&!locked){if(chiefNoteCompose)submitPhoneNoteTask();else if(thought.trim())ask();}}}}/>
               <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={conversationBusy || locked || !!nativeChatOwner&&!nativeComposerEditable || (chiefNoteCompose?phoneNoteTaskBlocked:!thought.trim()) || !bot?.enabled}

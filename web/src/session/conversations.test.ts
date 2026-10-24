@@ -4,18 +4,20 @@ import {WorkspaceSession} from './workspace-session';
 import {teamFixture,teamUuid} from '../team-setup-test-fixture';
 import {DraftJournal,editorAddress} from '../draft-journal';
 import {memoryDraftStorage} from '../draft-test-fixture';
-import type {Workspace} from '../workspace-api';
+import type {Workspace,WorkspaceIdentity} from '../workspace-api';
 import type {ConversationHost} from './conversations';
 import {PRESENTATION_KEY} from './presentation';
+import type {ConversationInbox,ConversationSummary} from '../conversations-api';
 async function fixture(){
-  const api={read:vi.fn(async()=>({contract_version:1 as const,as_of:new Date().toISOString(),rows:[],next_cursor:null})),mark:vi.fn(async()=>({contract_version:1 as const,marker_version:1,manual_unread:false,seen_watermark:null}))};
+  const api={read:vi.fn(async():Promise<ConversationInbox>=>({contract_version:1,as_of:new Date().toISOString(),rows:[],next_cursor:null})),mark:vi.fn(async()=>({contract_version:1 as const,marker_version:1,manual_unread:false,seen_watermark:null}))};
   const values=new Map<string,string>(),storage={getItem:(key:string)=>values.get(key)??null,setItem:(key:string,value:string)=>{values.set(key,value);}};
-  const session=new WorkspaceSession({presentation:{enabled:true,phone:true,storage},conversations:api,conversationRead:async(_owner,wid)=>({...workspace,id:wid})});session.setTeam(teamFixture());
+  const readWorkspace=vi.fn(async(_owner:WorkspaceIdentity,wid:string):Promise<Workspace>=>({...workspace,id:wid}));
+  const session=new WorkspaceSession({presentation:{enabled:true,phone:true,storage},conversations:api,conversationRead:readWorkspace});session.setTeam(teamFixture());
   const workspace:Workspace={id:teamUuid(601),appointment_id:null,label:'Invented note',revision:1,entries:[],work_candidates:[]};
   session.setWorkspace(workspace);session.setSelected('chief');session.setPracticePage('notebook');
   const journal=new DraftJournal(await memoryDraftStorage()({scope:'invented'}));session.recovery.journal.current={scope:'invented',serverScope:'a'.repeat(64),value:journal};
   const host:ConversationHost={identity:{mode:'clerk_jwt',getToken:async()=>null},journal,scope:'invented',current:()=>true,blocked:()=>!!session.getSnapshot().pending,authorize:vi.fn(async()=>{}),failure:vi.fn(),navigate:vi.fn(async route=>{session.navigation.sequence.current++;session.setSelected(route.helper!);session.setPracticePage('notebook');session.setWorkspace({...workspace,id:route.workspaceId!});})};
-  return {session,workspace,journal,host,api,storage,values};
+  return {session,workspace,journal,host,api,storage,values,readWorkspace};
 }
 describe('shared conversation state',()=>{
   it('prepares journal addresses and restores drafts separately by bot and context',async()=>{
@@ -23,6 +25,15 @@ describe('shared conversation state',()=>{
     expect(f.session.getSnapshot().thought).toBe('');f.session.models.updateThought('Follow-up draft');await f.session.conversations.open(teamUuid(602),'chief',f.host);
     f.session.models.updateThought('Another visit');await f.session.conversations.open(f.workspace.id,'chief',f.host);expect(f.session.getSnapshot().thought).toBe('Chief directions');
     await f.session.conversations.open(f.workspace.id,'follow_up',f.host);expect(f.session.getSnapshot().thought).toBe('Follow-up draft');
+  });
+  it('keeps outgoing text under its original bot when an ordinary same-notebook switch fails',async()=>{
+    const f=await fixture();f.session.models.updateThought('Chief directions retained after a failed switch.');f.readWorkspace.mockRejectedValueOnce(new Error('Synthetic failed destination read'));
+    const exposed:string[]=[];const stop=f.session.subscribe(()=>{const live=f.session.getSnapshot();if(!live.conversationBusy&&live.selected==='follow_up'&&live.thought)exposed.push(live.thought);});
+    expect(await f.session.conversations.open(f.workspace.id,'follow_up',f.host)).toBe(false);
+    expect(f.session.getSnapshot()).toMatchObject({selected:'chief',thought:'Chief directions retained after a failed switch.',conversationBusy:false});expect(exposed).toEqual([]);expect(f.api.mark).not.toHaveBeenCalled();stop();
+    expect(await f.journal.load(editorAddress(f.workspace.id,'conversation:chief'))).toMatchObject({data:{text:'Chief directions retained after a failed switch.'}});
+    expect(await f.session.conversations.open(f.workspace.id,'follow_up',f.host)).toBe(true);expect(f.session.getSnapshot().thought).toBe('');
+    await f.session.conversations.open(f.workspace.id,'chief',f.host);expect(f.session.getSnapshot().thought).toBe('Chief directions retained after a failed switch.');
   });
   it.each([false,true])('retains both drafts when New message reopens the same note (observe during reopen: %s)',async observeDuringReopen=>{
     const f=await fixture(),chief='Retain these invented Chief directions after reopening.',followUp='Keep this separate invented Follow-up draft.';
@@ -78,14 +89,100 @@ describe('shared conversation state',()=>{
     const f=await fixture(),row={workspace_id:f.workspace.id,appointment_id:null,context_label:'Invented note',bot:{address:'scribe',role:'scribe' as const,name:'Scribe',available:true},preview:'Saved reply',preview_withheld:false,attention:'idle' as const,last_activity_at:new Date().toISOString(),watermark:'observed-before-open',unread:true,manual_unread:false,marker_version:3};
     await f.session.conversations.open(f.workspace.id,'scribe',f.host,row);
     expect(f.session.getSnapshot().mobilePanel).toBe('Notebook');expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'scribe',{});
-    await f.session.conversations.acknowledgeVisible(f.host);expect(f.api.mark).toHaveBeenCalledTimes(1);
-    f.session.setMobilePanel('Conversation');await f.session.conversations.acknowledgeVisible(f.host);
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);expect(f.api.mark).toHaveBeenCalledTimes(1);
+    f.session.setMobilePanel('Conversation');await f.session.conversations.acknowledgeVisible(f.host,()=>true);
     expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'scribe',{watermark:row.watermark,manual_unread:false,expected_version:3});
-    await f.session.conversations.acknowledgeVisible(f.host);expect(f.api.mark).toHaveBeenCalledTimes(2);
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);expect(f.api.mark).toHaveBeenCalledTimes(2);
   });
   it('blocks a layout change while Research retains an unconfirmed request',async()=>{
     const f=await fixture();f.session.setResearchPending(true);expect(f.session.presentation.choose('workspace',false)).toBe(false);
     f.session.setResearchPending(false);expect(f.session.presentation.choose('workspace',false)).toBe(true);
   });
 
+});
+
+async function visibleReply(){
+  const f=await fixture();
+  f.workspace.entries=[{id:teamUuid(620),revision:2,kind:'conversation',content:'Invented question',source_label:null,origin:'human',ticket:null,created_at:'2026-10-24T12:00:00Z',
+    reply:{agent_name:'Chief',role:'chief',backend:'fake',content:'New invented reply',context_revision:1,citations:[]}}];
+  f.workspace.revision=2;f.session.setWorkspace({...f.workspace});
+  const row:ConversationSummary={workspace_id:f.workspace.id,appointment_id:null,context_label:'Invented note',bot:{address:'chief',role:'chief',name:'Chief',available:true},preview:'New invented reply',preview_withheld:false,attention:'idle',last_activity_at:'2026-10-24T12:00:01Z',watermark:'fresh-server-watermark',unread:true,manual_unread:false,marker_version:3};
+  f.api.read.mockResolvedValue({contract_version:1,as_of:row.last_activity_at,rows:[row],next_cursor:null});
+  return {...f,row};
+}
+describe('read acknowledgment for displayed replies',()=>{
+  it('marks the fresh exact watermark after a confirming read and never clears manual unread',async()=>{
+    const f=await visibleReply();f.row.manual_unread=true;
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);
+    expect(f.readWorkspace).toHaveBeenCalledOnce();expect(f.host.authorize).toHaveBeenCalledOnce();
+    expect(f.api.mark).toHaveBeenCalledExactlyOnceWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark});
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.mark).toHaveBeenCalledOnce();expect(f.api.read).toHaveBeenCalledOnce();
+  });
+  it('does not acknowledge a newer server reply that has not rendered',async()=>{
+    const f=await visibleReply(),newer={...f.workspace,entries:[...f.workspace.entries,{...f.workspace.entries[0],id:teamUuid(621),reply:{...f.workspace.entries[0].reply!,content:'Not on screen yet'}}]};
+    f.readWorkspace.mockResolvedValue(newer);
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.mark).not.toHaveBeenCalled();
+    f.session.setWorkspace(newer);f.row.watermark='newer-server-watermark';
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenCalledExactlyOnceWith(f.host.identity,f.workspace.id,'chief',{watermark:'newer-server-watermark'});
+  });
+  it('follows bounded server pages to find the displayed conversation without inventing its watermark',async()=>{
+    const f=await visibleReply();f.api.read.mockResolvedValueOnce({contract_version:1,as_of:f.row.last_activity_at,rows:[],next_cursor:'opaque-next-page'});
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);
+    expect(f.api.read).toHaveBeenNthCalledWith(1,f.host.identity,null);expect(f.api.read).toHaveBeenNthCalledWith(2,f.host.identity,'opaque-next-page');
+    expect(f.api.mark).toHaveBeenCalledExactlyOnceWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark});
+  });
+  it('stops after five sequential pages and retains an explicit read-sync error',async()=>{
+    const f=await visibleReply();let page=0;f.api.read.mockImplementation(async()=>({contract_version:1,as_of:f.row.last_activity_at,rows:[],next_cursor:`opaque-page-${++page}`}));
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);
+    expect(f.api.read).toHaveBeenCalledTimes(5);expect(f.api.mark).not.toHaveBeenCalled();expect(f.readWorkspace).not.toHaveBeenCalled();
+    expect(f.session.getSnapshot().conversationError).toContain('Read status could not sync');
+    f.api.read.mockResolvedValue({contract_version:1,as_of:f.row.last_activity_at,rows:[f.row],next_cursor:null});
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.mark).toHaveBeenCalledOnce();expect(f.session.getSnapshot().conversationError).toBe('');
+  });
+  it('waits above the bottom and abandons a read if the history becomes hidden',async()=>{
+    const f=await visibleReply();let visible=false;
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>visible);expect(f.api.read).not.toHaveBeenCalled();
+    let finish!:()=>void;f.host.authorize=()=>new Promise(resolve=>{finish=resolve;});visible=true;
+    const task=f.session.conversations.acknowledgeDisplayed(f.host,()=>visible);await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
+    visible=false;finish();await task;expect(f.api.mark).not.toHaveBeenCalled();
+    f.host.authorize=async()=>{};visible=true;await f.session.conversations.acknowledgeDisplayed(f.host,()=>visible);expect(f.api.mark).toHaveBeenCalledOnce();
+  });
+  it.each(['settings','research','notebook','owner','route'] as const)('does not mark after %s replaces the visible conversation',async change=>{
+    const f=await visibleReply();let finish!:(value:Workspace)=>void;f.readWorkspace.mockImplementation(()=>new Promise(resolve=>{finish=resolve;}));
+    const task=f.session.conversations.acknowledgeDisplayed(f.host,()=>true);await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));
+    if(change==='settings')f.session.setSettingsOpen(true);
+    if(change==='research'){f.session.setSelected('research');f.session.setSavedResearchChat(false);}
+    if(change==='notebook')f.session.setMobilePanel('Notebook');
+    if(change==='owner')f.host.current=()=>false;
+    if(change==='route')f.session.navigation.sequence.current++;
+    finish(f.workspace);await task;expect(f.api.mark).not.toHaveBeenCalled();
+  });
+  it('requires full source access even when a withheld inbox preview is followed by a matching history',async()=>{
+    const f=await visibleReply();f.row.preview_withheld=true;f.readWorkspace.mockResolvedValue({...f.workspace,entries:f.workspace.entries.map(entry=>({...entry,google_source_state:'unavailable'}))});
+    await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.mark).not.toHaveBeenCalled();
+    f.readWorkspace.mockResolvedValue(f.workspace);await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.mark).toHaveBeenCalledOnce();
+  });
+  it('does not consume an opened Chief summary before it is visible and preserves manual-unread CAS',async()=>{
+    const f=await visibleReply();f.api.mark.mockResolvedValue({contract_version:1,marker_version:4,manual_unread:true,seen_watermark:null});f.row.manual_unread=true;
+    await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);
+    expect(f.api.mark).toHaveBeenCalledExactlyOnceWith(f.host.identity,f.workspace.id,'chief',{});
+    await f.session.conversations.acknowledgeVisible(f.host,()=>false);expect(f.api.mark).toHaveBeenCalledOnce();
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark,manual_unread:false,expected_version:4});
+  });
+  it('does not adopt a concurrently changed manual-unread version when opening a chat',async()=>{
+    const f=await visibleReply();f.api.mark.mockResolvedValue({contract_version:1,marker_version:5,manual_unread:true,seen_watermark:null});
+    await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);
+    await f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark,manual_unread:false,expected_version:3});
+  });
+  it('serializes duplicate visible notifications before automatic read updates',async()=>{
+    const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();
+    let finish!:()=>void;f.api.mark.mockImplementationOnce(()=>new Promise(resolve=>{finish=()=>resolve({contract_version:1,marker_version:4,manual_unread:false,seen_watermark:null});}));
+    const first=f.session.conversations.acknowledgeVisible(f.host,()=>true),second=f.session.conversations.acknowledgeVisible(f.host,()=>true).then(()=>f.session.conversations.acknowledgeDisplayed(f.host,()=>true));
+    await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));expect(f.api.mark).toHaveBeenCalledOnce();expect(f.api.read).toHaveBeenCalledOnce();
+    finish();await Promise.all([first,second]);expect(f.api.mark).toHaveBeenCalledTimes(2);
+    expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark});
+  });
 });

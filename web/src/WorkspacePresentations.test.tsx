@@ -2,6 +2,8 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_MESSAGES_ENABLED','true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');});
+const observedSession=vi.hoisted(()=>({value:null as import('./session/workspace-session').WorkspaceSession|null}));
+vi.mock('./session/use-workspace-session',async importOriginal=>{const original=await importOriginal<typeof import('./session/use-workspace-session')>();return {...original,useWorkspaceSession:(...args:Parameters<typeof original.useWorkspaceSession>)=>{observedSession.value=args[0];return original.useWorkspaceSession(...args);}};});
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {identity,installFixtures} from '../ux-acceptance/fixtures';
 import {workspaceApi,WorkspaceApiError} from './workspace-api';
@@ -9,6 +11,7 @@ import {handoffReviewHash,type HandoffReviewInput} from './handoff-review-api';
 import {memoryDraftStorage} from './draft-test-fixture';
 import {DraftJournal} from './draft-journal';
 import {PRESENTATION_KEY} from './session/presentation';
+import {conversationsApi} from './conversations-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement;
 const visible=(element:Element)=>!element.closest('[hidden]');
@@ -32,6 +35,68 @@ async function open(mode:'messages'|'workspace'){
   await vi.waitFor(()=>expect((host.querySelector('#team-question') as HTMLTextAreaElement)?.disabled).toBe(false));
 }
 describe('presentation parity',()=>{
+  it.each(['empty','unconfirmed request','active model request','draft awaiting review','edited draft','handoff pending','recording saved'] as const)('compares the same session across both layouts: %s',async scenario=>{
+    await open('messages');const session=observedSession.value!,base=structuredClone(session.getSnapshot().workspace!);
+    const chief=base.entries.find(entry=>entry.kind==='conversation')!,handoff=base.handoffs![0],team=session.getSnapshot().team!;
+    const next=structuredClone(base);next.handoffs=[];
+    const pending=scenario==='unconfirmed request'?{type:'ask' as const,body:{expected_revision:base.revision,team_revision:team.revision,idempotency_key:crypto.randomUUID(),role:'chief',content:'Retained invented request'}}:null;
+    if(scenario==='empty'||scenario==='unconfirmed request')next.entries=next.entries.filter(entry=>!['conversation','handoff_result'].includes(entry.kind));
+    if(scenario==='active model request'){
+      const turn=next.entries.find(entry=>entry.id===chief.id)!;turn.reply=null;turn.model_request={contract_version:1,request_sha256:'a'.repeat(64),request:{kind:'conversation',expected_revision:1,team_revision:team.revision,idempotency_key:crypto.randomUUID(),role:'chief'},
+        bot:{address:'chief',agent_id:chief.reply!.agent_id!,role:'chief',name:'Chief of Staff',team_revision:team.revision},reason:null,
+        admission:{id:crypto.randomUUID(),state:'running',unit:1,admitted_at:chief.created_at,dispatch:'started',usage:'unknown',input_tokens:null,output_tokens:null}};
+    }
+    if(['draft awaiting review','edited draft','handoff pending'].includes(scenario)){
+      next.handoffs=[structuredClone(handoff)];
+      if(scenario==='edited draft')next.handoffs[0].review_status='stale';
+      if(scenario==='handoff pending')Object.assign(next.handoffs[0],{status:'queued',result_entry_id:null,result_sha256:null,review:null,review_status:'not_reviewed',attempts:[]});
+    }
+    const recording=scenario==='recording saved'?{identity,scope:session.recovery.journal.current!.scope,generation:session.generation.current,rows:[{recordingId:crypto.randomUUID(),title:'Invented saved recording',phase:'sealed' as const,elapsedSeconds:18,recordedChunks:18,recordedBytes:5760792,workspaceId:base.id,busy:false,localOnly:true as const,transcription:'not_requested' as const,failure:null,startupStage:null}]}:null;
+    await act(async()=>{session.setWorkspace(next);session.setPending(pending);session.setPrivateRecordings(recording);});
+    const expectedIds=scenario==='empty'||scenario==='unconfirmed request'?[]:[chief.id,...(['draft awaiting review','edited draft','handoff pending'].includes(scenario)?[`handoff:${handoff.id}`]:[])];
+    const expectedAttention=scenario==='draft awaiting review'?['Unreviewed draft']:scenario==='edited draft'?['Review needs updating']:scenario==='handoff pending'?['Queued']:[];
+    const surface=()=>({
+      entries:[...host.querySelectorAll('.team-messages [data-entry-id]')].map(node=>node.getAttribute('data-entry-id')),
+      attention:[...host.querySelectorAll('.team-messages .conversation-review-card [role=status]')].map(node=>node.textContent),
+      actions:[...host.querySelectorAll<HTMLButtonElement>('.team-messages [data-action]')].map(node=>[node.dataset.action,node.disabled]),
+      delivery:[...host.querySelectorAll('.team-messages [data-delivery]')].map(node=>[node.getAttribute('data-entry-id'),node.getAttribute('data-delivery')]),
+      unconfirmed:host.querySelector('.team-recovery[aria-label="Unconfirmed model request"]')?.textContent??null,
+      inProgress:host.textContent?.includes('Request in progress')??false,
+    });
+    const messages=surface();expect(messages.entries).toEqual(expectedIds);expect(messages.attention).toEqual(expectedAttention);
+    expect(messages.delivery).toEqual(scenario==='empty'||scenario==='unconfirmed request'?[]:[[chief.id,'delivered']]);
+    if(scenario==='active model request'){expect(messages.inProgress).toBe(true);expect(messages.actions).toEqual([['check_request',false]]);}
+    if(scenario==='unconfirmed request'){expect(messages.unconfirmed).toContain('unconfirmed');expect(session.presentation.choose('workspace',false)).toBe(false);}
+    // Fixture rendering can inspect both views of a blocked session without
+    // invoking the user-facing switch or changing its admission rules.
+    await act(async()=>session.setPresentationPreference('workspace'));expect(surface()).toEqual(messages);expect(observedSession.value).toBe(session);
+    expect(session.getSnapshot().pending).toBe(pending);expect(session.getSnapshot().privateRecordings).toBe(recording);
+    await act(async()=>session.setPresentationPreference('messages'));expect(surface()).toEqual(messages);
+    if(recording)expect(recording.rows[0]).toMatchObject({phase:'sealed',recordedChunks:18,elapsedSeconds:18,transcription:'not_requested'});
+  });
+  it('keeps a new reply unread above the bottom and acknowledges its exact watermark after jumping',async()=>{
+    vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?200:0;});
+    vi.spyOn(HTMLElement.prototype,'scrollHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?1000:0;});
+    vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockReturnValue({top:100,bottom:200,left:0,right:390,width:390,height:100,x:0,y:100,toJSON:()=>({})});
+    const read=conversationsApi.read,oldWatermark='r1'+'0'.repeat(16)+'r'+'a'.repeat(96),newWatermark='r1'+'1'.repeat(16)+'r'+'b'.repeat(96);
+    vi.spyOn(conversationsApi,'read').mockImplementation(async(...args)=>{
+      const inbox=await read(...args),rows=await Promise.all(inbox.rows.map(async row=>{
+        const workspace=await workspaceApi.read(identity,row.workspace_id),arrived=workspace.entries.some(entry=>entry.content==='A new invented message while reading above.'&&entry.reply);
+        return {...row,watermark:arrived?newWatermark:oldWatermark};
+      }));return {...inbox,rows};
+    });
+    const mark=vi.spyOn(conversationsApi,'mark');await open('messages');
+    await vi.waitFor(()=>expect(mark.mock.calls.some(call=>call[3]?.watermark===oldWatermark&&call[3]?.manual_unread===undefined)).toBe(true));mark.mockClear();
+    const history=host.querySelector<HTMLDivElement>('.mobile-chat-scroll')!;await act(async()=>{history.scrollTop=200;history.dispatchEvent(new Event('scroll',{bubbles:true}));});
+    const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;await input(composer,'A new invented message while reading above.');
+    await act(async()=>composer.closest('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+    await vi.waitFor(()=>expect(composer.value).toBe(''));expect(history.scrollTop).toBe(200);expect(mark).not.toHaveBeenCalled();
+    await vi.waitFor(()=>expect(host.querySelector('.messages-new-replies')).toBeTruthy());
+    expect(host.querySelector('.messages-new-replies')?.textContent).toBe('1 new message ↓');
+    await act(async()=>host.querySelector<HTMLButtonElement>('.messages-new-replies')!.click());
+    await vi.waitFor(()=>expect(mark).toHaveBeenCalledExactlyOnceWith(identity,expect.any(String),'chief',{watermark:newWatermark}));
+    expect(history.scrollTop).toBe(800);expect(host.querySelector('.messages-new-replies')).toBeNull();
+  });
   it.each(['messages','workspace'] as const)('uses the same save and message actions from %s',async mode=>{
     await open(mode);
     expect([...host.querySelectorAll('.conversation-review-card')].map(item=>item.getAttribute('aria-label'))).toEqual(['Visit Prep draft','Scribe draft','Follow-up draft']);

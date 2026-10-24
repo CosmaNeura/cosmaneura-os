@@ -216,3 +216,54 @@ The physical iPhone is currently unavailable and the Mac is locked. Native UI
 acceptance remains pending, the rollout flag stays off in ordinary builds, and
 no Messages build has been installed on the phone. The synthetic rehearsal flag
 only enables the candidate for local validation.
+
+### October 24 completion pass and deliberate simplifications
+
+The inbox has local search over loaded conversations, Chief / Needs you / Recent
+sections, activity dates and one visible conversation-actions menu. Pin and Hide
+store only workspace/bot identifiers and flags in the existing encrypted,
+account-scoped device journal. Hidden conversations have a visible restore path.
+Rename opens the existing notebook title editor after a fresh revision read; it
+does not invent an independent visit title. Search explicitly offers loading
+older results when more pages exist.
+
+Messages now uses quiet human/bot bubbles, 15-minute/day separators, delivery
+labels, a one-to-five-line composer and two editable empty-thread suggestions.
+Both layouts omit routine model badges and use Delivered for a confirmed saved
+request; failure notices and source/revision provenance remain available. The
+seven invented parity fixtures compare one actual mounted session across both
+layouts, including entry identifiers, review states, delivery and enabled actions.
+
+Read acknowledgment waits for the actual end of the displayed history to be
+visible, with current ownership and source checks. New incoming replies preserve
+older reading positions and expose one jump control. Explicit manual-unread
+changes are protected against older automatic acknowledgments. The server's
+watermark identifies arrival activity, not a transcript position: this release
+uses unread dots and the observed-new-message jump instead of fabricating a
+historical unread divider. A precise historical boundary would require an
+additional authorized entry/attempt reference and a chronological arrival view;
+a late reply to an old request cannot be marked accurately by workspace revision.
+
+The Settings-only layout switch and the visible actions menu intentionally replace
+the handoff's three switch locations and hidden swipe/long-press commands. The
+persistent bottom tabs follow the owner's approved responsive-navigation choice.
+Phone labels are brief (Chats, Visits, Work, Settings); accessible names retain Messages,
+Visits and notes / Practice work. The compact header omits its redundant context
+kind line, while Details retains the full context.
+
+Native presentation support stays in the owned composition overlay. It uses
+public UIKit feedback generators, a light status-bar appearance matching the
+current light header, and the existing guarded route history for back gestures.
+Feedback accepts only enumerated presentation hints from the current local main
+frame and generation, while foreground and capture-idle checks suppress unwanted
+vibration. It cannot carry messages, credentials or workflow commands. The
+existing UIKit keyboardLayoutGuide remains the sole native keyboard resize owner;
+the system accessory Done control is retained. No additional Keyboard/Haptics/
+StatusBar package, private API or Scribe-source mutation is introduced. Physical
+haptics, gesture, keyboard and VoiceOver acceptance remain required before the
+ordinary-build rollout gate is removed.
+
+The API image passes the unchanged high/critical vulnerability policy after the
+pypdf update. The web image also required an existing Alpine Brotli dependency
+pin update to 1.2.1-r0 (CVE-2026-111497); its rebuilt image passes the same scan and
+nginx configuration check. No scan exception or policy weakening was added.

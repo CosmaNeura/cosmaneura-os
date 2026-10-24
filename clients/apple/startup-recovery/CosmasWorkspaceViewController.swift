@@ -17,8 +17,13 @@ import CosmaneuraIOSPCMCapacitor
     private let reopenButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
 
+    // The shipped workspace header is light in both layouts. A future dark
+    // palette must change its status style together with its surface tokens.
+    override var preferredStatusBarStyle: UIStatusBarStyle { .darkContent }
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        overrideUserInterfaceStyle = .light
         view.backgroundColor = .systemBackground
         buildPanel()
         openWorkspace()

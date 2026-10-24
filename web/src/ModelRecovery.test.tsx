@@ -26,7 +26,7 @@ const currentDraft=()=>records.get(team.recovery_scope!+address)?.value?.body as
 async function mount(){root=createRoot(element);await act(async()=>root.render(<EncounterWorkspace authenticated={access} draftStorage={factory}/>));}
 async function click(text:string){
   const matches=(button:HTMLButtonElement)=>button.textContent?.replace(/\s*↗$/,'').trim()===text||button.getAttribute('aria-label')===text||[...button.querySelectorAll('strong')].some(label=>label.textContent?.trim()===text);
-  const banners=()=>[...element.querySelectorAll('.team-banner[role="status"],.team-banner[role="alert"]')];
+  const banners=()=>[...element.querySelectorAll('.team-banner[role="status"],.team-banner[role="alert"],.team-fine[role="status"]')];
   let button:HTMLButtonElement|undefined;
   await vi.waitFor(async()=>{await act(async()=>{});button=[...element.querySelectorAll('button')].find(matches);expect(button,text).toBeTruthy();expect(button!.disabled,text).toBe(false);});
   const before=new Map(banners().map(banner=>[banner,banner.textContent]));
@@ -62,7 +62,7 @@ it('retains an exact lost ask across remount and settles an old saved receipt om
   const body=(saved.pending as ModelOperation&{type:'ask'}).body;
   vi.mocked(modelWorkApi.resolve).mockResolvedValue(await modelReceipt(body,id,8));vi.mocked(workspaceApi.read).mockResolvedValue({...original,revision:15,entries:[]});
   await click('Check saved result');expect(modelWorkApi.resolve).toHaveBeenCalledWith(access,id,saved.pending);
-  expect(currentDraft()?.pending).toBeNull();expect(currentDraft()?.note).toBe('Keep invented notebook');expect(element.textContent).toContain('Conversation saved.');expect(workspaceApi.ask).toHaveBeenCalledOnce();
+  expect(currentDraft()?.pending).toBeNull();expect(currentDraft()?.note).toBe('Keep invented notebook');expect(element.textContent).toContain('Delivered');expect(workspaceApi.ask).toHaveBeenCalledOnce();
 });
 it('keeps an admitted model request when a background flush races its deferred notebook autosave',async()=>{
   await open();await input('#team-notebook','Keep notes while asking');await input('#team-question','Invented background interruption');

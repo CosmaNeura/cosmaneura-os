@@ -21,7 +21,7 @@
   .team-workspace[data-presentation=messages][data-messages-chat=true] .practice-navigation{position:absolute}
   .team-workspace[data-presentation=messages][data-messages-chat=true] .team-main,.team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-main-content,.team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-notebook:not([hidden]),.team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-notebook-body,.team-workspace[data-presentation=messages][data-messages-chat=true] .team-content{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
   .team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-notebook-body .team-content .team-conversation{height:auto;flex:1;min-height:0;overflow:hidden}
-  .team-workspace[data-presentation=messages] .team-composer-wrap .team-composer textarea{height:66px;min-height:56px;max-height:120px;box-sizing:border-box;resize:vertical}
+  .team-workspace[data-presentation=messages] .team-composer-wrap .team-composer textarea{box-sizing:border-box}
 }
 
 .messages-context-button small{display:block;font-size:11px;line-height:1.35;color:#536158;margin-top:3px}
@@ -54,21 +54,54 @@
   .messages-thread-header>button:last-child:not(.messages-back){max-width:none;white-space:nowrap}
 }
 @media(max-width:600px){
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .team-main{overflow-y:auto}
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .workspace-main-content,
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .workspace-notebook:not([hidden]),
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .workspace-notebook-body,
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .team-content,
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .workspace-notebook-body .team-content .team-conversation{flex:none;overflow:visible}
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .mobile-chat-scroll{flex:none;min-height:96px;max-height:30dvh}
-  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .team-composer-wrap{position:sticky;bottom:0;z-index:2}
+  .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .messages-context-button small{display:none}
   .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .team-composer-wrap>.team-fine{display:none}
 }
 
-.workspace-dialog-heading{position:sticky;top:0;z-index:2;display:flex;align-items:start;gap:12px;padding:16px 0 12px;margin-top:-16px;background:#fffdf7}
+.workspace-dialog-heading{position:sticky;top:0;z-index:2;display:flex;align-items:start;gap:12px;padding:16px 0 12px;margin-top:0;background:#fffdf7}
 .workspace-dialog-heading h2{min-width:0;flex:1;margin:0;overflow-wrap:anywhere}
 .team-workspace .workspace-dialog-heading button{flex:none;width:44px;min-height:44px;margin:0}
 
 /* The Workspace conversation cap must not create a second scroll owner here. */
 .team-workspace[data-presentation=messages] .workspace-notebook-body .team-messages{height:auto;min-height:0;max-height:none;overflow:visible;flex:none}
 .team-workspace[data-presentation=messages] .workspace-notebook-body .team-composer-wrap{position:static;bottom:auto}
+
+/* Messages keeps technical provenance available without placing it in every turn. */
+.team-workspace[data-presentation=messages]{--cb-surface:#fff;--cb-text:#20332b;--cb-text-2:#536158;--cb-tint:#31543f;--cb-bubble-me:#31543f;--cb-bubble-bot:#f1f4ef;font-size:17px}
+.team-workspace[data-presentation=messages] :is(button,nav,header,.bot-avatar){-webkit-tap-highlight-color:transparent;-webkit-touch-callout:none;user-select:none}
+.team-workspace[data-presentation=messages] :is(.workspace-markdown,.team-human-message p,textarea){user-select:text;-webkit-user-select:text}
+.team-workspace[data-presentation=messages] .team-human-message{max-width:78%;padding:12px 16px;border-radius:18px 18px 6px 18px;background:var(--cb-bubble-me);color:#fff;overflow-wrap:anywhere}
+.team-workspace[data-presentation=messages] .team-human-message small{color:#e0eae2}
+.team-workspace[data-presentation=messages] .team-bot-message{max-width:92%;padding:14px 16px;border-radius:18px 18px 18px 6px;background:var(--cb-bubble-bot);color:var(--cb-text);overflow-wrap:anywhere}
+.team-workspace[data-presentation=messages] .team-bot-message header{flex-wrap:wrap;margin-bottom:8px}
+.team-workspace[data-presentation=messages] .workspace-markdown{font-size:1em;line-height:1.5;min-width:0}
+.team-workspace[data-presentation=messages] .workspace-markdown :is(pre,table){display:block;max-width:100%;overflow-x:auto}
+.team-workspace[data-presentation=messages] .messages-source-details{min-height:44px;padding:6px 0;background:transparent;border:0;font-size:12px;color:var(--cb-text-2);text-align:left;line-height:1.4}
+.messages-time-separator{margin:4px 0 18px;text-align:center;font-size:12px;color:var(--cb-text-2)}
+.messages-delivery{text-align:right;margin:5px 3px 0;font-size:12px;color:var(--cb-text-2)}
+.team-workspace[data-presentation=messages] .team-composer-wrap .team-composer{display:grid;grid-template-columns:minmax(0,1fr) 44px;align-items:end;gap:6px;padding:6px;border-radius:26px;background:var(--cb-surface)}
+.team-workspace[data-presentation=messages] .team-composer:focus-within{border-color:var(--cb-tint);box-shadow:0 0 0 1px var(--cb-tint)}
+.team-workspace[data-presentation=messages] .team-composer-wrap .team-composer textarea{height:auto;min-height:44px;max-height:min(calc(5lh + 12px),30dvh);field-sizing:content;box-sizing:border-box;padding:8px 10px;resize:none;font-size:1em;line-height:1.5;border-radius:20px;margin:0;outline:none;box-shadow:none}
+.team-workspace[data-presentation=messages] .team-composer-wrap .team-composer textarea:focus-visible{outline:none}
+.team-workspace[data-presentation=messages] .team-composer>div:not(.chief-note-compose-context):not(.session-prep-included){padding:0;display:block}
+.team-workspace[data-presentation=messages] .team-composer>div>span{display:none}
+.team-workspace[data-presentation=messages] .team-composer .team-send{width:44px;height:44px;min-height:44px;margin:0;border-radius:50%;background:var(--cb-tint)}
+.team-workspace[data-presentation=messages] .team-composer :is(.chief-note-compose-context,.chief-note-compose-attention,.session-prep-included,#team-request-progress){grid-column:1/-1}
+.team-workspace[data-presentation=messages] button:focus:not(:focus-visible){outline:none}
+.team-workspace[data-presentation=messages] .messages-new-replies{align-self:center;min-height:44px;margin:4px auto;padding:8px 16px;border-radius:24px;background:var(--cb-tint);color:#fff;flex:none}
+@supports(font:-apple-system-body){.team-workspace[data-presentation=messages]{font:-apple-system-body}}
+.messages-inbox-tools{display:flex;align-items:end;flex-wrap:wrap;gap:12px;margin:20px 0}
+.messages-inbox-tools label{display:flex;flex:1;min-width:0;flex-basis:230px;flex-direction:column;gap:6px;font-size:14px}
+.team-workspace .messages-inbox-tools input{box-sizing:border-box;width:100%;min-height:44px;border-radius:12px;font:inherit}
+.messages-inbox-tools button{min-height:44px;max-width:100%;overflow-wrap:anywhere}
+.messages-inbox-group{margin-top:24px}.messages-inbox-group>.messages-list{margin:4px 0 16px}
+.messages-list>li{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:2px;align-items:center}
+.team-workspace .messages-row-menu{width:44px;min-height:44px;padding:0;border:0;background:transparent;letter-spacing:2px}
+.messages-conversation-actions{display:flex;flex-direction:column;gap:6px}
+.messages-conversation-actions>button{min-height:44px;text-align:left;padding:12px;overflow-wrap:anywhere}
+.messages-inbox .messages-status:empty{display:none}
+@media(max-width:360px){.messages-row{gap:8px}.messages-row>.bot-avatar{width:32px;height:32px;min-width:32px}.messages-row time{max-width:44px}}
+@media(prefers-reduced-motion:no-preference){
+  .team-workspace[data-presentation=messages] button{transition:transform 120ms cubic-bezier(.2,0,0,1)}
+  .team-workspace[data-presentation=messages] button:active:not(:disabled){transform:scale(.98)}
+}

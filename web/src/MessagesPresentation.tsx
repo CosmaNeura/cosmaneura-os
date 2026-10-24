@@ -1,34 +1,62 @@
 import {BotAvatar} from './BotAvatar';
+import {useEffect,useRef,useState} from 'react';
 import {WorkspaceDialog} from './WorkspaceDialog';
 import {botAddress,type ProviderTeam,type BotRole} from './workspace-api';
 import type {ConversationInbox,ConversationSummary} from './conversations-api';
 import type {Presentation} from './session/presentation';
+import {conversationPreferenceKey} from './conversation-preferences';
+import {conversationActivityDate,organizedConversations,type InboxPreferencesSnapshot,type InboxRenameTarget} from './session/inbox-preferences';
 import './messages-presentation.css';
 
 const attention={idle:'',working:'Working',needs_review:'Needs you',needs_check:'Check status'};
-export function MessagesInbox({inbox,team,loading,error,locked,onOpen,onNew,onChief,onRefresh,onMore,onUnread,onSettings}:{
+export function MessagesInbox({inbox,team,loading,error,locked,organization,onOpen,onNew,onChief,onRefresh,onMore,onUnread,onSettings,onOrganize,onRestoreAll,onInspect,onCloseMenu,onRename,onReloadOrganization}:{
   inbox:ConversationInbox|null;team:ProviderTeam|null;loading:boolean;error:string;locked:boolean;
   onOpen:(row:ConversationSummary)=>void;onNew:()=>void;onChief:(address:string)=>void;onRefresh:()=>void;onMore:()=>void;onUnread:(row:ConversationSummary)=>void;onSettings:()=>void;
+  organization:InboxPreferencesSnapshot;onOrganize:(row:ConversationSummary,change:{pinned?:boolean;hidden?:boolean})=>Promise<boolean>;onRestoreAll:()=>Promise<boolean>;
+  onInspect:(row:ConversationSummary)=>void;onCloseMenu:()=>void;onRename:(target:InboxRenameTarget)=>void;onReloadOrganization:()=>void;
 }){
+  const [search,setSearch]=useState(''),[hidden,setHidden]=useState(false),[menu,setMenu]=useState<ConversationSummary|null>(null),heading=useRef<HTMLHeadingElement>(null);
+  const activeMenu=useRef(menu),alive=useRef(true);activeMenu.current=menu;useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const chief=team?.configuration.bots.find(bot=>bot.role==='chief'&&!bot.retired);
   const chiefReady=!!chief?.enabled;
   const chiefRows=inbox?.rows.filter(row=>row.bot.role==='chief')??[];
-  const rows=[...chiefRows,...inbox?.rows.filter(row=>row.bot.role!=='chief')??[]];
+  const groups=organizedConversations(inbox?.rows??[],organization.value,search,hidden),count=groups.reduce((total,group)=>total+group.rows.length,0);
+  const hiddenCount=organization.value.items.filter(item=>item.hidden).length;
+  const preference=(row:ConversationSummary)=>organization.value.items.find(item=>conversationPreferenceKey(item.workspace_id,item.bot)===conversationPreferenceKey(row.workspace_id,row.bot.address));
+  const organizationLocked=locked||organization.busy||!organization.ready;
+  const closeMenu=()=>{setMenu(null);onCloseMenu();};
+  useEffect(()=>{setMenu(null);setSearch('');setHidden(false);onCloseMenu();},[team?.recovery_scope]);
+  useEffect(()=>{if(menu&&!inbox?.rows.some(row=>row.workspace_id===menu.workspace_id&&row.bot.address===menu.bot.address))closeMenu();},[inbox]);
+  async function organize(change:{pinned?:boolean;hidden?:boolean}){if(!menu||organizationLocked)return;const selected=menu;if(await onOrganize(menu,change)&&alive.current&&activeMenu.current===selected){closeMenu();if(change.hidden!==undefined)queueMicrotask(()=>heading.current?.focus());}}
   return <section className="messages-inbox" aria-labelledby="messages-title">
-    <header><h1 id="messages-title">Messages</h1><button className="team-primary" disabled={locked} onClick={onNew}>New message</button></header>
+    <header><h1 id="messages-title" ref={heading} tabIndex={-1}>{hidden?'Hidden conversations':'Messages'}</h1><button className="team-primary" disabled={locked} onClick={onNew}>New message</button></header>
     {error&&<p role="alert">{error}</p>}
-    {!chiefRows.length&&<section className="messages-chief-start"><BotAvatar role="chief"/><div><h2>{chief?.name??'Chief'}</h2>
+    {organization.error&&!menu&&<p role="alert">{organization.error} <button disabled={organization.busy||locked} onClick={onReloadOrganization}>Retry organization</button></p>}
+    <div className="messages-inbox-tools"><label>Search conversations<input type="search" maxLength={200} value={search} onChange={event=>setSearch(event.target.value)} placeholder="Bot, note or message"/></label>
+      {(hiddenCount>0||hidden)&&<button disabled={locked} onClick={()=>setHidden(!hidden)}>{hidden?'Back to conversations':`Hidden conversations (${hiddenCount})`}</button>}</div>
+    {hidden&&<p className="team-fine">Hidden on this device. Open a row’s actions to restore it.{hiddenCount>0&&<> <button disabled={organizationLocked} onClick={()=>void onRestoreAll().then(saved=>{if(saved){setHidden(false);queueMicrotask(()=>heading.current?.focus());}})}>Restore all hidden conversations</button></>}</p>}
+    {search.trim()&&<p className="team-fine" role="status">{count} {count===1?'match':'matches'} among {inbox?.rows.length??0} loaded conversations.{inbox?.next_cursor?' Load earlier conversations to search more.':''}</p>}
+    {!hidden&&!search.trim()&&!chiefRows.length&&<section className="messages-chief-start"><BotAvatar role="chief"/><div><h2>{chief?.name??'Chief'}</h2>
       <p>{chiefReady?'A private conversation to plan your next step. Choose a visit or a private note.':'Chief is unavailable. Your saved conversations remain here.'}</p>
       {chiefReady?<button disabled={locked} onClick={()=>onChief(botAddress(chief!))}>Chat with {chief!.name}</button>:<button disabled={locked} onClick={onSettings}>Review team settings</button>}</div></section>}
-    <ul className="messages-list" aria-label="Your conversations">{rows.map(row=><li key={`${row.workspace_id}:${row.bot.address}`}>
+    {!organization.ready&&organization.busy?<p role="status">Loading conversation organization…</p>:groups.map(group=><section className="messages-inbox-group" key={group.title}><h2>{group.title}</h2><ul className="messages-list" aria-label={`${group.title} conversations`}>{group.rows.map(row=><li key={`${row.workspace_id}:${row.bot.address}`}>
       <button className="messages-row" disabled={locked} onClick={()=>onOpen(row)}><BotAvatar role={row.bot.role}/><span className="messages-row-copy"><strong>{row.bot.name}{row.unread&&<><span className="messages-unread" aria-hidden="true"/><span className="team-sr-only">Unread</span></>}</strong><span className="messages-context">{row.context_label}</span><span className="messages-preview">{row.preview||'No messages yet'}</span>
-        <span className="messages-status">{[!row.bot.available?'Unavailable · history retained':'',attention[row.attention]].filter(Boolean).join(' · ')}{row.manual_unread?' · Marked unread':''}</span></span>
-        <time dateTime={row.last_activity_at}>{new Date(row.last_activity_at).toLocaleDateString(undefined,{month:'short',day:'numeric'})}</time></button>
-      {!row.manual_unread&&<button className="messages-mark-unread" aria-label={`Mark ${row.bot.name}, ${row.context_label} unread`} disabled={locked||loading} onClick={()=>onUnread(row)}>Mark unread</button>}
-    </li>)}</ul>
+        <span className="messages-status">{[preference(row)?.pinned?'Pinned':'',!row.bot.available?'Unavailable · history retained':'',attention[row.attention],row.manual_unread?'Marked unread':''].filter(Boolean).join(' · ')}</span></span>
+        <time dateTime={row.last_activity_at} title={new Date(row.last_activity_at).toLocaleString()}>{conversationActivityDate(row.last_activity_at)}</time></button>
+      <button className="messages-row-menu" aria-label={`Conversation actions for ${row.bot.name}, ${row.context_label}`} disabled={locked||organization.busy} onClick={()=>{setMenu(row);onInspect(row);}}>•••</button>
+    </li>)}</ul></section>)}
     {loading&&<p role="status">Loading conversations…</p>}
-    {!loading&&inbox&&!rows.length&&<p className="team-fine">Chats you open will appear here.</p>}
-    <footer><button disabled={loading||locked} onClick={onRefresh}>Refresh conversations</button>{inbox?.next_cursor&&<button disabled={loading||locked} onClick={onMore}>Earlier conversations</button>}</footer>
+    {!loading&&inbox&&!count&&!search.trim()&&<p className="team-fine">{hidden?'No hidden conversations are in the loaded results.':'Chats you open will appear here.'}{inbox.next_cursor?' Load earlier conversations to see more.':''}</p>}
+    <footer><button disabled={loading||locked} onClick={onRefresh}>Refresh conversations</button>{inbox?.next_cursor&&<button disabled={loading||locked} onClick={onMore}>Load earlier conversations</button>}</footer>
+    {menu&&<WorkspaceDialog title="Conversation actions" closeLabel="Close conversation actions" onClose={closeMenu}><p><strong>{menu.bot.name}</strong><br/>{menu.context_label}</p><div className="messages-conversation-actions">
+      <button disabled={organizationLocked} onClick={()=>void organize({pinned:!preference(menu)?.pinned})}>{preference(menu)?.pinned?'Unpin conversation':'Pin conversation'}</button>
+      <button disabled={organizationLocked} onClick={()=>void organize({hidden:!preference(menu)?.hidden})}>{preference(menu)?.hidden?'Restore conversation':'Hide conversation'}</button>
+      {!menu.manual_unread&&<button disabled={locked||loading} onClick={()=>{onUnread(menu);closeMenu();}}>Mark unread</button>}
+      {organization.inspecting?<p role="status">Checking notebook actions…</p>:organization.rename?.workspaceId===menu.workspace_id?<button disabled={locked||organization.busy} onClick={()=>{const target=organization.rename!;closeMenu();onRename(target);}}>Rename notebook</button>:!organization.renameError&&<p className="team-fine">This conversation uses its visit label.</p>}
+      {organization.renameError&&<p role="status">{organization.renameError}</p>}
+      {attention[menu.attention]&&<p className="team-fine">{attention[menu.attention]}. Hiding this conversation keeps it available in Hidden conversations.</p>}
+      {organization.error&&<p role="alert">{organization.error}</p>}
+    </div></WorkspaceDialog>}
   </section>;
 }
 export function NewMessagePicker({team,locked,onChoose,onClose}:{team:ProviderTeam;locked:boolean;onChoose:(address:string)=>void;onClose:()=>void}){

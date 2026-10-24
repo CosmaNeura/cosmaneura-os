@@ -1,5 +1,6 @@
 import {WorkspacePresentationPreference,type PresentationOptions} from './presentation';
 import {WorkspaceConversations} from './conversations';
+import {WorkspaceInboxPreferences} from './inbox-preferences';
 import {WorkspaceComposer} from './composer';
 import {WorkspaceActivity,type ActivityDependencies} from './activity';
 import {WorkspaceSources,type SourceDependencies} from './sources';
@@ -39,6 +40,7 @@ export class WorkspaceSession {
   readonly composer:WorkspaceComposer;
   readonly presentation:WorkspacePresentationPreference;
   readonly conversations:WorkspaceConversations;
+  readonly inboxPreferences:WorkspaceInboxPreferences;
   constructor(deps:Partial<LifecycleDependencies>&{presentation?:PresentationOptions;conversations?:ConstructorParameters<typeof WorkspaceConversations>[1];conversationRead?:ConstructorParameters<typeof WorkspaceConversations>[2];recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];observationRead?:ConstructorParameters<typeof WorkspaceObservations>[1];sources?:SourceDependencies;activity?:ActivityDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
@@ -56,6 +58,7 @@ export class WorkspaceSession {
     this.composer=new WorkspaceComposer(this);
     this.presentation=new WorkspacePresentationPreference(this,deps.presentation);
     this.conversations=new WorkspaceConversations(this,deps.conversations,deps.conversationRead);
+    this.inboxPreferences=new WorkspaceInboxPreferences(deps.conversationRead);
     this.setPracticePage(deps.initialPage??'visits');
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
@@ -165,7 +168,7 @@ export class WorkspaceSession {
   /** Withhold private view state; the journal retains exact unconfirmed work. */
   readonly clear = ():void => {
     this.review.returnTarget.current=null;this.review.conversationReturn.current=null;
-    this.composer.reset();this.conversations.reset();
+    this.composer.reset();this.conversations.reset();this.inboxPreferences.clear();
     this.team.exitAction.current=null;this.clinical.preparation.current=null;
     this.invalidate();this.activityNavigation.current?.abort();this.activityNavigation.current=null;
     this.recovery.close();this.recovery.nativeModelSettling.current=false;this.models.reset();

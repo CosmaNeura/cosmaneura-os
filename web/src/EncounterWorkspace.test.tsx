@@ -566,7 +566,7 @@ describe("private encounter workspace", () => {
     expect(container.querySelector<HTMLDetailsElement>(".session-prep-detail")?.open).toBe(false);
     expect(document.activeElement).toBe(container.querySelector("#team-question"));
     await input("Thought or question","What changed since the previous visit?");await click("Send message");
-    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Conversation saved.");});
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Delivered");});
     const first=vi.mocked(workspaceApi.ask).mock.calls[0][2];
     expect(first.session_prep_analysis).toEqual(await sessionPrepAnalysis(sessionPrepFixture()));
     expect(JSON.stringify(first)).not.toContain("Invented reviewed visit summary");
@@ -759,7 +759,7 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.ask).mockImplementation(async(_,id,body)=>modelReceipt(body,id));
     await click("Send message");
     expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({role: added.instance_id, team_revision: 2});
-    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Conversation saved.");});
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Delivered");});
     await settings().editSelected(); await settings().click("Permissions");
     const enabled = [...container.querySelectorAll("label")].find(e => e.textContent === "Enable this bot")!.querySelector<HTMLInputElement>("input")!;
     await act(async () => enabled.click());
@@ -1163,7 +1163,7 @@ describe("private encounter workspace", () => {
     await click("Review Scribe result");
     expect(container.textContent).toContain("Brief from Chief");
     expect(document.activeElement?.id).toBe("turn-draft-result");
-    expect(container.querySelector("#turn-draft-result .team-pill")?.textContent).toBe("GPT-4.1");
+    expect(container.querySelector("#turn-draft-result .team-pill")?.textContent).toBe("Unreviewed draft");
     expect(workspaceApi.ask).not.toHaveBeenCalled();
   });
 

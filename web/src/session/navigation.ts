@@ -2,6 +2,7 @@ import {teamConfigurationChanged} from '../team-configuration-diff';
 import {workspaceApi,WorkspaceApiError,botAddress,type ProviderTeam} from '../workspace-api';
 import type {WorkspaceRoute} from '../workspace-route';
 import type {WorkspaceSession} from './workspace-session';
+import type {ConversationHost} from './conversations';
 import type {LoadingContext,OpenedNotebook} from './loading';
 export type NavigationDependencies={initialRoute?:WorkspaceRoute|null;read?:typeof workspaceApi.read;team?:typeof workspaceApi.team};
 export type NavigationContext=LoadingContext&{
@@ -66,6 +67,33 @@ export class WorkspaceNavigation {
       await recoverAfterRead(value, null, current);
     } catch (cause) { if (current === generation.current) failure(cause,()=>this.openSettings(context,entry)); }
     finally { if (current === generation.current) setBusy(false); }
+  }
+  /** Browser and native history are user navigation, never a draft-restore bypass. */
+  async followHistory(target:WorkspaceRoute,context:NavigationContext,conversation:ConversationHost|null):Promise<boolean>{
+    const state=this.session.getSnapshot();
+    const reject=()=>{this.session.setError('Finish or check the current action before going back. Your text is retained.');context.replaceRoute(this.route());return false;};
+    if(state.busy||state.pending||state.conversationBusy||state.conflict||state.clinicalPreparing||state.recordingTransition||state.researchPending||state.handoffReviewPending||state.recoveryState==='failed'||state.recoveryState==='saving'||state.recoveryOffers.length||
+      context.viewNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked)return reject();
+    if(state.settingsOpen&&target.page!=='settings'&&state.team&&state.teamDraft&&teamConfigurationChanged(state.team.configuration,state.teamDraft)){
+      context.replaceRoute(this.route());
+      this.session.team.leave(true,()=>void this.followHistory(target,context,conversation));
+      return false;
+    }
+    const bot=target.helper??state.selected;
+    const changesConversation=target.page==='notebook'&&(target.workspaceId!==state.workspace?.id||bot!==state.selected);
+    if(changesConversation&&this.session.presentation.enabled){
+      if(!target.workspaceId||!conversation||!conversation.current()||conversation.blocked())return reject();
+      const opened=await this.session.conversations.open(target.workspaceId,bot,{...conversation,restoreRejectedNavigation:()=>context.replaceRoute(this.route())});
+      const live=this.session.getSnapshot();
+      if(!opened){context.replaceRoute(this.route());return false;}
+      if(!conversation.current()||live.workspace?.id!==target.workspaceId||live.selected!==bot||live.practicePage!=='notebook'||live.settingsOpen||live.practiceOpen){context.replaceRoute(this.route());return false;}
+      if(target.material)await this.applyRoute({...target,helper:bot},context);
+      return true;
+    }
+    await this.applyRoute(target,context);
+    // A guarded legacy route may intentionally leave the current screen in place.
+    context.replaceRoute(this.route());
+    return true;
   }
   async applyRoute(target:WorkspaceRoute,context:NavigationContext){
     const {workspace,team,teamDraft,settingsOpen,busy,pending}=this.session.getSnapshot();
