@@ -15,6 +15,7 @@ export type ReviewContext={
 
 /** Reviews return to the exact owner, note and chat that initiated them. */
 export class WorkspaceReview {
+  readonly conversationReturn:{current:{owner:AuthenticatedWorkspaceIdentity;workspaceId:string;generation:number;address:string;journal:DraftJournal}|null}={current:null};
   readonly returnTarget:{current:ChiefReviewReturn|null}={current:null};
   constructor(private readonly session:WorkspaceSession){}
   retry(handoff:DraftHandoff,context:SaveContext){
@@ -37,15 +38,21 @@ export class WorkspaceReview {
       (target.owner.mode==='desktop_native'?!target.owner.isCurrent():!!target.owner.nativeSession&&!target.owner.nativeSession.isCurrent()))return null;
     return target;
   }
+  currentConversationReturn(context:ReviewContext){
+    if(this.returnTarget.current)return null;
+    const target=this.conversationReturn.current,view=this.session.getSnapshot();
+    return target&&target.owner===context.authenticated&&target.owner===context.previousIdentity.current&&target.workspaceId===view.workspace?.id&&target.generation===this.session.generation.current&&target.journal===this.session.recovery.journal.current?.value?target:null;
+  }
   close(context:ReviewContext){
     const {handoffReviewPending}=this.session.getSnapshot();
     const {setReviewHandoffId,setSelected,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticeOpen,setMobilePanel}=this.session;
     const {actionLocked,viewNavigationLocked,captureNavigationLocked,captureDraftLocked,setPhoneChatToolsOpen,setClinicalTeamExpanded}=context;
     if(handoffReviewPending)return;
-    const target=this.currentReturn(context);
-    if(target&&(actionLocked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked))return;
+    const target=this.currentReturn(context),conversation=this.currentConversationReturn(context);
+    if((target||conversation)&&(actionLocked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked))return;
     this.returnTarget.current=null;setReviewHandoffId(null);
-    if(!target)return;
+    this.conversationReturn.current=null;
+    if(!target){if(conversation){setSelected(conversation.address);setSelectedResult(null);setSavedResearchChat(false);setMobilePanel('Conversation');setPhoneChatToolsOpen(false);context.focusQuestion();}return;}
     context.returnFocus.current=target;
     setSelected(target.address);setSelectedResult(null);setSavedResearchChat(false);
     setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');
@@ -59,7 +66,8 @@ export class WorkspaceReview {
     const bot=team?.configuration.bots.find(value=>botAddress(value)===selected);
     if(handoffReviewPending||!handoff.result_entry_id)return;
     const reviewable=typeof handoff.result_sha256==='string'&&/^[0-9a-f]{64}$/.test(handoff.result_sha256);
-    this.returnTarget.current=null;context.returnFocus.current=null;
+    this.returnTarget.current=null;this.conversationReturn.current=null;context.returnFocus.current=null;
+    if(fromChiefPlan&&reviewable&&authenticated&&identity===authenticated&&previousIdentity.current===authenticated&&workspace&&journal.current)this.conversationReturn.current={owner:authenticated,workspaceId:workspace.id,generation:generation.current,address:selected,journal:journal.current.value};
     const store=journal.current,savedNote=workspace?.note?.latest,shared=workspace?currentSharedNote(workspace):null;
     if(fromChiefPlan&&reviewable&&authenticated&&identity===authenticated&&previousIdentity.current===authenticated&&bot?.role==='chief'&&workspace&&store&&savedNote&&shared&&!savedNote.sources_changed)
       this.returnTarget.current={owner:authenticated,scope:store.scope,serverScope:store.serverScope,journal:store.value,generation:generation.current,

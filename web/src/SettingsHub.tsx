@@ -21,8 +21,8 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
-  open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
+export function SettingsHub({appearance,open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+  appearance?:ReactNode;open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
@@ -161,6 +161,7 @@ export function SettingsHub({open, team, members, core, scheduling, microsoft, g
       {screen === 'home' && <p>A little setup. A team that fits your practice.</p>}
       {screen === 'connections' && <p>Choose a service, check what is ready, and take the next step.</p>}
     </header>
+    {screen === 'home' && appearance}
     {screen === 'home' && <div className="settings-cards">
       <button disabled={navigationLocked} className="settings-card" onClick={() => visit('team')}>
         <span className="settings-card-icon" aria-hidden="true">✳</span>

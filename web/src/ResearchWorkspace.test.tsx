@@ -96,6 +96,42 @@ it('restores an uncertain exact request after remount and resolves without resen
 it('retains an unconfirmed evidence save and checks its exact receipt without resaving',async()=>{
  vi.mocked(port.save).mockRejectedValue(new Error('save response lost'));await mount();await prepare();await click('Search selected sources');await workSettled();await check('Select excerpt to save');await click('Save selected excerpts');await workSettled();const request=vi.mocked(port.save).mock.calls[0][3];expect(element.textContent).toContain('Evidence save retained');await click('Check saved result');await workSettled();expect(port.resolveSave).toHaveBeenCalledTimes(1);expect(vi.mocked(port.resolveSave).mock.calls[0][3]).toEqual(request);expect(port.save).toHaveBeenCalledTimes(1);expect(changed).toHaveBeenCalledWith(3);
 });
+it.each(['search','save'] as const)('keeps navigation locked through an unconfirmed %s until its exact saved result is confirmed',async kind=>{
+ const onBusyChange=vi.fn();let loseResponse!:(cause:Error)=>void;
+ const response=new Promise<never>((_resolve,reject)=>{loseResponse=reject;});
+ if(kind==='search')vi.mocked(port.search).mockImplementation(()=>response);else vi.mocked(port.save).mockImplementation(()=>response);
+ await mount({onBusyChange});await prepare();expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ await click('Search selected sources');
+ if(kind==='save'){await workSettled();await check('Select excerpt to save');await click('Save selected excerpts');}
+ await vi.waitFor(()=>expect(kind==='search'?port.search:port.save).toHaveBeenCalledOnce());
+ expect(onBusyChange).toHaveBeenLastCalledWith(true);const lockReported=onBusyChange.mock.calls.length;
+ const request=kind==='search'?vi.mocked(port.search).mock.calls[0][2]:vi.mocked(port.save).mock.calls[0][3];
+ await act(async()=>loseResponse(new Error('Synthetic response lost')));await workSettled();
+ expect(element.querySelector('[aria-label="Unconfirmed research request"]')).not.toBeNull();
+ expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ expect(onBusyChange.mock.calls.slice(lockReported).some(([blocked])=>!blocked)).toBe(false);
+ expect(button('Check saved result').disabled).toBe(false);
+ await click('Check saved result');await workSettled();
+ expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ expect(element.querySelector('[aria-label="Unconfirmed research request"]')).toBeNull();
+ expect(kind==='search'?port.resolve:port.resolveSave).toHaveBeenCalledOnce();
+ expect(kind==='search'?vi.mocked(port.resolve).mock.calls[0][2]:vi.mocked(port.resolveSave).mock.calls[0][3]).toEqual(request);
+ expect(port.search).toHaveBeenCalledOnce();expect(port.save).toHaveBeenCalledTimes(kind==='save'?1:0);
+ expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:null,data:{pending:null}});
+});
+it('reports a recovered pending request before restoration and releases its host lock on unmount',async()=>{
+ const onBusyChange=vi.fn();vi.mocked(port.search).mockRejectedValue(new Error('Synthetic response lost'));
+ await mount({onBusyChange});await prepare();await click('Search selected sources');await workSettled();
+ expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ await act(async()=>root.unmount());expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ journal.close();journal=new DraftJournal(await factory({scope:'c'.repeat(64)}));access={...access,journal};root=createRoot(element);
+ await mount({onBusyChange});expect(button('Restore research draft')).toBeTruthy();expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ const lockReported=onBusyChange.mock.calls.length;
+ await click('Restore research draft');expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ expect(onBusyChange.mock.calls.slice(lockReported).some(([blocked])=>!blocked)).toBe(false);
+ await click('Check saved result');await workSettled();expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ expect(port.search).toHaveBeenCalledOnce();expect(port.resolve).toHaveBeenCalledOnce();
+});
 it('invalidates a prepared review on revision or lock changes and never sends while locked',async()=>{
  await mount();await prepare();await mount({workspaceRevision:3});expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Search selected sources')).toBe(false);await mount({locked:true});expect(button('Review query').matches(':disabled')).toBe(true);expect(port.search).not.toHaveBeenCalled();
 });

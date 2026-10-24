@@ -16,9 +16,9 @@ import './research-workspace.css';
 const blank=(bot:string):ResearchDraft=>({version:1,bot,topic:'literature',query:'',sources:[],pending:null});
 const stateLabel:Record<ResearchObservation['state'],string>={running:'Lookup in progress',completed:'Sources retrieved',partial:'Some sources unavailable',unavailable:'Sources unavailable',interrupted:'Lookup interrupted — outcome unconfirmed'};
 const sourceLabel=(source:ResearchSource,catalog:ResearchCatalog|null)=>catalog?.sources.find(s=>s.id===source)?.label??source.replaceAll('_',' ');
-export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,enabled,locked,onDenied,onChanged,analysis,port=researchApi}: {
+export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,enabled,locked,onDenied,onChanged,onBusyChange,analysis,port=researchApi}: {
  identity:AuthenticatedWorkspaceIdentity;workspaceId:string;workspaceRevision:number;bot:{address:string;team_revision:number};enabled:boolean;locked:boolean;
- onDenied?:(cause:WorkspaceApiError)=>void;onChanged?:(revision:number)=>void;analysis?:ResearchAnalysisAccess;port?:ResearchPort;
+ onDenied?:(cause:WorkspaceApiError)=>void;onChanged?:(revision:number)=>void;onBusyChange?:(blocked:boolean)=>void;analysis?:ResearchAnalysisAccess;port?:ResearchPort;
 }){
  const [draft,setDraft]=useState<ResearchDraft>(()=>blank(bot.address)),[catalog,setCatalog]=useState<ResearchCatalog|null>(null),[catalogError,setCatalogError]=useState(false);
  const [review,setReview]=useState<ResearchSearch|null>(null),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
@@ -38,6 +38,12 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const value=draft.query||draft.sources.length||draft.pending||draft.previous_request||draft.saved_packet||draft.analysis_draft||draft.note_question?editorDraft(workspaceId,kind,draft,draft.pending?.request.idempotency_key??null):null;
  const recovery=useEditorRecovery(workspaceId,kind,value,busy,{required:true,identity,scopeKey:bot.address});
  const blocked=locked||busy||recovery.blocked,canSearch=enabled&&!blocked&&!draft.pending;
+ const busyCallback=useRef(onBusyChange);busyCallback.current=onBusyChange;
+ const navigationBlocked=busy||!!draft.pending||!!recovery.offer?.pending||recovery.phase==='failed';
+ // A lost response remains a navigation lock after the spinner stops. Keep
+ // reporting separate from cleanup so the busy-to-pending handoff never unlocks.
+ useEffect(()=>{busyCallback.current?.(navigationBlocked);},[navigationBlocked,onBusyChange]);
+ useEffect(()=>()=>{busyCallback.current?.(false);},[]);
  useUnsavedWork(!!draft.pending||!!draft.query||!!draft.analysis_draft?.question||busy);
  useEffect(()=>{generation.current++;inFlight.current=false;setBusy(false);setCancellable(false);setProgress('');return()=>{generation.current++;operation.current?.abort();};},[identity,workspaceId,bot.address]);
  useEffect(()=>{setSavedReceipt(null);setObservation(null);setHistory([]);setPackets([]);setHistoryMore(false);setPacketsMore(false);},[identity,workspaceId,bot.address]);

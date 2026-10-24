@@ -108,9 +108,17 @@ retain current owner/patient-reference checks. Previews for workspaces with
 selected connector sources are deliberately withheld until the conversation's
 full source checks run. Unconfirmed model states remain needs-check.
 
-Messages layout, device preference, per-chat draft switching, workflow-host
-separation and end-to-end parity are still in progress. The rollout remains off;
-no Messages build has been released to the phone.
+Messages now supplies a Chief-first inbox, explicit chat/context picker, device
+layout preference, per-bot/context drafts, attributed review cards and three
+Details groups. Workspace and Messages use the same composer, notebook,
+request/recovery controllers and fixed recording/workflow hosts. Opening Scribe
+or Research retains unread status until its reply history is actually displayed.
+Unavailable bots retain their attention status. Research requests, recording
+transitions and unconfirmed recording metadata block layout changes without
+changing their existing consent, recovery or exact retry behavior.
+
+The rollout remains gated while the final frozen-build visual and native checks
+run. No Messages build has been released to the phone.
 
 ## Validation
 
@@ -128,3 +136,30 @@ no Messages build has been released to the phone.
 - Physical VoiceOver, first-install cold start and final Messages keyboard/layout
   acceptance still require their dedicated checks. Earlier browser evidence does
   not establish Messages or native acceptance.
+
+### October 23 implementation verification
+
+- Real-shell parity: nine tests pass across both layouts, covering notebook
+  writes, Chief messages, exact retry after a lost response, approval
+  attempt/result/hash/revision binding, change requests and linked revisions,
+  retained composer/editor instances and directions on review return.
+- Shared conversation tests: nine pass, including bot/context drafts, late
+  results, interrupted requests, device preferences, deferred read markers,
+  Research locks and recording transition locks.
+- Full web run exercised 4,369 executable tests plus 103 skips. Seven failures
+  from in-progress recorder edits and an over-broad visit-link navigation lock
+  were corrected; the final affected five-file rerun passes all 178 tests.
+  TypeScript, production build and the static Messages rehearsal build pass.
+- Desktop conversation/transport contracts: 73 tests pass, including real
+  disposable loopback sockets, deadlines, payload bounds and sign-out fencing.
+- Fresh PostgreSQL: all 14 inbox tests pass. The combined migration/review run
+  passed 134 tests, including every historical migration case; its one inbox
+  setup failure under local contention passes in the subsequent isolated run.
+  The earlier broader integration pass covered 272 successful cases; its new
+  query-count fixture was corrected and now passes for 20 populated chats.
+- Inbox review state now uses the existing source/team/review validators with
+  batch-loaded typed inputs; no separate approximation grants review authority.
+- Browser checks have verified exact draft acceptance/return and a visible Send
+  control at a 390 × 420 viewport. Final recording continuity, long text,
+  Research and native acceptance remain in progress. Development Fast Refresh
+  is excluded from the recording continuity evidence.

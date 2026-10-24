@@ -160,6 +160,7 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
   if(accessLost||identityChanged||journalChanged)return <section className="handoff-review" aria-label="Review completed draft"><p role="alert">Workspace access is unavailable. The draft is withheld from this view.</p></section>;
   return <section className="handoff-review" aria-label="Review completed draft" aria-busy={checking||busy||recovery.phase==='checking'}>
     <h3 tabIndex={-1}>{pending?.recipientName??handoff.recipient_name} draft</h3>
+    <p className="handoff-review-context">{workspace.notebook?.title??workspace.label}</p>
     <EditorRecoveryNotice recovery={recovery} label="Handoff review" onRestore={async(draft,latest,isCurrent)=>{
       const restored=await validateHandoffReviewRecovery(draft.data,workspace.id,handoff.id);
       if(latest.id!==restored.workspace_id||latest.appointment_id!==restored.appointment_id)throw new WorkspaceApiError(403);

@@ -1,3 +1,5 @@
+import {WorkspacePresentationPreference,type PresentationOptions} from './presentation';
+import {WorkspaceConversations} from './conversations';
 import {WorkspaceComposer} from './composer';
 import {WorkspaceActivity,type ActivityDependencies} from './activity';
 import {WorkspaceSources,type SourceDependencies} from './sources';
@@ -35,7 +37,9 @@ export class WorkspaceSession {
   readonly sources:WorkspaceSources;
   readonly activity:WorkspaceActivity;
   readonly composer:WorkspaceComposer;
-  constructor(deps:Partial<LifecycleDependencies>&{recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];observationRead?:ConstructorParameters<typeof WorkspaceObservations>[1];sources?:SourceDependencies;activity?:ActivityDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
+  readonly presentation:WorkspacePresentationPreference;
+  readonly conversations:WorkspaceConversations;
+  constructor(deps:Partial<LifecycleDependencies>&{presentation?:PresentationOptions;conversations?:ConstructorParameters<typeof WorkspaceConversations>[1];conversationRead?:ConstructorParameters<typeof WorkspaceConversations>[2];recovery?:Partial<RecoveryDependencies>;saves?:SaveDependencies;models?:ModelDependencies;loading?:LoadingDependencies;clinical?:ClinicalDependencies;recording?:RecordingDependencies;navigation?:NavigationDependencies;initialPage?:WorkspaceSessionState['practicePage'];observationRead?:ConstructorParameters<typeof WorkspaceObservations>[1];sources?:SourceDependencies;activity?:ActivityDependencies;teamRead?:ConstructorParameters<typeof WorkspaceTeam>[1]}={}) {
     this.lifecycle=new WorkspaceLifecycle(this,deps);
     this.recovery=new WorkspaceRecovery(this,deps.recovery);
     this.saves=new WorkspaceSaves(this,deps.saves);
@@ -50,9 +54,12 @@ export class WorkspaceSession {
     this.sources=new WorkspaceSources(this,deps.sources);
     this.activity=new WorkspaceActivity(this,deps.activity);
     this.composer=new WorkspaceComposer(this);
+    this.presentation=new WorkspacePresentationPreference(this,deps.presentation);
+    this.conversations=new WorkspaceConversations(this,deps.conversations,deps.conversationRead);
     this.setPracticePage(deps.initialPage??'visits');
   }
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
+    presentationPreference:null,presentationError:'',conversationInbox:null,conversationLoading:false,conversationError:'',conversationBusy:false,recordingTransition:false,researchPending:false,
     activityProof:null,activityBusy:false,activityContextBusy:false,activityContextError:'',activityAttempt:0,
     selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,faxSourceBusy:false,providerFaxSourceBusy:false,
     phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
@@ -75,6 +82,14 @@ export class WorkspaceSession {
     return ()=>{this.listeners.delete(listener);};
   };
 
+  readonly setPresentationPreference = this.setter('presentationPreference');
+  readonly setPresentationError = this.setter('presentationError');
+  readonly setConversationInbox = this.setter('conversationInbox');
+  readonly setConversationLoading = this.setter('conversationLoading');
+  readonly setConversationError = this.setter('conversationError');
+  readonly setConversationBusy = this.setter('conversationBusy');
+  readonly setRecordingTransition = this.setter('recordingTransition');
+  readonly setResearchPending = this.setter('researchPending');
   readonly setActivityProof = this.setter('activityProof');
   readonly setActivityBusy = this.setter('activityBusy');
   readonly setActivityContextBusy = this.setter('activityContextBusy');
@@ -149,14 +164,15 @@ export class WorkspaceSession {
 
   /** Withhold private view state; the journal retains exact unconfirmed work. */
   readonly clear = ():void => {
-    this.review.returnTarget.current=null;
-    this.composer.reset();
+    this.review.returnTarget.current=null;this.review.conversationReturn.current=null;
+    this.composer.reset();this.conversations.reset();
     this.team.exitAction.current=null;this.clinical.preparation.current=null;
     this.invalidate();this.activityNavigation.current?.abort();this.activityNavigation.current=null;
     this.recovery.close();this.recovery.nativeModelSettling.current=false;this.models.reset();
     // The recorder descriptor remains mounted long enough to stop/retain audio.
     // Its generation and journal checks already deny access synchronously.
-    this.patch({activityProof:null,activityBusy:false,activityContextBusy:false,activityContextError:'',
+    this.patch({conversationInbox:null,conversationLoading:false,conversationError:'',conversationBusy:false,researchPending:false,
+      activityProof:null,activityBusy:false,activityContextBusy:false,activityContextError:'',
       selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,faxSourceBusy:false,providerFaxSourceBusy:false,
       phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
       settingsOpen:false,practiceOpen:false,practiceOpened:false,entryIntent:null,researchEntry:false,inboxSelection:null,

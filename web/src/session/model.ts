@@ -1,3 +1,5 @@
+import type {Presentation} from './presentation';
+import type {ConversationInbox} from '../conversations-api';
 import type {ActivityProof} from './activity';
 import type {EFaxSourceOffer} from '../efax-inbound-source-api';
 import type {FaxSourceOffer} from '../fax-inbound-source-api';
@@ -31,6 +33,14 @@ export type ChiefNoteTask = {
 export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
 
 export type WorkspaceSessionState = {
+  presentationPreference:Presentation|null;
+  presentationError:string;
+  conversationInbox:ConversationInbox|null;
+  conversationLoading:boolean;
+  conversationError:string;
+  conversationBusy:boolean;
+  recordingTransition:boolean;
+  researchPending:boolean;
   activityProof:ActivityProof|null;
   activityBusy:boolean;
   activityContextBusy:boolean;

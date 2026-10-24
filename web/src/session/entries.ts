@@ -27,14 +27,16 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
     actions:!entry.reply&&entry.model_request?.request.kind==='conversation'?[{kind:'check_request',id:entry.id,label:'Check saved result'}]:[]}));
   if(!workspace)return {workspaceId:null,botAddress:selected,entries,turns};
   if(bot?.role==='chief'){
-    const origins=new Set(turns.map(entry=>entry.id));
+    const origins=new Set(turns.map(entry=>entry.id)),handoffs=workspace.handoffs??[];
+    const related=new Set(handoffs.filter(item=>origins.has(item.origin_entry_id)).map(item=>item.id));
+    for(let pass=0;pass<handoffs.length;pass++){let added=false;for(const item of handoffs)if(item.revision_request&&related.has(item.revision_request.parent_handoff_id)&&!related.has(item.id)){related.add(item.id);added=true;}if(!added)break;}
     for(const handoff of workspace.handoffs??[]){
       // Revision children remain associated with the same Chief conversation.
-      if(!origins.has(handoff.origin_entry_id)&&!handoff.revision_request)continue;
+      if(!related.has(handoff.id))continue;
       const result=workspace.entries.find(entry=>entry.id===handoff.result_entry_id);
       const withheld=!!result&&[result.google_source_state,result.calendar_source_state,result.fax_source_state,result.practice_fax_source_state].includes('unavailable');
-      const available=!!result?.reply&&!withheld;
-      const label=handoffReviewLabel(handoff),reviewed=['Draft accepted','Changes requested'].includes(label);
+      const available=!!result?.reply&&!withheld&&result.kind==='handoff_result'&&result.reply.role===handoff.recipient_role&&result.reply.agent_name===handoff.recipient_name&&(!handoff.recipient_agent_id||result.reply.agent_id===handoff.recipient_agent_id)&&typeof handoff.result_sha256==='string'&&/^[a-f0-9]{64}$/.test(handoff.result_sha256);
+      const label=handoffReviewLabel(handoff),reviewed=label==='Draft accepted'||label==='Changes requested'&&!!handoff.review?.revision_handoff_id&&handoffs.some(child=>child.id===handoff.review?.revision_handoff_id&&child.revision_request?.parent_handoff_id===handoff.id);
       const status=withheld?'Source access needs checking':handoff.status==='completed'?available?label:'Result needs checking':
         handoff.status==='queued'?'Queued':handoff.status==='running'?'Working':handoff.status==='failed'?'Could not finish':'Outcome needs checking';
       const actions:ConversationAction[]=available?[{kind:'review_handoff',id:handoff.id,label:'Review draft'}]:
@@ -49,7 +51,7 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
       actions:[{kind:'review_note',id:note.id,label:'Review note'}]});
   }
   if(['chief','follow_up'].includes(bot?.role??''))for(const work of workspace.follow_ups??[]){
-    if(['done','closed','rejected','completed'].includes(work.state))continue;
+    if(['done','closed','rejected','completed','cancelled'].includes(work.state))continue;
     entries.push({kind:'review',id:`work:${work.ticket_id}`,author:'Follow-up',title:'Follow-up',status:work.source_changed?'Sources changed':work.state.replaceAll('_',' '),needsReview:true,
       actions:[{kind:'review_work',id:work.ticket_id,label:'Review follow-up'}]});
   }

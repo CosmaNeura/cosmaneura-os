@@ -1,3 +1,7 @@
+import {recordingMetadata} from './recording-metadata';
+import {handoffReviewHash,validHandoffReviewInput,validHandoffRevisionInput} from '../src/handoff-review-api';
+import {conversationsApi,type ConversationSummary} from '../src/conversations-api';
+import {botAddress} from '../src/workspace-api';
 import {workspaceApi,WorkspaceApiError,type Workspace,type ProviderTeam,type BotRole,type WorkspaceEntry} from '../src/workspace-api';
 import {teamSetupApi} from '../src/team-setup-api';
 import {policySetupFixture,resourcesFixture,usageFixture,policyRehearsalFixture} from '../src/team-policy-test-fixture';
@@ -8,7 +12,7 @@ import {CLINICAL_NOTE_LABEL,verifyClinicalNoteShareReceipt} from '../src/clinica
 import {researchApi} from '../src/research-api';
 import {researchCatalog,researchObservation,researchSaved} from '../src/research-test-fixture';
 import type {ResearchObservation,ResearchSavedPacket} from '../src/research-contract';
-export const identity={mode:'clerk_jwt' as const,getToken:async()=>null,
+export const identity={mode:'clerk_jwt' as const,getToken:async()=>'invented-ui-rehearsal-token',
   ...(new URLSearchParams(location.search).has('native-chat')?{nativeSession:{revision:modelUuid(999),isCurrent:()=>true}}:{})};
 const roles:BotRole[]=['visit_prep','scribe','follow_up','chief','research'];
 const names=['Visit Prep','Scribe','Follow-up','Chief of Staff','Research'];
@@ -19,6 +23,7 @@ const storageKey='cosmabot-desktop-ux-acceptance-v1';
 const scopeKey=storageKey+':owner';
 const syntheticScope=sessionStorage.getItem(scopeKey)??Array.from(crypto.getRandomValues(new Uint8Array(32)),byte=>byte.toString(16).padStart(2,'0')).join('');
 sessionStorage.setItem(scopeKey,syntheticScope);
+const ownerKey=storageKey+':owner-id',inventedOwner=sessionStorage.getItem(ownerKey)??crypto.randomUUID();sessionStorage.setItem(ownerKey,inventedOwner);
 let team:ProviderTeam={revision:1,recovery_scope:syntheticScope,template_version:'provider-team-v1',
   llm:{enabled:true,model:'Synthetic scripted replies'},capture:{enabled:true,prep_enabled:true},
   configuration:{practice_context:'Synthetic family practice',bots:roles.map((role,i)=>({role,name:names[i],enabled:true,
@@ -37,7 +42,7 @@ function initial():Workspace{
   const chief=entry(modelUuid(600),2,'conversation','Please prepare the saved intake and visit notes for handoffs.');
   chief.reply={agent_name:'Chief of Staff',agent_id:modelUuid(103),role:'chief',backend:'azure_gpt41',
     content:'Three private drafts are ready for your review. Contact preference, consent and the medication list still need staff attention.',context_revision:1,citations:[]};
-  return {notebook:{title:'Jordan · sleep diary follow-up',title_revision:0,created_at:stamp},id:modelUuid(71),appointment_id:modelUuid(72),label:'Jordan Cypress · synthetic visit',revision:5,work_candidates:[],follow_ups:[],
+  return {model_contract_version:1,model_observed_at:stamp,notebook:{title:'Jordan · sleep diary follow-up',title_revision:0,created_at:stamp},id:modelUuid(71),appointment_id:modelUuid(72),label:'Jordan Cypress · synthetic visit',revision:5,work_candidates:[],follow_ups:[],
     entries:[entry(modelUuid(1),1,'synthetic_source','Invented intake: appointment access concern, after-15:00 contact preference, medication list missing, consent undocumented.'),chief,
       ...drafts.map((body,i)=>({...entry(modelUuid(610+i),3+i,'handoff_result','Private draft result'),reply:{agent_name:names[i],agent_id:modelUuid(100+i),
         role:roles[i],backend:'azure_gpt41',content:body,context_revision:2,citations:[]}}))],
@@ -58,7 +63,21 @@ function check(id:string,expected?:number){if(id!==state.id||expected!==undefine
 function persist(){sessionStorage.setItem(storageKey,JSON.stringify(state));}
 function receipt(){persist();return {entry_revision:state.revision,workspace:copy()};}
 async function once<T>(key:string,work:()=>Promise<T>):Promise<T>{if(saved.has(key))return structuredClone(saved.get(key)) as T;const result=await work();saved.set(key,result);sessionStorage.setItem(receiptsKey,JSON.stringify([...saved]));return structuredClone(result);}
-export function installFixtures(){
+export async function installFixtures(reset=false){
+  team.recovery_scope=await hash(modelCanonical({contract:'cosmas-private-drafts-v1',box_id:modelUuid(9000),owner_id:inventedOwner}));
+  const recordingServer=recordingMetadata(inventedOwner,()=>team,()=>state);
+  if(reset){state=initial();saved.clear();observations.length=0;packets.length=0;persist();}
+  state.model_contract_version=1;state.model_observed_at=stamp;
+  for(const handoff of state.handoffs??[]){const result=state.entries.find(entry=>entry.id===handoff.result_entry_id);if(result?.reply){handoff.result_sha256=await hash(result.reply.content);handoff.review_status=handoff.review?'current':'not_reviewed';}}
+  const markers=new Map<string,{version:number;manual:boolean;seen:boolean}>();
+  Object.assign(conversationsApi,{
+    read:async()=>({contract_version:1,as_of:stamp,next_cursor:null,rows:team.configuration.bots.filter(bot=>markers.has(botAddress(bot))||state.entries.some(entry=>entry.kind==='conversation'&&entry.reply?.role===bot.role)).map(bot=>{
+      const marker=markers.get(botAddress(bot)),entry=state.entries.filter(entry=>entry.kind==='conversation'&&entry.reply?.role===bot.role).at(-1);
+      return {workspace_id:state.id,appointment_id:state.appointment_id,context_label:state.notebook?.title??state.label,bot:{address:botAddress(bot),role:bot.role,name:bot.name,available:bot.enabled&&!bot.retired},preview:entry?.reply?.content.slice(0,180)??'No messages yet',preview_withheld:false,attention:bot.role==='chief'&&state.handoffs?.some(h=>h.review?.decision!=='accepted')?'needs_review':'idle',last_activity_at:stamp,watermark:'r1'+'0'.repeat(16)+'e'+'0'.repeat(96),unread:marker?.manual||!marker?.seen,manual_unread:marker?.manual??false,marker_version:marker?.version??0} satisfies ConversationSummary;
+    })}),
+    mark:async(_owner:unknown,_wid:string,bot:string,command:{watermark?:string;manual_unread?:boolean;expected_version?:number})=>{const prior=markers.get(bot),version=prior?.version??0,manual=command.expected_version===version&&command.manual_unread!==undefined?command.manual_unread:prior?.manual??false;markers.set(bot,{version:version+1,manual,seen:!!command.watermark||prior?.seen===true});return {contract_version:1,marker_version:version+1,manual_unread:manual,seen_watermark:command.watermark??null};},
+  });
+
   Object.assign(teamSetupApi,{read:async()=>({...await policySetupFixture(team.configuration),team:structuredClone(team)}),resources:async()=>structuredClone(resourcesFixture),usage:async()=>structuredClone(usageFixture),rehearse:async(_identity:unknown,body:Parameters<typeof teamSetupApi.rehearse>[1])=>policyRehearsalFixture(body.configuration,body.expected_revision)});
   Object.assign(researchApi,{
     catalog:async()=>researchCatalog(),
@@ -74,8 +93,34 @@ export function installFixtures(){
       const added=entry(crypto.randomUUID(),++state.revision,'conversation',modelCanonical(snapshot));added.source_label=CLINICAL_NOTE_LABEL;state.entries.push(added);persist();return verifyClinicalNoteShareReceipt({contract:'clinical-note-share.v1',outcome:'saved',source_entry_id:added.id,source_entry_revision:added.revision,workspace:copy()},id,body);}),
     resolve:async(_identity:unknown,id:string,body:Parameters<typeof clinicalTeamApi.resolve>[2])=>verifyClinicalNoteShareReceipt(saved.get(body.idempotency_key)??{contract:'clinical-note-share.v1',outcome:'not_found',source_entry_id:null,source_entry_revision:null,workspace:copy()},id,body),
   } satisfies Partial<typeof clinicalTeamApi>);
-  // The page is intentionally disconnected: unsupported service actions fail.
-  window.fetch=async()=>{throw new Error('Service operation unavailable in this isolated UI fixture');};
+  // Exact review contracts run through the real client, entirely in this tab.
+  // Unsupported requests never leave this isolated, invented-data rehearsal.
+  window.fetch=async(input,init)=>{
+    const path=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url,location.href).pathname;
+    const recordingResponse=await recordingServer(path,init);if(recordingResponse)return recordingResponse;
+    const route=/^\/workspaces\/([a-f0-9-]{36})\/handoffs\/([a-f0-9-]{36})\/(review|revision)$/.exec(path);
+    if(!route||init?.method!=='POST'||typeof init.body!=='string')throw new Error('Service operation unavailable in this isolated UI fixture');
+    const body:unknown=JSON.parse(init.body),[_,wid,hid,kind]=route;
+    if(kind==='review'&&!validHandoffReviewInput(body)||kind==='revision'&&!validHandoffRevisionInput(body))throw new WorkspaceApiError(422);
+    if(!validHandoffReviewInput(body)&&!validHandoffRevisionInput(body))throw new WorkspaceApiError(422);
+    const result=await once(body.idempotency_key,async()=>{
+      check(wid,body.expected_revision);const handoff=state.handoffs?.find(item=>item.id===hid);
+      if(!handoff)throw new WorkspaceApiError(404);
+      if(validHandoffReviewInput(body)){
+        const reply=state.entries.find(item=>item.id===handoff.result_entry_id)?.reply;
+        if(handoff.review||handoff.attempt_id!==body.attempt_id||handoff.result_entry_id!==body.result_entry_id||!reply||await hash(reply.content)!==body.result_sha256)throw new WorkspaceApiError(409);
+        handoff.review={id:crypto.randomUUID(),attempt_id:body.attempt_id,result_entry_id:body.result_entry_id,result_sha256:body.result_sha256,decision:body.decision,feedback:body.feedback,created_at:new Date().toISOString()};handoff.review_status='current';
+        state.revision++;persist();return {entry_revision:state.revision,request_sha256:await handoffReviewHash(wid,hid,body),feedback_withheld:false,workspace:copy()};
+      }
+      const review=handoff.review;
+      if(!review||review.id!==body.review_id||review.decision!=='changes_requested'||review.revision_handoff_id)throw new WorkspaceApiError(409);
+      const request=entry(crypto.randomUUID(),++state.revision,'conversation',review.feedback);request.origin='authenticated_human';state.entries.push(request);
+      const id=crypto.randomUUID();review.revision_handoff_id=id;
+      state.handoffs!.push({...handoff,id,origin_entry_id:request.id,status:'queued',context_revision:state.revision,attempt_id:crypto.randomUUID(),attempt_count:0,result_entry_id:null,result_sha256:null,review:null,review_status:'not_reviewed',attempts:[],revision_request:{parent_handoff_id:handoff.id,review_id:review.id,attempt_id:review.attempt_id,result_entry_id:review.result_entry_id,result_sha256:review.result_sha256,feedback:review.feedback}});
+      persist();return {entry_revision:state.revision,revision_handoff_id:id,workspace:copy()};
+    });
+    return new Response(JSON.stringify(result),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+  };
   for(const key of Object.keys(workspaceApi) as (keyof typeof workspaceApi)[])Object.assign(workspaceApi,{[key]:async()=>{throw new WorkspaceApiError(503);}});
   Object.assign(workspaceApi,{
     catalog:async()=>[{appointment_id:state.appointment_id!,label:state.label,workspace_id:state.id,start_at:new Date().toISOString(),source:'synthetic_fixture'}],
