@@ -54,6 +54,21 @@ it('checks compatibility before onboarding and uses the existing signed bounded 
   expect(check).toHaveBeenCalledOnce();expect(container.textContent).toContain('Join an existing practice');
 });
 
+it('requires the inbox contract only for Messages and resumes after the matching server is available',async()=>{
+  vi.stubEnv('VITE_MESSAGES_ENABLED','false');
+  expect(validateWorkspaceCompatibility(descriptor())).toBeTruthy();
+  vi.stubEnv('VITE_MESSAGES_ENABLED','true');
+  const id=identity(),mounted=vi.fn();function Workspace(){useEffect(()=>{mounted();},[]);return <p>Messages ready</p>;}
+  vi.mocked(fetch).mockResolvedValueOnce(response(descriptor()));
+  await act(async()=>root.render(<WorkspaceCompatibilityGate identity={id} accountControls={null}><Workspace/></WorkspaceCompatibilityGate>));
+  expect(mounted).not.toHaveBeenCalled();expect(workspaceProtocolPhase(id)).not.toBe('ready');
+  expect(container.textContent).toContain('could not confirm a compatible version');
+  expect(()=>validateWorkspaceCompatibility({...descriptor(),contracts:{...REQUIRED_WORKSPACE_CONTRACTS,conversations:2}})).toThrow();
+  vi.mocked(fetch).mockResolvedValueOnce(response({...descriptor(),contracts:{...REQUIRED_WORKSPACE_CONTRACTS,conversations:1}}));
+  await click();expect(mounted).toHaveBeenCalledOnce();expect(container.textContent).toContain('Messages ready');
+  expect(vi.mocked(fetch).mock.calls.every(([url,init])=>url===api+'/practice-access/compatibility'&&init?.method==='GET'&&init.body===undefined)).toBe(true);
+});
+
 it('holds children closed for legacy servers and outages, then retries without reloading or clearing drafts',async()=>{
   const id=identity(),mounted=vi.fn();function Workspace(){useEffect(()=>{mounted();},[]);return <p>Private draft</p>;}
   vi.mocked(fetch).mockResolvedValueOnce(response({detail:'Not found'},404,null));

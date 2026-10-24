@@ -12,8 +12,9 @@ import {CLINICAL_NOTE_LABEL,verifyClinicalNoteShareReceipt} from '../src/clinica
 import {researchApi} from '../src/research-api';
 import {researchCatalog,researchObservation,researchSaved} from '../src/research-test-fixture';
 import type {ResearchObservation,ResearchSavedPacket} from '../src/research-contract';
+import {nativeRehearsal} from './native-rehearsal';
 export const identity={mode:'clerk_jwt' as const,getToken:async()=>'invented-ui-rehearsal-token',
-  ...(new URLSearchParams(location.search).has('native-chat')?{nativeSession:{revision:modelUuid(999),isCurrent:()=>true}}:{})};
+  ...(nativeRehearsal(new URL(location.href),window.top===window)?{nativeSession:{revision:modelUuid(999),isCurrent:()=>true}}:{})};
 const roles:BotRole[]=['visit_prep','scribe','follow_up','chief','research'];
 const longNames=new URLSearchParams(location.search).get('long-names')==='1';
 const names=longNames?['Visit Preparation and Care Coordination','Visit Notes and Recording Assistant','Follow-up and Patient Care Planning','Chief of Staff for Complex Care','Clinical Evidence Research Assistant']:['Visit Prep','Scribe','Follow-up','Chief of Staff','Research'];

@@ -25,6 +25,9 @@ export function validateWorkspaceCompatibility(value:unknown):WorkspaceCompatibi
     !Number.isSafeInteger(version) || (version as number)<1 || (version as number)>1000) ||
     Object.entries(REQUIRED_WORKSPACE_CONTRACTS).some(([key,version])=>
       !Object.hasOwn(contracts,key) || (contracts as Record<string,unknown>)[key]!==version))throw updateRequired();
+  // A Messages candidate must qualify its inbox before opening the workspace.
+  // Ordinary Workspace builds remain compatible during the staged rollout.
+  if(import.meta.env.VITE_MESSAGES_ENABLED==='true' && (contracts as Record<string,unknown>).conversations!==1)throw updateRequired();
   return value as WorkspaceCompatibility;
 }
 
