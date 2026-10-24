@@ -192,6 +192,26 @@ run. No Messages build has been released to the phone.
   27 fresh PostgreSQL workspace/inbox tests pass, including that full migration
   and data-preservation case. Runtime downgrade protections are unchanged.
 
+- A final standard-size preview caught a legacy 350px history cap. Messages now
+  has one scrolling history container; the inner transcript grows naturally.
+  The real browser preserves a 437.5px reading position across both layouts and
+  keeps older content in place as a new reply arrives. The normal composer no
+  longer inherits Workspace’s separate sticky safe-area offset.
+- Final 6034815 checks: the full GitHub web job, all three signed UI jobs and
+  the complete backend pass (7,485 workspace, 27 deployment-profile and 23 compact
+  tests).
+  Local full web passes 4,371 cases with 103 skips; all 65 cases from the three
+  files affected by socket permissions/timeouts pass in an isolated rerun.
+  The isolated unsigned simulator build compiles and is installed under its
+  separate synthetic bundle. Browser QC, generated-audio checks and this build
+  do not establish physical microphone or native accessibility acceptance.
+
+The release-image scan then identified three fixable high-severity pypdf issues
+in the pre-existing 6.19.0 pin. The optional inbound-PDF dependency is updated to
+6.21.2 with official locked hashes; no other package version changes. All 180
+existing PDF/parser/security cases pass in an isolated environment. The scanner’s
+severity and failure policy remain unchanged.
+
 The physical iPhone is currently unavailable and the Mac is locked. Native UI
 acceptance remains pending, the rollout flag stays off in ordinary builds, and
 no Messages build has been installed on the phone. The synthetic rehearsal flag

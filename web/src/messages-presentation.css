@@ -68,3 +68,7 @@
 .workspace-dialog-heading{position:sticky;top:0;z-index:2;display:flex;align-items:start;gap:12px;padding:16px 0 12px;margin-top:-16px;background:#fffdf7}
 .workspace-dialog-heading h2{min-width:0;flex:1;margin:0;overflow-wrap:anywhere}
 .team-workspace .workspace-dialog-heading button{flex:none;width:44px;min-height:44px;margin:0}
+
+/* The Workspace conversation cap must not create a second scroll owner here. */
+.team-workspace[data-presentation=messages] .workspace-notebook-body .team-messages{height:auto;min-height:0;max-height:none;overflow:visible;flex:none}
+.team-workspace[data-presentation=messages] .workspace-notebook-body .team-composer-wrap{position:static;bottom:auto}

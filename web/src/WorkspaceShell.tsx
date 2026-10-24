@@ -1219,7 +1219,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               disabled={viewNavigationLocked} onClick={()=>phoneChiefToolsVisible?returnToPhoneChat():openPhoneChatTools()}>Tools</button>:
               <button className="team-subtle" onClick={() => setSettingsOpen(true)}>Skills & settings</button>}</header>
           <div className="mobile-chat-scroll" ref={mobileChatFrame.scrollRef} onScroll={mobileChatFrame.onScroll}
-            role={nativeChat||messagesMode?'region':undefined} aria-label={nativeChat||messagesMode?(phoneChiefToolsVisible?'Chief tools':'Conversation history'):undefined} tabIndex={nativeChat||messagesMode?0:undefined}>
+            role={nativeChat||messagesMode?'region':undefined} aria-label={messagesMode?(messagesTaskLabel??(bot?.role==='research'&&!savedResearchChat?'Research workspace':'Conversation history')):nativeChat?(phoneChiefToolsVisible?'Chief tools':'Conversation history'):undefined} tabIndex={nativeChat||messagesMode?0:undefined}>
           <div id={`chief-tools-${workspace.id}`} className="team-conversation-tools" hidden={messagesMode?!messagesTask&&!phoneChiefToolsVisible&&bot?.role!=='research':phoneChiefConversation&&!phoneChiefToolsVisible}>
           {phoneChiefConversation&&<header className="chief-tools-heading"><h3>Chief tools</h3><button className="team-subtle" disabled={viewNavigationLocked} onClick={returnToPhoneChat}>Back to chat</button></header>}
           {phoneChiefToolsVisible&&thought!==''&&!(nativeChat&&clinicalTeamExpanded)&&<p className="team-fine chief-tools-draft" role="status">Your directions are kept in this plan. Prepare Follow-up and Research includes them with the saved note.</p>}
