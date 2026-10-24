@@ -267,3 +267,9 @@ The API image passes the unchanged high/critical vulnerability policy after the
 pypdf update. The web image also required an existing Alpine Brotli dependency
 pin update to 1.2.1-r0 (CVE-2026-111497); its rebuilt image passes the same scan and
 nginx configuration check. No scan exception or policy weakening was added.
+
+Browser acceptance also exercises consecutive Back actions, not just individual
+popstate events: dismissing Details must preserve the inbox history entry so the
+next Back reaches the inbox. Consumed traversal restores the existing route entry
+instead of overwriting its parent, with equivalent protection for Forward and
+pending requests.

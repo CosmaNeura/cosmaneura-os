@@ -115,6 +115,11 @@ const WorkRoutines=deferredWorkspacePanel(()=>import('./WorkRoutines').then(modu
 const isFollowUpRecovery = (draft: RecoveryOffer["draft"]) => draft.kind === "workspace" && draft.pending?.type.startsWith("followUp") === true;
 const phoneLayout = () => window.matchMedia?.('(max-width: 600px)')?.matches ?? false;
 const deviceStorage=()=>{try{return window.localStorage;}catch{return undefined;}};
+const HISTORY_POSITION='cosmas.workspace-history.v1';
+function workspaceHistoryPosition(value:unknown):number|null{
+  const position=value&&typeof value==='object'?(value as Record<string,unknown>)[HISTORY_POSITION]:null;
+  return typeof position==='number'&&Number.isSafeInteger(position)&&position>=0&&position<=1_000_000_000?position:null;
+}
 
 export function WorkspaceShell({ onExit, authenticated, accountControls, practiceAccess, draftStorage = openDraftStore }: {
   onExit?: () => void; authenticated?: AuthenticatedWorkspaceIdentity; accountControls?: ReactNode;
@@ -447,7 +452,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function recheckSyntheticConnection(){
     return session.lifecycle.recheckSyntheticConnection(lifecycleContext(),connectionNavigationLocked||captureNavigationLocked||captureDraftLocked);
   }
-  function navigationContext():import('./session/navigation').NavigationContext{return {...loadingContext(),viewNavigationLocked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,minimizeRecording:()=>setRecordingMinimized(true),hasUnsavedWork,replaceRoute:target=>history.replaceState(history.state,'',workspaceRouteHash(target)),openPrivateNotebook,loadEncounters,currentTeam};}
+  function navigationContext():import('./session/navigation').NavigationContext{return {...loadingContext(),viewNavigationLocked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,minimizeRecording:()=>setRecordingMinimized(true),hasUnsavedWork,replaceRoute:target=>writeHistoryRoute(target,false),openPrivateNotebook,loadEncounters,currentTeam};}
   function goHome(){setContextBot(null);setMessagesTask(null);setConversationDetails(false);session.navigation.goHome(navigationContext());}
   function conversationHost(allowHomeResult=false):import('./session/conversations').ConversationHost|null{
     const owner=authenticated,owned=journal.current;if(!owner||!owned||!accountAccess)return null;
@@ -615,33 +620,62 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function requestScribeDraft(){session.composer.requestScribe(composerContext());}
   useEffect(()=>{session.composer.continueScribe(composerContext());},[busy,workspace?.revision,pending,conflict,recoveryBlocked]);
   const {ready:routeReady,applying:routeApplying,sequence:routeSequence,route}=session.navigation;
+  const historyPosition=useRef(workspaceHistoryPosition(history.state)??0),historyRestoring=useRef<number|null>(null),historyHandling=useRef<number|null>(null),historyOperation=useRef(0);
+  function writeHistoryRoute(target:WorkspaceRoute,push:boolean){
+    const position=historyPosition.current+(push?1:0),state={...(history.state&&typeof history.state==='object'?history.state:{}),[HISTORY_POSITION]:position};
+    if(push)history.pushState(state,'',workspaceRouteHash(target));else history.replaceState(state,'',workspaceRouteHash(target));
+    historyPosition.current=position;
+  }
+  function restoreConsumedHistory(from:number,to:number|null){
+    if(to!==null&&from!==to){historyRestoring.current=from;history.go(from-to);}
+    // Old/unmarked entries have no direction information. Keep the popped
+    // parent intact and recreate our current entry rather than overwriting it.
+    else writeHistoryRoute(route(),true);
+  }
+  useEffect(()=>{if(workspaceHistoryPosition(history.state)===null){const state={...(history.state&&typeof history.state==='object'?history.state:{}),[HISTORY_POSITION]:historyPosition.current};history.replaceState(state,'');}},[]);
   function applyRoute(target:WorkspaceRoute){return session.navigation.applyRoute(target,navigationContext());}
   useEffect(()=>{
     if(!team||recoveryBlocked||routeReady.current||routeApplying.current)return;
     const target=readWorkspaceRoute(window.location.hash);if(target)void applyRoute(target);else routeReady.current=true;
   },[team,recoveryBlocked]);
-  const historyNavigation=useRef<(target:WorkspaceRoute)=>Promise<void>>(async()=>{});
-  historyNavigation.current=async target=>{
-    if(messagesMode){
-      const dialog=[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].find(element=>!element.closest('[hidden]'));
-      if(dialog){
-        // Sheets use their existing Escape/dismiss action before history can
-        // change the conversation beneath them. No extra route stack is added.
-        document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
-        history.replaceState(history.state,'',workspaceRouteHash(route()));return;
+  const historyNavigation=useRef<(target:WorkspaceRoute,from:number,to:number|null)=>Promise<void>>(async()=>{});
+  historyNavigation.current=async(target,from,to)=>{
+    const operation=++historyOperation.current;historyHandling.current=operation;const origin=workspaceRouteHash(route());
+    try{
+      if(messagesMode){
+        const dialog=[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].find(element=>!element.closest('[hidden]'));
+        if(dialog){
+          // Consume dismissal in the original entry. Replacing the popped
+          // entry would delete Inbox; reversing the traversal preserves Back
+          // and Forward while using the sheet's existing dismiss action.
+          document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));
+          restoreConsumedHistory(from,to);return;
+        }
+        if(messagesTask){returnToMessagesChat();restoreConsumedHistory(from,to);return;}
       }
-      if(messagesTask){returnToMessagesChat();history.replaceState(history.state,'',workspaceRouteHash(route()));return;}
-    }
-    const followed=await session.navigation.followHistory(target,navigationContext(),conversationHost());
-    if(followed){setContextBot(null);setMessagesTask(null);setPhoneChatToolsOpen(false);}
+      const context={...navigationContext(),replaceRoute:(actual:WorkspaceRoute)=>{if(historyHandling.current!==operation)writeHistoryRoute(actual,false);}};
+      const host=conversationHost(),conversation=host?{...host,navigate:(target:WorkspaceRoute)=>session.navigation.applyRoute(target,context)}:null;
+      const followed=await session.navigation.followHistory(target,context,conversation);
+      if(historyHandling.current!==operation)return;
+      if(!followed&&workspaceRouteHash(route())===origin){restoreConsumedHistory(from,to);return;}
+      writeHistoryRoute(route(),false);
+      if(followed){setContextBot(null);setMessagesTask(null);setPhoneChatToolsOpen(false);}
+    }finally{if(historyHandling.current===operation)historyHandling.current=null;}
   };
-  useEffect(()=>{const back=()=>{const target=readWorkspaceRoute(window.location.hash);if(target)void historyNavigation.current(target);};
+  useEffect(()=>{const back=(event:PopStateEvent)=>{
+    const from=historyPosition.current,to=workspaceHistoryPosition(event.state);if(to!==null)historyPosition.current=to;
+    if(historyRestoring.current!==null){
+      const expected=historyRestoring.current;historyRestoring.current=null;
+      if(to===expected){writeHistoryRoute(route(),false);return;}
+    }
+    const target=readWorkspaceRoute(window.location.hash);if(target)void historyNavigation.current(target,from,to);
+  };
     window.addEventListener?.('popstate',back);return()=>window.removeEventListener?.('popstate',back);
   },[]);
   useEffect(()=>{
-    if(!routeReady.current||routeApplying.current||!team||practicePage==='notebook'&&!workspace)return;
+    if(historyHandling.current!==null||historyRestoring.current!==null||!routeReady.current||routeApplying.current||!team||practicePage==='notebook'&&!workspace)return;
     const hash=workspaceRouteHash(route());if(window.location.hash===hash)return;
-    if(!window.location.hash.startsWith('#cosmas/'))history.replaceState(history.state,'',hash);else history.pushState(history.state,'',hash);
+    writeHistoryRoute(route(),window.location.hash.startsWith('#cosmas/'));
   },[practicePage,settingsOpen,practiceOpen,workspace?.id,selected,mobilePanel,team,conversationBusy]);
   useEffect(()=>{
     const closeMenus=(event:MouseEvent|KeyboardEvent)=>document.querySelectorAll<HTMLDetailsElement>('details[data-menu][open]').forEach(menu=>{
