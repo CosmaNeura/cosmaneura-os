@@ -91,7 +91,7 @@ Concrete QC stop criteria:
 The plain TypeScript session owns lifecycle, durable saves and model requests,
 loading, team settings, clinical preparation, recording descriptors, navigation,
 review return routing, selected-source verification and recovery access. The
-remaining shell work keeps child workflow instances above presentation changes.
+shell keeps child workflow instances above presentation changes.
 
 The shared conversation projection now renders the existing Workspace history
 and attributed review cards. Chief receives specialist results as cards without
@@ -111,8 +111,8 @@ full source checks run. Unconfirmed model states remain needs-check.
 Messages now supplies a Chief-first inbox, explicit chat/context picker, device
 layout preference, per-bot/context drafts, attributed review cards and three
 Details groups. Workspace and Messages use the same composer, notebook,
-request/recovery controllers and fixed recording/workflow hosts. Opening Scribe
-or Research retains unread status until its reply history is actually displayed.
+request/recovery controllers and fixed recording/workflow hosts. Opening Scribe,
+Visit Prep or Research retains unread status until its reply history is displayed.
 Unavailable bots retain their attention status. Research requests, recording
 transitions and unconfirmed recording metadata block layout changes without
 changing their existing consent, recovery or exact retry behavior.
@@ -160,6 +160,39 @@ run. No Messages build has been released to the phone.
 - Inbox review state now uses the existing source/team/review validators with
   batch-loaded typed inputs; no separate approximation grants review authority.
 - Browser checks have verified exact draft acceptance/return and a visible Send
-  control at a 390 × 420 viewport. Final recording continuity, long text,
-  Research and native acceptance remain in progress. Development Fast Refresh
-  is excluded from the recording continuity evidence.
+  control at a 390 × 420 viewport. The frozen rehearsal now also completes Research query/source review and
+  selected-excerpt saving. Generated audio continues in the same recorder through
+  Messages → Workspace → Messages and saves all 18 generated chunks. Development
+  Fast Refresh is excluded from this recording continuity evidence. Physical
+  keyboard, VoiceOver and first-install timing remain unverified.
+
+### Final workflow corrections
+
+- A New message context reopen could treat the temporary empty Chief composer as
+  an edit and overwrite its retained draft. Preparation now belongs to the
+  workspace generation. Two tests use the real loader and reproduce both timing
+  cases; the browser now retains separate Chief and Follow-up drafts in both
+  directions. Automated encrypted-store tests establish reload persistence; a
+  guarded browser reload alone is not evidence that a new document loaded.
+- During chat restoration, Send, Enter, form submission and the shared model
+  controller reject submission until the destination draft is ready. A delayed
+  restoration test proves the previous bot’s text cannot be dispatched.
+- Long context labels and 200% text no longer consume the chat viewport or push
+  New message beyond the right edge. The full context remains available in
+  Details. Short-screen layout follows the measured visual viewport, and its
+  composer remains reachable above the bottom navigation.
+- Messages sheets have a persistent close control. Opening a Details task focuses
+  its heading and returning restores the previous conversation scroll position.
+- Research's explicit context picker shows visits only. Team activity and account
+  connector controls stay in their relevant Details destinations.
+- GitHub's full web, Python lint/type, infrastructure and all three signed UI
+  jobs passed on 7cc047a. The backend stopped after 2,457 passes because the
+  current-head downgrade test expected the prior migration's refusal message.
+  The assertion now checks the new migration's retained-read-history refusal;
+  27 fresh PostgreSQL workspace/inbox tests pass, including that full migration
+  and data-preservation case. Runtime downgrade protections are unchanged.
+
+The physical iPhone is currently unavailable and the Mac is locked. Native UI
+acceptance remains pending, the rollout flag stays off in ordinary builds, and
+no Messages build has been installed on the phone. The synthetic rehearsal flag
+only enables the candidate for local validation.

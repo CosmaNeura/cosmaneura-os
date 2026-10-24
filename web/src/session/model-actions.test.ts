@@ -7,6 +7,7 @@ import {modelRequestHash,type ModelOperation} from '../model-work-request';
 import type {AuthenticatedWorkspaceIdentity,ProviderTeam,Workspace} from '../workspace-api';
 import {WorkspaceSession} from './workspace-session';
 import type {ModelActionContext} from './model-actions';
+import {teamFixture} from '../team-setup-test-fixture';
 
 const team:ProviderTeam={revision:1,recovery_scope:'a'.repeat(64),template_version:'provider-team-v1',llm:{enabled:true,model:'gpt-4.1'},
   configuration:{practice_context:'DPC',bots:[{role:'visit_prep',name:'Visit Prep',enabled:true,response_style:'brief',include_notebook:true,include_evidence:true}]},members:[]};
@@ -22,6 +23,18 @@ async function durable(session:WorkspaceSession,workspace:Workspace,authenticate
 }
 
 describe('shared model request ownership',()=>{
+  it.each(['ask','save'] as const)('blocks %s during conversation restoration and sends only the restored bot draft afterward',async command=>{
+    const workspace=await pendingWorkspace(),ask=vi.fn(async(_owner,_id,body:typeof conversationFixture)=>modelReceipt(body,workspace.id));
+    const session=new WorkspaceSession({models:{workspace:{ask,read:async()=>workspace,team:async()=>teamFixture()}}});open(session,workspace);
+    session.setTeam(teamFixture());session.setTeamDraft(teamFixture().configuration);session.setSelected('follow_up');
+    session.models.updateThought('Keep this invented Chief draft separate.');session.setConversationBusy(true);
+    if(command==='ask')await session.models.ask('follow_up',null,context(session));
+    else await session.models.save({...operation,body:{...operation.body,role:'follow_up',content:session.getSnapshot().thought}},'submit',context(session));
+    expect(ask).not.toHaveBeenCalled();expect(session.getSnapshot()).toMatchObject({thought:'Keep this invented Chief draft separate.',pending:null,busy:false});
+    session.models.updateThought('Send this invented Follow-up draft.');session.setConversationBusy(false);
+    await session.models.ask('follow_up',null,context(session));
+    expect(ask).toHaveBeenCalledOnce();expect(ask.mock.calls[0][2]).toMatchObject({role:'follow_up',content:'Send this invented Follow-up draft.'});
+  });
   it('checks a retained exact request without starting model work',async()=>{
     const workspace=await pendingWorkspace(),saved=await modelReceipt();
     const ask=vi.fn(),resolve=vi.fn(async()=>({...saved,outcome:'not_found' as const,saved_entry:null}));

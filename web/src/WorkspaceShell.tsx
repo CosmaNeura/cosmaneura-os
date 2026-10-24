@@ -156,7 +156,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const [navigationHeight,setNavigationHeight]=useState(80);
   useLayoutEffect(()=>{
     const root=workspaceFrame.current;if(!root||!messagesMode||!phoneLayout())return;
-    const measure=()=>{root.style.setProperty('--messages-height',`${Math.max(220,(window.visualViewport?.height??window.innerHeight)-Math.max(0,root.getBoundingClientRect().top))}px`);};
+    const measure=()=>{const height=Math.max(220,(window.visualViewport?.height??window.innerHeight)-Math.max(0,root.getBoundingClientRect().top));root.style.setProperty('--messages-height',`${height}px`);root.dataset.messagesCompact=String(height<600);};
     measure();window.addEventListener('resize',measure);window.visualViewport?.addEventListener('resize',measure);
     return()=>{window.removeEventListener('resize',measure);window.visualViewport?.removeEventListener('resize',measure);};
   },[messagesMode,settingsOpen,practicePage]);
@@ -458,8 +458,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     const address=contextBotRef.current;await openPrivateNotebook(result,view);
     if(address&&previousIdentity.current===result.identity&&session.getSnapshot().workspace?.id===result.workspace.id){setContextBot(null);await openConversation(result.workspace.id,address,undefined,true);}
   }
+  const taskFocusPending=useRef(false),taskScrollReturn=useRef<number|null>(null);
   function showConversationTask(task:'Review'|'Notebook'|'Sources'|'Work'|'Activity'|'Tools'){
     if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;setConversationDetails(false);
+    taskFocusPending.current=true;taskScrollReturn.current=mobileChatFrame.scrollRef.current?.scrollTop??null;
     if(task==='Activity'||task==='Tools'){setMessagesTask(task);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setTeamWorkExpanded(task==='Activity');}
     else{setMessagesTask(null);setPanel(task);setMobilePanel(task);setPhoneChatToolsOpen(false);}
   }
@@ -861,6 +863,19 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const contextChoice=contextBot?team?.configuration.bots.find(item=>botAddress(item)===contextBot):null;
   const messagesTaskLabel=messagesTask??(mobilePanel!=='Conversation'?({Notebook:'Notes',Sources:'Saved sources',Review:'Review note',Work:'Follow-up and linked work'} as Record<string,string>)[mobilePanel]:null);
 
+  useEffect(()=>{
+    if(!messagesMode||settingsOpen||practiceOpen)return;
+    if(messagesTaskLabel&&taskFocusPending.current){
+      taskFocusPending.current=false;
+      if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=0;
+      const heading=workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header h1');
+      heading?.focus({preventScroll:true});heading?.scrollIntoView?.({block:'start'});
+    }else if(!messagesTaskLabel&&taskScrollReturn.current!==null){
+      if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=taskScrollReturn.current;
+      taskScrollReturn.current=null;mobileChatFrame.onScroll();
+    }
+  },[messagesMode,messagesTaskLabel,settingsOpen,practiceOpen]);
+
   const showExecutionProof=!!onExit&&import.meta.env.VITE_SHOW_EXECUTION_PROOF==='true';
   const errorBanner=error&&<div className="team-banner error workspace-error-banner" role="alert"><p>{error}</p><div className="workspace-error-actions">
     {readRetry&&<button disabled={busy||homeBusy||!!pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void readRetry.run()}>Try again</button>}
@@ -955,7 +970,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked}
         onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
         onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>void session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated)}/>}
-      {contextChoice&&!settingsOpen&&(!privateRecordingEntry||recordingMinimized)&&<header className="messages-context-choice"><button disabled={homeBusy||homePending} onClick={()=>{setContextBot(null);goHome();}}>‹ Messages</button><h1>{contextChoice.name}</h1><p>Choose the visit or private note for this conversation.</p></header>}
+      {contextChoice&&!settingsOpen&&(!privateRecordingEntry||recordingMinimized)&&<header className="messages-context-choice"><button disabled={homeBusy||homePending} onClick={()=>{setContextBot(null);goHome();}}>‹ Messages</button><h1>{contextChoice.name}</h1><p>{contextChoice.role==='research'?'Choose the visit for this research.':'Choose the visit or private note for this conversation.'}</p></header>}
       {messagesMode&&conversationError&&practicePage==='notebook'&&!settingsOpen&&<p className="team-banner" role="alert">{conversationError}</p>}
 
       {settingsOpen&&!hasWorkspaceIdentity&&<section className="settings-hub" aria-labelledby="offline-settings-title"><h1 id="offline-settings-title">Settings</h1><p>Settings are available after your workspace connects.</p><button className="settings-done" onClick={closeSettings}>Done</button></section>}
@@ -1066,7 +1081,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         recordingActive={!!privateRecordingEntry} openRecordingRequest={privateRecordingRequest}
         recordings={privateRecordings&&privateRecordings.identity===authenticated&&privateRecordings.generation===generation.current&&privateRecordings.scope===journal.current?.scope?privateRecordings.rows:undefined} onReopenRecording={reopenPrivateRecording}
         onOpened={value=>contextOpened(value)} onNoteOpened={value=>contextOpened(value,'notebook')}/></div>}
-      <section hidden={settingsOpen||practicePage!=='visits'} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
+      <section hidden={settingsOpen||practicePage!=='visits'} data-conversation-picker={!!contextChoice} className={`team-welcome${encounters ? " team-welcome-choosing" : ""}`}><p className="team-kicker">{encounters ? "YOUR VISITS" : "YOUR PRACTICE"}</p>
         <h1>{researchEntry ? "Choose a visit for Research" : entryIntent==="fax" ? "Choose a visit for fax work" : entryIntent==="chief" ? "Choose a visit for Chief" : entryIntent==="record" ? "Choose the visit to record" : entryIntent==="recording" ? "Choose the recorded visit" : encounters ? "Your encounters" : "Ready for your next visit?"}</h1><p>{researchEntry ? "Keep trial results and source evidence with the right encounter." : entryIntent==='fax' ? "Keep the fax document, recipient and delivery status with the right visit." : entryIntent==='chief' ? "Start with typed notes and prepare your next step." : encounters ? "Record a visit, or open its notes." : "Start with notes, record a conversation, or pick up an existing visit."}</p>
         <WelcomeActions showConnections={!!authenticated&&CONNECTION_ONBOARDING_BUILD} compact={!!encounters}
           connectionsDisabled={busy||!!pending||connectionNavigationLocked} encounterDisabled={busy||!!pending}
@@ -1078,8 +1093,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onResearch={authenticated?()=>{setResearchEntry(true);setEntryIntent(null);void loadEncounters();}:undefined}/>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {workspace&&practicePage==='visits'&&!settingsOpen&&<button className="team-phone-notebook-return" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
-        {authenticated&&encounters&&<VisitCatalog identity={authenticated} visits={encounters} locked={busy||!!pending} recordingActive={!!privateRecordingEntry}
-          onOpen={appointmentId=>{const target=contextBot;void open(appointmentId).then(()=>{const current=session.getSnapshot().workspace;if(target&&current?.appointment_id===appointmentId){setContextBot(null);return openConversation(current.id,target);}});}} onRecord={CAPTURE_WORKSPACE_BUILD&&(!team||team.capture?.enabled)?appointmentId=>void open(appointmentId,undefined,undefined,true):undefined}
+        {authenticated&&encounters&&<VisitCatalog identity={authenticated} visits={encounters} visitsOnly={contextChoice?.role==='research'} locked={busy||!!pending} recordingActive={!!privateRecordingEntry}
+          onOpen={appointmentId=>{const target=contextBot;void open(appointmentId).then(()=>{const current=session.getSnapshot().workspace;if(target&&current?.appointment_id===appointmentId){setContextBot(null);return openConversation(current.id,target);}});}} onRecord={!contextChoice&&CAPTURE_WORKSPACE_BUILD&&(!team||team.capture?.enabled)?appointmentId=>void open(appointmentId,undefined,undefined,true):undefined}
           onPrivateNote={workspaceId=>{void session.loading.openSavedPrivate(workspaceId,{authenticated,failure,opened:openPrivateNotebook});}}
           onConnections={()=>void openSettings('core')}/>}
         <p className="team-fine">Notes and private drafts do not need email or calendar setup.</p>
@@ -1208,7 +1223,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           <div id={`chief-tools-${workspace.id}`} className="team-conversation-tools" hidden={messagesMode?!messagesTask&&!phoneChiefToolsVisible&&bot?.role!=='research':phoneChiefConversation&&!phoneChiefToolsVisible}>
           {phoneChiefConversation&&<header className="chief-tools-heading"><h3>Chief tools</h3><button className="team-subtle" disabled={viewNavigationLocked} onClick={returnToPhoneChat}>Back to chat</button></header>}
           {phoneChiefToolsVisible&&thought!==''&&!(nativeChat&&clinicalTeamExpanded)&&<p className="team-fine chief-tools-draft" role="status">Your directions are kept in this plan. Prepare Follow-up and Research includes them with the saved note.</p>}
-          {teamDrafts}
+          <div className="messages-activity-host" hidden={messagesMode&&messagesTask!=='Activity'}>{teamDrafts}</div>
           
           {prepAvailable && bot && authenticated && team &&
             <SessionPrepPanel key={prepEpoch} workspaceId={workspace.id} identity={authenticated}
@@ -1257,7 +1272,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             onBusyChange={session.setResearchPending} onDenied={failure} onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}}/>
             : <p className="research-status">Sign in to use private Research settings and check public source connections.</p>}
             <button className="team-subtle" aria-expanded={savedResearchChat} onClick={()=>setSavedResearchChat(value=>!value)}>Saved encounter conversation</button></>}
-          {authenticated && <details><summary>Team connector tools</summary><ConnectorToolsPanel identity={authenticated}
+          {authenticated && <details hidden={messagesMode&&messagesTask!=='Tools'}><summary>Team connector tools</summary><ConnectorToolsPanel identity={authenticated}
             locked={locked||captureNavigationLocked||captureDraftLocked} onAuthenticationLost={failure}/></details>}
           {bot?.role==='research'&&authenticated&&agentResearchRecovery&&<AgentResearchReviewPanel
             identity={authenticated} workspaceId={workspace.id} recovery={agentResearchRecovery}
@@ -1297,7 +1312,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           <div hidden={phoneChiefToolsVisible || bot?.role==='research'&&!savedResearchChat} className="team-composer-wrap">
             {!nativeChat&&!phoneChiefConversation&&chiefStarters}
             {!team?.revision ? <p className="team-fine">You can save notes now. Use your team above to start a conversation.</p> :
-            <form className="team-composer" onSubmit={event => { event.preventDefault();if(chiefNoteCompose)submitPhoneNoteTask();else ask(); }}>
+            <form className="team-composer" onSubmit={event => { event.preventDefault();if(conversationBusy)return;if(chiefNoteCompose)submitPhoneNoteTask();else ask(); }}>
               {chiefNoteCompose&&<div className="chief-note-compose-context" role="status"><span>Follow-up + Research · v{phoneNoteTask!.selection.note_version}</span>
                 <button type="button" className="team-subtle" disabled={viewNavigationLocked} aria-label="Return to regular message" onClick={()=>{setPhoneNoteTask(null);setQuestionFocus(value=>value+1);}}>Message Chief</button></div>}
               {chiefNoteCompose&&(!phoneNoteMatches?<p className="chief-note-compose-attention" role="status">The saved note changed. Choose its current version above; your directions are kept.</p>:phoneNoteDirectionsError?<p className="chief-note-compose-attention" role="status">{phoneNoteDirectionsError}</p>:phoneNoteDirectionsUnsupported?<p className="chief-note-compose-attention" role="status">This practice service needs an update to include your directions with the saved note. Your text is kept.</p>:phoneNoteAlreadyRequested?<p className="chief-note-compose-attention" role="status">These exact drafts are already requested. Review their saved result above.</p>:!phoneNoteTeamReady?<p className="chief-note-compose-attention" role="status">Enable Chief, Follow-up and Research with private draft handoffs to prepare these drafts.</p>:null)}
@@ -1309,8 +1324,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               <label className="team-sr-only" htmlFor="team-question">{chiefNoteCompose?'Directions for Chief':'Thought or question'}</label>
               <textarea ref={questionRef} id="team-question" className={chiefNoteCompose?'clinical-team-directions':undefined} aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?"team-request-progress":undefined} rows={2} maxLength={4000} disabled={conversationBusy || phoneChiefToolsVisible || (nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => updateThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? chiefNoteCompose?'Optional directions for these drafts…':phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
                 onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&
-                  !(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession)){event.preventDefault();if(!locked){if(chiefNoteCompose)submitPhoneNoteTask();else if(thought.trim())ask();}}}}/>
-              <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={locked || !!nativeChatOwner&&!nativeComposerEditable || (chiefNoteCompose?phoneNoteTaskBlocked:!thought.trim()) || !bot?.enabled}
+                  !(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession)){event.preventDefault();if(!conversationBusy&&!locked){if(chiefNoteCompose)submitPhoneNoteTask();else if(thought.trim())ask();}}}}/>
+              <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={conversationBusy || locked || !!nativeChatOwner&&!nativeComposerEditable || (chiefNoteCompose?phoneNoteTaskBlocked:!thought.trim()) || !bot?.enabled}
                 onPointerDown={event=>{if(nativeChatOwner&&document.activeElement===questionRef.current)event.preventDefault();}} aria-label={chiefNoteCompose?'Prepare Follow-up and Research':'Send message'}>↑</button></div>
             </form>}
             <p className="team-fine">{bot?.blocked_capabilities?.includes("model_answer") ? "AI answers are unavailable for this teammate. You can still check saved sources." : team?.llm.enabled ? phoneChiefConversation?"Review Chief’s answer and sources before using them.":"Ask about this visit. Check the answer and its sources before using it." : "Saved notes are available. AI chat needs a service connection."} {!phoneChiefConversation&&(CAPTURE_WORKSPACE_BUILD&&authenticated&&workspace.private_draft?.state==='unlinked'&&!visitLinked ? "Record privately with Scribe. Choose a patient or visit later." : CAPTURE_WORKSPACE_BUILD && authenticated && team?.capture?.enabled ? "Use the Scribe visit controls for consented recording." : "Recording is not connected.")}</p>

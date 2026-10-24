@@ -55,7 +55,9 @@ export class WorkspaceModelActions {
     const {authenticated,notebookDraft,modelFailure}=context;
     const checkRecoveryOwner=(value:ProviderTeam)=>this.session.recovery.checkOwner(authenticated,value);
     const requestWorkspace=confirmed?.workspace??workspace,requestTeam=confirmed?.team??team,requestIdentity=confirmed?.identity??identity;
-    if(!requestWorkspace||!requestIdentity||busy||modelBusy.current||!validModelOperation(operation)||confirmed&&(!confirmed.isCurrent()||!confirmed.canSend()))return;
+    // Navigation selects the next bot before its retained composer is restored.
+    // Neither presentation may submit that temporary previous-bot text.
+    if(!requestWorkspace||!requestIdentity||busy||this.session.getSnapshot().conversationBusy||modelBusy.current||!validModelOperation(operation)||confirmed&&(!confirmed.isCurrent()||!confirmed.canSend()))return;
     const currentRequest=()=>current===generation.current&&(!confirmed||confirmed.isCurrent());
     modelBusy.current=true;
     const current=generation.current,id=requestWorkspace.id,active=journal.current?.value;

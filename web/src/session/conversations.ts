@@ -14,7 +14,9 @@ export class WorkspaceConversations {
   private readEpoch=0;
   private opening=false;
   private unreadDisplay:{row:ConversationSummary;identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number}|null=null;
-  private readonly prepared=new WeakMap<DraftJournal,Set<string>>();
+  // A workspace reopen clears the composer even when the journal and address
+  // are unchanged. Preparation belongs to that composer lifetime, not the store.
+  private readonly prepared=new WeakMap<DraftJournal,Map<string,number>>();
   constructor(private readonly session:WorkspaceSession,private readonly api=conversationsApi,private readonly readWorkspace=workspaceApi.read){}
   reset(){this.readEpoch++;this.opening=false;this.unreadDisplay=null;}
   async refresh(identity:AuthenticatedWorkspaceIdentity,more=false,failure?:(cause:unknown)=>void){
@@ -31,11 +33,11 @@ export class WorkspaceConversations {
   async observe(host:ConversationHost){
     const view=this.session.getSnapshot(),wid=view.workspace?.id,bot=view.selected;if(!wid||!host.current()||this.opening)return;
     const address=editorAddress(wid,`conversation:${bot}`),generation=this.session.generation.current,edit=this.session.models.thoughtEditVersion.current,route=this.session.navigation.sequence.current;
-    let known=this.prepared.get(host.journal);if(!known){known=new Set();this.prepared.set(host.journal,known);}
-    if(!known.has(address)){
+    let known=this.prepared.get(host.journal);if(!known){known=new Map();this.prepared.set(host.journal,known);}
+    if(known.get(address)!==generation){
       const retained=await host.journal.load(address),live=this.session.getSnapshot();
       if(!host.current()||generation!==this.session.generation.current||route!==this.session.navigation.sequence.current||edit!==this.session.models.thoughtEditVersion.current||live.workspace?.id!==wid||live.selected!==bot||this.opening)return;
-      known.add(address);
+      known.set(address,generation);
       if(retained&&retained.kind==='editor'&&!live.thought&&!live.pending&&!live.recoveryOffers.length){const draft=parseConversationDraft(retained.data);this.restore(draft,host,wid,generation);}
     }
     await this.retain(host);
@@ -52,13 +54,13 @@ export class WorkspaceConversations {
     if(!workspace||!teamAddress(selected))return true;if(!host.current())return false;
     const generation=this.session.generation.current,edit=this.session.models.thoughtEditVersion.current;
     const address=editorAddress(workspace.id,`conversation:${selected}`);
-    let known=this.prepared.get(host.journal);if(!known){known=new Set();this.prepared.set(host.journal,known);}
+    let known=this.prepared.get(host.journal);if(!known){known=new Map();this.prepared.set(host.journal,known);}
     const current=()=>{const view=this.session.getSnapshot();return host.current()&&generation===this.session.generation.current&&view.workspace?.id===workspace.id&&view.selected===selected&&view.thought===thought&&this.session.models.thoughtEditVersion.current===edit;};
-    if(!known.has(address)){
+    if(known.get(address)!==generation){
       const prior=await host.journal.load(address);if(!current())return false;
       // Opening an existing Workspace must not erase a chat draft not yet restored.
       if(prior&&prior.kind==='editor'&&parseConversationDraft(prior.data).text&&!thought)return true;
-      known.add(address);
+      known.set(address,generation);
     }
     const task=phoneNoteTask&&phoneNoteTask.workspaceId===workspace.id&&phoneNoteTask.owner===host.identity&&phoneNoteTask.generation===generation?phoneNoteTask:null;
     const data:ConversationDraft={text:thought,...(task?{noteTask:{contract:'chief-note-task.compose.v1',note_id:task.selection.note_id,note_version:task.selection.note_version,content_hash:task.selection.content_hash,source_fingerprint:task.selection.source_fingerprint}}:{})};
@@ -86,7 +88,7 @@ export class WorkspaceConversations {
       const retained=await journal.load(editorAddress(workspaceId,`conversation:${bot}`));
       if(!destination()||this.session.models.thoughtEditVersion.current!==edit)return;
       await host.authorize();if(!destination()||this.session.models.thoughtEditVersion.current!==edit||host.blocked())return;
-      let known=this.prepared.get(journal);if(!known){known=new Set();this.prepared.set(journal,known);}known.add(editorAddress(workspaceId,`conversation:${bot}`));
+      let known=this.prepared.get(journal);if(!known){known=new Map();this.prepared.set(journal,known);}known.set(editorAddress(workspaceId,`conversation:${bot}`),generation);
       if(retained){
         if(retained.kind!=='editor'||retained.editor!==`conversation:${bot}`)throw new DraftStoreError('integrity');
         this.restore(parseConversationDraft(retained.data),host,workspaceId,generation);
@@ -95,7 +97,7 @@ export class WorkspaceConversations {
       const latest=this.session.getSnapshot(),selectedBot=latest.team?.configuration.bots.find(item=>(item.instance_id||item.role)===bot);
       if(selectedBot?.role==='scribe'){this.session.setPanel('Notebook');this.session.setMobilePanel('Notebook');}
       if(selectedBot?.role==='research')this.session.setSavedResearchChat(false);
-      const deferRead=selectedBot?.role==='scribe'||selectedBot?.role==='research';
+      const deferRead=selectedBot?.role==='scribe'||selectedBot?.role==='research'||selectedBot?.role==='visit_prep';
       this.unreadDisplay=deferRead&&observed?{row:observed,identity:host.identity,journal,generation}:null;
       await this.api.mark(host.identity,workspaceId,bot,observed&&!deferRead?{watermark:observed.watermark,manual_unread:false,expected_version:observed.marker_version}:{});
       if(current()&&generation===this.session.generation.current)void this.refresh(host.identity,false,host.failure);

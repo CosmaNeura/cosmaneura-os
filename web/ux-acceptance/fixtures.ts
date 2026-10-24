@@ -15,9 +15,12 @@ import type {ResearchObservation,ResearchSavedPacket} from '../src/research-cont
 export const identity={mode:'clerk_jwt' as const,getToken:async()=>'invented-ui-rehearsal-token',
   ...(new URLSearchParams(location.search).has('native-chat')?{nativeSession:{revision:modelUuid(999),isCurrent:()=>true}}:{})};
 const roles:BotRole[]=['visit_prep','scribe','follow_up','chief','research'];
-const names=['Visit Prep','Scribe','Follow-up','Chief of Staff','Research'];
+const longNames=new URLSearchParams(location.search).get('long-names')==='1';
+const names=longNames?['Visit Preparation and Care Coordination','Visit Notes and Recording Assistant','Follow-up and Patient Care Planning','Chief of Staff for Complex Care','Clinical Evidence Research Assistant']:['Visit Prep','Scribe','Follow-up','Chief of Staff','Research'];
+const visitTitle=longNames?'Jordan Cypress — sleep diary, medication questions and follow-up planning for the next synthetic visit':'Jordan · sleep diary follow-up';
+const visitLabel=longNames?'Jordan Cypress Evergreen — extended synthetic follow-up visit for sleep, medications and care coordination':'Jordan Cypress · synthetic visit';
 const stamp=new Date().toISOString();
-const storageKey='cosmabot-desktop-ux-acceptance-v1';
+const storageKey='cosmabot-desktop-ux-acceptance-v1'+(longNames?':long-names':'');
 // A tab owns one synthetic account; its scope survives reload but never grants
 // another tab access to this tab's server fixture or working drafts.
 const scopeKey=storageKey+':owner';
@@ -40,9 +43,9 @@ const entry=(id:string,revision:number,kind:WorkspaceEntry['kind'],content:strin
   source_label:kind==='synthetic_source'?'Invented encounter input':null,origin:'synthetic_fixture',ticket:null,created_at:stamp});
 function initial():Workspace{
   const chief=entry(modelUuid(600),2,'conversation','Please prepare the saved intake and visit notes for handoffs.');
-  chief.reply={agent_name:'Chief of Staff',agent_id:modelUuid(103),role:'chief',backend:'azure_gpt41',
+  chief.reply={agent_name:names[3],agent_id:modelUuid(103),role:'chief',backend:'azure_gpt41',
     content:'Three private drafts are ready for your review. Contact preference, consent and the medication list still need staff attention.',context_revision:1,citations:[]};
-  return {model_contract_version:1,model_observed_at:stamp,notebook:{title:'Jordan · sleep diary follow-up',title_revision:0,created_at:stamp},id:modelUuid(71),appointment_id:modelUuid(72),label:'Jordan Cypress · synthetic visit',revision:5,work_candidates:[],follow_ups:[],
+  return {model_contract_version:1,model_observed_at:stamp,notebook:{title:visitTitle,title_revision:0,created_at:stamp},id:modelUuid(71),appointment_id:modelUuid(72),label:visitLabel,revision:5,work_candidates:[],follow_ups:[],
     entries:[entry(modelUuid(1),1,'synthetic_source','Invented intake: appointment access concern, after-15:00 contact preference, medication list missing, consent undocumented.'),chief,
       ...drafts.map((body,i)=>({...entry(modelUuid(610+i),3+i,'handoff_result','Private draft result'),reply:{agent_name:names[i],agent_id:modelUuid(100+i),
         role:roles[i],backend:'azure_gpt41',content:body,context_revision:2,citations:[]}}))],
@@ -73,7 +76,7 @@ export async function installFixtures(reset=false){
   Object.assign(conversationsApi,{
     read:async()=>({contract_version:1,as_of:stamp,next_cursor:null,rows:team.configuration.bots.filter(bot=>markers.has(botAddress(bot))||state.entries.some(entry=>entry.kind==='conversation'&&entry.reply?.role===bot.role)).map(bot=>{
       const marker=markers.get(botAddress(bot)),entry=state.entries.filter(entry=>entry.kind==='conversation'&&entry.reply?.role===bot.role).at(-1);
-      return {workspace_id:state.id,appointment_id:state.appointment_id,context_label:state.notebook?.title??state.label,bot:{address:botAddress(bot),role:bot.role,name:bot.name,available:bot.enabled&&!bot.retired},preview:entry?.reply?.content.slice(0,180)??'No messages yet',preview_withheld:false,attention:bot.role==='chief'&&state.handoffs?.some(h=>h.review?.decision!=='accepted')?'needs_review':'idle',last_activity_at:stamp,watermark:'r1'+'0'.repeat(16)+'e'+'0'.repeat(96),unread:marker?.manual||!marker?.seen,manual_unread:marker?.manual??false,marker_version:marker?.version??0} satisfies ConversationSummary;
+      return {workspace_id:state.id,appointment_id:state.appointment_id,context_label:state.notebook?.title??state.label,bot:{address:botAddress(bot),role:bot.role,name:bot.name,available:bot.enabled&&!bot.retired},preview:entry?.reply?.content.slice(0,180)??'No messages yet',preview_withheld:false,attention:bot.role==='chief'&&state.handoffs?.some(h=>h.review?.decision!=='accepted')?'needs_review':'idle',last_activity_at:stamp,watermark:'r1'+'0'.repeat(16)+'e'+'0'.repeat(96),unread:(marker?.manual??false)||(!!entry&&!marker?.seen),manual_unread:marker?.manual??false,marker_version:marker?.version??0} satisfies ConversationSummary;
     })}),
     mark:async(_owner:unknown,_wid:string,bot:string,command:{watermark?:string;manual_unread?:boolean;expected_version?:number})=>{const prior=markers.get(bot),version=prior?.version??0,manual=command.expected_version===version&&command.manual_unread!==undefined?command.manual_unread:prior?.manual??false;markers.set(bot,{version:version+1,manual,seen:!!command.watermark||prior?.seen===true});return {contract_version:1,marker_version:version+1,manual_unread:manual,seen_watermark:command.watermark??null};},
   });

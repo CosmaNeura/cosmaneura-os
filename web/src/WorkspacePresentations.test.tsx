@@ -7,6 +7,7 @@ import {identity,installFixtures} from '../ux-acceptance/fixtures';
 import {workspaceApi,WorkspaceApiError} from './workspace-api';
 import {handoffReviewHash,type HandoffReviewInput} from './handoff-review-api';
 import {memoryDraftStorage} from './draft-test-fixture';
+import {DraftJournal} from './draft-journal';
 import {PRESENTATION_KEY} from './session/presentation';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement;
@@ -45,6 +46,39 @@ describe('presentation parity',()=>{
     await vi.waitFor(()=>expect(ask).toHaveBeenCalledOnce());expect(ask.mock.calls[0][2]).toMatchObject({expected_revision:6,role:'chief',content:'Review these invented notes.'});
     expect(ask.mock.calls[0][2].idempotency_key).toMatch(/^[a-f0-9-]{36}$/);
     await vi.waitFor(()=>expect(composer.value).toBe(''));
+  });
+  it('focuses a Details task and restores the reader position on return',async()=>{
+    await open('messages');const history=host.querySelector<HTMLDivElement>('.mobile-chat-scroll')!;
+    history.scrollTop=120;await act(async()=>history.dispatchEvent(new Event('scroll',{bubbles:true})));
+    await click('Details');await click('Team activity and drafts');
+    expect(document.activeElement).toBe(host.querySelector('.messages-thread-header h1'));
+    expect(document.activeElement?.textContent).toBe('Activity');expect(history.scrollTop).toBe(0);
+    await click('‹ Back to chat');expect(history.scrollTop).toBe(120);
+  });
+  it('cannot send the previous bot draft while an inbox conversation restores',async()=>{
+    await open('messages');const chief='Keep Chief draft when opening Follow-up.',followUp='Send only this separate invented Follow-up draft.';
+    const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;
+    await input(composer,chief);await click('‹ Messages');await click('New message');
+    await act(async()=>{[...host.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find(item=>item.querySelector('strong')?.textContent==='Follow-up')!.click();});
+    await vi.waitFor(()=>expect([...host.querySelectorAll<HTMLButtonElement>('.notebook-list-row .practice-home-note')].find(visible)).toBeTruthy());
+    await act(async()=>{[...host.querySelectorAll<HTMLButtonElement>('.notebook-list-row .practice-home-note')].find(visible)!.click();});
+    await vi.waitFor(()=>expect(composer.disabled).toBe(false));await input(composer,followUp);await click('‹ Messages');
+    const row=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(item=>item.querySelector('strong')?.textContent?.startsWith(name));
+    await vi.waitFor(()=>expect(row('Chief of Staff')).toBeTruthy());await act(async()=>row('Chief of Staff')!.click());
+    await vi.waitFor(()=>expect(composer.value).toBe(chief));await click('‹ Messages');
+    const load=DraftJournal.prototype.load,ask=vi.spyOn(workspaceApi,'ask');let release!:()=>void;
+    const held=new Promise<void>(resolve=>{release=resolve;});vi.spyOn(DraftJournal.prototype,'load').mockImplementation(async function(this:DraftJournal,address){if(address.endsWith(':conversation:follow_up'))await held;return load.call(this,address);});
+    await vi.waitFor(()=>expect(row('Follow-up')).toBeTruthy());await act(async()=>row('Follow-up')!.click());
+    try{
+      await vi.waitFor(()=>expect(host.querySelector('.messages-thread-header h1')?.textContent).toBe('Follow-up'));
+      expect(composer.disabled).toBe(true);expect(composer.value).toBe(chief);
+      expect(host.querySelector<HTMLButtonElement>('.team-send')!.disabled).toBe(true);
+      await act(async()=>{composer.closest('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));composer.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+      expect(ask).not.toHaveBeenCalled();
+    }finally{await act(async()=>release());}
+    await vi.waitFor(()=>expect(composer.disabled).toBe(false));expect(composer.value).toBe(followUp);
+    await act(async()=>composer.closest('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+    await vi.waitFor(()=>expect(ask).toHaveBeenCalledOnce());expect(ask.mock.calls[0][2]).toMatchObject({role:'follow_up',content:followUp});
   });
   it('switches layouts without replacing the composer or notebook editor',async()=>{
     await open('messages');const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!,notebook=host.querySelector('#team-notebook');await input(composer,'Keep this invented draft.');

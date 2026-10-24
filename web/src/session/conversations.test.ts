@@ -24,6 +24,26 @@ describe('shared conversation state',()=>{
     f.session.models.updateThought('Another visit');await f.session.conversations.open(f.workspace.id,'chief',f.host);expect(f.session.getSnapshot().thought).toBe('Chief directions');
     await f.session.conversations.open(f.workspace.id,'follow_up',f.host);expect(f.session.getSnapshot().thought).toBe('Follow-up draft');
   });
+  it.each([false,true])('retains both drafts when New message reopens the same note (observe during reopen: %s)',async observeDuringReopen=>{
+    const f=await fixture(),chief='Retain these invented Chief directions after reopening.',followUp='Keep this separate invented Follow-up draft.';
+    f.session.models.updateThought(chief);await f.session.conversations.observe(f.host);
+    // New message retains the outgoing draft before showing the context picker.
+    expect(await f.session.conversations.retain(f.host)).toBe(true);f.session.setPracticePage('home');
+    // Reuse the real loader: choosing the existing note starts a new lifetime,
+    // clears the composer, and shows Chief before the requested bot opens.
+    await f.session.loading.openPrivate({identity:f.host.identity,workspace:f.workspace,team:f.session.getSnapshot().team!},{
+      authenticated:f.host.identity,beforeOpen:()=>{},show:()=>{f.session.setSelected('chief');f.session.setPracticePage('notebook');},
+      recoverAfterRead:async()=>{if(observeDuringReopen)await f.session.conversations.observe(f.host);},
+    });
+    await f.session.conversations.open(f.workspace.id,'follow_up',f.host);
+    expect(f.session.getSnapshot().thought).toBe('');
+    expect(await f.journal.load(editorAddress(f.workspace.id,'conversation:chief'))).toMatchObject({data:{text:chief}});
+    f.session.models.updateThought(followUp);await f.session.conversations.observe(f.host);
+    f.session.setPracticePage('home');await f.session.conversations.open(f.workspace.id,'chief',f.host);
+    expect(f.session.getSnapshot().thought).toBe(chief);
+    await f.session.conversations.open(f.workspace.id,'follow_up',f.host);expect(f.session.getSnapshot().thought).toBe(followUp);
+    expect(f.session.getSnapshot().pending).toBeNull();
+  });
   it('does not restore into a different bot or page after delayed authorization',async()=>{
     const f=await fixture();let resolve!:()=>void;f.host.authorize=()=>new Promise<void>(done=>{resolve=done;});
     const task=f.session.conversations.open(f.workspace.id,'follow_up',f.host);await vi.waitFor(()=>expect(resolve).toBeTypeOf('function'));

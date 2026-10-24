@@ -1,6 +1,6 @@
 import {useEffect,useId,useRef,type ReactNode} from 'react';
 
-export function WorkspaceDialog({title,onClose,children}:{title:string;onClose:()=>void;children:ReactNode}){
+export function WorkspaceDialog({title,onClose,children,closeLabel}:{title:string;onClose:()=>void;children:ReactNode;closeLabel?:string}){
   const ref=useRef<HTMLDivElement>(null),id=useId(),close=useRef(onClose);close.current=onClose;
   useEffect(()=>{
     const previous=document.activeElement as HTMLElement|null,element=ref.current!;
@@ -17,6 +17,6 @@ export function WorkspaceDialog({title,onClose,children}:{title:string;onClose:(
     return()=>{document.removeEventListener('keydown',key);if(previous?.isConnected)previous.focus();};
   },[]);
   return <div className="workspace-dialog-backdrop" onMouseDown={event=>{if(event.target===event.currentTarget)onClose();}}>
-    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1} className="workspace-dialog"><h2 id={id}>{title}</h2>{children}</div>
+    <div ref={ref} role="dialog" aria-modal="true" aria-labelledby={id} tabIndex={-1} className="workspace-dialog">{closeLabel?<header className="workspace-dialog-heading"><h2 id={id}>{title}</h2><button aria-label={closeLabel} onClick={onClose}>×</button></header>:<h2 id={id}>{title}</h2>}{children}</div>
   </div>;
 }
