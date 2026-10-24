@@ -118,7 +118,8 @@ transitions and unconfirmed recording metadata block layout changes without
 changing their existing consent, recovery or exact retry behavior.
 
 The rollout remains gated while the final frozen-build visual and native checks
-run. No Messages build has been released to the phone.
+run. Ordinary builds still keep Messages disabled; the separate invented-data
+phone preview is documented below.
 
 ## Validation
 
@@ -278,8 +279,9 @@ pending requests.
 
 GitHub run 40073093050, attempt 2, passed all nine required jobs on 8040b3f,
 including the full backend, web, signed UI and unchanged image-security gate.
-Commit 6b03415 is now pushed to PR #204 and has its own CI run. The previously
-reported billing block is resolved.
+The subsequent run 40098235982 also passed all nine jobs on 44c1087. Both
+6b03415 and 44c1087 are pushed to PR #204. The previously reported Actions
+availability block is resolved.
 
 The separate CosmaBot Preview, bundle `com.cosmasos.synthetic.w206`, is installed
 on the owner's iPhone 12. Build 7 comes from 6b03415; the regular CosmaBot app
@@ -290,8 +292,10 @@ acceptance. No backend deployment was performed.
 The owner confirmed VoiceOver can read and activate Chief, Details, the message
 field and Send in build 6. They reported no vibration in both builds 6 and 7;
 retaining view-associated UIKit feedback generators has therefore not established
-a fix. Native presentation and UIKit delivery are being traced before another
-haptic change is made.
+a fix. A real Send through iPhone Mirroring in build 7 reached both
+`receivePresentation` and UIKit `impactOccurred`; the invented message was
+visibly Delivered with a scripted reply. This establishes native command
+delivery, not a felt vibration. The debugger was detached after the trace.
 
 The owner reported that the direct Chief conversation header disappears when
 the keyboard opens, while the private-note route retains it. Native Messages
@@ -300,9 +304,16 @@ matching the established native Workspace frame. The browser frame is unchanged;
 UIKit's keyboardLayoutGuide remains the only native resize owner. The rehearsal
 notice stays in the inbox and Settings and no longer shifts native chat geometry.
 Fresh build 9 simulator replay confirms Chief, Back and Details remain below the
-notch on first direct focus, including actual Text Size 9. A remaining lower gap
-after Done also affects the inbox and is under native geometry investigation.
-Body text scales, but complete Dynamic Type acceptance is not yet established.
+notch on first direct focus, including actual Text Size 9. Native geometry inspection traced a remaining lower gap after Done to a
+keyboard layout guide retaining 68pt of dismissed accessory space. The root
+container now returns to its full bottom anchor after UIKit confirms dismissal,
+and synchronously lays out the keyboard guide before WebKit handles the next
+opening. Simulator build 14 passes three open/settled-Done cycles. The navigation
+measurement now observes its border box so safe-area padding changes also update
+the reserved tab height. Native Settings scrolls its section into view while
+focusing the heading, keeping the preceding Done navigation reachable. Build 14 also verifies Settings →
+Your team → All settings retains Done and returns to Chief. Final acceptance
+checks draft switching and enlarged text independently of component tests.
 
 Messages-enabled builds now require the server's conversations contract before
 rendering the workspace. A mounted compatibility test proves an older server is
@@ -321,3 +332,9 @@ restored in the permanent checkout. All 62 affected parity, history, frame,
 compatibility and native-helper tests pass, as do production and rehearsal
 TypeScript checks and the rehearsal renderer build. Subsequent build recipes,
 receipts and UI evidence are saved under the permanent October 24 resumed handoff.
+
+The final affected layout, parity, history, Settings and shell run passes all 49
+tests after the navigation measurement correction. Production and rehearsal
+TypeScript checks and the new rehearsal renderer build pass. The separate native
+scene/recovery suite passes all 11 cases. Existing React act and bundle-size
+warnings remain; no failing check was suppressed.

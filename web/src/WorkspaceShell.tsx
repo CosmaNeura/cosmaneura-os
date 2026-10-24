@@ -187,7 +187,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     const measure=()=>setNavigationHeight(nav.getBoundingClientRect().height);
     measure();
     if(typeof ResizeObserver==='undefined')return;
-    const observer=new ResizeObserver(measure);observer.observe(nav);return()=>observer.disconnect();
+    // Safe-area padding changes the space reserved for the tabs.
+    const observer=new ResizeObserver(measure);observer.observe(nav,{box:'border-box'});return()=>observer.disconnect();
   },[]);
   useEffect(()=>{
     const closed=previousRecordingOpen.current&&!privateRecordingEntry;previousRecordingOpen.current=!!privateRecordingEntry;
@@ -1099,7 +1100,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         <p>The previous {previousModelRequest.operation.type==='ask'?'question':'draft retry'} was last checked as {previousModelRequest.outcome.replaceAll('_',' ')} at {previousModelRequest.observed_at}. Its original body and binding remain on this device. A later request does not resolve that earlier provider uncertainty.</p></details>}
       {activityEnabled && settingsOpen && activityContextBusy && <p className="team-fine" role="status">Checking optional AI activity access…</p>}
       {activityEnabled && settingsOpen && activityContextError && <div className="team-banner error" role="alert"><p>{activityContextError}</p><button disabled={locked || activityContextBusy} onClick={()=>setActivityAttempt(value=>value+1)}>Recheck AI activity access</button></div>}
-      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
+      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} nativePresentation={!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
         onOpenMessagingWork={authenticated?openMessagingWork:undefined} messagingWorkLabel={workspace?'Open fax work for this visit':'Choose a visit for fax work'}
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
         onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveFaxDocument:undefined}

@@ -77,6 +77,46 @@ it('moves focus to the new screen title and keeps unavailable connections out', 
   await click('Done'); expect(close).toHaveBeenCalledOnce();
 });
 
+it.each([true,false])('keeps Settings navigation in the native scroll target while preserving heading focus (native=%s)', async nativePresentation => {
+  const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype,'scrollIntoView');
+  const scroll = vi.fn();
+  const focus = vi.spyOn(HTMLElement.prototype,'focus');
+  Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,writable:true,value:scroll});
+  const render = (open:boolean) => act(async () => root.render(<SettingsHub open={open} nativePresentation={nativePresentation}
+    team={<div><p>Long team settings</p><input aria-label="Retained team draft" defaultValue="Invented draft"/></div>}
+    teamSummary="Five coworkers" teamDirty={false} onClose={() => {}}/>));
+  try {
+    await render(false);
+    expect(scroll).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
+    await render(true);
+    const section = container.querySelector('.settings-hub')!;
+    const title = section.querySelector('h1')!;
+    const expectedTarget = nativePresentation ? section : title;
+    expect(document.activeElement).toBe(title);
+    expect(focus).toHaveBeenLastCalledWith({preventScroll:true});
+    expect(scroll.mock.contexts).toEqual([expectedTarget]);
+    expect(scroll).toHaveBeenLastCalledWith({block:'start'});
+    expect(section.querySelector('.settings-hub-nav')?.textContent).toContain('Done');
+    await click('Your team');
+    const editor = section.querySelector('[aria-label="Retained team draft"]');
+    expect(document.activeElement?.textContent).toBe('Your team');
+    expect(scroll.mock.contexts).toEqual([expectedTarget,expectedTarget]);
+    await click('All settings');
+    expect(document.activeElement?.textContent).toBe('Settings');
+    expect(scroll.mock.contexts).toEqual([expectedTarget,expectedTarget,expectedTarget]);
+    expect(section.querySelector('[aria-label="Retained team draft"]')).toBe(editor);
+    const focusCount = focus.mock.calls.length;
+    await render(false);
+    expect(scroll).toHaveBeenCalledTimes(3);
+    expect(focus).toHaveBeenCalledTimes(focusCount);
+  } finally {
+    focus.mockRestore();
+    if(originalScroll)Object.defineProperty(HTMLElement.prototype,'scrollIntoView',originalScroll);
+    else delete (HTMLElement.prototype as Partial<HTMLElement>).scrollIntoView;
+  }
+});
+
 it('keeps recovery available while preventing navigation during an undurable edit', async () => {
   const close = vi.fn();
   function App() {

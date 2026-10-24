@@ -10,6 +10,8 @@ import CosmaneuraIOSPCMCapacitor
     private var sceneDisconnected = false
     private var timer: Timer?
     private var stopTask: Task<Void, Never>?
+    private var keyboardBottom: NSLayoutConstraint?
+    private var restingBottom: NSLayoutConstraint?
     private let panel = UIView()
     private let titleLabel = UILabel()
     private let explanationLabel = UILabel()
@@ -26,6 +28,10 @@ import CosmaneuraIOSPCMCapacitor
         overrideUserInterfaceStyle = .light
         view.backgroundColor = .systemBackground
         buildPanel()
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)),
+            name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardDidHide(_:)),
+            name: UIResponder.keyboardDidHideNotification, object: nil)
         openWorkspace()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
@@ -33,6 +39,29 @@ import CosmaneuraIOSPCMCapacitor
                 self.tick()
             }
         }
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        // Keyboard notifications are process-wide. Only this active key window
+        // may opt into its own keyboard guide.
+        guard let window = view.window, window.isKeyWindow,
+              window.windowScene?.activationState == .foregroundActive,
+              notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool != false,
+              workspace != nil else { return }
+        restingBottom?.isActive = false
+        keyboardBottom?.isActive = true
+        // Commit the native resize before WebKit reacts to the same keyboard
+        // transition, so it does not also pan a full-height document.
+        view.layoutIfNeeded()
+    }
+
+    @objc private func keyboardDidHide(_ notification: Notification) {
+        // Some UIKit versions retain the dismissed accessory's height in the
+        // guide. Once UIKit confirms dismissal, the viewport is the full view.
+        // Interactive dismissal continues to follow the guide until didHide.
+        guard notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool != false else { return }
+        keyboardBottom?.isActive = false
+        restingBottom?.isActive = true
     }
 
     func setSceneActive(_ active: Bool) {
@@ -103,11 +132,15 @@ import CosmaneuraIOSPCMCapacitor
         let keyboard = view.keyboardLayoutGuide
         keyboard.followsUndockedKeyboard = false
         keyboard.usesBottomSafeArea = false
+        keyboardBottom = next.view.bottomAnchor.constraint(equalTo: keyboard.topAnchor)
+        restingBottom = next.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         NSLayoutConstraint.activate([
             next.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             next.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             next.view.topAnchor.constraint(equalTo: view.topAnchor),
-            next.view.bottomAnchor.constraint(equalTo: keyboard.topAnchor),
+            // Keep the guide attached from first layout so WebKit cannot also
+            // pan the document while UIKit begins the first keyboard resize.
+            keyboardBottom!,
         ])
         next.didMove(toParent: self)
     }

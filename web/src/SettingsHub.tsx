@@ -21,8 +21,8 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({appearance,open, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
-  appearance?:ReactNode;open: boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
+export function SettingsHub({appearance,open,nativePresentation=false, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+  appearance?:ReactNode;open: boolean;nativePresentation?:boolean; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
@@ -35,6 +35,7 @@ export function SettingsHub({appearance,open, team, members, core, scheduling, m
   const [visited, setVisited] = useState<Editor[]>(!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen]:[]);
   const [recovering,setRecovering]=useState<ConnectionId|null>(null);
   const title = useRef<HTMLHeadingElement>(null);
+  const section = useRef<HTMLElement>(null);
   const messagingEditor=useRef<HTMLDivElement|null>(null);
   const googleHealth=useConnectionHealth(connectionIdentity,'google'),microsoftHealth=useConnectionHealth(connectionIdentity,'microsoft');
   type Check = {value?:ConnectionSummary; last?:ConnectionSummary; busy:boolean};
@@ -98,8 +99,9 @@ export function SettingsHub({appearance,open, team, members, core, scheduling, m
   useEffect(() => {
     if (!open) return;
     title.current?.focus({preventScroll:true});
-    title.current?.scrollIntoView?.({block:'start'});
-  }, [open, screen]);
+    // Native scrolling must keep the navigation before the title in view.
+    (nativePresentation ? section.current : title.current)?.scrollIntoView?.({block:'start'});
+  }, [open, screen, nativePresentation]);
   function visit(next: Screen, accepted=false) {
     if (leaveLocked) return;
     if(!accepted&&screen==='team'&&next!=='team'&&teamDirty&&beforeLeaveTeam){beforeLeaveTeam(()=>visit(next,true));return;}
@@ -148,7 +150,7 @@ export function SettingsHub({appearance,open, team, members, core, scheduling, m
     return catalog?connectionSetupSummary(catalog,id)??{label:'Ready to connect',reason:'Sign in and review the access for this service.',action:'Connect account',tone:'neutral'}:
       {label:'Not checked',reason:'Account status has not been checked.',action:'Check connection',tone:'neutral'};
   }
-  return <section className="settings-hub" hidden={!open} aria-label="Settings">
+  return <section ref={section} className="settings-hub" hidden={!open} aria-label="Settings">
     <nav className="settings-hub-nav" aria-label="Settings navigation">
       {screen !== 'home' && <button disabled={leaveLocked} onClick={() => visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
         <span aria-hidden="true">← </span>{screen === 'members' || screen === 'team' || screen === 'connections' ? 'All settings' : 'All connections'}
