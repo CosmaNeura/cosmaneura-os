@@ -18,6 +18,9 @@
 
 @media(max-width:600px){
   .team-workspace[data-presentation=messages][data-messages-chat=true]{height:var(--messages-height,100dvh);min-height:0;box-sizing:border-box;position:relative;overflow:hidden}
+  /* UIKit already resizes this WebView for the keyboard. Anchor native chat
+     to that viewport so WebKit focus scrolling cannot carry its header away. */
+  .team-workspace[data-presentation=messages][data-native-presentation=true][data-messages-chat=true]{position:fixed;inset:0;z-index:12;height:100%;max-height:100%;padding-top:env(safe-area-inset-top,0px);padding-left:env(safe-area-inset-left,0px);padding-right:env(safe-area-inset-right,0px);background:#faf8f2}
   .team-workspace[data-presentation=messages][data-messages-chat=true] .practice-navigation{position:absolute}
   .team-workspace[data-presentation=messages][data-messages-chat=true] .team-main,.team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-main-content,.team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-notebook:not([hidden]),.team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-notebook-body,.team-workspace[data-presentation=messages][data-messages-chat=true] .team-content{display:flex;flex-direction:column;flex:1;min-height:0;overflow:hidden}
   .team-workspace[data-presentation=messages][data-messages-chat=true] .workspace-notebook-body .team-content .team-conversation{height:auto;flex:1;min-height:0;overflow:hidden}

@@ -212,10 +212,9 @@ in the pre-existing 6.19.0 pin. The optional inbound-PDF dependency is updated t
 existing PDF/parser/security cases pass in an isolated environment. The scanner’s
 severity and failure policy remain unchanged.
 
-The physical iPhone is currently unavailable and the Mac is locked. Native UI
-acceptance remains pending, the rollout flag stays off in ordinary builds, and
-no Messages build has been installed on the phone. The synthetic rehearsal flag
-only enables the candidate for local validation.
+The rollout flag stays off in ordinary builds. The synthetic rehearsal flag
+only enables the candidate for local validation; current physical-device results
+are recorded in the October 24 follow-up below.
 
 ### October 24 completion pass and deliberate simplifications
 
@@ -273,3 +272,52 @@ popstate events: dismissing Details must preserve the inbox history entry so the
 next Back reaches the inbox. Consumed traversal restores the existing route entry
 instead of overwriting its parent, with equivalent protection for Forward and
 pending requests.
+
+
+### October 24 physical-device follow-up and restart recovery
+
+GitHub run 40073093050, attempt 2, passed all nine required jobs on 8040b3f,
+including the full backend, web, signed UI and unchanged image-security gate.
+Commit 6b03415 is now pushed to PR #204 and has its own CI run. The previously
+reported billing block is resolved.
+
+The separate CosmaBot Preview, bundle `com.cosmasos.synthetic.w206`, is installed
+on the owner's iPhone 12. Build 7 comes from 6b03415; the regular CosmaBot app
+remains build 1102. The preview uses invented information and simulated services
+and audio. It does not qualify real microphone capture or authenticated backend
+acceptance. No backend deployment was performed.
+
+The owner confirmed VoiceOver can read and activate Chief, Details, the message
+field and Send in build 6. They reported no vibration in both builds 6 and 7;
+retaining view-associated UIKit feedback generators has therefore not established
+a fix. Native presentation and UIKit delivery are being traced before another
+haptic change is made.
+
+The owner reported that the direct Chief conversation header disappears when
+the keyboard opens, while the private-note route retains it. Native Messages
+chat now uses a fixed safe-area frame inside the existing UIKit-resized WebView,
+matching the established native Workspace frame. The browser frame is unchanged;
+UIKit's keyboardLayoutGuide remains the only native resize owner. The rehearsal
+notice stays in the inbox and Settings and no longer shifts native chat geometry.
+Fresh build 9 simulator replay confirms Chief, Back and Details remain below the
+notch on first direct focus, including actual Text Size 9. A remaining lower gap
+after Done also affects the inbox and is under native geometry investigation.
+Body text scales, but complete Dynamic Type acceptance is not yet established.
+
+Messages-enabled builds now require the server's conversations contract before
+rendering the workspace. A mounted compatibility test proves an older server is
+blocked, then admitted after Retry returns the required contract. Ordinary
+Workspace builds retain their previous compatibility requirements. An unauthenticated
+staging 401 does not establish that the new inbox endpoint is deployed.
+
+The first physical preview launch recorded a native first frame at 1.159 seconds.
+This is not a completed WebView or authenticated workspace readiness measurement;
+first-install readiness and full operational native capture remain unverified.
+
+The Mac restarted at 08:25:59 EDT, clearing temporary working/build directories.
+The permanent checkout passes Git object verification and all 33 saved evidence
+files match their SHA-256 manifest. Four uncommitted frame/rehearsal files were
+restored in the permanent checkout. All 62 affected parity, history, frame,
+compatibility and native-helper tests pass, as do production and rehearsal
+TypeScript checks and the rehearsal renderer build. Subsequent build recipes,
+receipts and UI evidence are saved under the permanent October 24 resumed handoff.
