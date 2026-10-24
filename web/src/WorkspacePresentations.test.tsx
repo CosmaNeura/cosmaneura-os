@@ -152,6 +152,26 @@ describe('presentation parity',()=>{
     await click('Settings');await act(async()=>{(host.querySelector('input[name="cosmas-layout"]:not(:checked)') as HTMLInputElement).click();});await click('Done');
     expect(host.querySelector('#team-question')).toBe(composer);expect(composer.value).toBe('Keep this invented draft.');
   });
+  it('keeps Workspace Tools complete when Settings switches to Messages and returns to the same draft',async()=>{
+    await open('workspace');const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!,notebook=host.querySelector('#team-notebook');
+    const session=observedSession.value!,workspaceId=session.getSnapshot().workspace!.id;
+    await input(composer,'Keep this invented Tools draft.');await click('Tools');await click('Skills & settings');
+    await act(async()=>{(host.querySelector('input[name="cosmas-layout"]:not(:checked)') as HTMLInputElement).click();});await click('Done');
+    expect(host.querySelector('main')?.getAttribute('data-presentation')).toBe('messages');
+    expect(host.querySelector('.messages-thread-header h1')?.textContent).toBe('Tools');
+    expect(host.querySelector('main')?.getAttribute('data-messages-task')).toBe('Tools');
+    expect(host.querySelector('.team-conversation-tools .chief-start-actions')).not.toBeNull();
+    expect(visible(host.querySelector('.team-conversation-tools .chief-start-actions')!)).toBe(true);
+    expect(visible(composer)).toBe(false);expect(composer.value).toBe('Keep this invented Tools draft.');
+    await click('‹ Back to chat');
+    expect(host.querySelector('.messages-thread-header h1')?.textContent).toBe('Chief of Staff');
+    expect(host.querySelector('#team-question')).toBe(composer);expect(host.querySelector('#team-notebook')).toBe(notebook);
+    expect(visible(composer)).toBe(true);expect(composer.disabled).toBe(false);expect(composer.value).toBe('Keep this invented Tools draft.');
+    expect(session.getSnapshot()).toMatchObject({selected:'chief',mobilePanel:'Conversation',workspace:{id:workspaceId}});
+    await click('Settings');await act(async()=>{(host.querySelector('input[name="cosmas-layout"]:not(:checked)') as HTMLInputElement).click();});await click('Done');
+    expect(host.querySelector('main')?.getAttribute('data-presentation')).toBe('workspace');expect(visible(composer)).toBe(true);
+    expect(host.querySelector('#team-question')).toBe(composer);expect(composer.value).toBe('Keep this invented Tools draft.');
+  });
   it.each(['messages','workspace'] as const)('reviews the exact saved draft and returns to the originating chat from %s',async mode=>{
     await open(mode);const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;await input(composer,'Keep my Chief directions.');
     const fetch=window.fetch;let envelope:unknown;const send=vi.spyOn(window,'fetch').mockImplementation(async(...args)=>{const response=await fetch(...args);envelope=await response.clone().json();return response;});

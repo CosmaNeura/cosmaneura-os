@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {describe,expect,it} from 'vitest';
 import {teamFixture,teamUuid} from '../team-setup-test-fixture';
-import type {DraftHandoff,Workspace,WorkspaceEntry} from '../workspace-api';
+import type {DraftHandoff,FollowUp,PrivateNote,Workspace,WorkspaceEntry} from '../workspace-api';
 import {projectConversation,savedDraftReviewLabel} from './entries';
 
 const team=teamFixture(),chief=team.members.find(bot=>bot.role==='chief')!;
@@ -27,5 +27,27 @@ describe('shared conversation projection',()=>{
   });
   it('keeps direct specialist history separate from Chief',()=>{
     const projection=projectConversation(workspace,team,'follow_up');expect(projection.turns).toEqual([result]);expect(projection.entries).toHaveLength(1);
+  });
+});
+
+describe('saved conversation order',()=>{
+  const later:WorkspaceEntry={...turn,id:teamUuid(260),revision:9,content:'Invented later question',created_at:'2026-10-23T13:00:00Z'};
+  it('keeps old result, note and linked work cards before a newly delivered turn',()=>{
+    const note:PrivateNote={id:teamUuid(261),version:1,workspace_revision:4,content:'Invented private note',content_hash:'b'.repeat(64),source_reply_id:result.id,source_revision:3,source_fingerprint:'c'.repeat(64),sources_changed:false,created_at:turn.created_at,review:null};
+    const work:FollowUp={ticket_id:teamUuid(262),revision_id:teamUuid(263),payload_hash:'d'.repeat(64),state:'pending_approval',create_key:'invented-create',body:'Invented follow-up',due_date:'2026-10-24',expected_outcome:'Invented outcome',owner_id:teamUuid(264),note_version:1,source_changed:false,operation_status:null,receipts:[]};
+    const link:WorkspaceEntry={...turn,id:teamUuid(265),revision:5,kind:'work_link',reply:null,ticket:{id:work.ticket_id,state:work.state,lane:'follow_up'}};
+    const projection=projectConversation({...workspace,revision:9,entries:[turn,{...result,revision:3},link,later],note:{latest:note,history:[note]},follow_ups:[work]},team,'chief');
+    expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`handoff:${handoff.id}`,`note:${note.id}`,`work:${work.ticket_id}`,later.id]);
+    expect(projection.entries.filter(row=>row.kind==='review').flatMap(row=>row.actions.map(action=>action.kind))).toEqual(['review_handoff','review_note','review_work']);
+    expect(projection.turns).toEqual([turn,later]);
+  });
+  it('leaves pending work at its saved context, then places an actually later result after the later turn',()=>{
+    const pending={...handoff,status:'running' as const,result_entry_id:null,result_sha256:null};
+    const before=projectConversation({...workspace,revision:9,entries:[turn,later],handoffs:[pending]},team,'chief');
+    expect(before.entries.map(row=>row.id)).toEqual([turn.id,`handoff:${handoff.id}`,later.id]);
+    expect(before.entries[1]).toMatchObject({status:'Working',actions:[]});
+    const after=projectConversation({...workspace,revision:10,entries:[turn,later,{...result,revision:10}]},team,'chief');
+    expect(after.entries.map(row=>row.id)).toEqual([turn.id,later.id,`handoff:${handoff.id}`]);
+    expect(after.entries[2]).toMatchObject({status:'Unreviewed draft',actions:[{kind:'review_handoff',id:handoff.id,label:'Review draft'}]});
   });
 });

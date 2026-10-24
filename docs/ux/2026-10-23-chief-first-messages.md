@@ -338,3 +338,31 @@ tests after the navigation measurement correction. Production and rehearsal
 TypeScript checks and the new rehearsal renderer build pass. The separate native
 scene/recovery suite passes all 11 cases. Existing React act and bundle-size
 warnings remain; no failing check was suppressed.
+
+
+### Follow-up from direct phone and cross-layout QC
+
+Direct iPhone Mirroring testing found that old attributed draft cards were
+appended after a newly delivered conversation turn. The shared projection now
+orders turns and review cards by their existing saved workspace positions:
+handoff result/context, note revision, and linked work or its source note. Both
+layouts keep identical entries and actions. This is display ordering; it does not
+replace inbox arrival clocks or grant read/review authority. New regression cases
+cover older cards before a later turn and a genuinely later result after it.
+
+Native Settings now keeps its brand/sidebar in normal flow, and its existing
+focus/scroll effect also runs when the layout changes. This prevents the Workspace
+brand or a change to Messages geometry from covering Done. Switching from Workspace
+Tools through Settings to Messages retains the complete Tools task, including its
+heading, controls and Back to chat. Returning preserves the same composer,
+notebook and exact draft; request and recording guards are unchanged.
+
+The final focused pass has 111 passing cases across seven suites, and both
+TypeScript configurations pass. The complete web suite then passes 4,466 tests
+with 103 existing skips (324 passing files, 17 skipped). Native simulator build 14
+also preserves the exact draft through Messages → Workspace → Messages. Final
+visual verification of the last Settings, spacing, Tools and ordering corrections
+is tracked separately from these automated results. A Mac screen lock interrupted
+the Text Size 9 Details-close check; the owner subsequently unlocked the Mac and
+visual checks resumed. The regular phone app remains 1102 and Preview remains 7
+until a new candidate clears that pass.

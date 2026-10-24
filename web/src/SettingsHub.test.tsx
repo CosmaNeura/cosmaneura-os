@@ -77,12 +77,12 @@ it('moves focus to the new screen title and keeps unavailable connections out', 
   await click('Done'); expect(close).toHaveBeenCalledOnce();
 });
 
-it.each([true,false])('keeps Settings navigation in the native scroll target while preserving heading focus (native=%s)', async nativePresentation => {
+it.each(['workspace','messages',undefined] as const)('keeps Settings navigation in the native scroll target while preserving heading focus (native=%s)', async nativePresentation => {
   const originalScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype,'scrollIntoView');
   const scroll = vi.fn();
   const focus = vi.spyOn(HTMLElement.prototype,'focus');
   Object.defineProperty(HTMLElement.prototype,'scrollIntoView',{configurable:true,writable:true,value:scroll});
-  const render = (open:boolean) => act(async () => root.render(<SettingsHub open={open} nativePresentation={nativePresentation}
+  const render = (open:boolean,layout=nativePresentation) => act(async () => root.render(<SettingsHub open={open} nativePresentation={layout}
     team={<div><p>Long team settings</p><input aria-label="Retained team draft" defaultValue="Invented draft"/></div>}
     teamSummary="Five coworkers" teamDirty={false} onClose={() => {}}/>));
   try {
@@ -106,9 +106,15 @@ it.each([true,false])('keeps Settings navigation in the native scroll target whi
     expect(document.activeElement?.textContent).toBe('Settings');
     expect(scroll.mock.contexts).toEqual([expectedTarget,expectedTarget,expectedTarget]);
     expect(section.querySelector('[aria-label="Retained team draft"]')).toBe(editor);
+    if(nativePresentation){
+      await render(true,nativePresentation==='messages'?'workspace':'messages');
+      expect(document.activeElement?.textContent).toBe('Settings');
+      expect(scroll.mock.contexts).toEqual([section,section,section,section]);
+      expect(section.querySelector('[aria-label="Retained team draft"]')).toBe(editor);
+    }
     const focusCount = focus.mock.calls.length;
     await render(false);
-    expect(scroll).toHaveBeenCalledTimes(3);
+    expect(scroll).toHaveBeenCalledTimes(nativePresentation?4:3);
     expect(focus).toHaveBeenCalledTimes(focusCount);
   } finally {
     focus.mockRestore();

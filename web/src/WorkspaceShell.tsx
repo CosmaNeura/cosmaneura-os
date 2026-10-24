@@ -135,7 +135,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setWorkspace,setTeamDraft,setNote,setThought,setEvidence,setSource,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryState}=session;
   const messagesMode=session.presentation.current()==='messages';
   const [newMessage,setNewMessage]=useState(false),[conversationDetails,setConversationDetails]=useState(false);
-  const [contextBot,setContextBot]=useState<string|null>(null),[messagesTask,setMessagesTask]=useState<'Tools'|'Activity'|null>(null);
+  const [contextBot,setContextBot]=useState<string|null>(null),[messagesTaskChoice,setMessagesTask]=useState<'Tools'|'Activity'|null>(null);
   const [captureTransition,setCaptureTransition]=useState(false),[homePending,setHomePending]=useState(false),[privateLinkPending,setPrivateLinkPending]=useState(false);
   const contextBotRef=useRef(contextBot);contextBotRef.current=contextBot;
   const connectionRecovery=useContext(WorkspaceConnectionRecoveryContext);
@@ -220,6 +220,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const conversationHeaderRef=useRef<HTMLElement|null>(null);
   const [teamWorkExpanded,setTeamWorkExpanded]=useState(()=>!phoneLayout());
   const [phoneChatToolsOpen,setPhoneChatToolsOpen]=useState(false);
+  // Workspace Tools stays the same complete task when the presentation changes.
+  const messagesTask=phoneChatToolsOpen&&mobilePanel==='Conversation'?(messagesTaskChoice??'Tools'):null;
   const [clinicalTeamExpanded,setClinicalTeamExpanded]=useState(false);
   const chiefReviewReturn=session.review.returnTarget;
   const chiefReviewReturnFocus=useRef<typeof chiefReviewReturn.current>(null);
@@ -617,7 +619,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   }
   function clinicalContext():import('./session/clinical').ClinicalContext {return {...modelContext(),locked,viewNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,latestNote,previousIdentity,privateRecordingLive,currentIdentity,recoveryView,currentTeam,failure,save,saveModel,showReplacement:role=>{setSelected(role);setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setClinicalTeamExpanded(true);}};}
   function prepareClinicalDrafts(input:ShareSavedNoteInput){return session.clinical.prepare(input,clinicalContext());}
-  function returnToPhoneChat(){setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);}
+  function returnToPhoneChat(){setMessagesTask(null);setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);}
   function requestScribeDraft(){session.composer.requestScribe(composerContext());}
   useEffect(()=>{session.composer.continueScribe(composerContext());},[busy,workspace?.revision,pending,conflict,recoveryBlocked]);
   const {ready:routeReady,applying:routeApplying,sequence:routeSequence,route}=session.navigation;
@@ -868,7 +870,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     const removeNative=nativeOwner?subscribeNativeWorkspaceForeground(nativeOwner,visible,()=>{}):undefined;
     return()=>{document.removeEventListener('visibilitychange',visible);document.removeEventListener('focusin',visible);window.removeEventListener?.('focus',visible);window.removeEventListener?.('scroll',visible,true);removeNative?.();};
   },[authenticated]);
-  function openPhoneChatTools(){setPhoneChatToolsOpen(true);if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=0;}
+  function openPhoneChatTools(){setMessagesTask('Tools');setPhoneChatToolsOpen(true);if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=0;}
   function reviewContext():import('./session/review').ReviewContext{return {authenticated,previousIdentity,actionLocked,viewNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,phoneChatToolsOpen,setPhoneChatToolsOpen,setClinicalTeamExpanded,focusQuestion:()=>setQuestionFocus(value=>value+1),returnFocus:chiefReviewReturnFocus};}
   function retryTeamTask(handoff:DraftHandoff){session.review.retry(handoff,saveContext());}
   function currentChiefReviewReturn(target=chiefReviewReturn.current){return session.review.currentReturn(reviewContext(),target);}
@@ -1100,7 +1102,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         <p>The previous {previousModelRequest.operation.type==='ask'?'question':'draft retry'} was last checked as {previousModelRequest.outcome.replaceAll('_',' ')} at {previousModelRequest.observed_at}. Its original body and binding remain on this device. A later request does not resolve that earlier provider uncertainty.</p></details>}
       {activityEnabled && settingsOpen && activityContextBusy && <p className="team-fine" role="status">Checking optional AI activity access…</p>}
       {activityEnabled && settingsOpen && activityContextError && <div className="team-banner error" role="alert"><p>{activityContextError}</p><button disabled={locked || activityContextBusy} onClick={()=>setActivityAttempt(value=>value+1)}>Recheck AI activity access</button></div>}
-      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} nativePresentation={!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
+      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} nativePresentation={nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()?(messagesMode?'messages':'workspace'):undefined} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
         onOpenMessagingWork={authenticated?openMessagingWork:undefined} messagingWorkLabel={workspace?'Open fax work for this visit':'Choose a visit for fax work'}
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
         onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveFaxDocument:undefined}

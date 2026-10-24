@@ -26,6 +26,9 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
   const entries:ConversationRow[]=turns.map(entry=>({kind:'turn',id:entry.id,entry,reviewLabel:savedDraftReviewLabel(workspace,entry),
     actions:!entry.reply&&entry.model_request?.request.kind==='conversation'?[{kind:'check_request',id:entry.id,label:'Check saved result'}]:[]}));
   if(!workspace)return {workspaceId:null,botAddress:selected,entries,turns};
+  // Keep older review cards at their saved position instead of appending them
+  // after every new turn. This is display order, not an activity/read clock.
+  const positions=new Map(turns.map(entry=>[entry.id,entry.revision]));
   if(bot?.role==='chief'){
     const origins=new Set(turns.map(entry=>entry.id)),handoffs=workspace.handoffs??[];
     const related=new Set(handoffs.filter(item=>origins.has(item.origin_entry_id)).map(item=>item.id));
@@ -42,6 +45,7 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
       const actions:ConversationAction[]=available?[{kind:'review_handoff',id:handoff.id,label:'Review draft'}]:
         ['failed','interrupted'].includes(handoff.status)?[{kind:'retry_handoff',id:handoff.id,label:'Retry draft'}]:[];
       entries.push({kind:'review',id:`handoff:${handoff.id}`,author:handoff.recipient_name,title:`${handoff.recipient_name} draft`,status,needsReview:!reviewed,actions});
+      positions.set(`handoff:${handoff.id}`,result?.revision??Math.max(handoff.context_revision,turns.find(entry=>entry.id===handoff.origin_entry_id)?.revision??0));
     }
   }
   if(['chief','scribe'].includes(bot?.role??'')&&workspace.note?.latest){
@@ -49,11 +53,16 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
     entries.push({kind:'review',id:`note:${note.id}`,author:'Scribe',title:`Saved note · version ${note.version}`,
       status:note.sources_changed?'Sources changed':note.review?'Reviewed privately':'Needs your review',needsReview:note.sources_changed||!note.review,
       actions:[{kind:'review_note',id:note.id,label:'Review note'}]});
+    positions.set(`note:${note.id}`,note.workspace_revision);
   }
   if(['chief','follow_up'].includes(bot?.role??''))for(const work of workspace.follow_ups??[]){
     if(['done','closed','rejected','completed','cancelled'].includes(work.state))continue;
     entries.push({kind:'review',id:`work:${work.ticket_id}`,author:'Follow-up',title:'Follow-up',status:work.source_changed?'Sources changed':work.state.replaceAll('_',' '),needsReview:true,
       actions:[{kind:'review_work',id:work.ticket_id,label:'Review follow-up'}]});
+    const link=workspace.entries.find(entry=>entry.kind==='work_link'&&entry.ticket?.id===work.ticket_id);
+    const sourceNote=workspace.note?.history.find(note=>note.version===work.note_version)??(workspace.note?.latest?.version===work.note_version?workspace.note.latest:null);
+    positions.set(`work:${work.ticket_id}`,link?.revision??sourceNote?.workspace_revision??0);
   }
+  entries.sort((left,right)=>(positions.get(left.id)??0)-(positions.get(right.id)??0));
   return {workspaceId:workspace.id,botAddress:selected,entries,turns};
 }
