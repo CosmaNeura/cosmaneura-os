@@ -250,6 +250,18 @@ describe('read acknowledgment for displayed replies',()=>{
     await f.session.conversations.acknowledgeVisible(f.host,()=>true);
     expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'follow_up',{watermark:next.watermark,manual_unread:false,expected_version:8});
   });
+  it('acknowledges a newly opened chat while the previous chat acknowledgment is still waiting',async()=>{
+    const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();
+    let reject!:(cause:Error)=>void;f.api.mark.mockImplementationOnce(()=>new Promise((_resolve,fail)=>{reject=fail;}));
+    const older=f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    const next={...f.row,bot:{...f.row.bot,address:'follow_up',role:'follow_up' as const,name:'Follow-up'},watermark:'next-observed-watermark',marker_version:8};
+    await f.session.conversations.open(f.workspace.id,'follow_up',f.host,next);
+    const newer=f.session.conversations.acknowledgeVisible(f.host,()=>true);
+    try{
+      expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'follow_up',{watermark:next.watermark,manual_unread:false,expected_version:8});
+    }finally{reject(new Error('Synthetic delayed previous-chat acknowledgment'));await Promise.all([older,newer]);}
+    expect(f.session.getSnapshot().conversationError).toBe('');
+  });
   it('shares one failed acknowledgment across simultaneous visibility events, then retries on a later event',async()=>{
     const f=await visibleReply();await f.session.conversations.open(f.workspace.id,'chief',f.host,f.row);f.api.mark.mockClear();
     let reject!:(cause:Error)=>void;

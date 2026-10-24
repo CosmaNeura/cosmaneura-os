@@ -18,7 +18,7 @@ export class WorkspaceConversations {
   private unreadDisplay:{row:ConversationSummary;identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number}|null=null;
   private displayed:{journal:DraftJournal;generation:number;key:string}|null=null;
   private displayRead:{key:string;journal:DraftJournal;generation:number;route:number;promise:Promise<void>}|null=null;
-  private visibleAcknowledgment:Promise<void>|null=null;
+  private visibleAcknowledgment:{retained:object;promise:Promise<void>}|null=null;
   // A workspace reopen clears the composer even when the journal and address
   // are unchanged. Preparation belongs to that composer lifetime, not the store.
   private readonly prepared=new WeakMap<DraftJournal,Map<string,number>>();
@@ -130,8 +130,9 @@ export class WorkspaceConversations {
   /** A task can open a chat without showing its replies. Acknowledge only the
    * exact summary observed before the fresh workspace read, once history opens. */
   async acknowledgeVisible(host:ConversationHost,isVisible:()=>boolean){
-    if(this.visibleAcknowledgment)return this.visibleAcknowledgment;
-    const retained=this.unreadDisplay,view=this.session.getSnapshot();
+    const retained=this.unreadDisplay;
+    if(retained&&this.visibleAcknowledgment?.retained===retained)return this.visibleAcknowledgment.promise;
+    const view=this.session.getSnapshot();
     if(!retained||this.opening||!isVisible()||!host.current()||host.identity!==retained.identity||host.journal!==retained.journal||this.session.generation.current!==retained.generation||view.workspace?.id!==retained.row.workspace_id||view.selected!==retained.row.bot.address||view.practicePage!=='notebook'||view.settingsOpen||view.practiceOpen||view.reviewHandoffId||view.mobilePanel!=='Conversation')return;
     const bot=view.team?.configuration.bots.find(item=>(item.instance_id||item.role)===view.selected);
     if(bot?.role==='research'&&!view.savedResearchChat)return;
@@ -142,8 +143,8 @@ export class WorkspaceConversations {
       await this.api.mark(host.identity,retained.row.workspace_id,retained.row.bot.address,{watermark:retained.row.watermark,manual_unread:false,expected_version:retained.row.marker_version});
       if(current()){this.unreadDisplay=null;if(this.session.getSnapshot().conversationError===READ_SYNC_ERROR)this.session.setConversationError('');}
     }catch(cause){if(current()){this.session.setConversationError(READ_SYNC_ERROR);if(cause instanceof WorkspaceApiError&&[401,403].includes(cause.status))host.failure(cause);}}})();
-    this.visibleAcknowledgment=acknowledgment;
-    try{await acknowledgment;}finally{if(this.visibleAcknowledgment===acknowledgment)this.visibleAcknowledgment=null;}
+    this.visibleAcknowledgment={retained,promise:acknowledgment};
+    try{await acknowledgment;}finally{if(this.visibleAcknowledgment?.promise===acknowledgment)this.visibleAcknowledgment=null;}
   }
   /** A visible new reply needs a fresh server watermark, not the one captured
    * when the chat opened. A later workspace read must match what is on screen

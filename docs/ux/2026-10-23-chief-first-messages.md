@@ -404,7 +404,8 @@ The resumed review confirmed three recovery defects and their corrections:
 - An opened chat discarded its exact read acknowledgment before the server
   confirmed it. The same watermark and marker version now survive a failed
   attempt; automatic watermarks wait for it, and simultaneous visibility events
-  share one attempt. Current 401/403 responses from acknowledgment and Mark unread
+  for the same opening share one attempt. A pending acknowledgment from an older
+  chat does not block the current chat. Current 401/403 responses from acknowledgment and Mark unread
   use the existing access-loss handler. Late responses remain generation-fenced.
 - A selected saved-note task with empty optional directions could be erased
   before draft hydration. It now survives switching and reopening. A newer note
@@ -422,12 +423,12 @@ parity test now returns from Notebook to chat before retrying a lost save. An
 existing connector recovery test waits for its field to finish restoring before
 editing; its controller identity and exact-retry assertions remain intact.
 
-The final full web run passes 4,479 tests with 103 existing skips (324 passing
+The final full web run passes 4,480 tests with 103 existing skips (324 passing
 files, 17 skipped). Both TypeScript configurations, the production build and the
 frozen synthetic rehearsal build pass. The native scene/recovery Swift package
 passes 15 tests. Existing React act and bundle-size warnings are retained.
 
-The frozen browser replay uses 390 × 420, 200% text, long names and the native
+The frozen browser replay on 2993eda uses 390 × 420, 200% text, long names and the native
 layout fixture. Retry is fully visible and enabled; the exact invented note is
 saved once as revision 6, and header, composer and Send return inside the frame.
 This browser fixture does not exercise UIKit or the physical keyboard.
