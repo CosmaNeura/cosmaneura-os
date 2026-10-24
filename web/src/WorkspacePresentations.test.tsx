@@ -74,6 +74,24 @@ describe('presentation parity',()=>{
     await act(async()=>session.setPresentationPreference('messages'));expect(surface()).toEqual(messages);
     if(recording)expect(recording.rows[0]).toMatchObject({phase:'sealed',recordedChunks:18,elapsedSeconds:18,transcription:'not_requested'});
   });
+  it('does not announce historical review changes or new review cards as incoming messages',async()=>{
+    vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?200:0;});
+    vi.spyOn(HTMLElement.prototype,'scrollHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?1000:0;});
+    await open('messages');const session=observedSession.value!,history=host.querySelector<HTMLDivElement>('.mobile-chat-scroll')!;
+    await act(async()=>{history.scrollTop=200;history.dispatchEvent(new Event('scroll',{bubbles:true}));});
+    const mark=vi.spyOn(conversationsApi,'mark'),updated=structuredClone(session.getSnapshot().workspace!),handoff=updated.handoffs![0];
+    const card=()=>host.querySelector(`[data-entry-id="handoff:${handoff.id}"]`)!;
+    expect(card().textContent).toContain('Unreviewed draft');
+    handoff.review_status='current';handoff.review={id:crypto.randomUUID(),attempt_id:handoff.attempt_id!,result_entry_id:handoff.result_entry_id!,result_sha256:handoff.result_sha256!,decision:'accepted',feedback:'',created_at:'2026-10-24T12:00:00Z'};
+    await act(async()=>session.setWorkspace(updated));
+    expect(card().textContent).toContain('Draft accepted');expect(history.scrollTop).toBe(200);
+    expect(host.querySelector('.messages-new-replies')).toBeNull();expect(mark).not.toHaveBeenCalled();
+    const withNewCard=structuredClone(updated),newHandoff={...structuredClone(handoff),id:crypto.randomUUID(),review:undefined,review_status:'not_reviewed' as const};
+    withNewCard.handoffs!.push(newHandoff);await act(async()=>session.setWorkspace(withNewCard));
+    const added=host.querySelector(`[data-entry-id="handoff:${newHandoff.id}"]`)!;
+    expect(added.textContent).toContain('Unreviewed draft');expect(added.querySelector('button')?.textContent).toBe('Review draft');
+    expect(history.scrollTop).toBe(200);expect(host.querySelector('.messages-new-replies')).toBeNull();expect(mark).not.toHaveBeenCalled();
+  });
   it('keeps a new reply unread above the bottom and acknowledges its exact watermark after jumping',async()=>{
     vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?200:0;});
     vi.spyOn(HTMLElement.prototype,'scrollHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?1000:0;});

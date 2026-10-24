@@ -358,11 +358,40 @@ heading, controls and Back to chat. Returning preserves the same composer,
 notebook and exact draft; request and recording guards are unchanged.
 
 The final focused pass has 111 passing cases across seven suites, and both
-TypeScript configurations pass. The complete web suite then passes 4,466 tests
-with 103 existing skips (324 passing files, 17 skipped). Native simulator build 14
-also preserves the exact draft through Messages → Workspace → Messages. Final
-visual verification of the last Settings, spacing, Tools and ordering corrections
-is tracked separately from these automated results. A Mac screen lock interrupted
-the Text Size 9 Details-close check; the owner subsequently unlocked the Mac and
-visual checks resumed. The regular phone app remains 1102 and Preview remains 7
-until a new candidate clears that pass.
+TypeScript configurations pass. The complete web suite on 4203cc4 passes 4,466
+tests with 103 existing skips (324 passing files, 17 skipped).
+
+Preview 17, composed from 4203cc4, passes the final simulator workflow replay:
+direct Chief keyboard focus and settled Done retain the header and full height;
+Settings keeps Done reachable in both layouts; Workspace Tools → Settings →
+Messages retains the complete task and returns to the exact draft. Actual iOS
+Text Size 9 enlarges chat, composer and Details content, and the scrolled Details
+sheet closes successfully. Header and navigation labels do not all scale, so
+this establishes partial Dynamic Type response and control reachability, not
+universal scaling. The new-reply jump shows the latest reply after older cards.
+Text Size 3 and Capture Keyboard off were restored. The 22 screenshots and exact
+observations are saved in the permanent October 24 resumed handoff under
+`simulator-preview17-qc/evidence.json`. This scripted simulator pass does not
+establish physical haptics, VoiceOver speech, edge-swipe, interactive keyboard
+dismissal, real microphone capture or authenticated backend acceptance.
+
+Preview 17 is also installed on the physical iPhone 12. Through iPhone Mirroring,
+an invented send shows Delivered and its scripted Chief reply; Details opens and
+closes, Settings retains Done through both layout choices, and Done returns to
+the same conversation. Chief, Back and Details remain visible during hardware-
+keyboard input, and settled dismissal restores the full frame. Mirroring does
+not establish ordinary physical soft-keyboard or tactile acceptance. Read-only
+checks found global Vibration and System Haptics enabled; the phone settings were
+not changed. The physical evidence is retained under `phone-preview17-qc/`.
+
+A final source audit found that an older review card changing state could create
+an inaccurate “new message” indicator whose jump went to the end of the chat.
+Only incoming turn replies now count toward that indicator. Creating a review
+card or changing its status keeps its attributed card and review controls without
+claiming a new chat message; inbox attention and exact read-marker synchronization
+are unchanged. The mounted-shell regression covers both review changes and card
+creation above the bottom; the existing incoming-reply case retains exact
+watermark acknowledgment only after the jump. All 60 focused presentation, frame,
+projection and read-marker cases pass, as do both TypeScript configurations. The
+complete web suite after this correction passes 4,467 tests with 103 existing
+skips (324 passing files, 17 skipped).

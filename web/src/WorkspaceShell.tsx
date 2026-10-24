@@ -838,7 +838,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   else if(!busy)recoveryAppearance.current=JSON.stringify([localModelPending.body.idempotency_key,modelObservation?.receipt.outcome??null,!!replacementDraft]);
   const sharedChatOwner=session.presentation.enabled?authenticated??null:nativeChatOwner;
   const mobileChatFrame=useMobileChatFrame({active:session.presentation.enabled?!!workspace:nativeChat&&!phoneChiefToolsVisible,owner:sharedChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${session.review.returnTarget.current?.address??session.review.conversationReturn.current?.address??selected}`,
-    arrivals:conversation.entries.flatMap(row=>row.kind==='turn'?(row.entry.reply?[`reply:${row.id}`]:[]):[`review:${row.id}:${row.status}`]),
+    // The jump counts incoming replies, not review cards or their changing
+    // status: those cards may be earlier in history than the latest message.
+    arrivals:conversation.entries.flatMap(row=>row.kind==='turn'&&row.entry.reply?[`reply:${row.id}`]:[]),
     onBottomVisible:()=>void acknowledgeDisplayedConversation(),
     messages:JSON.stringify([turns.map(entry=>[entry.id,entry.reply?.content??null]),
       pending?.type==='ask'&&pending.body.role===selected&&!localQuestionRepresented?pending.body.idempotency_key:null,recoveryAppearance.current,
