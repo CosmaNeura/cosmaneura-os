@@ -399,7 +399,7 @@ skips (324 passing files, 17 skipped).
 
 ### October 24 phone-independent recovery review
 
-The resumed review confirmed three recovery defects and their corrections:
+The resumed review confirmed four recovery defects and their corrections:
 
 - An opened chat discarded its exact read acknowledgment before the server
   confirmed it. The same watermark and marker version now survive a failed
@@ -416,6 +416,10 @@ The resumed review confirmed three recovery defects and their corrections:
   settling the save restores the fixed chat frame. Other notices scroll before
   the transcript, preserving its end as the read-visibility anchor. Save/retry
   handlers, exact request bodies, disabled guards and workflow owners are shared.
+- A notebook's delayed recovery could restore its old route after Home or an
+  account clear. The navigation owner now rechecks the route and account lifetime
+  after draft flushing and recovery, and ignores stale read failures. A newer
+  route or account view wins without starting an obsolete notebook read.
 
 Regression tests reproduced the lost acknowledgment, duplicate retry burst,
 note-selection loss/race and swallowed access denials before correction. The
@@ -423,7 +427,7 @@ parity test now returns from Notebook to chat before retrying a lost save. An
 existing connector recovery test waits for its field to finish restoring before
 editing; its controller identity and exact-retry assertions remain intact.
 
-The final full web run passes 4,480 tests with 103 existing skips (324 passing
+The final full web run passes 4,484 tests with 103 existing skips (324 passing
 files, 17 skipped). Both TypeScript configurations, the production build and the
 frozen synthetic rehearsal build pass. The native scene/recovery Swift package
 passes 15 tests. Existing React act and bundle-size warnings are retained.

@@ -1,7 +1,7 @@
 // @vitest-environment node
 import {describe,expect,it,vi} from 'vitest';
 import {teamFixture} from '../team-setup-test-fixture';
-import type {AuthenticatedWorkspaceIdentity,Workspace} from '../workspace-api';
+import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from '../workspace-api';
 import type {NavigationContext} from './navigation';
 import {WorkspaceSession} from './workspace-session';
 import {DraftJournal,editorAddress} from '../draft-journal';
@@ -26,6 +26,40 @@ describe('one workspace navigation owner',()=>{
     const routing=session.navigation.applyRoute({page:'notebook',workspaceId:'00000000-0000-4000-8000-000000000062',helper:'chief'},host);
     await vi.waitFor(()=>expect(read).toHaveBeenCalledOnce());session.navigation.goHome(host);finish({...workspace,id:'00000000-0000-4000-8000-000000000062'});await routing;
     expect(session.getSnapshot().practicePage).toBe('home');expect(host.openPrivateNotebook).not.toHaveBeenCalled();
+  });
+  it('keeps Home when notebook recovery finishes after the user leaves',async()=>{
+    const destination={...workspace,id:'00000000-0000-4000-8000-000000000062'};
+    const session=new WorkspaceSession({navigation:{read:async()=>destination,team:async()=>teamFixture()}});open(session);const host=context(session);
+    let finish!:()=>void;host.openPrivateNotebook=result=>session.loading.openPrivate(result,{authenticated,beforeOpen:()=>{},show:()=>session.setPracticePage('notebook'),recoverAfterRead:()=>new Promise(resolve=>{finish=resolve;})});
+    const routing=session.navigation.applyRoute({page:'notebook',workspaceId:destination.id,helper:'follow_up',material:'Review'},host);
+    await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));session.navigation.goHome(host);finish();await routing;
+    expect(session.getSnapshot()).toMatchObject({practicePage:'home',selected:'chief',mobilePanel:'Conversation'});
+  });
+  it('does not restore a notebook route after its recovery belongs to a cleared account',async()=>{
+    const destination={...workspace,id:'00000000-0000-4000-8000-000000000062'};
+    const session=new WorkspaceSession({navigation:{read:async()=>destination,team:async()=>teamFixture()}});open(session);const host=context(session);
+    let finish!:()=>void;host.openPrivateNotebook=result=>session.loading.openPrivate(result,{authenticated,beforeOpen:()=>{},show:()=>session.setPracticePage('notebook'),recoverAfterRead:()=>new Promise(resolve=>{finish=resolve;})});
+    const routing=session.navigation.applyRoute({page:'notebook',workspaceId:destination.id,helper:'follow_up',material:'Review'},host);
+    await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));session.clear();session.setPracticePage('home');finish();await routing;
+    expect(session.getSnapshot()).toMatchObject({practicePage:'home',workspace:null,identity:null,mobilePanel:'Conversation'});
+    expect(host.failure).not.toHaveBeenCalled();
+  });
+  it('does not start an old notebook read after a delayed draft flush and newer navigation',async()=>{
+    const read=vi.fn(async()=>({...workspace,id:'00000000-0000-4000-8000-000000000062'}));
+    const session=new WorkspaceSession({navigation:{read,team:async()=>teamFixture()}});open(session);const host=context(session);
+    let finish!:()=>void;session.recovery.scheduledDraftSave.current={run:()=>new Promise<void>(resolve=>{finish=resolve;}),cancel:()=>{},drain:async()=>{}};
+    const routing=session.navigation.applyRoute({page:'notebook',workspaceId:'00000000-0000-4000-8000-000000000062'},host);
+    await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));session.recovery.scheduledDraftSave.current=null;session.navigation.goHome(host);finish();await routing;
+    expect(read).not.toHaveBeenCalled();expect(session.getSnapshot().practicePage).toBe('home');
+  });
+  it('ignores a rejected old notebook read after the account is cleared',async()=>{
+    let reject!:(cause:Error)=>void;const read=vi.fn(()=>new Promise<Workspace>((_resolve,fail)=>{reject=fail;}));
+    const session=new WorkspaceSession({navigation:{read,team:async()=>teamFixture()}});open(session);const host=context(session);
+    const routing=session.navigation.applyRoute({page:'notebook',workspaceId:'00000000-0000-4000-8000-000000000062'},host);
+    await vi.waitFor(()=>expect(reject).toBeTypeOf('function'));session.clear();session.setPracticePage('home');session.setError('New account state');
+    reject(new WorkspaceApiError(403));await routing;
+    expect(session.getSnapshot()).toMatchObject({practicePage:'home',workspace:null,error:'New account state'});
+    expect(host.failure).not.toHaveBeenCalled();expect(host.replaceRoute).not.toHaveBeenCalled();
   });
   it('does not leave a notebook with an unconfirmed request',async()=>{
     const read=vi.fn(),session=new WorkspaceSession({navigation:{read}});open(session);const host=context(session);

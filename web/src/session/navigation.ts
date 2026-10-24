@@ -101,15 +101,20 @@ export class WorkspaceNavigation {
     const {scheduledDraftSave}=this.session.recovery;
     const {authenticated,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,failure,openPrivateNotebook,loadEncounters,currentTeam}=context;
     if(settingsOpen&&target.page!=='settings'&&team&&teamDraft&&teamConfigurationChanged(team.configuration,teamDraft)){context.replaceRoute(this.route());this.session.team.leave(settingsOpen,()=>void this.applyRoute(target,context));return;}
-    const routeToken=++this.sequence.current;this.applying.current=true;
+    const routeToken=++this.sequence.current;this.applying.current=true;let current=generation.current;
     try{
       if(target.page==='notebook'&&target.workspaceId!==workspace?.id){
         if(!authenticated||busy||pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)throw new Error('Retained operation');
         await scheduledDraftSave.current?.run();
-        const current=generation.current,latest=await this.read(authenticated,target.workspaceId!);
+        if(current!==generation.current||routeToken!==this.sequence.current)return;
+        const latest=await this.read(authenticated,target.workspaceId!);
         if(current!==generation.current||routeToken!==this.sequence.current)return;
         const latestTeam=await this.readTeam(authenticated);if(current!==generation.current||routeToken!==this.sequence.current)return;
-        await openPrivateNotebook({identity:authenticated,workspace:latest,team:latestTeam});
+        // Opening installs its workspace generation synchronously, then waits
+        // for draft recovery. A later account or navigation must still win.
+        const opening=openPrivateNotebook({identity:authenticated,workspace:latest,team:latestTeam});
+        current=generation.current;await opening;
+        if(current!==generation.current||routeToken!==this.sequence.current)return;
       }
       if(target.page==='home')this.goHome(context);
       else if(target.page==='visits')await loadEncounters();
@@ -120,7 +125,7 @@ export class WorkspaceNavigation {
         if(target.helper&&(currentTeam.current??team)?.configuration.bots.some(bot=>botAddress(bot)===target.helper))setSelected(target.helper);
         if(target.material){setMobilePanel(target.material);if(target.material!=='Conversation')setPanel(target.material);}
       }
-    }catch(cause){if(routeToken!==this.sequence.current)return;setError('Finish or recover the current action before opening another notebook. Your text is retained.');
+    }catch(cause){if(current!==generation.current||routeToken!==this.sequence.current)return;setError('Finish or recover the current action before opening another notebook. Your text is retained.');
       if(cause instanceof WorkspaceApiError)failure(cause);context.replaceRoute(this.route());}
     finally{if(routeToken===this.sequence.current){this.applying.current=false;this.ready.current=true;}}
   }
