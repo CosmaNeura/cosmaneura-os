@@ -35,6 +35,8 @@ export class WorkspaceRecovery {
   readonly nativeModelSettling={current:false};
 
   private readonly api:RecoveryDependencies;
+  private editorAuthorizationSequence=0;
+  private editorAuthorizationSettled=0;
   constructor(private readonly session:WorkspaceSession,deps:Partial<RecoveryDependencies>={}) {
     this.api={team:(...args)=>workspaceApi.team(...args),read:(...args)=>workspaceApi.read(...args),...deps};
   }
@@ -53,16 +55,24 @@ export class WorkspaceRecovery {
     if(!authenticated)return undefined;
     if(blocked||!editorJournal||!editorWorkspace||!ready)return null;
     return {journal:editorJournal,workspaceId:editorWorkspace,recoveryScope:editorScope,authorize:async()=>{
-      const current=this.session.generation.current;
-      const team=await this.api.team(authenticated);
-      if(current!==this.session.generation.current||team.recovery_scope!==editorScope)throw new WorkspaceApiError(403);
-      const latest=await this.api.read(authenticated,editorWorkspace);
-      if(current!==this.session.generation.current||this.journal.current?.value!==editorJournal)throw new WorkspaceApiError(403);
-      const view=this.session.getSnapshot();
-      if(view.workspace?.id!==latest.id)throw new WorkspaceApiError(403);
-      const saved=view.workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
-      if(latest.revision!==view.workspace.revision&&view.note!==saved&&(latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'')!==saved)this.session.setConflict(true);
-      this.session.setWorkspace(latest);return latest;
+      const current=this.session.generation.current,request=++this.editorAuthorizationSequence;
+      try {
+        const team=await this.api.team(authenticated);
+        if(current!==this.session.generation.current||team.recovery_scope!==editorScope)throw new WorkspaceApiError(403);
+        const latest=await this.api.read(authenticated,editorWorkspace);
+        if(current!==this.session.generation.current||this.journal.current?.value!==editorJournal)throw new WorkspaceApiError(403);
+        const view=this.session.getSnapshot();
+        if(view.workspace?.id!==latest.id)throw new WorkspaceApiError(403);
+        // Editors and foreground reloads share this fence across access handles.
+        // Equal revisions may contain fresh withholding, so request order also matters.
+        if(request<this.editorAuthorizationSettled||latest.revision<view.workspace.revision)throw new WorkspaceApiError(409,'workspace_revision_conflict');
+        const saved=view.workspace.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'';
+        if(latest.revision!==view.workspace.revision&&view.note!==saved&&(latest.entries.filter(entry=>entry.kind==='scratchpad').at(-1)?.content??'')!==saved)this.session.setConflict(true);
+        this.session.setWorkspace(latest);return latest;
+      } finally {
+        // A newer refusal also prevents an older successful read from reviving content.
+        this.editorAuthorizationSettled=Math.max(this.editorAuthorizationSettled,request);
+      }
     },denied:cause=>{
       if(cause&&typeof cause==='object'&&'status' in cause&&[401,403,404].includes(Number(cause.status)))failure(new WorkspaceApiError(Number(cause.status)));
     }};
