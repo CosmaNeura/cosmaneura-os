@@ -520,3 +520,22 @@ full destination to accessibility. Details return text wraps within the sheet,
 including unbroken bot names. The existing 21 presentation/parity tests and both
 TypeScript configurations pass. The novice's missing inbox Draft marker is a
 separate discoverability opportunity; it was not draft loss.
+
+
+Preview27 (`ad65d7c`) rebuilds that copy change and passes the six focused mobile
+browser journeys from a clean source tree. On the owned iPhone12 simulator at
+Text Size3, Follow-up review visibly names Back to Chief of Staff and returns to
+Chief with Qdraft retained; Details uses the same named destination and retains
+the draft on return. Native Done also dismisses the keyboard reopened by review
+focus without clearing it. The final state has Text Size3 and keyboard hidden.
+Independent source QC accepts the scoped long-name wrapping correction. The
+unchanged native font rules retain Preview26's Text Size3/9 evidence; Preview27's
+new native check is scoped to normal-size return copy. Both re-signed packages
+verify; only the simulator has Preview27, while the phone remains on24.
+
+GitHub's current-head jobs could not start because its account payment/spending
+restriction blocks runners. The prior Done commit passed seven jobs before the
+same restriction stopped its image job. No product-code failure was reported by
+those startup failures, and CI is not counted as passing. No rollout or merge
+was performed. Evidence is in the October25 Preview27 handoff's
+`native-validation/receipt.json`.
