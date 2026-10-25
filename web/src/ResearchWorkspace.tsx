@@ -11,6 +11,7 @@ import type {EditorDraft} from './draft-journal';
 import {validateResearchSavedHistory,type ResearchSaved,type ResearchSavedPacket} from './research-contract';
 import {NoteResearchPanel,useNoteResearchPlan} from './NoteResearchPanel';
 import {noteResearchSelectionMatches,type NoteResearchSelection} from './note-research-workflow';
+import {researchQueryGuidance,researchQueryIssue,researchSourceFailure} from './research-query-guidance';
 import './research-workspace.css';
 
 const blank=(bot:string):ResearchDraft=>({version:1,bot,topic:'literature',query:'',sources:[],pending:null});
@@ -62,8 +63,10 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  useEffect(()=>{void loadCatalog();return()=>catalogRequest.current?.abort();},[identity,workspaceId,bot.address,port]);
  function edit(update:Partial<ResearchDraft>){if(!canSearch)return;setDraft(d=>({...d,...update}));setReview(null);setConfirmed(false);setMessage('');}
  const sources=catalog?.sources.filter(s=>s.topics.includes(draft.topic))??[];
+ const queryGuidance=researchQueryGuidance(draft.topic,draft.sources),queryIssue=teamStrip(draft.query)?researchQueryIssue(draft.sources,teamStrip(draft.query)):null;
+ const queryHelpId=`research-query-help-${workspaceId}-${bot.address}`;
  const selectedAvailable=!!catalog?.enabled&&draft.sources.length>0&&draft.sources.every(id=>sources.some(s=>s.id===id&&s.state==='enabled'));
- function reviewQuery(){if(!canSearch||!noteQuestionCurrent||!selectedAvailable||!teamStrip(draft.query))return;const query=teamStrip(draft.query);setDraft(d=>({...d,query}));const request={contract_version:1 as const,idempotency_key:crypto.randomUUID(),expected_revision:workspaceRevision,team_revision:bot.team_revision,bot:bot.address,topic:draft.topic,sources:[...draft.sources],query,public_query_confirmed:true as const};if(!validResearchSearch(request)){setMessage('Use one general question without line breaks or control characters.');return;}setReview(request);setConfirmed(false);}
+ function reviewQuery(){if(!canSearch||!noteQuestionCurrent||!selectedAvailable||!teamStrip(draft.query)||queryIssue)return;const query=teamStrip(draft.query);setDraft(d=>({...d,query}));const request={contract_version:1 as const,idempotency_key:crypto.randomUUID(),expected_revision:workspaceRevision,team_revision:bot.team_revision,bot:bot.address,topic:draft.topic,sources:[...draft.sources],query,public_query_confirmed:true as const};if(!validResearchSearch(request)){setMessage('Use one general question without line breaks or control characters.');return;}setReview(request);setConfirmed(false);}
  function chooseNoteQuestion(selection:NoteResearchSelection,proposedQuery:string|null){
   if(!canSearch||draft.query!==''||!noteResearchSelectionMatches(notePlan,selection))return;
   setDraft(value=>({...value,note_question:selection,query:proposedQuery??''}));setReview(null);setConfirmed(false);
@@ -72,7 +75,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  }
  function snapshot(next:ResearchDraft):EditorDraft{return editorDraft(workspaceId,kind,next,next.pending?.request.idempotency_key??null);}
  async function execute(pending:ResearchPending,resolve=false){
-  if(inFlight.current||blocked||!resolve&&(!enabled||draft.pending||pending.kind==='search'&&!noteQuestionCurrent))return;
+  if(inFlight.current||blocked||!resolve&&(!enabled||draft.pending||pending.kind==='search'&&(!noteQuestionCurrent||researchQueryIssue(pending.request.sources,pending.request.query))))return;
   inFlight.current=true;beginProgress(resolve?'Checking the saved result…':pending.kind==='search'?'Searching selected public sources…':'Saving selected excerpts to this encounter…');setMessage('');setReview(null);setConfirmed(false);
   const controller=new AbortController(),n=generation.current;operation.current=controller;
   const retained={...draft,pending};
@@ -84,7 +87,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
     const raw=await (resolve?port.resolve:port.search)(identity,workspaceId,pending.request,controller.signal);
     const result=await validateResearchObservation(raw,workspaceId,pending.request,bot.address);if(!current(n,controller))return;
     const unsettled=result.state==='running'||result.state==='interrupted',next={...retained,pending:unsettled?pending:null};
-    await recovery.commit(snapshot(next));if(!current(n,controller))return;setDraft(next);setObservation(result);setSelected([]);if(result.state==='interrupted'){setReplacement({request:pending.request,outcome:'interrupted',observed_at:new Date().toISOString()});setReplaceAcknowledged(false);}else setReplacement(null);setMessage(unsettled?'The request is retained. Check its saved result before starting another lookup.':'Source excerpts are ready to compare. They have not been added to your encounter.');
+    await recovery.commit(snapshot(next));if(!current(n,controller))return;setDraft(next);setObservation(result);setSelected([]);if(result.state==='interrupted'){setReplacement({request:pending.request,outcome:'interrupted',observed_at:new Date().toISOString()});setReplaceAcknowledged(false);}else setReplacement(null);setMessage(unsettled?'The request is retained. Check its saved result before starting another lookup.':result.results.length?'Source excerpts are ready to compare. They have not been added to your encounter.':result.errors.length?'This lookup finished without confirmed records. Review the source messages below before another search.':'This lookup returned no records. Try different public terms or an exact identifier.');
    }else{
     const raw=await (resolve?port.resolveSave:port.save)(identity,workspaceId,pending.run_id,pending.request,controller.signal);
     const result=await validateResearchSaved(raw,workspaceId,pending.run_id,pending.request);if(!current(n,controller))return;
@@ -195,11 +198,12 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
    <fieldset disabled={!canSearch}><legend className="team-sr-only">Public research question</legend>
     <div className="research-topic-row">{RESEARCH_TOPICS.slice(0,4).map(topic=><button key={topic} type="button" aria-pressed={draft.topic===topic} onClick={()=>edit({topic,sources:topic==='trials'&&catalog?.sources.some(source=>source.id==='clinical_trials'&&source.state==='enabled')?['clinical_trials']:[]})}>{TOPIC_LABELS[topic]}</button>)}</div>
     <details className="research-provider-topic"><summary>Provider information</summary><button type="button" aria-pressed={draft.topic==='provider_data'} onClick={()=>edit({topic:'provider_data',sources:[]})}>Provider data</button></details>
-    <label className="research-question">Public question<textarea ref={queryField} rows={3} maxLength={500} value={draft.query} onChange={event=>edit({query:event.target.value})} placeholder={draft.topic==='trials'?'For example, myocardial infarction AND stem cell':'For example, recent reviews of treatment options…'}/></label>
-    <p className="team-fine">Write a general question without patient identifiers. Your encounter, notebook and private conversation are not automatically included.</p>
+    <label className="research-question">{queryGuidance.label}<textarea ref={queryField} rows={3} maxLength={500} value={draft.query} onChange={event=>edit({query:event.target.value})} placeholder={queryGuidance.placeholder} aria-invalid={!!queryIssue} aria-describedby={queryGuidance.help||queryIssue?queryHelpId:undefined}/></label>
+    {(queryGuidance.help||queryIssue)&&<p id={queryHelpId} className="team-fine" role={queryIssue?'status':undefined}>{queryIssue??queryGuidance.help}</p>}
+    <p className="team-fine">Use public terms or identifiers, without patient details. Your encounter, notebook and private conversation are not automatically included.</p>
     {draft.topic==='trials'&&<p className="team-fine">Compare recruitment status, trial locations and eligibility. A registry listing does not establish treatment benefit or confirm that someone qualifies.</p>}
-    <details className="research-source-picker"><summary>{draft.sources.length ? `Sources · ${draft.sources.length} selected` : "Choose sources to continue"}</summary>{sources.length?sources.map(source=><label key={source.id}><input type="checkbox" disabled={source.state!=='enabled'||!draft.sources.includes(source.id)&&draft.sources.length>=3} checked={draft.sources.includes(source.id)} onChange={event=>edit({sources:event.target.checked?[...draft.sources,source.id]:draft.sources.filter(id=>id!==source.id)})}/><span>{source.label}<small>{source.state==='enabled'?'Connection configured':'Not connected'}</small></span></label>):<p>No source connection is confirmed for this topic.</p>}</details>
-    <button className="team-primary" disabled={!noteQuestionCurrent||!selectedAvailable||!teamStrip(draft.query)}>Review query</button>
+    <details className="research-source-picker"><summary>{draft.sources.length ? `Sources · ${draft.sources.length} selected` : "Choose sources to continue"}</summary>{sources.length?sources.map(source=><label key={source.id}><input type="checkbox" disabled={source.state!=='enabled'||!draft.sources.includes(source.id)&&draft.sources.length>=3} checked={draft.sources.includes(source.id)} onChange={event=>edit({sources:event.target.checked?[...draft.sources,source.id]:draft.sources.filter(id=>id!==source.id)})}/><span>{source.label}<small>{source.state==='enabled'?'Connection configured':'Not connected'}</small><small>{source.description}</small></span></label>):<p>No source connection is confirmed for this topic.</p>}</details>
+    <button className="team-primary" disabled={!noteQuestionCurrent||!selectedAvailable||!teamStrip(draft.query)||!!queryIssue}>Review query</button>
    </fieldset>
   </form>
   {review&&noteQuestionCurrent&&<section className="research-query-review" aria-label="Review public query"><h3>Check what will be sent</h3><p>{review.query}</p><p>To: {review.sources.map(id=>sourceLabel(id,catalog)).join(', ')}</p>{draft.note_question&&<p>Private note version {draft.note_question.note_version} and its assessment stay in this workspace. Only the public question above and selected sources are sent.</p>}<label><input type="checkbox" checked={confirmed} disabled={blocked} onChange={event=>setConfirmed(event.target.checked)}/>This is a general public question, with no patient identifiers.</label><div><button disabled={blocked} onClick={()=>{setReview(null);setConfirmed(false);}}>Edit query</button><button className="team-primary" disabled={!confirmed||!canSearch||!selectedAvailable} onClick={()=>{if(confirmed&&canSearch&&selectedAvailable&&review.expected_revision===workspaceRevision&&review.team_revision===bot.team_revision)void execute({kind:'search',request:review});}}>Search selected sources</button></div></section>}
@@ -214,7 +218,9 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
    onSmaller={()=>{setSelected([]);setMessage('Choose fewer excerpts from the lookup below, or open saved research history first. Save the smaller selection as a new packet before requesting analysis.');}}/>}
   {observation&&<section className="research-results" aria-label="Research results"><header><h3>{stateLabel[observation.state]}</h3><p>{observation.query}</p><p className="team-fine">Retrieved records are source evidence. No AI synthesis or clinical inference is supplied by this lookup.</p></header>
    {!observation.results.length&&<p>No source records were confirmed for this lookup. This does not prove that evidence, warnings, trials or coverage are absent.</p>}
-   {observation.errors.map(error=><p className="research-status" key={error.source}>{sourceLabel(error.source,catalog)} could not be confirmed for this lookup.</p>)}
+   {observation.errors.map(error=><p className="research-status" key={error.source}><strong>{sourceLabel(error.source,catalog)}: </strong>{researchSourceFailure(error.source,error.code,observation.query)}</p>)}
+   {observation.errors.some(error=>error.code==='source_not_configured')&&<button disabled={blocked} onClick={()=>void loadCatalog()}>Check research connection</button>}
+   {!!observation.errors.length&&<button className="team-subtle" disabled={!canSearch} onClick={()=>queryField.current?.focus()}>Edit public query</button>}
    <div className="research-result-grid">{observation.results.map(resultCard)}</div>
    {!!observation.results.length&&<footer><span>{selected.length} of up to 5 selected</span><button className="team-primary" disabled={!canSearch||!selected.length} onClick={saveSelected}>Save selected excerpts</button></footer>}
   </section>}

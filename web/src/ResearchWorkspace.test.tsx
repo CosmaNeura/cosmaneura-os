@@ -2,12 +2,12 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import {ResearchWorkspace} from './ResearchWorkspace';
-import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
+import {editorDraft,EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
 import {DraftJournal,editorAddress} from './draft-journal';
 import {memoryDraftStorage} from './draft-test-fixture';
-import {researchCatalog,researchObservation,researchIdentity,researchWorkspaceId,researchBotId,researchRunId,researchSaved,researchSavedPacket,researchFixtureId} from './research-test-fixture';
+import {researchCatalog,researchObservation,researchIdentity,researchWorkspaceId,researchBotId,researchRunId,researchSaved,researchSavedPacket,researchFixtureId,researchRequest} from './research-test-fixture';
 import type {ResearchPort} from './research-api';
-import {researchDigest,type ResearchObservation,type ResearchSaved} from './research-contract';
+import {researchDigest,type ResearchObservation,type ResearchSaved,type ResearchSearch} from './research-contract';
 import {researchSavedText} from './research-analysis-contract';
 import {WorkspaceApiError,type Workspace} from './workspace-api';
 import {noteResearchWorkspace} from './note-research-test-fixture';
@@ -257,4 +257,84 @@ it('cancels a saved-history read and fences a late reply while allowing another 
  expect(element.querySelectorAll('.research-history strong')).toHaveLength(0);
  expect(element.querySelector('textarea')!.value).toBe('Keep my question');
  expect(port.search).not.toHaveBeenCalled();expect(port.save).not.toHaveBeenCalled();
+});
+
+it('guides an explicitly selected NPI lookup and blocks names or Unicode digits before dispatch',async()=>{
+ const catalog=researchCatalog(),source=catalog.sources.find(source=>source.id==='npi_registry')!;
+ source.state='enabled';source.description='Look up a public provider by their 10-digit NPI.';
+ vi.mocked(port.catalog).mockResolvedValue(catalog);
+ vi.mocked(port.search).mockImplementation(async(_i,_w,request)=>({...await researchObservation(request),results:[]}));
+ await mount();await click('Provider data');
+ const checkbox=[...element.querySelectorAll('label')].find(label=>label.textContent?.includes('NPI Registry'))!.querySelector('input')!;
+ expect(checkbox.checked).toBe(false);expect(element.textContent).toContain(source.description);
+ await check('NPI Registry');expect(element.querySelector('textarea')!.placeholder).toContain('1234567890');
+ for(const query of ['Invented Provider','１２３４５６７８９０','123456789']){
+  await fill(query);expect(button('Review query').disabled).toBe(true);
+  expect(element.querySelector('textarea')!.getAttribute('aria-invalid')).toBe('true');
+  expect(element.textContent).toContain('NPI Registry needs a 10-digit NPI');
+  await act(async()=>element.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+ }
+ expect(port.search).not.toHaveBeenCalled();await fill('1234567890');await click('Review query');
+ expect(button('Search selected sources').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();
+ await check('This is a general public question');await click('Search selected sources');await workSettled();
+ expect(vi.mocked(port.search).mock.calls[0][2]).toMatchObject({query:'1234567890',sources:['npi_registry'],public_query_confirmed:true});
+ expect(element.textContent).toContain('This lookup returned no records');expect(element.textContent).not.toContain('Source excerpts are ready to compare');
+ expect(port.search).toHaveBeenCalledOnce();expect(port.save).not.toHaveBeenCalled();
+});
+
+it('explains the exact NCD input while preserving the selected source and deliberate query review',async()=>{
+ const catalog=researchCatalog();catalog.sources.find(source=>source.id==='cms_coverage')!.state='enabled';
+ vi.mocked(port.catalog).mockResolvedValue(catalog);await mount();await click('Coverage versions');await check('CMS Coverage');
+ expect(element.querySelector('textarea')!.placeholder).toContain('NCD 123:2');
+ for(const query of ['Invented coverage policy','１２３','NCD 123:２','123456789']){
+  await fill(query);expect(button('Review query').disabled).toBe(true);expect(element.textContent).toContain('CMS Coverage needs an NCD ID');
+ }
+ await fill('NCD 123:2');await click('Review query');expect(element.querySelector('.research-query-review')?.textContent).toContain('NCD 123:2');
+ expect(button('Search selected sources').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();
+ await click('Edit query');await fill('123');expect(button('Review query').disabled).toBe(false);
+ expect([...element.querySelectorAll('label')].find(label=>label.textContent?.includes('CMS Coverage'))?.querySelector<HTMLInputElement>('input')?.checked).toBe(true);
+});
+
+it('lets the user deselect an identifier-only source without rewriting a different dataset query',async()=>{
+ const catalog=researchCatalog();for(const source of catalog.sources)if(['npi_registry','cms_open_data'].includes(source.id))source.state='enabled';
+ vi.mocked(port.catalog).mockResolvedValue(catalog);await mount();await click('Provider data');await check('CMS Open Data');await check('NPI Registry');
+ await fill('Invented public facility');expect(button('Review query').disabled).toBe(true);await check('NPI Registry');
+ expect(element.querySelector('textarea')!.value).toBe('Invented public facility');await click('Review query');
+ expect(element.querySelector('.research-query-review')?.textContent).toContain('To: CMS Open Data');
+ expect(element.querySelector('.research-query-review')?.textContent).not.toContain('NPI Registry');expect(port.search).not.toHaveBeenCalled();
+});
+
+it.each([
+ ['no_matching_record','No matching record was returned. Check the query or identifier'],
+ ['source_rate_limited','The source is limiting requests. Wait a little'],
+ ['source_timeout','The source took too long to respond. Try a new reviewed search later'],
+ ['source_not_configured','This source is not connected. Check the research connection'],
+ ['invalid_source_response','The source response could not be verified. No records from this source were accepted'],
+ ['source_unavailable','The source is unavailable. Try a new reviewed search later'],
+])('explains a completed %s without redispatching or offering unconfirmed-request recovery',async(code,message)=>{
+ vi.mocked(port.search).mockImplementation(async(_i,_w,request)=>({...await researchObservation(request),state:'unavailable',results:[],errors:[{source:'pubmed',code}]}));
+ await mount();await prepare();await click('Search selected sources');await workSettled();
+ expect(element.textContent).toContain(message);expect(element.textContent).toContain('This lookup finished without confirmed records');
+ expect(element.textContent).not.toContain('Source excerpts are ready to compare');
+ expect(element.querySelector('[aria-label="Unconfirmed research request"]')).toBeNull();
+ await click('Edit public query');expect(document.activeElement).toBe(element.querySelector('textarea'));
+ if(code==='source_not_configured'){await click('Check research connection');await settle();expect(port.catalog).toHaveBeenCalledTimes(2);}
+ expect(port.search).toHaveBeenCalledOnce();expect(port.resolve).not.toHaveBeenCalled();expect(port.save).not.toHaveBeenCalled();
+ expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:null,data:{pending:null}});
+});
+
+it('restores and resolves a legacy invalid identifier request exactly while blocking a new invalid lookup',async()=>{
+ const request:ResearchSearch={...researchRequest(),topic:'provider_data',sources:['npi_registry'],query:'Invented Provider'};
+ const draft={version:1,bot:researchBotId,topic:request.topic,query:request.query,sources:request.sources,pending:{kind:'search',request}};
+ const address=editorAddress(researchWorkspaceId,`research:${researchBotId}`);await journal.load(address);
+ await journal.persist(address,editorDraft(researchWorkspaceId,`research:${researchBotId}`,draft,request.idempotency_key));
+ const catalog=researchCatalog();catalog.sources.find(source=>source.id==='npi_registry')!.state='enabled';vi.mocked(port.catalog).mockResolvedValue(catalog);
+ vi.mocked(port.resolve).mockImplementation(async(_i,_w,body)=>({...await researchObservation(body),state:'unavailable',results:[],errors:[{source:'npi_registry',code:'invalid_source_response'}]}));
+ await mount();await click('Restore research draft');expect(button('Review query').disabled).toBe(true);
+ await click('Check saved result');await workSettled();expect(vi.mocked(port.resolve).mock.calls[0][2]).toEqual(request);
+ expect(element.querySelector('.research-results')?.textContent).toContain('NPI Registry needs a 10-digit NPI');
+ await fill('1234567890');expect(button('Review query').disabled).toBe(false);
+ expect(element.querySelector('.research-results')?.textContent).toContain('NPI Registry needs a 10-digit NPI');
+ expect(request.query).toBe('Invented Provider');expect(port.search).not.toHaveBeenCalled();expect(port.resolve).toHaveBeenCalledOnce();
+ expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:null,data:{pending:null,query:'1234567890'}});
 });
