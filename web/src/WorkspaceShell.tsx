@@ -527,13 +527,26 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     if(address&&previousIdentity.current===result.identity&&session.getSnapshot().workspace?.id===result.workspace.id){setContextBot(null);await openConversation(result.workspace.id,address,undefined,true);}
   }
   const taskFocusPending=useRef(false),taskScrollReturn=useRef<number|null>(null);
+  const sourceTaskReturn=useRef<{owner:typeof authenticated;identity:typeof identity;workspaceId:string;address:string;generation:number;target:HTMLElement|null}|null>(null);
+  const ownsSourceReturn=()=>{const target=sourceTaskReturn.current,view=session.getSnapshot();return !!target&&target.owner===authenticated&&target.identity===identity&&target.generation===generation.current&&target.workspaceId===view.workspace?.id&&target.address===view.selected;};
+  useEffect(()=>{if(sourceTaskReturn.current){sourceTaskReturn.current=null;taskScrollReturn.current=null;taskFocusPending.current=false;}},[authenticated,identity,workspace?.id,selected,messagesMode,connectionGeneration]);
   function showConversationTask(task:'Review'|'Notebook'|'Sources'|'Work'|'Activity'|'Tools'){
-    if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;setConversationDetails(false);
+    if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;setConversationDetails(false);sourceTaskReturn.current=null;
     taskFocusPending.current=true;taskScrollReturn.current=mobileChatFrame.scrollRef.current?.scrollTop??null;
     if(task==='Activity'||task==='Tools'){setMessagesTask(task);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setTeamWorkExpanded(task==='Activity');}
     else{setMessagesTask(null);setPanel(task);setMobilePanel(task);setPhoneChatToolsOpen(false);}
   }
-  function returnToMessagesChat(){if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;setMessagesTask(null);setMobilePanel('Conversation');setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);}
+  function openConversationSource(id:string){
+    const view=session.getSnapshot();if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked||previousIdentity.current!==authenticated||view.workspace?.id!==workspace?.id||view.selected!==selected||!view.workspace?.entries.some(entry=>entry.id===id))return;
+    const target=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    // A new source intent cancels an older EHR-return animation frame, even
+    // when the user returns to this conversation again before that frame runs.
+    ehrReturnFocus.current=null;
+    if(messagesMode){showConversationTask('Sources');sourceTaskReturn.current={owner:authenticated,identity,workspaceId:view.workspace.id,address:selected,generation:generation.current,target};}
+    else{setPanel('Sources');setMobilePanel('Sources');}
+    setSelectedSource(id);
+  }
+  function returnToMessagesChat(){if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;const returnToSource=ownsSourceReturn();setMessagesTask(null);setMobilePanel('Conversation');setPhoneChatToolsOpen(false);if(!returnToSource)setQuestionFocus(value=>value+1);}
 
   function clearPageError(){session.navigation.clearPageError({hasUnsavedWork});}
   function goNotebook(){session.navigation.goNotebook(navigationContext());}
@@ -1067,7 +1080,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function closeEhrTask(){closeVisitSourceTask('ehr');}
   function closeCalendarImportTask(){closeVisitSourceTask('calendar');}
   function closeVisitSourceTask(kind:'ehr'|'calendar'){if(kind==='calendar'?session.sources.closeCalendarImport(sourceContext()):session.sources.closeEhr(sourceContext())){const returned=ehrReturnFocus.current,current=generation.current,route=session.navigation.sequence.current,view=session.getSnapshot();requestAnimationFrame(()=>{
-    const now=session.getSnapshot();if(current!==generation.current||route!==session.navigation.sequence.current||now.identity!==view.identity||now.workspace?.id!==view.workspace?.id||now.ehrReview?.open||now.calendarImportReview?.open||now.mobilePanel!==view.mobilePanel||now.settingsOpen!==view.settingsOpen||now.practicePage!==view.practicePage)return;
+    const now=session.getSnapshot();if(returned!==ehrReturnFocus.current||current!==generation.current||route!==session.navigation.sequence.current||now.identity!==view.identity||now.workspace?.id!==view.workspace?.id||now.ehrReview?.open||now.calendarImportReview?.open||now.mobilePanel!==view.mobilePanel||now.settingsOpen!==view.settingsOpen||now.practicePage!==view.practicePage)return;
     if(returned?.scroll!==null&&returned?.scroll!==undefined&&mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=returned.scroll;
     const target=returned?.element;if(target?.isConnected&&!target.closest('[hidden]'))target.focus({preventScroll:true});else{const fallback=workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child')??conversationHeaderRef.current?.querySelector<HTMLElement>('h2');if(fallback&&!fallback.closest('[hidden]')){fallback.tabIndex=-1;fallback.focus({preventScroll:true});}}
   });}}
@@ -1157,10 +1170,16 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       taskFocusPending.current=false;
       if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=0;
       const heading=workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header h1');
-      heading?.focus({preventScroll:true});heading?.scrollIntoView?.({block:'start'});
+      const sourceTarget=ownsSourceReturn()&&selectedSource?document.getElementById(`source-${selectedSource}`):null,target=sourceTarget??heading;
+      target?.focus({preventScroll:true});target?.scrollIntoView?.({block:'start'});
     }else if(!messagesTaskLabel&&taskScrollReturn.current!==null){
       if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=taskScrollReturn.current;
       taskScrollReturn.current=null;mobileChatFrame.onScroll();
+      if(ownsSourceReturn()){
+        const target=sourceTaskReturn.current?.target,visible=target?.isConnected&&!target.closest('[hidden]')&&!target.matches(':disabled');
+        (visible?target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header h1'))?.focus({preventScroll:true});
+      }
+      sourceTaskReturn.current=null;
     }
   },[messagesMode,messagesTaskLabel,settingsOpen,practiceOpen]);
 
@@ -1634,14 +1653,14 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               still proves the latest reply was displayed for read tracking. */}
           {messagesChat&&<div className="messages-recovery-notices">{recoveryNotices}{workspaceNotices}</div>}
           <div hidden={phoneChiefToolsVisible || bot?.role==='research'&&!savedResearchChat || visitPrepReader&&!turns.length&&pending?.type!=='ask'} className="team-messages" aria-live="polite" aria-relevant="additions">
-            {!turns.length && !visitPrepReader && !chiefNoteCompose && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
+            {!turns.length && !conversation.entries.some(row=>row.kind==='material') && !visitPrepReader && !chiefNoteCompose && <div className="team-conversation-empty"><BotAvatar role={bot?.role ?? "scribe"} large greeting={!busy}
               enabled={!!bot?.enabled && !bot.retired && !!team?.revision && !settingsOpen && !practiceOpen} />
               <h3>{messagesMode?`A private conversation with ${bot?.name??'your teammate'}`:phoneChiefConversation?"What would you like to work on?":stage === "Before" ? "A clear start to the visit" : stage === "During" ? "Space to think and take notes" : "Keep the next step in view"}</h3>
               <p>{team?.llm.enabled ? phoneChiefConversation?"Write naturally. Chief can help organize your notes and coordinate your team.":"Ask a question, organize your notes, or think through the next step. Your team works from the saved context you choose." : "Review saved sources with your team. Advanced skills will connect here as their services become ready."}</p>
               {messagesMode&&bot?.role==='chief'&&chiefStarters}
               {bot?.role!=='chief'&&<button disabled={locked || !team?.revision || !bot?.enabled} onClick={() => {if(session.presentation.enabled){updateThought(template?.prompt??'Review this encounter');setQuestionFocus(value=>value+1);}else ask(template?.prompt);}}>{template?.prompt ?? "Review this encounter"}<span aria-hidden="true"> ↗</span></button>}</div>}
-            <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked}
-              onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={id=>{setPanel('Sources');setMobilePanel('Sources');setSelectedSource(id);}}
+            <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
+              onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={openConversationSource}
               onCheck={checkEntryResult} onAction={action=>{
                 if(action.kind==='review_note'){setPanel('Review');setMobilePanel('Review');}
                 else if(action.kind==='review_work'){setPanel('Work');setMobilePanel('Work');}

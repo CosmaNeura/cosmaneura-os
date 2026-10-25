@@ -51,3 +51,17 @@ describe('saved conversation order',()=>{
     expect(after.entries[2]).toMatchObject({status:'Unreviewed draft',actions:[{kind:'review_handoff',id:handoff.id,label:'Review draft'}]});
   });
 });
+
+describe('saved EHR material cards',()=>{
+  const source:WorkspaceEntry={id:teamUuid(280),revision:3,kind:'ehr_read_source',content:'Private invented chart text must not enter the card.',source_label:'Elation: reviewed problem list',ehr_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:00:00Z'};
+  it('places metadata-only material at its saved revision without creating a turn',()=>{
+    const later={...turn,id:teamUuid(281),revision:5},projection=projectConversation({...workspace,revision:5,handoffs:[],entries:[later,source,turn]},team,'chief');
+    expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${source.id}`,later.id]);expect(projection.turns).toEqual([later,turn]);expect(projection.entries[1]).toEqual({kind:'material',id:`source:${source.id}`,sourceId:source.id,label:source.source_label,state:'current',createdAt:source.created_at});expect(JSON.stringify(projection.entries)).not.toContain(source.content);
+  });
+  it('does not infer material from a label, another bot, missing custody or a removed source',()=>{
+    const w={...workspace,handoffs:[],entries:[{...source,kind:'evidence' as const},{...source,id:teamUuid(282),ehr_source_state:undefined}]};expect(projectConversation(w,team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,entries:[source],handoffs:[]},team,'follow_up').entries).toEqual([]);expect(projectConversation({...workspace,entries:[],handoffs:[]},team,'chief').entries).toEqual([]);
+  });
+  it('replaces unavailable material metadata without exposing the old label or content',()=>{
+    const projection=projectConversation({...workspace,handoffs:[],entries:[{...source,ehr_source_state:'unavailable',source_label:'Private old label'}]},team,'chief');expect(projection.entries).toEqual([{kind:'material',id:`source:${source.id}`,sourceId:source.id,label:'Unavailable EHR source',state:'unavailable',createdAt:source.created_at}]);expect(projection.turns).toEqual([]);
+  });
+});

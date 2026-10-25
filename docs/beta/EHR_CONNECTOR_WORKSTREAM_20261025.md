@@ -446,6 +446,15 @@ receipts recorded in the workstream when completed. No Elation sandbox or live
 practice was used; the access packet describes the additional clinical scope
 required.
 
+The committed Elation slice is `3a408775`. Its single native app-hosted journey
+passes with UIKit Done, Back and the Chief draft preserved, and no image
+attachments. Mac Studio independently passes 142 web cases, 220 adapter cases
+and both typechecks against all 2,930 unchanged source files. Preview31 is
+signed and archived, but CoreDevice lost the paired phone's developer tunnel
+before installation; Preview30 remains the last confirmed installed version.
+The current local browser rehearsal serves the qualified Elation build. See
+`CHECKPOINT-ELATION-PROBLEMS.json` and `native/elation-problems-native-review.json`.
+
 ## Elation sandbox access
 
 The owner confirmed no sandbox is available and requested access requirements.

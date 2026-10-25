@@ -3,6 +3,7 @@ import {botAddress,type DraftHandoff,type ProviderTeam,type Workspace,type Works
 export type ConversationAction={kind:'review_handoff'|'retry_handoff'|'review_note'|'review_work'|'check_request';id:string;label:string};
 export type ConversationRow=
   {kind:'turn';id:string;entry:WorkspaceEntry;reviewLabel:string;actions:ConversationAction[]}|
+  {kind:'material';id:string;sourceId:string;label:string;createdAt:string;state:'current'|'unavailable'}|
   {kind:'review';id:string;author:string;title:string;status:string;needsReview:boolean;actions:ConversationAction[]};
 export type ConversationProjection={workspaceId:string|null;botAddress:string;entries:ConversationRow[];turns:WorkspaceEntry[]};
 
@@ -30,6 +31,13 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
   // after every new turn. This is display order, not an activity/read clock.
   const positions=new Map(turns.map(entry=>[entry.id,entry.revision]));
   if(bot?.role==='chief'){
+    for(const source of workspace.entries){
+      if(source.kind!=='ehr_read_source'||!['current','unavailable'].includes(source.ehr_source_state??''))continue;
+      const state=source.ehr_source_state==='current'?'current':'unavailable',id=`source:${source.id}`;
+      // Material is metadata only. It is neither a reply nor an unread clock.
+      entries.push({kind:'material',id,sourceId:source.id,createdAt:source.created_at,state,label:state==='current'?source.source_label??'Reviewed EHR source':'Unavailable EHR source'});
+      positions.set(id,source.revision);
+    }
     const origins=new Set(turns.map(entry=>entry.id)),handoffs=workspace.handoffs??[];
     const related=new Set(handoffs.filter(item=>origins.has(item.origin_entry_id)).map(item=>item.id));
     for(let pass=0;pass<handoffs.length;pass++){let added=false;for(const item of handoffs)if(item.revision_request&&related.has(item.revision_request.parent_handoff_id)&&!related.has(item.id)){related.add(item.id);added=true;}if(!added)break;}

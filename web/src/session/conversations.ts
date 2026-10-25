@@ -2,7 +2,7 @@ import {parseConversationDraft,type ConversationDraft} from '../conversation-dra
 import {conversationsApi,type ConversationSummary} from '../conversations-api';
 import {DraftStoreError} from '../draft-store';
 import {editorAddress,type DraftJournal} from '../draft-journal';
-import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from '../workspace-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from '../workspace-api';
 import {teamAddress,teamUuid} from '../team-setup-request';
 import type {WorkspaceRoute} from '../workspace-route';
 import type {WorkspaceSession} from './workspace-session';
@@ -172,7 +172,7 @@ export class WorkspaceConversations {
     // Finish the explicit opened-chat acknowledgment first. Advancing the
     // automatic watermark would change the marker version needed by its retry.
     if(opened?.journal===host.journal&&opened.generation===generation&&opened.row.workspace_id===workspace.id&&opened.row.bot.address===bot)return;
-    const projection=()=>JSON.stringify(projectConversation(this.session.getSnapshot().workspace,this.session.getSnapshot().team,bot).entries);
+    const projection=(value:Workspace|null=this.session.getSnapshot().workspace)=>JSON.stringify(projectConversation(value,this.session.getSnapshot().team,bot).entries.filter(row=>row.kind!=='material'));
     const content=projection(),key=`${workspace.id}:${bot}:${content}`;
     if(this.displayed?.journal===host.journal&&this.displayed.generation===generation&&this.displayed.key===key)return;
     if(this.displayRead?.key===key&&this.displayRead.journal===host.journal&&this.displayRead.generation===generation&&this.displayRead.route===route)return this.displayRead.promise;
@@ -198,7 +198,7 @@ export class WorkspaceConversations {
         }
         if(!row)throw new WorkspaceApiError(503);
         const fresh=await this.readWorkspace(host.identity,workspace.id);
-        if(!current()||fresh.id!==workspace.id||fresh.revision<workspace.revision||fresh.entries.some(entry=>[entry.google_source_state,entry.microsoft_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state,entry.ehr_source_state,entry.calendar_import_source_state].includes('unavailable'))||JSON.stringify(projectConversation(fresh,this.session.getSnapshot().team,bot).entries)!==content)return;
+        if(!current()||fresh.id!==workspace.id||fresh.revision<workspace.revision||fresh.entries.some(entry=>[entry.google_source_state,entry.microsoft_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state,entry.ehr_source_state,entry.calendar_import_source_state].includes('unavailable'))||projection(fresh)!==content)return;
         await host.authorize();if(!current())return;
         await this.api.mark(host.identity,workspace.id,bot,{watermark:row.watermark});
         if(current()){this.displayed={journal:host.journal,generation,key};if(this.session.getSnapshot().conversationError===READ_SYNC_ERROR)this.session.setConversationError('');}

@@ -31,3 +31,17 @@ it('closes provenance when the conversation changes and retains Workspace markup
   await render('messages',{...projection,botAddress:'follow_up'});expect(host.querySelector('[role=dialog]')).toBeNull();
   await render('workspace');expect(host.textContent).not.toContain('GPT-4.1');expect(host.querySelectorAll('details')).toHaveLength(3);expect(host.querySelector('.messages-delivery')).toBeNull();
 });
+
+it.each(['messages','workspace'] as const)('shows two saved-source cards in %s with distinct time associations and exact source actions',async presentation=>{
+ const material=(id:string,createdAt:string)=>({kind:'material' as const,id:`source:${id}`,sourceId:id,label:'Elation: reviewed problem list',createdAt,state:'current' as const});
+ await render(presentation,{...projection,entries:[projection.entries[0],material('source-one','2026-10-25T12:00:00Z'),material('source-two','2026-10-25T12:15:00Z'),...projection.entries.slice(1)]});
+ const cards=[...host.querySelectorAll<HTMLElement>('.conversation-material-card')];expect(cards).toHaveLength(2);expect(cards.every(card=>card.textContent?.includes('Saved EHR source'))).toBe(true);expect(cards[0].querySelector('time')?.dateTime).toBe('2026-10-25T12:00:00Z');expect(cards[1].querySelector('time')?.dateTime).toBe('2026-10-25T12:15:00Z');
+ for(const [index,card] of cards.entries()){const button=card.querySelector<HTMLButtonElement>('button')!;expect(button.textContent).toBe('View saved source');for(const id of button.getAttribute('aria-describedby')!.split(' '))expect(document.getElementById(id)?.closest('.conversation-material-card')).toBe(card);await act(async()=>button.click());expect(source).toHaveBeenLastCalledWith(index===0?'source-one':'source-two');}
+ expect(host.querySelectorAll('.team-turn')).toHaveLength(3);expect(host.querySelectorAll('.messages-delivery')).toHaveLength(presentation==='messages'?1:0);expect(action).not.toHaveBeenCalled();expect(check).not.toHaveBeenCalled();
+});
+it('withholds stale unavailable labels and handles missing saved time without presenting it as a reply',async()=>{
+ await render('messages',{...projection,turns:[],entries:[{kind:'material',id:'source:a',sourceId:'a',label:'Private old label',createdAt:'invalid',state:'unavailable'}]});expect(host.textContent).toContain('Unavailable — check access');expect(host.textContent).toContain('Save time unavailable');expect(host.textContent).not.toContain('Private old label');expect(host.querySelector('time')).toBeNull();expect(host.querySelector('.team-turn')).toBeNull();expect(host.querySelector('.messages-delivery')).toBeNull();
+});
+it.each(['locked','busy','recoveryBlocked'] as const)('blocks material selection under %s without dispatching another action',async gate=>{
+ const value:ConversationProjection={...projection,entries:[{kind:'material',id:'source:a',sourceId:'a',label:'Elation: reviewed appointment',createdAt:'2026-10-25T12:00:00Z',state:'current'}]};await act(async()=>root.render(<ConversationEntries projection={value} latestSourceRevision={2} busy={gate==='busy'} recoveryBlocked={gate==='recoveryBlocked'} locked={gate==='locked'} onWork={()=>{}} onSource={source} onCheck={check} onAction={action}/>));const button=host.querySelector<HTMLButtonElement>('.conversation-material-card button')!;expect(button.disabled).toBe(true);await act(async()=>button.click());expect(source).not.toHaveBeenCalled();expect(action).not.toHaveBeenCalled();expect(check).not.toHaveBeenCalled();
+});

@@ -7,6 +7,8 @@ import {modelActive,modelStateLabel} from './model-work-request';
 import type {WorkspaceEntry} from './workspace-api';
 import type {ConversationAction,ConversationProjection} from './session/entries';
 
+const entryTime=(time:Date)=>time.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
+
 /** Both presentations display the same entries and invoke the same actions. */
 export function ConversationEntries({presentation='workspace',projection,latestSourceRevision,busy,recoveryBlocked,locked,onWork,onSource,onCheck,onAction}:{
   presentation?:'messages'|'workspace';
@@ -20,12 +22,15 @@ export function ConversationEntries({presentation='workspace',projection,latestS
   const citations=(entry:WorkspaceEntry)=><div className="team-citations">{entry.reply?.citations.map(citation=>['membership_work','payment_work'].includes(citation.kind)?<button key={citation.entry_id} onClick={()=>{setDetails(null);onWork();}}>{citation.label} · r{citation.revision}</button>:['inbox_message','inbox_triage','session_prep'].includes(citation.kind)?<span key={citation.entry_id}>{citation.label} · r{citation.revision}</span>:<button key={citation.entry_id} onClick={()=>{setDetails(null);onSource(citation.entry_id);}}>{citation.label}</button>)}</div>;
   let previousTime:Date|null=null;
   return <>
-{projection.entries.map(row => {if(row.kind==='review')return <article key={row.id} data-entry-id={row.id} className="conversation-review-card" aria-label={row.title}><small>{row.author}</small><h3>{row.title}</h3><p role="status">{row.status}</p>{row.actions.map(action=><button key={action.kind} data-action={action.kind} disabled={locked} onClick={()=>onAction(action)}>{action.label}</button>)}</article>;const entry=row.entry;
+{projection.entries.map(row => {if(row.kind==='material'){
+  const time=new Date(row.createdAt),valid=Number.isFinite(time.getTime()),labelId=`material-label-${row.sourceId}`,timeId=`material-time-${row.sourceId}`;
+  return <article key={row.id} data-entry-id={row.id} className="conversation-review-card conversation-material-card" aria-label="Saved EHR source"><small>Saved EHR source</small><h3 id={labelId}>{row.state==='current'?row.label:'Unavailable EHR source'}</h3><p id={timeId}>{valid?<time dateTime={row.createdAt}>Saved {entryTime(time)}</time>:'Save time unavailable'}</p><p>{row.state==='current'?'Saved snapshot available':'Unavailable — check access'}</p><button data-action="view_source" aria-describedby={`${labelId} ${timeId}`} disabled={locked||busy||recoveryBlocked} onClick={event=>{event.currentTarget.focus({preventScroll:true});onSource(row.sourceId);}}>View saved source</button></article>;
+}if(row.kind==='review')return <article key={row.id} data-entry-id={row.id} className="conversation-review-card" aria-label={row.title}><small>{row.author}</small><h3>{row.title}</h3><p role="status">{row.status}</p>{row.actions.map(action=><button key={action.kind} data-action={action.kind} disabled={locked} onClick={()=>onAction(action)}>{action.label}</button>)}</article>;const entry=row.entry;
   const time=new Date(entry.created_at),valid=Number.isFinite(time.getTime());
   const separator=messages&&valid&&(!previousTime||time.toDateString()!==previousTime.toDateString()||time.getTime()-previousTime.getTime()>=15*60*1000);
   if(valid)previousTime=time;
   return <div className="team-turn" data-entry-id={row.id} data-delivery={entry.kind==='conversation'?'delivered':undefined} key={entry.id} id={`turn-${entry.id}`} tabIndex={-1}>
-    {separator&&<p className="messages-time-separator"><time dateTime={entry.created_at}>{time.toLocaleString(undefined,{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'})}</time></p>}
+    {separator&&<p className="messages-time-separator"><time dateTime={entry.created_at}>{entryTime(time)}</time></p>}
     <article className="team-human-message"><small>{entry.kind === "handoff_result" ? "Brief from Chief" : "You"}</small><p>{clinicalRequestDisplay(entry.content)}</p></article>
     {messages&&entry.id===lastSent&&<p className="messages-delivery">Delivered</p>}
               {entry.reply && <article className="team-bot-message"><header><BotAvatar role={entry.reply.role} />

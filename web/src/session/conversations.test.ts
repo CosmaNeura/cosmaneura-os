@@ -326,3 +326,11 @@ describe('read acknowledgment for displayed replies',()=>{
     expect(f.api.mark).toHaveBeenLastCalledWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark});
   });
 });
+
+it('keeps source-card creation, same-revision withholding and removal outside reply acknowledgment work',async()=>{
+ const f=await visibleReply();await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.read).toHaveBeenCalledOnce();expect(f.api.mark).toHaveBeenCalledOnce();const source={id:teamUuid(880),kind:'ehr_read_source' as const,revision:3,content:'Invented chart text',source_label:'Elation: reviewed problem list',ehr_source_state:'current' as const,origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:00:00Z'};
+ f.session.setWorkspace({...f.workspace,revision:3,entries:[...f.workspace.entries,source]});await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);f.session.setWorkspace({...f.workspace,revision:3,entries:[...f.workspace.entries,{...source,ehr_source_state:'unavailable',content:''}]});await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);f.session.setWorkspace({...f.workspace,revision:3});await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.read).toHaveBeenCalledOnce();expect(f.api.mark).toHaveBeenCalledOnce();expect(f.readWorkspace).toHaveBeenCalledOnce();
+});
+it('still acknowledges a real reply when the confirming workspace includes saved material',async()=>{
+ const f=await visibleReply(),source={id:teamUuid(881),kind:'ehr_read_source' as const,revision:1,content:'Invented chart text',source_label:'Elation: reviewed appointment',ehr_source_state:'current' as const,origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:00:00Z'},withSource={...f.workspace,entries:[source,...f.workspace.entries]};f.session.setWorkspace(withSource);f.readWorkspace.mockResolvedValue(withSource);await f.session.conversations.acknowledgeDisplayed(f.host,()=>true);expect(f.api.mark).toHaveBeenCalledExactlyOnceWith(f.host.identity,f.workspace.id,'chief',{watermark:f.row.watermark});
+});
