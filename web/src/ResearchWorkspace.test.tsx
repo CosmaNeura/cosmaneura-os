@@ -338,3 +338,36 @@ it('restores and resolves a legacy invalid identifier request exactly while bloc
  expect(request.query).toBe('Invented Provider');expect(port.search).not.toHaveBeenCalled();expect(port.resolve).toHaveBeenCalledOnce();
  expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:null,data:{pending:null,query:'1234567890'}});
 });
+
+async function chiefPacket(onPrepareChief:NonNullable<Parameters<typeof ResearchWorkspace>[0]['onPrepareChief']>){
+ const {analysisWorkspace}=await import('./research-analysis-test-fixture'),analysis={workspace:analysisWorkspace(),model:{enabled:true,model:'Configured model'},onSubmit:vi.fn(async()=>{})};
+ await mount({analysis,onPrepareChief});await prepare();await click('Search selected sources');await workSettled();await check('Select excerpt to save');await click('Save selected excerpts');await workSettled();
+ const run=await researchObservation(vi.mocked(port.search).mock.calls[0][2]),receipt=await researchSaved(vi.mocked(port.save).mock.calls[0][3]);analysis.workspace=savedWorkspace(run,receipt);await mount({workspaceRevision:3,analysis,onPrepareChief});await analysisReady();
+ return {analysis,run,receipt};
+}
+async function chiefWait(check:()=>void){for(let attempt=0;attempt<100;attempt++){let ready=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));try{check();ready=true;}catch{}});if(ready)return;}check();}
+async function chiefSettled(){await chiefWait(()=>expect(element.textContent).not.toContain('Preparing Chief draft…'));}
+it('retains exact Research work before handing its verified packet to Chief without consenting to AI or searching again',async()=>{
+ const address=editorAddress(researchWorkspaceId,`research:${researchBotId}`),callback=vi.fn(async(selection:import('./session/research-chief').ResearchChiefSelection)=>{expect(await journal.load(address)).toMatchObject({pending:null,data:{saved_packet:selection.anchor,query:'Invented general public question'}});return true;});
+ const {analysis,run,receipt}=await chiefPacket(callback);await click('Prepare Chief draft');await chiefSettled();
+ expect(callback).toHaveBeenCalledExactlyOnceWith({workspace_id:researchWorkspaceId,workspace_revision:3,team_revision:1,bot:researchBotId,anchor:{entry_id:receipt.entry_id,entry_revision:3,run_id:receipt.run_id,save_request_sha256:receipt.request_sha256},run,saved:receipt});
+ expect(element.textContent).toContain('Chief can also use other saved visit information allowed in its settings.');expect(element.textContent).toContain('Chief draft prepared. Nothing was sent.');expect(analysis.onSubmit).not.toHaveBeenCalled();expect(port.search).toHaveBeenCalledOnce();expect(port.save).toHaveBeenCalledOnce();
+});
+it('refuses an altered saved packet before the Chief callback',async()=>{
+ const callback=vi.fn(async()=>true),{analysis}=await chiefPacket(callback);analysis.workspace={...analysis.workspace,entries:analysis.workspace.entries.map(entry=>({...entry,content:'Changed retained source'}))};
+ await mount({workspaceRevision:3,analysis,onPrepareChief:callback});await click('Prepare Chief draft');await chiefSettled();
+ expect(callback).not.toHaveBeenCalled();expect(element.textContent).toContain('Load and check the exact saved source details');expect(analysis.onSubmit).not.toHaveBeenCalled();
+});
+it('does not dispatch the Chief handoff when its editor commit fails',async()=>{
+ const callback=vi.fn(async()=>true);await chiefPacket(callback);vi.spyOn(journal,'persist').mockRejectedValueOnce(new Error('invented private storage failure'));await click('Prepare Chief draft');await chiefSettled();
+ expect(callback).not.toHaveBeenCalled();expect(element.textContent).toContain('could not be retained safely');expect(port.save).toHaveBeenCalledOnce();
+});
+it('describes an unconfirmed Chief result without claiming a possibly committed draft was undone',async()=>{
+ const callback=vi.fn(async()=>false);await chiefPacket(callback);await click('Prepare Chief draft');await chiefSettled();
+ expect(element.textContent).toContain('Chief’s draft could not be confirmed. Reopen Chief and check its saved directions before trying again. Nothing was sent.');expect(port.save).toHaveBeenCalledOnce();
+});
+it('clears its preparing state on a same-mounted identity replacement and ignores the old callback result',async()=>{
+ let release!:(value:boolean)=>void;const callback=vi.fn(()=>new Promise<boolean>(resolve=>{release=resolve;})),{analysis}=await chiefPacket(callback);await click('Prepare Chief draft');await chiefWait(()=>expect(release).toBeTypeOf('function'));expect(button('Preparing Chief draft…').disabled).toBe(true);
+ await mount({identity:{mode:'clerk_jwt',getToken:async()=>null},workspaceRevision:3,analysis,onPrepareChief:callback});await settle();expect(element.textContent).not.toContain('Preparing Chief draft…');
+ await act(async()=>release(true));expect(element.textContent).not.toContain('Chief draft prepared.');expect(element.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(false);
+});

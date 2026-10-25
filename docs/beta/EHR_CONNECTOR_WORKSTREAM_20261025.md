@@ -409,8 +409,9 @@ removed trailing whitespace; their before/after hashes are recorded alongside
 the 142-check receipt. No real Microsoft account was connected.
 
 These deliveries do not establish live vendor connections. Atlas.md currently
-has generic calendar-file intake, not synchronization. Elation and Tebra provide
-reviewed patient/appointment context; Athena provides the Core visit-link task.
+has generic calendar-file intake, not synchronization. Elation provides reviewed
+patient/appointment context and the problem-list slice described below; Tebra
+provides reviewed patient/appointment context. Athena provides the Core visit-link task.
 None of the four has passed live vendor acceptance in this workstream.
 Longitudinal chart history, medications, labs, prescription relay/eRx
 and clinical writeback remain missing engineering capabilities. They are not
@@ -454,6 +455,15 @@ signed and archived, but CoreDevice lost the paired phone's developer tunnel
 before installation; Preview30 remains the last confirmed installed version.
 The current local browser rehearsal serves the qualified Elation build. See
 `CHECKPOINT-ELATION-PROBLEMS.json` and `native/elation-problems-native-review.json`.
+
+The subsequent `1f950824` mobile slice puts saved EHR sources directly in Chief's
+conversation, with a label, saved time and exact-source review action. Back
+preserves the draft, focus and reading position. It passes 107 focused web
+checks locally and on Mac Studio, 86 narrow-phone/enlarged-text Chromium checks,
+both typechecks and one native hosted journey with zero media attachments.
+Preview32 is signed, archived and served in the local browser rehearsal.
+The paired phone still reports its developer tunnel unavailable; Preview30 is
+the last confirmed installed version. See `CHECKPOINT-EHR-MATERIAL.json`.
 
 ## Elation sandbox access
 

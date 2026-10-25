@@ -90,6 +90,34 @@ export class WorkspaceConversations {
     if(!host.current()||host.blocked()||generation!==this.session.generation.current||route!==this.session.navigation.sequence.current||this.session.getSnapshot().selected!==bot)return false;
     return this.retain(host);
   }
+  /** Publish a prepared continuation only after its exact per-bot draft is durable.
+   * A stale completion cannot replace current text or grant source authority. */
+  async appendPreparedDraft(text:string,host:ConversationHost,accept:()=>boolean):Promise<boolean>{
+    const view=this.session.getSnapshot(),wid=view.workspace?.id,generation=this.session.generation.current,route=this.session.navigation.sequence.current,edit=this.session.models.thoughtEditVersion.current;
+    if(!wid||view.phoneNoteTask||!host.current()||!accept()||text.length>4000)return false;
+    const address=editorAddress(wid,`conversation:${view.selected}`);
+    if(this.prepared.get(host.journal)?.get(address)!==generation)throw new DraftStoreError('unavailable');
+    const owned=()=>host.current()&&this.session.recovery.journal.current?.value===host.journal;
+    const current=()=>owned()&&this.session.generation.current===generation&&this.session.navigation.sequence.current===route&&this.session.models.thoughtEditVersion.current===edit&&this.session.getSnapshot().workspace?.id===wid&&this.session.getSnapshot().selected===view.selected&&!this.session.getSnapshot().phoneNoteTask;
+    const next={kind:'editor' as const,workspaceId:wid,editor:`conversation:${view.selected}` as const,pending:null,data:{text}};
+    const journal=host.journal,prior=await journal.load(address);
+    if(!current()||!accept())return false;
+    if(prior===null?view.thought!=='':prior.kind!=='editor'||prior.editor!==next.editor||JSON.stringify(prior.data)!==JSON.stringify({text:view.thought}))throw new DraftStoreError('conflict');
+    await journal.persist(address,next,journal.records.get(address)!.revision);
+    if(!current()||!accept()){
+      // Cleanup belongs to the captured journal, independently of the current
+      // route/foreground. The serialized revision guard preserves newer edits.
+      // A closed store cannot promise rollback after a possibly committed write.
+      const saved=await journal.load(address);
+      if(saved?.kind==='editor'&&saved.editor===next.editor&&JSON.stringify(saved.data)===JSON.stringify(next.data)){
+        try{await journal.persist(address,prior,journal.records.get(address)!.revision);}
+        catch(cause){if(!(cause instanceof DraftStoreError)||cause.code!=='conflict')throw cause;}
+      }
+      return false;
+    }
+    this.session.models.updateThought(text);
+    return true;
+  }
   async open(workspaceId:string,bot:string,host:ConversationHost,summary?:ConversationSummary):Promise<boolean>{
     if(this.opening||host.blocked()||!host.current()||(!teamAddress(bot)||!teamUuid(workspaceId)))return false;
     const origin=this.session.getSnapshot(),originGeneration=this.session.generation.current,originEdit=this.session.models.thoughtEditVersion.current;

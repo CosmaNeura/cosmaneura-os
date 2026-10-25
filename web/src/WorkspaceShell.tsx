@@ -10,6 +10,7 @@ import {ConversationEntries} from './ConversationEntries';
 import {hasSavedBotContext,latestNotebookText} from './session/composer';
 import {WorkspaceDialog} from './WorkspaceDialog';
 import {WorkspaceSession} from './session/workspace-session';
+import {ResearchChiefHandoff,researchChiefUnavailable,type ResearchChiefSelection} from './session/research-chief';
 import {useWorkspaceSession} from './session/use-workspace-session';
 import type {ConfirmedClinicalModelContext,PendingSave} from './session/model';
 export type {PendingSave} from './session/model';
@@ -139,6 +140,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   draftStorage?: (options: { scope: string; native: boolean }) => Promise<DraftStore>;
 }) {
   const [session]=useState(()=>new WorkspaceSession({presentation:{enabled:import.meta.env.VITE_MESSAGES_ENABLED==='true',phone:phoneLayout(),storage:deviceStorage()},initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
+  const [researchChief]=useState(()=>new ResearchChiefHandoff(session));
   const inboxOrganization=useSyncExternalStore(session.inboxPreferences.subscribe,session.inboxPreferences.getSnapshot,session.inboxPreferences.getSnapshot);
   const inboxDraftStatus=useSyncExternalStore(session.conversations.drafts.subscribe,session.conversations.drafts.getSnapshot,session.conversations.drafts.getSnapshot);
   const [inboxRename,setInboxRename]=useState<{target:InboxRenameTarget;identity:AuthenticatedWorkspaceIdentity;scope:string|undefined}|null>(null);
@@ -1005,6 +1007,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function refreshGoogleVisit(){return session.sources.refresh(sourceContext());}
   function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){return session.sources.prepareGoogle(sourceContext(),source,kind);}
   function prepareMicrosoftChief(source:OutlookMessageSaved){return session.sources.prepareMicrosoft(sourceContext(),source);}
+  function prepareResearchChief(selection:ResearchChiefSelection){
+    const host=conversationHost();if(!host)return Promise.resolve(false);
+    return researchChief.prepare(selection,{...host,current:()=>host.current()&&!draftsSuspended.current&&document.visibilityState!=='hidden'},()=>{
+      setMessagesTask(null);setConversationDetails(false);setPhoneChatToolsOpen(false);setQuestionFocus(value=>value+1);
+    });
+  }
   async function openOutlookWork(origin:'conversation'|'sources'|'connections'){
     if(!OUTLOOK_MESSAGE_BUILD||!authenticated||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
     if(origin==='connections'){setOutlookReturn(null);setOutlookMessageVisited(true);setOutlookMessageOpen(true);return;}
@@ -1633,6 +1641,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               if(locked||captureNavigationLocked||captureDraftLocked||!team.llm.enabled||!bot.enabled||bot.retired||bot.blocked_capabilities?.includes('model_answer')||body.role!==botAddress(bot)||body.expected_revision!==workspace.revision||body.team_revision!==team.revision||!body.research_analysis)return;
               setSavedResearchChat(true);await saveModel({type:'ask',model_contract:1,origin:'durable_admission_v1',body},'submit');
             }}}
+            onPrepareChief={prepareResearchChief} chiefUnavailable={researchChiefUnavailable(team)}
             onBusyChange={session.setResearchPending} onDenied={failure} onChanged={revision=>{if(revision!==workspace.revision){setConflict(true);void refresh();}}}/>
             : <p className="research-status">Sign in to use private Research settings and check public source connections.</p>}
             <button className="team-subtle" aria-expanded={savedResearchChat} onClick={()=>setSavedResearchChat(value=>!value)}>Saved encounter conversation</button></>}

@@ -14,8 +14,7 @@ import {modelCanonical} from '../src/model-work-request';
 import {clinicalTeamApi} from '../src/clinical-team-api';
 import {CLINICAL_NOTE_LABEL,verifyClinicalNoteShareReceipt} from '../src/clinical-team-contract';
 import {researchApi} from '../src/research-api';
-import {researchCatalog,researchObservation,researchSaved} from '../src/research-test-fixture';
-import type {ResearchObservation,ResearchSavedPacket} from '../src/research-contract';
+import {researchRehearsal} from './research';
 import {nativeRehearsal} from './native-rehearsal';
 export const identity={mode:'clerk_jwt' as const,getToken:async()=>'invented-ui-rehearsal-token',
   ...(nativeRehearsal(new URL(location.href),window.top===window)?{nativeSession:{revision:modelUuid(999),isCurrent:()=>true}}:{})};
@@ -62,7 +61,6 @@ function initial():Workspace{
 let state:Workspace=JSON.parse(sessionStorage.getItem(storageKey)??'null')??initial();
 const receiptsKey=storageKey+':receipts';
 const saved=new Map<string,unknown>(JSON.parse(sessionStorage.getItem(receiptsKey)??'[]'));
-const observations:ResearchObservation[]=[],packets:ResearchSavedPacket[]=[];
 const interruptedSave=new URLSearchParams(location.search).get('scenario')==='unconfirmed-save';
 let lostSaveReply=false;
 const copy=()=>structuredClone(state);
@@ -74,7 +72,7 @@ async function once<T>(key:string,work:()=>Promise<T>):Promise<T>{if(saved.has(k
 export async function installFixtures(reset=false){
   team.recovery_scope=await hash(modelCanonical({contract:'cosmas-private-drafts-v1',box_id:modelUuid(9000),owner_id:inventedOwner}));
   const recordingServer=recordingMetadata(inventedOwner,()=>team,()=>state);
-  if(reset){state=initial();saved.clear();observations.length=0;packets.length=0;persist();}
+  if(reset){state=initial();saved.clear();persist();}
   state.model_contract_version=1;state.model_observed_at=stamp;
   for(const handoff of state.handoffs??[]){const result=state.entries.find(entry=>entry.id===handoff.result_entry_id);if(result?.reply){handoff.result_sha256=await hash(result.reply.content);handoff.review_status=handoff.review?'current':'not_reviewed';}}
   const markers=new Map<string,{version:number;manual:boolean;seen:boolean}>();
@@ -87,14 +85,7 @@ export async function installFixtures(reset=false){
   });
 
   Object.assign(teamSetupApi,{read:async()=>({...await policySetupFixture(team.configuration),team:structuredClone(team)}),resources:async()=>structuredClone(resourcesFixture),usage:async()=>structuredClone(usageFixture),rehearse:async(_identity:unknown,body:Parameters<typeof teamSetupApi.rehearse>[1])=>policyRehearsalFixture(body.configuration,body.expected_revision)});
-  Object.assign(researchApi,{
-    catalog:async()=>researchCatalog(),
-    history:async()=>({contract:'research.history.v1' as const,runs:structuredClone(observations)}),
-    savedHistory:async()=>({contract:'research.saved_history.v1' as const,workspace_id:state.id,bot:modelUuid(104),packets:structuredClone(packets)}),
-    search:async(_identity:unknown,id:string,body:Parameters<typeof researchApi.search>[2])=>once(body.idempotency_key,async()=>{check(id,body.expected_revision);const result={...await researchObservation(body),workspace_id:id,run_id:crypto.randomUUID()};observations.unshift(result);return result;}),
-    resolve:async(_identity:unknown,_id:string,body:Parameters<typeof researchApi.resolve>[2])=>{const result=saved.get(body.idempotency_key);if(!result)throw new WorkspaceApiError(404);return structuredClone(result) as ResearchObservation;},
-    save:async(_identity:unknown,id:string,run:string,body:Parameters<typeof researchApi.save>[3])=>once(body.idempotency_key,async()=>{check(id,body.expected_revision);const observation=observations.find(item=>item.run_id===run);if(!observation)throw new WorkspaceApiError(404);const result={...await researchSaved(body),workspace_id:id,run_id:run,entry_id:crypto.randomUUID()};state.revision++;state.entries.push(entry(result.entry_id,state.revision,'evidence',`Scripted public-source example: ${observation.query}. Invented excerpt; not clinical evidence.`));packets.unshift({query:observation.query,saved:result});persist();return result;}),
-  } satisfies Partial<typeof researchApi>);
+  Object.assign(researchApi,researchRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,modelUuid(104)));
   Object.assign(clinicalTeamApi,{
     share:async(_identity:unknown,id:string,body:Parameters<typeof clinicalTeamApi.share>[2])=>once(body.idempotency_key,async()=>{check(id,body.expected_revision);const note=state.note?.latest;if(!note||note.id!==body.note_id||note.version!==body.note_version||note.content_hash!==body.content_hash||note.source_fingerprint!==body.source_fingerprint||note.sources_changed)throw new WorkspaceApiError(409);
       const snapshot={contract:'clinical-note-team-source.v1',request:body,note:{id:note.id,version:note.version,content_hash:note.content_hash,source_fingerprint:note.source_fingerprint,content:note.content}};

@@ -353,12 +353,15 @@ export class DraftJournal {
     this.records.set(address, record);
     return draft;
   }
-  persist(address: string, body: RecoveredDraft | null): Promise<void> {
+  persist(address: string, body: RecoveredDraft | null, expectedRevision?: string | null): Promise<void> {
     // Snapshot before enqueueing: later input mutations cannot change this save.
     const copy = structuredClone(body);
     const task = async () => {
       if (!this.active || !this.records.has(address)) throw new DraftStoreError("unavailable");
       const previous = this.records.get(address)!;
+      // Conditional cleanup must not overwrite a newer write queued while its
+      // caller was checking the record. Compare inside this serialized task.
+      if (expectedRevision !== undefined && previous.revision !== expectedRevision) throw new DraftStoreError("conflict");
       if (same(previous.value?.body ?? null, copy)) return;
       const value: DraftValue | null = copy ? { schema: 1, updatedAt: new Date().toISOString(), body: copy } : null;
       parse(value, address);

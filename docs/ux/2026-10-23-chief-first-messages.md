@@ -613,3 +613,57 @@ uses the same frozen source and keeps its prior origin and storage.
 
 See the connector workstream's `CHECKPOINT-OUTLOOK.json`,
 `native/outlook-native-review.json` and `native/preview30-phone-summary.json`.
+
+### Reviewed EHR sources in the conversation
+
+Commit `1f950824` adds a saved EHR source card directly in Chief's conversation.
+It shows the reviewed source label and save time, with one action to reopen the
+exact saved snapshot. Back restores the card, reading position and draft without
+reopening the keyboard. Unavailable sources use a generic label; source cards
+are not bot replies and do not alter arrival or read-watermark tracking.
+
+The slice passes 107 focused web cases locally and on Mac Studio, both typechecks,
+86 Chromium assertions at 320px and 390px with 200% text, and one native hosted
+journey with UIKit Done. All 2,930 frozen source files remained unchanged; no
+images or media attachments were produced. The browser check uses the existing
+native-chat frame to match the installed app. Its nonnative rehearsal banner
+caused a transient height/scroll difference recorded separately, without a
+production code change.
+
+Preview32 is signed and archived, and the local rehearsal serves its qualified
+renderer. The phone's developer tunnel became unavailable before Preview31
+could be installed; Preview30 remains the last confirmed installed build.
+These checks do not establish physical touch, haptics or VoiceOver acceptance.
+See `CHECKPOINT-EHR-MATERIAL.json` and `native/ehr-material-native-review.json`
+in the connector workstream. This EHR card is one material type; the complete
+recording/research/material transcript and all Claude recommendations are not
+claimed complete.
+
+### Outlook cards and Research draft continuation
+
+Commit `0c2f733` extends the saved-source conversation card to reviewed Outlook
+email. Current source access is required for its label; unavailable email uses
+a generic label and cannot expose its subject or body. Reopening the exact
+source preserves Chief's draft and reading position. A delayed return from the
+email task is invalidated by a newer source-navigation action. The scoped slice
+passes 120 web cases and independent review.
+
+Research now offers **Prepare Chief draft** after a confirmed public-source
+packet save. It verifies the exact lookup, save receipt, packet revision and
+content, retains the Research editor, and opens Chief in the same visit. It
+preserves Chief's existing directions and appends a reference to the saved
+packet without copying the source passage into the composer. Chief may use
+other saved visit information allowed by its existing settings; Research's
+separately consented analysis flow is unchanged. Preparation performs no new
+public lookup, source save or model request, and never sends the draft.
+
+The final source and recovery suite passes 230 cases plus TypeScript. Stale
+handoffs recheck unrelated operation locks and restore only their own draft
+write, using the existing journal's serialized revision check to preserve newer
+edits. If storage closes after a write has already committed, the original
+account can still recover that unsent reference with its prior text. The UI
+describes preparation as unconfirmed and asks the user to check Chief before
+retrying; it does not promise that a closed store undid a committed write.
+Mounted, final browser, Mac and native outcomes are recorded separately in the
+connector workstream's delivery checkpoint. No live account or vendor
+qualification is implied by this source implementation.

@@ -12,14 +12,17 @@ import {validateResearchSavedHistory,type ResearchSaved,type ResearchSavedPacket
 import {NoteResearchPanel,useNoteResearchPlan} from './NoteResearchPanel';
 import {noteResearchSelectionMatches,type NoteResearchSelection} from './note-research-workflow';
 import {researchQueryGuidance,researchQueryIssue,researchSourceFailure} from './research-query-guidance';
+import {researchAnalysisPreview} from './research-analysis-contract';
+import type {ResearchChiefSelection} from './session/research-chief';
 import './research-workspace.css';
 
 const blank=(bot:string):ResearchDraft=>({version:1,bot,topic:'literature',query:'',sources:[],pending:null});
 const stateLabel:Record<ResearchObservation['state'],string>={running:'Lookup in progress',completed:'Sources retrieved',partial:'Some sources unavailable',unavailable:'Sources unavailable',interrupted:'Lookup interrupted — outcome unconfirmed'};
 const sourceLabel=(source:ResearchSource,catalog:ResearchCatalog|null)=>catalog?.sources.find(s=>s.id===source)?.label??source.replaceAll('_',' ');
-export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,enabled,locked,onDenied,onChanged,onBusyChange,analysis,port=researchApi}: {
+export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,enabled,locked,onDenied,onChanged,onBusyChange,analysis,onPrepareChief,chiefUnavailable,port=researchApi}: {
  identity:AuthenticatedWorkspaceIdentity;workspaceId:string;workspaceRevision:number;bot:{address:string;team_revision:number};enabled:boolean;locked:boolean;
  onDenied?:(cause:WorkspaceApiError)=>void;onChanged?:(revision:number)=>void;onBusyChange?:(blocked:boolean)=>void;analysis?:ResearchAnalysisAccess;port?:ResearchPort;
+ onPrepareChief?:(selection:ResearchChiefSelection)=>Promise<boolean>;chiefUnavailable?:string|null;
 }){
  const [draft,setDraft]=useState<ResearchDraft>(()=>blank(bot.address)),[catalog,setCatalog]=useState<ResearchCatalog|null>(null),[catalogError,setCatalogError]=useState(false);
  const [review,setReview]=useState<ResearchSearch|null>(null),[confirmed,setConfirmed]=useState(false),[busy,setBusy]=useState(false),[message,setMessage]=useState('');
@@ -27,6 +30,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const [historyMore,setHistoryMore]=useState(false),[packets,setPackets]=useState<ResearchSavedPacket[]>([]),[packetsMore,setPacketsMore]=useState(false);
  const [progress,setProgress]=useState(''),[cancellable,setCancellable]=useState(false);
  const [savedReceipt,setSavedReceipt]=useState<ResearchSaved|null>(null);
+ const [chiefPreparing,setChiefPreparing]=useState(false);
  const [replacement,setReplacement]=useState<ResearchPrevious|null>(null),[replaceAcknowledged,setReplaceAcknowledged]=useState(false),[previousResult,setPreviousResult]=useState<ResearchObservation|null>(null);
  const [showSavedChat,setShowSavedChat]=useState(false); // Reserved only for the focused view's explanation; no query forwarding.
  const notePlan=useNoteResearchPlan(analysis?.workspace.id===workspaceId?analysis.workspace:undefined,bot.address,identity);
@@ -37,8 +41,8 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  const live=useRef({identity,workspaceId,bot,enabled,locked,analysis,notePlan});live.current={identity,workspaceId,bot,enabled,locked,analysis,notePlan};
  const kind=`research:${bot.address}` as const;
  const value=draft.query||draft.sources.length||draft.pending||draft.previous_request||draft.saved_packet||draft.analysis_draft||draft.note_question?editorDraft(workspaceId,kind,draft,draft.pending?.request.idempotency_key??null):null;
- const recovery=useEditorRecovery(workspaceId,kind,value,busy,{required:true,identity,scopeKey:bot.address});
- const blocked=locked||busy||recovery.blocked,canSearch=enabled&&!blocked&&!draft.pending;
+ const recovery=useEditorRecovery(workspaceId,kind,value,busy||chiefPreparing,{required:true,identity,scopeKey:bot.address});
+ const blocked=locked||busy||chiefPreparing||recovery.blocked,canSearch=enabled&&!blocked&&!draft.pending;
  const busyCallback=useRef(onBusyChange);busyCallback.current=onBusyChange;
  const navigationBlocked=busy||!!draft.pending||!!recovery.offer?.pending||recovery.phase==='failed';
  // A lost response remains a navigation lock after the spinner stops. Keep
@@ -46,7 +50,7 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  useEffect(()=>{busyCallback.current?.(navigationBlocked);},[navigationBlocked,onBusyChange]);
  useEffect(()=>()=>{busyCallback.current?.(false);},[]);
  useUnsavedWork(!!draft.pending||!!draft.query||!!draft.analysis_draft?.question||busy);
- useEffect(()=>{generation.current++;inFlight.current=false;setBusy(false);setCancellable(false);setProgress('');return()=>{generation.current++;operation.current?.abort();};},[identity,workspaceId,bot.address]);
+ useEffect(()=>{generation.current++;inFlight.current=false;setBusy(false);setChiefPreparing(false);setCancellable(false);setProgress('');return()=>{generation.current++;operation.current?.abort();};},[identity,workspaceId,bot.address]);
  useEffect(()=>{setSavedReceipt(null);setObservation(null);setHistory([]);setPackets([]);setHistoryMore(false);setPacketsMore(false);},[identity,workspaceId,bot.address]);
  useEffect(()=>{setReview(null);setConfirmed(false);},[workspaceRevision,bot.team_revision,enabled,locked]);
  useEffect(()=>{setReview(null);setConfirmed(false);},[noteQuestionCurrent,draft.note_question]);
@@ -143,6 +147,24 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
  }
  const analysisSaved=savedReceipt?.entry_id===draft.saved_packet?.entry_id?savedReceipt:packets.find(packet=>packet.saved.entry_id===draft.saved_packet?.entry_id)?.saved??null;
  const analysisRun=observation?.run_id===draft.saved_packet?.run_id?observation:history.find(run=>run.run_id===draft.saved_packet?.run_id)??null;
+ async function prepareChief(){
+  if(inFlight.current||blocked||draft.pending||chiefUnavailable||!onPrepareChief||!analysis||!draft.saved_packet||!analysisRun||!analysisSaved)return;
+  const controller=new AbortController(),n=generation.current,selected=structuredClone(draft.saved_packet),retained=draft;
+  const selection:ResearchChiefSelection={workspace_id:workspaceId,workspace_revision:workspaceRevision,team_revision:bot.team_revision,bot:bot.address,anchor:selected,run:structuredClone(analysisRun),saved:structuredClone(analysisSaved)};
+  const chosen=()=>current(n,controller)&&live.current.analysis?.workspace.id===workspaceId&&live.current.analysis.workspace.revision===workspaceRevision&&live.current.bot.team_revision===selection.team_revision&&!live.current.locked;
+  inFlight.current=true;setChiefPreparing(true);setMessage('Keeping your Research work before preparing Chief…');operation.current=controller;
+  try{
+   await recovery.commit(snapshot(retained));
+   if(!chosen())return;
+   if(await researchAnalysisPreview(live.current.analysis!.workspace,selected,selection.run,selection.saved,selection.bot)===null){setMessage('Load and check the exact saved source details before preparing Chief. Nothing was sent.');return;}
+   if(!chosen())return;
+   // Only this editor is held. A completed save never becomes a global pending
+   // Research request that would prevent the shared conversation handoff.
+   const prepared=await onPrepareChief(selection);
+   if(current(n,controller))setMessage(prepared?'Chief draft prepared. Nothing was sent.':'Chief’s draft could not be confirmed. Reopen Chief and check its saved directions before trying again. Nothing was sent.');
+  }catch(cause){if(current(n,controller)){setMessage('Your Research work could not be retained safely. Existing drafts are kept; recheck storage before preparing Chief.');denied(cause);}}
+  finally{if(current(n,controller)){inFlight.current=false;setChiefPreparing(false);}if(operation.current===controller)operation.current=null;}
+ }
  async function loadAnalysisSources(){
   if(blocked||inFlight.current||!draft.saved_packet)return;
   const anchor=draft.saved_packet,controller=new AbortController(),n=generation.current;operation.current=controller;inFlight.current=true;beginProgress('Loading retained source details…',true);setMessage('');
@@ -216,6 +238,13 @@ export function ResearchWorkspace({identity,workspaceId,workspaceRevision,bot,en
    bot={bot.address} teamRevision={bot.team_revision} enabled={enabled} locked={blocked||!!draft.pending}
    onEdit={next=>{if(!blocked&&!draft.pending)setDraft(value=>({...value,analysis_draft:next}));}} onSubmit={submitAnalysis}
    onSmaller={()=>{setSelected([]);setMessage('Choose fewer excerpts from the lookup below, or open saved research history first. Save the smaller selection as a new packet before requesting analysis.');}}/>}
+  {onPrepareChief&&draft.saved_packet&&<section className="research-analysis" aria-label="Prepare Research for Chief"><h3>Plan the next step with Chief</h3>
+   <p>Prepare editable directions referring to this saved public-source packet, revision {draft.saved_packet.entry_revision}. Your existing Chief draft is kept. Nothing is sent or searched.</p>
+   <p className="team-fine">Chief can also use other saved visit information allowed in its settings.</p>
+   {chiefUnavailable&&<p role="status">{chiefUnavailable}</p>}
+   {(!analysisRun||!analysisSaved)&&<button type="button" disabled={blocked||!!draft.pending} onClick={()=>void loadAnalysisSources()}>Load saved source details for Chief</button>}
+   <button type="button" className="team-primary" disabled={blocked||!!draft.pending||!!chiefUnavailable||!analysisRun||!analysisSaved} onClick={()=>void prepareChief()}>{chiefPreparing?'Preparing Chief draft…':'Prepare Chief draft'}</button>
+  </section>}
   {observation&&<section className="research-results" aria-label="Research results"><header><h3>{stateLabel[observation.state]}</h3><p>{observation.query}</p><p className="team-fine">Retrieved records are source evidence. No AI synthesis or clinical inference is supplied by this lookup.</p></header>
    {!observation.results.length&&<p>No source records were confirmed for this lookup. This does not prove that evidence, warnings, trials or coverage are absent.</p>}
    {observation.errors.map(error=><p className="research-status" key={error.source}><strong>{sourceLabel(error.source,catalog)}: </strong>{researchSourceFailure(error.source,error.code,observation.query)}</p>)}
