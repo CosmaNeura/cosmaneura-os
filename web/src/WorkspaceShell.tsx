@@ -1300,7 +1300,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           currentSources={workspace.entries.filter(entry=>entry.kind==='ehr_read_source'&&!!entry.ehr_source_state).map(entry=>({id:entry.id,state:entry.ehr_source_state!}))}
           locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
           recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
-          onBusyChange={reportEhrBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource}
+          onBusyChange={reportEhrBusy} onAuthenticationLost={failure}
           onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareEhrChief(source)}/>
       </EhrReadTask>}
       {calendarImportOwned&&authenticated&&workspace&&<EhrReadTask title="Import calendar file" open={calendarImportOpen} context={workspace.notebook?.title??workspace.label}

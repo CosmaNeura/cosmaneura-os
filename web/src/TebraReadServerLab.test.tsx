@@ -40,13 +40,14 @@ it.skipIf(!base)('uses actual signed custody and preserves Chief directions thro
  const access=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,packet.workspace.id),webcrypto);
  access.recoveryScope=packet.team.recovery_scope;recovery=access;
  session.recovery.journal.current={scope:'e'.repeat(64),serverScope:packet.team.recovery_scope!,value:access.journal};
+ access.authorize=session.recovery.editorAccess(identity,packet.team.recovery_scope!,access.journal,packet.workspace.id,true,false,()=>{})!.authorize;
  const failures:unknown[]=[];
  const conversation:ConversationHost={identity,journal:access.journal,scope:'e'.repeat(64),current:()=>true,blocked:()=>session.getSnapshot().busy,
   authorize:async()=>{expect((await workspaceApi.team(identity)).recovery_scope).toBe(packet.team.recovery_scope);},failure:e=>failures.push(e),navigate:async()=>{throw new Error('This test retains the current Chief conversation.');}};
  const sourceContext:SourceContext={authenticated:identity,locked:false,connectionNavigationLocked:false,captureNavigationLocked:false,captureDraftLocked:false,connectionEditorsLocked:false,activityBusy:false,accessBusy:false,scribeSourceBusy:false,schedulingPatientBusy:false,accountAccess:null,conversationHost:conversation,failure:e=>failures.push(e),focusQuestion:()=>{}};
  function Harness(){const view=useWorkspaceSession(session),w=view.workspace!;return <><EditorRecoveryContext.Provider value={access}><EhrReadMount identity={identity} provider="tebra" workspace={{id:w.id,label:w.label,revision:w.revision}}
   currentSources={w.entries.filter(e=>e.kind==='ehr_read_source'&&!!e.ehr_source_state).map(e=>({id:e.id,state:e.ehr_source_state!}))}
-  onSaved={latest=>session.sources.receive(latest)} onAuthenticationLost={e=>failures.push(e)} onAskChief={saved=>void session.sources.prepareEhr(sourceContext,saved)}/></EditorRecoveryContext.Provider><textarea aria-label="Chief directions" readOnly value={view.thought}/></>;}
+  onAuthenticationLost={e=>failures.push(e)} onAskChief={saved=>void session.sources.prepareEhr(sourceContext,saved)}/></EditorRecoveryContext.Provider><textarea aria-label="Chief directions" readOnly value={view.thought}/></>;}
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Harness/>));
  const find=(name:string)=>[...host.querySelectorAll('button')].find(b=>b.textContent===name);
  const wait=async(check:()=>void)=>{for(let n=0;n<750;n++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,20));try{check();done=true;}catch{/* Wait for the mounted control. */}});if(done)return;}try{check();}catch(cause){throw new Error(String(cause)+'\nSynthetic UI: '+host.textContent?.slice(0,2500)+'\nWire: '+JSON.stringify(wire)+'\nFailures: '+String(failures));}};

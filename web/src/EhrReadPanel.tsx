@@ -1,12 +1,12 @@
 import './ehr-read.css';
 import {useEffect,useRef,useState} from 'react';
-import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
+import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {ehrReadApi,ehrProvider,ehrProviderFields,ehrProviderName,ehrPatientName,validTebraIdentity,type EhrProvider,ehrTransport,ehrTransportLabel,ehrMatchesCommand,ehrReviewProvesNoCommit,validEhrWindow,type EhrInstallReceipt,type EhrReadStatus,type EhrReceipt,type EhrWindowItem,type EhrCommand,type EhrReviewResponse,type EhrResolve} from './ehr-read-api';
 import {emptyEhrReadRecovery,validateEhrReadRecovery,type EhrReadRecovery,type EhrReadRecoveryAccess,type EhrReadSaved,type EhrReadScope,type EhrReadVisit,type EhrPending,type EhrSupersededRead} from './ehr-read-recovery';
 import {useGoogleNativeForeground} from './use-google-native-foreground';
 import {useUnsavedWork} from './unsaved-work';
 import {modelCanonical} from './model-work-request';
-export type EhrReadPanelProps={provider?:EhrProvider;identity:AuthenticatedWorkspaceIdentity;scope:EhrReadScope;recovery:EhrReadRecoveryAccess;workspace:EhrReadVisit;active?:boolean;locked?:boolean;recoveryLocked?:boolean;currentSources?:readonly {id:string;state:'current'|'unavailable'}[];onSaved(workspace:Workspace):void;onBusyChange?(busy:boolean):void;onAuthenticationLost(error:unknown):void;onAskChief?(source:EhrReadSaved):void;onRefreshVisit?():Promise<void>};
+export type EhrReadPanelProps={provider?:EhrProvider;identity:AuthenticatedWorkspaceIdentity;scope:EhrReadScope;recovery:EhrReadRecoveryAccess;workspace:EhrReadVisit;active?:boolean;locked?:boolean;recoveryLocked?:boolean;currentSources?:readonly {id:string;state:'current'|'unavailable'}[];onBusyChange?(busy:boolean):void;onAuthenticationLost(error:unknown):void;onAskChief?(source:EhrReadSaved):void;onRefreshVisit?():Promise<void>};
 const authority=(e:unknown)=>e instanceof WorkspaceApiError&&[401,403].includes(e.status);
 const localTime=(date:Date)=>new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
 const message=(e:unknown,name:string)=>e instanceof WorkspaceApiError&&e.code==='ehr_read_too_many_results'?'Too many appointments were returned. Check the saved result, then choose a smaller date range and load a fresh list.':e instanceof WorkspaceApiError&&['ehr_read_binding_changed','ehr_read_binding_unavailable','ehr_read_permission_denied','ehr_read_authentication_required'].includes(e.code??'')?name+' access changed. Saved details are hidden. Check practice access before continuing.':e instanceof WorkspaceApiError&&['ehr_read_appointment_changed','ehr_read_record_unavailable','ehr_read_source_changed','ehr_read_expired','ehr_read_superseded'].includes(e.code??'')?'This appointment could not be verified from the saved list. Recheck access, then load a fresh appointment list.':e instanceof WorkspaceApiError&&e.code==='workspace_revision_conflict'?'This visit changed. Refresh the visit, check the patient and appointment again, then save.':'The result could not be confirmed. Your saved request is retained; check its saved result before trying again.';
@@ -69,7 +69,9 @@ export function EhrReadPanel(props:EhrReadPanelProps){
  }
  async function settleReview(result:EhrReviewResponse,pending:Extract<EhrPending,{kind:'review'}>,g:number){
   const saved:EhrReadSaved={workspace_id:scope.workspace_id,entry_id:result.entry_id,entry_revision:result.entry_revision,source_sha256:result.source.source_sha256,content_sha256:result.source.content_sha256,request_sha256:result.request_sha256,source_withheld:result.source_withheld};
-  await persist({...latest.current!,pending:null,saved,saved_request:pending.request},g);if(!isCurrent(g))return;setVisible(!saved.source_withheld);setChecks([false,false,false,false]);callbacks.current.onSaved(result.workspace);setNotice(saved.source_withheld?'The source was saved, but its access needs checking.':'Reviewed appointment saved to this visit. Prepare a Chief draft when you are ready.');
+  // Required mounted recovery publishes a fresh workspace during persistence.
+  // The older mutation receipt must not restore newly withheld source content.
+  await persist({...latest.current!,pending:null,saved,saved_request:pending.request},g);if(!isCurrent(g))return;setVisible(!saved.source_withheld);setChecks([false,false,false,false]);setNotice(saved.source_withheld?'The source was saved, but its access needs checking.':'Reviewed appointment saved to this visit. Prepare a Chief draft when you are ready.');
  }
  async function review(g:number,signal:AbortSignal){
   const r=latest.current;if(!available||!checks.every(Boolean)||r?.pending||!r?.verified||r.verified.observation.kind!=='verified_visit')return;

@@ -7,17 +7,20 @@ import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery
 import {DraftJournal,editorAddress} from './draft-journal';
 import {openDraftStore,type DraftValue} from './draft-store';
 import {accountIdentityApi} from './account-identity-api';
-import {ehrReadApi} from './ehr-read-api';
+import {ehrReadApi,ehrProviderFields} from './ehr-read-api';
 import {emptyEhrReadRecovery,type EhrReadRecovery} from './ehr-read-recovery';
-import {ehrBinding,ehrScope,ehrUuid,ehrVisit} from './ehr-read-fixtures.test-support';
+import {ehrBinding,ehrScope,ehrUuid,ehrVisit,ehrWindowReceipt,ehrVerifiedReceipt,ehrReviewBody,ehrReviewResult} from './ehr-read-fixtures.test-support';
 import type {Workspace} from './workspace-api';
+import {WorkspaceSession} from './session/workspace-session';
+import {useWorkspaceSession} from './session/use-workspace-session';
+import {teamFixture} from './team-setup-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const opaque='e'.repeat(64),address=editorAddress(ehrVisit.id,'ehr-read'),identity={mode:'clerk_jwt' as const,getToken:async()=>null};
 let root:Root,host:HTMLDivElement,journal:DraftJournal,context:EditorRecoveryAccess,idb:IDBFactory,denied:ReturnType<typeof vi.fn>,record:EhrReadRecovery,actor:string;
 const store=()=>openDraftStore({scope:opaque,native:false,indexedDB:idb,crypto:webcrypto});
 const button=(s:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===s);
 async function wait(check:()=>void){for(let i=0;i<250;i++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,2));try{check();done=true;}catch{}});if(done)return;}check();}
-async function render(enabled=true,c:EditorRecoveryAccess|null=context){await act(async()=>root.render(<EditorRecoveryContext.Provider value={c}><EhrReadMount identity={identity} workspace={ehrVisit} enabled={enabled} onSaved={vi.fn()} onAuthenticationLost={denied}/></EditorRecoveryContext.Provider>));}
+async function render(enabled=true,c:EditorRecoveryAccess|null=context){await act(async()=>root.render(<EditorRecoveryContext.Provider value={c}><EhrReadMount identity={identity} workspace={ehrVisit} enabled={enabled} onAuthenticationLost={denied}/></EditorRecoveryContext.Provider>));}
 async function seed(){await journal.load(address);await journal.persist(address,{kind:'editor',workspaceId:ehrVisit.id,editor:'ehr-read',data:record,pending:null});}
 beforeEach(async()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);idb=new IDBFactory();journal=new DraftJournal(await store());actor=ehrScope.owner_id;
  const workspace:Workspace={...ehrVisit,appointment_id:null,entries:[],work_candidates:[]};context={journal,workspaceId:ehrVisit.id,recoveryScope:opaque,authorize:vi.fn(async()=>workspace),denied:vi.fn()};denied=vi.fn();
@@ -35,3 +38,32 @@ it.each(['ehr-read','ehr-read:tebra'] as const)('enforces a 128 KiB data envelop
 it.each(['ehr-read','ehr-read:tebra'] as const)('retains the same bounded %s frame in the native SecureQueue namespace',async editor=>{const address=editorAddress(ehrVisit.id,editor),records=new Map<string,{key:string;data:string;revision:string}>(),plugin={get:async({key}:{key:string})=>{const r=records.get(key);if(!r)throw {code:'SECURE_QUEUE_NOT_FOUND'};return r;},create:async(r:{key:string;data:string})=>{records.set(r.key,{...r,revision:'1'});return {revision:'1'};},compareAndSwap:async()=>{throw new Error('Unexpected CAS');}};
  const options={scope:'a'.repeat(64),native:true,indexedDB:new IDBFactory(),crypto:webcrypto,plugin},storage=await openDraftStore(options),value:DraftValue={schema:1,updatedAt:'2026-10-25T12:00:00Z',body:{kind:'editor',workspaceId:ehrVisit.id,editor,data:editor==='ehr-read:tebra'?emptyEhrReadRecovery({...ehrScope,provider:'tebra'}):record,pending:null}};
  await storage.write(address,null,value);storage.close();const key=`cosmas-private-draft:v1:${options.scope}:${address}`,retained=records.get(key)!;expect(new TextEncoder().encode(key).length).toBeLessThanOrEqual(512);expect(key.startsWith('cosmas-native-')).toBe(false);const bytes=Uint8Array.from(atob(retained.data),c=>c.charCodeAt(0));expect(bytes.length).toBeLessThanOrEqual(131072+1024);expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({version:1,scope:options.scope,address,value});const fresh=await openDraftStore(options);expect((await fresh.read(address)).value).toEqual(value);fresh.close();});
+
+
+it.each(['elation','tebra'] as const)('keeps fresh %s withholding published during review receipt persistence',async provider=>{
+ const scope={...ehrScope,...ehrProviderFields(provider)},editor=provider==='tebra'?'ehr-read:tebra':'ehr-read',address=editorAddress(ehrVisit.id,editor);
+ const window=await ehrWindowReceipt({...ehrProviderFields(provider),action:'observe',...ehrBinding,starts_at:'2026-10-25T12:00:00Z',ends_at:'2026-10-26T12:00:00Z',idempotency_key:ehrUuid(881)});
+ const verified=await ehrVerifiedReceipt(window),request=ehrReviewBody(verified),receipt=await ehrReviewResult(verified,request);
+ const before:Workspace={...ehrVisit,appointment_id:null,entries:[],work_candidates:[]};
+ const hidden:Workspace={...receipt.workspace,entries:receipt.workspace.entries.map(e=>({...e,content:'',source_label:'Unavailable EHR source',ehr_source_state:'unavailable'}))};
+ const team={...teamFixture(),recovery_scope:opaque};let responseReturned=false;
+ const read=vi.fn(async()=>responseReturned?hidden:before),session=new WorkspaceSession({recovery:{team:async()=>team,read}});
+ session.setIdentity(identity);session.setTeam(team);session.setWorkspace(before);
+ session.recovery.journal.current={scope:opaque,serverScope:opaque,value:journal};
+ const access=session.recovery.editorAccess(identity,opaque,journal,ehrVisit.id,true,false,denied)!;
+ await journal.load(address);await journal.persist(address,{kind:'editor',workspaceId:ehrVisit.id,editor,pending:null,data:{...emptyEhrReadRecovery(scope),binding:ehrBinding,window,verified,pending:{kind:'review',request,anchor:verified}}});
+ vi.spyOn(ehrReadApi,'review').mockImplementation(async()=>{responseReturned=true;return receipt;});
+ function Harness(){const view=useWorkspaceSession(session),workspace=view.workspace!;return <EditorRecoveryContext.Provider value={access}><EhrReadMount identity={identity} provider={provider} enabled workspace={workspace}
+  currentSources={workspace.entries.filter(e=>e.ehr_source_state).map(e=>({id:e.id,state:e.ehr_source_state!}))} onAskChief={vi.fn()} onAuthenticationLost={denied}/></EditorRecoveryContext.Provider>;}
+ await act(async()=>root.render(<Harness/>));
+ await wait(()=>expect(button('Restore saved '+(provider==='tebra'?'Tebra':'Elation')+' work')?.disabled).toBe(false));
+ await act(async()=>button('Restore saved '+(provider==='tebra'?'Tebra':'Elation')+' work')!.click());
+ await wait(()=>expect(button('Check saved source result')?.disabled).toBe(false));
+ await act(async()=>button('Check saved source result')!.click());
+ await wait(()=>expect(button('Prepare Chief draft')).toBeTruthy());
+ expect(session.getSnapshot().workspace).toBe(hidden);
+ expect(button('Prepare Chief draft')?.disabled).toBe(true);expect(host.textContent).not.toContain('Mira Invented');
+ expect(read).toHaveBeenCalled();expect(ehrReadApi.review).toHaveBeenCalledOnce();expect(ehrReadApi.execute).not.toHaveBeenCalled();
+ expect(await journal.load(address)).toMatchObject({data:{pending:null,saved:{entry_id:receipt.entry_id,source_withheld:false}}});
+ expect(denied).not.toHaveBeenCalled();
+});
