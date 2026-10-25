@@ -514,6 +514,22 @@ Physical touch, haptics, VoiceOver and draft contents across the update remain
 unverified. See `CHECKPOINT-ELATION-MEDICATIONS.json` and
 `native/preview34-phone-summary.json` in the connector workstream.
 
+### Tebra clinical reader foundation
+
+A separate [FHIR medication-history reader](../tebra-fhir-read.md) now handles
+ordered and reported medication requests, verifies the FHIR patient, resolves
+bounded medication references and preserves recorded instructions, negation and
+original reference provenance. It rejects unsafe references and unknown rules
+that could change clinical meaning. The final reader passes 82 focused cases,
+lint/type checks and independent review.
+
+This is an inactive, synthetic-only adapter. It does not add a Tebra medication
+button or Chief workflow to the app, and it cannot use a real HTTP transport.
+Exact vendor authentication, sandbox URLs, clinical scopes and patient/practice
+correspondence remain unresolved. Existing SOAP appointment behavior is
+unchanged; SOAP and FHIR patient IDs are not assumed to match. Human review,
+saved-source custody, recovery and UI integration are still engineering work.
+
 ## Elation sandbox access
 
 The owner confirmed no sandbox is available and requested access requirements.
