@@ -91,15 +91,13 @@ do not imply API availability, licensing or customer consent.
 
 ## Verified paths and current limits
 
-- **Athena:** the existing CosmaBot client reads a pinned practice schedule and
-  reviews an exact visit link. The current repair retains selected dates during
-  transient failures and rejects a direct link response for a different reviewed
-  target. After a lost save reply, the mounted panel also compares the recovered
-  result with the reviewed patient/visit or removal target before offering to
-  open a notebook. A current projection may refresh details for the same IDs.
-  A mismatched result remains unresolved without replaying the write. The wire
-  contract does not carry the original target; durable target proof after panel
-  remount remains a separate gap.
+- **Athena:** Chief and Connections share one account-owned visit task. An
+  explicit review links the selected Athena appointment to an existing Core
+  patient/visit. Exact link/removal request metadata survives reload and native
+  backgrounding; recovery checks status without repeating the mutation. The
+  fresh result must match the reviewed patient, visit, connection and account
+  before opening a notebook. Unfinished work still blocks opening. The current
+  slice is qualified with invented Core responses; live access remains untested.
 - **Elation:** the documented practice REST client-credentials path now has a
   default-off managed sandbox installation and a complete appointment-to-Chief
   source workflow. Local tests use invented responses; vendor access is not yet
@@ -340,9 +338,47 @@ Receipts are in `CHECKPOINT-CALENDAR.json`,
 `evidence/calendar-final-joined-ui-02/results.json`,
 `evidence/mac-studio/calendar-final-02-20261025/receipt.json`, and
 `native/calendar-native-review.json` in the connector workstream. Earlier
-snapshots and preflight results are retained separately. The active next slice
-is the shared Athena visit task: durable exact link/removal recovery through
-reload, Chief/Connections access, and correct notebook-opening gates.
+snapshots and preflight results are retained separately.
+
+## Athena shared task and native checkpoint
+
+**Find or connect an Athena visit** is available from Chief and Connections.
+Both entry points use one account-owned task and preserve Chief's exact draft
+and Back focus. A confirmed link or removal is written to private saved-work
+storage before submission. Its record retains bounded command/target metadata,
+not patient names, tokens or schedule contents. Reload and native backgrounding
+hide clinical details; a fresh exact-key status check verifies the original
+patient/visit or removal target. Recovery never automatically repeats a write.
+
+Notebook opening waits for the task's own read lock to clear, then uses the
+existing unsaved-work checks. It opens a clean notebook and dismisses the task
+even when that notebook was already current. Chief text and unrelated unfinished
+work remain protected. An opening failure appears inside the active Athena
+task; retrying it repeats only opening, not the visit-link change.
+
+At code commit `1d37b1c`, local tests pass 291 cases; the Mac Studio passes 316
+cases across 23 affected and adjacent files, both TypeScript checks and both
+renderer builds. Five browser scenarios pass 317 text/geometry checks, including
+lost link/removal replies, reload, small phone viewports, enlarged text, long
+names and clean notebook opening. All 2,894 frozen source hashes remain stable.
+The 970 unchanged Python/dependency inputs match the qualified calendar build;
+its backend tests were not repeated for this frontend-only slice.
+
+A fresh native simulator build passes four app-hosted checks. The Athena case
+recovers a lost link reply after reload, then a lost removal reply after another
+reload, using one mutation per operation and only exact status checks afterward.
+Back restores the original Chief draft. Done/keyboard, Tebra review and calendar
+import remain covered. The run has zero media attachments. These are programmatic
+UIKit/DOM tests with invented services; live sign-in, vendor access, physical
+touch, native file picking and physical-phone haptics remain unqualified.
+
+Evidence is recorded in `CHECKPOINT-ATHENA.json`,
+`evidence/athena-task/freeze.json`,
+`evidence/mac-studio/athena-final-20261025/receipt.json`, and
+`native/athena-native-review.json` in the connector workstream. The local UI
+rehearsal's address and process are recorded in `LOCAL-REHEARSAL.json`. The phone
+remains on Preview24. No vendor messages, prescriptions, bookings or production
+rollout occurred.
 
 ## Elation sandbox access
 
