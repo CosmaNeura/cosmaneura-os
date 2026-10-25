@@ -192,3 +192,13 @@ content erasure. An EHR retention/erasure policy and implementation are required
 before storing real patient data. Native recovery framing is tested, while a
 rebuilt native client and physical-device acceptance of this new EHR flow remain
 outstanding. Atlas.md and Tebra activation limits above remain unchanged.
+
+## Next step: obtain Elation sandbox access
+
+The owner confirmed no sandbox is available and requested access requirements.
+The [Elation sandbox access packet](ELATION_SANDBOX_ACCESS_REQUIREMENTS.md) is
+prepared, with verified official onboarding links, three minimum read scopes,
+test-practice requirements, remaining CosmaBot installation work and an unsent
+request. A legal entity, business contact and authorized signer are still needed
+for a submission. No vendor request, account creation or agreement acceptance
+has occurred. The synthetic checkpoint and its test receipts remain unchanged.

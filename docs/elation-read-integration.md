@@ -248,6 +248,12 @@ raw provider messages, names, queries or token responses never enter diagnostics
 
 ## Qualification and deferred capabilities
 
+The owner confirmed that no Elation sandbox exists yet. The
+[sandbox access packet](beta/ELATION_SANDBOX_ACCESS_REQUIREMENTS.md) records the
+current official request route, minimum read grant, invented test fixtures,
+remaining runtime work and an unsent vendor request. Preparing that packet does
+not provision an account or activate the connector.
+
 Vendor [onboarding](https://help.elationhealth.com/articles/rest/overview/getting-started)
 requires vendor agreements/access steps and practice consent before production.
 No such step is authorized or performed here. Before activation, qualify actual
