@@ -7,7 +7,7 @@ test.beforeEach(async({page})=>{
 });
 
 for(const scenario of ['mixed','new','failure','offline','slow']){
-  test(`${scenario}: honest status, usable rows, no overflow`,async({page},info)=>{
+  test(`${scenario}: honest status, usable rows, no overflow`,async({page})=>{
     await page.getByLabel('Scenario').selectOption(scenario);
     if(scenario==='slow')await expect(page.getByText('Checking connections…',{exact:true})).toBeVisible();
     const cards=page.locator('.connection-card-box');
@@ -46,7 +46,6 @@ for(const scenario of ['mixed','new','failure','offline','slow']){
     }
     const accessibility=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa','wcag22aa']).analyze();
     expect(accessibility.violations).toEqual([]);
-    await page.screenshot({path:info.outputPath(`${scenario}.png`),fullPage:true});
   });
 }
 

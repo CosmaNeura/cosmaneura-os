@@ -3,7 +3,6 @@
 import {chromium} from '@playwright/test';
 import {createInterface} from 'node:readline';
 import {mkdir} from 'node:fs/promises';
-import {resolve} from 'node:path';
 const output=process.argv[2];
 if(!output)throw new Error('Supply a local report directory.');
 await mkdir(output,{recursive:true});
@@ -36,10 +35,7 @@ try {
         case 'scroll':await page.mouse.move(cmd.x??1050,cmd.y??700);await page.mouse.wheel(0,Math.max(-900,Math.min(900,cmd.dy??500)));break;
         case 'reload':await page.reload();break;
         case 'snapshot':break;
-        case 'screenshot':{
-          if(!/^[a-z0-9_-]+\.png$/.test(cmd.file))throw new Error('Use a simple PNG filename.');
-          const path=resolve(output,cmd.file);await page.screenshot({path,fullPage:cmd.fullPage??false});console.log(JSON.stringify({screenshot:path}));break;
-        }
+        case 'screenshot':throw new Error('This lab uses text observations. Use snapshot for the current accessibility state.');
         case 'close':await browser.close();process.exit(0);
         default:throw new Error('Unknown UI action.');
       }
