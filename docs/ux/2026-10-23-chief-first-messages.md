@@ -743,3 +743,17 @@ both type checks. These checks include unchanged ordinary near-bottom
 following, unseen replies, exact owner/scope lifetimes and nested source-page
 returns. Preview35 was held after the browser finding and was not installed.
 The corrected renderer receives its own final browser/native qualification.
+
+The corrected `59a92dc` renderer passes all 132 browser checks, including exact
+reading-position and unchanged read-marker assertions at 320px with 200% text.
+Mac Studio independently passes the 67 focused cases and both type checks;
+the final hosted native Research journey passes with 44px Done, retained draft
+and focus, and zero media attachments. All 2,951 frozen source files stayed
+unchanged. Preview36 is installed and launched on the phone, with build36
+independently verified; the local rehearsal serves the same qualified source
+at its existing origin. No uninstall or storage reset occurred. Preview35
+remains held and was never installed. See `CHECKPOINT-RESEARCH-SCROLL.json` and
+`native/preview36-phone-summary.json` in the connector workstream. Physical
+touch, haptics, VoiceOver and draft contents across the phone update remain
+unverified. The complete all-kind material transcript and remaining accepted
+mobile recommendations are not claimed complete.

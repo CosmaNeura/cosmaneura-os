@@ -530,6 +530,22 @@ correspondence remain unresolved. Existing SOAP appointment behavior is
 unchanged; SOAP and FHIR patient IDs are not assumed to match. Human review,
 saved-source custody, recovery and UI integration are still engineering work.
 
+## Latest phone delivery
+
+Preview36 (`59a92dc`) is installed and launched in place, with the phone's
+reported build independently verified. It includes the qualified Elation
+medication workflow above, saved Research packet cards in Chief, and exact
+reading-position restoration after source review without early reply
+acknowledgment. Its browser, Mac Studio and native checks pass, with zero
+images or native media attachments. The local rehearsal serves the same
+source. See `CHECKPOINT-RESEARCH-SCROLL.json` and
+`native/preview36-phone-summary.json` in the connector workstream.
+
+This delivery uses invented provider data. It does not activate the Tebra
+FHIR reader or establish live EHR access, medication reconciliation, broader
+chart/lab coverage, prescription transmission or clinical writeback. Those
+remain separate implementation and vendor-acceptance work.
+
 ## Elation sandbox access
 
 The owner confirmed no sandbox is available and requested access requirements.
