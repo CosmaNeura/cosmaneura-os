@@ -7,17 +7,20 @@ import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery
 import {DraftJournal,editorAddress} from './draft-journal';
 import {openDraftStore,type DraftValue} from './draft-store';
 import {accountIdentityApi} from './account-identity-api';
-import {calendarImportApi} from './calendar-import-api';
+import {calendarImportApi,calendarRevokeHash,type CalendarReviewResponse,type CalendarRevokeResponse} from './calendar-import-api';
 import {emptyCalendarRecovery,type CalendarImportRecovery} from './calendar-import-recovery';
-import {calOwner,calScope,calUuid,calVisit,calForm,calIntent} from './calendar-import-fixtures.test-support';
+import {calOwner,calScope,calUuid,calVisit,calForm,calIntent,calImported,calReviewBody,calReviewResult} from './calendar-import-fixtures.test-support';
 import type {Workspace} from './workspace-api';
+import {WorkspaceSession} from './session/workspace-session';
+import {useWorkspaceSession} from './session/use-workspace-session';
+import {teamFixture} from './team-setup-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const opaque='e'.repeat(64),address=editorAddress(calVisit.id,'calendar-import'),identity={mode:'clerk_jwt' as const,getToken:async()=>null};
 let root:Root,host:HTMLDivElement,journal:DraftJournal,context:EditorRecoveryAccess,idb:IDBFactory,denied:ReturnType<typeof vi.fn>,record:CalendarImportRecovery,actor:string;
 const store=()=>openDraftStore({scope:opaque,native:false,indexedDB:idb,crypto:webcrypto});
 const button=(s:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent===s);
 async function wait(check:()=>void){for(let i=0;i<250;i++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,2));try{check();done=true;}catch{}});if(done)return;}check();}
-async function render(enabled=true,c:EditorRecoveryAccess|null=context){await act(async()=>root.render(<EditorRecoveryContext.Provider value={c}><CalendarImportMount identity={identity} workspace={calVisit} enabled={enabled} onSaved={vi.fn()} onAuthenticationLost={denied}/></EditorRecoveryContext.Provider>));}
+async function render(enabled=true,c:EditorRecoveryAccess|null=context){await act(async()=>root.render(<EditorRecoveryContext.Provider value={c}><CalendarImportMount identity={identity} workspace={calVisit} enabled={enabled} onAuthenticationLost={denied}/></EditorRecoveryContext.Provider>));}
 async function seed(){await journal.load(address);await journal.persist(address,{kind:'editor',workspaceId:calVisit.id,editor:'calendar-import',data:record,pending:null});}
 beforeEach(async()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);idb=new IDBFactory();journal=new DraftJournal(await store());actor=calOwner.owner_id;
  const workspace:Workspace={...calVisit,appointment_id:null,entries:[],work_candidates:[]};context={journal,workspaceId:calVisit.id,recoveryScope:opaque,authorize:vi.fn(async()=>workspace),denied:vi.fn()};denied=vi.fn();
@@ -35,3 +38,25 @@ it.each(['calendar-import'] as const)('enforces a 128 KiB data envelope at the a
 it.each(['calendar-import'] as const)('retains the same bounded %s frame in the native SecureQueue namespace',async editor=>{const address=editorAddress(calVisit.id,editor),records=new Map<string,{key:string;data:string;revision:string}>(),plugin={get:async({key}:{key:string})=>{const r=records.get(key);if(!r)throw {code:'SECURE_QUEUE_NOT_FOUND'};return r;},create:async(r:{key:string;data:string})=>{records.set(r.key,{...r,revision:'1'});return {revision:'1'};},compareAndSwap:async()=>{throw new Error('Unexpected CAS');}};
  const options={scope:'a'.repeat(64),native:true,indexedDB:new IDBFactory(),crypto:webcrypto,plugin},storage=await openDraftStore(options),value:DraftValue={schema:1,updatedAt:'2026-10-25T12:00:00Z',body:{kind:'editor',workspaceId:calVisit.id,editor,data:record,pending:null}};
  await storage.write(address,null,value);storage.close();const key=`cosmas-private-draft:v1:${options.scope}:${address}`,retained=records.get(key)!;expect(new TextEncoder().encode(key).length).toBeLessThanOrEqual(512);expect(key.startsWith('cosmas-native-')).toBe(false);const bytes=Uint8Array.from(atob(retained.data),c=>c.charCodeAt(0));expect(bytes.length).toBeLessThanOrEqual(131072+1024);expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({version:1,scope:options.scope,address,value});const fresh=await openDraftStore(options);expect((await fresh.read(address)).value).toEqual(value);fresh.close();});
+
+it.each(['withdrawn','missing','revoke'] as const)('never republishes an older receipt when final mounted authorization finds %s source state',async condition=>{
+ const anchor=await calImported(),review=await calReviewBody(anchor),result=await calReviewResult(anchor,review),other={...result.workspace.entries[0],id:calUuid(4888)};
+ let server:Workspace=condition==='revoke'?{...result.workspace,entries:[...result.workspace.entries,other]}:{...calVisit,appointment_id:calUuid(4880),entries:[],work_candidates:[]};
+ const team={...teamFixture(),recovery_scope:opaque},session=new WorkspaceSession({recovery:{team:async()=>team,read:async()=>server}});session.setIdentity(identity);session.setWorkspace(server);session.setTeam(team);session.models.updateThought('Keep my exact Chief directions.');
+ session.recovery.journal.current={scope:opaque,serverScope:opaque,value:journal};const access=session.recovery.editorAccess(identity,opaque,journal,calVisit.id,true,false,denied)!;
+ const revoked={...result.workspace.entries[0],content:'',source_label:'Unavailable calendar import',calendar_import_source_state:'unavailable' as const};
+ const body={action:'revoke' as const,expected_revision:server.revision,idempotency_key:calUuid(4881),import_id:anchor.import_id,source_sha256:anchor.source_sha256};
+ record={...emptyCalendarRecovery(calOwner,calForm),scope:calScope,import:anchor,selected:0,pending:condition==='revoke'?{kind:'revoke',anchor,request:body}:{kind:'review',anchor,request:review}};await seed();
+ let finish!:()=>void;
+ if(condition==='revoke')vi.spyOn(calendarImportApi,'revoke').mockImplementation(()=>new Promise<CalendarRevokeResponse>(resolve=>{finish=()=>void calendarRevokeHash(calVisit.id,body).then(request_sha256=>resolve({status:'revoked',scope:calScope,import_id:anchor.import_id,idempotency_key:body.idempotency_key,source_sha256:anchor.source_sha256,request_sha256,workspace:{...result.workspace,entries:[revoked,other]}}));}));
+ else vi.spyOn(calendarImportApi,'review').mockImplementation(()=>new Promise<CalendarReviewResponse>(resolve=>{finish=()=>resolve(result);}));
+ vi.mocked(calendarImportApi.status).mockResolvedValue({status:'available',scope:calScope,file_limit_bytes:1048576,max_items:25,formats:['ics'],reported_sources:['atlas_md','other_calendar']});
+ // A caller retained across a rollout must not regain publication authority from an old callback.
+ const obsoletePublication=vi.fn((workspace:Workspace)=>session.sources.receive(workspace)),obsoleteCaller={onSaved:obsoletePublication},ask=vi.fn();
+ function Harness(){const view=useWorkspaceSession(session),workspace=view.workspace!;return <EditorRecoveryContext.Provider value={access}><CalendarImportMount {...obsoleteCaller} identity={identity} enabled workspace={workspace} currentSources={workspace.entries.filter(e=>e.kind==='calendar_import_source').map(e=>({id:e.id,state:e.calendar_import_source_state!}))} onAskChief={ask} onAuthenticationLost={denied}/></EditorRecoveryContext.Provider>;}
+ await act(async()=>root.render(<Harness/>));await wait(()=>expect(button('Restore saved calendar import')?.disabled).toBe(false));await act(async()=>button('Restore saved calendar import')!.click());await wait(()=>expect(button('Check import access')?.disabled).toBe(false));await act(async()=>button('Check import access')!.click());
+ const recover=condition==='revoke'?'Check saved stop-using result':'Check saved source result';await wait(()=>expect(button(recover)?.disabled).toBe(false));await act(async()=>button(recover)!.click());await wait(()=>expect(finish).toBeTypeOf('function'));
+ server={...result.workspace,entries:condition==='missing'?[]:condition==='revoke'?[revoked,{...other,content:'',source_label:'Unavailable calendar import',calendar_import_source_state:'unavailable'}]:[revoked]};
+ await act(async()=>finish());await wait(()=>expect(host.textContent).not.toContain('Checking and saving this step'));
+ expect(session.getSnapshot().workspace).toEqual(server);expect(obsoletePublication).not.toHaveBeenCalled();expect(button('Prepare Chief draft')?.disabled??true).toBe(true);expect(host.querySelector('[aria-label="Imported calendar events"]')).toBeNull();expect(session.getSnapshot().thought).toBe('Keep my exact Chief directions.');expect(ask).not.toHaveBeenCalled();expect((await journal.load(address))).toMatchObject({data:{pending:null}});
+});

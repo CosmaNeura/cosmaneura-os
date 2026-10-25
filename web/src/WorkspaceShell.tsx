@@ -1309,7 +1309,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           currentSources={workspace.entries.filter(entry=>entry.kind==='calendar_import_source'&&!!entry.calendar_import_source_state).map(entry=>({id:entry.id,state:entry.calendar_import_source_state!}))}
           locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='calendarImport'&&value)}
           recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='calendarImport'&&value)}
-          onBusyChange={reportCalendarImportBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource} onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareCalendarChief(source)}/>
+          onBusyChange={reportCalendarImportBusy} onAuthenticationLost={failure} onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareCalendarChief(source)}/>
       </EhrReadTask>}
       {workspace&&<div className="workspace-notebook" data-native-private-note={nativePrivateNote} hidden={practicePage!=="notebook"||visitSourceTaskOpen}>
         {messagesMode&&!settingsOpen&&!savedRecordingFocused&&!reviewHandoffId&&<MessagesThreadHeader name={bot?.name??'Conversation'} role={bot?.role??'chief'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} task={messagesTaskLabel}

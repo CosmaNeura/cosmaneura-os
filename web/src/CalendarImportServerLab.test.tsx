@@ -37,16 +37,17 @@ it.skipIf(!base)('imports one bounded file through actual signed custody and pre
  const packet=await (await realFetch(base!.origin+'/lab/state')).json() as {workspace:Workspace;team:ProviderTeam;token:string;file_base64:string;window:{starts_on:string;ends_on:string;timezone:string};event_title:string};
  const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>packet.token};
  const session=new WorkspaceSession();session.setIdentity(identity);session.setWorkspace(packet.workspace);session.setTeam(packet.team);session.setSelected('chief');session.setPracticePage('notebook');session.models.updateThought('Keep my existing Chief directions.');
- const access=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,packet.workspace.id),webcrypto);
- access.recoveryScope=packet.team.recovery_scope;recovery=access;
- session.recovery.journal.current={scope:'e'.repeat(64),serverScope:packet.team.recovery_scope!,value:access.journal};
+ const retainedJournal=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,packet.workspace.id),webcrypto);
+ session.recovery.journal.current={scope:'e'.repeat(64),serverScope:packet.team.recovery_scope!,value:retainedJournal.journal};
  const failures:unknown[]=[];
+ const access=session.recovery.editorAccess(identity,packet.team.recovery_scope,retainedJournal.journal,packet.workspace.id,true,false,e=>failures.push(e))!;
+ recovery=access;
  const conversation:ConversationHost={identity,journal:access.journal,scope:'e'.repeat(64),current:()=>true,blocked:()=>session.getSnapshot().busy,
   authorize:async()=>{expect((await workspaceApi.team(identity)).recovery_scope).toBe(packet.team.recovery_scope);},failure:e=>failures.push(e),navigate:async()=>{throw new Error('This test retains the current Chief conversation.');}};
  const sourceContext:SourceContext={authenticated:identity,locked:false,connectionNavigationLocked:false,captureNavigationLocked:false,captureDraftLocked:false,connectionEditorsLocked:false,activityBusy:false,accessBusy:false,scribeSourceBusy:false,schedulingPatientBusy:false,accountAccess:null,conversationHost:conversation,failure:e=>failures.push(e),focusQuestion:()=>{}};
  function Harness(){const view=useWorkspaceSession(session),w=view.workspace!;return <><EditorRecoveryContext.Provider value={access}><CalendarImportMount identity={identity} workspace={{id:w.id,label:w.label,revision:w.revision}}
   currentSources={w.entries.filter(e=>e.kind==='calendar_import_source'&&!!e.calendar_import_source_state).map(e=>({id:e.id,state:e.calendar_import_source_state!}))}
-  onSaved={latest=>session.sources.receive(latest)} onAuthenticationLost={e=>failures.push(e)} onAskChief={saved=>void session.sources.prepareCalendarImport(sourceContext,saved)}/></EditorRecoveryContext.Provider><textarea aria-label="Chief directions" readOnly value={view.thought}/></>;}
+  onAuthenticationLost={e=>failures.push(e)} onAskChief={saved=>void session.sources.prepareCalendarImport(sourceContext,saved)}/></EditorRecoveryContext.Provider><textarea aria-label="Chief directions" readOnly value={view.thought}/></>;}
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Harness/>));
  const diagnostic=()=>{const copy=host.cloneNode(true) as HTMLDivElement;copy.querySelectorAll('option').forEach(option=>option.remove());return copy.textContent?.slice(0,3000);};
  const find=(name:string)=>[...host.querySelectorAll('button')].find(b=>b.textContent===name);

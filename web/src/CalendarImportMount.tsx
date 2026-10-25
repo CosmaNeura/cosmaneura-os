@@ -32,6 +32,7 @@ export function CalendarImportMount(props:CalendarImportMountProps){
   const check=()=>{if(!live.current.alive||!live.current.enabled||live.current.generation!==generation||live.current.identity!==identity||live.current.context!==context||live.current.recoveryScope!==recoveryScope||live.current.workspaceId!==scope.workspace_id)throw new WorkspaceApiError(403);};
   const authorize=async()=>{check();const w=await context.authorize();check();if(w.id!==scope.workspace_id)throw new WorkspaceApiError(403);
    const account=await accountIdentityApi.read(identity);check();if(account.box_id!==scope.box_id||account.actor_id!==scope.owner_id||account.recovery_scope!==proof.account.recovery_scope)throw new WorkspaceApiError(403);};
+  // Authorize refreshes the shared visit; a saved receipt must never republish its older workspace.
   return {authorize,denied:e=>{check();context.denied(e);callbacks.current.onAuthenticationLost(e);},load:async()=>{
    await authorize();const draft=await context.journal.load(address);check();if(!draft)return null;
    if(draft.kind!=='editor'||draft.workspaceId!==scope.workspace_id||draft.editor!==('calendar-import')||draft.pending!==null)throw new DraftStoreError('integrity');
