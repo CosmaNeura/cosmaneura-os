@@ -30,6 +30,24 @@ describe('shared conversation projection',()=>{
   });
 });
 
+describe('saved Outlook material cards',()=>{
+  const email:WorkspaceEntry={id:teamUuid(290),revision:4,kind:'microsoft_message',content:'Private invented email body must stay out of the card.',source_label:'Outlook: Invented follow-up',microsoft_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:15:00Z'};
+  it('places Outlook and EHR metadata at their saved revisions without adding replies or body text',()=>{
+    const ehr:WorkspaceEntry={...email,id:teamUuid(291),revision:3,kind:'ehr_read_source',microsoft_source_state:undefined,ehr_source_state:'current',source_label:'Elation: reviewed appointment'},later={...turn,id:teamUuid(292),revision:5};
+    const projection=projectConversation({...workspace,revision:5,handoffs:[],entries:[later,email,ehr,turn]},team,'chief');
+    expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${ehr.id}`,`source:${email.id}`,later.id]);expect(projection.turns).toEqual([later,turn]);
+    expect(projection.entries[2]).toEqual({kind:'material',sourceKind:'outlook',id:`source:${email.id}`,sourceId:email.id,label:email.source_label,state:'current',createdAt:email.created_at});expect(JSON.stringify(projection.entries)).not.toContain(email.content);
+  });
+  it('requires Microsoft custody on an actual reviewed email and stays in Chief',()=>{
+    const entries:WorkspaceEntry[]=[{...email,microsoft_source_state:undefined},{...email,id:teamUuid(293),microsoft_source_state:undefined,ehr_source_state:'current'},{...email,id:teamUuid(294),kind:'evidence'}];
+    expect(projectConversation({...workspace,handoffs:[],entries},team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[email]},team,'follow_up').entries).toEqual([]);
+  });
+  it('replaces revoked Outlook metadata even when an old subject and body remain in the input',()=>{
+    const projection=projectConversation({...workspace,handoffs:[],entries:[{...email,microsoft_source_state:'unavailable'}]},team,'chief');
+    expect(projection.entries).toEqual([{kind:'material',sourceKind:'outlook',id:`source:${email.id}`,sourceId:email.id,label:'Unavailable email source',state:'unavailable',createdAt:email.created_at}]);expect(projection.turns).toEqual([]);expect(JSON.stringify(projection)).not.toContain('Invented follow-up');expect(JSON.stringify(projection)).not.toContain(email.content);
+  });
+});
+
 describe('saved conversation order',()=>{
   const later:WorkspaceEntry={...turn,id:teamUuid(260),revision:9,content:'Invented later question',created_at:'2026-10-23T13:00:00Z'};
   it('keeps old result, note and linked work cards before a newly delivered turn',()=>{
@@ -56,12 +74,12 @@ describe('saved EHR material cards',()=>{
   const source:WorkspaceEntry={id:teamUuid(280),revision:3,kind:'ehr_read_source',content:'Private invented chart text must not enter the card.',source_label:'Elation: reviewed problem list',ehr_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:00:00Z'};
   it('places metadata-only material at its saved revision without creating a turn',()=>{
     const later={...turn,id:teamUuid(281),revision:5},projection=projectConversation({...workspace,revision:5,handoffs:[],entries:[later,source,turn]},team,'chief');
-    expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${source.id}`,later.id]);expect(projection.turns).toEqual([later,turn]);expect(projection.entries[1]).toEqual({kind:'material',id:`source:${source.id}`,sourceId:source.id,label:source.source_label,state:'current',createdAt:source.created_at});expect(JSON.stringify(projection.entries)).not.toContain(source.content);
+    expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${source.id}`,later.id]);expect(projection.turns).toEqual([later,turn]);expect(projection.entries[1]).toEqual({kind:'material',sourceKind:'ehr',id:`source:${source.id}`,sourceId:source.id,label:source.source_label,state:'current',createdAt:source.created_at});expect(JSON.stringify(projection.entries)).not.toContain(source.content);
   });
   it('does not infer material from a label, another bot, missing custody or a removed source',()=>{
     const w={...workspace,handoffs:[],entries:[{...source,kind:'evidence' as const},{...source,id:teamUuid(282),ehr_source_state:undefined}]};expect(projectConversation(w,team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,entries:[source],handoffs:[]},team,'follow_up').entries).toEqual([]);expect(projectConversation({...workspace,entries:[],handoffs:[]},team,'chief').entries).toEqual([]);
   });
   it('replaces unavailable material metadata without exposing the old label or content',()=>{
-    const projection=projectConversation({...workspace,handoffs:[],entries:[{...source,ehr_source_state:'unavailable',source_label:'Private old label'}]},team,'chief');expect(projection.entries).toEqual([{kind:'material',id:`source:${source.id}`,sourceId:source.id,label:'Unavailable EHR source',state:'unavailable',createdAt:source.created_at}]);expect(projection.turns).toEqual([]);
+    const projection=projectConversation({...workspace,handoffs:[],entries:[{...source,ehr_source_state:'unavailable',source_label:'Private old label'}]},team,'chief');expect(projection.entries).toEqual([{kind:'material',sourceKind:'ehr',id:`source:${source.id}`,sourceId:source.id,label:'Unavailable EHR source',state:'unavailable',createdAt:source.created_at}]);expect(projection.turns).toEqual([]);
   });
 });

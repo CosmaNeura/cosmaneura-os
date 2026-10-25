@@ -539,9 +539,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function openConversationSource(id:string){
     const view=session.getSnapshot();if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked||previousIdentity.current!==authenticated||view.workspace?.id!==workspace?.id||view.selected!==selected||!view.workspace?.entries.some(entry=>entry.id===id))return;
     const target=document.activeElement instanceof HTMLElement?document.activeElement:null;
-    // A new source intent cancels an older EHR-return animation frame, even
+    // A new source intent cancels an older task-return animation frame, even
     // when the user returns to this conversation again before that frame runs.
-    ehrReturnFocus.current=null;
+    ehrReturnFocus.current=null;outlookOpening.current++;
     if(messagesMode){showConversationTask('Sources');sourceTaskReturn.current={owner:authenticated,identity,workspaceId:view.workspace.id,address:selected,generation:generation.current,target};}
     else{setPanel('Sources');setMobilePanel('Sources');}
     setSelectedSource(id);
@@ -1025,10 +1025,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   }
   function closeOutlookWork(){
     if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
-    const returned=outlookReturn;setOutlookMessageOpen(false);setOutlookReturn(null);
+    const returned=outlookReturn,intent=++outlookOpening.current;setOutlookMessageOpen(false);setOutlookReturn(null);
     if(!returned||returned.identity!==authenticated||returned.generation!==generation.current||returned.workspaceId!==workspace?.id)return;
     setSettingsOpen(false);if(returned.origin==='sources'){setPanel('Sources');setMobilePanel('Sources');}
-    requestAnimationFrame(()=>{if(previousIdentity.current!==returned.identity||generation.current!==returned.generation||session.getSnapshot().settingsOpen)return;
+    requestAnimationFrame(()=>{if(outlookOpening.current!==intent||previousIdentity.current!==returned.identity||generation.current!==returned.generation||session.getSnapshot().settingsOpen)return;
       const target=returned.target?.isConnected&&!returned.target.closest('[hidden]')?returned.target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child');
       if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});});
   }

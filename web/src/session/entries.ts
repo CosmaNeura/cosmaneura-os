@@ -3,7 +3,7 @@ import {botAddress,type DraftHandoff,type ProviderTeam,type Workspace,type Works
 export type ConversationAction={kind:'review_handoff'|'retry_handoff'|'review_note'|'review_work'|'check_request';id:string;label:string};
 export type ConversationRow=
   {kind:'turn';id:string;entry:WorkspaceEntry;reviewLabel:string;actions:ConversationAction[]}|
-  {kind:'material';id:string;sourceId:string;label:string;createdAt:string;state:'current'|'unavailable'}|
+  {kind:'material';sourceKind:'ehr'|'outlook';id:string;sourceId:string;label:string;createdAt:string;state:'current'|'unavailable'}|
   {kind:'review';id:string;author:string;title:string;status:string;needsReview:boolean;actions:ConversationAction[]};
 export type ConversationProjection={workspaceId:string|null;botAddress:string;entries:ConversationRow[];turns:WorkspaceEntry[]};
 
@@ -32,10 +32,12 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
   const positions=new Map(turns.map(entry=>[entry.id,entry.revision]));
   if(bot?.role==='chief'){
     for(const source of workspace.entries){
-      if(source.kind!=='ehr_read_source'||!['current','unavailable'].includes(source.ehr_source_state??''))continue;
-      const state=source.ehr_source_state==='current'?'current':'unavailable',id=`source:${source.id}`;
+      const sourceKind=source.kind==='ehr_read_source'?'ehr':source.kind==='microsoft_message'?'outlook':null;
+      const custody=sourceKind==='ehr'?source.ehr_source_state:sourceKind==='outlook'?source.microsoft_source_state:undefined;
+      if(!sourceKind||(custody!=='current'&&custody!=='unavailable'))continue;
+      const state=custody,id=`source:${source.id}`,fallback=sourceKind==='ehr'?'Reviewed EHR source':'Reviewed Outlook email',unavailable=sourceKind==='ehr'?'Unavailable EHR source':'Unavailable email source';
       // Material is metadata only. It is neither a reply nor an unread clock.
-      entries.push({kind:'material',id,sourceId:source.id,createdAt:source.created_at,state,label:state==='current'?source.source_label??'Reviewed EHR source':'Unavailable EHR source'});
+      entries.push({kind:'material',sourceKind,id,sourceId:source.id,createdAt:source.created_at,state,label:state==='current'?source.source_label??fallback:unavailable});
       positions.set(id,source.revision);
     }
     const origins=new Set(turns.map(entry=>entry.id)),handoffs=workspace.handoffs??[];
