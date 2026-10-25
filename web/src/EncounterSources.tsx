@@ -1,16 +1,17 @@
 import type { Workspace } from "./workspace-api";
 import {currentSharedNote,parseSharedClinicalNote} from './clinical-team-contract';
 
-export function EncounterSources({ workspace, selectedSource, locked, source, evidence, setSource, setEvidence, onSave, onNotebook, briefViewedAt, onPrep }: {
+export function EncounterSources({ workspace, selectedSource, locked, source, evidence, setSource, setEvidence, onSave, onNotebook, briefViewedAt, onPrep, onReviewAppointment, appointmentReviewLocked }: {
   workspace: Workspace; selectedSource: string | null; locked: boolean;
   source: string; evidence: string; setSource: (value: string) => void; setEvidence: (value: string) => void;
-  onSave: () => void; onNotebook: () => void; briefViewedAt?:string; onPrep?:()=>void;
+  onSave: () => void; onNotebook: () => void; briefViewedAt?:string; onPrep?:()=>void; onReviewAppointment?:()=>void; appointmentReviewLocked?:boolean;
 }) {
   const reviewedThrough=workspace.note?.latest?.source_revision;
   const entries = [...workspace.entries].reverse().filter(e => ["synthetic_source", "evidence", "scratchpad", "google_message", "google_calendar", "efax_inbound_source", "fax_inbound_source", "ehr_read_source"].includes(e.kind)||parseSharedClinicalNote(e));
   const current=currentSharedNote(workspace);
   return <section aria-label="Scribe sources">
     <div className="team-notebook-title"><h2>Saved visit sources</h2><span className="team-pill">{entries.length} saved</span></div>
+    {onReviewAppointment&&<section className="ehr-source-action" aria-label="Appointment source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewAppointment}>Review Elation appointment</button><p>Check the patient and appointment before adding it to this visit. Your conversation draft stays in place.</p></section>}
     <p className="team-fine">Most recent first. Read changed material before reviewing the note.</p>
     {!entries.length&&<p>No notebook entries or reference notes have been saved for this visit.</p>}
     {entries.map(e => {const shared=parseSharedClinicalNote(e);return <article id={`source-${e.id}`} tabIndex={-1} className={`team-source ${selectedSource === e.id ? "selected" : ""}`} key={e.id}>

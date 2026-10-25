@@ -1,10 +1,10 @@
 import {teamClosed,teamHash,teamNatural,teamUuid} from './team-setup-request';
 import {modelCanonical} from './model-work-request';
-import {ehrHash,ehrContentHash,ehrSourceContent,ehrReviewHash,ehrSourceHash,validEhrCommand,validEhrReceipt,validEhrReview,type EhrCommand,type EhrReceipt,type EhrReviewRequest,type EhrResolve} from './ehr-read-api';
+import {ehrHash,ehrContentHash,ehrSourceContent,ehrReviewHash,ehrSourceHash,ehrTransport,validEhrInstall,validEhrCommand,validEhrReceipt,validEhrReview,type EhrTransport,type EhrInstallRequest,type EhrCommand,type EhrReceipt,type EhrReviewRequest,type EhrResolve} from './ehr-read-api';
 export type EhrReadScope={box_id:string;owner_id:string;workspace_id:string};
 export type EhrReadVisit={id:string;label:string;revision:number};
 export type EhrReadSaved={workspace_id:string;entry_id:string;entry_revision:number;source_sha256:string;content_sha256:string;request_sha256:string;source_withheld:boolean};
-export type EhrPending={kind:'read';request:EhrCommand;anchor:EhrReceipt|null}|{kind:'review';request:EhrReviewRequest;anchor:EhrReceipt};
+export type EhrPending={kind:'install';request:EhrInstallRequest;anchor:null}|{kind:'read';request:EhrCommand;anchor:EhrReceipt|null;transport?:EhrTransport}|{kind:'review';request:EhrReviewRequest;anchor:EhrReceipt};
 export type EhrSupersededRead={request:EhrCommand;resolution:EhrResolve};
 export type EhrReadRecovery={version:1;superseded_reads:EhrSupersededRead[];scope:EhrReadScope;binding:{connection_id:string;binding_sha256:string}|null;window:EhrReceipt|null;verified:EhrReceipt|null;pending:EhrPending|null;saved:EhrReadSaved|null;saved_request:EhrReviewRequest|null};
 export type EhrReadRecoveryAccess={authorize():Promise<void>;load():Promise<unknown>;persist(value:EhrReadRecovery|null):Promise<void>;denied?(error:unknown):void};
@@ -23,14 +23,17 @@ export async function validateEhrReadRecovery(value:unknown,scope:EhrReadScope):
  if(v.verified!==null){
   if(!v.window||!await validEhrReceipt(v.verified)||v.verified.observation.kind!=='verified_visit'||v.window.observation.kind!=='window')return bad();
   const o=v.verified.observation,item=v.window.observation.items.find(i=>i.handle===o.item.handle&&i.selectable);
-  if(!item||item.starts_at!==o.item.starts_at||item.ends_at!==o.item.ends_at||item.status!==o.item.status||!same(v.window.observation.practice,o.practice)||!same(v.window.observation.window,o.window)||v.window.observation.coverage!==o.coverage)return bad();
+  if(!item||item.starts_at!==o.item.starts_at||item.ends_at!==o.item.ends_at||item.status!==o.item.status||ehrTransport(v.window)!==ehrTransport(v.verified)||!same(v.window.observation.practice,o.practice)||!same(v.window.observation.window,o.window)||v.window.observation.coverage!==o.coverage)return bad();
  }
- if(!v.binding&&(v.window||v.verified||v.pending||v.saved))return bad();
+ if(!v.binding&&(v.window||v.verified||v.pending&&v.pending.kind!=='install'||v.saved))return bad();
  for(const r of [v.window,v.verified])if(r&&(r.connection_id!==v.binding?.connection_id||r.binding_sha256!==v.binding?.binding_sha256))return bad();
  const reviewMatches=(r:EhrReviewRequest,a:EhrReceipt)=>a.observation.kind==='verified_visit'&&r.observation_id===a.observation_id&&r.observation_sha256===a.source_sha256&&r.item_handle===a.observation.item.handle&&r.item_sha256===a.observation.item.sha256;
  if(v.pending!==null){
-  const p=v.pending;if(!teamClosed(p,'kind,request,anchor')||v.saved!==null||v.saved_request!==null)return bad();
-  if(p.kind==='read'){
+  const p=v.pending;if(!teamClosed(p,'kind,request,anchor',p.kind==='read'?'transport':'')||v.saved!==null||v.saved_request!==null)return bad();
+  if(p.kind==='install'){
+   if(!validEhrInstall(p.request)||p.anchor!==null||v.binding||v.window||v.verified||v.superseded_reads.length)return bad();
+  }else if(p.kind==='read'){
+   if(p.transport!==undefined&&p.transport!=='mock'&&p.transport!=='vendor_sandbox'||p.anchor&&ehrTransport(p)!==ehrTransport(p.anchor))return bad();
    if(!validEhrCommand(p.request)||p.request.connection_id!==v.binding?.connection_id||p.request.binding_sha256!==v.binding?.binding_sha256)return bad();
    if(p.request.action==='observe'){if(p.anchor!==null||v.window!==null||v.verified!==null)return bad();}
    else {const r=p.request;if(!v.window||!same(p.anchor,v.window)||v.window.observation.kind!=='window'||r.observation_id!==v.window.observation_id||r.observation_sha256!==v.window.source_sha256||!v.window.observation.items.some(i=>i.handle===r.item_handle&&i.sha256===r.item_sha256&&i.selectable)||v.verified!==null)return bad();}

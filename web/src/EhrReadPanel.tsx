@@ -1,17 +1,17 @@
 import './ehr-read.css';
 import {useEffect,useRef,useState} from 'react';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
-import {ehrReadApi,ehrMatchesCommand,ehrReviewProvesNoCommit,validEhrWindow,type EhrReadStatus,type EhrReceipt,type EhrWindowItem,type EhrCommand,type EhrReviewResponse,type EhrResolve} from './ehr-read-api';
+import {ehrReadApi,ehrTransport,ehrTransportLabel,ehrMatchesCommand,ehrReviewProvesNoCommit,validEhrWindow,type EhrInstallReceipt,type EhrReadStatus,type EhrReceipt,type EhrWindowItem,type EhrCommand,type EhrReviewResponse,type EhrResolve} from './ehr-read-api';
 import {emptyEhrReadRecovery,validateEhrReadRecovery,type EhrReadRecovery,type EhrReadRecoveryAccess,type EhrReadSaved,type EhrReadScope,type EhrReadVisit,type EhrPending,type EhrSupersededRead} from './ehr-read-recovery';
 import {useGoogleNativeForeground} from './use-google-native-foreground';
 import {useUnsavedWork} from './unsaved-work';
 import {modelCanonical} from './model-work-request';
-export type EhrReadPanelProps={identity:AuthenticatedWorkspaceIdentity;scope:EhrReadScope;recovery:EhrReadRecoveryAccess;workspace:EhrReadVisit;locked?:boolean;recoveryLocked?:boolean;currentSources?:readonly {id:string;state:'current'|'unavailable'}[];onSaved(workspace:Workspace):void;onBusyChange?(busy:boolean):void;onAuthenticationLost(error:unknown):void;onAskChief?(source:EhrReadSaved):void;onRefreshVisit?():Promise<void>};
+export type EhrReadPanelProps={identity:AuthenticatedWorkspaceIdentity;scope:EhrReadScope;recovery:EhrReadRecoveryAccess;workspace:EhrReadVisit;active?:boolean;locked?:boolean;recoveryLocked?:boolean;currentSources?:readonly {id:string;state:'current'|'unavailable'}[];onSaved(workspace:Workspace):void;onBusyChange?(busy:boolean):void;onAuthenticationLost(error:unknown):void;onAskChief?(source:EhrReadSaved):void;onRefreshVisit?():Promise<void>};
 const authority=(e:unknown)=>e instanceof WorkspaceApiError&&[401,403].includes(e.status);
 const localTime=(date:Date)=>new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
 const message=(e:unknown)=>e instanceof WorkspaceApiError&&['ehr_read_binding_changed','ehr_read_binding_unavailable','ehr_read_permission_denied','ehr_read_authentication_required'].includes(e.code??'')?'Elation access changed. Saved details are hidden. Check practice access before continuing.':e instanceof WorkspaceApiError&&['ehr_read_appointment_changed','ehr_read_record_unavailable','ehr_read_source_changed','ehr_read_expired','ehr_read_superseded'].includes(e.code??'')?'This appointment could not be verified from the saved list. Recheck access, then load a fresh appointment list.':e instanceof WorkspaceApiError&&e.code==='workspace_revision_conflict'?'This visit changed. Refresh the visit, check the patient and appointment again, then save.':'The result could not be confirmed. Your saved request is retained; check its saved result before trying again.';
 export function EhrReadPanel(props:EhrReadPanelProps){
- const {identity,scope,recovery,workspace,locked=false,recoveryLocked=false,currentSources}=props,scopeKey=modelCanonical(scope);
+ const {identity,scope,recovery,workspace,active:taskActive=true,locked=false,recoveryLocked=false,currentSources}=props,scopeKey=modelCanonical(scope);
  const callbacks=useRef(props);callbacks.current=props;
  const owner=useRef({identity,recovery,scopeKey,generation:0,alive:true});
  if(owner.current.identity!==identity||owner.current.recovery!==recovery||owner.current.scopeKey!==scopeKey)owner.current={identity,recovery,scopeKey,generation:owner.current.generation+1,alive:true};
@@ -26,11 +26,13 @@ export function EhrReadPanel(props:EhrReadPanelProps){
   return()=>{owner.current.alive=false;owner.current.generation++;controller.current?.abort();};
  },[identity,recovery,scopeKey,epoch]);
  useEffect(()=>{setChecks([false,false,false,false]);},[workspace.id,workspace.revision,locked]);
+ const priorActive=useRef(taskActive);
+ useEffect(()=>{if(priorActive.current===taskActive)return;priorActive.current=taskActive;owner.current.generation++;controller.current?.abort();setVisible(false);setConnection(null);setChecks([false,false,false,false]);setReady(false);if(taskActive)setEpoch(n=>n+1);},[taskActive]);
  useEffect(()=>{props.onBusyChange?.(busy);return()=>props.onBusyChange?.(false);},[busy,props.onBusyChange]);
  useUnsavedWork(busy||offer||!!record?.pending||checks.some(Boolean));
  const sameOwner=shown.current.identity===identity&&shown.current.recovery===recovery&&shown.current.scopeKey===scopeKey;
  const withheld=!!record?.saved&&currentSources?.some(s=>s.id===record.saved!.entry_id&&s.state==='unavailable');
- const blocked=locked||recoveryLocked||busy||!sameOwner||native.suspended;
+ const blocked=!taskActive||locked||recoveryLocked||busy||!sameOwner||native.suspended;
  const available=ready&&visible&&connection?.status==='ready'&&!withheld;
  const persist=async(next:EhrReadRecovery,g:number)=>{const data=await validateEhrReadRecovery(next,scope);if(!isCurrent(g))throw new WorkspaceApiError(403);await recovery.authorize();if(!isCurrent(g))throw new WorkspaceApiError(403);await recovery.persist(data);if(!isCurrent(g))throw new WorkspaceApiError(403);latest.current=data;setRecord(data);return data;};
  async function run(action:(g:number,signal:AbortSignal)=>Promise<void>){
@@ -41,19 +43,19 @@ export function EhrReadPanel(props:EhrReadPanelProps){
  }
  async function checkAccess(g:number,signal:AbortSignal){
   setVisible(false);setChecks([false,false,false,false]);const status=await ehrReadApi.status(identity,signal);if(!isCurrent(g))return;setConnection(status);
-  if(status.status!=='ready'){setNotice(status.status==='not_enabled'?'Elation appointment review is not enabled for this practice.':'Elation setup is pending. Ask the practice administrator to finish the installed connection.');return;}
+  if(status.status!=='ready'){setNotice(status.status==='setup_required'?'Review the configured practice below, then enable its sandbox for this account. No appointments are loaded by this step.':status.status==='not_enabled'?'Elation appointment review is not enabled for this practice.':'Elation setup is pending. Ask the practice administrator to finish the installed connection.');return;}
   const r=latest.current;if(r?.binding&&(r.binding.connection_id!==status.connection_id||r.binding.binding_sha256!==status.binding_sha256))throw new WorkspaceApiError(409,'ehr_read_binding_changed');
-  const anchor=r?.verified??r?.window;if(anchor&&!r?.pending)await ehrReadApi.inspect(identity,anchor,signal);if(!isCurrent(g))return;setVisible(true);
+  const anchor=r?.verified??r?.window;if(anchor&&ehrTransport(anchor)!==ehrTransport(status))throw new WorkspaceApiError(409,'ehr_read_binding_changed');if(anchor&&!r?.pending)await ehrReadApi.inspect(identity,anchor,signal);if(!isCurrent(g))return;setVisible(true);
  }
  async function settleRead(receipt:EhrReceipt,pending:Extract<EhrPending,{kind:'read'}>,g:number){
-  if(!ehrMatchesCommand(receipt,pending.request,pending.anchor))throw new WorkspaceApiError(502);
+  if(ehrTransport(receipt)!==ehrTransport(pending)||!ehrMatchesCommand(receipt,pending.request,pending.anchor))throw new WorkspaceApiError(502);
   const r=latest.current!;await persist({...r,pending:null,...(pending.request.action==='observe'?{window:receipt,verified:null}:{verified:receipt}),saved:null,saved_request:null},g);setMissing(false);setUnconfirmed(null);setChecks([false,false,false,false]);setVisible(true);
  }
  async function startRead(command:EhrCommand,anchor:EhrReceipt|null,g:number,signal:AbortSignal,superseded?:EhrSupersededRead[]){
-  const r=latest.current!,pending:EhrPending={kind:'read',request:command,anchor};
+  const r=latest.current!,pending:Extract<EhrPending,{kind:'read'}>={kind:'read',request:command,anchor,transport:ehrTransport(connection??{})};
   setVisible(false);
   await persist({...r,superseded_reads:superseded??r.superseded_reads,binding:{connection_id:command.connection_id,binding_sha256:command.binding_sha256},window:command.action==='observe'?null:r.window,verified:null,pending,saved:null,saved_request:null},g);setChecks([false,false,false,false]);setMissing(false);setUnconfirmed(null);
-  const receipt=await ehrReadApi.execute(identity,command,anchor,signal);if(isCurrent(g))await settleRead(receipt,pending,g);
+  const receipt=await ehrReadApi.execute(identity,command,anchor,signal,ehrTransport(pending));if(isCurrent(g))await settleRead(receipt,pending,g);
  }
  async function load(g:number,signal:AbortSignal){
   if(!connection||connection.status!=='ready'||!connection.connection_id||!connection.binding_sha256||!available||latest.current?.pending)return;
@@ -77,10 +79,23 @@ export function EhrReadPanel(props:EhrReadPanelProps){
   try{const result=await ehrReadApi.review(identity,scope.workspace_id,p.request,p.anchor,signal);if(isCurrent(g))await settleReview(result,p,g);}
   catch(e){if(isCurrent(g)&&ehrReviewProvesNoCommit(e))await persist({...latest.current!,pending:null},g);throw e;}
  }
+ async function settleInstall(result:EhrInstallReceipt,g:number,signal:AbortSignal){
+  await persist({...latest.current!,pending:null},g);setMissing(false);
+  if(result.status==='unavailable'){setVisible(false);setConnection(null);setNotice('This saved setup is no longer available. Ask the practice administrator to check Elation setup.');return;}
+  // A replay proves the installation outcome, not present-day access.
+  await checkAccess(g,signal);
+ }
+ async function install(g:number,signal:AbortSignal){
+  const status=connection,r=latest.current;
+  if(status?.status!=='setup_required'||!status.installation||!r||r.pending||r.binding)return;
+  const pending:Extract<EhrPending,{kind:'install'}>={kind:'install',anchor:null,request:{action:'install',installation_id:status.installation.id,installation_sha256:status.installation.sha256,idempotency_key:crypto.randomUUID()}};
+  await persist({...r,pending},g);const result=await ehrReadApi.install(identity,pending.request,signal);if(isCurrent(g))await settleInstall(result,g,signal);
+ }
  async function recover(g:number,signal:AbortSignal){
   const p=latest.current?.pending;if(!p)return;
   if(p.kind==='review'){await dispatchReview(p,g,signal);return;}
-  const result=await ehrReadApi.resolve(identity,p.request,p.anchor,signal);if(!isCurrent(g))return;
+  if(p.kind==='install'){const result=await ehrReadApi.resolveInstall(identity,p.request,signal);if(!isCurrent(g))return;if(result.status==='not_found'){setMissing(true);setNotice('No saved setup result was found. You may explicitly send the same saved setup request.');}else if('installation_id' in result)await settleInstall(result,g,signal);return;}
+  const result=await ehrReadApi.resolve(identity,p.request,p.anchor,signal,ehrTransport(p));if(!isCurrent(g))return;
   if('status' in result){setMissing(result.status==='not_found');setUnconfirmed(result.status==='unconfirmed'?result:null);setNotice(result.status==='not_found'?'No saved result was found. You may explicitly send this same saved request.':'This request is still unconfirmed. Check its saved result again; a new read has not been started.');}
   else await settleRead(result,p,g);
  }
@@ -96,16 +111,18 @@ export function EhrReadPanel(props:EhrReadPanelProps){
  const format=(s:string)=>new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short',timeZone:connection?.practice?.timezone||'UTC'}).format(new Date(s));
  return <section className="ehr-read-panel" aria-label="Elation appointments">
   <h3>Choose an appointment for this visit</h3><p>Visit: <strong>{workspace.label}</strong></p>
-  <p className="team-fine">Read one appointment page, check the patient and visit, then save a reviewed source. This setup uses invented records.</p>
+  <p className="team-fine">Read one appointment page, check the patient and visit, then save a reviewed source. Your draft stays in this visit. Only invented records are supported in this setup.</p>
   {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
   {native.suspended&&<p role="status">Details are hidden while the app is in the background. Recheck access when you return.</p>}
   {!sameOwner||!record?<><p role="status">Checking private saved-work storage…</p>{error&&<button disabled={blocked} onClick={()=>setEpoch(n=>n+1)}>Recheck saved-work storage</button>}</>:<>
    {offer?<><p>Saved Elation work is available for this visit. Restore it to check its result; restoring does not read Elation.</p><button className="team-primary" disabled={blocked} onClick={()=>void run(async(g)=>{await recovery.authorize();if(!isCurrent(g))return;setOffer(false);setReady(true);setVisible(false);setNotice('Saved work restored. Check access before viewing details.');})}>Restore saved Elation work</button></>:<>
-    <button className={!available&&!record.pending?"team-primary":undefined} disabled={blocked||!ready} onClick={()=>void run(checkAccess)}>Check Elation access</button>
-    {connection?.status==='ready'&&<p className="team-fine">{connection.practice?.label} · Synthetic records · Appointment times use {connection.practice?.timezone}</p>}
-    {record.pending?<div role="group" aria-label="Saved Elation request"><p>A request is saved and its result needs checking. Keep this request until its outcome is known.</p><button className="team-primary" disabled={blocked||!ready} onClick={()=>void run(recover)}>{record.pending.kind==='review'?'Check saved source result':'Check saved appointment result'}</button>
+    <button className={!available&&!record.pending&&connection?.status!=='setup_required'?"team-primary":undefined} disabled={blocked||!ready} onClick={()=>void run(checkAccess)}>Check Elation access</button>
+    {connection?.practice&&<p className="team-fine">{connection.practice.label} · {ehrTransportLabel(connection)} · Appointment times use {connection.practice.timezone}</p>}
+    {connection?.status==='setup_required'&&!record.pending&&!record.binding&&<section aria-label="Enable Elation sandbox"><p>This uses the practice’s configured Elation sandbox for invented test records. Loading appointments contacts that sandbox. Your practice administrator manages its credentials.</p><button className="team-primary" disabled={blocked||!ready} onClick={()=>void run(install)}>Use this practice’s Elation sandbox</button></section>}
+    {record.pending?<div role="group" aria-label="Saved Elation request"><p>A request is saved and its result needs checking. Keep this request until its outcome is known.</p><button className="team-primary" disabled={blocked||!ready} onClick={()=>void run(recover)}>{record.pending.kind==='review'?'Check saved source result':record.pending.kind==='install'?'Check saved setup result':'Check saved appointment result'}</button>
+      {missing&&record.pending.kind==='install'&&<button disabled={blocked||!ready||connection?.status!=='setup_required'||connection.installation?.id!==record.pending.request.installation_id||connection.installation?.sha256!==record.pending.request.installation_sha256} onClick={()=>void run(async(g,signal)=>{const p=latest.current?.pending;if(p?.kind!=='install')return;setMissing(false);const result=await ehrReadApi.install(identity,p.request,signal);if(isCurrent(g))await settleInstall(result,g,signal);})}>Send same saved setup request</button>}
       {unconfirmed&&record.pending.kind==='read'&&<><p>You can load a fresh list for the same dates. The earlier read stays recorded and cannot replace the new list.</p><button disabled={blocked||!ready||connection?.status!=='ready'} onClick={()=>void run(freshWindow)}>Load a fresh appointment list</button></>}
-      {missing&&record.pending.kind==='read'&&<button disabled={blocked||!ready||!available} onClick={()=>void run(async(g,signal)=>{const p=latest.current?.pending;if(p?.kind!=='read')return;setMissing(false);const result=await ehrReadApi.execute(identity,p.request,p.anchor,signal);if(isCurrent(g))await settleRead(result,p,g);})}>Send same saved request</button>}</div>:<>
+      {missing&&record.pending.kind==='read'&&<button disabled={blocked||!ready||!available} onClick={()=>void run(async(g,signal)=>{const p=latest.current?.pending;if(p?.kind!=='read')return;setMissing(false);const result=await ehrReadApi.execute(identity,p.request,p.anchor,signal,ehrTransport(p));if(isCurrent(g))await settleRead(result,p,g);})}>Send same saved request</button>}</div>:<>
       <fieldset disabled={blocked||!available}><legend>Choose a date range</legend><p className="team-fine">Enter times in your device timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Up to 7 days; the end time is excluded.</p><label>From<input type="datetime-local" value={starts} onChange={e=>setStarts(e.target.value)}/></label><label>Until<input type="datetime-local" value={ends} onChange={e=>setEnds(e.target.value)}/></label>{available&&(!dateRange||!validEhrWindow(dateRange))&&<p role="alert">Choose a valid start and end time, with the end after the start and no more than 7 days apart.</p>}<button className={available&&!record.window?"team-primary":undefined} disabled={blocked||!available||!dateRange||!validEhrWindow(dateRange)} onClick={()=>void run(load)}>Load appointments</button></fieldset>
       {windowObservation&&<><p>{windowObservation.coverage==='more_rows_available'?'More appointments exist. This page is incomplete; narrow the date range to look for a missing appointment.':'One returned page is shown. This snapshot does not establish current availability.'}</p>{!windowObservation.items.length?<p>No matching appointments were returned in this page. Check the date range.</p>:<ul aria-label="Appointments">{windowObservation.items.map(item=><li key={item.handle}><button disabled={blocked||!item.selectable} onClick={()=>void run((g,s)=>select(item,g,s))}>{format(item.starts_at)} · {item.status??'Status unavailable'}</button>{!item.selectable&&<small> Patient verification unavailable for this appointment.</small>}</li>)}</ul>}</>}
       {observation?.kind==='verified_visit'&&<div aria-label="Review patient and visit"><h4>Check this patient and appointment</h4><p>{observation.item.patient.first_name} {observation.item.patient.last_name}</p><p>Date of birth: {observation.item.patient.birth_date}</p><p>{format(observation.item.starts_at)} to {format(observation.item.ends_at)} · {observation.item.status??'Status unavailable'}</p><p className="team-fine">Observed {format(observation.observed_at)}. Appointment details only. Check Elation for current availability and the full chart.</p>

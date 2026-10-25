@@ -6,11 +6,11 @@ import {memoryDraftStorage} from '../draft-test-fixture';
 import {teamFixture} from '../team-setup-test-fixture';
 import type {ConversationHost} from './conversations';
 import type {SourceContext,SourceDependencies} from './sources';
-import type {EhrReadSaved} from '../ehr-read-recovery';
+import {emptyEhrReadRecovery,type EhrReadSaved} from '../ehr-read-recovery';
 import {ehrScope,ehrVisit,ehrUuid,ehrWindowReceipt,ehrVerifiedReceipt,ehrReviewBody,ehrReviewResult} from '../ehr-read-fixtures.test-support';
 import {WorkspaceApiError} from '../workspace-api';
 async function fixture(deps:SourceDependencies={}){
- const verified=await ehrVerifiedReceipt(await ehrWindowReceipt()),result=await ehrReviewResult(verified,ehrReviewBody(verified)),workspace=result.workspace;
+ const verified=await ehrVerifiedReceipt(await ehrWindowReceipt()),result=await ehrReviewResult(verified,ehrReviewBody(verified)),workspace={...result.workspace,appointment_id:ehrUuid(900)};
  const identity={mode:'clerk_jwt' as const,getToken:async()=>null};
  const session=new WorkspaceSession({sources:{read:async()=>workspace,...deps},conversationRead:async()=>workspace,conversations:{read:vi.fn(async()=>({contract_version:1 as const,as_of:'2026-10-25T12:00:00Z',rows:[],next_cursor:null})),mark:vi.fn(async()=>({contract_version:1 as const,marker_version:1,manual_unread:false,seen_watermark:null}))}});
  session.setWorkspace(workspace);session.setTeam(teamFixture());session.setIdentity(identity);session.setSelected('chief');session.setPracticePage('notebook');
@@ -29,4 +29,23 @@ describe('shared EHR Chief draft preparation',()=>{
  it('does not append after a newer composer edit wins during source hashing',async()=>{let release!:(s:string)=>void;const f=await fixture({hash:()=>new Promise(r=>{release=r;})}),preparing=f.session.sources.prepareEhr(f.context,f.saved);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));f.session.models.updateThought('New directions while checking');release(f.saved.content_sha256);await preparing;expect(f.session.getSnapshot().thought).toBe('New directions while checking');expect(f.context.focusQuestion).not.toHaveBeenCalled();});
  it('does not focus a newer route when retained Chief draft persistence settles',async()=>{const f=await fixture(),original=f.journal.persist.bind(f.journal);let release!:()=>void;vi.spyOn(f.journal,'persist').mockImplementation(async(address,draft)=>{if(draft?.kind==='editor'&&JSON.stringify(draft.data).includes('human-selected Elation'))await new Promise<void>(r=>{release=r;});return original(address,draft);});const preparing=f.session.sources.prepareEhr(f.context,f.saved);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));f.session.navigation.sequence.current++;f.session.setPracticePage('home');release();await preparing;expect(f.context.focusQuestion).not.toHaveBeenCalled();});
  it('requires the shared conversation journal instead of moving specialist text into Chief',async()=>{const f=await fixture();f.session.setSelected('follow_up');f.session.models.updateThought('Unsent specialist directions');await f.session.sources.prepareEhr({...f.context,conversationHost:null},f.saved);expect(f.session.getSnapshot()).toMatchObject({selected:'follow_up',thought:'Unsent specialist directions'});expect(f.context.failure).toHaveBeenCalledOnce();});
+});
+
+describe('shared EHR task navigation',()=>{
+ it.each(['conversation','sources','connections'] as const)('retains the composer before entering from %s and preserves EHR work on return',async origin=>{
+  const f=await fixture();f.session.models.updateThought('Keep these unsent directions');
+  const address=editorAddress(ehrVisit.id,'ehr-read'),draft={kind:'editor' as const,workspaceId:ehrVisit.id,editor:'ehr-read' as const,pending:null,data:{...emptyEhrReadRecovery(ehrScope),pending:{kind:'install',anchor:null,request:{action:'install',installation_id:ehrUuid(810),installation_sha256:'8'.repeat(64),idempotency_key:ehrUuid(811)}}}};
+  await f.journal.load(address);await f.journal.persist(address,draft);
+  expect(await f.session.sources.openEhr(f.context,origin)).toBe(true);
+  expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'))).toMatchObject({data:{text:'Keep these unsent directions'}});
+  expect(f.session.getSnapshot().ehrReview).toMatchObject({open:true,origin,workspaceId:ehrVisit.id});
+  expect(f.session.sources.closeEhr(f.context)).toBe(true);
+  expect(f.session.getSnapshot()).toMatchObject({thought:'Keep these unsent directions',ehrReview:{open:false}});
+  expect(await f.journal.load(address)).toEqual(draft);
+  if(origin==='connections')expect(f.session.getSnapshot()).toMatchObject({settingsOpen:true,settingsEntry:'connections'});
+  else expect(f.session.getSnapshot().mobilePanel).toBe(origin==='sources'?'Sources':'Conversation');
+ });
+ it('keeps the original page when its composer cannot be retained',async()=>{const f=await fixture();f.session.models.updateThought('Unsent');vi.spyOn(f.journal,'persist').mockRejectedValueOnce(new Error('storage unavailable'));expect(await f.session.sources.openEhr(f.context,'conversation')).toBe(false);expect(f.session.getSnapshot().ehrReview).toBeNull();expect(f.session.getSnapshot().thought).toBe('Unsent');});
+ it.each(['edit','navigation','account'] as const)('does not open after newer %s wins while retaining',async change=>{const f=await fixture();let finish!:()=>void;vi.mocked(f.host.authorize).mockImplementationOnce(()=>new Promise<void>(r=>{finish=r;}));const opening=f.session.sources.openEhr(f.context,'conversation');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));if(change==='edit')f.session.models.updateThought('New edit');else if(change==='navigation')f.session.navigation.sequence.current++;else f.session.setIdentity({mode:'clerk_jwt',getToken:async()=>null});finish();expect(await opening).toBe(false);expect(f.session.getSnapshot().ehrReview).toBeNull();});
+ it('blocks an unfinished operation from being hidden with Back',async()=>{const f=await fixture();await f.session.sources.openEhr(f.context,'conversation');expect(f.session.sources.closeEhr({...f.context,connectionNavigationLocked:true})).toBe(false);expect(f.session.getSnapshot().ehrReview?.open).toBe(true);});
 });

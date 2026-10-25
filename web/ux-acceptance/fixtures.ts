@@ -1,3 +1,4 @@
+import {ehrRehearsal} from './ehr';
 import {recordingMetadata} from './recording-metadata';
 import {handoffReviewHash,validHandoffReviewInput,validHandoffRevisionInput} from '../src/handoff-review-api';
 import {conversationsApi,type ConversationSummary} from '../src/conversations-api';
@@ -97,10 +98,13 @@ export async function installFixtures(reset=false){
       const added=entry(crypto.randomUUID(),++state.revision,'conversation',modelCanonical(snapshot));added.source_label=CLINICAL_NOTE_LABEL;state.entries.push(added);persist();return verifyClinicalNoteShareReceipt({contract:'clinical-note-share.v1',outcome:'saved',source_entry_id:added.id,source_entry_revision:added.revision,workspace:copy()},id,body);}),
     resolve:async(_identity:unknown,id:string,body:Parameters<typeof clinicalTeamApi.resolve>[2])=>verifyClinicalNoteShareReceipt(saved.get(body.idempotency_key)??{contract:'clinical-note-share.v1',outcome:'not_found',source_entry_id:null,source_entry_revision:null,workspace:copy()},id,body),
   } satisfies Partial<typeof clinicalTeamApi>);
+  const ehrServer=ehrRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   // Exact review contracts run through the real client, entirely in this tab.
   // Unsupported requests never leave this isolated, invented-data rehearsal.
   window.fetch=async(input,init)=>{
     const path=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url,location.href).pathname;
+    if(path==='/provider-team/identity'&&init?.method==='GET')return new Response(JSON.stringify({contract_version:1,box_id:modelUuid(9000),actor_id:inventedOwner,recovery_scope:team.recovery_scope}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+    const ehrResponse=await ehrServer(path,init);if(ehrResponse)return ehrResponse;
     const recordingResponse=await recordingServer(path,init);if(recordingResponse)return recordingResponse;
     const route=/^\/workspaces\/([a-f0-9-]{36})\/handoffs\/([a-f0-9-]{36})\/(review|revision)$/.exec(path);
     if(!route||init?.method!=='POST'||typeof init.body!=='string')throw new Error('Service operation unavailable in this isolated UI fixture');

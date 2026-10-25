@@ -99,8 +99,8 @@ it('immediately withholds a saved email when its exact current visit source beco
  const before=structuredClone(saved),calls=vi.mocked(googleMessageApi.inspect).mock.calls.length;
  props={...props,currentSources:[{entry_id:review.entry_id,state:'unavailable'}]};await act(async()=>root.render(<GoogleMessagePanel {...props}/>));
  expect(host.querySelector('pre')).toBeNull();expect(host.querySelector('.google-message-list')).toBeNull();expect(host.textContent).not.toContain('sender@example.invalid');
- expect(button('Ask Chief about this email')).toBeUndefined();expect(host.textContent).toContain('contents are withheld');expect(saved).toEqual(before);expect(googleMessageApi.inspect).toHaveBeenCalledTimes(calls);
- await click('Check email access');expect(host.querySelector('pre')).toBeNull();expect(button('Ask Chief about this email')).toBeUndefined();expect(saved).toEqual(before);
+ expect(button('Prepare Chief draft')).toBeUndefined();expect(host.textContent).toContain('contents are withheld');expect(saved).toEqual(before);expect(googleMessageApi.inspect).toHaveBeenCalledTimes(calls);
+ await click('Check email access');expect(host.querySelector('pre')).toBeNull();expect(button('Prepare Chief draft')).toBeUndefined();expect(saved).toEqual(before);
  await click('Refresh email list');await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());await idle();await click('Read full email');
  expect(saved?.saved).toBeNull();expect(host.querySelector('pre')?.textContent).toBe(message.message!.content);
 });
@@ -116,7 +116,7 @@ it.each(['physician','nurse_practitioner','physician_assistant'])('%s completes 
   await prepareReview();expect(host.textContent).toContain('DOB not provided');expect(button('Save reviewed email for this visit')!.disabled).toBe(false);
   expect(googleMessageApi.review).toHaveBeenCalledTimes(round-1);await click('Save reviewed email for this visit');
   expect(host.textContent).toContain('Email source saved');expect(props.onSaved).toHaveBeenCalledTimes(round);expect(props.onAskChief).toHaveBeenCalledTimes(round-1);
-  await click('Ask Chief about this email');expect(props.onAskChief).toHaveBeenLastCalledWith({workspace_id:visit.id,entry_id:review.entry_id,entry_revision:6,source_sha256:message.source_sha256,content_sha256:message.message!.content_sha256,request_sha256:review.request_sha256,source_withheld:false});
+  await click('Prepare Chief draft');expect(props.onAskChief).toHaveBeenLastCalledWith({workspace_id:visit.id,entry_id:review.entry_id,entry_revision:6,source_sha256:message.source_sha256,content_sha256:message.message!.content_sha256,request_sha256:review.request_sha256,source_withheld:false});
   expect(saved?.pending).toBeNull();expect(persona).toBeTruthy();
  }
 });
@@ -168,8 +168,8 @@ it('clears an exact uncertain source save with a confirmed masked receipt withou
   workspace:{...review.workspace,entries:review.workspace.entries.map(e=>({...e,content:'',source_label:'Unavailable email source',google_source_state:'unavailable'}))}});
  await prepareReview();await click('Save reviewed email for this visit');const exact=vi.mocked(googleMessageApi.review).mock.calls[0][2];await click('Retry exact source save');
  expect(vi.mocked(googleMessageApi.review).mock.calls[1][2]).toEqual(exact);expect(saved?.pending).toBeNull();expect(saved?.saved?.source_withheld).toBe(true);
- expect(host.querySelector('pre')).toBeNull();expect(host.textContent).not.toContain('sender@example.invalid');expect(host.textContent).toContain('exact email source save is confirmed');expect(button('Ask Chief about this email')).toBeUndefined();
- await act(async()=>root.unmount());root=createRoot(host);await mount();await click('Restore saved email work');expect(host.querySelector('pre')).toBeNull();expect(button('Ask Chief about this email')).toBeUndefined();
+ expect(host.querySelector('pre')).toBeNull();expect(host.textContent).not.toContain('sender@example.invalid');expect(host.textContent).toContain('exact email source save is confirmed');expect(button('Prepare Chief draft')).toBeUndefined();
+ await act(async()=>root.unmount());root=createRoot(host);await mount();await click('Restore saved email work');expect(host.querySelector('pre')).toBeNull();expect(button('Prepare Chief draft')).toBeUndefined();
  expect(props.onAskChief).not.toHaveBeenCalled();
 });
 it('releases a definitely refused review, retains the message and requires fresh visit confirmation',async()=>{

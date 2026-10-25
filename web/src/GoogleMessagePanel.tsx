@@ -186,7 +186,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
           <p>Saving adds a separate source. It does not replace the clinical note or ask Chief to act.</p>
         </>}
         {record.saved&&<div role="status"><p>Email source saved for this visit. The clinical note remains separate.</p>
-          {onAskChief&&<button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!)}>Ask Chief about this email</button>}</div>}
+          {onAskChief&&<button disabled={blocked||!sourceAllowed||workspace?.id!==record.saved.workspace_id} onClick={()=>onAskChief(record.saved!)}>Prepare Chief draft</button>}</div>}
       </article>}
       {sourceStale&&<div role="alert"><p>Confirm the current visit and review a fresh email source before new work.</p>{onRefreshVisit&&<button disabled={busy||!!pending||(recoveryLocked??locked)} onClick={()=>void run(async()=>{await onRefreshVisit();setSourceStale(false);})}>Refresh current visit</button>}</div>}
       {pending&&<div className="google-message-recovery"><h4>Saved request needs a confirmed result</h4><p>{pending.kind==='review'?'This source save may already be recorded. Retry uses the same visit, message and key.':'Check the saved result without repeating the Google read.'}</p>

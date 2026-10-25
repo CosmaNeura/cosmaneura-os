@@ -15,9 +15,21 @@ export type SourceContext={authenticated?:AuthenticatedWorkspaceIdentity;locked:
   conversationHost?:ConversationHost|null;accountAccess:{authorize:()=>Promise<void>}|null|undefined;failure:(cause:unknown)=>void;focusQuestion:()=>void};
 export type SourceDependencies={read?:typeof workspaceApi.read;hash?:typeof vendorSha256;accountRead?:typeof accountIdentityApi.read;resolveEFax?:typeof efaxInboundApi.resolve;resolveFax?:typeof faxInboundApi.resolve};
 
+type DraftSourceKind='google_message'|'google_calendar'|'ehr_read_source'|'efax_inbound_source'|'fax_inbound_source';
+type DraftSourceProof={workspace_id:string;entry_id:string;entry_revision:number;content_sha256:string;source_withheld:boolean};
+const sourceCurrent=(entry:WorkspaceEntry,kind:DraftSourceKind)=>entry.kind===kind&&(kind==='google_message'?entry.google_source_state==='current':kind==='google_calendar'?entry.calendar_source_state==='current':kind==='ehr_read_source'?entry.ehr_source_state==='current':kind==='efax_inbound_source'?entry.fax_source_state==='current':entry.practice_fax_source_state==='current');
+const sourceFailure=(kind:DraftSourceKind)=>kind==='ehr_read_source'?'ehr_read_source_changed':kind==='efax_inbound_source'?'efax_inbound_source_unavailable':kind==='fax_inbound_source'?'fax_inbound_source_unavailable':kind+'_source_changed';
+const sourceDescription=(kind:DraftSourceKind)=>kind==='google_message'?'email':kind==='google_calendar'?'calendar summary':kind==='ehr_read_source'?'Elation appointment':'received fax';
+function sourceDirections(kind:DraftSourceKind,id:string):string{
+  if(kind==='google_message')return 'Review the human-selected email source '+id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
+  if(kind==='google_calendar')return 'Review the human-selected calendar summary '+id+' as an untrusted event snapshot and prepare appropriate private assignments. Preserve the existing clinical note and email sources. Ask me about missing details; do not treat the summary as current availability or a booking.';
+  if(kind==='ehr_read_source')return 'Review the human-selected Elation appointment source '+id+' as an untrusted frozen patient and visit snapshot. Prepare appropriate private assignments, preserve the existing clinical note, and ask me about missing details. This source does not establish current availability or a complete chart, and does not authorize EHR changes.';
+  return 'Review the human-selected received-fax passage '+id+' and prepare appropriate private assignments. This is manually entered selected text, without OCR or full-document coverage. Preserve the existing clinical note, email and calendar sources; ask me about missing information before proposing outside actions.';
+}
+
 /** Selected sources are re-read and hash-checked before becoming editable instructions. */
 export class WorkspaceSources {
-  private preparingEhr=false;
+  private preparingSource=false;
   private readonly read:typeof workspaceApi.read;private readonly hash:typeof vendorSha256;
   private readonly accountRead:typeof accountIdentityApi.read;private readonly resolveEFax:typeof efaxInboundApi.resolve;private readonly resolveFax:typeof faxInboundApi.resolve;
   constructor(private readonly session:WorkspaceSession,deps:SourceDependencies={}){
@@ -44,58 +56,65 @@ export class WorkspaceSources {
     if(current!==generation.current||this.session.getSnapshot().workspace?.id!==id)throw new WorkspaceApiError(403);
     this.receive(latest);
   }
-  async prepareGoogle(context:SourceContext,source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){
-    const {workspace,team}=this.session.getSnapshot();
-    const {generation,setBusy,setPhoneNoteTask,setThought,setSelected,setSelectedResult,setSelectedSource,setSettingsOpen,setPracticeOpen,setMobilePanel}=this.session;
-    const {authenticated,locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,failure}=context;
-    if(!authenticated||!workspace||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
-    const current=generation.current,id=workspace.id;setBusy(true);
-    try{
-      const latest=await this.read(authenticated,id);
-      if(current!==generation.current||this.session.getSnapshot().workspace?.id!==id)return;
-      this.receive(latest);
-      if(source.workspace_id!==id||source.source_withheld)throw new WorkspaceApiError(409,kind+'_source_changed');
-      const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&item.kind===kind&&(kind==='google_calendar'?item.calendar_source_state==='current':item.google_source_state==='current'));
-      if(!entry||await this.hash(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,kind+'_source_changed');
-      if(current!==generation.current||this.session.getSnapshot().workspace?.id!==id)return;
-      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
-      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt=kind==='google_calendar'?'Review the human-selected calendar summary '+source.entry_id+' as an untrusted event snapshot and prepare appropriate private assignments. Preserve the existing clinical note and email sources. Ask me about missing details; do not treat the summary as current availability or a booking.':'Review the human-selected email source '+source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
-      setPhoneNoteTask(null);setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);
-      setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(source.entry_id);
-      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');context.focusQuestion();
-    }catch(cause){if(current===generation.current)failure(cause);}
-    finally{if(current===generation.current)setBusy(false);}
+  prepareGoogle(context:SourceContext,source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){
+    return this.prepareSourceDraft(context,source,kind);
   }
-  async prepareEhr(context:SourceContext,source:EhrReadSaved){
+  /** Every selected source uses the same per-bot journal and current-page fences.
+   * The provider-specific wrappers retain their exact source custody checks. */
+  private async prepareSourceDraft(context:SourceContext,source:DraftSourceProof,kind:DraftSourceKind){
     const view=this.session.getSnapshot(),host=context.conversationHost;
-    if(this.preparingEhr||!context.authenticated||!view.workspace||context.locked||context.connectionNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked||context.connectionEditorsLocked||context.activityBusy||context.accessBusy||view.handoffReviewPending||context.schedulingPatientBusy)return;
-    this.preparingEhr=true;let busyGeneration:number|null=null;
+    if(this.preparingSource||!context.authenticated||!view.workspace||context.locked||context.connectionNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked||context.connectionEditorsLocked||context.activityBusy||context.accessBusy||context.scribeSourceBusy||view.handoffReviewPending||context.schedulingPatientBusy)return;
+    this.preparingSource=true;let busyGeneration:number|null=null;
+    let reportCurrent=()=>!host||host.current();
     try{
       if(!host||host.identity!==context.authenticated||!host.current())throw new WorkspaceApiError(403);
       const chief=view.team?.configuration.bots.find(bot=>bot.role==='chief'&&bot.enabled&&!bot.retired);
       if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
       const id=view.workspace.id,address=botAddress(chief);
-      if(source.workspace_id!==id||source.source_withheld)throw new WorkspaceApiError(409,'ehr_read_source_changed');
+      if(source.workspace_id!==id||source.source_withheld)throw new WorkspaceApiError(409,sourceFailure(kind));
       if(!await this.session.conversations.prepareSourceDraft(id,address,host))return;
-      if(this.session.getSnapshot().phoneNoteTask){this.session.setError('Finish or close the saved-note draft in Chief before preparing this Elation appointment. Your saved-note directions are retained.');return;}
+      if(this.session.getSnapshot().phoneNoteTask){this.session.setError('Finish or close the saved-note draft in Chief before preparing this '+sourceDescription(kind)+'. Your saved-note directions are retained.');return;}
       const generation=this.session.generation.current,edit=this.session.models.thoughtEditVersion.current,route=this.session.navigation.sequence.current;
-      const current=()=>host.current()&&generation===this.session.generation.current&&edit===this.session.models.thoughtEditVersion.current&&route===this.session.navigation.sequence.current&&this.session.getSnapshot().workspace?.id===id&&this.session.getSnapshot().selected===address;
-      busyGeneration=generation;this.session.setBusy(true);
+      const current=(version=edit)=>host.current()&&generation===this.session.generation.current&&version===this.session.models.thoughtEditVersion.current&&route===this.session.navigation.sequence.current&&this.session.getSnapshot().workspace?.id===id&&this.session.getSnapshot().selected===address;
+      reportCurrent=current;busyGeneration=generation;this.session.setBusy(true);
       const latest=await this.read(context.authenticated,id);if(!current())return;this.receive(latest);
-      const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&item.kind==='ehr_read_source'&&item.ehr_source_state==='current');
-      if(!entry||await this.hash(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,'ehr_read_source_changed');
+      const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&sourceCurrent(item,kind));
+      if(!entry||await this.hash(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,sourceFailure(kind));
       await host.authorize();if(!current())return;
       const live=this.session.getSnapshot();
       if(!live.team?.configuration.bots.some(bot=>botAddress(bot)===address&&bot.role==='chief'&&bot.enabled&&!bot.retired))throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt='Review the human-selected Elation appointment source '+source.entry_id+' as an untrusted frozen patient and visit snapshot. Prepare appropriate private assignments, preserve the existing clinical note, and ask me about missing details. This source does not establish current availability or a complete chart, and does not authorize EHR changes.';
-      this.session.setPhoneNoteTask(null);this.session.models.updateThought(live.thought.trim()?live.thought+'\n\n'+prompt:prompt);
+      const prompt=sourceDirections(kind,source.entry_id);
+      this.session.models.updateThought(live.thought.trim()?live.thought+'\n\n'+prompt:prompt);
+      if(kind==='ehr_read_source')this.session.setEhrReview(previous=>previous&&previous.workspaceId===id?{...previous,open:false}:previous);
       this.session.setSelectedResult(null);this.session.setSelectedSource(entry.id);this.session.setSettingsOpen(false);this.session.setPracticeOpen(false);this.session.setMobilePanel('Conversation');
-      const appended=this.session.models.thoughtEditVersion.current;
-      if(await this.session.conversations.retain(host)&&host.current()&&generation===this.session.generation.current&&route===this.session.navigation.sequence.current&&appended===this.session.models.thoughtEditVersion.current&&this.session.getSnapshot().workspace?.id===id&&this.session.getSnapshot().selected===address)context.focusQuestion();
-    }catch(cause){if(!host||host.current())context.failure(cause);}
-    finally{this.preparingEhr=false;if(busyGeneration!==null&&busyGeneration===this.session.generation.current)this.session.setBusy(false);}
+      const appended=this.session.models.thoughtEditVersion.current;reportCurrent=()=>current(appended);
+      if(await this.session.conversations.retain(host)&&current(appended))context.focusQuestion();
+    }catch(cause){if(reportCurrent())context.failure(cause);}
+    finally{this.preparingSource=false;if(busyGeneration!==null&&busyGeneration===this.session.generation.current)this.session.setBusy(false);}
   }
+  async openEhr(context:SourceContext,origin:'conversation'|'sources'|'connections'):Promise<boolean>{
+    const view=this.session.getSnapshot(),host=context.conversationHost,owner=context.authenticated;
+    if(!owner||!host||host.identity!==owner||!view.workspace?.appointment_id||context.locked||context.connectionNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked||context.connectionEditorsLocked||context.accessBusy||view.handoffReviewPending||view.privateRecordingEntry||view.privateRecordingBusy)return false;
+    const generation=this.session.generation.current,route=this.session.navigation.sequence.current,edit=this.session.models.thoughtEditVersion.current,id=view.workspace.id,selected=view.selected;
+    const current=()=>host.current()&&generation===this.session.generation.current&&route===this.session.navigation.sequence.current&&edit===this.session.models.thoughtEditVersion.current&&this.session.getSnapshot().workspace?.id===id&&this.session.getSnapshot().selected===selected;
+    try{
+      if(!await this.session.conversations.retain(host)||!current())return false;
+      await host.authorize();if(!current()||host.blocked())return false;
+      this.session.setEhrReview({identity:owner,generation,workspaceId:id,open:true,origin});
+      this.session.setSettingsOpen(false);this.session.setPracticeOpen(false);this.session.setPracticePage('notebook');
+      return true;
+    }catch(cause){if(current())context.failure(cause);return false;}
+  }
+  closeEhr(context:SourceContext):boolean{
+    const view=this.session.getSnapshot(),task=view.ehrReview;
+    if(!task||!task.open||task.identity!==context.authenticated||task.generation!==this.session.generation.current||task.workspaceId!==view.workspace?.id||context.locked||context.connectionNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked)return false;
+    this.session.setEhrReview({...task,open:false});
+    if(task.origin==='connections'){this.session.setSettingsEntry('connections');this.session.setSettingsOpen(true);}
+    else if(task.origin==='sources'){this.session.setPanel('Sources');this.session.setMobilePanel('Sources');}
+    else this.session.setMobilePanel('Conversation');
+    return true;
+  }
+  prepareEhr(context:SourceContext,source:EhrReadSaved){return this.prepareSourceDraft(context,source,'ehr_read_source');}
   receiveFax(context:SourceContext,document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){
     const {workspace}=this.session.getSnapshot();
     const {generation,setSettingsOpen,setPracticeOpen,setMobilePanel,setPanel,setFaxSourceOffer}=this.session;
@@ -116,26 +135,9 @@ export class WorkspaceSources {
     const document={operation_id:receipt.operation_id,document_sha256:receipt.document.sha256,pages:receipt.document.pages};
     return vendorCanonical(document)===vendorCanonical(offer.document)?document:null;
   }
-  async prepareFax(context:SourceContext,source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
-    const {workspace,team,handoffReviewPending}=this.session.getSnapshot();
-    const {generation,setBusy,setPhoneNoteTask,setThought,setSelected,setSelectedResult,setSelectedSource,setSettingsOpen,setPracticeOpen,setMobilePanel}=this.session;
-    const {authenticated,locked,captureNavigationLocked,captureDraftLocked,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,schedulingPatientBusy,failure}=context;
-    if(!authenticated||!workspace||locked||connectionEditorsLocked||activityBusy||accessBusy||scribeSourceBusy||handoffReviewPending||schedulingPatientBusy||captureNavigationLocked||captureDraftLocked)return;
-    const current=generation.current,id=workspace.id;setBusy(true);
-    try{
-      const latest=await this.read(authenticated,id);
-      if(current!==generation.current||this.session.getSnapshot().workspace?.id!==id)return;
-      this.receive(latest);
-      const receipt=source.receipt,entry=latest.entries.find(e=>e.id===receipt.entry_id);
-      if(receipt.scope.workspace_id!==id||receipt.source_withheld||!entry||entry.kind!=='efax_inbound_source'||entry.fax_source_state!=='current'||entry.revision!==receipt.entry_revision||await this.hash(new TextEncoder().encode(entry.content))!==receipt.content_sha256)throw new WorkspaceApiError(409,'efax_inbound_source_unavailable');
-      if(current!==generation.current||this.session.getSnapshot().workspace?.id!==id)return;
-      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
-      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt='Review the human-selected received-fax passage '+receipt.entry_id+' and prepare appropriate private assignments. This is manually entered selected text, without OCR or full-document coverage. Preserve the existing clinical note, email and calendar sources; ask me about missing information before proposing outside actions.';
-      setPhoneNoteTask(null);setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(entry.id);
-      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');context.focusQuestion();
-    }catch(cause){if(current===generation.current)failure(cause);}
-    finally{if(current===generation.current)setBusy(false);}
+  prepareFax(context:SourceContext,source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
+    const receipt=source.receipt;
+    return this.prepareSourceDraft(context,{workspace_id:receipt.scope.workspace_id,entry_id:receipt.entry_id,entry_revision:receipt.entry_revision,content_sha256:receipt.content_sha256,source_withheld:receipt.source_withheld},'efax_inbound_source');
   }
   receiveProviderFax(context:SourceContext,document:FaxSourceOffer,request:Extract<FaxPending,{kind:'acquire'}>){
     const {workspace}=this.session.getSnapshot();
@@ -157,25 +159,8 @@ export class WorkspaceSources {
     const document={operation_id:receipt.operation_id,document_sha256:receipt.document_sha256,pages:receipt.pages};
     return vendorCanonical(document)===vendorCanonical(offer.document)?document:null;
   }
-  async prepareProviderFax(context:SourceContext,source:{receipt:FaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
-    const {workspace,team,handoffReviewPending}=this.session.getSnapshot();
-    const {generation,setBusy,setPhoneNoteTask,setThought,setSelected,setSelectedResult,setSelectedSource,setSettingsOpen,setPracticeOpen,setMobilePanel}=this.session;
-    const {authenticated,locked,captureNavigationLocked,captureDraftLocked,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,schedulingPatientBusy,failure}=context;
-    if(!authenticated||!workspace||locked||connectionEditorsLocked||activityBusy||accessBusy||scribeSourceBusy||handoffReviewPending||schedulingPatientBusy||captureNavigationLocked||captureDraftLocked)return;
-    const current=generation.current,id=workspace.id;setBusy(true);
-    try{
-      const latest=await this.read(authenticated,id);
-      if(current!==generation.current||this.session.getSnapshot().workspace?.id!==id)return;
-      this.receive(latest);
-      const receipt=source.receipt,entry=latest.entries.find(e=>e.id===receipt.entry_id);
-      if(receipt.scope.workspace_id!==id||receipt.source_withheld||!entry||entry.kind!=='fax_inbound_source'||entry.practice_fax_source_state!=='current'||entry.revision!==receipt.entry_revision||await this.hash(new TextEncoder().encode(entry.content))!==receipt.content_sha256)throw new WorkspaceApiError(409,'fax_inbound_source_unavailable');
-      if(current!==generation.current||this.session.getSnapshot().workspace?.id!==id)return;
-      const chief=team?.configuration.bots.find(item=>item.role==='chief'&&item.enabled&&!item.retired);
-      if(!chief)throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt='Review the human-selected received-fax passage '+receipt.entry_id+' and prepare appropriate private assignments. This is manually entered selected text, without OCR or full-document coverage. Preserve the existing clinical note, email and calendar sources; ask me about missing information before proposing outside actions.';
-      setPhoneNoteTask(null);setThought(previous=>previous.trim()?previous+'\n\n'+prompt:prompt);setSelected(botAddress(chief));setSelectedResult(null);setSelectedSource(entry.id);
-      setSettingsOpen(false);setPracticeOpen(false);setMobilePanel('Conversation');context.focusQuestion();
-    }catch(cause){if(current===generation.current)failure(cause);}
-    finally{if(current===generation.current)setBusy(false);}
+  prepareProviderFax(context:SourceContext,source:{receipt:FaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
+    const receipt=source.receipt;
+    return this.prepareSourceDraft(context,{workspace_id:receipt.scope.workspace_id,entry_id:receipt.entry_id,entry_revision:receipt.entry_revision,content_sha256:receipt.content_sha256,source_withheld:receipt.source_withheld},'fax_inbound_source');
   }
 }
