@@ -539,3 +539,19 @@ same restriction stopped its image job. No product-code failure was reported by
 those startup failures, and CI is not counted as passing. No rollout or merge
 was performed. Evidence is in the October25 Preview27 handoff's
 `native-validation/receipt.json`.
+
+
+### Review return and new-reply counts
+
+Returning from a specialist review could count old Chief replies as new while
+the reader was above the bottom. The frame retained Chief's scroll scope during
+review, but its observed arrival IDs temporarily came from the selected review
+recipient. Arrival tracking now uses the same originating conversation as the
+frame. It does not reset the scroll position or mark unseen replies read.
+
+Two mounted-shell regressions failed before correction: no new reply showed one
+new message, and one genuine reply during review showed two. After correction,
+all 30 focused presentation/frame tests and both TypeScript configurations pass.
+The cases retain the exact draft and reading position, preserve genuine replies
+during review, and acknowledge their exact watermark only after the user jumps
+to the latest message.

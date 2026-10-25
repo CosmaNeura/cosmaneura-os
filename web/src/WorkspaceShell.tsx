@@ -841,10 +841,13 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const messagesRecoveryFlow=confirmCaptureExit||recoveryOffers.length>0||recoveryState==='failed'||recoveryBlocked||conflict||!!pending&&!busy;
   const messagesChat=!!workspace&&messagesMode&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&mobilePanel==='Conversation'&&!messagesTask&&!phoneChiefToolsVisible&&!reviewHandoffId&&(!privateRecordingEntry||recordingMinimized)&&!messagesRecoveryFlow;
   const sharedChatOwner=session.presentation.enabled?authenticated??null:nativeChatOwner;
-  const mobileChatFrame=useMobileChatFrame({active:session.presentation.enabled?!!workspace:nativeChat&&!phoneChiefToolsVisible,owner:sharedChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${session.review.returnTarget.current?.address??session.review.conversationReturn.current?.address??selected}`,
+  const frameAddress=session.review.returnTarget.current?.address??session.review.conversationReturn.current?.address??selected;
+  // Review temporarily selects its recipient; arrivals still belong to the chat we return to.
+  const frameConversation=frameAddress===selected?conversation:projectConversation(workspace,team,frameAddress);
+  const mobileChatFrame=useMobileChatFrame({active:session.presentation.enabled?!!workspace:nativeChat&&!phoneChiefToolsVisible,owner:sharedChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${frameAddress}`,
     // The jump counts incoming replies, not review cards or their changing
     // status: those cards may be earlier in history than the latest message.
-    arrivals:conversation.entries.flatMap(row=>row.kind==='turn'&&row.entry.reply?[`reply:${row.id}`]:[]),
+    arrivals:frameConversation.entries.flatMap(row=>row.kind==='turn'&&row.entry.reply?[`reply:${row.id}`]:[]),
     onBottomVisible:()=>void acknowledgeDisplayedConversation(),
     messages:JSON.stringify([turns.map(entry=>[entry.id,entry.reply?.content??null]),
       pending?.type==='ask'&&pending.body.role===selected&&!localQuestionRepresented?pending.body.idempotency_key:null,recoveryAppearance.current,

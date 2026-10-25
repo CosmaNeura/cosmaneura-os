@@ -92,6 +92,42 @@ describe('presentation parity',()=>{
     expect(added.textContent).toContain('Unreviewed draft');expect(added.querySelector('button')?.textContent).toBe('Review draft');
     expect(history.scrollTop).toBe(200);expect(host.querySelector('.messages-new-replies')).toBeNull();expect(mark).not.toHaveBeenCalled();
   });
+  it.each([false,true])('preserves Chief arrivals across a review round trip (new reply during review: %s)',async newReply=>{
+    vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')&&!this.closest('[data-handoff-open=true]')?200:0;});
+    vi.spyOn(HTMLElement.prototype,'scrollHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?1000:0;});
+    vi.spyOn(HTMLElement.prototype,'getBoundingClientRect').mockReturnValue({top:100,bottom:200,left:0,right:390,width:390,height:100,x:0,y:100,toJSON:()=>({})});
+    const read=conversationsApi.read,arrival='A new Chief reply while reviewing Follow-up.',oldWatermark='r1'+'0'.repeat(16)+'r'+'a'.repeat(96),newWatermark='r1'+'1'.repeat(16)+'r'+'b'.repeat(96);
+    vi.spyOn(conversationsApi,'read').mockImplementation(async(...args)=>{
+      const inbox=await read(...args),rows=await Promise.all(inbox.rows.map(async row=>{
+        const workspace=await workspaceApi.read(identity,row.workspace_id),arrived=workspace.entries.some(entry=>entry.content===arrival&&entry.reply);
+        return {...row,watermark:arrived?newWatermark:oldWatermark};
+      }));return {...inbox,rows};
+    });
+    const mark=vi.spyOn(conversationsApi,'mark');await open('messages');
+    await vi.waitFor(()=>expect(mark.mock.calls.some(call=>call[3]?.watermark===oldWatermark&&call[3]?.manual_unread===undefined)).toBe(true));mark.mockClear();
+    const session=observedSession.value!,history=host.querySelector<HTMLDivElement>('.mobile-chat-scroll')!,composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;
+    await input(composer,'Keep this Chief draft while reviewing.');
+    await act(async()=>{history.scrollTop=200;history.dispatchEvent(new Event('scroll',{bubbles:true}));});
+    await act(async()=>host.querySelector<HTMLButtonElement>('.conversation-review-card[aria-label="Follow-up draft"] button')!.click());
+    await vi.waitFor(()=>expect(button('Back to Chief of Staff')?.disabled).toBe(false));
+    expect(session.getSnapshot().selected).toBe('follow_up');
+    if(newReply){
+      const view=session.getSnapshot();
+      await workspaceApi.ask(identity,view.workspace!.id,{expected_revision:view.workspace!.revision,team_revision:view.team!.revision,idempotency_key:crypto.randomUUID(),role:'chief',content:arrival});
+      await act(async()=>session.setWorkspace(await workspaceApi.read(identity,view.workspace!.id)));
+    }
+    expect(mark).not.toHaveBeenCalled();
+    await click('Back to Chief of Staff');
+    expect(session.getSnapshot().selected).toBe('chief');expect(host.querySelector('.handoff-review')).toBeNull();
+    expect(host.querySelector('#team-question')).toBe(composer);expect(composer.value).toBe('Keep this Chief draft while reviewing.');
+    expect(history.scrollTop).toBe(200);expect(mark).not.toHaveBeenCalled();
+    if(newReply){
+      expect(host.querySelector('.messages-new-replies')?.textContent).toBe('1 new message ↓');
+      await act(async()=>host.querySelector<HTMLButtonElement>('.messages-new-replies')!.click());
+      await vi.waitFor(()=>expect(mark).toHaveBeenCalledExactlyOnceWith(identity,session.getSnapshot().workspace!.id,'chief',{watermark:newWatermark}));
+      expect(history.scrollTop).toBe(800);expect(host.querySelector('.messages-new-replies')).toBeNull();
+    }else expect(host.querySelector('.messages-new-replies')).toBeNull();
+  });
   it('keeps a new reply unread above the bottom and acknowledges its exact watermark after jumping',async()=>{
     vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?200:0;});
     vi.spyOn(HTMLElement.prototype,'scrollHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?1000:0;});
