@@ -544,7 +544,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     // A new source intent cancels an older task-return animation frame, even
     // when the user returns to this conversation again before that frame runs.
     ehrReturnFocus.current=null;outlookOpening.current++;
-    if(messagesMode){showConversationTask('Sources');sourceTaskReturn.current={owner:authenticated,identity,workspaceId:view.workspace.id,address:selected,generation:generation.current,target};}
+    if(messagesMode){mobileChatFrame.restoreReadingPosition(mobileChatFrame.scrollRef.current?.scrollTop??0);showConversationTask('Sources');sourceTaskReturn.current={owner:authenticated,identity,workspaceId:view.workspace.id,address:selected,generation:generation.current,target};}
     else{setPanel('Sources');setMobilePanel('Sources');}
     setSelectedSource(id);
   }
@@ -946,7 +946,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const frameAddress=session.review.returnTarget.current?.address??session.review.conversationReturn.current?.address??selected;
   // Review temporarily selects its recipient; arrivals still belong to the chat we return to.
   const frameConversation=frameAddress===selected?conversation:projectConversation(workspace,team,frameAddress);
-  const mobileChatFrame=useMobileChatFrame({active:session.presentation.enabled?!!workspace:nativeChat&&!phoneChiefToolsVisible,owner:sharedChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${frameAddress}`,
+  const mobileChatFrame=useMobileChatFrame({active:session.presentation.enabled?!!workspace:nativeChat&&!phoneChiefToolsVisible,visible:messagesMode?messagesChat:true,owner:sharedChatOwner,scope:`${chatGeneration}:${workspace?.id??''}:${frameAddress}`,
     // The jump counts incoming replies, not review cards or their changing
     // status: those cards may be earlier in history than the latest message.
     arrivals:frameConversation.entries.flatMap(row=>row.kind==='turn'&&row.entry.reply?[`reply:${row.id}`]:[]),
@@ -1181,8 +1181,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       const sourceTarget=ownsSourceReturn()&&selectedSource?document.getElementById(`source-${selectedSource}`):null,target=sourceTarget??heading;
       target?.focus({preventScroll:true});target?.scrollIntoView?.({block:'start'});
     }else if(!messagesTaskLabel&&taskScrollReturn.current!==null){
-      if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=taskScrollReturn.current;
-      taskScrollReturn.current=null;mobileChatFrame.onScroll();
+      if(ownsSourceReturn())mobileChatFrame.restoreReadingPosition(taskScrollReturn.current);
+      else{if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=taskScrollReturn.current;mobileChatFrame.onScroll();}
+      taskScrollReturn.current=null;
       if(ownsSourceReturn()){
         const target=sourceTaskReturn.current?.target,visible=target?.isConnected&&!target.closest('[hidden]')&&!target.matches(':disabled');
         (visible?target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header h1'))?.focus({preventScroll:true});
@@ -1701,7 +1702,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               </p>}
               <label className="team-sr-only" htmlFor="team-question">{chiefNoteCompose?'Directions for Chief':'Thought or question'}</label>
               <textarea ref={questionRef} id="team-question" className={chiefNoteCompose?'clinical-team-directions':undefined} aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?"team-request-progress":undefined} rows={messagesMode?1:2} maxLength={4000} disabled={conversationBusy || phoneChiefToolsVisible || (nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => updateThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? chiefNoteCompose?'Optional directions for these drafts…':messagesMode?'Message…':phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
-                onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&
+                onFocus={mobileChatFrame.releaseReadingPosition} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&
                   !(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession)){event.preventDefault();if(!conversationBusy&&!locked){if(chiefNoteCompose)submitPhoneNoteTask();else if(thought.trim())ask();}}}}/>
               <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={conversationBusy || locked || !!nativeChatOwner&&!nativeComposerEditable || (chiefNoteCompose?phoneNoteTaskBlocked:!thought.trim()) || !bot?.enabled}
                 onPointerDown={event=>{if(nativeChatOwner&&document.activeElement===questionRef.current)event.preventDefault();}} aria-label={chiefNoteCompose?'Prepare Follow-up and Research':'Send message'}>↑</button></div>

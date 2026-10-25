@@ -2,7 +2,7 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
-vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED','VITE_EHR_READ_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
+vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED','VITE_EHR_READ_ENABLED','VITE_CALENDAR_IMPORT_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {identity,installFixtures} from '../ux-acceptance/fixtures';
 import {openDraftStore} from './draft-store';
@@ -94,4 +94,22 @@ it('prevents an older EHR task return from stealing focus after Research source 
  await click('Details');await click('Review EHR records');await wait(()=>expect(button('Check Elation access')).toBeDefined());let oldReturn:FrameRequestCallback|undefined;vi.spyOn(window,'requestAnimationFrame').mockImplementationOnce(callback=>{oldReturn=callback;return 11001;});await click('‹ Back to Chief of Staff');await wait(()=>expect(oldReturn).toBeTypeOf('function'));
  const card=host.querySelector<HTMLElement>('.conversation-material-card')!,control=card.querySelector<HTMLButtonElement>('button')!,id=card.dataset.entryId!.slice('source:'.length),scroll=host.querySelector<HTMLElement>('.mobile-chat-scroll')!;Object.defineProperty(scroll,'clientHeight',{configurable:true,value:200});Object.defineProperty(scroll,'scrollHeight',{configurable:true,value:1000});scroll.scrollTop=180;await act(async()=>scroll.dispatchEvent(new Event('scroll')));const before=structuredClone(stats());
  await act(async()=>control.click());await wait(()=>expect(document.activeElement?.id).toBe('source-'+id));await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(control));await act(async()=>oldReturn!(0));expect(document.activeElement).toBe(control);expect(document.activeElement).not.toBe(composer());expect(scroll.scrollTop).toBe(180);expect(composer().value).toBe(draft);expect(stats()).toEqual(before);expect((window as Window&{ehrRehearsalStats?:{reads:number;externalCalls:number}}).ehrRehearsalStats).toMatchObject({reads:0,externalCalls:0});noDispatchReceipt();
+});
+
+it.each(['direct','ehr','calendar'] as const)('keeps a Research source return 21px above the bottom through queued scroll and resize work (%s)',async nested=>{
+ const observers:{callback:()=>void;element?:Element}[]=[];
+ vi.stubGlobal('ResizeObserver',class{entry:{callback:()=>void;element?:Element};constructor(callback:()=>void){this.entry={callback};observers.push(this.entry);}observe(element:Element){this.entry.element=element;}disconnect(){}});
+ owner={...identity,nativeSession:{revision:'00000000-0000-4000-8000-000000000994',isCurrent:()=>true}};await act(async()=>root.render(<EncounterWorkspace authenticated={owner} draftStorage={storage}/>));
+ const ask=vi.spyOn(workspaceApi,'ask'),marks=vi.spyOn(conversationsApi,'mark');
+ await openChief();await type(composer(),'Keep my reading position and this Chief draft.');await click('‹ Messages');await chooseResearch();await searchAndSave();await wait(()=>expect(button('Prepare Chief draft')?.disabled).toBe(false));await click('Prepare Chief draft');await wait(()=>expect(composer().value).toContain('Review the saved public Research packet'));
+ const draft=composer().value,control=host.querySelector<HTMLButtonElement>('.conversation-material-card button')!,scroll=host.querySelector<HTMLElement>('.mobile-chat-scroll')!,observer=observers.filter(item=>item.element===scroll).at(-1)!;
+ expect(observer).toBeDefined();Object.defineProperty(scroll,'clientHeight',{configurable:true,value:149});Object.defineProperty(scroll,'scrollHeight',{configurable:true,value:3593});scroll.scrollTop=3423;await act(async()=>scroll.dispatchEvent(new Event('scroll')));const before=structuredClone(stats()),markCount=marks.mock.calls.length;
+ await act(async()=>control.click());await wait(()=>expect(document.activeElement?.id).toMatch(/^source-/));
+ if(nested!=='direct'){
+   const action=nested==='ehr'?'Review EHR records':'Import calendar file';scroll.scrollTop=71;await act(async()=>{scroll.dispatchEvent(new Event('scroll'));button(action)!.focus();});await click(action);await wait(()=>expect(button(nested==='ehr'?'Check Elation access':'Check import access')).toBeDefined());
+   scroll.scrollTop=113;await click('‹ Back to saved sources');await wait(()=>expect(document.activeElement?.closest(nested==='ehr'?'.ehr-source-action':'.calendar-import-action')).not.toBeNull());await act(async()=>{scroll.dispatchEvent(new Event('scroll'));observer.callback();});expect(scroll.scrollTop).toBe(71);
+ }
+ await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(control));
+ await act(async()=>{scroll.dispatchEvent(new Event('scroll'));observer.callback();scroll.dispatchEvent(new Event('scroll'));observer.callback();});
+ expect(scroll.scrollTop).toBe(3423);expect(document.activeElement).toBe(control);expect(composer().value).toBe(draft);expect(stats()).toEqual(before);expect(marks).toHaveBeenCalledTimes(markCount);expect(ask).not.toHaveBeenCalled();noDispatchReceipt();
 });

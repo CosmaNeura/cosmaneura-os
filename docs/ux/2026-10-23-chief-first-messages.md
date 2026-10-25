@@ -727,3 +727,19 @@ plus 121 focused Python cases and eight PostgreSQL provenance cases from an
 isolated source candidate. The database check confirms one joined proof query
 for multiple packets and unchanged model context. Final combined browser,
 Mac, native and phone delivery are recorded separately when completed.
+
+Browser qualification exposed a near-bottom return bug: delayed layout work
+could move the reader 21px to the bottom and acknowledge a reply before the
+shell restored the saved position. The source-card path now captures the
+position before navigation and retains it through hidden-task scrolling and
+queued resize events. Each conversation lifetime owns its restoration; stale
+callbacks cannot regain control after leaving and reopening the same chat.
+User scrolling, jumping to the latest reply, or focusing the composer releases
+preservation. Nested EHR/calendar task pages keep their existing raw position
+restoration, without replacing Chief's separately retained position.
+
+The reproduced failure passes after the fix, along with 67 focused cases and
+both type checks. These checks include unchanged ordinary near-bottom
+following, unseen replies, exact owner/scope lifetimes and nested source-page
+returns. Preview35 was held after the browser finding and was not installed.
+The corrected renderer receives its own final browser/native qualification.
