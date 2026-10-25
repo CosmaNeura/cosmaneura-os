@@ -49,3 +49,22 @@ describe('shared EHR task navigation',()=>{
  it.each(['edit','navigation','account'] as const)('does not open after newer %s wins while retaining',async change=>{const f=await fixture();let finish!:()=>void;vi.mocked(f.host.authorize).mockImplementationOnce(()=>new Promise<void>(r=>{finish=r;}));const opening=f.session.sources.openEhr(f.context,'conversation');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));if(change==='edit')f.session.models.updateThought('New edit');else if(change==='navigation')f.session.navigation.sequence.current++;else f.session.setIdentity({mode:'clerk_jwt',getToken:async()=>null});finish();expect(await opening).toBe(false);expect(f.session.getSnapshot().ehrReview).toBeNull();});
  it('blocks an unfinished operation from being hidden with Back',async()=>{const f=await fixture();await f.session.sources.openEhr(f.context,'conversation');expect(f.session.sources.closeEhr({...f.context,connectionNavigationLocked:true})).toBe(false);expect(f.session.getSnapshot().ehrReview?.open).toBe(true);});
 });
+
+
+it.each(['withheld','deleted','changed'] as const)('preserves the draft when the source is %s during final authorization',async change=>{
+ const f=await fixture(),previousSource=ehrUuid(979),text='Keep my existing Chief directions';
+ f.session.models.updateThought(text);await f.session.conversations.observe(f.host);
+ f.session.setSelectedSource(previousSource);
+ f.session.setEhrReview({identity:f.host.identity,generation:f.session.generation.current,workspaceId:f.workspace.id,open:true,origin:'sources'});
+ let release!:()=>void,paused=false;
+ vi.mocked(f.host.authorize).mockImplementation(async()=>{if(f.session.getSnapshot().busy&&!paused){paused=true;await new Promise<void>(r=>{release=r;});}});
+ const preparing=f.session.sources.prepareEhr(f.context,f.saved);
+ await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ const entries=change==='deleted'?[]:f.workspace.entries.map(entry=>entry.id===f.saved.entry_id?{...entry,
+  ...(change==='withheld'?{ehr_source_state:'unavailable' as const,content:''}:{content:entry.content+' changed while authorizing'})}:entry);
+ f.session.sources.receive({...f.workspace,entries});release();await preparing;
+ expect(f.session.getSnapshot()).toMatchObject({thought:text,selectedSource:previousSource,ehrReview:{open:true}});
+ expect(f.context.failure).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({status:409,code:'ehr_read_source_changed'}));
+ expect(f.context.focusQuestion).not.toHaveBeenCalled();
+ expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'))).toMatchObject({data:{text}});
+});

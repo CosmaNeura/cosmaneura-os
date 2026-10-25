@@ -80,15 +80,21 @@ export class WorkspaceSources {
       reportCurrent=current;busyGeneration=generation;this.session.setBusy(true);
       const latest=await this.read(context.authenticated,id);if(!current())return;this.receive(latest);
       const entry=latest.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&sourceCurrent(item,kind));
-      if(!entry||await this.hash(new TextEncoder().encode(entry.content))!==source.content_sha256)throw new WorkspaceApiError(409,sourceFailure(kind));
+      if(!entry)throw new WorkspaceApiError(409,sourceFailure(kind));
+      const verifiedContent=entry.content;
+      if(await this.hash(new TextEncoder().encode(verifiedContent))!==source.content_sha256)throw new WorkspaceApiError(409,sourceFailure(kind));
       await host.authorize();if(!current())return;
       const live=this.session.getSnapshot();
+      // A fresh projection may withdraw the source during hashing or authorization.
+      // Compare the exact verified text without another await before editing the draft.
+      const liveEntry=live.workspace?.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&sourceCurrent(item,kind));
+      if(!liveEntry||liveEntry.content!==verifiedContent)throw new WorkspaceApiError(409,sourceFailure(kind));
       if(!live.team?.configuration.bots.some(bot=>botAddress(bot)===address&&bot.role==='chief'&&bot.enabled&&!bot.retired))throw new WorkspaceApiError(409,'bot_unavailable');
       const prompt=sourceDirections(kind,source.entry_id);
       this.session.models.updateThought(live.thought.trim()?live.thought+'\n\n'+prompt:prompt);
       if(kind==='calendar_import_source')this.session.setCalendarImportReview(previous=>previous&&previous.workspaceId===id?{...previous,open:false}:previous);
       if(kind==='ehr_read_source')this.session.setEhrReview(previous=>previous&&previous.workspaceId===id?{...previous,open:false}:previous);
-      this.session.setSelectedResult(null);this.session.setSelectedSource(entry.id);this.session.setSettingsOpen(false);this.session.setPracticeOpen(false);this.session.setMobilePanel('Conversation');
+      this.session.setSelectedResult(null);this.session.setSelectedSource(liveEntry.id);this.session.setSettingsOpen(false);this.session.setPracticeOpen(false);this.session.setMobilePanel('Conversation');
       const appended=this.session.models.thoughtEditVersion.current;reportCurrent=()=>current(appended);
       if(await this.session.conversations.retain(host)&&current(appended))context.focusQuestion();
     }catch(cause){if(reportCurrent())context.failure(cause);}

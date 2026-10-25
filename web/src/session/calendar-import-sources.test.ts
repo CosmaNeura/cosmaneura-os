@@ -34,3 +34,22 @@ describe('shared imported calendar Chief draft preparation',()=>{
 
 it('retains directions and the calendar import task on a blocked Back, then restores its origin',async()=>{const f=await fixture();f.session.models.updateThought('Retained calendar directions');expect(await f.session.sources.openCalendarImport(f.context,'sources')).toBe(true);expect(f.session.getSnapshot().calendarImportReview).toMatchObject({open:true,origin:'sources'});expect(f.session.sources.closeCalendarImport({...f.context,connectionNavigationLocked:true})).toBe(false);expect(f.session.sources.closeCalendarImport(f.context)).toBe(true);expect(f.session.getSnapshot()).toMatchObject({thought:'Retained calendar directions',mobilePanel:'Sources',calendarImportReview:{open:false}});expect(await f.journal.load(editorAddress(calVisit.id,'conversation:chief'))).toMatchObject({data:{text:'Retained calendar directions'}});});
 it('does not open an import after a new composer edit wins during retention',async()=>{const f=await fixture();let release!:()=>void;vi.mocked(f.host.authorize).mockImplementationOnce(()=>new Promise<void>(r=>{release=r;}));const opening=f.session.sources.openCalendarImport(f.context,'conversation');await vi.waitFor(()=>expect(release).toBeTypeOf('function'));f.session.models.updateThought('New directions');release();expect(await opening).toBe(false);expect(f.session.getSnapshot().calendarImportReview).toBeNull();});
+
+
+it.each(['withheld','deleted','changed'] as const)('preserves the draft when the source is %s during final authorization',async change=>{
+ const f=await fixture(),previousSource=calUuid(979),text='Keep my existing Chief directions';
+ f.session.models.updateThought(text);await f.session.conversations.observe(f.host);
+ f.session.setSelectedSource(previousSource);
+ f.session.setCalendarImportReview({identity:f.host.identity,generation:f.session.generation.current,workspaceId:f.workspace.id,open:true,origin:'sources'});
+ let release!:()=>void,paused=false;
+ vi.mocked(f.host.authorize).mockImplementation(async()=>{if(f.session.getSnapshot().busy&&!paused){paused=true;await new Promise<void>(r=>{release=r;});}});
+ const preparing=f.session.sources.prepareCalendarImport(f.context,f.saved);
+ await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ const entries=change==='deleted'?[]:f.workspace.entries.map(entry=>entry.id===f.saved.entry_id?{...entry,
+  ...(change==='withheld'?{calendar_import_source_state:'unavailable' as const,content:''}:{content:entry.content+' changed while authorizing'})}:entry);
+ f.session.sources.receive({...f.workspace,entries});release();await preparing;
+ expect(f.session.getSnapshot()).toMatchObject({thought:text,selectedSource:previousSource,calendarImportReview:{open:true}});
+ expect(f.context.failure).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({status:409,code:'calendar_import_source_changed'}));
+ expect(f.context.focusQuestion).not.toHaveBeenCalled();
+ expect(await f.journal.load(editorAddress(calVisit.id,'conversation:chief'))).toMatchObject({data:{text}});
+});
