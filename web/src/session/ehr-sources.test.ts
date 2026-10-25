@@ -9,6 +9,7 @@ import type {SourceContext,SourceDependencies} from './sources';
 import {emptyEhrReadRecovery,type EhrReadSaved} from '../ehr-read-recovery';
 import {ehrScope,ehrVisit,ehrUuid,ehrWindowReceipt,ehrVerifiedReceipt,ehrReviewBody,ehrReviewResult} from '../ehr-read-fixtures.test-support';
 import {WorkspaceApiError} from '../workspace-api';
+import {vendorSha256} from '../vendor-contract';
 async function fixture(deps:SourceDependencies={}){
  const verified=await ehrVerifiedReceipt(await ehrWindowReceipt()),result=await ehrReviewResult(verified,ehrReviewBody(verified)),workspace={...result.workspace,appointment_id:ehrUuid(900)};
  const identity={mode:'clerk_jwt' as const,getToken:async()=>null};
@@ -21,6 +22,22 @@ async function fixture(deps:SourceDependencies={}){
  return {session,workspace,journal,host,context,saved};
 }
 describe('shared EHR Chief draft preparation',()=>{
+ it('prepares a reviewed problem-list snapshot without describing it as an appointment or replacing the draft',async()=>{
+  const f=await fixture(),send=vi.spyOn(f.session.models,'save');
+  const entry=f.workspace.entries.find(item=>item.id===f.saved.entry_id)!;
+  entry.content='Elation problem-list snapshot\nCoverage: one bounded page; more records may exist.\nInvented recorded problem: Active; verification status: unconfirmed.';
+  f.saved.content_sha256=await vendorSha256(new TextEncoder().encode(entry.content));
+  f.session.models.updateThought('Ask me about missing history.');await f.session.conversations.observe(f.host);
+  await f.session.sources.prepareEhr(f.context,f.saved);
+  const text=f.session.getSnapshot().thought;
+  expect(text).toContain('Ask me about missing history.\n\nReview the human-selected EHR source '+entry.id);
+  expect(text).toContain('recorded statuses and verification status');
+  expect(text).toContain('do not infer missing clinical facts or a complete chart');
+  expect(text).not.toContain('EHR appointment source');
+  expect(f.session.getSnapshot().selectedSource).toBe(entry.id);
+  expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'))).toMatchObject({data:{text}});
+  expect(send).not.toHaveBeenCalled();
+ });
  it('preserves both specialist and retained Chief directions and sends no model request',async()=>{const f=await fixture(),send=vi.spyOn(f.session.models,'save');f.session.models.updateThought('Retained Chief instructions');await f.session.conversations.observe(f.host);await f.session.conversations.open(ehrVisit.id,'follow_up',f.host);f.session.models.updateThought('Specialist directions stay here');await f.session.sources.prepareEhr(f.context,f.saved);
  expect(f.session.getSnapshot().thought).toContain('Retained Chief instructions\n\nReview the human-selected EHR');expect(f.session.getSnapshot().thought).not.toContain('Specialist directions');expect(f.session.getSnapshot().selectedSource).toBe(f.saved.entry_id);expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:follow_up'))).toMatchObject({data:{text:'Specialist directions stay here'}});expect(send).not.toHaveBeenCalled();expect(f.context.focusQuestion).toHaveBeenCalledOnce();});
  it('does not erase a retained saved-note task while preparing a new EHR source',async()=>{const f=await fixture();const task={contract:'chief-note-task.compose.v1' as const,note_id:ehrUuid(600),note_version:1,content_hash:'a'.repeat(64),source_fingerprint:'b'.repeat(64)};await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'));await f.journal.persist(editorAddress(ehrVisit.id,'conversation:chief'),{kind:'editor',workspaceId:ehrVisit.id,editor:'conversation:chief',pending:null,data:{text:'Directions for the saved note',noteTask:task}});await f.session.sources.prepareEhr(f.context,f.saved);expect(f.session.getSnapshot().thought).toBe('Directions for the saved note');expect(f.session.getSnapshot().phoneNoteTask?.selection.note_id).toBe(task.note_id);expect(f.session.getSnapshot().error).toContain('Finish or close the saved-note draft');expect(f.context.focusQuestion).not.toHaveBeenCalled();});

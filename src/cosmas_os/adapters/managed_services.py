@@ -85,7 +85,8 @@ class ManagedServices:
             self.ehr_reads = ManagedElationSandboxReads(profile.elation_sandbox,
                 credentials=profile.elation_credentials, credentials_current=profile.elation_credentials_current,
                 sessions=sessions, enabled=lambda: self._available() and settings.workspace_elation_sandbox_available,
-                transport_factory=profile.transport_factory)
+                transport_factory=profile.transport_factory,
+                problems_enabled=lambda: self._available() and settings.workspace_elation_problems_enabled)
         if (len(profile.efax_inbound_installations) > 50
                 or any(type(item) is not EFaxInboundInstallation for item in profile.efax_inbound_installations)
                 or len({str(item.selection.connection_id) for item in profile.efax_inbound_installations})

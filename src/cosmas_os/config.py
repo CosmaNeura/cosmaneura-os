@@ -104,6 +104,8 @@ class Settings(BaseSettings):
     workspace_ehr_read_enabled: bool = False
     # Separate network permission: sandbox REST reads of invented records only.
     workspace_elation_sandbox_enabled: bool = False
+    # Additional clinical read scope; appointments retain their three-scope grant.
+    workspace_elation_problems_enabled: bool = False
     google_connection_client_id: str = ""
     google_connection_client_secret: SecretStr | None = None
     google_connection_callback_uri: str = ""

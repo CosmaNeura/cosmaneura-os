@@ -2,7 +2,7 @@ import {useEffect,useRef,type ReactNode} from 'react';
 import './ehr-read.css';
 
 /** One visit-scoped task host; hiding it never discards its mounted recovery journal. */
-export function EhrReadTask({open,context,returnLabel,returnBlocked,onReturn,children,title='Review an appointment'}:{
+export function EhrReadTask({open,context,returnLabel,returnBlocked,onReturn,children,title='Review EHR records'}:{
  title?:string;open:boolean;context:string;returnLabel:string;returnBlocked:boolean;onReturn:()=>void;children:ReactNode;
 }){
  const heading=useRef<HTMLHeadingElement>(null);

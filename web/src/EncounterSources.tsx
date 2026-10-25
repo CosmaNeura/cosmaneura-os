@@ -12,7 +12,7 @@ export function EncounterSources({ workspace, selectedSource, locked, source, ev
   return <section aria-label="Scribe sources">
     <div className="team-notebook-title"><h2>Saved visit sources</h2><span className="team-pill">{entries.length} saved</span></div>
     {onReviewOutlook&&<section className="outlook-source-action" aria-label="Outlook email source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewOutlook}>Review Outlook email</button><p>Choose an email and check that it belongs to this visit before saving a source.</p></section>}
-    {onReviewAppointment&&<section className="ehr-source-action" aria-label="Appointment source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewAppointment}>Review an appointment</button><p>Check the patient and appointment before adding it to this visit. Your conversation draft stays in place.</p></section>}
+    {onReviewAppointment&&<section className="ehr-source-action" aria-label="Appointment source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewAppointment}>Review EHR records</button><p>Choose the patient and appointment, then review the available records before saving a source. Your conversation draft stays in place.</p></section>}
     {onImportCalendar&&<section className="calendar-import-action" aria-label="Import calendar source"><button disabled={locked||appointmentReviewLocked} onClick={onImportCalendar}>Import calendar file</button><p>Review an event from an exported file before adding its summary to this visit.</p></section>}
     <p className="team-fine">Most recent first. Read changed material before reviewing the note.</p>
     {!entries.length&&<p>No notebook entries or reference notes have been saved for this visit.</p>}

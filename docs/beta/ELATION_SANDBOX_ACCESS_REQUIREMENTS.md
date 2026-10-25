@@ -238,3 +238,46 @@ Thank you.
 Official sources above were checked October 25, 2026. Form submission, account
 provisioning, agreement acceptance and vendor tests remain outstanding. No
 images, live API calls or account changes were used to prepare this packet.
+
+## Optional problem-list read
+
+The appointment-only key still requests exactly the three scopes above. Reading
+chart problems needs a separate, explicitly approved addition:
+[`system/problems.read`](https://help.elationhealth.com/articles/rest/overview/scopes.md).
+Do not infer it from `system/patients.read`, omit scopes, or request broad `apiv2`.
+For this optional profile the token request and returned grant must contain
+exactly those three scopes plus `system/problems.read`; no write or prescribing
+permission is added.
+
+After Elation authorizes that profile, use a new credential generation and new
+installation review. Set the private installation's `problems_enabled: true`
+and the host's `WORKSPACE_ELATION_PROBLEMS_ENABLED=true`; both default off.
+The installation commitment includes the optional clinical scope. Changing the
+profile invalidates the previous installation commitment. The renderer never
+collects keys or lets staff add scopes. Installation still performs no vendor
+call and does not prove access. The required additive source migration is
+`r57d3f6b1098` after the preceding migrations.
+
+The staff action follows a verified appointment. The server rereads that exact
+appointment and its bound patient, compares the retained identity, then makes
+one `GET /api/2.0/problems/` with exact patient, practice and `limit=25` filters.
+No caller supplies a patient ID or continuation URL. The selected summary shows
+only description, status, start/resolved dates and the provider's verification
+status. It explicitly excludes diagnosis codes and synopsis, records partial or
+unknown page coverage, and never interprets an empty page as absence of disease.
+A summary exceeding 5,000 characters is refused without truncation. The same
+saved-command recovery and human source review apply; reading does not prescribe
+or write to a chart.
+
+Before claiming vendor qualification, exercise the approved sandbox with
+invented Active/Controlled/Resolved rows; confirmed, provisional, differential,
+unconfirmed, refuted and entered-in-error verification; missing/blank verification;
+empty and more-than-25 result sets; exact patient/practice mismatch denial;
+changed patient identity; grant withdrawal; and lost read replies. Confirm the
+current problems endpoint's optional `count`/`next` metadata and positive offset
+format with Elation. Missing metadata remains unknown; the implementation never
+follows a continuation. These are pending vendor checks, not completed live tests.
+The public reference is the current
+[patient profile schema](https://help.elationhealth.com/openapi/patient-profile-api.yaml),
+retrieved October 25, 2026; its document hash and the scope reference are retained
+in this workstream's `evidence/elation-clinical-reference` packet.

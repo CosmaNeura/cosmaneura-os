@@ -83,8 +83,11 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
         def execute():
             reauthenticate()
             if body.action == "status":
-                return ehr_reads.status(*scope, enabled=configuration().workspace_ehr_read_available,
-                    port=runtime(), reauthenticate=reauthenticate, provider=body.provider)
+                result = ehr_reads.status(*scope, enabled=configuration().workspace_ehr_read_available,
+                    port=runtime(), reauthenticate=reauthenticate, provider=body.provider, include_problems=body.include_problems is True)
+                if body.include_problems is True and not configuration().workspace_elation_problems_enabled:
+                    result["problems"] = "not_enabled"
+                return result
             port = service(body.provider)
             if body.action == "install":
                 result = elation_sandbox_installation.install(*scope, key=body.idempotency_key,
@@ -100,6 +103,14 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                     observation_id=str(body.observation_id), observation_sha256=body.observation_sha256,
                     item_handle=str(body.item_handle), item_sha256=body.item_sha256,
                     port=port, reauthenticate=reauthenticate, provider=body.provider, last_name=body.last_name, birth_date=body.birth_date)
+            elif body.action == "problems":
+                if not configuration().workspace_elation_problems_enabled:
+                    raise ws.WorkspaceError("ehr_read_problems_unavailable", 404)
+                result = ehr_reads.problems(*scope, key=body.idempotency_key,
+                    connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
+                    observation_id=str(body.observation_id), observation_sha256=body.observation_sha256,
+                    item_handle=str(body.item_handle), item_sha256=body.item_sha256,
+                    port=port, reauthenticate=reauthenticate, provider=body.provider)
             elif body.action == "inspect":
                 result = ehr_reads.inspect_observation(*scope, observation_id=str(body.observation_id),
                     port=port, reauthenticate=reauthenticate, provider=body.provider)

@@ -304,3 +304,53 @@ can inform a later staff-supplied calendar-file slice. That slice must preserve
 `is_live=false` and unverified patient identity. It must never claim live EHR
 sync or interpret an event UID/title as a patient ID. Fetching live subscription
 URLs and adapting undocumented CSV headers remain outside this milestone.
+
+### Optional reviewed problem-list source
+
+`system/problems.read` is an additional clinical permission, independent from
+`system/patients.read`. The existing appointment scope string, binding digest,
+status reply, appointment item hash and source text remain unchanged. The new
+managed installation flag `problems_enabled` defaults false; when true its
+installation commitment includes that scope. The host additionally requires
+`WORKSPACE_ELATION_PROBLEMS_ENABLED`. A changed scope profile requires a new
+credential generation and explicit installation review. Tests can install the
+same separate capability on `SyntheticElationReads` through a callback; it still
+requires the exact mock transport and invented records.
+
+An opt-in status request `{action: "status", include_problems: true}` adds the
+closed `problems` capability (`available`, `not_enabled`, `not_configured`).
+Legacy status commands receive their original shape. The new `problems` action
+uses the existing read endpoint and exact command fields of appointment verify,
+but references a `verified_visit` observation. Patient identifiers come only
+from its immutable private snapshot. The runtime rechecks the same appointment
+and full retained patient identity before the problem GET. No arbitrary patient
+search, pagination, prescription or clinical-write endpoint is introduced.
+
+The new `verified_problems` observation retains the appointment context and adds
+an exact parent commitment and `item.problems`. The list contains up to 25 rows,
+optional provider total count and separate `end_of_results`, `more_rows_available`
+or `unknown` problem coverage. Fields are description (1–200 characters), status
+(Active/Controlled/Resolved), ISO start date, optional resolved date and the exact
+provider verification enum, blank or null. Non-Resolved rows cannot carry a
+resolved date. Blank/missing verification is not promoted to confirmation.
+Provider IDs stay private. Diagnosis codes and synopsis are deliberately outside
+the displayed summary and this limit is stated in the saved source. No text is
+silently shortened; a source exceeding the existing 5,000-character budget is
+refused as `ehr_read_response_too_large`.
+
+Item commitments use `ehr_verified_problems_item.v1` over the complete public
+item without its hash. The receipt binds its parent observation ID, source hash
+and item hash. Review continues through `ehr_read_source`; source text begins
+`Elation problem list (synthetic frozen observation)` and the label is
+`Elation: reviewed problem list`. The source hash and review request hash domains
+remain unchanged. The database migration `r57d3f6b1098` extends immutable custody
+through the verified parent to the original window; new windows, expiry, account
+or credential changes and clinical capability withdrawal withhold old content.
+Exact resolve/inspect perform no provider reads. A failed read stays reserved;
+transport errors never authorize an automatic repeat.
+
+The current public [scope catalog](https://help.elationhealth.com/articles/rest/overview/scopes.md)
+and [patient profile schema](https://help.elationhealth.com/openapi/patient-profile-api.yaml)
+were captured October 25, 2026. Production and live vendor qualification remain
+unavailable. Local tests use only synthetic transport and signed local database
+fixtures; external access gates are recorded in the sandbox access packet.

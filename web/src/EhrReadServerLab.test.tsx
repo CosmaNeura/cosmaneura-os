@@ -16,6 +16,7 @@ const moduleName='node:util';
 const {transferableAbortController}=await import(/* @vite-ignore */moduleName) as {transferableAbortController:()=>AbortController};
 const env=(globalThis as typeof globalThis&{process?:{env:Record<string,string|undefined>}}).process?.env;
 const configured=env?.COSMAS_EHR_UI_LAB_URL;
+const problemsMode=env?.COSMAS_EHR_UI_LAB_PROBLEMS==='1';
 const base=configured?new URL(configured):null;
 if(base&&(base.protocol!=='http:'||base.hostname!=='127.0.0.1'||base.pathname!=='/'||base.username||base.password||base.search||base.hash))throw new Error('EHR UI lab must use owned loopback.');
 const realFetch=globalThis.fetch.bind(globalThis);
@@ -32,7 +33,7 @@ it.skipIf(!base)('uses actual signed custody and preserves Chief directions thro
   const body=init?.method==='POST'?JSON.parse(String(init.body)) as {action?:string;idempotency_key?:string}:null;
   wire.push({path:url.pathname,action:body?.action,key:body?.idempotency_key});
   const request=realFetch(input,options);pending.add(request);
-  try{const response=await request;if(body?.action==='observe'&&!dropped&&response.ok){await response.arrayBuffer();dropped=true;throw new Error('Invented lost success response');}return response;}finally{pending.delete(request);}
+  try{const response=await request;if(body?.action===(problemsMode?'problems':'observe')&&!dropped&&response.ok){await response.arrayBuffer();dropped=true;throw new Error('Invented lost success response');}return response;}finally{pending.delete(request);}
  });
  const packet=await (await realFetch(base!.origin+'/lab/state')).json() as {workspace:Workspace;team:ProviderTeam;token:string;starts_at:string;ends_at:string};
  const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>packet.token};
@@ -55,21 +56,23 @@ it.skipIf(!base)('uses actual signed custody and preserves Chief directions thro
  await click('Check Elation access');await wait(()=>expect(find('Load appointments')?.disabled).toBe(false));
  const fields=host.querySelectorAll<HTMLInputElement>('input[type="datetime-local"]');
  for(const [index,value] of [packet.starts_at,packet.ends_at].entries())await act(async()=>{const d=new Date(value);const local=new Date(d.getTime()-d.getTimezoneOffset()*60000).toISOString().slice(0,16);Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(fields[index],local);fields[index].dispatchEvent(new Event('input',{bubbles:true}));});
- await click('Load appointments');await click('Check saved appointment result');
+ await click('Load appointments');if(!problemsMode)await click('Check saved appointment result');
  await wait(()=>expect(host.querySelectorAll('[aria-label="Appointments"] button').length).toBe(1));
  await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Appointments"] button')!.click());
  await wait(()=>expect(host.querySelector('[aria-label="Review patient and visit"]')?.textContent).toContain('Alex Example'));
  expect((host.querySelector('[aria-label="Chief directions"]') as HTMLTextAreaElement).value).toBe('Keep my existing Chief directions.');
+ if(problemsMode){await click('Read problem list');await click('Check saved problem-list result');await wait(()=>expect(host.querySelector('[aria-label="Review problem list"]')?.textContent).toContain('Invented chart concern'));expect(host.textContent).toContain('Verification: unconfirmed');}
  for(const checkbox of host.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))await act(async()=>checkbox.click());
- await click('Save reviewed appointment');await click('Prepare Chief draft');
+ await click(problemsMode?'Save reviewed problem list':'Save reviewed appointment');await click('Prepare Chief draft');
  await wait(()=>expect(session.getSnapshot().thought).toContain('Keep my existing Chief directions.\n\nReview'));
  expect(session.getSnapshot().selectedSource).toBeTruthy();
  const draft=await access.journal.load(editorAddress(packet.workspace.id,'conversation:chief'));
  expect(draft).toMatchObject({data:{text:session.getSnapshot().thought}});
  const counts=await (await realFetch(base!.origin+'/lab/counts')).json() as {provider_calls:number;model_admissions:number};
- expect(counts.provider_calls).toBe(6);expect(wire.filter(row=>row.action==='observe')).toHaveLength(1);
- expect(wire.find(row=>row.action==='resolve')?.key).toBe(wire.find(row=>row.action==='observe')?.key);
+ expect(counts.provider_calls).toBe(problemsMode?10:6);expect(wire.filter(row=>row.action==='observe')).toHaveLength(1);
+ expect(wire.find(row=>row.action==='resolve')?.key).toBe(wire.find(row=>row.action===(problemsMode?'problems':'observe'))?.key);
  expect(wire.some(row=>/ask|model-work/.test(row.path))).toBe(false);
+ if(problemsMode){expect(wire.filter(row=>row.action==='problems')).toHaveLength(1);expect(session.getSnapshot().workspace?.entries.find(e=>e.id===session.getSnapshot().selectedSource)?.source_label).toBe('Elation: reviewed problem list');}
  await realFetch(base!.origin+'/lab/revoke',{method:'POST',body:'{}'});
  const revoked=await workspaceApi.read(identity,packet.workspace.id);
  const entry=revoked.entries.find(e=>e.id===session.getSnapshot().selectedSource)!;
@@ -80,5 +83,5 @@ it.skipIf(!base)('uses actual signed custody and preserves Chief directions thro
  expect(failures).toEqual([]);
  const finalCounts=await (await realFetch(base!.origin+'/lab/counts')).json();expect(finalCounts).toEqual(counts);
  const fsName='node:fs/promises';const fs=await import(/* @vite-ignore */fsName) as {writeFile:(path:string,value:string)=>Promise<void>};
- await fs.writeFile(env!.COSMAS_EHR_UI_LAB_REPORT!,JSON.stringify({passed:true,screenshots:0,...counts,lost_response_recovered:true,draft_preserved:true,revoked_source_withheld:true,wire},null,2));
+ await fs.writeFile(env!.COSMAS_EHR_UI_LAB_REPORT!,JSON.stringify({passed:true,problems:problemsMode,screenshots:0,...counts,lost_response_recovered:true,draft_preserved:true,revoked_source_withheld:true,wire},null,2));
 },90000);

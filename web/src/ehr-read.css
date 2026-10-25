@@ -27,3 +27,6 @@
 
 .ehr-provider-choice {display:grid;gap:.4rem;max-width:48rem;font-weight:600;}
 .ehr-provider-choice select {box-sizing:border-box;width:100%;min-height:44px;min-width:0;font:inherit;padding:.55rem;border:1px solid var(--team-line,#cbd4cd);border-radius:8px;background:var(--team-surface,#fff);}
+
+.ehr-read-panel [aria-label="Review problem list"] {display:grid;gap:.8rem;}
+.ehr-read-panel [aria-label="Returned problems"] li {padding-block:.7rem;border-top:1px solid var(--team-line,#d5dbe5);}

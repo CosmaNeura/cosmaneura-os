@@ -26,11 +26,15 @@ from pydantic import SecretStr
 
 ORIGIN = "https://sandbox.elationemr.com"
 SCOPES = "system/practices.read system/appointments.read system/patients.read"
+PROBLEM_SCOPES = SCOPES + " system/problems.read"
 MAX_BODY = 1_048_576
 PAGE_SIZE = 25
 MAX_ID = 9_223_372_036_854_775_807
 STATUSES = frozenset(("Scheduled", "Confirmed", "Checked Out", "Cancelled", "With Doctor",
     "In Room", "Checked In", "In Room - Vitals Taken", "Not Seen", "Billed"))
+PROBLEM_STATUSES = frozenset(("Active", "Controlled", "Resolved"))
+PROBLEM_VERIFICATION = frozenset(("confirmed", "differential", "entered_in_error",
+    "provisional", "refuted", "unconfirmed", ""))
 
 
 class ElationReadError(Exception):
@@ -132,6 +136,19 @@ class ElationAppointment:
 
 
 @dataclass(frozen=True, repr=False)
+class ElationProblem:
+    problem_id: int
+    patient_id: int
+    practice_id: int
+    description: str
+    status: Literal["Active", "Controlled", "Resolved"]
+    start_date: date
+    resolved_date: date | None
+    verification_status: Literal["confirmed", "differential", "entered_in_error",
+        "provisional", "refuted", "unconfirmed", ""] | None
+
+
+@dataclass(frozen=True, repr=False)
 class ElationCursor:
     query_sha256: str
     value: str
@@ -145,10 +162,11 @@ class ElationReadResult:
     operation: str
     request_sha256: str
     observed_at: datetime
-    rows: tuple[ElationPractice | ElationPatient | ElationAppointment, ...]
+    rows: tuple[ElationPractice | ElationPatient | ElationAppointment | ElationProblem, ...]
     next_cursor: ElationCursor | None
     source_sha256: str
-    coverage: Literal["end_of_results", "more_rows_available", "selected_record"]
+    coverage: Literal["end_of_results", "more_rows_available", "selected_record", "unknown"]
+    total_count: int | None = None
 
 
 class ElationReadAdapter:
@@ -163,6 +181,7 @@ class ElationReadAdapter:
     def __init__(self, scope: ElationReadScope,
             credentials: Callable[[ElationReadScope], Awaitable[ElationCredentials]], *,
             enabled: bool = False,
+            problems_enabled: bool = False,
             authorize_read: Callable[[ElationReadScope], Awaitable[bool]] | None = None,
             permit_request: Callable[[ElationReadScope], Awaitable[bool]] | None = None,
             transport: httpx.AsyncBaseTransport | None = None,
@@ -170,6 +189,7 @@ class ElationReadAdapter:
             monotonic: Callable[[], float] = time.monotonic,
             sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
         if (type(scope) is not ElationReadScope or type(enabled) is not bool
+                or type(problems_enabled) is not bool
                 or scope.environment != "sandbox"
                 or any(type(v) is not UUID for v in (scope.box_id, scope.owner_id,
                     scope.connection_id, scope.credential_generation))):
@@ -177,6 +197,8 @@ class ElationReadAdapter:
         _id(scope.practice_id, "invalid_request")
         _text(scope.practice_name, 200, "invalid_request")
         self.scope, self.credentials, self.enabled = scope, credentials, enabled
+        self._problems_enabled = problems_enabled
+        self._scopes = PROBLEM_SCOPES if problems_enabled else SCOPES
         self.authorize_read, self.permit_request = authorize_read, permit_request
         self.transport, self.now, self.monotonic, self.sleep = transport, now, monotonic, sleep
         self._token: SecretStr | None = None
@@ -263,7 +285,7 @@ class ElationReadAdapter:
                 raise ElationReadError("not_configured")
             identity = _text(supplied.client_id.get_secret_value(), 1024, "not_configured")
             secret = _text(supplied.client_secret.get_secret_value(), 4096, "not_configured")
-            commitment = _digest([self.scope.commitment(), identity, secret])
+            commitment = _digest([self.scope.commitment(), identity, secret, self._scopes])
             if self._credential_commitment is not None and self._credential_commitment != commitment:
                 self._token = None
                 raise ElationReadError("connection_changed")
@@ -273,7 +295,7 @@ class ElationReadAdapter:
             began = self.monotonic()
             value = await self._json(client, "POST", "/api/2.0/oauth2/token/", form={
                 "grant_type": "client_credentials", "client_id": identity,
-                "client_secret": secret, "scope": SCOPES,
+                "client_secret": secret, "scope": self._scopes,
             })
             token = _text(value.get("access_token"), 8192)
             lifetime = value.get("expires_in")
@@ -281,7 +303,7 @@ class ElationReadAdapter:
                     or value.get("token_type") != "Bearer" or type(lifetime) is not int
                     or not 1 <= lifetime <= 31_536_000
                     or type(value.get("scope")) is not str
-                    or set(value["scope"].split()) != set(SCOPES.split())):
+                    or set(value["scope"].split()) != set(self._scopes.split())):
                 raise ElationReadError("invalid_response")
             self._token = SecretStr(token)
             self._token_until = began + lifetime - min(30, lifetime / 10)
@@ -312,7 +334,42 @@ class ElationReadAdapter:
             raise ElationReadError("invalid_response")
         return ElationCursor(query_hash, cursor)
 
-    async def _read(self, path, params, parser, *, cursor=None, page=False):
+    def _problem_page(self, value, path, params):
+        """Qualify first-page metadata without exposing or following its URL."""
+        items = value.get("results")
+        if (set(value) - {"results", "count", "next", "previous"}
+                or type(items) is not list or len(items) > PAGE_SIZE
+                or value.get("previous") is not None):
+            raise ElationReadError("invalid_response")
+        total = value.get("count")
+        if "count" in value and (type(total) is not int or not len(items) <= total <= MAX_ID):
+            raise ElationReadError("invalid_response")
+        if "next" not in value:
+            return items, "unknown", total
+        following = value["next"]
+        if following is None:
+            if total is not None and total != len(items):
+                raise ElationReadError("invalid_response")
+            return items, "end_of_results", total
+        if (type(following) is not str or not 1 <= len(following) <= 2048 or not items
+                or any(c.isspace() or ord(c) < 32 or ord(c) == 127 for c in following)
+                or total is not None and total <= len(items)):
+            raise ElationReadError("invalid_response")
+        parsed = urlsplit(following)
+        if (parsed.scheme != "https" or parsed.netloc != urlsplit(ORIGIN).netloc
+                or parsed.path not in (path, path.removesuffix("/")) or parsed.fragment):
+            raise ElationReadError("invalid_response")
+        pairs = parse_qsl(parsed.query, keep_blank_values=True, strict_parsing=True, max_num_fields=4)
+        fields = dict(pairs)
+        offset = fields.pop("offset", None)
+        if (len(pairs) != len(dict(pairs)) or any(params.get(key) != item for key, item in fields.items())
+                or type(offset) is not str or not offset.isascii() or not offset.isdecimal()
+                or not 1 <= len(offset) <= 19 or str(int(offset)) != offset
+                or not len(items) <= int(offset) <= MAX_ID):
+            raise ElationReadError("invalid_response")
+        return items, "more_rows_available", total
+
+    async def _read(self, path, params, parser, *, cursor=None, page=False, problem_page=False):
         try:
             async with asyncio.timeout(30):
                 await self._authorize()
@@ -330,7 +387,17 @@ class ElationReadAdapter:
                     token = await self._access_token(client)
                     client.cookies.clear()  # OAuth bearer authority never gains a cookie session.
                     value = await self._json(client, "GET", path, params=sent, token=token)
-                if page:
+                total_count = None
+                if problem_page:
+                    items, coverage, total_count = self._problem_page(value, path, params)
+                    if any(type(item) is not dict for item in items):
+                        raise ElationReadError("invalid_response")
+                    rows = tuple(parser(item) for item in items)
+                    ids = [item.problem_id for item in rows]
+                    if len(set(ids)) != len(ids):
+                        raise ElationReadError("invalid_response")
+                    following = None
+                elif page:
                     items = value.get("results")
                     if (type(items) is not list or len(items) > PAGE_SIZE
                             or "next" not in value or "previous" not in value):
@@ -351,11 +418,15 @@ class ElationReadAdapter:
                     raise ElationReadError("invalid_response")
                 observed = observed.astimezone(UTC)
                 request_hash = self._query_hash(path, sent)
-                source_hash = _digest({"scope": self.scope.commitment(), "request": request_hash,
+                source = {"scope": self.scope.commitment(), "request": request_hash,
                     "observed_at": observed, "rows": [asdict(row) for row in rows],
-                    "next": asdict(following) if following else None, "coverage": coverage})
+                    "next": asdict(following) if following else None, "coverage": coverage}
+                if problem_page:
+                    source.update(contract="elation-problems.v1", total_count=total_count,
+                        resource_scopes=self._scopes)
+                source_hash = _digest(source)
                 return ElationReadResult(self.scope, path, request_hash, observed,
-                    rows, following, source_hash, coverage)
+                    rows, following, source_hash, coverage, total_count)
         except ElationReadError:
             raise
         except (httpx.TimeoutException, TimeoutError):
@@ -479,3 +550,47 @@ class ElationReadAdapter:
                 raise ElationReadError("record_unavailable")
             return item
         return await self._read(f"/api/2.0/patients/{selected}/", {}, parse)
+
+    async def problems(self, patient_id: int) -> ElationReadResult:
+        """Read one problem-list page for an already scoped, selected patient.
+
+        Requires separately enabled problem read access. Codes, synopsis and
+        continuation URLs are excluded. No result establishes clinical truth or
+        a complete chart, and a missing next field means coverage is unknown.
+        """
+        if not self._problems_enabled:
+            raise ElationReadError("disabled")
+        selected = _id(patient_id, "invalid_request")
+        params = {"patient": str(selected), "practice": str(self.scope.practice_id),
+            "limit": str(PAGE_SIZE)}
+
+        def calendar_date(value):
+            if type(value) is not str or len(value) != 10:
+                raise ElationReadError("invalid_response")
+            parsed = date.fromisoformat(value)
+            if parsed.isoformat() != value:
+                raise ElationReadError("invalid_response")
+            return parsed
+
+        def parse(row):
+            if (type(row) is not dict or "deleted_date" not in row
+                    or _id(row.get("patient")) != selected
+                    or _id(row.get("practice")) != self.scope.practice_id):
+                raise ElationReadError("invalid_response")
+            if _optional_stamp(row, "deleted_date") is not None:
+                raise ElationReadError("record_unavailable")
+            state, verification = row.get("status"), row.get("verification_status")
+            if (state not in PROBLEM_STATUSES
+                    or verification is not None and verification not in PROBLEM_VERIFICATION):
+                raise ElationReadError("invalid_response")
+            resolved = None if row.get("resolved_date") is None else calendar_date(row["resolved_date"])
+            if resolved is not None and state != "Resolved":
+                raise ElationReadError("invalid_response")
+            description = _text(row.get("description"), 200)
+            if not description.strip():
+                raise ElationReadError("invalid_response")
+            return ElationProblem(_id(row.get("id")), selected, self.scope.practice_id,
+                description, state, calendar_date(row.get("start_date")),
+                resolved, verification)
+
+        return await self._read("/api/2.0/problems/", params, parse, problem_page=True)

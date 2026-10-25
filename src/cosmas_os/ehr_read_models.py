@@ -80,7 +80,7 @@ class EhrReadRequest(OwnerScope, Base):
         CheckConstraint("ordinal BETWEEN 1 AND 500 AND idempotency_key ~ '^[A-Za-z0-9:_-]{8,100}$'",
             name="ck_ehr_read_request_key"),
         CheckConstraint("(kind='window' AND parent_snapshot_id IS NULL AND item_handle IS NULL) OR "
-            "(kind='verify' AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL)",
+            "(kind IN ('verify','problems') AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL)",
             name="ck_ehr_read_request_kind"),
         CheckConstraint("isfinite(window_start) AND isfinite(window_end) AND window_end>window_start "
             "AND window_end<=window_start+interval '168 hours'", name="ck_ehr_read_request_window"),

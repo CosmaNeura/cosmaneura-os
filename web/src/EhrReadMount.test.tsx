@@ -7,9 +7,9 @@ import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery
 import {DraftJournal,editorAddress} from './draft-journal';
 import {openDraftStore,type DraftValue} from './draft-store';
 import {accountIdentityApi} from './account-identity-api';
-import {ehrReadApi,ehrProviderFields} from './ehr-read-api';
-import {emptyEhrReadRecovery,type EhrReadRecovery} from './ehr-read-recovery';
-import {ehrBinding,ehrScope,ehrUuid,ehrVisit,ehrWindowReceipt,ehrVerifiedReceipt,ehrReviewBody,ehrReviewResult} from './ehr-read-fixtures.test-support';
+import {ehrReadApi,ehrProviderFields,ehrHash,ehrSourceContent} from './ehr-read-api';
+import {emptyEhrReadRecovery,validateEhrReadRecovery,type EhrReadRecovery} from './ehr-read-recovery';
+import {ehrBinding,ehrScope,ehrUuid,ehrVisit,ehrWindowReceipt,ehrVerifiedReceipt,ehrReviewBody,ehrReviewResult,ehrProblemsReceipt,ehrProblemsCommand} from './ehr-read-fixtures.test-support';
 import type {Workspace} from './workspace-api';
 import {WorkspaceSession} from './session/workspace-session';
 import {useWorkspaceSession} from './session/use-workspace-session';
@@ -40,10 +40,11 @@ it.each(['ehr-read','ehr-read:tebra'] as const)('retains the same bounded %s fra
  await storage.write(address,null,value);storage.close();const key=`cosmas-private-draft:v1:${options.scope}:${address}`,retained=records.get(key)!;expect(new TextEncoder().encode(key).length).toBeLessThanOrEqual(512);expect(key.startsWith('cosmas-native-')).toBe(false);const bytes=Uint8Array.from(atob(retained.data),c=>c.charCodeAt(0));expect(bytes.length).toBeLessThanOrEqual(131072+1024);expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual({version:1,scope:options.scope,address,value});const fresh=await openDraftStore(options);expect((await fresh.read(address)).value).toEqual(value);fresh.close();});
 
 
-it.each(['elation','tebra'] as const)('keeps fresh %s withholding published during review receipt persistence',async provider=>{
+it.each(['elation','tebra','problems'] as const)('keeps fresh %s withholding published during review receipt persistence',async kind=>{
+ const provider=kind==='problems'?'elation':kind;
  const scope={...ehrScope,...ehrProviderFields(provider)},editor=provider==='tebra'?'ehr-read:tebra':'ehr-read',address=editorAddress(ehrVisit.id,editor);
  const window=await ehrWindowReceipt({...ehrProviderFields(provider),action:'observe',...ehrBinding,starts_at:'2026-10-25T12:00:00Z',ends_at:'2026-10-26T12:00:00Z',idempotency_key:ehrUuid(881)});
- const verified=await ehrVerifiedReceipt(window),request=ehrReviewBody(verified),receipt=await ehrReviewResult(verified,request);
+ const verified=await ehrVerifiedReceipt(window),selected=kind==='problems'?await ehrProblemsReceipt(verified):verified,request=ehrReviewBody(selected),receipt=await ehrReviewResult(selected,request);
  const before:Workspace={...ehrVisit,appointment_id:null,entries:[],work_candidates:[]};
  const hidden:Workspace={...receipt.workspace,entries:receipt.workspace.entries.map(e=>({...e,content:'',source_label:'Unavailable EHR source',ehr_source_state:'unavailable'}))};
  const team={...teamFixture(),recovery_scope:opaque};let responseReturned=false;
@@ -51,7 +52,7 @@ it.each(['elation','tebra'] as const)('keeps fresh %s withholding published duri
  session.setIdentity(identity);session.setTeam(team);session.setWorkspace(before);
  session.recovery.journal.current={scope:opaque,serverScope:opaque,value:journal};
  const access=session.recovery.editorAccess(identity,opaque,journal,ehrVisit.id,true,false,denied)!;
- await journal.load(address);await journal.persist(address,{kind:'editor',workspaceId:ehrVisit.id,editor,pending:null,data:{...emptyEhrReadRecovery(scope),binding:ehrBinding,window,verified,pending:{kind:'review',request,anchor:verified}}});
+ await journal.load(address);await journal.persist(address,{kind:'editor',workspaceId:ehrVisit.id,editor,pending:null,data:{...emptyEhrReadRecovery(scope),binding:ehrBinding,window,verified,...(kind==='problems'?{problems:selected}:{}),pending:{kind:'review',request,anchor:selected}}});
  vi.spyOn(ehrReadApi,'review').mockImplementation(async()=>{responseReturned=true;return receipt;});
  function Harness(){const view=useWorkspaceSession(session),workspace=view.workspace!;return <EditorRecoveryContext.Provider value={access}><EhrReadMount identity={identity} provider={provider} enabled workspace={workspace}
   currentSources={workspace.entries.filter(e=>e.ehr_source_state).map(e=>({id:e.id,state:e.ehr_source_state!}))} onAskChief={vi.fn()} onAuthenticationLost={denied}/></EditorRecoveryContext.Provider>;}
@@ -66,4 +67,17 @@ it.each(['elation','tebra'] as const)('keeps fresh %s withholding published duri
  expect(read).toHaveBeenCalled();expect(ehrReadApi.review).toHaveBeenCalledOnce();expect(ehrReadApi.execute).not.toHaveBeenCalled();
  expect(await journal.load(address)).toMatchObject({data:{pending:null,saved:{entry_id:receipt.entry_id,source_withheld:false}}});
  expect(denied).not.toHaveBeenCalled();
+});
+
+it('recovers an encrypted problem-list command after remount without repeating the read or losing its verified parent',async()=>{
+ const window=await ehrWindowReceipt(),verified=await ehrVerifiedReceipt(window),request=ehrProblemsCommand(verified),receipt=await ehrProblemsReceipt(verified,request);
+ record={...emptyEhrReadRecovery(ehrScope),binding:ehrBinding,window,verified,pending:{kind:'read',request,anchor:verified}};await seed();journal.close();journal=new DraftJournal(await store());context={...context,journal};vi.mocked(ehrReadApi.resolve).mockResolvedValueOnce(receipt);
+ await render();await wait(()=>expect(button('Restore saved Elation work')?.disabled).toBe(false));expect(host.textContent).not.toContain('Mira Invented');await act(async()=>button('Restore saved Elation work')!.click());await wait(()=>expect(button('Check saved problem-list result')?.disabled).toBe(false));await act(async()=>button('Check saved problem-list result')!.click());
+ await wait(()=>expect(ehrReadApi.resolve).toHaveBeenCalledOnce());await wait(()=>expect(host.textContent).not.toContain('Checking and saving this step'));expect(ehrReadApi.execute).not.toHaveBeenCalled();expect(vi.mocked(ehrReadApi.resolve).mock.lastCall?.slice(1,3)).toEqual([request,verified]);const fresh=new DraftJournal(await store());expect(await fresh.load(address)).toMatchObject({data:{window,verified,problems:receipt,pending:null}});fresh.close();
+});
+
+it('round-trips an expanded problem review with both parent receipts through the bounded native SecureQueue bridge',async()=>{
+ const window=await ehrWindowReceipt();if(window.observation.kind!=='window')throw new Error();const firstItem=window.observation.items[0];window.observation.items=Array.from({length:25},(_,index)=>({...firstItem,handle:ehrUuid(201+index)}));const {ehrItemHash}=await import('./ehr-read-api');for(const item of window.observation.items)item.sha256=await ehrItemHash(item);window.payload_sha256=await ehrHash(window.observation);const verified=await ehrVerifiedReceipt(window),problems=await ehrProblemsReceipt(verified,undefined,{coverage:'more_rows_available',total_count:30,items:Array.from({length:25},(_,index)=>({description:'Invented concern '+index,status:'Active',start_date:'2025-01-02',resolved_date:null,verification_status:'unconfirmed'}))});if(problems.observation.kind!=='verified_problems')throw new Error();expect(ehrSourceContent(problems.observation).length).toBeLessThanOrEqual(5000);
+ const request=ehrReviewBody(problems),data=await validateEhrReadRecovery({...emptyEhrReadRecovery(ehrScope),binding:ehrBinding,window,verified,problems,pending:{kind:'review',request,anchor:problems}},ehrScope),records=new Map<string,{key:string;data:string;revision:string}>(),plugin={get:async({key}:{key:string})=>{const row=records.get(key);if(!row)throw {code:'SECURE_QUEUE_NOT_FOUND'};return row;},create:async(row:{key:string;data:string})=>{expect(Uint8Array.from(atob(row.data),c=>c.charCodeAt(0)).length).toBeLessThanOrEqual(131072+1024);records.set(row.key,{...row,revision:'1'});return {revision:'1'};},compareAndSwap:async()=>{throw new Error('Unexpected duplicate write');}};
+ const options={scope:opaque,native:true,indexedDB:new IDBFactory(),crypto:webcrypto,plugin},nativeJournal=new DraftJournal(await openDraftStore(options));await nativeJournal.load(address);await nativeJournal.persist(address,{kind:'editor',workspaceId:ehrVisit.id,editor:'ehr-read',data,pending:null});nativeJournal.close();const fresh=new DraftJournal(await openDraftStore(options));expect(await fresh.load(address)).toMatchObject({data});fresh.close();expect(records.size).toBe(1);
 });

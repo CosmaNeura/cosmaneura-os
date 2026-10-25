@@ -382,20 +382,69 @@ rollout occurred.
 
 ## Current phone and delivery limits
 
-On October25 the owner requested a phone update. Preview29 is now installed and
-launches on the connected iPhone, with the latest qualified EHR/calendar screens
+On October25 the owner requested a phone update. Preview29 was installed and
+launched on the connected iPhone, with the latest qualified EHR/calendar screens
 and `4d1de237` Messages draft-presence/pull-to-refresh changes. This was an
 in-place update of `com.cosmasos.synthetic.w206`, preserving its signing and
 storage identity. See `native/preview29-phone-summary.json` and the physical
 Preview29 signing receipts in this workstream. No app data reset occurred.
 
+Preview30 has since been installed in place, and the phone confirms build30.
+It includes the `484e5b4` Outlook review-to-Chief workflow. The phone was locked
+when CoreDevice attempted to launch it, so that launch was denied by iOS;
+installation and version confirmation succeeded. The current browser rehearsal
+also serves this build at its existing origin. Neither update reset storage.
+See `CHECKPOINT-OUTLOOK.json` and `native/preview30-phone-summary.json`.
+
+Outlook now reads a selected email through the existing delegated Mail.Read
+permission, retains exact interrupted requests, and requires a current-visit
+review before preparing Chief. The Chief draft survives Back and reopening.
+The adapter does not fetch attachments or remote content; unsupported bodies
+are explicitly unreviewable. Restored content and derived replies are withheld
+when current connection or source access is lost. The final source passed 151
+web tests on both Macs, 142 database checks, 44 adapter/custody checks, 18 desktop
+proxy tests, 103 browser assertions and one native app-hosted Outlook journey.
+The native test had no media attachments. Two final backend-file changes only
+removed trailing whitespace; their before/after hashes are recorded alongside
+the 142-check receipt. No real Microsoft account was connected.
+
 These deliveries do not establish live vendor connections. Atlas.md currently
 has generic calendar-file intake, not synchronization. Elation and Tebra provide
 reviewed patient/appointment context; Athena provides the Core visit-link task.
 None of the four has passed live vendor acceptance in this workstream.
-Longitudinal chart history, medications, problems, labs, prescription relay/eRx
+Longitudinal chart history, medications, labs, prescription relay/eRx
 and clinical writeback remain missing engineering capabilities. They are not
 merely credentials awaiting installation. The phone still uses invented data.
+
+### Elation problem-list implementation
+
+The next implemented slice reads a bounded problem list for the patient in an
+already verified Elation appointment. The adapter rechecks both appointment and
+patient before the clinical request. It preserves recorded Active, Controlled
+or Resolved status and separate verification status, distinguishes empty,
+partial and unknown coverage, and refuses oversized content instead of
+truncating it. Diagnosis codes and synopsis text are outside this first slice.
+The optional `system/problems.read` capability is separate from the existing
+three-scope appointment profile and is disabled by default.
+
+The user flow is **Review EHR records → Read problem list → Save reviewed
+problem list → Prepare Chief draft**. The reviewed snapshot uses the existing
+EHR source custody and encrypted Chief draft. It does not replace the saved
+clinical note or send a message. An unresolved EHR request remains recoverable
+after Back; active I/O still blocks departure until it settles.
+
+The first complete backend run passed 109 checks, including the problem-list
+source, real Chief admission/tool read/settlement, later access withdrawal, and
+existing Elation/Tebra behavior. The adapter passed 220 tests, and the local
+contract/configuration suite passed 58. The final mounted API/database run
+passed six cases, including recovery of a lost problem response, review, Chief
+draft preservation and later source withdrawal. It also qualified the final
+host-permission status correction. The web suite passed 121 cases, and Chromium
+passed 218 checks across phone, enlarged-text and desktop scenarios. Native
+qualification and the next phone package are separate acceptance steps, with
+receipts recorded in the workstream when completed. No Elation sandbox or live
+practice was used; the access packet describes the additional clinical scope
+required.
 
 ## Elation sandbox access
 

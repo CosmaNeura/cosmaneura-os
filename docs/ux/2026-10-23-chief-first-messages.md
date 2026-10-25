@@ -592,3 +592,24 @@ implemented, partial, superseded and explicitly deferred recommendations. Camera
 attachments, live dictation and push notifications remain deferred by the
 accepted decision; an all-kind inline recording/research/material transcript
 and universal semantic color conversion are not complete.
+
+### Outlook source review and Preview30 delivery
+
+Commit `484e5b4` adds one retained Outlook email task reachable from Chief's
+Details, saved sources, and Microsoft settings. Review the chosen text against
+the current visit, save it, then prepare Chief through the existing encrypted
+conversation draft. Back restores the exact draft and focus. An interrupted
+read retains its exact request but no longer traps the user on the email page;
+only active authorization, network or persistence work blocks navigation.
+
+The final browser and Mac Studio checks passed, followed by one native
+app-hosted test exercising real WK navigation and UIKit Done. The native test
+verified the retained Chief prefix, 44px Done control, reachable Back, two
+invented reads and one review, with no external calls or media attachments.
+Preview30 is installed on the phone and its build number is confirmed. iOS
+denied the remote launch because the phone was locked. This does not establish
+physical touch, haptic or VoiceOver acceptance. The current browser rehearsal
+uses the same frozen source and keeps its prior origin and storage.
+
+See the connector workstream's `CHECKPOINT-OUTLOOK.json`,
+`native/outlook-native-review.json` and `native/preview30-phone-summary.json`.

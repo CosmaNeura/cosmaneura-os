@@ -95,6 +95,59 @@ class VerifiedObservation(CommonObservation):
     item: VerifiedItem
 
 
+class ProblemDisplay(Protected):
+    description: str = Field(strict=True, min_length=1, max_length=200)
+    status: Literal["Active", "Controlled", "Resolved"]
+    start_date: date
+    resolved_date: date | None
+    verification_status: Literal["confirmed", "differential", "entered_in_error", "provisional", "refuted", "unconfirmed", ""] | None
+
+    @field_validator("description")
+    @classmethod
+    def safe_text(cls, value):
+        if not value.strip() or any(ord(c) < 32 or ord(c) == 127 or 0xD800 <= ord(c) <= 0xDFFF for c in value):
+            raise ValueError("invalid_problem_description")
+        return value
+
+
+    @model_validator(mode="after")
+    def resolved_status(self):
+        if self.resolved_date is not None and self.status != "Resolved":
+            raise ValueError("invalid_problem_resolution")
+        return self
+
+
+class ProblemList(Protected):
+    coverage: Literal["end_of_results", "more_rows_available", "unknown"]
+    total_count: int | None = Field(strict=True, ge=0, le=2147483647)
+    items: tuple[ProblemDisplay, ...] = Field(max_length=25)
+
+    @model_validator(mode="after")
+    def consistent_count(self):
+        count = len(self.items)
+        if (self.total_count is not None and self.total_count < count
+                or self.coverage == "end_of_results" and self.total_count is not None and self.total_count != count
+                or self.coverage == "more_rows_available" and (not count or self.total_count is not None and self.total_count <= count)):
+            raise ValueError("invalid_problem_coverage")
+        return self
+
+
+class ProblemsItem(VerifiedItem):
+    problems: ProblemList
+
+
+class VerifiedParent(Protected):
+    observation_id: UUID
+    source_sha256: Digest
+    item_sha256: Digest
+
+
+class ProblemsObservation(CommonObservation):
+    kind: Literal["verified_problems"]
+    parent: VerifiedParent
+    item: ProblemsItem
+
+
 class PrivateAppointment(Protected):
     appointment_id: ProviderId
     patient_id: ProviderId | None
@@ -124,6 +177,17 @@ class PrivateSnapshot(Protected):
     request_sha256: Digest
     items: tuple[PrivateItem, ...] = Field(max_length=25)
     provider_sources: tuple[Digest, ...] = Field(min_length=1, max_length=2)
+
+
+class PrivateProblem(ProblemDisplay):
+    problem_id: ProviderId
+    patient_id: ProviderId
+    practice_id: ProviderId
+
+
+class ProblemsPrivateSnapshot(PrivateSnapshot):
+    provider_sources: tuple[Digest, ...] = Field(min_length=3, max_length=3)
+    problems: tuple[PrivateProblem, ...] = Field(max_length=25)
 
 
 TebraStatus = Literal["Confirmed", "Check-in", "No-show", "Check-out", "Rescheduled", "Scheduled", "Cancelled"]
@@ -193,18 +257,22 @@ class TebraPrivateSnapshot(Protected):
 
 
 class SnapshotPayload(Protected):
-    public: WindowObservation | VerifiedObservation | TebraWindowObservation | TebraVerifiedObservation
-    private: PrivateSnapshot | TebraPrivateSnapshot
+    public: WindowObservation | VerifiedObservation | ProblemsObservation | TebraWindowObservation | TebraVerifiedObservation
+    private: ProblemsPrivateSnapshot | PrivateSnapshot | TebraPrivateSnapshot
 
     @model_validator(mode="before")
     @classmethod
     def private_provider(cls, value):
+        if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("kind") == "verified_problems":
+            return {**value, "private": ProblemsPrivateSnapshot.model_validate(value["private"])}
         if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("provider") == "tebra":
             return {**value, "private": TebraPrivateSnapshot.model_validate(value["private"])}
         return value
 
     @model_validator(mode="after")
     def same_provider(self):
+        if isinstance(self.public, ProblemsObservation) != isinstance(self.private, ProblemsPrivateSnapshot):
+            raise ValueError("problem_payload_mismatch")
         if (self.public.provider == "tebra") != isinstance(self.private, TebraPrivateSnapshot):
             raise ValueError("provider_payload_mismatch")
         return self

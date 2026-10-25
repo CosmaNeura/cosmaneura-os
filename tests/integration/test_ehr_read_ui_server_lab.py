@@ -12,16 +12,25 @@ from sqlalchemy import func, select
 from tests.integration.test_ehr_reads import ehr_case as _ehr_case
 from tests.integration.test_ehr_reads import revoke
 from tests.integration.test_ehr_reads import signed_workspace as _signed_workspace
+from tests.integration.test_elation_problem_sources import problem_case as _problem_case
 
 from cosmas_os.models import ModelWorkAdmission
 
+problem_case = _problem_case
 ehr_case = _ehr_case
 signed_workspace = _signed_workspace
 REPO = Path(__file__).resolve().parents[2]
 
 
 def test_signed_elation_ui_recovers_one_read_and_prepares_existing_chief_draft(ehr_case, tmp_path):
-    f = ehr_case
+    run_signed_elation_ui(ehr_case, tmp_path, problems=False)
+
+
+def test_signed_elation_problem_ui_recovers_one_read_and_prepares_existing_chief_draft(problem_case, tmp_path):
+    run_signed_elation_ui(problem_case, tmp_path, problems=True)
+
+
+def run_signed_elation_ui(f, tmp_path, *, problems):
     node = shutil.which("node")
     assert node is not None
     initial_models = f.s.scalar(select(func.count()).select_from(ModelWorkAdmission))
@@ -69,7 +78,7 @@ def test_signed_elation_ui_recovers_one_read_and_prepares_existing_chief_draft(e
     report = tmp_path / "ehr-read-ui.json"
     env = {key: os.environ[key] for key in ("PATH", "TMPDIR") if key in os.environ}
     env.update(COSMAS_EHR_UI_LAB_URL=f"http://127.0.0.1:{server.server_port}",
-        COSMAS_EHR_UI_LAB_REPORT=str(report))
+        COSMAS_EHR_UI_LAB_REPORT=str(report), COSMAS_EHR_UI_LAB_PROBLEMS="1" if problems else "0")
     try:
         result = subprocess.run([node, "node_modules/vitest/vitest.mjs", "run",
             "src/EhrReadServerLab.test.tsx", "--maxWorkers=1"], cwd=REPO / "web",
@@ -77,9 +86,10 @@ def test_signed_elation_ui_recovers_one_read_and_prepares_existing_chief_draft(e
         assert result.returncode == 0, result.stdout + result.stderr
         evidence = json.loads(report.read_text())
         assert evidence["passed"] and evidence["screenshots"] == 0
-        assert evidence["provider_calls"] == 6
+        assert evidence["provider_calls"] == (10 if problems else 6)
+        assert evidence["problems"] == problems
         assert evidence["model_admissions"] == initial_models
-        assert len(f.provider.calls) == 6
+        assert len(f.provider.calls) == (10 if problems else 6)
     finally:
         server.shutdown()
         server.server_close()
