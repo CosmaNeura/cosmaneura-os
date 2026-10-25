@@ -81,6 +81,9 @@ import { GoogleMessageMount } from './GoogleMessageMount';
 import {GoogleCalendarMount} from './GoogleCalendarMount';
 import {GOOGLE_CALENDAR_BUILD} from './google-calendar-api';
 import type {GoogleCalendarSaved} from './google-calendar-recovery';
+import {EhrReadMount} from './EhrReadMount';
+import {EHR_READ_BUILD} from './ehr-read-api';
+import type {EhrReadSaved} from './ehr-read-recovery';
 import { GOOGLE_MESSAGE_BUILD } from './google-message-api';
 import type {GoogleMessageSaved} from './google-message-recovery';
 import {EFaxSourceReviewMount} from './EFaxSourceReviewMount';
@@ -148,10 +151,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
   const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
+  const ehrVisitSelection=useRef(false);
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
-  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,ehr:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const {activityNavigation}=session;
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
@@ -276,6 +280,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   }, [connectionGeneration]);
   const reportGoogleCalendarBusy = useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.googleCalendar===blocked?previous:{...previous,googleCalendar:blocked});
+  },[connectionGeneration]);
+  const reportEhrBusy = useCallback((blocked:boolean)=>{
+    if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.ehr===blocked?previous:{...previous,ehr:blocked});
   },[connectionGeneration]);
   const reportMicrosoftBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.microsoft===blocked?previous:{...previous,microsoft:blocked});
@@ -435,8 +442,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setInboxSelection(null);setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
-    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
+    ehrVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
     setEntryIntent(null);setRecordingSourceRequest(0);setSelectedSource(null); setSelectedResult(null);
@@ -510,7 +518,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     return session.loading.open({...loadingContext(),locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,
       begin:()=>{chiefNotebookFocus.current=null;},resetCapture:(record,useRecording)=>{setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(record?1:0);setRecordingSourceRequest(useRecording?1:0);},
       focusChief:(workspace,generation)=>{chiefNotebookFocus.current={workspace,generation};},focusFax:()=>setFocusFaxWork(true),showResearch:()=>setSavedResearchChat(false),
-      afterOpen:()=>{if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}},
+      afterOpen:()=>{if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}},
       retryRead:authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection,
     },appointmentId,coreSelection,incoming,recordVisit);
   }
@@ -900,10 +908,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   },[authenticated,workspace?.id,selected,reviewHandoffId,clinicalTeamExpanded]);
   function reviewTeamResult(handoff:DraftHandoff,fromChiefPlan=false){session.review.open(handoff,reviewContext(),fromChiefPlan);}
   function prepareFreshHandoff(feedback:string){session.review.prepareFresh(feedback,reviewContext());}
-  function sourceContext():import('./session/sources').SourceContext{return {authenticated,locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,schedulingPatientBusy,accountAccess,failure,focusQuestion:()=>setQuestionFocus(value=>value+1)};}
+  function sourceContext():import('./session/sources').SourceContext{return {authenticated,locked,connectionNavigationLocked,captureNavigationLocked,captureDraftLocked,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,schedulingPatientBusy,accountAccess,failure,conversationHost:conversationHost(),focusQuestion:()=>setQuestionFocus(value=>value+1)};}
   function receiveGoogleSource(latest:Workspace){return session.sources.receive(latest);}
   function refreshGoogleVisit(){return session.sources.refresh(sourceContext());}
   function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){return session.sources.prepareGoogle(sourceContext(),source,kind);}
+  function prepareEhrChief(source:EhrReadSaved){return session.sources.prepareEhr(sourceContext(),source);}
 
   function receiveFaxDocument(document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){return session.sources.receiveFax(sourceContext(),document,request);}
   function refreshFaxDocument(){return session.sources.refreshFax(sourceContext());}
@@ -1134,6 +1143,14 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         onReviewProviderFaxDocument={FAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveProviderFaxDocument:undefined}
         initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
+        ehr={EHR_READ_BUILD&&authenticated?(visitLinked&&workspace?<EhrReadMount identity={authenticated}
+          workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
+          currentSources={workspace.entries.filter(entry=>entry.kind==='ehr_read_source'&&!!entry.ehr_source_state).map(entry=>({id:entry.id,state:entry.ehr_source_state!}))}
+          locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
+          recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
+          onBusyChange={reportEhrBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource}
+          onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareEhrChief(source)}/>:<section aria-label="Choose a visit for Elation"><p>Choose the existing visit that will receive your reviewed appointment details.</p>
+          <button className="team-primary" disabled={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>{if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;ehrVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}>Choose a visit</button></section>):undefined}
         google={GOOGLE_CONNECTION_BUILD&&authenticated?<AccountRecoveryContext.Provider value={accountAccess}>
           <GoogleConnectionPanel identity={authenticated} onBusyChange={reportGoogleBusy} onAuthenticationLost={failure}
             messageWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.googleMessages||connectionLocks.googleCalendar}

@@ -1,0 +1,122 @@
+import './ehr-read.css';
+import {useEffect,useRef,useState} from 'react';
+import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from './workspace-api';
+import {ehrReadApi,ehrMatchesCommand,ehrReviewProvesNoCommit,validEhrWindow,type EhrReadStatus,type EhrReceipt,type EhrWindowItem,type EhrCommand,type EhrReviewResponse,type EhrResolve} from './ehr-read-api';
+import {emptyEhrReadRecovery,validateEhrReadRecovery,type EhrReadRecovery,type EhrReadRecoveryAccess,type EhrReadSaved,type EhrReadScope,type EhrReadVisit,type EhrPending,type EhrSupersededRead} from './ehr-read-recovery';
+import {useGoogleNativeForeground} from './use-google-native-foreground';
+import {useUnsavedWork} from './unsaved-work';
+import {modelCanonical} from './model-work-request';
+export type EhrReadPanelProps={identity:AuthenticatedWorkspaceIdentity;scope:EhrReadScope;recovery:EhrReadRecoveryAccess;workspace:EhrReadVisit;locked?:boolean;recoveryLocked?:boolean;currentSources?:readonly {id:string;state:'current'|'unavailable'}[];onSaved(workspace:Workspace):void;onBusyChange?(busy:boolean):void;onAuthenticationLost(error:unknown):void;onAskChief?(source:EhrReadSaved):void;onRefreshVisit?():Promise<void>};
+const authority=(e:unknown)=>e instanceof WorkspaceApiError&&[401,403].includes(e.status);
+const localTime=(date:Date)=>new Date(date.getTime()-date.getTimezoneOffset()*60000).toISOString().slice(0,16);
+const message=(e:unknown)=>e instanceof WorkspaceApiError&&['ehr_read_binding_changed','ehr_read_binding_unavailable','ehr_read_permission_denied','ehr_read_authentication_required'].includes(e.code??'')?'Elation access changed. Saved details are hidden. Check practice access before continuing.':e instanceof WorkspaceApiError&&['ehr_read_appointment_changed','ehr_read_record_unavailable','ehr_read_source_changed','ehr_read_expired','ehr_read_superseded'].includes(e.code??'')?'This appointment could not be verified from the saved list. Recheck access, then load a fresh appointment list.':e instanceof WorkspaceApiError&&e.code==='workspace_revision_conflict'?'This visit changed. Refresh the visit, check the patient and appointment again, then save.':'The result could not be confirmed. Your saved request is retained; check its saved result before trying again.';
+export function EhrReadPanel(props:EhrReadPanelProps){
+ const {identity,scope,recovery,workspace,locked=false,recoveryLocked=false,currentSources}=props,scopeKey=modelCanonical(scope);
+ const callbacks=useRef(props);callbacks.current=props;
+ const owner=useRef({identity,recovery,scopeKey,generation:0,alive:true});
+ if(owner.current.identity!==identity||owner.current.recovery!==recovery||owner.current.scopeKey!==scopeKey)owner.current={identity,recovery,scopeKey,generation:owner.current.generation+1,alive:true};
+ const [record,setRecord]=useState<EhrReadRecovery|null>(null),latest=useRef<EhrReadRecovery|null>(null),[offer,setOffer]=useState(false),[ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState(''),[connection,setConnection]=useState<EhrReadStatus|null>(null),[visible,setVisible]=useState(false),[checks,setChecks]=useState([false,false,false,false]),[missing,setMissing]=useState(false),[unconfirmed,setUnconfirmed]=useState<EhrResolve|null>(null),[epoch,setEpoch]=useState(0);
+ const [starts,setStarts]=useState(()=>localTime(new Date())),[ends,setEnds]=useState(()=>localTime(new Date(Date.now()+86400000)));
+ const shown=useRef({identity,recovery,scopeKey}),active=useRef(false),controller=useRef<AbortController|null>(null);
+ const native=useGoogleNativeForeground(identity,{suspended:()=>{owner.current.generation++;controller.current?.abort();setVisible(false);setChecks([false,false,false,false]);setConnection(null);setReady(false);},resumed:()=>{setVisible(false);setChecks([false,false,false,false]);setEpoch(n=>n+1);}});
+ const isCurrent=(g:number)=>owner.current.alive&&owner.current.generation===g&&owner.current.identity===identity&&owner.current.recovery===recovery&&owner.current.scopeKey===scopeKey&&native.foreground.current;
+ useEffect(()=>{
+  owner.current.alive=true;const g=++owner.current.generation;shown.current={identity,recovery,scopeKey};latest.current=null;setRecord(null);setOffer(false);setReady(false);setVisible(false);setConnection(null);setError('');setChecks([false,false,false,false]);setMissing(false);setUnconfirmed(null);
+  if(native.foreground.current)void recovery.load().then(async value=>{if(!isCurrent(g))return;const next=value===null?emptyEhrReadRecovery(scope):await validateEhrReadRecovery(value,scope);if(!isCurrent(g))return;latest.current=next;setRecord(next);setOffer(value!==null);setReady(value===null);}).catch(e=>{if(isCurrent(g)){setError('Private saved-work storage could not be opened. Recheck storage before continuing.');if(authority(e)){recovery.denied?.(e);callbacks.current.onAuthenticationLost(e);}}});
+  return()=>{owner.current.alive=false;owner.current.generation++;controller.current?.abort();};
+ },[identity,recovery,scopeKey,epoch]);
+ useEffect(()=>{setChecks([false,false,false,false]);},[workspace.id,workspace.revision,locked]);
+ useEffect(()=>{props.onBusyChange?.(busy);return()=>props.onBusyChange?.(false);},[busy,props.onBusyChange]);
+ useUnsavedWork(busy||offer||!!record?.pending||checks.some(Boolean));
+ const sameOwner=shown.current.identity===identity&&shown.current.recovery===recovery&&shown.current.scopeKey===scopeKey;
+ const withheld=!!record?.saved&&currentSources?.some(s=>s.id===record.saved!.entry_id&&s.state==='unavailable');
+ const blocked=locked||recoveryLocked||busy||!sameOwner||native.suspended;
+ const available=ready&&visible&&connection?.status==='ready'&&!withheld;
+ const persist=async(next:EhrReadRecovery,g:number)=>{const data=await validateEhrReadRecovery(next,scope);if(!isCurrent(g))throw new WorkspaceApiError(403);await recovery.authorize();if(!isCurrent(g))throw new WorkspaceApiError(403);await recovery.persist(data);if(!isCurrent(g))throw new WorkspaceApiError(403);latest.current=data;setRecord(data);return data;};
+ async function run(action:(g:number,signal:AbortSignal)=>Promise<void>){
+  if(active.current||blocked)return;active.current=true;setBusy(true);setError('');setNotice('');const g=owner.current.generation,c=new AbortController();controller.current=c;
+  try{await recovery.authorize();if(!isCurrent(g))return;await action(g,c.signal);}
+  catch(e){if(isCurrent(g)){setError(!latest.current?.pending&&!(e instanceof WorkspaceApiError&&['ehr_read_binding_changed','ehr_read_binding_unavailable','ehr_read_permission_denied','ehr_read_authentication_required','ehr_read_appointment_changed','ehr_read_record_unavailable','ehr_read_source_changed','ehr_read_expired','ehr_read_superseded','workspace_revision_conflict'].includes(e.code??''))?'This step could not be saved or checked. Recheck private storage and Elation access before continuing.':message(e));setChecks([false,false,false,false]);if(authority(e)){setVisible(false);setConnection(null);setReady(false);recovery.denied?.(e);callbacks.current.onAuthenticationLost(e);}else if(e instanceof WorkspaceApiError&&([404,426].includes(e.status)||['ehr_read_binding_changed','ehr_read_binding_unavailable','ehr_read_permission_denied','ehr_read_authentication_required','ehr_read_appointment_changed','ehr_read_record_unavailable','ehr_read_expired','ehr_read_superseded'].includes(e.code??'')))setVisible(false);}}
+  finally{active.current=false;if(controller.current===c)controller.current=null;if(owner.current.alive)setBusy(false);}
+ }
+ async function checkAccess(g:number,signal:AbortSignal){
+  setVisible(false);setChecks([false,false,false,false]);const status=await ehrReadApi.status(identity,signal);if(!isCurrent(g))return;setConnection(status);
+  if(status.status!=='ready'){setNotice(status.status==='not_enabled'?'Elation appointment review is not enabled for this practice.':'Elation setup is pending. Ask the practice administrator to finish the installed connection.');return;}
+  const r=latest.current;if(r?.binding&&(r.binding.connection_id!==status.connection_id||r.binding.binding_sha256!==status.binding_sha256))throw new WorkspaceApiError(409,'ehr_read_binding_changed');
+  const anchor=r?.verified??r?.window;if(anchor&&!r?.pending)await ehrReadApi.inspect(identity,anchor,signal);if(!isCurrent(g))return;setVisible(true);
+ }
+ async function settleRead(receipt:EhrReceipt,pending:Extract<EhrPending,{kind:'read'}>,g:number){
+  if(!ehrMatchesCommand(receipt,pending.request,pending.anchor))throw new WorkspaceApiError(502);
+  const r=latest.current!;await persist({...r,pending:null,...(pending.request.action==='observe'?{window:receipt,verified:null}:{verified:receipt}),saved:null,saved_request:null},g);setMissing(false);setUnconfirmed(null);setChecks([false,false,false,false]);setVisible(true);
+ }
+ async function startRead(command:EhrCommand,anchor:EhrReceipt|null,g:number,signal:AbortSignal,superseded?:EhrSupersededRead[]){
+  const r=latest.current!,pending:EhrPending={kind:'read',request:command,anchor};
+  setVisible(false);
+  await persist({...r,superseded_reads:superseded??r.superseded_reads,binding:{connection_id:command.connection_id,binding_sha256:command.binding_sha256},window:command.action==='observe'?null:r.window,verified:null,pending,saved:null,saved_request:null},g);setChecks([false,false,false,false]);setMissing(false);setUnconfirmed(null);
+  const receipt=await ehrReadApi.execute(identity,command,anchor,signal);if(isCurrent(g))await settleRead(receipt,pending,g);
+ }
+ async function load(g:number,signal:AbortSignal){
+  if(!connection||connection.status!=='ready'||!connection.connection_id||!connection.binding_sha256||!available||latest.current?.pending)return;
+  const window={starts_at:new Date(starts).toISOString(),ends_at:new Date(ends).toISOString()};if(!validEhrWindow(window))throw new WorkspaceApiError(422);
+  await startRead({action:'observe',connection_id:connection.connection_id,binding_sha256:connection.binding_sha256,...window,idempotency_key:crypto.randomUUID()},null,g,signal);
+ }
+ async function select(item:EhrWindowItem,g:number,signal:AbortSignal){
+  const r=latest.current;if(!available||r?.pending||!r?.window||!r.binding||!item.selectable)return;
+  await startRead({action:'verify',...r.binding,observation_id:r.window.observation_id,observation_sha256:r.window.source_sha256,item_handle:item.handle,item_sha256:item.sha256,idempotency_key:crypto.randomUUID()},r.window,g,signal);
+ }
+ async function settleReview(result:EhrReviewResponse,pending:Extract<EhrPending,{kind:'review'}>,g:number){
+  const saved:EhrReadSaved={workspace_id:scope.workspace_id,entry_id:result.entry_id,entry_revision:result.entry_revision,source_sha256:result.source.source_sha256,content_sha256:result.source.content_sha256,request_sha256:result.request_sha256,source_withheld:result.source_withheld};
+  await persist({...latest.current!,pending:null,saved,saved_request:pending.request},g);if(!isCurrent(g))return;setVisible(!saved.source_withheld);setChecks([false,false,false,false]);callbacks.current.onSaved(result.workspace);setNotice(saved.source_withheld?'The source was saved, but its access needs checking.':'Reviewed appointment saved to this visit. Prepare a Chief draft when you are ready.');
+ }
+ async function review(g:number,signal:AbortSignal){
+  const r=latest.current;if(!available||!checks.every(Boolean)||r?.pending||!r?.verified||r.verified.observation.kind!=='verified_visit')return;
+  const item=r.verified.observation.item,pending:Extract<EhrPending,{kind:'review'}>={kind:'review',anchor:r.verified,request:{expected_revision:workspace.revision,idempotency_key:crypto.randomUUID(),observation_id:r.verified.observation_id,observation_sha256:r.verified.source_sha256,item_handle:item.handle,item_sha256:item.sha256,reviewed_visit:true,reviewed_patient_identity:true,reviewed_exact_snapshot:true,reviewed_untrusted_source:true}};
+  await persist({...r,pending,saved:null,saved_request:null},g);setChecks([false,false,false,false]);await dispatchReview(pending,g,signal);
+ }
+ async function dispatchReview(p:Extract<EhrPending,{kind:'review'}>,g:number,signal:AbortSignal){
+  try{const result=await ehrReadApi.review(identity,scope.workspace_id,p.request,p.anchor,signal);if(isCurrent(g))await settleReview(result,p,g);}
+  catch(e){if(isCurrent(g)&&ehrReviewProvesNoCommit(e))await persist({...latest.current!,pending:null},g);throw e;}
+ }
+ async function recover(g:number,signal:AbortSignal){
+  const p=latest.current?.pending;if(!p)return;
+  if(p.kind==='review'){await dispatchReview(p,g,signal);return;}
+  const result=await ehrReadApi.resolve(identity,p.request,p.anchor,signal);if(!isCurrent(g))return;
+  if('status' in result){setMissing(result.status==='not_found');setUnconfirmed(result.status==='unconfirmed'?result:null);setNotice(result.status==='not_found'?'No saved result was found. You may explicitly send this same saved request.':'This request is still unconfirmed. Check its saved result again; a new read has not been started.');}
+  else await settleRead(result,p,g);
+ }
+ async function freshWindow(g:number,signal:AbortSignal){
+  const r=latest.current,p=r?.pending;if(!r||p?.kind!=='read'||!unconfirmed||unconfirmed.status!=='unconfirmed'||unconfirmed.observation_key!==p.request.idempotency_key||connection?.status!=='ready'||connection.connection_id!==r.binding?.connection_id||connection.binding_sha256!==r.binding?.binding_sha256)return;
+  const window=p.request.action==='observe'?{starts_at:p.request.starts_at,ends_at:p.request.ends_at}:p.anchor?.observation.window;if(!window)return;
+  const retained=[...r.superseded_reads,{request:p.request,resolution:unconfirmed}].slice(-3);
+  await startRead({action:'observe',...r.binding,...window,idempotency_key:crypto.randomUUID()},null,g,signal,retained);
+ }
+ const dateRange=(()=>{try{return {starts_at:new Date(starts).toISOString(),ends_at:new Date(ends).toISOString()};}catch{return null;}})();
+ const observation=available?(record?.verified?.observation??record?.window?.observation):null;
+ const windowObservation=available&&record?.window?.observation.kind==='window'?record.window.observation:null;
+ const format=(s:string)=>new Intl.DateTimeFormat(undefined,{dateStyle:'medium',timeStyle:'short',timeZone:connection?.practice?.timezone||'UTC'}).format(new Date(s));
+ return <section className="ehr-read-panel" aria-label="Elation appointments">
+  <h3>Choose an appointment for this visit</h3><p>Visit: <strong>{workspace.label}</strong></p>
+  <p className="team-fine">Read one appointment page, check the patient and visit, then save a reviewed source. This setup uses invented records.</p>
+  {error&&<p role="alert">{error}</p>}{notice&&<p role="status">{notice}</p>}
+  {native.suspended&&<p role="status">Details are hidden while the app is in the background. Recheck access when you return.</p>}
+  {!sameOwner||!record?<><p role="status">Checking private saved-work storage…</p>{error&&<button disabled={blocked} onClick={()=>setEpoch(n=>n+1)}>Recheck saved-work storage</button>}</>:<>
+   {offer?<><p>Saved Elation work is available for this visit. Restore it to check its result; restoring does not read Elation.</p><button className="team-primary" disabled={blocked} onClick={()=>void run(async(g)=>{await recovery.authorize();if(!isCurrent(g))return;setOffer(false);setReady(true);setVisible(false);setNotice('Saved work restored. Check access before viewing details.');})}>Restore saved Elation work</button></>:<>
+    <button className={!available&&!record.pending?"team-primary":undefined} disabled={blocked||!ready} onClick={()=>void run(checkAccess)}>Check Elation access</button>
+    {connection?.status==='ready'&&<p className="team-fine">{connection.practice?.label} · Synthetic records · Appointment times use {connection.practice?.timezone}</p>}
+    {record.pending?<div role="group" aria-label="Saved Elation request"><p>A request is saved and its result needs checking. Keep this request until its outcome is known.</p><button className="team-primary" disabled={blocked||!ready} onClick={()=>void run(recover)}>{record.pending.kind==='review'?'Check saved source result':'Check saved appointment result'}</button>
+      {unconfirmed&&record.pending.kind==='read'&&<><p>You can load a fresh list for the same dates. The earlier read stays recorded and cannot replace the new list.</p><button disabled={blocked||!ready||connection?.status!=='ready'} onClick={()=>void run(freshWindow)}>Load a fresh appointment list</button></>}
+      {missing&&record.pending.kind==='read'&&<button disabled={blocked||!ready||!available} onClick={()=>void run(async(g,signal)=>{const p=latest.current?.pending;if(p?.kind!=='read')return;setMissing(false);const result=await ehrReadApi.execute(identity,p.request,p.anchor,signal);if(isCurrent(g))await settleRead(result,p,g);})}>Send same saved request</button>}</div>:<>
+      <fieldset disabled={blocked||!available}><legend>Choose a date range</legend><p className="team-fine">Enter times in your device timezone ({Intl.DateTimeFormat().resolvedOptions().timeZone}). Up to 7 days; the end time is excluded.</p><label>From<input type="datetime-local" value={starts} onChange={e=>setStarts(e.target.value)}/></label><label>Until<input type="datetime-local" value={ends} onChange={e=>setEnds(e.target.value)}/></label>{available&&(!dateRange||!validEhrWindow(dateRange))&&<p role="alert">Choose a valid start and end time, with the end after the start and no more than 7 days apart.</p>}<button className={available&&!record.window?"team-primary":undefined} disabled={blocked||!available||!dateRange||!validEhrWindow(dateRange)} onClick={()=>void run(load)}>Load appointments</button></fieldset>
+      {windowObservation&&<><p>{windowObservation.coverage==='more_rows_available'?'More appointments exist. This page is incomplete; narrow the date range to look for a missing appointment.':'One returned page is shown. This snapshot does not establish current availability.'}</p>{!windowObservation.items.length?<p>No matching appointments were returned in this page. Check the date range.</p>:<ul aria-label="Appointments">{windowObservation.items.map(item=><li key={item.handle}><button disabled={blocked||!item.selectable} onClick={()=>void run((g,s)=>select(item,g,s))}>{format(item.starts_at)} · {item.status??'Status unavailable'}</button>{!item.selectable&&<small> Patient verification unavailable for this appointment.</small>}</li>)}</ul>}</>}
+      {observation?.kind==='verified_visit'&&<div aria-label="Review patient and visit"><h4>Check this patient and appointment</h4><p>{observation.item.patient.first_name} {observation.item.patient.last_name}</p><p>Date of birth: {observation.item.patient.birth_date}</p><p>{format(observation.item.starts_at)} to {format(observation.item.ends_at)} · {observation.item.status??'Status unavailable'}</p><p className="team-fine">Observed {format(observation.observed_at)}. Appointment details only. Check Elation for current availability and the full chart.</p>
+       {!record.saved&&<><fieldset disabled={blocked}><legend>Confirm before saving</legend>{['The appointment belongs in '+workspace.label+'.','The name and date of birth match the intended patient.','I reviewed the appointment details shown above.','I will check these outside details before relying on them.'].map((label,i)=><label key={i}><input type="checkbox" checked={checks[i]} onChange={e=>setChecks(old=>old.map((v,n)=>n===i?e.target.checked:v))}/>{label}</label>)}</fieldset><button className="team-primary" disabled={blocked||!checks.every(Boolean)} onClick={()=>void run(review)}>Save reviewed appointment</button></>}
+      </div>}
+      {record.saved&&<div><p>{record.saved.source_withheld||withheld?'This saved source is unavailable. Check practice access.':'Reviewed appointment saved to this visit.'}</p>{props.onAskChief&&<button className={available&&!record.saved.source_withheld?"team-primary":undefined} disabled={blocked||!available||record.saved.source_withheld} onClick={()=>props.onAskChief?.(record.saved!)}>Prepare Chief draft</button>}</div>}
+      {record.binding&&<button className="team-subtle" disabled={blocked||!ready} onClick={()=>void run(async g=>{await persist(emptyEhrReadRecovery(scope),g);setVisible(false);setConnection(null);setChecks([false,false,false,false]);setNotice('Saved review closed. Check access to choose another appointment.');})}>Choose another appointment</button>}
+      {props.onRefreshVisit&&<button className="team-subtle" disabled={blocked} onClick={()=>void run(async()=>{await props.onRefreshVisit?.();setChecks([false,false,false,false]);})}>Refresh visit</button>}
+     </>}
+    </>}
+   </>}
+   {busy&&<p role="status">Checking and saving this step…</p>}
+ </section>;
+}

@@ -150,3 +150,45 @@ vendor acceptance. Elation remains default-off and sandbox-only; Tebra is
 synthetic-transport-only until its ambiguous provider contract is qualified.
 The existing mobile candidate is separate: all nine GitHub CI jobs pass for
 `1a4ebbf`, and Preview28 physical acceptance remains outstanding.
+
+## Elation user-journey checkpoint
+
+The second checkpoint connects the Elation adapter to actual signed application
+routes, immutable PostgreSQL read/review records, encrypted local recovery and
+the shared conversation session. Connections offers **Elation appointments**
+when the build flag is enabled. Staff chooses an existing visit, loads a bounded
+appointment page, verifies the patient name/date of birth, reviews the details
+and saves the source. **Prepare Chief draft** keeps existing Chief directions
+and the outgoing coworker's draft; it does not send a message or call a model.
+
+The joined mounted-UI test uses the actual RSA-signed API and PostgreSQL ledger.
+It deliberately loses the successful read reply, resolves that exact request,
+then verifies/saves the appointment and prepares Chief. It passes with six
+synthetic provider requests, zero model admissions, the existing draft retained
+and revoked source content withheld. Both 390px and 1280px browser layout checks
+pass with 44px main controls and at most one primary next action. No screenshots
+or external requests were used by those layout checks.
+
+Independent source review reproduced a postcommit access race in both window
+and patient verification responses. The service now reacquires current authority
+and revalidates the saved result before disclosure. Read recovery never repeats
+provider I/O. An explicitly requested fresh list can supersede an unconfirmed
+read while retaining its old command; pending source saves cannot use that path.
+
+This is an integrated **synthetic** workflow, not a qualified live connection.
+The server flag `WORKSPACE_EHR_READ_ENABLED` and renderer flag
+`VITE_EHR_READ_ENABLED` default to false. The runtime accepts only an explicitly
+installed in-process MockTransport and invented credentials. This slice supports
+signed Clerk external identities, one page (up to 25 appointments), exact
+appointment/patient verification and one reviewed source. Patient search,
+additional pages, real credential installation and vendor qualification remain
+separate gates. Date inputs explicitly use the device timezone; returned
+appointment times show the practice timezone.
+
+Current repository history is immutable: it has no source/workspace deletion
+endpoint, and the existing artifact-retention purge does not erase EHR snapshots.
+Access revocation withholds selected content and dependent drafts; that is not
+content erasure. An EHR retention/erasure policy and implementation are required
+before storing real patient data. Native recovery framing is tested, while a
+rebuilt native client and physical-device acceptance of this new EHR flow remain
+outstanding. Atlas.md and Tebra activation limits above remain unchanged.

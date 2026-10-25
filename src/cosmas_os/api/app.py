@@ -2164,6 +2164,18 @@ app.include_router(google_calendar_router(
     fence=_refresh_model_identity))
 app.add_middleware(GoogleCalendarBoundary)
 
+from cosmas_os.api.ehr_read_routes import EhrReadBoundary  # noqa: E402
+from cosmas_os.api.ehr_read_routes import router as ehr_read_router  # noqa: E402
+from cosmas_os.application import ehr_reads  # noqa: E402
+
+ehr_reads.configure_runtime_reader(lambda: getattr(app.state, "ehr_reads", None))
+app.include_router(ehr_read_router(
+    runtime=lambda: getattr(app.state, "ehr_reads", None), configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(EhrReadBoundary)
+allowed_headers.append("X-Cosmas-Ehr-Read")
+
 
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402
 

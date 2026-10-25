@@ -1,4 +1,4 @@
-"""Current custody for explicitly shared email, calendar and fax evidence.
+"""Current custody for explicitly shared email, calendar, fax and EHR sources.
 
 Source kinds keep separate ledgers. Historical provenance never grants current
 model or human-review access, including for uncited derived drafts.
@@ -12,6 +12,7 @@ SOURCE_STATE_FIELDS = {
     "google_calendar": "calendar_source_state",
     "efax_inbound_source": "fax_source_state",
     "fax_inbound_source": "practice_fax_source_state",
+    "ehr_read_source": "ehr_source_state",
 }
 
 
@@ -20,6 +21,10 @@ def is_selected_connector(entry):
 
 
 def _service(kind):
+    if kind == "ehr_read_source":
+        from cosmas_os.application import ehr_reads
+
+        return ehr_reads
     if kind == "google_message":
         from cosmas_os.application import google_message
 

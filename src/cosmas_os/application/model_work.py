@@ -602,8 +602,8 @@ def _context_for(
     from cosmas_os.application.clinical_note_share import clinical_request
 
     context = clinical_request(s, workspace, settings, command["content"], context)
-    selected_google_kinds = {"google_message", "google_calendar"}
-    if any(s.get(WorkspaceEntry, source.entry_id).kind in selected_google_kinds
+    bounded_connector_kinds = {"google_message", "google_calendar", "ehr_read_source"}
+    if any(s.get(WorkspaceEntry, source.entry_id).kind in bounded_connector_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
                 prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS
@@ -612,6 +612,9 @@ def _context_for(
             or sum(len(source.content) for source in context.sources) > 30000):
         has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind == "google_calendar"
             for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
+        if any(s.get(WorkspaceEntry, source.entry_id).kind == "ehr_read_source"
+               for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
+            raise ws.WorkspaceError("ehr_read_source_context_too_large", 422)
         raise ws.WorkspaceError("selected_google_context_too_large" if has_calendar else "google_message_context_too_large", 422)
     has_fax = any(s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
                   for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
@@ -685,6 +688,10 @@ def _selected_connector_passages(s, workspace, settings):
     from cosmas_os.ports.bot_capabilities import SourcePassage
 
     reviewed = []
+    if team.runtime_settings.workspace_ehr_read_available:
+        from cosmas_os.application import ehr_reads
+
+        reviewed.extend(ehr_reads.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.efax_inbound_source_available:
         reviewed.extend(efax_inbound_source.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.fax_inbound_source_available:

@@ -17,6 +17,34 @@ async function click(text: string) {
   const button = visibleButtons().find(button => button.textContent?.includes(text));
   expect(button, `Visible button: ${text}`).toBeDefined(); await act(async () => button!.click());
 }
+it('opens Elation only when offered and selected, and retains its pending editor across navigation', async () => {
+  const mounted = vi.fn(), unmounted = vi.fn();
+  function Elation() { useEffect(() => { mounted(); return unmounted; }, []); return <input aria-label="Elation dates" defaultValue="Retained window"/>; }
+  const render = (enabled:boolean, initialScreen:'home'|'ehr'='home') => act(async () => root.render(<SettingsHub open initialScreen={initialScreen}
+    ehr={enabled?<Elation/>:undefined} team={<p>Team</p>} teamSummary="5 coworkers" teamDirty={false} onClose={()=>{}}/>));
+  await render(false);
+  expect(visibleButtons().some(button=>button.textContent?.includes('Connections'))).toBe(false);
+  await render(true);
+  expect(mounted).not.toHaveBeenCalled();
+  await click('Connections');
+  expect(mounted).not.toHaveBeenCalled();
+  expect(container.querySelector('[aria-label="Practice records"]')?.textContent).not.toContain('Connected');
+  await click('Elation appointments');
+  expect(mounted).toHaveBeenCalledOnce();
+  expect(container.querySelector('[aria-label="Elation dates"]')).toBeTruthy();
+  await click('All connections'); await click('Elation appointments');
+  expect(mounted).toHaveBeenCalledOnce(); expect(unmounted).not.toHaveBeenCalled();
+  expect((container.querySelector('[aria-label="Elation dates"]') as HTMLInputElement).value).toBe('Retained window');
+});
+it('restores Elation after visit selection and blocks leaving during an exact pending command', async () => {
+  const close=vi.fn();
+  await act(async()=>root.render(<SettingsHub open initialScreen="ehr" navigationLocked ehr={<p>Selected visit</p>}
+    team={<p>Team</p>} teamSummary="5 coworkers" teamDirty={false} onClose={close}/>));
+  expect(container.querySelector('[data-settings-screen="ehr"]')?.hasAttribute('hidden')).toBe(false);
+  expect(visibleButtons().find(button=>button.textContent==='Done')?.disabled).toBe(true);
+  expect(visibleButtons().find(button=>button.textContent?.includes('All connections'))?.disabled).toBe(true);
+  expect(close).not.toHaveBeenCalled();
+});
 it('opens appointment discovery directly and retains it after returning from connections', async () => {
   const mounted = vi.fn();
   function Core() { useEffect(() => { mounted(); }, []); return <button>View appointments</button>; }

@@ -76,6 +76,18 @@ export class WorkspaceConversations {
     await this.session.recovery.scheduledDraftSave.current?.run();
     return current();
   }
+  /** Prepare the destination composer using the same encrypted per-bot drafts as
+   * ordinary navigation. Source callers append only after their own fresh read. */
+  async prepareSourceDraft(workspaceId:string,bot:string,host:ConversationHost):Promise<boolean>{
+    if(!host.current()||host.blocked()||this.opening)return false;
+    const view=this.session.getSnapshot();
+    if(view.workspace?.id!==workspaceId)return false;
+    if(view.selected!==bot)return this.open(workspaceId,bot,host);
+    const generation=this.session.generation.current,route=this.session.navigation.sequence.current;
+    await this.observe(host);
+    if(!host.current()||host.blocked()||generation!==this.session.generation.current||route!==this.session.navigation.sequence.current||this.session.getSnapshot().selected!==bot)return false;
+    return this.retain(host);
+  }
   async open(workspaceId:string,bot:string,host:ConversationHost,summary?:ConversationSummary):Promise<boolean>{
     if(this.opening||host.blocked()||!host.current()||(!teamAddress(bot)||!teamUuid(workspaceId)))return false;
     const origin=this.session.getSnapshot(),originGeneration=this.session.generation.current,originEdit=this.session.models.thoughtEditVersion.current;
@@ -184,7 +196,7 @@ export class WorkspaceConversations {
         }
         if(!row)throw new WorkspaceApiError(503);
         const fresh=await this.readWorkspace(host.identity,workspace.id);
-        if(!current()||fresh.id!==workspace.id||fresh.revision<workspace.revision||fresh.entries.some(entry=>[entry.google_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state].includes('unavailable'))||JSON.stringify(projectConversation(fresh,this.session.getSnapshot().team,bot).entries)!==content)return;
+        if(!current()||fresh.id!==workspace.id||fresh.revision<workspace.revision||fresh.entries.some(entry=>[entry.google_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state,entry.ehr_source_state].includes('unavailable'))||JSON.stringify(projectConversation(fresh,this.session.getSnapshot().team,bot).entries)!==content)return;
         await host.authorize();if(!current())return;
         await this.api.mark(host.identity,workspace.id,bot,{watermark:row.watermark});
         if(current()){this.displayed={journal:host.journal,generation,key};if(this.session.getSnapshot().conversationError===READ_SYNC_ERROR)this.session.setConversationError('');}

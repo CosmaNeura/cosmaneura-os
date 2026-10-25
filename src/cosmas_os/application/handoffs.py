@@ -134,6 +134,7 @@ def read(s, w, revision):
                             "google_calendar": "The selected calendar summary is unavailable. Load and review a fresh summary before using this draft.",
                             "efax_inbound_source": "The reviewed fax passage is unavailable. Check its received-fax access and selected visit before using this draft.",
                             "fax_inbound_source": "The reviewed practice-fax passage is unavailable. Check its account access and selected visit before using this draft.",
+                            "ehr_read_source": "The reviewed EHR visit is unavailable. Load and review the patient and visit again before using this draft.",
                         }[original.kind]
                         evidence.pop("task_brief", None)
                         evidence.pop("completion_evidence", None)
@@ -149,6 +150,8 @@ def read(s, w, revision):
                                if unavailable_kinds == {"google_message"} else
                                "Check the reviewed fax passage before viewing this feedback."
                                if unavailable_kinds & {"efax_inbound_source", "fax_inbound_source"} else
+                               "Check the reviewed EHR appointment before viewing this feedback."
+                               if "ehr_read_source" in unavailable_kinds else
                                "Check the selected calendar summary before viewing this feedback.")
             if reviewed:
                 reviewed = {**reviewed, "feedback": feedback_notice}

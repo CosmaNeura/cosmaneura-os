@@ -1,9 +1,13 @@
 # Elation read adapter and the next integrated slice
 
-Verified locally on 2026-10-25. The adapter is implemented; the production
-integration and the source-selection user journey are **not complete**. There is
-no application route, managed credential installation, persisted read ledger or
-Elation UI wired by this adapter pass. No vendor account was created or contacted.
+Updated 2026-10-25: the adapter now connects to actual authenticated application
+routes, persisted read/verification/review ledgers and shared selected-source
+custody. This milestone is **synthetic only and off by default**. The application
+bridge requires an explicitly installed `httpx.MockTransport` and invented
+credentials; it has no live transport or vendor-credential input. Production
+installation and qualification remain incomplete. No vendor account was created
+or contacted. Joined UI verification is recorded separately by the integration
+workstream; the backend evidence below does not claim a browser qualification.
 
 ## Implemented contract
 
@@ -99,26 +103,41 @@ malformed/oversized responses, closed HTTP failures, no retries, no redirect or
 cookie authority, and protected provenance. These are mocked endpoint contracts,
 not proof of a successful vendor sandbox or production qualification.
 
+The integrated backend additionally passes 16 signed API/PostgreSQL tests in
+`tests/integration/test_ehr_reads.py` (34.99 seconds), with unchanged source during
+the owned database run and verified cluster cleanup. The 34 new contract tests
+plus the original 76 adapter tests pass together; Pyright and Ruff are clean.
+The independent custody suite adds 32 PostgreSQL checks. Workstream evidence:
+`evidence/elation-service-debug-02/results.json` and
+`evidence/elation-custody-green-01/results.json` outside this checkout.
+
+The signed fixture uses fresh request-owned SQL sessions; it does not weaken
+the existing CaptureBoundary session-ownership fence. Authenticated Clerk
+requests are supported in the synthetic profile. A native session without an
+external identity is explicitly unavailable for this EHR slice.
+
 ## Milestone 3: one usable selected-source journey
 
-Deliver this as a distinct migration/lifecycle slice. Keep F-8 as the existing
+This is the integrated synthetic milestone. Keep F-8 as the existing
 work/approval owner. Do not extend the delivery-vendor SQL enum, impersonate a
 Google account, turn a static catalog into a connected status, or route through
 the Core/Scribe Athena adapter.
 
 1. **Choose the installed practice.** Existing connection UI lists only the
    current Box's server-installed Elation practice. It shows setup pending until
-   an independently enabled read binding is current. Credentials never enter the
+   an independently enabled synthetic read binding is current. Credentials never enter the
    renderer. Owner selection freezes the exact connection/generation and practice.
 2. **Load the chosen date window.** Staff selects a practice-local range of up
-   to seven elapsed days and an optional active physician. Persist the immutable
-   request before OAuth/provider I/O. Show the returned page and explicit
-   “Load more”; do not merge pages from different scopes or requests.
+   to seven elapsed days for the selected practice. Persist the immutable
+   request before mocked OAuth/resource I/O. Show at most 25 appointments. When
+   additional records exist, say “Showing this page; more appointments may be
+   available.” This slice has no paging command or load-more affordance; an
+   explicit narrower date range starts a fresh read.
 3. **Review the appointment and patient.** Staff selects a server-issued opaque
    appointment handle. Fetch that exact appointment, require unchanged patient
    identity, then fetch its patient in the same practice. For an independent
-   patient search require complete first/last name and DOB; show every matching
-   choice without auto-selecting. Null/deleted/changed identity cannot proceed.
+   patient search, use a later separately implemented slice. Null, deleted,
+   cancelled or changed identity cannot proceed here.
 4. **Save to the intended existing visit.** Display minimal patient identity,
    practice/provider, appointment time/status and observation time together.
    Staff confirms this patient and existing workspace. Save one immutable,
@@ -130,7 +149,7 @@ the Core/Scribe Athena adapter.
    The staff member uses the existing Send action. No automatic model call,
    clinical write, second task queue or second approval owner is introduced.
 
-### Required custody and schema changes
+### Implemented custody and schema
 
 Use additive models/migration patterned after `google_calendar_models.py` and
 `application/google_calendar.py`, with four distinct records:
@@ -146,9 +165,9 @@ Use additive models/migration patterned after `google_calendar_models.py` and
   URLs or free-form remote record IDs from the renderer.
 * `EhrReadSnapshot`: one immutable request result and commitment, original
   normalized observation plus private provenance. Verify Box/owner/binding,
-  request and payload hashes on every read. An explicit page chain is limited
-  to 20 pages/500 rows, rejects any repeated cursor or conflicting duplicate ID,
-  and records every page request. Reaching the cap remains visibly incomplete.
+  request and payload hashes on every read. Only a single page is accepted by
+  application commands; provider cursor details remain private and cannot be
+  submitted by the renderer. Partial coverage stays explicit.
 * `EhrReadSourceReview`: exact snapshot/item commitment, workspace identity and
   revision, confirming human and review time. One review creates/reuses one
   `ehr_read_source`; no unrestricted `evidence` fallback. Add that entry kind
@@ -161,33 +180,41 @@ repeat these checks. Changes withhold prior content and derived drafts while
 retaining permitted historical provenance. Deleting the source or workspace
 cannot leave a replay endpoint that discloses deleted content.
 
-### Application and UI wiring
+### Application and UI contract
 
-* Add typed optional EHR read installation/configuration and a factory in
-  `adapters/managed_service_configuration.py` and `adapters/managed_services.py`.
-  Use the existing hash-checked `SecretReference` resolver. Configuration load
-  validates only. Factory authorization binds current identity to the selected
-  immutable scope; all instances share the credential request budget.
-* Add `application/ehr_reads.py` with `observe`, `inspect_observation`,
+* `adapters/elation_read_runtime.py` supplies `SyntheticElationReads`, requiring
+  exact invented scopes and an exact `httpx.MockTransport`. The host installs it
+  as `app.state.ehr_reads` and seeds a matching immutable `EhrReadBinding`; tests
+  demonstrate this through the compact signed `ehr_case` fixture. The feature
+  flag `workspace_ehr_read_enabled` is false by default and unavailable in hosted
+  mode. Real managed credentials, cross-process rate budgets and production
+  activation require a separate reviewed implementation.
+* `application/ehr_reads.py` implements `observe`, `verify`, `inspect_observation`,
   `resolve_observation`, `select_review`, `validate_selected_source` and
   `historical_source`; retain the existing reservation-before-I/O pattern.
   `resolve_observation` and `inspect_observation` make zero provider calls.
-* Add bounded POST command routes under `/connections/ehr/reads` for
-  `observe_appointments`, `inspect`, `resolve`, and `/connections/ehr/patients`
-  for `search`, `inspect`, `resolve`. Review is
+* Bounded POST commands under `/connections/ehr/reads` implement `status`,
+  `observe`, `verify`, `inspect`, and `resolve`. There is no independent patient
+  search route. Review is
   `/workspaces/{workspace_id}/ehr-read/review` with observation/item commitment,
   expected revision, explicit identity/visit confirmations and idempotency key.
-  Use current workspace identity, fresh mutation fence and no-store responses.
-* Extend `application/selected_connector_sources.py` with `ehr_read_source` →
+  Current workspace identity, fresh mutation fences and no-store responses apply.
+  Every read receipt carries exact `connection_id` and `binding_sha256` so
+  the renderer can compare it to the reserved command before accepting content.
+* `application/selected_connector_sources.py` dispatches `ehr_read_source` →
   `ehr_source_state`, then workspace projection/schema and source withholding.
   Extend `web/src/session/sources.ts` and `session/conversations.ts` through the
   shared session, so both app presentations have identical recovery/access.
-* Add an EHR DraftJournal address/payload validator. Persist the exact pending
+* The shared UI uses an EHR DraftJournal address/payload validator. Persist the exact pending
   command before dispatch. Reload restores the selected source and command;
   “Check saved result” resolves that command. A fresh read uses a new key only
   after explicit Refresh. Query edits cannot overwrite the old pending command.
+  A server-resolved unconfirmed reservation may be followed by an explicit new
+  window request; that reservation supersedes the old window and its pending
+  verifications before I/O. It does not redispatch the old key or infer success
+  from a transport error. Status, inspect and resolve perform no provider calls.
 
-### Acceptance tests required for milestone 3
+### Acceptance contract
 
 1. Default/off/setup-pending surfaces make zero OAuth/resource calls. Current
    installed practice plus explicit read action executes the documented adapter.
@@ -196,11 +223,12 @@ cannot leave a replay endpoint that discloses deleted content.
 3. Lost success response/reload resolves the original receipt with zero extra
    provider calls. A reserved-but-unsaved attempt remains unconfirmed; same-key
    replay cannot redispatch it. Changed command/same key fails as a conflict.
-4. Empty search, duplicate matches, changed/deleted appointment patient and
-   unknown status cannot silently select a patient or create a local link.
-5. Additional pages preserve exact scope/query, reject cycles/duplicates and
-   display the 500-row cap as incomplete. Local-day tests cover spring/fall DST
-   and shared boundary timestamps without creating duplicate appointments.
+4. An empty page, changed/deleted appointment patient or unknown status cannot
+   silently select a patient or create a local link. Independent patient search
+   and duplicate-match selection are outside this slice.
+5. Additional-page commands are rejected before I/O. A partial page is labelled
+   explicitly and the user can choose a narrower range. UTC range checks cover
+   repeated clock times and seven-day windows across DST transitions.
 6. Review commits only the exact snapshot/item and expected workspace revision;
    a repeated review returns the same receipt. A changed item or revision fails.
 7. Saving a source does not call a model. Preparing Chief preserves unsent edits;

@@ -184,3 +184,4 @@ it('waits for the prior access read to settle before consuming the successful Re
   await act(async()=>finish(accessConnected));expect(read).toHaveBeenCalledTimes(2);
   await act(async()=>{});expect(read).toHaveBeenCalledTimes(2);
 });
+it('requires the EHR read contract only for an explicitly enabled EHR build',()=>{vi.stubEnv('VITE_EHR_READ_ENABLED','false');expect(validateWorkspaceCompatibility(descriptor())).toBeTruthy();vi.stubEnv('VITE_EHR_READ_ENABLED','true');expect(()=>validateWorkspaceCompatibility(descriptor())).toThrow();expect(validateWorkspaceCompatibility({...descriptor(),contracts:{...REQUIRED_WORKSPACE_CONTRACTS,ehr_reads:1}})).toBeTruthy();});

@@ -1,0 +1,24 @@
+import {ehrHash,ehrItemHash,ehrSourceHash,ehrSourceContent,ehrContentHash,ehrReviewHash,type EhrReceipt,type EhrReviewRequest,type EhrReviewResponse,type EhrWindowItem,type EhrVerifiedItem,type EhrCommand} from './ehr-read-api';
+export const ehrUuid=(n:number)=>`00000000-0000-4000-8000-${n.toString().padStart(12,'0')}`;
+export const ehrScope={box_id:ehrUuid(101),owner_id:ehrUuid(102),workspace_id:ehrUuid(103)};
+export const ehrVisit={id:ehrScope.workspace_id,label:'Invented Mira visit',revision:5};
+export const ehrBinding={connection_id:ehrUuid(104),binding_sha256:'b'.repeat(64)};
+export const ehrPractice={label:'Invented Maple practice',timezone:'America/Los_Angeles'};
+export async function ehrWindowReceipt(command?:EhrCommand):Promise<EhrReceipt>{
+ const item:EhrWindowItem={handle:ehrUuid(201),sha256:'',starts_at:'2026-10-25T13:00:00Z',ends_at:'2026-10-25T13:30:00Z',status:'Scheduled',selectable:true};item.sha256=await ehrItemHash(item);
+ const observation={kind:'window' as const,provider:'elation' as const,mode:'synthetic' as const,practice:ehrPractice,observed_at:'2026-10-25T12:00:00Z',window:{starts_at:command?.action==='observe'?command.starts_at:'2026-10-25T12:00:00Z',ends_at:command?.action==='observe'?command.ends_at:'2026-10-26T12:00:00Z'},coverage:'more_rows_available' as const,items:[item]};
+ return {contract_version:1,...ehrBinding,observation_id:ehrUuid(202),observation_key:command?.idempotency_key??ehrUuid(203),source_sha256:'c'.repeat(64),payload_sha256:await ehrHash(observation),observation};
+}
+export async function ehrVerifiedReceipt(anchor:EhrReceipt,command?:EhrCommand):Promise<EhrReceipt>{
+ if(anchor.observation.kind!=='window')throw new Error('Expected window');const {selectable:_,...original}=anchor.observation.items[0];
+ const item:EhrVerifiedItem={...original,patient:{first_name:'Mira',last_name:'Invented',birth_date:'1980-02-03'}};item.sha256=await ehrItemHash(item);
+ const {items:__,...base}=anchor.observation,observation={...base,kind:'verified_visit' as const,item};
+ return {...anchor,observation_id:ehrUuid(204),observation_key:command?.idempotency_key??ehrUuid(205),source_sha256:'d'.repeat(64),payload_sha256:await ehrHash(observation),observation};
+}
+export function ehrReviewBody(anchor:EhrReceipt):EhrReviewRequest{
+ if(anchor.observation.kind!=='verified_visit')throw new Error('Expected patient');return {expected_revision:ehrVisit.revision,idempotency_key:ehrUuid(206),observation_id:anchor.observation_id,observation_sha256:anchor.source_sha256,item_handle:anchor.observation.item.handle,item_sha256:anchor.observation.item.sha256,reviewed_visit:true,reviewed_patient_identity:true,reviewed_exact_snapshot:true,reviewed_untrusted_source:true};
+}
+export async function ehrReviewResult(anchor:EhrReceipt,body:EhrReviewRequest):Promise<EhrReviewResponse>{
+ if(anchor.observation.kind!=='verified_visit')throw new Error('Expected patient');const content=ehrSourceContent(anchor.observation),entry_id=ehrUuid(207);
+ return {entry_id,entry_revision:body.expected_revision+1,request_sha256:await ehrReviewHash(ehrVisit.id,body),source_withheld:false,source:{entry_id,source_sha256:await ehrSourceHash(anchor,anchor.observation.item),content_sha256:await ehrContentHash(content)},workspace:{id:ehrVisit.id,label:ehrVisit.label,appointment_id:null,revision:body.expected_revision+1,entries:[{id:entry_id,kind:'ehr_read_source',revision:body.expected_revision+1,source_label:'Elation: reviewed appointment',content,origin:'authenticated_human',created_at:'2026-10-25T12:00:00Z',ticket:null,ehr_source_state:'current'}],work_candidates:[],model_contract_version:1,model_observed_at:'2026-10-25T12:00:00Z'}};
+}

@@ -38,7 +38,7 @@ from cosmas_os.models import (
 
 PAGE_SIZE = 20
 EPOCH = datetime(1970, 1, 1, tzinfo=UTC)
-CONNECTOR_KINDS = {'google_message', 'google_calendar', 'efax_inbound_source', 'fax_inbound_source'}
+CONNECTOR_KINDS = {'google_message', 'google_calendar', 'efax_inbound_source', 'fax_inbound_source', 'ehr_read_source'}
 
 
 def _micros(value):

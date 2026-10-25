@@ -12,19 +12,19 @@ import {EFaxInboundMount} from './EFaxInboundMount';
 import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
-type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google';
+type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google' | 'ehr';
 type Editor = Exclude<Screen, 'home' | 'connections'>;
 const titles: Record<Screen, string> = {
   home: 'Settings', connections: 'Connections', members:'Practice access', team: 'Your team',
   core: 'Cosmaneura account & appointments', scheduling: 'Scheduling & Google sign-in', microsoft:'Microsoft email & calendar', google:'Google email & calendar',
-  messaging: 'Messaging & fax', payments: 'Payments', portals: 'Patient portals',
+  messaging: 'Messaging & fax', payments: 'Payments', portals: 'Patient portals', ehr: 'Elation appointments',
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({appearance,open,nativePresentation, team, members, core, scheduling, microsoft, google, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
-  appearance?:ReactNode;open: boolean;nativePresentation?:'workspace'|'messages'; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
+export function SettingsHub({appearance,open,nativePresentation, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+  appearance?:ReactNode;open: boolean;nativePresentation?:'workspace'|'messages'; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; ehr?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
-  initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google';guidedConnections?:boolean;
+  initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'|'ehr';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
   onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];onReviewProviderFaxDocument?:FaxInboundPanelProps['onReviewDocument'];
 }) {
@@ -32,7 +32,7 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
   const [inboundBusy,setInboundBusy]=useState(false),[providerInboundBusy,setProviderInboundBusy]=useState(false);
   const [inboundOwner,setInboundOwner]=useState<AuthenticatedWorkspaceIdentity|null>(null);
   const leaveLocked=navigationLocked||inboundBusy||providerInboundBusy;
-  const [visited, setVisited] = useState<Editor[]>(!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen]:[]);
+  const [visited, setVisited] = useState<Editor[]>(initialScreen==='ehr'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen as Editor]:[]);
   const [recovering,setRecovering]=useState<ConnectionId|null>(null);
   const title = useRef<HTMLHeadingElement>(null);
   const section = useRef<HTMLElement>(null);
@@ -94,7 +94,7 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
   },[open,screen,connectionIdentity,refreshCatalog,summaryIds]);
   useEffect(() => { if (!open) setScreen(initialScreen); }, [open,initialScreen]);
   useEffect(() => {
-    if(open){setScreen(initialScreen);if(!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'))setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
+    if(open){setScreen(initialScreen);if(initialScreen==='ehr'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'))setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
   }, [initialScreen,connectionIdentity]);
   useEffect(() => {
     if (!open) return;
@@ -112,7 +112,7 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
     }
     setScreen(next);
   }
-  const editors = {team, members, core, scheduling, microsoft, google, messaging, payments, portals};
+  const editors = {team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals};
   const connectionCards = (['core','scheduling','google','microsoft','messaging','payments','portals'] as const)
     .filter(id=>editors[id]!=null).map(id=>({id,...CONNECTION_GUIDES[id]}));
   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
@@ -174,7 +174,7 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
         <span className="settings-card-icon" aria-hidden="true">＋</span>
         <span><strong>Practice access</strong><small>Teammates joining your practice workspace</small></span><span aria-hidden="true">›</span>
       </button>}
-      {connectionCards.length > 0 && <button disabled={navigationLocked} className="settings-card" onClick={() => visit('connections')}>
+      {(connectionCards.length > 0 || ehr != null) && <button disabled={navigationLocked} className="settings-card" onClick={() => visit('connections')}>
         <span className="settings-card-icon" aria-hidden="true">↔</span>
         <span><strong>Connections</strong><small>{core?'Practice account, appointments & services':'Messaging, fax, payments & portals'}</small></span>
         <span aria-hidden="true">›</span>
@@ -224,7 +224,13 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
           </article>)}
         </section>;
       })}
-      {!connectionCards.length && <p>No connection setup is available for this account.</p>}
+      {ehr != null&&<section className="connection-group" aria-label="Practice records"><h2>Practice records</h2>
+        <button className="settings-card connection-card" disabled={navigationLocked} onClick={()=>visit('ehr')}>
+          <span className="connection-card-copy"><strong>Elation appointments</strong><small>Choose appointments for a visit. Practice access is checked when you open.</small></span>
+          <span className="connection-card-action">Open <span aria-hidden="true">›</span></span>
+        </button>
+      </section>}
+      {!connectionCards.length && ehr == null && <p>No connection setup is available for this account.</p>}
       {guidedConnections&&<aside className="connection-next-services"><h2>Other services</h2>
         <p>{ATHENA_CONNECTION_BUILD?'Athena schedule access is managed through your Cosmaneura practice connection.':'Additional EHR connections are managed by your practice.'}</p>
         <p>Connecting an account does not automatically import its contents into a visit or give a bot permission to act.</p>

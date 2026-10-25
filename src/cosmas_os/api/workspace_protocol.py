@@ -13,6 +13,7 @@ CONTRACTS = {
     "inbox_handoff": 1, "core_record": 1, "core_connection": 1,
     "research": 1, "scheduling_login": 1, "google_connection": 1,
     "microsoft_connection": 1, "google_messages": 1, "google_calendar": 1,
+    "ehr_reads": 1,
     "scheduling_patient": 1, "practice_setup": 1, "private_draft": 1, "private_recording": 1, "conversations": 1,
 }
 WORKSPACE_ROOTS = frozenset({
