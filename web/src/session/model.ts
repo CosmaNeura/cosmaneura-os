@@ -49,6 +49,7 @@ export type WorkspaceSessionState = {
   selectedSource:string|null;
   faxSourceOffer:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:EFaxSourceOffer;request:Extract<EFaxPending,{kind:'acquire'}>}|null;
   providerFaxSourceOffer:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;document:FaxSourceOffer;request:Extract<FaxPending,{kind:'acquire'}>}|null;
+  calendarImportReview:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;open:boolean;origin:'conversation'|'sources'}|null;
   ehrReview:{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;open:boolean;origin:'conversation'|'sources'|'connections'}|null;
   faxSourceBusy:boolean;
   providerFaxSourceBusy:boolean;

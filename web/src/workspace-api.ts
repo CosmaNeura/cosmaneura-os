@@ -65,9 +65,10 @@ export type AssistantReply = { agent_name: string; agent_id?: string; role: BotR
   citations: { entry_id: string; revision: number; label: string; kind: string }[] };
 export type WorkspaceEntry = {
   id: string; revision: number;
-  kind: "synthetic_source" | "scratchpad" | "conversation" | "evidence" | "work_link" | "handoff_result" | "google_message" | "google_calendar" | "efax_inbound_source" | "fax_inbound_source" | "ehr_read_source";
+  kind: "synthetic_source" | "scratchpad" | "conversation" | "evidence" | "work_link" | "handoff_result" | "google_message" | "google_calendar" | "efax_inbound_source" | "fax_inbound_source" | "ehr_read_source" | "calendar_import_source";
   content: string; source_label: string | null; origin: string;
   ticket: WorkReference | null; created_at: string;
+  calendar_import_source_state?: "current" | "unavailable";
   ehr_source_state?: "current" | "unavailable";
   google_source_state?: "current" | "unavailable";
   calendar_source_state?: "current" | "unavailable";

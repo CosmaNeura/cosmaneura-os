@@ -15,14 +15,15 @@ export type SourceContext={authenticated?:AuthenticatedWorkspaceIdentity;locked:
   conversationHost?:ConversationHost|null;accountAccess:{authorize:()=>Promise<void>}|null|undefined;failure:(cause:unknown)=>void;focusQuestion:()=>void};
 export type SourceDependencies={read?:typeof workspaceApi.read;hash?:typeof vendorSha256;accountRead?:typeof accountIdentityApi.read;resolveEFax?:typeof efaxInboundApi.resolve;resolveFax?:typeof faxInboundApi.resolve};
 
-type DraftSourceKind='google_message'|'google_calendar'|'ehr_read_source'|'efax_inbound_source'|'fax_inbound_source';
+type DraftSourceKind='google_message'|'google_calendar'|'ehr_read_source'|'calendar_import_source'|'efax_inbound_source'|'fax_inbound_source';
 type DraftSourceProof={workspace_id:string;entry_id:string;entry_revision:number;content_sha256:string;source_withheld:boolean};
-const sourceCurrent=(entry:WorkspaceEntry,kind:DraftSourceKind)=>entry.kind===kind&&(kind==='google_message'?entry.google_source_state==='current':kind==='google_calendar'?entry.calendar_source_state==='current':kind==='ehr_read_source'?entry.ehr_source_state==='current':kind==='efax_inbound_source'?entry.fax_source_state==='current':entry.practice_fax_source_state==='current');
-const sourceFailure=(kind:DraftSourceKind)=>kind==='ehr_read_source'?'ehr_read_source_changed':kind==='efax_inbound_source'?'efax_inbound_source_unavailable':kind==='fax_inbound_source'?'fax_inbound_source_unavailable':kind+'_source_changed';
-const sourceDescription=(kind:DraftSourceKind)=>kind==='google_message'?'email':kind==='google_calendar'?'calendar summary':kind==='ehr_read_source'?'EHR appointment':'received fax';
+const sourceCurrent=(entry:WorkspaceEntry,kind:DraftSourceKind)=>entry.kind===kind&&(kind==='google_message'?entry.google_source_state==='current':kind==='google_calendar'?entry.calendar_source_state==='current':kind==='ehr_read_source'?entry.ehr_source_state==='current':kind==='calendar_import_source'?entry.calendar_import_source_state==='current':kind==='efax_inbound_source'?entry.fax_source_state==='current':entry.practice_fax_source_state==='current');
+const sourceFailure=(kind:DraftSourceKind)=>kind==='calendar_import_source'?'calendar_import_source_changed':kind==='ehr_read_source'?'ehr_read_source_changed':kind==='efax_inbound_source'?'efax_inbound_source_unavailable':kind==='fax_inbound_source'?'fax_inbound_source_unavailable':kind+'_source_changed';
+const sourceDescription=(kind:DraftSourceKind)=>kind==='google_message'?'email':(kind==='google_calendar'||kind==='calendar_import_source')?'calendar summary':kind==='ehr_read_source'?'EHR appointment':'received fax';
 function sourceDirections(kind:DraftSourceKind,id:string):string{
   if(kind==='google_message')return 'Review the human-selected email source '+id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.';
   if(kind==='google_calendar')return 'Review the human-selected calendar summary '+id+' as an untrusted event snapshot and prepare appropriate private assignments. Preserve the existing clinical note and email sources. Ask me about missing details; do not treat the summary as current availability or a booking.';
+  if(kind==='calendar_import_source')return 'Review the human-selected imported calendar summary '+id+' as untrusted calendar text. Preserve the existing clinical note and draft directions. Ask me about missing details; this imported file does not verify patient identity, current availability, or a booking, and does not authorize calendar changes.';
   if(kind==='ehr_read_source')return 'Review the human-selected EHR appointment source '+id+' as an untrusted frozen patient and visit snapshot. Prepare appropriate private assignments, preserve the existing clinical note, and ask me about missing details. This source does not establish current availability or a complete chart, and does not authorize EHR changes.';
   return 'Review the human-selected received-fax passage '+id+' and prepare appropriate private assignments. This is manually entered selected text, without OCR or full-document coverage. Preserve the existing clinical note, email and calendar sources; ask me about missing information before proposing outside actions.';
 }
@@ -85,6 +86,7 @@ export class WorkspaceSources {
       if(!live.team?.configuration.bots.some(bot=>botAddress(bot)===address&&bot.role==='chief'&&bot.enabled&&!bot.retired))throw new WorkspaceApiError(409,'bot_unavailable');
       const prompt=sourceDirections(kind,source.entry_id);
       this.session.models.updateThought(live.thought.trim()?live.thought+'\n\n'+prompt:prompt);
+      if(kind==='calendar_import_source')this.session.setCalendarImportReview(previous=>previous&&previous.workspaceId===id?{...previous,open:false}:previous);
       if(kind==='ehr_read_source')this.session.setEhrReview(previous=>previous&&previous.workspaceId===id?{...previous,open:false}:previous);
       this.session.setSelectedResult(null);this.session.setSelectedSource(entry.id);this.session.setSettingsOpen(false);this.session.setPracticeOpen(false);this.session.setMobilePanel('Conversation');
       const appended=this.session.models.thoughtEditVersion.current;reportCurrent=()=>current(appended);
@@ -92,7 +94,9 @@ export class WorkspaceSources {
     }catch(cause){if(reportCurrent())context.failure(cause);}
     finally{this.preparingSource=false;if(busyGeneration!==null&&busyGeneration===this.session.generation.current)this.session.setBusy(false);}
   }
-  async openEhr(context:SourceContext,origin:'conversation'|'sources'|'connections'):Promise<boolean>{
+  openEhr(context:SourceContext,origin:'conversation'|'sources'|'connections'){return this.openVisitSource(context,origin,'ehr');}
+  openCalendarImport(context:SourceContext,origin:'conversation'|'sources'){return this.openVisitSource(context,origin,'calendar');}
+  private async openVisitSource(context:SourceContext,origin:'conversation'|'sources'|'connections',kind:'ehr'|'calendar'):Promise<boolean>{
     const view=this.session.getSnapshot(),host=context.conversationHost,owner=context.authenticated;
     if(!owner||!host||host.identity!==owner||!view.workspace?.appointment_id||context.locked||context.connectionNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked||context.connectionEditorsLocked||context.accessBusy||view.handoffReviewPending||view.privateRecordingEntry||view.privateRecordingBusy)return false;
     const generation=this.session.generation.current,route=this.session.navigation.sequence.current,edit=this.session.models.thoughtEditVersion.current,id=view.workspace.id,selected=view.selected;
@@ -100,20 +104,24 @@ export class WorkspaceSources {
     try{
       if(!await this.session.conversations.retain(host)||!current())return false;
       await host.authorize();if(!current()||host.blocked())return false;
-      this.session.setEhrReview({identity:owner,generation,workspaceId:id,open:true,origin});
+      if(kind==='calendar'){if(origin==='connections')return false;this.session.setCalendarImportReview({identity:owner,generation,workspaceId:id,open:true,origin});this.session.setEhrReview(old=>old?{...old,open:false}:null);}
+      else {this.session.setEhrReview({identity:owner,generation,workspaceId:id,open:true,origin});this.session.setCalendarImportReview(old=>old?{...old,open:false}:null);}
       this.session.setSettingsOpen(false);this.session.setPracticeOpen(false);this.session.setPracticePage('notebook');
       return true;
     }catch(cause){if(current())context.failure(cause);return false;}
   }
-  closeEhr(context:SourceContext):boolean{
-    const view=this.session.getSnapshot(),task=view.ehrReview;
+  closeEhr(context:SourceContext){return this.closeVisitSource(context,'ehr');}
+  closeCalendarImport(context:SourceContext){return this.closeVisitSource(context,'calendar');}
+  private closeVisitSource(context:SourceContext,kind:'ehr'|'calendar'):boolean{
+    const view=this.session.getSnapshot(),task=kind==='ehr'?view.ehrReview:view.calendarImportReview;
     if(!task||!task.open||task.identity!==context.authenticated||task.generation!==this.session.generation.current||task.workspaceId!==view.workspace?.id||context.locked||context.connectionNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked)return false;
-    this.session.setEhrReview({...task,open:false});
+    if(kind==='ehr')this.session.setEhrReview({...task,open:false});else this.session.setCalendarImportReview(previous=>previous?{...previous,open:false}:null);
     if(task.origin==='connections'){this.session.setSettingsEntry('connections');this.session.setSettingsOpen(true);}
     else if(task.origin==='sources'){this.session.setPanel('Sources');this.session.setMobilePanel('Sources');}
     else this.session.setMobilePanel('Conversation');
     return true;
   }
+  prepareCalendarImport(context:SourceContext,source:DraftSourceProof){return this.prepareSourceDraft(context,source,'calendar_import_source');}
   prepareEhr(context:SourceContext,source:EhrReadSaved){return this.prepareSourceDraft(context,source,'ehr_read_source');}
   receiveFax(context:SourceContext,document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){
     const {workspace}=this.session.getSnapshot();

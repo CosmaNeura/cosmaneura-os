@@ -84,6 +84,9 @@ import type {GoogleCalendarSaved} from './google-calendar-recovery';
 import {EhrReadTask} from './EhrReadTask';
 import {EhrReadProviders} from './EhrReadProviders';
 import {EHR_READ_BUILD} from './ehr-read-api';
+import {CALENDAR_IMPORT_BUILD} from './calendar-import-api';
+import {CalendarImportMount} from './CalendarImportMount';
+import type {CalendarSavedSource} from './calendar-import-recovery';
 import type {EhrReadSaved} from './ehr-read-recovery';
 import { GOOGLE_MESSAGE_BUILD } from './google-message-api';
 import type {GoogleMessageSaved} from './google-message-recovery';
@@ -134,7 +137,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const inboxOrganization=useSyncExternalStore(session.inboxPreferences.subscribe,session.inboxPreferences.getSnapshot,session.inboxPreferences.getSnapshot);
   const [inboxRename,setInboxRename]=useState<{target:InboxRenameTarget;identity:AuthenticatedWorkspaceIdentity;scope:string|undefined}|null>(null);
   const {presentationError,conversationInbox,conversationLoading,conversationError,conversationBusy,recordingTransition,researchPending,activityProof,activityBusy,activityContextBusy,activityContextError,activityAttempt,selectedSource,faxSourceOffer,providerFaxSourceOffer,faxSourceBusy,providerFaxSourceBusy,phoneNoteTask,reviewHandoffId,handoffReviewPending,selectedResult,savedResearchChat,settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
-    workspace,encounters,team,teamDraft,note,thought,evidence,source,ehrReview,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
+    workspace,encounters,team,teamDraft,note,thought,evidence,source,ehrReview,calendarImportReview,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
   const {setActivityProof,setActivityBusy,setActivityContextBusy,setActivityContextError,setActivityAttempt,setSelectedSource,setFaxSourceBusy,setProviderFaxSourceBusy,setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setConnectionError,setConflict,setMessage,setError,generation,
     setWorkspace,setTeamDraft,setNote,setThought,setEvidence,setSource,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryState}=session;
   const messagesMode=session.presentation.current()==='messages';
@@ -157,7 +160,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
-  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,ehr:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const {activityNavigation}=session;
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
@@ -290,6 +293,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   },[connectionGeneration]);
   const reportEhrBusy = useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.ehr===blocked?previous:{...previous,ehr:blocked});
+  },[connectionGeneration]);
+  const reportCalendarImportBusy = useCallback((blocked:boolean)=>{
+    if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.calendarImport===blocked?previous:{...previous,calendarImport:blocked});
   },[connectionGeneration]);
   const reportMicrosoftBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.microsoft===blocked?previous:{...previous,microsoft:blocked});
@@ -449,7 +455,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setInboxSelection(null);setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
-    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
     ehrVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
@@ -607,6 +613,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const visitLinked=!!workspace?.appointment_id;
   const ehrReviewOwned=EHR_READ_BUILD&&!!authenticated&&!!workspace&&ehrReview?.identity===authenticated&&ehrReview.generation===generation.current&&ehrReview.workspaceId===workspace.id;
   const ehrReviewOpen=ehrReviewOwned&&ehrReview.open&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen;
+  const calendarImportOwned=CALENDAR_IMPORT_BUILD&&!!authenticated&&!!workspace&&calendarImportReview?.identity===authenticated&&calendarImportReview.generation===generation.current&&calendarImportReview.workspaceId===workspace.id;
+  const calendarImportOpen=calendarImportOwned&&calendarImportReview.open&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen;
+  const visitSourceTaskOpen=ehrReviewOpen||calendarImportOpen;
   const prepAvailable=!!(visitLinked&&bot&&supportsSkill(bot,"encounter_prep")&&ENCOUNTER_PREP_BUILD&&authenticated&&team?.capture?.prep_enabled&&
     template?.capabilities.some(capability=>capability.key==="core.session_prep.read"&&capability.state==="enabled"&&capability.contract==="core.session-prep.brief.v1"));
   const prepScope=useMemo(()=>Symbol(),[workspace?.id,authenticated,selected,team?.revision,bot?.enabled,bot?.include_evidence,prepAvailable,prepEpoch]);
@@ -662,7 +671,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   historyNavigation.current=async(target,from,to)=>{
     const operation=++historyOperation.current;historyHandling.current=operation;const origin=workspaceRouteHash(route());
     try{
-      if(ehrReviewOpen){closeEhrTask();restoreConsumedHistory(from,to);return;}
+      if(visitSourceTaskOpen){if(calendarImportOpen)closeCalendarImportTask();else closeEhrTask();restoreConsumedHistory(from,to);return;}
       if(messagesMode){
         const dialog=[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].find(element=>!element.closest('[hidden]'));
         if(dialog){
@@ -809,9 +818,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     !!savedRecordingEntry&&savedRecordingEntry.identity===authenticated&&savedRecordingEntry.workspaceId===workspace?.id&&journal.current?.scope===savedRecordingEntry.scope;
   const savedRecordingNotebookOpen=nativeSavedRecording&&savedRecordingNotebook===savedRecordingEntry;
   const savedRecordingFocused=nativeSavedRecording&&!savedRecordingNotebookOpen;
-  const nativeChat=!ehrReviewOpen&&!messagesMode&&!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!!workspace&&practicePage==='notebook'&&mobilePanel==='Conversation'&&
+  const nativeChat=!visitSourceTaskOpen&&!messagesMode&&!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!!workspace&&practicePage==='notebook'&&mobilePanel==='Conversation'&&
     !settingsOpen&&!practiceOpen&&!privateRecordingEntry&&(!savedRecordingEntry||savedRecordingNotebookOpen)&&!scribeRecordingOpen&&!scribeSourceBusy&&!reviewHandoffId&&!conflict&&!recoveryBlocked&&!recoveryOffers.length&&(!pending||busy||nativeConversationPending);
-  const nativeWorkspace=!ehrReviewOpen&&!messagesMode&&!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!nativeHome&&!nativeChat&&!privateRecordingEntry&&!settingsOpen&&!practiceOpen;
+  const nativeWorkspace=!visitSourceTaskOpen&&!messagesMode&&!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&!nativeHome&&!nativeChat&&!privateRecordingEntry&&!settingsOpen&&!practiceOpen;
   const nativeClinicalPlan=(messagesMode||nativeChat||chiefNoteCompose)&&bot?.role==='chief'&&!!workspace?.appointment_id&&!!workspace.note?.latest&&authenticated===identity&&authenticated===previousIdentity.current&&
     !!authenticated&&!!journal.current&&journal.current.serverScope===team?.recovery_scope?{
       owner:authenticated,scope:journal.current.scope,generation:generation.current,selection:noteSelection(workspace.note.latest,workspace.revision),
@@ -857,7 +866,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   // Blocking recovery can need more vertical space than a keyboard-sized
   // chat viewport. Keep its actions in document flow until it is resolved.
   const messagesRecoveryFlow=confirmCaptureExit||recoveryOffers.length>0||recoveryState==='failed'||recoveryBlocked||conflict||!!pending&&!busy;
-  const messagesChat=!ehrReviewOpen&&!!workspace&&messagesMode&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&mobilePanel==='Conversation'&&!messagesTask&&!phoneChiefToolsVisible&&!reviewHandoffId&&(!privateRecordingEntry||recordingMinimized)&&!messagesRecoveryFlow;
+  const messagesChat=!visitSourceTaskOpen&&!!workspace&&messagesMode&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&mobilePanel==='Conversation'&&!messagesTask&&!phoneChiefToolsVisible&&!reviewHandoffId&&(!privateRecordingEntry||recordingMinimized)&&!messagesRecoveryFlow;
   const sharedChatOwner=session.presentation.enabled?authenticated??null:nativeChatOwner;
   const frameAddress=session.review.returnTarget.current?.address??session.review.conversationReturn.current?.address??selected;
   // Review temporarily selects its recipient; arrivals still belong to the chat we return to.
@@ -923,10 +932,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function refreshGoogleVisit(){return session.sources.refresh(sourceContext());}
   function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){return session.sources.prepareGoogle(sourceContext(),source,kind);}
   const ehrReturnFocus=useRef<{element:HTMLElement|null;scroll:number|null}|null>(null);
-  async function openEhrTask(origin:'conversation'|'sources'|'connections'){
+  function openEhrTask(origin:'conversation'|'sources'|'connections'){return openVisitSourceTask(origin,'ehr');}
+  function openCalendarImportTask(origin:'conversation'|'sources'){return openVisitSourceTask(origin,'calendar');}
+  async function openVisitSourceTask(origin:'conversation'|'sources'|'connections',kind:'ehr'|'calendar'){
     const target=document.activeElement instanceof HTMLElement?document.activeElement:null,scroll=mobileChatFrame.scrollRef.current?.scrollTop??null;
     const context=sourceContext(),host=context.conversationHost;if(!host)return;
-    const entry=workspaceFrame.current?.querySelector<HTMLElement>(origin==='connections'?'[aria-label="Choose a visit for appointment review"]':origin==='sources'?'.ehr-source-action':conversationDetails?'.messages-details':'.ehr-chief-action');
+    const entry=workspaceFrame.current?.querySelector<HTMLElement>(origin==='connections'?'[aria-label="Choose a visit for appointment review"]':origin==='sources'?(kind==='ehr'?'.ehr-source-action':'.calendar-import-action'):conversationDetails?'.messages-details':kind==='ehr'?'.ehr-chief-action':'.calendar-import-chief-action');
     if(!entry||entry.closest('[hidden]'))return;
     ehrOpeningCleanup.current?.();const intent=++ehrOpeningIntent.current,view=session.getSnapshot();
     const sameView=()=>{const now=session.getSnapshot();return (['practicePage','practiceOpen','settingsOpen','settingsEntry','panel','mobilePanel'] as const).every(key=>view[key]===now[key]);};
@@ -939,14 +950,17 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     const cleanup=()=>{document.removeEventListener('click',invalidate,true);document.removeEventListener('keydown',escape,true);};ehrOpeningCleanup.current=cleanup;
     try{
       const current=()=>ehrOpeningIntent.current===intent&&sameView()&&entry.isConnected&&!entry.closest('[hidden]')&&host.current();
-      if(await session.sources.openEhr({...context,conversationHost:{...host,current}},origin)){ehrReturnFocus.current={element:target,scroll};setConversationDetails(false);setMessagesTask(null);setPhoneChatToolsOpen(false);}
+      if(await (kind==='calendar'&&origin!=='connections'?session.sources.openCalendarImport({...context,conversationHost:{...host,current}},origin):session.sources.openEhr({...context,conversationHost:{...host,current}},origin))){ehrReturnFocus.current={element:target,scroll};setConversationDetails(false);setMessagesTask(null);setPhoneChatToolsOpen(false);}
     }finally{cleanup();if(ehrOpeningCleanup.current===cleanup)ehrOpeningCleanup.current=null;}
   }
-  function closeEhrTask(){if(session.sources.closeEhr(sourceContext())){const returned=ehrReturnFocus.current,current=generation.current,route=session.navigation.sequence.current,view=session.getSnapshot();requestAnimationFrame(()=>{
-    const now=session.getSnapshot();if(current!==generation.current||route!==session.navigation.sequence.current||now.identity!==view.identity||now.workspace?.id!==view.workspace?.id||now.ehrReview?.open||now.mobilePanel!==view.mobilePanel||now.settingsOpen!==view.settingsOpen||now.practicePage!==view.practicePage)return;
+  function closeEhrTask(){closeVisitSourceTask('ehr');}
+  function closeCalendarImportTask(){closeVisitSourceTask('calendar');}
+  function closeVisitSourceTask(kind:'ehr'|'calendar'){if(kind==='calendar'?session.sources.closeCalendarImport(sourceContext()):session.sources.closeEhr(sourceContext())){const returned=ehrReturnFocus.current,current=generation.current,route=session.navigation.sequence.current,view=session.getSnapshot();requestAnimationFrame(()=>{
+    const now=session.getSnapshot();if(current!==generation.current||route!==session.navigation.sequence.current||now.identity!==view.identity||now.workspace?.id!==view.workspace?.id||now.ehrReview?.open||now.calendarImportReview?.open||now.mobilePanel!==view.mobilePanel||now.settingsOpen!==view.settingsOpen||now.practicePage!==view.practicePage)return;
     if(returned?.scroll!==null&&returned?.scroll!==undefined&&mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=returned.scroll;
     const target=returned?.element;if(target?.isConnected&&!target.closest('[hidden]'))target.focus({preventScroll:true});else{const fallback=workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child')??conversationHeaderRef.current?.querySelector<HTMLElement>('h2');if(fallback&&!fallback.closest('[hidden]')){fallback.tabIndex=-1;fallback.focus({preventScroll:true});}}
   });}}
+  function prepareCalendarChief(source:CalendarSavedSource){return session.sources.prepareCalendarImport(sourceContext(),source);}
   function prepareEhrChief(source:EhrReadSaved){return session.sources.prepareEhr(sourceContext(),source);}
 
 
@@ -1118,7 +1132,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     </aside>
     <div className="team-main">
       {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)}/>}
-      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined}/>}
+      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined}/>}
       {nativeHome||nativeWorkspace?<header className="native-home-header">
         {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
         <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
@@ -1289,7 +1303,15 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onBusyChange={reportEhrBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource}
           onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareEhrChief(source)}/>
       </EhrReadTask>}
-      {workspace&&<div className="workspace-notebook" data-native-private-note={nativePrivateNote} hidden={practicePage!=="notebook"||ehrReviewOpen}>
+      {calendarImportOwned&&authenticated&&workspace&&<EhrReadTask title="Import calendar file" open={calendarImportOpen} context={workspace.notebook?.title??workspace.label}
+        returnLabel={calendarImportReview.origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`} returnBlocked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onReturn={closeCalendarImportTask}>
+        <CalendarImportMount identity={authenticated} active={calendarImportOpen} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
+          currentSources={workspace.entries.filter(entry=>entry.kind==='calendar_import_source'&&!!entry.calendar_import_source_state).map(entry=>({id:entry.id,state:entry.calendar_import_source_state!}))}
+          locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='calendarImport'&&value)}
+          recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='calendarImport'&&value)}
+          onBusyChange={reportCalendarImportBusy} onAuthenticationLost={failure} onSaved={receiveGoogleSource} onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareCalendarChief(source)}/>
+      </EhrReadTask>}
+      {workspace&&<div className="workspace-notebook" data-native-private-note={nativePrivateNote} hidden={practicePage!=="notebook"||visitSourceTaskOpen}>
         {messagesMode&&!settingsOpen&&!savedRecordingFocused&&!reviewHandoffId&&<MessagesThreadHeader name={bot?.name??'Conversation'} role={bot?.role??'chief'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} task={messagesTaskLabel}
           locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onBack={goHome} onContext={()=>void chooseConversationContext(selected)} onDetails={()=>setConversationDetails(true)} onReturn={returnToMessagesChat}/>}
 
@@ -1413,6 +1435,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           <div id={`chief-tools-${workspace.id}`} className="team-conversation-tools" hidden={messagesMode?!messagesTask&&!phoneChiefToolsVisible&&bot?.role!=='research':phoneChiefConversation&&!phoneChiefToolsVisible}>
           {phoneChiefConversation&&<header className="chief-tools-heading"><h3>Chief tools</h3><button className="team-subtle" disabled={viewNavigationLocked} onClick={returnToPhoneChat}>Back to chat</button></header>}
           {phoneChiefToolsVisible&&thought!==''&&!(nativeChat&&clinicalTeamExpanded)&&<p className="team-fine chief-tools-draft" role="status">Your directions are kept in this plan. Prepare Follow-up and Research includes them with the saved note.</p>}
+          {CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'&&<button className="calendar-import-chief-action" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void openCalendarImportTask('conversation')}>Import calendar file</button>}
           {EHR_READ_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'&&<button className="ehr-chief-action" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void openEhrTask('conversation')}>Review an appointment</button>}
           <div className="messages-activity-host" hidden={messagesMode&&messagesTask!=='Activity'}>{teamDrafts}</div>
           
@@ -1552,7 +1575,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             {faxSourceOffer&&authenticated===faxSourceOffer.identity&&generation.current===faxSourceOffer.generation&&workspace.id===faxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><EFaxSourceReviewMount identity={faxSourceOffer.identity} offered={faxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='efax_inbound_source'&&e.fax_source_state).map(e=>({entry_id:e.id,state:e.fax_source_state!}))} onBusyChange={reportFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareFaxChief(value)} onRefreshDocument={refreshFaxDocument}/></div>}
             {providerFaxSourceOffer&&authenticated===providerFaxSourceOffer.identity&&generation.current===providerFaxSourceOffer.generation&&workspace.id===providerFaxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><FaxSourceReviewMount identity={providerFaxSourceOffer.identity} offered={providerFaxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='fax_inbound_source'&&e.practice_fax_source_state).map(e=>({entry_id:e.id,state:e.practice_fax_source_state!}))} onBusyChange={reportProviderFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareProviderFaxChief(value)} onRefreshDocument={refreshProviderFaxDocument}/></div>}
             {panel === "Sources" && <EncounterSources workspace={workspace} selectedSource={selectedSource} locked={locked}
-              onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('sources'):undefined} appointmentReviewLocked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
+              onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('sources'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('sources'):undefined} appointmentReviewLocked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
               briefViewedAt={briefViewed?.workspace===workspace.id&&briefViewed.owner===authenticated&&briefViewed.teamRevision===team?.revision?briefViewed.at:undefined}
               onPrep={team?.configuration.bots.some(member=>member.role==='visit_prep'&&member.enabled)?()=>{const reader=team.configuration.bots.find(member=>member.role==='visit_prep'&&member.enabled)!;if(session.presentation.enabled){void openConversation(workspace.id,botAddress(reader)).then(()=>{if(session.getSnapshot().selected===botAddress(reader))showConversationTask('Tools');});}else{setSelected(botAddress(reader));setMobilePanel('Conversation');}}:undefined}
               source={source} evidence={evidence} setSource={setSource} setEvidence={setEvidence}

@@ -196,7 +196,7 @@ export class WorkspaceConversations {
         }
         if(!row)throw new WorkspaceApiError(503);
         const fresh=await this.readWorkspace(host.identity,workspace.id);
-        if(!current()||fresh.id!==workspace.id||fresh.revision<workspace.revision||fresh.entries.some(entry=>[entry.google_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state,entry.ehr_source_state].includes('unavailable'))||JSON.stringify(projectConversation(fresh,this.session.getSnapshot().team,bot).entries)!==content)return;
+        if(!current()||fresh.id!==workspace.id||fresh.revision<workspace.revision||fresh.entries.some(entry=>[entry.google_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state,entry.ehr_source_state,entry.calendar_import_source_state].includes('unavailable'))||JSON.stringify(projectConversation(fresh,this.session.getSnapshot().team,bot).entries)!==content)return;
         await host.authorize();if(!current())return;
         await this.api.mark(host.identity,workspace.id,bot,{watermark:row.watermark});
         if(current()){this.displayed={journal:host.journal,generation,key};if(this.session.getSnapshot().conversationError===READ_SYNC_ERROR)this.session.setConversationError('');}

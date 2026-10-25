@@ -64,7 +64,7 @@ export class WorkspaceSession {
   private snapshot: WorkspaceSessionSnapshot = Object.freeze({
     presentationPreference:null,presentationError:'',conversationInbox:null,conversationLoading:false,conversationError:'',conversationBusy:false,recordingTransition:false,researchPending:false,
     activityProof:null,activityBusy:false,activityContextBusy:false,activityContextError:'',activityAttempt:0,
-    selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,ehrReview:null,faxSourceBusy:false,providerFaxSourceBusy:false,
+    selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,ehrReview:null,calendarImportReview:null,faxSourceBusy:false,providerFaxSourceBusy:false,
     phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
     settingsOpen:false,practicePage:'visits',practiceOpen:false,practiceOpened:false,selected:'visit_prep',panel:'Notebook',mobilePanel:'Conversation',stage:'Before',entryIntent:null,researchEntry:false,settingsEntry:'home',inboxSelection:null,
     privateRecordingBusy:false,privateRecordingEntry:null,savedRecordingEntry:null,savedRecordingNotebook:null,privateRecordings:null,privateRecordingListEpoch:0,privateRecordingRequest:0,
@@ -119,6 +119,7 @@ export class WorkspaceSession {
   readonly setEntryIntent = this.setter('entryIntent');
   readonly setResearchEntry = this.setter('researchEntry');
   readonly setSettingsEntry = this.setter('settingsEntry');
+  readonly setCalendarImportReview = this.setter('calendarImportReview');
   readonly setEhrReview = this.setter('ehrReview');
   readonly setInboxSelection = this.setter('inboxSelection');
   readonly setPrivateRecordingBusy = this.setter('privateRecordingBusy');
@@ -177,7 +178,7 @@ export class WorkspaceSession {
     // Its generation and journal checks already deny access synchronously.
     this.patch({conversationInbox:null,conversationLoading:false,conversationError:'',conversationBusy:false,researchPending:false,
       activityProof:null,activityBusy:false,activityContextBusy:false,activityContextError:'',
-      selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,ehrReview:null,faxSourceBusy:false,providerFaxSourceBusy:false,
+      selectedSource:null,faxSourceOffer:null,providerFaxSourceOffer:null,ehrReview:null,calendarImportReview:null,faxSourceBusy:false,providerFaxSourceBusy:false,
       phoneNoteTask:null,reviewHandoffId:null,handoffReviewPending:false,selectedResult:null,savedResearchChat:false,
       settingsOpen:false,practiceOpen:false,practiceOpened:false,entryIntent:null,researchEntry:false,inboxSelection:null,
       savedRecordingEntry:null,savedRecordingNotebook:null,privateRecordings:null,
