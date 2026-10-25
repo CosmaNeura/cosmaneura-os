@@ -123,7 +123,7 @@ describe('presentation parity',()=>{
     await input(host.querySelector('#team-notebook')!,'Invented jottings for parity.');await click('Save notebook revision');
     await vi.waitFor(()=>expect(append).toHaveBeenCalledOnce());expect(append.mock.calls[0][2]).toMatchObject({expected_revision:5,kind:'scratchpad',content:'Invented jottings for parity.'});
     await vi.waitFor(()=>expect(button('Save notebook revision')!.disabled).toBe(true));
-    if(mode==='messages')await click('‹ Back to chat');else await click('Conversation');
+    if(mode==='messages')await click('‹ Back to Chief of Staff');else await click('Conversation');
     const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;await input(composer,'Review these invented notes.');
     await act(async()=>composer.closest('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
     await vi.waitFor(()=>expect(ask).toHaveBeenCalledOnce());expect(ask.mock.calls[0][2]).toMatchObject({expected_revision:6,role:'chief',content:'Review these invented notes.'});
@@ -136,7 +136,7 @@ describe('presentation parity',()=>{
     await click('Details');await click('Team activity and drafts');
     expect(document.activeElement).toBe(host.querySelector('.messages-thread-header h1'));
     expect(document.activeElement?.textContent).toBe('Activity');expect(history.scrollTop).toBe(0);
-    await click('‹ Back to chat');expect(history.scrollTop).toBe(120);
+    await click('‹ Back to Chief of Staff');expect(history.scrollTop).toBe(120);
   });
   it('cannot send the previous bot draft while an inbox conversation restores',async()=>{
     await open('messages');const chief='Keep Chief draft when opening Follow-up.',followUp='Send only this separate invented Follow-up draft.';
@@ -181,7 +181,7 @@ describe('presentation parity',()=>{
     expect(host.querySelector('.team-conversation-tools .chief-start-actions')).not.toBeNull();
     expect(visible(host.querySelector('.team-conversation-tools .chief-start-actions')!)).toBe(true);
     expect(visible(composer)).toBe(false);expect(composer.value).toBe('Keep this invented Tools draft.');
-    await click('‹ Back to chat');
+    await click('‹ Back to Chief of Staff');
     expect(host.querySelector('.messages-thread-header h1')?.textContent).toBe('Chief of Staff');
     expect(host.querySelector('#team-question')).toBe(composer);expect(host.querySelector('#team-notebook')).toBe(notebook);
     expect(visible(composer)).toBe(true);expect(composer.disabled).toBe(false);expect(composer.value).toBe('Keep this invented Tools draft.');
@@ -203,7 +203,7 @@ describe('presentation parity',()=>{
     const saved=await workspaceApi.read(identity,workspaceId),handoff=saved.handoffs!.find(item=>item.id===handoffId)!;
     expect(body).toMatchObject({attempt_id:handoff.attempt_id,result_entry_id:handoff.result_entry_id,result_sha256:handoff.result_sha256});
     expect((envelope as {request_sha256:string}).request_sha256).toBe(await handoffReviewHash(workspaceId,handoffId,body));
-    await click('Back to chat');expect(host.querySelector('#team-question')).toBe(composer);expect(composer.value).toBe('Keep my Chief directions.');
+    await click('Back to Chief of Staff');expect(host.querySelector('#team-question')).toBe(composer);expect(composer.value).toBe('Keep my Chief directions.');
     expect(host.querySelector('.handoff-review')).toBeNull();
     expect(host.querySelectorAll('.conversation-review-card')[2].textContent).toContain('Draft accepted');
   });
@@ -217,7 +217,7 @@ describe('presentation parity',()=>{
     const saved=await workspaceApi.read(identity,wid),parent=saved.handoffs!.find(item=>item.review?.decision==='changes_requested')!,revision=saved.handoffs!.find(item=>item.id===parent.review!.revision_handoff_id)!;
     expect(revisionBody).toMatchObject({expected_revision:6,review_id:parent.review!.id});expect(revision.revision_request).toMatchObject({parent_handoff_id:parent.id,review_id:parent.review!.id,result_sha256:reviewBody.result_sha256,feedback:'Clarify the invented contact preference.'});
     expect(button('Accept draft for next work')?.disabled).toBe(true);
-    await click('Back to chat');expect(host.querySelector('.handoff-review')).toBeNull();
+    await click('Back to Chief of Staff');expect(host.querySelector('.handoff-review')).toBeNull();
   });
   it.each(['messages','workspace'] as const)('replays the same save after a lost response from %s',async mode=>{
     await open(mode);const append=workspaceApi.append;let lost=false;
@@ -226,7 +226,7 @@ describe('presentation parity',()=>{
     await input(host.querySelector('#team-notebook')!,'Save these invented notes exactly once.');await click('Save notebook revision');
     await vi.waitFor(()=>expect(button('Retry same save')?.disabled).toBe(false));
     if(mode==='messages'){
-      await click('‹ Back to chat');
+      await click('‹ Back to Chief of Staff');
       expect(button('Retry same save')?.disabled).toBe(false);
       expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Save these invented notes exactly once.');
     }

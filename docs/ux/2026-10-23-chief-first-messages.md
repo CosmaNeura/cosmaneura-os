@@ -505,3 +505,18 @@ unconfirmed. Saved evidence is in the October25 Preview26 handoff's
 `native-validation/receipt.json`, normal/enlarged comparisons and OCR. Ordinary
 Messages rollout remains disabled; physical and connected-service acceptance
 remain separate gates.
+
+
+### Return destination clarity
+
+A fresh novice pass in a measured 320 × 568 mobile iframe completed Chief context,
+Details, Follow-up review and Messages navigation with the exact unsent draft
+retained. The review's generic Back to chat label did not identify its correct
+Chief destination. Return buttons now name their conversation; review labels
+use the existing validated origin address, never the currently selected review
+recipient. The Chief saved-note return branch and all routing/locking behavior
+are retained. Phone task headers keep their existing 44px chevron and expose the
+full destination to accessibility. Details return text wraps within the sheet,
+including unbroken bot names. The existing 21 presentation/parity tests and both
+TypeScript configurations pass. The novice's missing inbox Draft marker is a
+separate discoverability opportunity; it was not draft loss.

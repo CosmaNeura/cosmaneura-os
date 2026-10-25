@@ -63,6 +63,8 @@
   .team-workspace[data-presentation=messages][data-messages-chat=true][data-messages-compact=true] .team-composer-wrap .team-composer textarea{max-height:min(80px,30dvh)}
 }
 
+.team-workspace .messages-details-return{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+
 .workspace-dialog-heading{position:sticky;top:0;z-index:2;display:flex;align-items:start;gap:12px;padding:16px 0 12px;margin-top:0;background:#fffdf7}
 .workspace-dialog-heading h2{min-width:0;flex:1;margin:0;overflow-wrap:anywhere}
 .team-workspace .workspace-dialog-heading button{flex:none;width:44px;min-height:44px;margin:0}

@@ -881,6 +881,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function reviewContext():import('./session/review').ReviewContext{return {authenticated,previousIdentity,actionLocked,viewNavigationLocked,captureNavigationLocked,captureDraftLocked,recoveryBlocked,phoneChatToolsOpen,setPhoneChatToolsOpen,setClinicalTeamExpanded,focusQuestion:()=>setQuestionFocus(value=>value+1),returnFocus:chiefReviewReturnFocus};}
   function retryTeamTask(handoff:DraftHandoff){session.review.retry(handoff,saveContext());}
   function currentChiefReviewReturn(target=chiefReviewReturn.current){return session.review.currentReturn(reviewContext(),target);}
+  function conversationReviewCloseLabel(){
+    const target=session.review.currentConversationReturn(reviewContext());
+    if(!target)return undefined;
+    const name=team?.configuration.bots.find(item=>botAddress(item)===target.address)?.name;
+    return name?`Back to ${name}`:'Back to chat';
+  }
   function closeTeamReview(){session.review.close(reviewContext());}
   useLayoutEffect(()=>{
     const target=chiefReviewReturnFocus.current;
@@ -1064,7 +1070,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     </aside>
     <div className="team-main">
       {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)}/>}
-      {conversationDetails&&workspace&&<ConversationDetails context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask}/>}
+      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask}/>}
       {nativeHome||nativeWorkspace?<header className="native-home-header">
         {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
         <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
@@ -1321,7 +1327,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             onAccessLost={failure} onRefresh={refreshHandoffReview}
             onFreshAssignment={prepareFreshHandoff}
             onSaved={latest=>{if(messagesMode&&workspace.id===latest.id&&workspace.revision<=latest.revision)nativePresentationFeedback('success');setWorkspace(previous=>previous?.id===latest.id&&previous.revision<=latest.revision?latest:previous);}}
-            closeLabel={currentChiefReviewReturn()?'Return to Chief':session.review.currentConversationReturn(reviewContext())?'Back to chat':undefined}
+            closeLabel={currentChiefReviewReturn()?'Return to Chief':conversationReviewCloseLabel()}
             closeLocked={!!currentChiefReviewReturn()&&(actionLocked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked)}
             onClose={closeTeamReview}
             onRevisionPrepared={id=>{setReviewHandoffId(id);setHandoffReviewPending(false);}}/>}
