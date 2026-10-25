@@ -1,21 +1,26 @@
 import {BotAvatar} from './BotAvatar';
 import {useEffect,useRef,useState} from 'react';
 import {WorkspaceDialog} from './WorkspaceDialog';
-import {botAddress,type ProviderTeam,type BotRole} from './workspace-api';
+import {botAddress,type ProviderTeam,type BotRole,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import type {ConversationInbox,ConversationSummary} from './conversations-api';
 import type {Presentation} from './session/presentation';
+import type {ConversationDraftSnapshot} from './session/conversation-drafts';
 import {conversationPreferenceKey} from './conversation-preferences';
 import {conversationActivityDate,organizedConversations,type InboxPreferencesSnapshot,type InboxRenameTarget} from './session/inbox-preferences';
+import {useInboxPullRefresh} from './use-inbox-pull-refresh';
 import './messages-presentation.css';
 
 const attention={idle:'',working:'Working',needs_review:'Needs you',needs_check:'Check status'};
-export function MessagesInbox({inbox,team,loading,error,locked,organization,onOpen,onNew,onChief,onRefresh,onMore,onUnread,onSettings,onOrganize,onRestoreAll,onInspect,onCloseMenu,onRename,onReloadOrganization}:{
+export function MessagesInbox({identity,inbox,team,loading,error,locked,organization,drafts,onRefreshDrafts,onOpen,onNew,onChief,onRefresh,onMore,onUnread,onSettings,onOrganize,onRestoreAll,onInspect,onCloseMenu,onRename,onReloadOrganization}:{
+  identity?:AuthenticatedWorkspaceIdentity;
   inbox:ConversationInbox|null;team:ProviderTeam|null;loading:boolean;error:string;locked:boolean;
-  onOpen:(row:ConversationSummary)=>void;onNew:()=>void;onChief:(address:string)=>void;onRefresh:()=>void;onMore:()=>void;onUnread:(row:ConversationSummary)=>void;onSettings:()=>void;
+  onOpen:(row:ConversationSummary)=>void;onNew:()=>void;onChief:(address:string)=>void;onRefresh:()=>void|Promise<void>;onMore:()=>void;onUnread:(row:ConversationSummary)=>void;onSettings:()=>void;
   organization:InboxPreferencesSnapshot;onOrganize:(row:ConversationSummary,change:{pinned?:boolean;hidden?:boolean})=>Promise<boolean>;onRestoreAll:()=>Promise<boolean>;
+  drafts?:ConversationDraftSnapshot|null;onRefreshDrafts?:()=>void;
   onInspect:(row:ConversationSummary)=>void;onCloseMenu:()=>void;onRename:(target:InboxRenameTarget)=>void;onReloadOrganization:()=>void;
 }){
   const [search,setSearch]=useState(''),[hidden,setHidden]=useState(false),[menu,setMenu]=useState<ConversationSummary|null>(null),heading=useRef<HTMLHeadingElement>(null);
+  const pull=useInboxPullRefresh({disabled:locked||loading||!!menu,scope:team?.recovery_scope??'',onRefresh,identity});
   const activeMenu=useRef(menu),alive=useRef(true);activeMenu.current=menu;useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const chief=team?.configuration.bots.find(bot=>bot.role==='chief'&&!bot.retired);
   const chiefReady=!!chief?.enabled;
@@ -28,9 +33,11 @@ export function MessagesInbox({inbox,team,loading,error,locked,organization,onOp
   useEffect(()=>{setMenu(null);setSearch('');setHidden(false);onCloseMenu();},[team?.recovery_scope]);
   useEffect(()=>{if(menu&&!inbox?.rows.some(row=>row.workspace_id===menu.workspace_id&&row.bot.address===menu.bot.address))closeMenu();},[inbox]);
   async function organize(change:{pinned?:boolean;hidden?:boolean}){if(!menu||organizationLocked)return;const selected=menu;if(await onOrganize(menu,change)&&alive.current&&activeMenu.current===selected){closeMenu();if(change.hidden!==undefined)queueMicrotask(()=>heading.current?.focus());}}
-  return <section className="messages-inbox" aria-labelledby="messages-title">
+  return <section ref={pull.ref} className="messages-inbox" aria-labelledby="messages-title">
+    <div className="messages-pull-refresh" style={{height:pull.distance}} role="status" aria-live="polite">{pull.distance>0&&(pull.ready?'Release to refresh':'Pull to refresh')}</div>
     <header><h1 id="messages-title" ref={heading} tabIndex={-1}>{hidden?'Hidden conversations':'Messages'}</h1><button className="team-primary" disabled={locked} onClick={onNew}>New message</button></header>
     {error&&<p role="alert">{error}</p>}
+    {drafts?.error&&<p role="status">{drafts.error} <button disabled={locked||drafts.checking} onClick={onRefreshDrafts}>Check saved drafts</button></p>}
     {organization.error&&!menu&&<p role="alert">{organization.error} <button disabled={organization.busy||locked} onClick={onReloadOrganization}>Retry organization</button></p>}
     <div className="messages-inbox-tools"><label>Search conversations<input type="search" maxLength={200} value={search} onChange={event=>setSearch(event.target.value)} placeholder="Bot, note or message"/></label>
       {(hiddenCount>0||hidden)&&<button disabled={locked} onClick={()=>setHidden(!hidden)}>{hidden?'Back to conversations':`Hidden conversations (${hiddenCount})`}</button>}</div>
@@ -41,6 +48,7 @@ export function MessagesInbox({inbox,team,loading,error,locked,organization,onOp
       {chiefReady?<button disabled={locked} onClick={()=>onChief(botAddress(chief!))}>Chat with {chief!.name}</button>:<button disabled={locked} onClick={onSettings}>Review team settings</button>}</div></section>}
     {!organization.ready&&organization.busy?<p role="status">Loading conversation organization…</p>:groups.map(group=><section className="messages-inbox-group" key={group.title}><h2>{group.title}</h2><ul className="messages-list" aria-label={`${group.title} conversations`}>{group.rows.map(row=><li key={`${row.workspace_id}:${row.bot.address}`}>
       <button className="messages-row" disabled={locked} onClick={()=>onOpen(row)}><BotAvatar role={row.bot.role}/><span className="messages-row-copy"><strong>{row.bot.name}{row.unread&&<><span className="messages-unread" aria-hidden="true"/><span className="team-sr-only">Unread</span></>}</strong><span className="messages-context">{row.context_label}</span><span className="messages-preview">{row.preview||'No messages yet'}</span>
+        {drafts?.items[conversationPreferenceKey(row.workspace_id,row.bot.address)]&&<span className="messages-status" data-draft-presence={drafts.items[conversationPreferenceKey(row.workspace_id,row.bot.address)]}>{drafts.items[conversationPreferenceKey(row.workspace_id,row.bot.address)]==='note'?'Saved-note draft':'Draft'}</span>}
         <span className="messages-status">{[preference(row)?.pinned?'Pinned':'',!row.bot.available?'Unavailable · history retained':'',attention[row.attention],row.manual_unread?'Marked unread':''].filter(Boolean).join(' · ')}</span></span>
         <time dateTime={row.last_activity_at} title={new Date(row.last_activity_at).toLocaleString()}>{conversationActivityDate(row.last_activity_at)}</time></button>
       <button className="messages-row-menu" aria-label={`Conversation actions for ${row.bot.name}, ${row.context_label}`} disabled={locked||organization.busy} onClick={()=>{setMenu(row);onInspect(row);}}>•••</button>

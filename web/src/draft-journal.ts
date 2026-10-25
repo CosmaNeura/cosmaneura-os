@@ -325,7 +325,11 @@ export class DraftJournal {
   readonly records = new Map<string, DraftRecord>();
   private chain: Promise<unknown> = Promise.resolve();
   private active = true;
+  private listeners = new Set<(address:string|null)=>void>();
   constructor(private readonly store: DraftStore) {}
+  /** Only confirmed local changes are announced; no draft content leaves here. */
+  subscribe(changed:(address:string|null)=>void):()=>void {this.listeners.add(changed);return()=>{this.listeners.delete(changed);};}
+  private changed(address:string|null):void {for(const listener of [...this.listeners]){try{listener(address);}catch{/* An observer cannot fail a confirmed save. */}}}
   has(address: string): boolean { return this.records.has(address); }
   async load(address: string): Promise<RecoveredDraft | null> {
     // A newly mounted editor must see writes queued by its predecessor.
@@ -361,10 +365,11 @@ export class DraftJournal {
       }
       if (!this.active) throw new DraftStoreError("unavailable");
       this.records.set(address, saved);
+      this.changed(address);
     };
     const result = this.chain.catch(() => {}).then(task);
     this.chain = result;
     return result;
   }
-  close(): void { this.active = false; this.records.clear(); this.store.close(); }
+  close(): void { this.active = false; this.records.clear(); this.store.close(); this.changed(null); this.listeners.clear(); }
 }

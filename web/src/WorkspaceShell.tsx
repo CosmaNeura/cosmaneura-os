@@ -137,6 +137,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
 }) {
   const [session]=useState(()=>new WorkspaceSession({presentation:{enabled:import.meta.env.VITE_MESSAGES_ENABLED==='true',phone:phoneLayout(),storage:deviceStorage()},initialPage:authenticated?'home':'visits',navigation:{initialRoute:readWorkspaceRoute(window.location.hash)}}));
   const inboxOrganization=useSyncExternalStore(session.inboxPreferences.subscribe,session.inboxPreferences.getSnapshot,session.inboxPreferences.getSnapshot);
+  const inboxDraftStatus=useSyncExternalStore(session.conversations.drafts.subscribe,session.conversations.drafts.getSnapshot,session.conversations.drafts.getSnapshot);
   const [inboxRename,setInboxRename]=useState<{target:InboxRenameTarget;identity:AuthenticatedWorkspaceIdentity;scope:string|undefined}|null>(null);
   const {presentationError,conversationInbox,conversationLoading,conversationError,conversationBusy,recordingTransition,researchPending,activityProof,activityBusy,activityContextBusy,activityContextError,activityAttempt,selectedSource,faxSourceOffer,providerFaxSourceOffer,faxSourceBusy,providerFaxSourceBusy,phoneNoteTask,reviewHandoffId,handoffReviewPending,selectedResult,savedResearchChat,settingsOpen,practicePage,practiceOpen,practiceOpened,selected,panel,mobilePanel,stage,entryIntent,researchEntry,settingsEntry,inboxSelection,privateRecordingBusy,privateRecordingEntry,savedRecordingEntry,savedRecordingNotebook,privateRecordings,privateRecordingListEpoch,privateRecordingRequest,clinicalPreparing,homeBusy,setupApproval,setupProjection,setupEpoch,confirmTeamExit,teamSaveExit,identity,connectionError,busy,pending,conflict,message,error,readRetry,
     workspace,encounters,team,teamDraft,note,thought,evidence,source,ehrReview,calendarImportReview,previousModelRequest,clinicalShareCheck,modelObservation,replacementDraft,modelHashes,schedulingObservation,recoveryOffers,recoveryState,recoveryEpoch}=useWorkspaceSession(session);
@@ -801,6 +802,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       denied:cause=>{if(cause instanceof WorkspaceApiError&&[401,403,426].includes(cause.status))failure(cause);}};
   }
   useEffect(()=>{if(session.presentation.enabled)void session.inboxPreferences.bind(inboxPreferencesHost());},[authenticated,accountAccess]);
+  useEffect(()=>{
+    const active=session.presentation.enabled&&practicePage==='home'&&!settingsOpen&&!practiceOpen&&!contextBot;
+    void session.conversations.drafts.bind(active?inboxPreferencesHost():null,active?conversationInbox?.rows??null:null);
+    return()=>session.conversations.drafts.clear();
+  },[authenticated,accountAccess,conversationInbox,practicePage,settingsOpen,practiceOpen,contextBot]);
+  const currentInboxDrafts=inboxDraftStatus.identity===authenticated&&inboxDraftStatus.journal===editorJournal&&inboxDraftStatus.scope===editorScope&&inboxDraftStatus.rows===conversationInbox?.rows?inboxDraftStatus:null;
   useEffect(()=>setInboxRename(null),[authenticated]);
   function closeInboxRename(){setInboxRename(null);queueMicrotask(()=>document.getElementById('messages-title')?.focus());}
   const privateRecordingPlatform = authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?'ios':'desktop';
@@ -1242,10 +1249,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onOpenNotebook={stageAthenaNotebook}/>
       </AccountRecoveryContext.Provider>}
       <div className="workspace-main-content" hidden={practiceOpen||athenaTaskOpen}>
-      {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization}
+      {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox identity={authenticated} inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization}
+        drafts={currentInboxDrafts} onRefreshDrafts={()=>void session.conversations.drafts.refresh()}
         locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked}
         onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
-        onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>void session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated,failure)}
+        onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated,failure)}
         onOrganize={(row,change)=>session.inboxPreferences.set(row,change)} onRestoreAll={()=>session.inboxPreferences.restoreAll()} onInspect={row=>void session.inboxPreferences.inspect(row)} onCloseMenu={()=>session.inboxPreferences.closeMenu()}
         onReloadOrganization={()=>void session.inboxPreferences.bind(inboxPreferencesHost(),true)} onRename={target=>setInboxRename({target,identity:authenticated,scope:accountAccess?.recoveryScope})}/>}
       {inboxRename&&inboxRename.identity===authenticated&&accountAccess?.recoveryScope===inboxRename.scope&&<WorkspaceDialog title="Rename notebook" closeLabel="Close rename notebook" onClose={closeInboxRename}>

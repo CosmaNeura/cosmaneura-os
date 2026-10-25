@@ -7,12 +7,14 @@ import {teamAddress,teamUuid} from '../team-setup-request';
 import type {WorkspaceRoute} from '../workspace-route';
 import type {WorkspaceSession} from './workspace-session';
 import {projectConversation} from './entries';
+import {WorkspaceConversationDrafts} from './conversation-drafts';
 const READ_SYNC_ERROR='Read status could not sync. Your messages and drafts are retained.';
 
 export type ConversationHost={identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;scope:string;
   current:()=>boolean;blocked:()=>boolean;authorize:()=>Promise<void>;navigate:(route:WorkspaceRoute)=>Promise<void>;failure:(cause:unknown)=>void;restoreRejectedNavigation?:()=>void};
 /** Inbox and per-context drafts outlive either presentation; no model dispatch. */
 export class WorkspaceConversations {
+  readonly drafts=new WorkspaceConversationDrafts();
   private readEpoch=0;
   private opening=false;
   private unreadDisplay:{row:ConversationSummary;identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;generation:number}|null=null;
@@ -23,7 +25,7 @@ export class WorkspaceConversations {
   // are unchanged. Preparation belongs to that composer lifetime, not the store.
   private readonly prepared=new WeakMap<DraftJournal,Map<string,number>>();
   constructor(private readonly session:WorkspaceSession,private readonly api=conversationsApi,private readonly readWorkspace=workspaceApi.read){}
-  reset(){this.readEpoch++;this.opening=false;this.unreadDisplay=null;this.displayed=null;this.displayRead=null;this.visibleAcknowledgment=null;}
+  reset(){this.readEpoch++;this.opening=false;this.unreadDisplay=null;this.displayed=null;this.displayRead=null;this.visibleAcknowledgment=null;this.drafts.clear();}
   async refresh(identity:AuthenticatedWorkspaceIdentity,more=false,failure?:(cause:unknown)=>void){
     const current=this.session.generation.current,epoch=++this.readEpoch,prior=this.session.getSnapshot().conversationInbox;
     this.session.setConversationLoading(true);this.session.setConversationError('');

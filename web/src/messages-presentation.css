@@ -107,6 +107,7 @@
 .messages-conversation-actions{display:flex;flex-direction:column;gap:6px}
 .messages-conversation-actions>button{min-height:44px;text-align:left;padding:12px;overflow-wrap:anywhere}
 .messages-inbox .messages-status:empty{display:none}
+.messages-pull-refresh{display:flex;align-items:center;justify-content:center;overflow:hidden;font-size:14px;color:var(--cb-text-2,#536158);pointer-events:none}
 @media(max-width:360px){.messages-row{gap:8px}.messages-row>.bot-avatar{width:32px;height:32px;min-width:32px}.messages-row time{max-width:44px}}
 @media(prefers-reduced-motion:no-preference){
   .team-workspace[data-presentation=messages] button{transition:transform 120ms cubic-bezier(.2,0,0,1)}
