@@ -10,7 +10,16 @@ type Props={identity:AuthenticatedWorkspaceIdentity;connection:CoreConnection;ac
  onBusyChange?:(busy:boolean)=>void;onAccessLost:(error:unknown)=>void;onClose:()=>void;onOpenNotebook?:(command:CoreConnectionCommand)=>Promise<void>;openBlocked?:boolean};
 type Stored<T>={identity:AuthenticatedWorkspaceIdentity;scope:string;value:T};
 type Review={command:AthenaVisitLinkCommand;observation:AthenaVisitLinkObservation};
-type Pending={command_key:string;command_sha256:string};
+type Pending={command_key:string;command_sha256:string;target:
+ {operation:'link';appointment_ref:string;patient_ref:string}|{operation:'unlink';link_ref:string}};
+function matchesPending(result:AthenaVisitLinkObservation,pending:Pending){
+ if(!result.applied)return true;
+ const target=pending.target;
+ if(result.operation!==target.operation)return false;
+ if(target.operation==='unlink')return result.state==='removed'&&result.link_ref===target.link_ref;
+ // Status may return a newer projection, but it must still be the reviewed patient and visit.
+ return !result.encounter||result.encounter.appointment.appointment_ref===target.appointment_ref&&result.encounter.patient.patient_ref===target.patient_ref;
+}
 function coreWindow(selection:AthenaSourceSelection):CoreWindow{
  const end=new Date(selection.end_date+'T00:00:00Z');end.setUTCDate(end.getUTCDate()+1);
  return {start_date:selection.start_date,end_date:end.toISOString().slice(0,10)};
@@ -48,6 +57,7 @@ export function AthenaVisitLinkPanel({identity,connection,account,source,selecti
   try{
    const result=(await coreConnectionApi.read(identity,command,abort.signal)).athena_visit_link;
    if(!isCurrent())return;
+   if(command.action==='athena_visit_status'&&(!pending||!matchesPending(result,pending)))throw new WorkspaceApiError(502);
    setStored(remember(result));
    if(command.action==='athena_visit_preview'||command.action==='athena_visit_unlink_preview'){
     setStoredReview(result.state==='ready'&&result.plan_sha256&&result.command_sha256?remember({command,observation:result}):null);setConfirmed(false);
@@ -82,7 +92,11 @@ export function AthenaVisitLinkPanel({identity,connection,account,source,selecti
   const r=review.observation;
   if(!r.command_key||!r.command_sha256||!r.plan_sha256)return;
   const command:AthenaVisitLinkCommand={...review.command,action:review.command.action==='athena_visit_preview'?'athena_visit_link':'athena_visit_unlink',request_nonce:crypto.randomUUID(),plan_sha256:r.plan_sha256,confirmed:true};
-  setStoredPending(remember({command_key:r.command_key,command_sha256:r.command_sha256}));
+  const target:Pending['target']|null=command.action==='athena_visit_link'
+   ?command.appointment_ref&&r.encounter?{operation:'link',appointment_ref:command.appointment_ref,patient_ref:r.encounter.patient.patient_ref}:null
+   :command.link_ref?{operation:'unlink',link_ref:command.link_ref}:null;
+  if(!target)return;
+  setStoredPending(remember({command_key:r.command_key,command_sha256:r.command_sha256,target}));
   void run(command);
  }
  async function openVisit(){
@@ -102,7 +116,7 @@ export function AthenaVisitLinkPanel({identity,connection,account,source,selecti
   <p>This saves a connection to an existing Cosmaneura visit. Athena stays read-only.</p>
   {error&&<p role="alert">{error}</p>}
   {busy&&<p role="status">Checking visit connection…</p>}
-  {pending&&<div role="status"><p>The result of your last change needs to be checked.</p><button disabled={busy} onClick={()=>void run(base('athena_visit_status',pending))}>Check saved result</button></div>}
+  {pending&&<div role="status"><p>The result of your last change needs to be checked.</p><button disabled={busy} onClick={()=>void run(base('athena_visit_status',{command_key:pending.command_key,command_sha256:pending.command_sha256}))}>Check saved result</button></div>}
   {!pending&&<button disabled={busy} onClick={()=>void run(base('athena_visit_lookup',{source:selection}))}>Check current visit connection</button>}
   {observation?.state==='review_required'&&!pending&&<p role="status">This patient or visit connection needs review. Ask your practice administrator to review the patient match before continuing.</p>}
   {observation?.state==='review_required'&&observation.link_ref&&!pending&&<button disabled={busy} onClick={()=>void run(base('athena_visit_unlink_preview',{link_ref:observation.link_ref!,command_key:crypto.randomUUID()}))}>Review removing connection</button>}

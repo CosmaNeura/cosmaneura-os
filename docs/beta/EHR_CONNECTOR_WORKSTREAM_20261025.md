@@ -94,8 +94,12 @@ do not imply API availability, licensing or customer consent.
 - **Athena:** the existing CosmaBot client reads a pinned practice schedule and
   reviews an exact visit link. The current repair retains selected dates during
   transient failures and rejects a direct link response for a different reviewed
-  target. The status contract does not carry the original target, so independent
-  target proof after status reconciliation is still a separate contract gap.
+  target. After a lost save reply, the mounted panel also compares the recovered
+  result with the reviewed patient/visit or removal target before offering to
+  open a notebook. A current projection may refresh details for the same IDs.
+  A mismatched result remains unresolved without replaying the write. The wire
+  contract does not carry the original target; durable target proof after panel
+  remount remains a separate gap.
 - **Elation:** the documented practice REST client-credentials path now has a
   default-off managed sandbox installation and a complete appointment-to-Chief
   source workflow. Local tests use invented responses; vendor access is not yet
