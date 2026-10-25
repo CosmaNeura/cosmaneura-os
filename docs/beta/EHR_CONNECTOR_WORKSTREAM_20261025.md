@@ -263,7 +263,88 @@ uses accessibility text. The original mobile checkout and phone Preview24 remain
 unchanged. Physical iPhone qualification awaits available developer services;
 Elation vendor acceptance still awaits the separate sandbox access below.
 
-## Next step: obtain Elation sandbox access
+## Tebra appointment workflow
+
+The shared **Review an appointment** task now offers Elation and Tebra. Each
+keeps its own encrypted recovery journal. Tebra first shows the returned
+appointment window, then requires a last name and birth date for the selected
+appointment. The patient identifier already attached to that appointment must
+match the demographic result, and a fresh appointment read must still match
+before review. The four confirmations save one source and **Prepare Chief
+draft** retains Chief's existing directions. A window with too many rows asks
+for a smaller date range after checking the original request's saved result.
+
+This Tebra path uses an explicitly installed mock transport and invented
+records. It does not install real Tebra credentials or imply a live connection.
+Elation's existing request, response and source hashes remain compatible, and
+rotating Elation sandbox access preserves Tebra's separately scoped sources.
+
+At code commit `4f1c12d`, the signed Tebra and Elation app-to-database journeys
+both pass. The Mac Studio passes 199 focused web tests, 98 Python tests
+(including the calendar parser), TypeScript and both renderer builds. Browser
+checks cover four layouts, including a short phone viewport and enlarged text.
+A rebuilt iOS simulator client passes two app-hosted checks for the real Done
+control, Tebra patient review, preserved Chief text and recovery after a lost
+source-save response. The native run produced zero attachments. Its input is
+programmatic UIKit/DOM with invented services; live vendor, physical touch and
+native file-picker acceptance are not established.
+
+Receipts are in the connector workstream's `CHECKPOINT-TEBRA.json`,
+`evidence/tebra-joined-ui-final/results.json`,
+`evidence/mac-studio/tebra-final-02-20261025/receipt.json`, and
+`native/tebra-native-review.json`. The first Mac attempt's missing capture-client
+dependencies were repaired in the test copy; the passing rerun used the same
+source hashes. The original mobile checkout and phone Preview24 are unchanged.
+
+## Calendar import and current-source checkpoint
+
+From Chief's Details or Saved sources, **Import calendar file** accepts a bounded
+`.ics` export with an explicit source, week and timezone. The user reviews one
+event, confirms its summary, saves it and prepares a Chief draft without losing
+existing directions. **View saved imports** reopens older imports for review or
+withdrawal. Reviewed events cannot create duplicate summaries. **Stop using this
+import** retains visit history while withholding the source from future work.
+
+The raw calendar file, filename, feed URL and event UID are not kept. Atlas.md is
+a source reported by the user; this flow does not connect to Atlas.md or verify
+patient identity, availability or a booking. The parser distinguishes all-day
+dates and timed events, checks daylight-saving transitions and rejects event
+recurrence and unsupported ambiguous time definitions. Compatibility with an
+actual Atlas-produced synthetic export remains unverified.
+
+At code commit `45a4981`, the signed calendar, Elation and Tebra UI-to-database
+journeys pass. The calendar journey recovers lost upload/save replies, revisits
+the first of two imports and withdraws its sole reviewed source. Its server
+records contain no raw file or omitted private calendar fields. Frozen backend
+checks include 35 API and 44 database custody cases. The Mac Studio passes 409
+web tests, 185 Python tests, TypeScript and both renderer builds with all 2,887
+source hashes unchanged.
+
+Review also fixed delayed-response races: older editor reads cannot replace a
+fresh workspace, and preparing Chief checks the exact source again after the
+last authorization. Calendar and EHR mutation receipts no longer republish an
+older workspace after a fresh authorization. The affected fax recovery branch
+now obtains its callback workspace after persistence. Withdrawn, deleted or
+changed sources preserve the existing Chief draft.
+
+A newly compiled iOS simulator client passes three app-hosted checks: real Done
+keyboard behavior, Tebra review/recovery, and calendar lost-reply recovery with
+Chief directions intact. The native run produces zero attachments. Four browser
+layouts passed 270 text/geometry checks; those layout checks preceded the final
+publication fixes, which are included in the final Mac/native runs. Native input
+is programmatic UIKit/DOM; physical file-picker, touch, live sign-in and vendor
+account acceptance are not established. Phone Preview24 and the original mobile
+checkout remain unchanged.
+
+Receipts are in `CHECKPOINT-CALENDAR.json`,
+`evidence/calendar-final-joined-ui-02/results.json`,
+`evidence/mac-studio/calendar-final-02-20261025/receipt.json`, and
+`native/calendar-native-review.json` in the connector workstream. Earlier
+snapshots and preflight results are retained separately. The active next slice
+is the shared Athena visit task: durable exact link/removal recovery through
+reload, Chief/Connections access, and correct notebook-opening gates.
+
+## Elation sandbox access
 
 The owner confirmed no sandbox is available and requested access requirements.
 The [Elation sandbox access packet](ELATION_SANDBOX_ACCESS_REQUIREMENTS.md) is
