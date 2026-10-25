@@ -427,6 +427,7 @@ def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None
             "efax_inbound_source": "Unavailable received-fax source",
             "fax_inbound_source": "Unavailable received practice-fax source",
             "ehr_read_source": "Unavailable EHR source",
+            "calendar_import_source": "Unavailable calendar import",
         }.get(e.kind)
         entries.append(
             {
@@ -479,6 +480,15 @@ def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None
     }
 
 
+def _entry_key_available(s, wid, key):
+    """File-import command keys cannot later become ordinary entry commands."""
+    from cosmas_os.calendar_import_models import CalendarImportRequest, CalendarImportRevocation
+
+    for table in (CalendarImportRequest, CalendarImportRevocation):
+        if s.scalar(select(table.id).where(table.workspace_id == wid, table.idempotency_key == key)):
+            raise WorkspaceError("idempotency_conflict")
+
+
 def append(
     s: Session,
     box: str,
@@ -515,6 +525,7 @@ def append(
             "entry_revision": replay.revision,
             "workspace": read(s, box, actor, wid, at_revision=replay.revision),
         }
+    _entry_key_available(s, wid, key)
     if expected != w.revision:
         raise WorkspaceError("workspace_revision_conflict")
     if w.revision >= 500:

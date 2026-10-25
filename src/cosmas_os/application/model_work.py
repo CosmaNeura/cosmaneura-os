@@ -602,7 +602,7 @@ def _context_for(
     from cosmas_os.application.clinical_note_share import clinical_request
 
     context = clinical_request(s, workspace, settings, command["content"], context)
-    bounded_connector_kinds = {"google_message", "google_calendar", "ehr_read_source"}
+    bounded_connector_kinds = {"google_message", "google_calendar", "ehr_read_source", "calendar_import_source"}
     if any(s.get(WorkspaceEntry, source.entry_id).kind in bounded_connector_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
@@ -610,6 +610,9 @@ def _context_for(
                 and s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
             ) for source in context.sources)
             or sum(len(source.content) for source in context.sources) > 30000):
+        if any(s.get(WorkspaceEntry, source.entry_id).kind == "calendar_import_source"
+               for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
+            raise ws.WorkspaceError("calendar_import_source_context_too_large", 422)
         has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind == "google_calendar"
             for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
         if any(s.get(WorkspaceEntry, source.entry_id).kind == "ehr_read_source"
@@ -688,6 +691,10 @@ def _selected_connector_passages(s, workspace, settings):
     from cosmas_os.ports.bot_capabilities import SourcePassage
 
     reviewed = []
+    if team.runtime_settings.workspace_calendar_import_available:
+        from cosmas_os.application import calendar_imports
+
+        reviewed.extend(calendar_imports.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.workspace_ehr_read_available:
         from cosmas_os.application import ehr_reads
 
@@ -721,6 +728,7 @@ def _new_admission(
     *,
     attempt=None,
 ):
+    ws._entry_key_available(s, workspace.id, command["idempotency_key"])
     full_source_task = command.get("task_brief", {}).get("version") == 2
     tools_available = (team.runtime_settings.workspace_agent_tools_enabled
         and not any(key in command for key in (
@@ -854,6 +862,7 @@ def reserve_conversation(
         s.commit()
         return None, prior
     # No current-model/policy gate precedes the exact historical lookup above.
+    ws._entry_key_available(s, wid, key)
     if workspace.revision != expected:
         raise ws.WorkspaceError("workspace_revision_conflict")
     if workspace.revision >= 500:

@@ -6,6 +6,7 @@ and deliberately remains outside this registry.
 """
 
 from cosmas_os import (  # noqa: F401 -- imports register declarative models
+    calendar_import_models,
     conversation_models,
     efax_inbound_models,
     efax_source_models,

@@ -2164,6 +2164,15 @@ app.include_router(google_calendar_router(
     fence=_refresh_model_identity))
 app.add_middleware(GoogleCalendarBoundary)
 
+from cosmas_os.api.calendar_import_routes import CalendarImportBoundary  # noqa: E402
+from cosmas_os.api.calendar_import_routes import router as calendar_import_router  # noqa: E402
+
+app.include_router(calendar_import_router(configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(CalendarImportBoundary)
+allowed_headers.append("X-Cosmas-Calendar-Import")
+
 from cosmas_os.api.ehr_read_routes import EhrReadBoundary  # noqa: E402
 from cosmas_os.api.ehr_read_routes import router as ehr_read_router  # noqa: E402
 from cosmas_os.application import ehr_reads  # noqa: E402

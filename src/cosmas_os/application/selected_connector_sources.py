@@ -13,6 +13,7 @@ SOURCE_STATE_FIELDS = {
     "efax_inbound_source": "fax_source_state",
     "fax_inbound_source": "practice_fax_source_state",
     "ehr_read_source": "ehr_source_state",
+    "calendar_import_source": "calendar_import_source_state",
 }
 
 
@@ -21,6 +22,10 @@ def is_selected_connector(entry):
 
 
 def _service(kind):
+    if kind == "calendar_import_source":
+        from cosmas_os.application import calendar_imports
+
+        return calendar_imports
     if kind == "ehr_read_source":
         from cosmas_os.application import ehr_reads
 

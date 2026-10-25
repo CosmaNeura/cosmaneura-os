@@ -97,6 +97,8 @@ class Settings(BaseSettings):
     workspace_google_message_enabled: bool = False
     # Explicitly reviewed calendar snapshots; independent from whole-message consent.
     workspace_google_calendar_enabled: bool = False
+    # Staff-supplied files only; no subscription or provider activation.
+    workspace_calendar_import_enabled: bool = False
     # Explicit installed synthetic Elation fixture only; no vendor activation.
     workspace_ehr_read_enabled: bool = False
     # Separate network permission: sandbox REST reads of invented records only.
@@ -168,6 +170,12 @@ class Settings(BaseSettings):
     # New admissions opt into the closed product reader loop; saved v1–v4
     # requests retain their original single-response contract.
     workspace_agent_tools_enabled: bool = False
+
+    @property
+    def workspace_calendar_import_available(self) -> bool:
+        return bool(self.workspace_calendar_import_enabled and self.workspace_available
+                    and self.workspace_authenticated_enabled and self.auth_mode == "clerk_jwt"
+                    and not self.workspace_hosted_enabled)
 
     @property
     def workspace_ehr_read_available(self) -> bool:
