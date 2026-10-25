@@ -476,3 +476,12 @@ retry. Chromium reports that it does not support `-apple-system-body`; these
 checks establish browser behavior and geometry, not execution of the new native
 font rules. Installed iOS comparison at normal and enlarged preferred text sizes
 remains required before this typography change is accepted as native-qualified.
+
+
+Preview25's actual iOS simulator check confirmed that native headings, context
+and tab labels grow at Text Size9, with the real keyboard, Done and the visible
+Qdraft text retained. The enlarged Settings label split across two lines. The
+follow-up keeps native caption sizing on the navigation parent and bounds the
+four compact tab labels at18px without wrapping; conversation/header text
+continues to follow the unrestricted native style. The installed follow-up still
+requires its native visual comparison before acceptance.
