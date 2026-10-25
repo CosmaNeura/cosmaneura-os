@@ -465,6 +465,16 @@ Preview32 is signed, archived and served in the local browser rehearsal.
 The paired phone still reports its developer tunnel unavailable; Preview30 is
 the last confirmed installed version. See `CHECKPOINT-EHR-MATERIAL.json`.
 
+Preview33 (`1301827`) adds the reviewed Outlook source card and a verified
+Research-packet-to-Chief draft continuation. It passes 311 focused Mac cases,
+both typechecks, 76 real-browser assertions and two native hosted journeys,
+with zero images. The signed package and verified archive are ready, and the
+local rehearsal serves this renderer. The phone's developer tunnel is still
+unavailable; Preview30 remains the last confirmed installation. The delivery
+receipt and the closed-storage draft uncertainty are documented in
+`CHECKPOINT-OUTLOOK-RESEARCH.json` and the Chief-first Messages implementation
+record. These are new usable data flows, not live vendor acceptance.
+
 ## Elation sandbox access
 
 The owner confirmed no sandbox is available and requested access requirements.

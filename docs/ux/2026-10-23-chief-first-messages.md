@@ -667,3 +667,15 @@ retrying; it does not promise that a closed store undid a committed write.
 Mounted, final browser, Mac and native outcomes are recorded separately in the
 connector workstream's delivery checkpoint. No live account or vendor
 qualification is implied by this source implementation.
+
+The combined `1301827` renderer subsequently passed all 311 cases across 18
+files on Mac Studio, both TypeScript configurations, 76 Chromium assertions
+across four 320px/390px enlarged-text scenarios, and both native hosted
+journeys. The mounted Research flow also passes actual encrypted-store reload
+recovery and suspension checks. All 2,935 frozen source files stayed unchanged.
+Native Done measured 44px, Back/Send remained reachable, and no media
+attachments were generated. Preview33 is signed and archived; its normal
+browser build is served at the existing rehearsal origin without a storage
+reset. The phone still reports an unavailable developer tunnel, leaving
+Preview30 as the last confirmed installed version. See
+`CHECKPOINT-OUTLOOK-RESEARCH.json` in the connector workstream.
