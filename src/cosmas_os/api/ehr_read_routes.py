@@ -8,10 +8,11 @@ from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
 from cosmas_os.adapters.elation_read_runtime import SyntheticElationReads
+from cosmas_os.adapters.elation_sandbox_runtime import ManagedElationSandboxReads
 from cosmas_os.api import ehr_read_schemas as schema
 from cosmas_os.api.capture_deadline import CaptureBoundary
 from cosmas_os.api.capture_schemas import _unique_object
-from cosmas_os.application import ehr_reads, model_work
+from cosmas_os.application import ehr_reads, elation_sandbox_installation, model_work
 from cosmas_os.application import workspace as ws
 from cosmas_os.application.capture_deadline import run_in_threadpool
 
@@ -40,7 +41,7 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
 
     def service():
         port = runtime()
-        if not configuration().workspace_ehr_read_available or type(port) is not SyntheticElationReads:
+        if not configuration().workspace_ehr_read_available or type(port) not in (SyntheticElationReads, ManagedElationSandboxReads):
             raise ws.WorkspaceError("ehr_read_unavailable", 404)
         return port
 
@@ -86,7 +87,11 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                 return ehr_reads.status(*scope, enabled=configuration().workspace_ehr_read_available,
                     port=runtime(), reauthenticate=reauthenticate)
             port = service()
-            if body.action == "observe":
+            if body.action == "install":
+                result = elation_sandbox_installation.install(*scope, key=body.idempotency_key,
+                    installation_id=str(body.installation_id), installation_sha256=body.installation_sha256,
+                    port=port, reauthenticate=reauthenticate)
+            elif body.action == "observe":
                 result = ehr_reads.observe(*scope, key=body.idempotency_key,
                     connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
                     starts_at=body.starts_at, ends_at=body.ends_at, port=port, reauthenticate=reauthenticate)

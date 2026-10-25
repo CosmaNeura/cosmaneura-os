@@ -49,7 +49,14 @@ class Resolve(Protected):
     idempotency_key: IdempotencyKey
 
 
-EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Inspect | Resolve, Field(discriminator="action")])
+class Install(Protected):
+    action: Literal["install"]
+    installation_id: UUID
+    installation_sha256: Digest
+    idempotency_key: IdempotencyKey
+
+
+EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Inspect | Resolve | Install, Field(discriminator="action")])
 
 
 class ReviewEhr(Protected):

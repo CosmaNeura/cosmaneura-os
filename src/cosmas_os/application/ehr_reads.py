@@ -19,6 +19,7 @@ from cosmas_os.adapters.elation_read import (
     ElationReadScope,
 )
 from cosmas_os.adapters.elation_read_runtime import SyntheticElationReads
+from cosmas_os.adapters.elation_sandbox_runtime import ManagedElationSandboxReads
 from cosmas_os.application import model_work
 from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import canonical_json, payload_hash
@@ -28,6 +29,7 @@ from cosmas_os.ehr_read_models import (
     EhrReadSnapshot,
     EhrReadSourceReview,
 )
+from cosmas_os.elation_sandbox_models import ElationSandboxInstallationReceipt
 from cosmas_os.models import ExternalIdentity, WorkspaceEntry
 from cosmas_os.ports.ehr_reads import (
     PrivateAppointment,
@@ -61,9 +63,9 @@ def install_runtime_reader(reader):
         _runtime_reader = previous
 
 
-def _runtime(port=None):
+def _runtime(port=None) -> SyntheticElationReads | ManagedElationSandboxReads:
     candidate = port if port is not None else _runtime_reader() if _runtime_reader else None
-    if type(candidate) is not SyntheticElationReads:
+    if type(candidate) is not SyntheticElationReads and type(candidate) is not ManagedElationSandboxReads:
         raise ws.WorkspaceError("ehr_read_unavailable", 404)
     return candidate
 
@@ -101,9 +103,17 @@ def _binding(s, account, connection_id, digest, *, port=None):
     binding = rows[0]
     try:
         scope = _scope(binding)
+        runtime = _runtime(port)
+        if type(runtime) is ManagedElationSandboxReads:
+            installed = runtime.selected(scope)
+            receipt = s.scalar(select(ElationSandboxInstallationReceipt).where(
+                ElationSandboxInstallationReceipt.binding_id == binding.id))
+            if (installed is None or receipt is None or receipt.installation_id != str(installed.id)
+                    or receipt.installation_sha256 != installed.commitment()):
+                raise ValueError
         if (binding.vendor != "elation" or binding.environment != "sandbox"
                 or binding.binding_digest != scope.commitment() or digest != binding.binding_digest
-                or not _runtime(port).current(scope)):
+                or not runtime.current(scope)):
             raise ValueError
     except Exception:
         raise ws.WorkspaceError("ehr_read_binding_changed") from None
@@ -113,6 +123,8 @@ def _binding(s, account, connection_id, digest, *, port=None):
 def _authorize(s, read, *, port=None):
     account = _identity(s, read.box_id, read.owner_id, read.account_id)
     binding = _binding(s, account, read.connection_id, read.binding_digest, port=port)
+    if read.transport != _runtime(port).transport_mode:
+        raise ws.WorkspaceError("ehr_read_binding_changed")
     if (binding.id, binding.credential_generation, binding.practice_id) != (
             read.binding_id, read.credential_generation, read.practice_id):
         raise ws.WorkspaceError("ehr_read_binding_changed")
@@ -120,7 +132,7 @@ def _authorize(s, read, *, port=None):
     snapshot = s.scalar(select(EhrReadSnapshot).where(EhrReadSnapshot.observation_id == root.id))
     if snapshot is not None:
         public = SnapshotPayload.model_validate(snapshot.payload).public
-        if public.practice.timezone != _runtime(port).timezone:
+        if public.practice.timezone != _runtime(port).timezone_for(_scope(binding)):
             raise ws.WorkspaceError("ehr_read_binding_changed")
     return binding
 
@@ -131,9 +143,19 @@ def status(s, box, actor, account_id, *, enabled, port=None, reauthenticate=None
         reauthenticate()
     empty = dict(contract_version=1, provider="elation", mode="synthetic",
         status="not_enabled" if not enabled else "not_configured", connection_id=None,
-        binding_sha256=None, practice=None)
-    if not enabled or type(port) is not SyntheticElationReads:
+        binding_sha256=None, practice=None, installation=None,
+        transport=_runtime(port).transport_mode if type(port) in (SyntheticElationReads, ManagedElationSandboxReads) else "mock")
+    if not enabled or type(port) not in (SyntheticElationReads, ManagedElationSandboxReads):
         return empty
+    if type(port) is ManagedElationSandboxReads:
+        if not port.available():
+            return {**empty, "status": "not_enabled"}
+        candidates = port.candidates(box, actor, account_id)
+        candidate = candidates[0] if len(candidates) == 1 else None
+        if candidate is not None:
+            empty = {**empty, "status": "setup_required", "installation": {
+                "id": str(candidate.id), "sha256": candidate.commitment()},
+                "practice": {"label": candidate.scope.practice_name, "timezone": candidate.timezone}}
     rows = list(s.scalars(select(EhrReadBinding).where(EhrReadBinding.box_id == box,
         EhrReadBinding.owner_id == actor, EhrReadBinding.account_id == account_id,
         EhrReadBinding.state == "active").execution_options(populate_existing=True)))
@@ -152,7 +174,7 @@ def status(s, box, actor, account_id, *, enabled, port=None, reauthenticate=None
         return empty
     return {**empty, "status": "ready", "connection_id": binding.connection_id,
         "binding_sha256": binding.binding_digest,
-        "practice": {"label": binding.practice_name, "timezone": port.timezone}}
+        "practice": {"label": binding.practice_name, "timezone": _runtime(port).timezone_for(_scope(binding))}}
 
 
 def _stamp(value):
@@ -216,6 +238,7 @@ def _snapshot(s, read):
                 or read.request_hash != payload_hash(read.request_json)
                 or payload.private.binding_sha256 != read.binding_digest
                 or payload.private.request_sha256 != read.request_hash
+                or payload.private.transport != read.transport
                 or public.window.starts_at != read.window_start or public.window.ends_at != read.window_end
                 or (public.kind == "window") != (read.kind == "window")
                 or snap.payload_sha256 != payload_hash(snap.payload)
@@ -261,6 +284,7 @@ def _snapshot(s, read):
 def _receipt(read, snap):
     public = SnapshotPayload.model_validate(snap.payload).public.model_dump(mode="json")
     return dict(contract_version=1, observation_id=read.id, observation_key=read.idempotency_key,
+        transport=SnapshotPayload.model_validate(snap.payload).private.transport,
         connection_id=read.connection_id, binding_sha256=read.binding_digest,
         source_sha256=snap.source_sha256, payload_sha256=payload_hash(public), observation=public)
 
@@ -303,6 +327,11 @@ def inspect_observation(s, box, actor, account_id, *, observation_id, port=None,
 def resolve_observation(s, box, actor, account_id, *, key, port=None, reauthenticate=None):
     _key(key)
     _access(s, box, actor, account_id, reauthenticate)
+    from cosmas_os.application import elation_sandbox_installation
+
+    installation = elation_sandbox_installation.resolve(s, box, actor, account_id, key, port)
+    if installation is not None:
+        return installation
     read = s.scalar(select(EhrReadRequest).where(EhrReadRequest.box_id == box,
         EhrReadRequest.owner_id == actor, EhrReadRequest.idempotency_key == key))
     if read is None:
@@ -329,6 +358,11 @@ def _digest(value):
 
 def _reserve(s, account, binding, body, window, *, parent=None, item_handle=None, port=None):
     key, request_hash = body["idempotency_key"], payload_hash(body)
+    if s.scalar(select(ElationSandboxInstallationReceipt.id).where(
+            ElationSandboxInstallationReceipt.box_id == account.box_id,
+            ElationSandboxInstallationReceipt.owner_id == account.principal_id,
+            ElationSandboxInstallationReceipt.idempotency_key == key)):
+        raise ws.WorkspaceError("idempotency_conflict")
     replay = s.scalar(select(EhrReadRequest).where(EhrReadRequest.box_id == account.box_id,
         EhrReadRequest.owner_id == account.principal_id, EhrReadRequest.idempotency_key == key))
     if replay is not None:
@@ -350,6 +384,7 @@ def _reserve(s, account, binding, body, window, *, parent=None, item_handle=None
         practice_id=binding.practice_id, binding_digest=binding.binding_digest,
         kind="window" if parent is None else "verify", idempotency_key=key, request_hash=request_hash,
         request_json=body, ordinal=ordinal, parent_snapshot_id=parent.id if parent else None,
+        transport=_runtime(port).transport_mode,
         item_handle=item_handle, window_start=window.starts_at, window_end=window.ends_at,
         valid_until=expires, created_at=now)
     s.add(read)
@@ -372,6 +407,7 @@ def _store(s, read_id, payload, port, reauthenticate):
     _access(s, read.box_id, read.owner_id, read.account_id, reauthenticate)
     _authorize(s, read, port=port)
     _current(s, read)
+    payload = {**payload, "private": {**payload["private"], "transport": read.transport}}
     value = SnapshotPayload.model_validate(payload).model_dump(mode="json")
     snap = EhrReadSnapshot(box_id=read.box_id, owner_id=read.owner_id, observation_id=read.id,
         payload=value, payload_sha256=payload_hash(value), source_sha256=_commitment(read, payload_hash(value)))
@@ -426,7 +462,7 @@ def observe(s, box, actor, account_id, *, key, connection_id, binding_sha256, st
             raise ValueError
         practice = practice_result.rows[0]
         if (not isinstance(practice, ElationPractice) or practice.name != scope.practice_name
-                or practice.timezone != _runtime(port).timezone):
+                or practice.timezone != _runtime(port).timezone_for(scope)):
             raise ValueError
         private_items = []
         for row in result.rows:
@@ -607,6 +643,7 @@ def _selection_receipt(s, w, read, review, entry):
         finally:
             _withheld_sources.reset(token)
     return dict(entry_id=entry.id, entry_revision=entry.revision, workspace=workspace,
+        transport=read.transport,
         source=dict(entry_id=entry.id, source_sha256=review.source_sha256, content_sha256=review.content_sha256),
         request_sha256=review.request_hash, source_withheld=withheld)
 

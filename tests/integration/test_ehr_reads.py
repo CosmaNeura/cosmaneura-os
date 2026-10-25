@@ -99,15 +99,22 @@ def ehr_case(signed_workspace, session, monkeypatch):
             finally:
                 provider.session = session
 
-    monkeypatch.setitem(api_module.app.dependency_overrides, api_module.get_session, request_session)
+    # Restore before signed_workspace removes its own override. Registering an
+    # undo with monkeypatch would run later and resurrect its closed Session.
+    overrides = api_module.app.dependency_overrides
+    previous_session = overrides[api_module.get_session]
+    overrides[api_module.get_session] = request_session
     monkeypatch.setattr(f.client, "request", isolate_http_request(f.client, session))
     start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
     result = SimpleNamespace(client=f.client, token=f.token, workspace=f.workspace, box=f.box, owner=f.actor,
         account=f.binding.id, configuration=f.configuration, binding=binding, binding_id=binding.id, scope=scope, port=port,
         provider=provider, s=session, starts_at=start, ends_at=start + timedelta(days=1))
     result.headers = lambda: {"Authorization": "Bearer " + f.token(), "X-Cosmas-Ehr-Read": "1"}
-    with ehr.install_runtime_reader(lambda: port):
-        yield result
+    try:
+        with ehr.install_runtime_reader(lambda: port):
+            yield result
+    finally:
+        overrides[api_module.get_session] = previous_session
 
 
 def observe_body(f, key="ehr-observe-1", **changes):

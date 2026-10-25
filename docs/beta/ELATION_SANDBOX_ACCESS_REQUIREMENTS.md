@@ -1,9 +1,9 @@
 # Elation sandbox access packet
 
-Prepared October 25, 2026 for **CosmaBot**. Status: requirements prepared;
-request **not sent**; sandbox **not provisioned**. The integrated local fixture
-passes, but the application still accepts only invented credentials and an
-in-process mock transport. No vendor qualification is claimed.
+Updated October 25, 2026 for **CosmaBot**. The default-off managed sandbox
+installation and appointment-review workflow are implemented and tested with
+invented responses. The access request is **not sent**, a vendor sandbox is
+**not provisioned**, and no vendor qualification is claimed.
 
 ## Start here
 
@@ -54,8 +54,9 @@ prerequisite for the sandbox request.
    [onboarding guide](https://help.elationhealth.com/articles/rest/overview/getting-started)
    describes provisioning an isolated, PHI-free practice. It initially has only
    the provisioning account; request guidance for adding test providers. Record
-   the granted practice ID, display name, timezone and provider IDs in private
-   installation configuration, not this document.
+   the granted practice ID, display name and timezone in private installation
+   configuration. Keep test provider IDs in the private qualification record,
+   not this document.
 2. **A dedicated APIv2 key.** A sandbox practice admin can use **Settings →
    API Access → Create API Key**. Suggested name: `CosmaBot sandbox read test`.
    Choose **Elation APIv2** and save the secret directly into the approved
@@ -108,35 +109,67 @@ method to exercise throttling. The linked agreement specifies **fewer than
 3 calls/second and fewer than 150,000 calls/24 hours**; confirm any stricter
 sandbox limits.
 
-## CosmaBot work before the first sandbox read
+## Operator setup before the first sandbox read
 
-Possessing a key will not activate the current application. These are internal
-engineering requirements; staff should eventually see the practice name and
-one clear setup/recovery action, without entering credentials into chat.
+The software path is implemented. A key alone does not activate it, and the
+current tests have not used a vendor account. After approved access is obtained:
 
-- Add a separately gated, sandbox-only installation/runtime path. Preserve
-  `SyntheticElationReads` as mock-only; production stays rejected. Current
-  `WORKSPACE_EHR_READ_ENABLED` and `VITE_EHR_READ_ENABLED` defaults stay off.
-- Extend the existing hash-checked `SecretReference` mechanism in
-  `src/cosmas_os/adapters/managed_service_configuration.py` for private backend
-  credential resolution. There is no working Elation credential installer yet.
-  A raw key must never enter renderer storage, Git, chat, test receipts or logs.
-- Bind Box, human owner, connection, credential generation and selected practice
-  to the immutable `EhrReadBinding`. Recheck current authority before and after
-  I/O and during recovery. A key change requires a new generation.
-- Supply a shared credential request budget through `permit_request`; the
-  adapter's per-instance limiter is insufficient across workers or machines.
-  Preserve fixed-host requests, time/size bounds and no automatic retries.
-- Run bounded qualification against invented records, then repeat the actual
-  appointment → patient review → existing visit → Chief draft journey. Keep
-  lost-reply recovery on the original command, preserve unsent text, and verify
-  revocation withholds saved source content. Preparing a draft makes no model
-  call and performs no chart write.
+1. **Prepare the private installation.** Bring the local database through the
+   additive `n13f9b2d7654` migration in the normal reviewed setup process. Use
+   the existing managed-service configuration (`version: 1`, exact `box_id`) with one
+   `elation_sandbox` entry for the intended human account. Its fields are
+   `id`, `owner_id`, `account_id`, `connection_id`, `credential_generation`,
+   `practice_id`, `practice_name`, `timezone`, `environment: "sandbox"`,
+   `data_classification: "synthetic_only"`, `client_id` and `client_secret`.
+   IDs and practice metadata come from the authorized local identity and vendor
+   setup; staff does not enter them in the renderer. A new credential version
+   requires a new generation and an explicit installation review.
+2. **Supply exact secret references.** `client_id` and `client_secret` each use
+   the existing `SecretReference` shape `{environment, sha256}`. The environment
+   name must begin `COSMAS_MANAGED_SECRET_`; the digest pins the exact value.
+   The operator supplies those private process values from approved credential
+   custody. Raw keys never belong in the configuration document, repository,
+   chat, renderer storage, receipts or diagnostics. Load either
+   `MANAGED_SERVICES_CONFIG_PATH` or `MANAGED_SERVICES_CONFIG_JSON`, with the
+   matching `MANAGED_SERVICES_CONFIG_SHA256`. Configuration loading performs no
+   provider calls or account activation.
+3. **Enable only the approved local test installation.**
+   `WORKSPACE_EHR_READ_ENABLED`, `WORKSPACE_ELATION_SANDBOX_ENABLED` and
+   `VITE_EHR_READ_ENABLED` all default off. The backend also requires an
+   authenticated Clerk workspace with an external identity and rejects hosted
+   mode for this slice. The managed runtime uses the fixed Elation sandbox
+   origin; production, arbitrary host URLs and non-synthetic classification are
+   rejected. The separate local-example runtime remains mock-only; both runtimes
+   cannot be installed together.
+4. **Let the intended person review setup.** From Chief's **Details → Notes and
+   sources**, or the visit's **Sources**, choose **Review Elation appointment**.
+   **Check Elation access** shows the configured practice. **Use this practice’s
+   Elation sandbox** records that person's exact local installation; it does not
+   contact Elation. An interrupted step offers **Check saved setup result**.
+   Recovery checks the original command, and only a confirmed missing result
+   permits the person to explicitly resend that same command. A saved setup
+   receipt does not prove vendor access; the screen checks current setup again.
+5. **Qualify the read and review journey.** Explicitly load a date window,
+   choose an appointment, check its patient and intended visit, then save the
+   reviewed source. **Prepare Chief draft** preserves unsent directions and
+   makes no model call or chart write. The display distinguishes **Local
+   example** from **Elation sandbox — invented test data**. A failed or lost read
+   offers recovery of the saved request before any new read.
 
-Implementation references: [adapter and application contract](../elation-read-integration.md),
-`src/cosmas_os/adapters/elation_read_runtime.py`,
-`src/cosmas_os/application/ehr_reads.py` and
-[workstream checkpoint](EHR_CONNECTOR_WORKSTREAM_20261025.md).
+The shared request quota counts token and resource calls by client-ID digest
+across processes using the same database, including credential generations.
+It stays below the published limits, releases quota locks before sleeping or
+provider I/O, and bounds SQL contention. Database connection acquisition retains
+the existing host factory's timeout behavior. Use a dedicated test client: this
+budget cannot measure other applications or deployments using the same key
+outside that database. Confirm stricter vendor limits before qualification.
+
+Signed API/database checks validate exact installation recovery, secret
+rotation, transport integrity, access withholding and quota contention. Shared
+UI checks validate setup recovery and preserved drafts using invented service
+responses. These are software checks, not vendor acceptance. Implementation
+and evidence references are in the [adapter and application contract](../elation-read-integration.md)
+and [workstream checkpoint](EHR_CONNECTOR_WORKSTREAM_20261025.md).
 
 ## Acceptance and later production work
 
@@ -168,9 +201,10 @@ Elation APIv2 sandbox practice.
 
 Our first workflow lets staff choose an existing appointment, check its patient
 identity, review the source, and prepare an editable draft for CosmaBot's Chief
-assistant. A local mocked prototype passes; we have not qualified it against
-Elation. This phase has no real patient data, automatic AI invocation, chart
-writes, prescribing, booking or patient messages.
+assistant. The managed sandbox installation and workflow pass local tests with
+invented responses; we have not qualified them against Elation. This phase has
+no real patient data, automatic AI invocation, chart writes, prescribing,
+booking or patient messages.
 
 Please confirm the sandbox onboarding path and whether administrator-created
 APIv2 credentials are appropriate for this partner evaluation. We request only

@@ -23,6 +23,8 @@ from uuid import UUID
 from azure.core.credentials import AzureSasCredential
 from pydantic import Field, SecretStr
 
+from cosmas_os.adapters.elation_read import ElationCredentials, ElationReadScope
+from cosmas_os.adapters.elation_sandbox_runtime import ElationSandboxInstallation
 from cosmas_os.adapters.managed_event_routing import (
     ManagedEventProfile,
     ManagedEventRoutes,
@@ -102,6 +104,21 @@ class ArtifactConfiguration(ProtectedModel):
     credential: SecretReference
 
 
+class ElationSandboxConfiguration(ProtectedModel):
+    id: UUID
+    owner_id: UUID
+    account_id: UUID
+    connection_id: UUID
+    credential_generation: UUID
+    practice_id: Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]{0,18}$")]
+    practice_name: str = Field(strict=True, min_length=1, max_length=200)
+    timezone: str = Field(strict=True, min_length=1, max_length=100)
+    environment: Literal["sandbox"]
+    data_classification: Literal["synthetic_only"]
+    client_id: SecretReference
+    client_secret: SecretReference
+
+
 class Configuration(ProtectedModel):
     version: Literal[1]
     box_id: UUID
@@ -112,6 +129,7 @@ class Configuration(ProtectedModel):
     efax_inbound: list[InboundInstallation] = Field(default_factory=list, max_length=50)
     fax_inbound: list[FaxInstallation] = Field(default_factory=list, max_length=20)
     inbox_grants: list[inbox_work.InboxReadGrant] = Field(default_factory=list, max_length=100)
+    elation_sandbox: list[ElationSandboxConfiguration] = Field(default_factory=list, max_length=20)
 
 
 def _secret(reference: SecretReference) -> str:
@@ -285,6 +303,41 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
             register(item.credential)
             if item.credential is not None:
                 credentials.append((selected, item.credential))
+        sandbox = []
+        sandbox_accounts = set()
+        for item in config.elation_sandbox:
+            if (item.account_id in sandbox_accounts or item.connection_id in identifiers
+                    or int(item.practice_id) > 2**63 - 1):
+                raise ValueError("Distinct exact sandbox practice installations required")
+            sandbox_accounts.add(item.account_id)
+            identifiers.add(item.connection_id)
+            register(item.client_id)
+            register(item.client_secret)
+            sandbox.append(ElationSandboxInstallation(item.id, item.account_id,
+                ElationReadScope(config.box_id, item.owner_id, item.connection_id, item.credential_generation,
+                    int(item.practice_id), item.practice_name), item.timezone,
+                item.client_id.sha256, item.client_secret.sha256))
+
+        def sandbox_references(scope):
+            matches = [configured for configured, installed in zip(config.elation_sandbox, sandbox, strict=True)
+                if installed.scope == scope]
+            if len(matches) != 1:
+                raise ValueError("Sandbox installation changed")
+            return matches[0]
+
+        def sandbox_current(scope):
+            try:
+                configured = sandbox_references(scope)
+                _secret(configured.client_id)
+                _secret(configured.client_secret)
+                return True
+            except Exception:
+                return False
+
+        async def sandbox_credentials(scope):
+            configured = sandbox_references(scope)
+            return ElationCredentials(scope.commitment(), SecretStr(_secret(configured.client_id)),
+                SecretStr(_secret(configured.client_secret)))
         vendor = vendor_settings.Catalog(
             vendor_settings.Installation(
                 item.selection,
@@ -380,6 +433,8 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
             events=events if config.events else None,
             efax_inbound_installations=inbound, fax_inbound_installations=fax_inbound,
             inbox_grants=tuple(inbox_registry.grants.values()),
+            elation_sandbox=tuple(sandbox), elation_credentials=sandbox_credentials if sandbox else None,
+            elation_credentials_current=sandbox_current if sandbox else None,
         )
     except Exception:
         raise ValueError("Managed service configuration is invalid or unavailable") from None

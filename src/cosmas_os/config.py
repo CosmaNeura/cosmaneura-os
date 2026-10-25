@@ -99,6 +99,8 @@ class Settings(BaseSettings):
     workspace_google_calendar_enabled: bool = False
     # Explicit installed synthetic Elation fixture only; no vendor activation.
     workspace_ehr_read_enabled: bool = False
+    # Separate network permission: sandbox REST reads of invented records only.
+    workspace_elation_sandbox_enabled: bool = False
     google_connection_client_id: str = ""
     google_connection_client_secret: SecretStr | None = None
     google_connection_callback_uri: str = ""
@@ -172,6 +174,10 @@ class Settings(BaseSettings):
         return bool(self.workspace_ehr_read_enabled and self.workspace_available
                     and self.workspace_authenticated_enabled and self.auth_mode == "clerk_jwt"
                     and not self.workspace_hosted_enabled)
+
+    @property
+    def workspace_elation_sandbox_available(self) -> bool:
+        return bool(self.workspace_ehr_read_available and self.workspace_elation_sandbox_enabled)
 
     @property
     def fax_inbound_source_available(self) -> bool:

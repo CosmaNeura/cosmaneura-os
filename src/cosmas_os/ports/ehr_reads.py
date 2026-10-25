@@ -119,6 +119,7 @@ class PrivateItem(Protected):
 
 
 class PrivateSnapshot(Protected):
+    transport: Literal["mock", "vendor_sandbox"] = "mock"
     binding_sha256: Digest
     request_sha256: Digest
     items: tuple[PrivateItem, ...] = Field(max_length=25)

@@ -83,6 +83,7 @@ class EhrReadRequest(OwnerScope, Base):
             "AND valid_until<=created_at+interval '30 minutes'", name="ck_ehr_read_request_expiry"),
         digest_check("request_hash", "binding_digest"),
         json_check("request_json", 4096),
+        CheckConstraint("transport IN ('mock','vendor_sandbox')", name="ck_ehr_read_transport"),
     )
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     binding_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
@@ -96,6 +97,7 @@ class EhrReadRequest(OwnerScope, Base):
     idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     request_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    transport: Mapped[str] = mapped_column(String(20), nullable=False, default="mock", server_default="mock")
     parent_snapshot_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     item_handle: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     window_start: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

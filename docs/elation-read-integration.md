@@ -1,13 +1,14 @@
-# Elation read adapter and the next integrated slice
+# Elation appointment review and sandbox setup
 
-Updated 2026-10-25: the adapter now connects to actual authenticated application
-routes, persisted read/verification/review ledgers and shared selected-source
-custody. This milestone is **synthetic only and off by default**. The application
-bridge requires an explicitly installed `httpx.MockTransport` and invented
-credentials; it has no live transport or vendor-credential input. Production
-installation and qualification remain incomplete. No vendor account was created
-or contacted. Joined UI verification is recorded separately by the integration
-workstream; the backend evidence below does not claim a browser qualification.
+Updated 2026-10-25: authenticated application routes, immutable read/review
+records, shared selected-source custody and a managed sandbox installation path
+are implemented. Staff can review an Elation appointment from Chief's Details
+or a visit's Sources and prepare an editable Chief draft without losing existing
+text. This milestone is **synthetic only and off by default**. The original
+local-example runtime remains mock-only; the separate managed runtime accepts
+private server-configured sandbox credentials. All qualification to date uses
+invented responses. No vendor account was created or contacted, and production
+and actual vendor acceptance remain unavailable.
 
 ## Implemented contract
 
@@ -25,11 +26,12 @@ rejected. The resolver must return `ElationCredentials` with this exact scope
 commitment and private `SecretStr` client credentials. Changed credentials
 require a new generation and adapter; cached authority cannot cross that change.
 
-The host must implement the authorization callback with fresh actor, Box,
-installation and generation checks. Supplying `True` is not authorization.
-It is checked before dispatch and after response. Loading configuration or
-constructing the adapter performs no I/O. An explicitly enabled, authorized
-instance can call the fixed sandbox origin; tests inject `httpx.MockTransport`.
+The integrated service supplies fresh actor, Box, account, installation and
+generation checks before dispatch and after response. It rechecks authority
+after committing a result and before disclosing it or recovering it later.
+Loading configuration, checking setup and installing local access perform no
+provider I/O. An explicitly enabled and installed managed runtime can call the
+fixed sandbox origin; tests inject `httpx.MockTransport`.
 
 The adapter uses Elation's current
 [client-credentials token exchange](https://help.elationhealth.com/articles/rest/overview/get-token)
@@ -81,40 +83,38 @@ one MiB per resource response and 16 KiB per token response. Redirects, cookies,
 ambient proxies and compressed responses are not accepted. There are no resource
 writes, retries or background polling. A local limiter stays below three calls
 per second and 150,000 calls per rolling day, including token requests. The host
-must share a credential budget across every process through `permit_request`;
-an adapter's in-memory limiter alone cannot enforce a deployment-wide quota.
+now supplies a shared budget through `permit_request`, keyed by client-ID digest
+across processes using the same database, including credential generations.
+Quota locks are released before waiting or provider I/O. A short child request
+budget bounds SQL lock/statement waits and follows parent cancellation;
+connection acquisition retains the existing host database factory's timing.
+Traffic from another deployment using the same key is outside that budget.
 
-## Verified synthetic checks
+## Validated behavior
 
-From the integration checkout:
+Focused adapter, configuration and contract tests pass. Signed API/PostgreSQL
+checks pass for explicit installation, exact recovery, changed credentials,
+transport substitution, quota contention, source review and disclosure after
+commit. Legacy mock observations remain mock; changing the runtime cannot
+relabel old vendor observations. Existing managed-service tests pass alongside
+the EHR service after correcting a test-fixture teardown leak. The final
+combined run retained unchanged source and shut down its owned database cleanly.
+Ruff and focused Pyright pass.
 
-```text
-.venv/bin/python -m pytest tests/unit/test_elation_read.py -q
-76 passed in 0.16s
-.venv/bin/ruff check src/cosmas_os/adapters/elation_read.py tests/unit/test_elation_read.py
-All checks passed!
-```
+Shared UI tests cover direct appointment-task entry, setup and lost-reply
+recovery, small/large layouts, unsent Chief and coworker drafts, and withholding
+a revoked source. The earlier joined browser/API/database journey also recovers
+a lost successful read and prepares Chief with zero model calls. These checks
+use invented provider/service responses. They do not qualify real Elation
+requests or a rebuilt physical-device client.
 
-The two DST regressions first failed against the prior implementation, then
-passed after UTC normalization. The full suite also verifies disabled/no-auth
-zero-I/O behavior, exact OAuth requests, token reuse/rotation, revoked authority,
-practice/record isolation, duplicate patient choices, cursor filtering,
-malformed/oversized responses, closed HTTP failures, no retries, no redirect or
-cookie authority, and protected provenance. These are mocked endpoint contracts,
-not proof of a successful vendor sandbox or production qualification.
-
-The integrated backend additionally passes 16 signed API/PostgreSQL tests in
-`tests/integration/test_ehr_reads.py` (34.99 seconds), with unchanged source during
-the owned database run and verified cluster cleanup. The 34 new contract tests
-plus the original 76 adapter tests pass together; Pyright and Ruff are clean.
-The independent custody suite adds 32 PostgreSQL checks. Workstream evidence:
-`evidence/elation-service-debug-02/results.json` and
-`evidence/elation-custody-green-01/results.json` outside this checkout.
-
-The signed fixture uses fresh request-owned SQL sessions; it does not weaken
-the existing CaptureBoundary session-ownership fence. Authenticated Clerk
-requests are supported in the synthetic profile. A native session without an
-external identity is explicitly unavailable for this EHR slice.
+The reproducible commands, failures and corrections, source hashes and cleanup
+results are retained outside this repository in the dedicated workstream's
+`evidence/elation-sandbox-backend-review.json`, `evidence/elation-sandbox-03/`
+and `evidence/ehr-task/freeze.json`. The signed fixture uses fresh request-owned
+SQL sessions without weakening the CaptureBoundary ownership fence. This slice
+requires an authenticated Clerk external identity; a native session without one
+is unavailable.
 
 ## Milestone 3: one usable selected-source journey
 
@@ -123,14 +123,15 @@ work/approval owner. Do not extend the delivery-vendor SQL enum, impersonate a
 Google account, turn a static catalog into a connected status, or route through
 the Core/Scribe Athena adapter.
 
-1. **Choose the installed practice.** Existing connection UI lists only the
-   current Box's server-installed Elation practice. It shows setup pending until
-   an independently enabled synthetic read binding is current. Credentials never enter the
-   renderer. Owner selection freezes the exact connection/generation and practice.
-2. **Load the chosen date window.** Staff selects a practice-local range of up
-   to seven elapsed days for the selected practice. Persist the immutable
-   request before mocked OAuth/resource I/O. Show at most 25 appointments. When
-   additional records exist, say “Showing this page; more appointments may be
+1. **Check the configured practice.** Open **Review Elation appointment** from
+   Chief's **Details → Notes and sources** or the visit's **Sources**. **Check
+   Elation access** shows only this person's configured practice. If setup is
+   required, **Use this practice’s Elation sandbox** records the exact local
+   installation without a provider call. Credentials never enter the renderer.
+2. **Load the chosen date window.** Staff enters a range in the device timezone,
+   up to seven elapsed days; returned appointment times use the practice timezone.
+   Persist the immutable request before OAuth/resource I/O. Show at most 25
+   appointments. When additional records exist, say “Showing this page; more appointments may be
    available.” This slice has no paging command or load-more affordance; an
    explicit narrower date range starts a fresh read.
 3. **Review the appointment and patient.** Staff selects a server-issued opaque
@@ -139,7 +140,7 @@ the Core/Scribe Athena adapter.
    patient search, use a later separately implemented slice. Null, deleted,
    cancelled or changed identity cannot proceed here.
 4. **Save to the intended existing visit.** Display minimal patient identity,
-   practice/provider, appointment time/status and observation time together.
+   practice, appointment time/status and observation time together.
    Staff confirms this patient and existing workspace. Save one immutable,
    reviewed `ehr_read_source` with expected workspace revision and receipt hash.
    This confirmation does not itself create a cross-system `PatientLink`.
@@ -151,17 +152,17 @@ the Core/Scribe Athena adapter.
 
 ### Implemented custody and schema
 
-Use additive models/migration patterned after `google_calendar_models.py` and
-`application/google_calendar.py`, with four distinct records:
+Additive models and migrations follow `google_calendar_models.py` and
+`application/google_calendar.py`, with four distinct read/custody records:
 
 * `EhrReadBinding`: immutable Box/owner/connection/generation/practice/environment
   identity and commitment; active/revoked state; no raw credential fields.
   Composite owner foreign keys must prevent cross-Box substitution. New
   credentials or practice selection create a new version rather than rewrite it.
 * `EhrReadRequest`: owner-bound idempotency key, exact operation/query hash,
-  binding commitment, ordinal and request timestamp. Commit reservation before
-  network I/O. One key plus changed payload is a conflict. Store only bounded
-  opaque selection/cursor references in client commands; never accept provider
+  binding commitment, original transport, ordinal and request timestamp. Commit
+  reservation before network I/O. One key plus changed payload is a conflict.
+  Client commands carry opaque appointment handles; they never accept provider
   URLs or free-form remote record IDs from the renderer.
 * `EhrReadSnapshot`: one immutable request result and commitment, original
   normalized observation plus private provenance. Verify Box/owner/binding,
@@ -170,32 +171,54 @@ Use additive models/migration patterned after `google_calendar_models.py` and
   submitted by the renderer. Partial coverage stays explicit.
 * `EhrReadSourceReview`: exact snapshot/item commitment, workspace identity and
   revision, confirming human and review time. One review creates/reuses one
-  `ehr_read_source`; no unrestricted `evidence` fallback. Add that entry kind
-  via migration and use existing retention/deletion conventions for its content.
+  `ehr_read_source`; no unrestricted `evidence` fallback. Its history is
+  immutable. Read expiry and revocation withhold content; they do not erase it.
 
 Binding authorization must refresh the authenticated external identity and human
 seat, current Box membership and installed generation before dispatch and before
 publishing. Inspection, recovery, selected-source access and model-context access
 repeat these checks. Changes withhold prior content and derived drafts while
-retaining permitted historical provenance. Deleting the source or workspace
-cannot leave a replay endpoint that discloses deleted content.
+retaining permitted historical provenance. The repository currently has no
+source/workspace deletion endpoint. A future deletion/retention implementation
+must cover the read ledger and recovery endpoints before real patient data is
+permitted; the existing artifact purge does not erase EHR snapshots.
 
 ### Application and UI contract
 
 * `adapters/elation_read_runtime.py` supplies `SyntheticElationReads`, requiring
   exact invented scopes and an exact `httpx.MockTransport`. The host installs it
   as `app.state.ehr_reads` and seeds a matching immutable `EhrReadBinding`; tests
-  demonstrate this through the compact signed `ehr_case` fixture. The feature
-  flag `workspace_ehr_read_enabled` is false by default and unavailable in hosted
-  mode. Real managed credentials, cross-process rate budgets and production
-  activation require a separate reviewed implementation.
+  demonstrate this through the compact signed `ehr_case` fixture.
+* `adapters/elation_sandbox_runtime.py` supplies `ManagedElationSandboxReads`
+  through the existing managed-service lifespan. Private configuration binds
+  the Box, owner, authenticated account, connection, generation, test practice,
+  timezone and exact `SecretReference` digests. It requires both
+  `workspace_ehr_read_enabled` and `workspace_elation_sandbox_enabled`; both
+  default false and hosted use remains unavailable. The fixed sandbox origin
+  and `synthetic_only` classification are mandatory. The two runtimes cannot
+  be installed together. Operator steps are in the
+  [sandbox access packet](beta/ELATION_SANDBOX_ACCESS_REQUIREMENTS.md).
+* `application/elation_sandbox_installation.py` persists a human's exact local
+  installation with an immutable receipt; configuration loading does not
+  activate access. The command contains only `action: "install"`, opaque
+  `installation_id`, `installation_sha256` and `idempotency_key`. A repeat or
+  resolve returns that receipt as `installed` or `unavailable` after current
+  access checks. Neither outcome proves a successful provider read. Installation
+  and read commands cannot reuse one key for different work.
+* Migration `n13f9b2d7654` follows `m02e8a1c6543`, adding installation receipts,
+  shared quota tables and immutable request transport. `transport` is `mock` or
+  `vendor_sandbox` in setup/read/review receipts and in the hash-bound private
+  snapshot; access and recovery compare it to the current runtime. Legacy
+  missing transport means only `mock`. Public `mode: "synthetic"` still describes
+  the data restriction, and the original source content/hash contract remains
+  compatible.
 * `application/ehr_reads.py` implements `observe`, `verify`, `inspect_observation`,
   `resolve_observation`, `select_review`, `validate_selected_source` and
   `historical_source`; retain the existing reservation-before-I/O pattern.
   `resolve_observation` and `inspect_observation` make zero provider calls.
 * Bounded POST commands under `/connections/ehr/reads` implement `status`,
-  `observe`, `verify`, `inspect`, and `resolve`. There is no independent patient
-  search route. Review is
+  `install`, `observe`, `verify`, `inspect`, and `resolve`. There is no independent
+  patient search route. Review is
   `/workspaces/{workspace_id}/ehr-read/review` with observation/item commitment,
   expected revision, explicit identity/visit confirmations and idempotency key.
   Current workspace identity, fresh mutation fences and no-store responses apply.
@@ -203,21 +226,26 @@ cannot leave a replay endpoint that discloses deleted content.
   the renderer can compare it to the reserved command before accepting content.
 * `application/selected_connector_sources.py` dispatches `ehr_read_source` →
   `ehr_source_state`, then workspace projection/schema and source withholding.
-  Extend `web/src/session/sources.ts` and `session/conversations.ts` through the
-  shared session, so both app presentations have identical recovery/access.
-* The shared UI uses an EHR DraftJournal address/payload validator. Persist the exact pending
-  command before dispatch. Reload restores the selected source and command;
+  `web/src/session/sources.ts` and `session/conversations.ts` use the shared
+  session so both app presentations have identical recovery/access.
+* The shared UI uses an EHR DraftJournal address/payload validator. It persists
+  the exact pending command before dispatch. Reload restores the selected source and command;
   “Check saved result” resolves that command. A fresh read uses a new key only
   after explicit Refresh. Query edits cannot overwrite the old pending command.
   A server-resolved unconfirmed reservation may be followed by an explicit new
   window request; that reservation supersedes the old window and its pending
   verifications before I/O. It does not redispatch the old key or infer success
-  from a transport error. Status, inspect and resolve perform no provider calls.
+  from a transport error. Installation recovery likewise resolves the persisted
+  exact command; only a confirmed `not_found` offers an explicit resend of that
+  same command against the current installation. Status, install, inspect and
+  resolve perform no provider calls. A successful setup receipt triggers a new
+  current-status check before reads are offered.
 
 ### Acceptance contract
 
-1. Default/off/setup-pending surfaces make zero OAuth/resource calls. Current
-   installed practice plus explicit read action executes the documented adapter.
+1. Default/off/setup-pending surfaces and local installation/recovery make zero
+   OAuth/resource calls. A current installed practice plus explicit read action
+   executes the documented adapter; setup alone does not verify vendor access.
 2. Cross-Box, owner, workspace, provider and credential-generation substitutions
    fail before I/O; revocation during I/O withholds the entire response.
 3. Lost success response/reload resolves the original receipt with zero extra
@@ -233,16 +261,17 @@ cannot leave a replay endpoint that discloses deleted content.
    a repeated review returns the same receipt. A changed item or revision fails.
 7. Saving a source does not call a model. Preparing Chief preserves unsent edits;
    Send uses the existing shared session and existing F-8 work substrate.
-8. Disconnect, credential rotation, source/workspace deletion or supersession
-   removes selected content from fresh and replayed model contexts and derived
-   drafts, while permitted historical provenance stays consistent.
+8. Revocation, credential rotation or supersession removes selected content
+   from fresh and replayed model contexts and derived drafts, while permitted
+   historical provenance stays consistent. Physical deletion remains a separate
+   required implementation before production data is allowed.
 9. Every API response and recovery state passes through the shared contract in
    both presentations; UI tests exercise no-match, timeout, rate limit,
    permission failure and malformed response without dropping the selection.
 
-No-match wording can state “No matching patients in this practice.” Timeout
-offers “Check saved result”; permission failure offers practice-connection
-review; malformed response preserves the selection and offers an explicit fresh
+An empty returned page says no matching appointments were returned and asks
+the person to check the date range. Timeout offers saved-result recovery;
+permission failure offers practice-connection review; malformed response preserves the selection and offers an explicit fresh
 read. Closed adapter codes map to existing application errors with fixed text;
 raw provider messages, names, queries or token responses never enter diagnostics.
 
@@ -251,8 +280,9 @@ raw provider messages, names, queries or token responses never enter diagnostics
 The owner confirmed that no Elation sandbox exists yet. The
 [sandbox access packet](beta/ELATION_SANDBOX_ACCESS_REQUIREMENTS.md) records the
 current official request route, minimum read grant, invented test fixtures,
-remaining runtime work and an unsent vendor request. Preparing that packet does
-not provision an account or activate the connector.
+private installation procedure and an unsent vendor request. The implemented
+runtime has been tested with invented responses only. Neither the packet nor
+those tests provision an account or establish vendor access.
 
 Vendor [onboarding](https://help.elationhealth.com/articles/rest/overview/getting-started)
 requires vendor agreements/access steps and practice consent before production.

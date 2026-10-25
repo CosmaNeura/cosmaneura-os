@@ -24,6 +24,13 @@ class SyntheticElationReads:
     custody while vendor activation remains a separate unimplemented milestone.
     """
 
+    transport_mode = "mock"
+
+    def timezone_for(self, scope):
+        if not self.current(scope):
+            raise ElationReadError("connection_changed")
+        return self.timezone
+
     def __init__(self, scopes: tuple[ElationReadScope, ...], transport: httpx.MockTransport, *,
                  enabled: Callable[[], bool], timezone: str = "UTC"):
         if (type(scopes) is not tuple or not 1 <= len(scopes) <= 20

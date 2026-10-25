@@ -96,10 +96,11 @@ do not imply API availability, licensing or customer consent.
   transient failures and rejects a direct link response for a different reviewed
   target. The status contract does not carry the original target, so independent
   target proof after status reconciliation is still a separate contract gap.
-- **Elation:** use the documented practice REST client-credentials path and
-  separately provisioned synthetic sandbox. Patient-access FHIR is read/search
-  only. Partner production access is distinct from a practice's own developer
-  subscription. Public documentation does not itself activate an account.
+- **Elation:** the documented practice REST client-credentials path now has a
+  default-off managed sandbox installation and a complete appointment-to-Chief
+  source workflow. Local tests use invented responses; vendor access is not yet
+  provisioned or qualified. Patient-access FHIR is a separate read/search path.
+  Partner production access is distinct from a practice's developer subscription.
 - **Tebra:** the current
   [SOAP integration guide](https://kareocustomertraining.s3.amazonaws.com/Help%20Center/Guides/Tebra%20API%20Integration%20Technical%20Guide.pdf)
   and public WSDL support practice-management reads. Customer-key access and
@@ -155,11 +156,13 @@ The existing mobile candidate is separate: all nine GitHub CI jobs pass for
 
 The second checkpoint connects the Elation adapter to actual signed application
 routes, immutable PostgreSQL read/review records, encrypted local recovery and
-the shared conversation session. Connections offers **Elation appointments**
-when the build flag is enabled. Staff chooses an existing visit, loads a bounded
-appointment page, verifies the patient name/date of birth, reviews the details
-and saves the source. **Prepare Chief draft** keeps existing Chief directions
-and the outgoing coworker's draft; it does not send a message or call a model.
+the shared conversation session. With the build flag enabled, staff can open
+**Review Elation appointment** directly from Chief's **Details → Notes and
+sources** or the visit's **Sources**. Staff checks practice access, loads a
+bounded appointment page, verifies the patient name/date of birth and intended
+visit, reviews the details and saves the source. **Prepare Chief draft** keeps
+existing Chief directions and the outgoing coworker's draft; it does not send a
+message or call a model.
 
 The joined mounted-UI test uses the actual RSA-signed API and PostgreSQL ledger.
 It deliberately loses the successful read reply, resolves that exact request,
@@ -175,15 +178,43 @@ and revalidates the saved result before disclosure. Read recovery never repeats
 provider I/O. An explicitly requested fresh list can supersede an unconfirmed
 read while retaining its old command; pending source saves cannot use that path.
 
-This is an integrated **synthetic** workflow, not a qualified live connection.
-The server flag `WORKSPACE_EHR_READ_ENABLED` and renderer flag
-`VITE_EHR_READ_ENABLED` default to false. The runtime accepts only an explicitly
-installed in-process MockTransport and invented credentials. This slice supports
-signed Clerk external identities, one page (up to 25 appointments), exact
-appointment/patient verification and one reviewed source. Patient search,
-additional pages, real credential installation and vendor qualification remain
-separate gates. Date inputs explicitly use the device timezone; returned
-appointment times show the practice timezone.
+This is an integrated **synthetic** workflow; vendor qualification is still
+outstanding. The slice supports signed Clerk external identities, one page of
+up to 25 appointments, exact appointment/patient verification and one reviewed
+source. Patient search and additional-page commands remain outside the workflow.
+Date inputs explicitly use the device timezone; returned appointment times show
+the practice timezone.
+
+## Managed sandbox setup checkpoint
+
+The backend now loads exact private Elation secret references and a configured
+test practice through the existing managed-service configuration. It remains off
+unless both `WORKSPACE_EHR_READ_ENABLED` and `WORKSPACE_ELATION_SANDBOX_ENABLED`
+are enabled; `VITE_EHR_READ_ENABLED` controls the renderer. Hosted and production
+use remain unavailable. The original local-example runtime stays mock-only.
+
+**Check Elation access** presents the configured practice. The intended human
+then chooses **Use this practice’s Elation sandbox** to save an immutable local
+installation. This step and **Check saved setup result** make no provider calls.
+Only an explicit appointment read contacts the configured sandbox. Old setup
+receipts cannot imply current access: changed secrets, account authority or
+installation make them unavailable. Each read retains its original **Local
+example** or **Elation sandbox — invented test data** provenance during recovery.
+
+The managed read path shares a client request budget across processes using the
+same database. Database tests cover setup/replay, credential changes, transport
+substitution, bounded quota contention and the existing selected-source custody.
+The final combined service/lifecycle run passes with unchanged source and clean
+owned-database shutdown. An EHR fixture cleanup leak found by the joined tests
+was repaired, after which the existing managed-service tests also pass together.
+Shared UI tests pass for setup recovery, direct task entry, preserved Chief and
+coworker drafts, and revoked-source withholding. These checks use invented
+responses; they do not establish a successful vendor connection.
+
+Evidence is retained outside the repository in the connector workstream's
+`evidence/elation-sandbox-backend-review.json` and `evidence/ehr-task/freeze.json`.
+The [sandbox access packet](ELATION_SANDBOX_ACCESS_REQUIREMENTS.md) gives the
+operator's installation sequence and outstanding vendor acceptance checks.
 
 Current repository history is immutable: it has no source/workspace deletion
 endpoint, and the existing artifact-retention purge does not erase EHR snapshots.
@@ -198,7 +229,8 @@ outstanding. Atlas.md and Tebra activation limits above remain unchanged.
 The owner confirmed no sandbox is available and requested access requirements.
 The [Elation sandbox access packet](ELATION_SANDBOX_ACCESS_REQUIREMENTS.md) is
 prepared, with verified official onboarding links, three minimum read scopes,
-test-practice requirements, remaining CosmaBot installation work and an unsent
-request. A legal entity, business contact and authorized signer are still needed
-for a submission. No vendor request, account creation or agreement acceptance
-has occurred. The synthetic checkpoint and its test receipts remain unchanged.
+test-practice requirements, the implemented private installation procedure and
+an unsent request. A legal entity, business contact and authorized signer are
+still needed for a submission. No vendor request, account creation or agreement
+acceptance has occurred. Actual scoped token/resource responses, the vendor
+sandbox-to-Chief journey and physical-device acceptance remain unverified.

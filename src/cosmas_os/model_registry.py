@@ -10,6 +10,7 @@ from cosmas_os import (  # noqa: F401 -- imports register declarative models
     efax_inbound_models,
     efax_source_models,
     ehr_read_models,
+    elation_sandbox_models,
     fax_inbound_models,
     fax_source_models,
     finance_models,

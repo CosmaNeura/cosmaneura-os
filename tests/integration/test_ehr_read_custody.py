@@ -204,6 +204,22 @@ def test_request_exact_body_hash_and_ordinals_are_enforced(ehr_custody):
     assert f.s.get(EhrReadRequest, row.id).idempotency_key == "exact-key-1"
 
 
+@pytest.mark.parametrize("transport", ["vendor_sandbox", "production", None])
+def test_legacy_mock_snapshot_cannot_claim_another_transport(ehr_custody, transport):
+    f = ehr_custody
+    read = request(f)
+    with pytest.raises(DBAPIError):
+        snapshot(f, read, mutate=lambda payload: payload["private"].update(transport=transport))
+    f.s.rollback()
+    assert f.s.scalar(select(EhrReadSnapshot.id).where(EhrReadSnapshot.observation_id == read.id)) is None
+
+
+def test_vendor_transport_request_requires_immutable_installation(ehr_custody):
+    with pytest.raises(DBAPIError):
+        request(ehr_custody, changes={"transport": "vendor_sandbox"})
+    ehr_custody.s.rollback()
+
+
 @pytest.mark.parametrize("target", ["patient", "appointment", "item", "private_field", "digest"])
 def test_self_consistent_outer_hash_does_not_hide_changed_exact_item(ehr_custody, target):
     f = ehr_custody
