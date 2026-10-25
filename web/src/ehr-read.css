@@ -3,16 +3,16 @@
 .ehr-read-panel fieldset {display:grid;gap:.7rem;min-width:0;margin:0;padding:1rem;border:1px solid var(--team-line,#d5dbe5);border-radius:12px;}
 .ehr-read-panel legend {font-weight:600;padding-inline:.3rem;}
 .ehr-read-panel label {display:flex;align-items:flex-start;gap:.6rem;line-height:1.45;min-width:0;}
-.ehr-read-panel label:has(input[type="datetime-local"]) {display:grid;gap:.3rem;}
-.ehr-read-panel input[type="datetime-local"] {box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:44px;font:inherit;padding:.55rem;border:1px solid var(--team-line,#cbd4cd);border-radius:8px;}
+.ehr-read-panel label:has(input:not([type="checkbox"])) {display:grid;gap:.3rem;}
+.ehr-read-panel input:not([type="checkbox"]) {box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:44px;font:inherit;padding:.55rem;border:1px solid var(--team-line,#cbd4cd);border-radius:8px;}
 .ehr-read-panel input[type="checkbox"] {flex-shrink:0;min-width:18px;min-height:18px;margin-top:.2rem;}
 .team-workspace .ehr-read-panel button,.ehr-read-panel button {min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere;}
 .ehr-read-panel ul {list-style:none;margin:0;padding:0;display:grid;gap:.5rem;}
 .ehr-read-panel li {display:grid;gap:.3rem;}
 .ehr-read-panel li button {text-align:left;width:100%;}
-.ehr-read-panel [aria-label="Review patient and visit"],.ehr-read-panel [aria-label="Saved Elation request"] {display:grid;gap:.8rem;padding:1rem;border:1px solid var(--team-line,#d5dbe5);border-radius:12px;background:var(--team-surface,#fff);}
+.ehr-read-panel [aria-label="Review patient and visit"],.ehr-read-panel [role="group"] {display:grid;gap:.8rem;padding:1rem;border:1px solid var(--team-line,#d5dbe5);border-radius:12px;background:var(--team-surface,#fff);}
 .ehr-read-panel [role="alert"] {padding:.8rem;border-left:3px solid var(--team-danger,#aa3e3e);background:var(--team-surface,#fff);}
-@media (max-width:480px) {.ehr-read-panel fieldset,.ehr-read-panel [aria-label="Review patient and visit"],.ehr-read-panel [aria-label="Saved Elation request"] {padding:.75rem;}}
+@media (max-width:480px) {.ehr-read-panel fieldset,.ehr-read-panel [aria-label="Review patient and visit"],.ehr-read-panel [role="group"] {padding:.75rem;}}
 
 .ehr-read-task {width:min(100%,52rem);min-width:0;margin-inline:auto;padding:1rem;box-sizing:border-box;}
 .ehr-read-task[hidden] {display:none;}
@@ -24,3 +24,6 @@
 .ehr-source-action button,.ehr-chief-action {min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere;}
 .ehr-source-action p {margin:0;font-size:.9rem;line-height:1.45;}
 @media(max-width:480px){.ehr-read-task {padding:.75rem;}.ehr-read-task>header {margin-bottom:1rem;}}
+
+.ehr-provider-choice {display:grid;gap:.4rem;max-width:48rem;font-weight:600;}
+.ehr-provider-choice select {box-sizing:border-box;width:100%;min-height:44px;min-width:0;font:inherit;padding:.55rem;border:1px solid var(--team-line,#cbd4cd);border-radius:8px;background:var(--team-surface,#fff);}

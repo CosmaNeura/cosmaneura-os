@@ -29,10 +29,10 @@ it('opens Elation only when offered and selected, and retains its pending editor
   await click('Connections');
   expect(mounted).not.toHaveBeenCalled();
   expect(container.querySelector('[aria-label="Practice records"]')?.textContent).not.toContain('Connected');
-  await click('Elation appointments');
+  await click('Practice appointments');
   expect(mounted).toHaveBeenCalledOnce();
   expect(container.querySelector('[aria-label="Elation dates"]')).toBeTruthy();
-  await click('All connections'); await click('Elation appointments');
+  await click('All connections'); await click('Practice appointments');
   expect(mounted).toHaveBeenCalledOnce(); expect(unmounted).not.toHaveBeenCalled();
   expect((container.querySelector('[aria-label="Elation dates"]') as HTMLInputElement).value).toBe('Retained window');
 });

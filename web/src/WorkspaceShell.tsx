@@ -82,7 +82,7 @@ import {GoogleCalendarMount} from './GoogleCalendarMount';
 import {GOOGLE_CALENDAR_BUILD} from './google-calendar-api';
 import type {GoogleCalendarSaved} from './google-calendar-recovery';
 import {EhrReadTask} from './EhrReadTask';
-import {EhrReadMount} from './EhrReadMount';
+import {EhrReadProviders} from './EhrReadProviders';
 import {EHR_READ_BUILD} from './ehr-read-api';
 import type {EhrReadSaved} from './ehr-read-recovery';
 import { GOOGLE_MESSAGE_BUILD } from './google-message-api';
@@ -926,7 +926,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   async function openEhrTask(origin:'conversation'|'sources'|'connections'){
     const target=document.activeElement instanceof HTMLElement?document.activeElement:null,scroll=mobileChatFrame.scrollRef.current?.scrollTop??null;
     const context=sourceContext(),host=context.conversationHost;if(!host)return;
-    const entry=workspaceFrame.current?.querySelector<HTMLElement>(origin==='connections'?'[aria-label="Choose a visit for Elation"]':origin==='sources'?'.ehr-source-action':conversationDetails?'.messages-details':'.ehr-chief-action');
+    const entry=workspaceFrame.current?.querySelector<HTMLElement>(origin==='connections'?'[aria-label="Choose a visit for appointment review"]':origin==='sources'?'.ehr-source-action':conversationDetails?'.messages-details':'.ehr-chief-action');
     if(!entry||entry.closest('[hidden]'))return;
     ehrOpeningCleanup.current?.();const intent=++ehrOpeningIntent.current,view=session.getSnapshot();
     const sameView=()=>{const now=session.getSnapshot();return (['practicePage','practiceOpen','settingsOpen','settingsEntry','panel','mobilePanel'] as const).every(key=>view[key]===now[key]);};
@@ -1179,8 +1179,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         onReviewProviderFaxDocument={FAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveProviderFaxDocument:undefined}
         initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
-        ehr={EHR_READ_BUILD&&authenticated?<section aria-label="Choose a visit for Elation"><p>{visitLinked?'Review the patient and appointment in this visit. Your conversation draft stays in place.':'Choose the existing visit that will receive your reviewed appointment details.'}</p>
-          <button className="team-primary" disabled={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>{if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;if(visitLinked)void openEhrTask('connections');else{ehrVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}}>{visitLinked?'Review Elation appointment':'Choose a visit'}</button></section>:undefined}
+        ehr={EHR_READ_BUILD&&authenticated?<section aria-label="Choose a visit for appointment review"><p>{visitLinked?'Review the patient and appointment in this visit. Your conversation draft stays in place.':'Choose the existing visit that will receive your reviewed appointment details.'}</p>
+          <button className="team-primary" disabled={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>{if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;if(visitLinked)void openEhrTask('connections');else{ehrVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}}>{visitLinked?'Review an appointment':'Choose a visit'}</button></section>:undefined}
         google={GOOGLE_CONNECTION_BUILD&&authenticated?<AccountRecoveryContext.Provider value={accountAccess}>
           <GoogleConnectionPanel identity={authenticated} onBusyChange={reportGoogleBusy} onAuthenticationLost={failure}
             messageWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.googleMessages||connectionLocks.googleCalendar}
@@ -1282,7 +1282,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       {ehrReviewOwned&&authenticated&&workspace&&<EhrReadTask open={ehrReviewOpen} context={workspace.notebook?.title??workspace.label}
         returnLabel={ehrReview.origin==='connections'?'Back to connections':ehrReview.origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`}
         returnBlocked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onReturn={closeEhrTask}>
-        <EhrReadMount identity={authenticated} active={ehrReviewOpen} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
+        <EhrReadProviders identity={authenticated} active={ehrReviewOpen} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
           currentSources={workspace.entries.filter(entry=>entry.kind==='ehr_read_source'&&!!entry.ehr_source_state).map(entry=>({id:entry.id,state:entry.ehr_source_state!}))}
           locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
           recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
@@ -1413,7 +1413,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           <div id={`chief-tools-${workspace.id}`} className="team-conversation-tools" hidden={messagesMode?!messagesTask&&!phoneChiefToolsVisible&&bot?.role!=='research':phoneChiefConversation&&!phoneChiefToolsVisible}>
           {phoneChiefConversation&&<header className="chief-tools-heading"><h3>Chief tools</h3><button className="team-subtle" disabled={viewNavigationLocked} onClick={returnToPhoneChat}>Back to chat</button></header>}
           {phoneChiefToolsVisible&&thought!==''&&!(nativeChat&&clinicalTeamExpanded)&&<p className="team-fine chief-tools-draft" role="status">Your directions are kept in this plan. Prepare Follow-up and Research includes them with the saved note.</p>}
-          {EHR_READ_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'&&<button className="ehr-chief-action" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void openEhrTask('conversation')}>Review Elation appointment</button>}
+          {EHR_READ_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'&&<button className="ehr-chief-action" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void openEhrTask('conversation')}>Review an appointment</button>}
           <div className="messages-activity-host" hidden={messagesMode&&messagesTask!=='Activity'}>{teamDrafts}</div>
           
           {prepAvailable && bot && authenticated && team &&

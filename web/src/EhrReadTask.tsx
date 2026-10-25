@@ -7,9 +7,9 @@ export function EhrReadTask({open,context,returnLabel,returnBlocked,onReturn,chi
 }){
  const heading=useRef<HTMLHeadingElement>(null);
  useEffect(()=>{if(!open)return;const frame=requestAnimationFrame(()=>{const target=heading.current;if(target&&!target.closest('[hidden]')){target.focus({preventScroll:true});target.scrollIntoView?.({block:'start'});}});return()=>cancelAnimationFrame(frame);},[open]);
- return <section className="ehr-read-task" aria-label="Review Elation appointment" hidden={!open}>
+ return <section className="ehr-read-task" aria-label="Review an appointment" hidden={!open}>
   <header><button className="team-subtle" disabled={returnBlocked} onClick={onReturn}><span aria-hidden="true">‹ </span>{returnLabel}</button>
-   <h1 ref={heading} tabIndex={-1}>Review Elation appointment</h1><p>{context}</p></header>
+   <h1 ref={heading} tabIndex={-1}>Review an appointment</h1><p>{context}</p></header>
   {children}
  </section>;
 }

@@ -17,7 +17,7 @@ type Editor = Exclude<Screen, 'home' | 'connections'>;
 const titles: Record<Screen, string> = {
   home: 'Settings', connections: 'Connections', members:'Practice access', team: 'Your team',
   core: 'Cosmaneura account & appointments', scheduling: 'Scheduling & Google sign-in', microsoft:'Microsoft email & calendar', google:'Google email & calendar',
-  messaging: 'Messaging & fax', payments: 'Payments', portals: 'Patient portals', ehr: 'Elation appointments',
+  messaging: 'Messaging & fax', payments: 'Payments', portals: 'Patient portals', ehr: 'Practice appointments',
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
@@ -226,7 +226,7 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
       })}
       {ehr != null&&<section className="connection-group" aria-label="Practice records"><h2>Practice records</h2>
         <button className="settings-card connection-card" disabled={navigationLocked} onClick={()=>visit('ehr')}>
-          <span className="connection-card-copy"><strong>Elation appointments</strong><small>Choose appointments for a visit. Practice access is checked when you open.</small></span>
+          <span className="connection-card-copy"><strong>Practice appointments</strong><small>Choose appointments for a visit. Practice access is checked when you open.</small></span>
           <span className="connection-card-action">Open <span aria-hidden="true">›</span></span>
         </button>
       </section>}
