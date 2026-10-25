@@ -11,6 +11,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from collections import deque
 from collections.abc import Awaitable, Callable
@@ -27,6 +28,7 @@ from pydantic import SecretStr
 ORIGIN = "https://sandbox.elationemr.com"
 SCOPES = "system/practices.read system/appointments.read system/patients.read"
 PROBLEM_SCOPES = SCOPES + " system/problems.read"
+MEDICATION_SCOPES = SCOPES + " system/medications.read"
 MAX_BODY = 1_048_576
 PAGE_SIZE = 25
 MAX_ID = 9_223_372_036_854_775_807
@@ -149,6 +151,30 @@ class ElationProblem:
 
 
 @dataclass(frozen=True, repr=False)
+class ElationMedication:
+    medication_id: int
+    patient_id: int
+    practice_id: int
+    medication_name: str
+    strength: str | None
+    route: str | None
+    form: str | None
+    directions: str | None
+    medication_type: str | None
+    order_type: str | None
+    is_doc_med: bool | None
+    is_permanent: bool | None
+    start_date: str | None
+    document_date: str | None
+    signed_date: str | None
+    deleted_date: str | None
+    discontinue_date: str | None
+    signature_state: Literal["date_recorded", "no_date_recorded", "unknown"]
+    discontinuation_state: Literal["date_recorded", "no_date_recorded", "unknown"]
+    deletion_state: Literal["date_recorded", "no_date_recorded", "unknown"]
+
+
+@dataclass(frozen=True, repr=False)
 class ElationCursor:
     query_sha256: str
     value: str
@@ -162,7 +188,7 @@ class ElationReadResult:
     operation: str
     request_sha256: str
     observed_at: datetime
-    rows: tuple[ElationPractice | ElationPatient | ElationAppointment | ElationProblem, ...]
+    rows: tuple[ElationPractice | ElationPatient | ElationAppointment | ElationProblem | ElationMedication, ...]
     next_cursor: ElationCursor | None
     source_sha256: str
     coverage: Literal["end_of_results", "more_rows_available", "selected_record", "unknown"]
@@ -182,6 +208,7 @@ class ElationReadAdapter:
             credentials: Callable[[ElationReadScope], Awaitable[ElationCredentials]], *,
             enabled: bool = False,
             problems_enabled: bool = False,
+            medications_enabled: bool = False,
             authorize_read: Callable[[ElationReadScope], Awaitable[bool]] | None = None,
             permit_request: Callable[[ElationReadScope], Awaitable[bool]] | None = None,
             transport: httpx.AsyncBaseTransport | None = None,
@@ -190,6 +217,7 @@ class ElationReadAdapter:
             sleep: Callable[[float], Awaitable[None]] = asyncio.sleep):
         if (type(scope) is not ElationReadScope or type(enabled) is not bool
                 or type(problems_enabled) is not bool
+                or type(medications_enabled) is not bool
                 or scope.environment != "sandbox"
                 or any(type(v) is not UUID for v in (scope.box_id, scope.owner_id,
                     scope.connection_id, scope.credential_generation))):
@@ -198,7 +226,9 @@ class ElationReadAdapter:
         _text(scope.practice_name, 200, "invalid_request")
         self.scope, self.credentials, self.enabled = scope, credentials, enabled
         self._problems_enabled = problems_enabled
-        self._scopes = PROBLEM_SCOPES if problems_enabled else SCOPES
+        self._medications_enabled = medications_enabled
+        self._scopes = (PROBLEM_SCOPES if problems_enabled else SCOPES) + (
+            " system/medications.read" if medications_enabled else "")
         self.authorize_read, self.permit_request = authorize_read, permit_request
         self.transport, self.now, self.monotonic, self.sleep = transport, now, monotonic, sleep
         self._token: SecretStr | None = None
@@ -369,7 +399,8 @@ class ElationReadAdapter:
             raise ElationReadError("invalid_response")
         return items, "more_rows_available", total
 
-    async def _read(self, path, params, parser, *, cursor=None, page=False, problem_page=False):
+    async def _read(self, path, params, parser, *, cursor=None, page=False, problem_page=False,
+            medication_page=False):
         try:
             async with asyncio.timeout(30):
                 await self._authorize()
@@ -388,12 +419,14 @@ class ElationReadAdapter:
                     client.cookies.clear()  # OAuth bearer authority never gains a cookie session.
                     value = await self._json(client, "GET", path, params=sent, token=token)
                 total_count = None
-                if problem_page:
+                if problem_page or medication_page:
                     items, coverage, total_count = self._problem_page(value, path, params)
+                    if medication_page and total_count is not None and total_count > 2**31 - 1:
+                        raise ElationReadError("invalid_response")
                     if any(type(item) is not dict for item in items):
                         raise ElationReadError("invalid_response")
                     rows = tuple(parser(item) for item in items)
-                    ids = [item.problem_id for item in rows]
+                    ids = [item.medication_id if medication_page else item.problem_id for item in rows]
                     if len(set(ids)) != len(ids):
                         raise ElationReadError("invalid_response")
                     following = None
@@ -423,6 +456,9 @@ class ElationReadAdapter:
                     "next": asdict(following) if following else None, "coverage": coverage}
                 if problem_page:
                     source.update(contract="elation-problems.v1", total_count=total_count,
+                        resource_scopes=self._scopes)
+                elif medication_page:
+                    source.update(contract="elation-medications.v1", total_count=total_count,
                         resource_scopes=self._scopes)
                 source_hash = _digest(source)
                 return ElationReadResult(self.scope, path, request_hash, observed,
@@ -594,3 +630,79 @@ class ElationReadAdapter:
                 resolved, verification)
 
         return await self._read("/api/2.0/problems/", params, parse, problem_page=True)
+
+    async def medications(self, patient_id: int) -> ElationReadResult:
+        """Read one page of medication records, not a reconciled/current-use list.
+
+        Keep recorded text, dates and flags without interpreting prescribing,
+        fulfillment or active-use status. Missing date metadata remains distinct
+        from explicit null. No pharmacy, refill or prescription-write capability.
+        """
+        if not self._medications_enabled:
+            raise ElationReadError("disabled")
+        selected = _id(patient_id, "invalid_request")
+        params = {"patient": str(selected), "practice": str(self.scope.practice_id),
+            "limit": str(PAGE_SIZE)}
+
+        def text(value, maximum, *, required=False, instructions=False):
+            if value is None and not required:
+                return None
+            allowed = "\r\n\t" if instructions else ""
+            if (type(value) is not str or len(value) > maximum
+                    or required and not value.strip()
+                    or any((ord(c) < 32 and c not in allowed) or ord(c) == 127
+                        or 0xD800 <= ord(c) <= 0xDFFF for c in value)):
+                raise ElationReadError("invalid_response")
+            return value
+
+        def boolean(value):
+            if value is not None and type(value) is not bool:
+                raise ElationReadError("invalid_response")
+            return value
+
+        def recorded_date(value, kind):
+            if value is None:
+                return None
+            if type(value) is not str or len(value) > 40:
+                raise ElationReadError("invalid_response")
+            if kind in {"date", "either"} and re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+                date.fromisoformat(value)
+                return value
+            if kind == "date" or re.fullmatch(
+                    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+                    r"(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})?", value) is None:
+                raise ElationReadError("invalid_response")
+            if (value[-6] in {"+", "-"}
+                    and (int(value[-5:-3]) > 23 or int(value[-2:]) > 59)):
+                raise ElationReadError("invalid_response")
+            datetime.fromisoformat(value.replace("Z", "+00:00"))
+            return value  # No date truncation, timezone assumption or UTC rewrite.
+
+        def date_state(row, key):
+            return "unknown" if key not in row else "no_date_recorded" if row[key] is None else "date_recorded"
+
+        def parse(row):
+            if (type(row) is not dict or _id(row.get("patient")) != selected
+                    or _id(row.get("practice")) != self.scope.practice_id):
+                raise ElationReadError("invalid_response")
+            medication, thread = row.get("medication"), row.get("thread")
+            if type(medication) is not dict or thread is not None and type(thread) is not dict:
+                raise ElationReadError("invalid_response")
+            thread = {} if thread is None else thread
+            name = text(medication.get("name"), 300, required=True)
+            if name is None:
+                raise ElationReadError("invalid_response")
+            return ElationMedication(_id(row.get("id")), selected, self.scope.practice_id,
+                name,
+                text(medication.get("strength"), 255), text(medication.get("route"), 100),
+                text(medication.get("form"), 100), text(row.get("directions"), 1000, instructions=True),
+                text(row.get("medication_type"), 40), text(row.get("order_type"), 40),
+                boolean(row.get("is_doc_med")), boolean(thread.get("is_permanent")),
+                recorded_date(row.get("start_date"), "date"),
+                recorded_date(row.get("document_date"), "timestamp"),
+                recorded_date(row.get("signed_date"), "timestamp"),
+                recorded_date(row.get("deleted_date"), "timestamp"),
+                recorded_date(thread.get("dc_date"), "either"),
+                date_state(row, "signed_date"), date_state(thread, "dc_date"), date_state(row, "deleted_date"))
+
+        return await self._read("/api/2.0/medications/", params, parse, medication_page=True)

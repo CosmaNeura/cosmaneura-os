@@ -1,4 +1,4 @@
-# Elation appointment review and sandbox setup
+# Elation appointment and clinical-record review
 
 Updated 2026-10-25: authenticated application routes, immutable read/review
 records, shared selected-source custody and a managed sandbox installation path
@@ -9,6 +9,11 @@ local-example runtime remains mock-only; the separate managed runtime accepts
 private server-configured sandbox credentials. All qualification to date uses
 invented responses. No vendor account was created or contacted, and production
 and actual vendor acceptance remain unavailable.
+
+Optional problem-list and medication-record reads now extend that same verified
+appointment journey. Each needs its own explicit installation and host opt-in.
+They retain separate reviewed sources and do not establish a reconciled chart
+or authorize prescribing. Their contracts and remaining vendor gates are below.
 
 ## Implemented contract
 
@@ -36,7 +41,9 @@ fixed sandbox origin; tests inject `httpx.MockTransport`.
 The adapter uses Elation's current
 [client-credentials token exchange](https://help.elationhealth.com/articles/rest/overview/get-token)
 and requests only `system/practices.read system/appointments.read
-system/patients.read`. Token responses must confirm that exact set. No password
+system/patients.read` for the base appointment/patient operations. Token responses
+must confirm the exact requested set. The optional clinical operations below
+add only their respective resource scope. No password
 grant, clinician impersonation, refresh grant or broad `apiv2` scope is used.
 Tokens stay in memory and expire early; credentials are checked on every read.
 
@@ -212,12 +219,13 @@ permitted; the existing artifact purge does not erase EHR snapshots.
   missing transport means only `mock`. Public `mode: "synthetic"` still describes
   the data restriction, and the original source content/hash contract remains
   compatible.
-* `application/ehr_reads.py` implements `observe`, `verify`, `inspect_observation`,
+* `application/ehr_reads.py` implements `observe`, `verify`, `problems`, `medications`, `inspect_observation`,
   `resolve_observation`, `select_review`, `validate_selected_source` and
   `historical_source`; retain the existing reservation-before-I/O pattern.
   `resolve_observation` and `inspect_observation` make zero provider calls.
 * Bounded POST commands under `/connections/ehr/reads` implement `status`,
-  `install`, `observe`, `verify`, `inspect`, and `resolve`. There is no independent
+  `install`, `observe`, `verify`, optional `problems` and `medications`, `inspect`,
+  and `resolve`. These local POST commands perform provider reads. There is no independent
   patient search route. Review is
   `/workspaces/{workspace_id}/ehr-read/review` with observation/item commitment,
   expected revision, explicit identity/visit confirmations and idempotency key.
@@ -354,3 +362,119 @@ and [patient profile schema](https://help.elationhealth.com/openapi/patient-prof
 were captured October 25, 2026. Production and live vendor qualification remain
 unavailable. Local tests use only synthetic transport and signed local database
 fixtures; external access gates are recorded in the sandbox access packet.
+
+### Optional reviewed medication-record source
+
+The [medications list endpoint](https://help.elationhealth.com/articles/rest/patient-document-api/medications/list-medications.md)
+returns `PaginatedMedOrderList`, containing patient medication records rather
+than a drug catalog or an established current medication reconciliation. The
+separate [`system/medications.read` scope](https://help.elationhealth.com/articles/rest/overview/scopes.md)
+is required. The application deliberately labels this source **Medication
+records**. Historical, discontinued, deleted or unfinished records can appear
+as returned; no active-only or permanent-only filter is applied.
+
+The three base scopes remain unchanged. A medication operation requests exactly
+those scopes plus `system/medications.read`; a problem operation still requests
+exactly the base scopes plus `system/problems.read`. Even when both capabilities
+are installed, the medication runtime does not add the problem scope to its
+token request. The token response must match the requested set. No `apiv2`,
+`system/discontinued_medications.read`, medication write, pharmacy or
+impersonation scope is added.
+
+The managed installation's `medications_enabled: true` and the host setting
+`WORKSPACE_ELATION_MEDICATIONS_ENABLED=true` are both required and both default
+off. Existing EHR/sandbox host gates and the current installed practice are
+also required. The setting maps to `workspace_elation_medications_enabled` in
+`Settings`; `ManagedElationSandboxReads` receives a `medications_enabled`
+callback. The installation commitment adds `medication_scope` only when enabled,
+preserving existing base and problem-only commitments when absent. An approved
+scope change needs a new credential generation and installation review. The
+synthetic runtime accepts the same separate callback but requires an exact
+`httpx.MockTransport`. Merely loading either configuration performs no vendor
+request.
+
+An explicit status request `{action: "status", include_medications: true}` adds
+the `medications` capability (`available`, `not_enabled`, `not_configured`). A
+legacy status request has its original response shape. **Read medication
+records** is enabled only for an available capability and a verified patient.
+The `medications` command contains the existing binding, observation, opaque
+item-handle, item-hash and idempotency fields; it accepts no provider patient ID,
+URL, offset or other search input.
+
+`medication_list(scope, appointment_id, patient_id, authorize=...,
+verify_identity=...)` rereads the exact appointment and patient retained in the
+`verified_visit` parent. The full retained identity must match before
+`ElationReadAdapter.medications(patient_id)` performs:
+
+```text
+GET /api/2.0/medications/?patient=<verified patient>&practice=<installed practice>&limit=25
+```
+
+Every returned row must carry the same top-level patient and practice IDs.
+Nested `medication.practice` describes the drug catalog's origin and cannot
+replace that patient/practice binding. Provider record IDs remain private. The
+new `verified_medications` observation retains the appointment and parent
+commitments and adds `item.medications` with a separate coverage, nullable
+reported total and zero to 25 projected rows.
+
+| Display field | Bound and interpretation |
+| --- | --- |
+| Medication name | Required, nonblank, at most 300 characters; recorded drug definition name |
+| Strength, route, form | Optional recorded strings, at most 255/100/100 characters; no dose conversion |
+| Directions | Optional, at most 1,000 characters; whitespace and complete instructions preserved |
+| Medication type, order type | Optional raw strings, at most 40 characters; unknown values and blanks retained |
+| Documentation/permanent flags | Exact boolean or unknown; no inferred prescribing or current-use state |
+| Start date | Optional valid `YYYY-MM-DD`, preserved as recorded |
+| Document, signed and deleted dates | Optional valid ISO timestamp; recorded offset or absent timezone preserved |
+| Discontinuation date | Optional valid date or ISO timestamp; both documented representations retained |
+
+Timestamps have seconds, optionally 1–6 fractional digits and `Z` or a valid
+`±HH:MM` offset. A missing timezone is not filled in. Signed, discontinuation and
+deletion metadata each distinguish `date_recorded`, `no_date_recorded` for an
+explicit null, and `unknown` for a missing key. These describe date presence,
+not signed/unsigned, current-use or reconciliation status. Other missing/null
+optional fields stay null; blank strings remain distinct. Text rejects control
+characters and Unicode surrogates; directions alone allow CR, LF and TAB.
+
+The official [medication object](https://help.elationhealth.com/articles/rest/patient-document-api/medications/the-medication-object.md)
+and [patient document schema](https://help.elationhealth.com/openapi/patient-document-api.yaml)
+differ on the allowed medication-type strings and date versus timestamp form
+of `thread.dc_date`. The bounded raw projection preserves both documented forms
+without guessing their clinical meaning. No pharmacy, fulfillment, quantity,
+refill, diagnosis-code, note or prescription-send field enters this source.
+
+Missing `next` means unknown coverage. An explicit null establishes the end of
+the returned results; a valid same-origin/path offset link establishes that more
+rows exist, but is never followed or exposed. Optional `count` must be an exact
+integer consistent with the page and no larger than 2,147,483,647; absent count
+projects null. Invalid metadata, duplicate IDs, a malformed row or more than 25
+rows refuses the entire page. An empty page does not establish that the patient
+takes no medications. Coverage never claims the whole chart was reconciled.
+
+The complete canonical saved source is limited to 5,000 characters, including
+context and limits. An oversized packet fails as `ehr_read_response_too_large`;
+instructions and rows are never silently shortened. **Save reviewed medication
+records** uses the existing human identity/visit/source checks and
+`ehr_read_source` custody. **Prepare Chief draft** preserves unsent text; the
+existing Send action controls model work. A read or save does not prescribe,
+reconcile, transmit an order, update the EHR or automatically send a message.
+
+The provider commitment uses `elation-medications.v1`; the public item hash uses
+`ehr_verified_medications_item.v1`. The saved label is
+`Elation: reviewed medication records`. Migration `s68e4f7c2109`, after
+`r57d3f6b1098`, adds the medication sibling while preserving prior validators
+and source-text contracts. Exact parent, row identity, raw fields, source text,
+expiry and review commitments are checked in the application and database.
+Resolve/inspect make no provider call. New windows, expired reads, lost access,
+changed credentials, or medication-capability withdrawal withhold saved content
+from display and model context; they do not erase the immutable history.
+
+Provider/runtime fixture tests cover this read and existing base/problem
+behavior, including changed identity, malformed fields, scope mismatch, quota
+and permission withdrawal. Six comparisons against the qualified `1301827`
+baseline preserve existing request/source and installation commitments. Official
+references, document hashes, the precise contract and focused verification are
+retained in the workstream's `evidence/elation-medication-reference/`. These are
+synthetic software checks. Real Elation token/record behavior, supported field
+variants and the complete sandbox-to-phone journey remain additional acceptance
+gates in the [access packet](beta/ELATION_SANDBOX_ACCESS_REQUIREMENTS.md#optional-medication-record-read).

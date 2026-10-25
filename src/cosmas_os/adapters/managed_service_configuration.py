@@ -106,6 +106,7 @@ class ArtifactConfiguration(ProtectedModel):
 
 class ElationSandboxConfiguration(ProtectedModel):
     problems_enabled: bool = Field(default=False, strict=True)
+    medications_enabled: bool = Field(default=False, strict=True)
     id: UUID
     owner_id: UUID
     account_id: UUID
@@ -317,7 +318,8 @@ def load_managed_profile(settings: Settings) -> ManagedServiceProfile:
             sandbox.append(ElationSandboxInstallation(item.id, item.account_id,
                 ElationReadScope(config.box_id, item.owner_id, item.connection_id, item.credential_generation,
                     int(item.practice_id), item.practice_name), item.timezone,
-                item.client_id.sha256, item.client_secret.sha256, problems_enabled=item.problems_enabled))
+                item.client_id.sha256, item.client_secret.sha256, problems_enabled=item.problems_enabled,
+                medications_enabled=item.medications_enabled))
 
         def sandbox_references(scope):
             matches = [configured for configured, installed in zip(config.elation_sandbox, sandbox, strict=True)

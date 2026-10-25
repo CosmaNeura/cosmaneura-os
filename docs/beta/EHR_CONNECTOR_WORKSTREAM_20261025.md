@@ -413,9 +413,11 @@ has generic calendar-file intake, not synchronization. Elation provides reviewed
 patient/appointment context and the problem-list slice described below; Tebra
 provides reviewed patient/appointment context. Athena provides the Core visit-link task.
 None of the four has passed live vendor acceptance in this workstream.
-Longitudinal chart history, medications, labs, prescription relay/eRx
+Longitudinal chart history, labs, prescription relay/eRx
 and clinical writeback remain missing engineering capabilities. They are not
 merely credentials awaiting installation. The phone still uses invented data.
+Elation medication-record reading is implemented in the slice below; this does
+not provide a reconciled current medication list or medication writeback.
 
 ### Elation problem-list implementation
 
@@ -474,6 +476,32 @@ unavailable; Preview30 remains the last confirmed installation. The delivery
 receipt and the closed-storage draft uncertainty are documented in
 `CHECKPOINT-OUTLOOK-RESEARCH.json` and the Chief-first Messages implementation
 record. These are new usable data flows, not live vendor acceptance.
+
+### Elation medication-record implementation
+
+From the same verified Elation appointment, staff can choose **Read medication
+records**, review the recorded directions, dates and coverage, save the
+reviewed source, and prepare Chief without replacing its existing draft. The
+saved record appears in Chief's existing EHR source card. Switching between
+problems and medications retains the verified appointment but requires a fresh
+review of the selected snapshot. Interrupted requests retain their exact
+recovery identity rather than issuing another clinical read.
+
+The separate `system/medications.read` scope and host/installation opt-ins are
+disabled by default. One page contains at most 25 records, and the entire saved
+source must fit 5,000 characters; oversized instructions or packets are refused
+without truncation. Historical and unfinished records remain visible as such.
+Missing dates, explicit null dates and recorded dates stay distinct, without
+inferring current use, reconciliation, dispensing or transmission.
+
+Final joined verification passed 32 medication database cases and the three
+actual signed API/database UI journeys (appointment, problems and medications).
+Four Chief model/settlement cases passed separately after correcting a test's
+assumption about the existing marked-excerpt delivery. The scripted model reads
+the exact full saved source before answering; current source access is checked
+during that read and settlement. No production change was needed for those test
+corrections. Earlier failed receipts remain preserved. Browser, Mac and native
+qualification and physical installation are recorded separately when complete.
 
 ## Elation sandbox access
 

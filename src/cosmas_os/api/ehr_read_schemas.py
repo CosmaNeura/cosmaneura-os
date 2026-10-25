@@ -23,8 +23,9 @@ class ProviderCommand(Protected):
 
 class Status(ProviderCommand):
     include_problems: Literal[True] | None = None
+    include_medications: Literal[True] | None = None
 
-    @field_validator("include_problems", mode="before")
+    @field_validator("include_problems", "include_medications", mode="before")
     @classmethod
     def explicit_capability(cls, value):
         if value is not True:
@@ -96,6 +97,23 @@ class Problems(ProviderCommand):
         return self
 
 
+class Medications(ProviderCommand):
+    action: Literal["medications"]
+    connection_id: UUID
+    binding_sha256: Digest
+    observation_id: UUID
+    observation_sha256: Digest
+    item_handle: UUID
+    item_sha256: Digest
+    idempotency_key: IdempotencyKey
+
+    @model_validator(mode="after")
+    def elation_only(self):
+        if self.provider not in (None, "elation"):
+            raise ValueError("elation_medications_required")
+        return self
+
+
 class Inspect(ProviderCommand):
     action: Literal["inspect"]
     observation_id: UUID
@@ -119,7 +137,7 @@ class Install(ProviderCommand):
     idempotency_key: IdempotencyKey
 
 
-EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Inspect | Resolve | Install, Field(discriminator="action")])
+EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | Inspect | Resolve | Install, Field(discriminator="action")])
 
 
 class ReviewEhr(ProviderCommand):

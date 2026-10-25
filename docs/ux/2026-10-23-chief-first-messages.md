@@ -679,3 +679,20 @@ browser build is served at the existing rehearsal origin without a storage
 reset. The phone still reports an unavailable developer tunnel, leaving
 Preview30 as the last confirmed installed version. See
 `CHECKPOINT-OUTLOOK-RESEARCH.json` in the connector workstream.
+
+### Medication-record review in the existing Chief flow
+
+The Elation task now offers **Read medication records** after the appointment
+and patient are verified. It preserves recorded instructions and date states,
+requires a fresh review, and saves an EHR source in the existing conversation
+card. **Prepare Chief draft** retains the user's directions. Back, exact lost
+request recovery and later access withdrawal use the same shared session and
+draft ownership as appointment/problem review. This reads a bounded snapshot;
+it does not reconcile medications, prescribe, transmit or update the EHR.
+
+The actual signed API/database UI journey passes alongside the existing
+appointment and problem journeys. Four model/settlement cases verify an exact
+full-source read following the existing marked excerpt and prevent publication
+after access withdrawal. Mac, browser, native and phone delivery evidence is
+recorded in the connector workstream when completed. These additions do not
+complete the remaining Claude recommendations or establish live vendor access.

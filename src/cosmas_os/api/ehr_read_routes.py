@@ -84,9 +84,11 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
             reauthenticate()
             if body.action == "status":
                 result = ehr_reads.status(*scope, enabled=configuration().workspace_ehr_read_available,
-                    port=runtime(), reauthenticate=reauthenticate, provider=body.provider, include_problems=body.include_problems is True)
+                    port=runtime(), reauthenticate=reauthenticate, provider=body.provider, include_problems=body.include_problems is True, include_medications=body.include_medications is True)
                 if body.include_problems is True and not configuration().workspace_elation_problems_enabled:
                     result["problems"] = "not_enabled"
+                if body.include_medications is True and not configuration().workspace_elation_medications_enabled:
+                    result["medications"] = "not_enabled"
                 return result
             port = service(body.provider)
             if body.action == "install":
@@ -107,6 +109,14 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                 if not configuration().workspace_elation_problems_enabled:
                     raise ws.WorkspaceError("ehr_read_problems_unavailable", 404)
                 result = ehr_reads.problems(*scope, key=body.idempotency_key,
+                    connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
+                    observation_id=str(body.observation_id), observation_sha256=body.observation_sha256,
+                    item_handle=str(body.item_handle), item_sha256=body.item_sha256,
+                    port=port, reauthenticate=reauthenticate, provider=body.provider)
+            elif body.action == "medications":
+                if not configuration().workspace_elation_medications_enabled:
+                    raise ws.WorkspaceError("ehr_read_medications_unavailable", 404)
+                result = ehr_reads.medications(*scope, key=body.idempotency_key,
                     connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
                     observation_id=str(body.observation_id), observation_sha256=body.observation_sha256,
                     item_handle=str(body.item_handle), item_sha256=body.item_sha256,

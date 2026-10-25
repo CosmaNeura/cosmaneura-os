@@ -2,7 +2,9 @@
 
 Updated October 25, 2026 for **CosmaBot**. The default-off managed sandbox
 installation and appointment-review workflow are implemented and tested with
-invented responses. The access request is **not sent**, a vendor sandbox is
+invented responses. Separate default-off problem and medication-record reads
+extend a verified appointment; their extra scope and fixture requirements are
+listed below. The access request is **not sent**, a vendor sandbox is
 **not provisioned**, and no vendor qualification is claimed.
 
 ## Start here
@@ -281,3 +283,100 @@ The public reference is the current
 [patient profile schema](https://help.elationhealth.com/openapi/patient-profile-api.yaml),
 retrieved October 25, 2026; its document hash and the scope reference are retained
 in this workstream's `evidence/elation-clinical-reference` packet.
+
+## Optional medication-record read
+
+The base appointment key and token request still use exactly the three scopes
+above. The optional problem operation still adds only `system/problems.read`.
+A medication-record operation needs the separately approved
+[`system/medications.read`](https://help.elationhealth.com/articles/rest/overview/scopes.md)
+permission and requests exactly the three base scopes plus that medication
+scope. The returned token must confirm that exact set. If the installation
+supports both clinical reads, confirm Elation permits a token restricted to the
+respective operation's scope set; do not broaden every request to both scopes,
+`apiv2` or any write permission. The distinct discontinued-medication resource
+and `system/discontinued_medications.read` are outside this slice.
+
+After that test profile is approved, use a new credential generation and exact
+installation review. Add `medications_enabled: true` to the private
+`elation_sandbox` installation and set
+`WORKSPACE_ELATION_MEDICATIONS_ENABLED=true` on the host. Both default false;
+the existing EHR and sandbox host gates, installed practice and authenticated
+identity remain necessary. There is no renderer credential or scope entry.
+The managed runtime receives the host gate through its `medications_enabled`
+callback, and the installation commitment adds `medication_scope` only when
+enabled. Existing base/problem-only commitments stay unchanged when it is off.
+Apply additive migration `s68e4f7c2109` after `r57d3f6b1098` and preceding
+migrations. Loading configuration, installation, status and saved-result checks
+make no vendor call.
+
+Staff selects **Read medication records** from an already verified appointment.
+The server rereads that exact appointment and patient, requires the complete
+retained identity to match, and only then reads one page:
+
+```text
+GET /api/2.0/medications/?patient=<verified patient>&practice=<installed practice>&limit=25
+```
+
+The [documented response](https://help.elationhealth.com/articles/rest/patient-document-api/medications/list-medications.md)
+is `PaginatedMedOrderList`. It is not a reconciled current medication list. No
+`discontinued` or `permanent` filter is applied. Every row's top-level patient
+and practice must match the verified parent; nested `medication.practice` is a
+catalog-origin field and supplies no patient authority. Record IDs stay private.
+The browser cannot submit patient IDs, continuation URLs or offsets.
+
+The summary preserves the recorded medication name, strength, route, form,
+directions, medication/order types, documentation/permanent flags and dates.
+It retains unknown type strings, nulls, blanks and full instructions without
+inferring active use, prescribing, dispensing or reconciliation. Signed,
+discontinuation and deletion dates distinguish a valid recorded date, an
+explicit null (no date recorded), and a missing key (unknown). An absent timezone
+stays absent. `thread.dc_date` accepts either a valid date or timestamp because
+the official [object example](https://help.elationhealth.com/articles/rest/patient-document-api/medications/the-medication-object.md)
+and [OpenAPI schema](https://help.elationhealth.com/openapi/patient-document-api.yaml)
+use different representations. The same sources disagree about whether
+`medication_type` includes `discontinued`; the implementation preserves a bounded
+raw string rather than inventing status semantics.
+
+At most 25 rows and one provider page are read. Missing `next` means coverage is
+unknown; a valid next link means additional records exist and is never followed;
+null means the end of returned results. The optional integer count must match
+that metadata. Empty results do not establish absence of medications. Directions
+have a 1,000-character bound and the entire canonical saved packet, including
+patient/visit context and stated limits, has a 5,000-character bound. A malformed
+row, invalid page or oversized packet fails as a whole; no instructions are
+truncated. Human review saves a separate **Elation: reviewed medication records**
+source. Chief preparation preserves unsent drafts; no read or save submits a
+prescription, changes the chart or automatically invokes the model.
+
+Additional vendor acceptance remains outstanding:
+
+- [ ] Confirm the exact medication read scope and narrow returned token grant,
+  practice restriction and supported endpoint representation with Elation.
+- [ ] Prepare invented OTC/documented and prescription medication records,
+  including unfinished, discontinued and deleted metadata where the vendor
+  supports them. Use separate administrator authority to seed fixtures; the
+  CosmaBot key remains read-only. Confirm what this endpoint actually returns
+  without active/permanent filters and record any unavailable fixture as unverified.
+- [ ] Exercise absent, explicit-null, blank and recorded fields; both documented
+  discontinuation-date forms; naive and offset timestamps; exact multiline
+  directions; and raw type/flag values. Confirm rather than assume the meaning
+  of `is_doc_med`, `is_permanent`, `medication_type` and nullable signed dates.
+- [ ] Verify zero, one and more-than-25 result sets, optional `count`/`next`
+  metadata and same-origin offset links. Confirm the 25-row request is honored
+  and that no second page is fetched. Use invented long instructions to verify
+  complete-packet refusal at the 5,000-character limit, never partial saving.
+- [ ] Verify that a changed appointment/patient or mismatched row cannot enter
+  the source; use only authorized fixture IDs. Test scope/credential withdrawal,
+  lost replies, exact saved-result recovery, source withholding and reuse of
+  the independently authorized appointment/problem reads.
+- [ ] Complete medication read → human review → saved source → editable Chief
+  draft against the real synthetic sandbox, then repeat on a rebuilt physical
+  client with unsent text, keyboard and navigation checks. Report injected
+  failures separately from actual vendor behavior.
+
+The official references were retrieved October 25, 2026, with their hashes and
+contract decisions retained in `evidence/elation-medication-reference/` outside
+this repository. Local provider/runtime tests and backend/UI checks do not close
+these vendor gates. This addendum prepares access requirements only; no outreach,
+account provisioning, agreement acceptance or live vendor call has occurred.

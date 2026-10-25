@@ -106,6 +106,7 @@ class Settings(BaseSettings):
     workspace_elation_sandbox_enabled: bool = False
     # Additional clinical read scope; appointments retain their three-scope grant.
     workspace_elation_problems_enabled: bool = False
+    workspace_elation_medications_enabled: bool = False
     google_connection_client_id: str = ""
     google_connection_client_secret: SecretStr | None = None
     google_connection_callback_uri: str = ""

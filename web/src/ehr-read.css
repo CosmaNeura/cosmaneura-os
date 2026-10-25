@@ -30,3 +30,11 @@
 
 .ehr-read-panel [aria-label="Review problem list"] {display:grid;gap:.8rem;}
 .ehr-read-panel [aria-label="Returned problems"] li {padding-block:.7rem;border-top:1px solid var(--team-line,#d5dbe5);}
+
+.ehr-read-panel [aria-label="Review medication records"],.ehr-record-choices,.ehr-record-choices>div {display:grid;gap:.8rem;}
+.ehr-read-panel [aria-label="Returned medication records"] li {padding-block:.8rem;border-top:1px solid var(--team-line,#d5dbe5);}
+.ehr-read-panel [aria-label="Returned medication records"] dl {display:grid;gap:.5rem;margin:.2rem 0;min-width:0;}
+.ehr-read-panel [aria-label="Returned medication records"] dl>div {display:grid;grid-template-columns:minmax(0,9rem) minmax(0,1fr);gap:.35rem;}
+.ehr-read-panel [aria-label="Returned medication records"] dt {font-weight:600;overflow-wrap:anywhere;}
+.ehr-read-panel [aria-label="Returned medication records"] dd {margin:0;white-space:pre-wrap;overflow-wrap:anywhere;}
+@media(max-width:480px){.ehr-read-panel [aria-label="Returned medication records"] dl>div {grid-template-columns:minmax(0,1fr);gap:.1rem;}}
