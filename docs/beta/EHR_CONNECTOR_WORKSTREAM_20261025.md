@@ -224,9 +224,44 @@ Current repository history is immutable: it has no source/workspace deletion
 endpoint, and the existing artifact-retention purge does not erase EHR snapshots.
 Access revocation withholds selected content and dependent drafts; that is not
 content erasure. An EHR retention/erasure policy and implementation are required
-before storing real patient data. Native recovery framing is tested, while a
-rebuilt native client and physical-device acceptance of this new EHR flow remain
-outstanding. Atlas.md and Tebra activation limits above remain unchanged.
+before storing real patient data. The rebuilt simulator client now passes the
+native checks below; physical-device acceptance remains outstanding. Atlas.md
+and Tebra activation limits above remain unchanged.
+
+## Source drafts and rebuilt native checkpoint
+
+The shared source actions now retain each coworker's own unsent text. Preparing
+an email, calendar summary or received-fax passage from Follow-up restores
+Chief's draft before adding the selected source; it no longer moves Follow-up's
+text into Chief or clears a saved-note task. Source checks retain their existing
+account, visit, revision and content commitments. Failed storage, a newer edit
+or changed identity withholds the handoff. Gmail calls this **Prepare Chief
+draft**. Outgoing fax PDF attachment is also one **Attach PDF** action, with
+separate durable preparation/upload receipts and recovery without duplication.
+
+Opening the Elation task preserves the conversation and its mounted recovery
+state. Escape, another task choice or leaving the starting page cancels a
+delayed opening. Back restores a visible control without opening the keyboard.
+The final combined Mac Studio run passes 582 focused web tests, TypeScript and
+both production/acceptance renderer builds at code commit `3b3c140`.
+
+A fresh iOS simulator build of that same code passes app-hosted XCTest using
+the actual shared components and invented local services. The native keyboard
+changes the 390px-wide viewport from 844px to 397px; the 44-point Done control
+dismisses it and restores the view. Chief's draft survives Details, appointment
+review and a dropped source-save reply. Recovery saves one source, performs no
+additional appointment read and sends no conversation. These are programmatic
+UIKit/DOM checks, not physical touch or live authentication acceptance. Fax has
+separate mounted/browser evidence and is not exercised by this native fixture.
+
+Exact manifests and results are retained in the dedicated connector workstream:
+`source-drafts-final-manifest.json`,
+`evidence/mac-studio/source-drafts-final-20261025/receipt.json`, and
+`native/final-native-review.json`. The native run produced zero attachments.
+Routine lab screenshots, video and traces are now disabled; the persona driver
+uses accessibility text. The original mobile checkout and phone Preview24 remain
+unchanged. Physical iPhone qualification awaits available developer services;
+Elation vendor acceptance still awaits the separate sandbox access below.
 
 ## Next step: obtain Elation sandbox access
 
