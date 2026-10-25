@@ -474,14 +474,34 @@ passes six focused journeys: Chief/Details return, separate bot drafts, encrypte
 reload and tab isolation, 320px controls, short/enlarged text, and exact lost-save
 retry. Chromium reports that it does not support `-apple-system-body`; these
 checks establish browser behavior and geometry, not execution of the new native
-font rules. Installed iOS comparison at normal and enlarged preferred text sizes
-remains required before this typography change is accepted as native-qualified.
+font rules. Native acceptance for this change is recorded below from the
+installed simulator, separately from the browser rehearsal.
 
 
 Preview25's actual iOS simulator check confirmed that native headings, context
 and tab labels grow at Text Size9, with the real keyboard, Done and the visible
 Qdraft text retained. The enlarged Settings label split across two lines. The
 follow-up keeps native caption sizing on the navigation parent and bounds the
-four compact tab labels at18px without wrapping; conversation/header text
-continues to follow the unrestricted native style. The installed follow-up still
-requires its native visual comparison before acceptance.
+four compact tab labels at 18px without wrapping; conversation/header text
+continues to follow the unrestricted native style.
+
+Preview26 (`fa16469`) passes the installed iPhone 12 simulator comparison at
+Text Size 3 and 9. All four tab labels, including Settings, remain on one line.
+Typing Qdraft with actual software keys, then tapping the native Done, hides the
+keyboard, restores the full-height chat and retains the visible unsent draft.
+Back, Details and Send remain inside the keyboard-open frame. Details exposes
+the full context; its visible close control returns to Chief with Qdraft intact.
+The simulator text preference is restored to 3. Independent source/OCR QC found
+no further adjustment for the tested 390px native layout. Native 320px was not
+tested; the 320px result is browser evidence only.
+
+The Preview26 renderer was rebuilt and packaged in the unchanged, previously
+compiled CosmaBot Preview24 native shells. Both iPhone and simulator packages
+were re-signed and their signatures/file hashes verified. This was not a fresh
+native compilation and did not use Scribe app source or services. The physical
+phone still has Preview24, whose visible Done the owner confirmed works;
+Preview26 is installed only in the owned simulator. Felt haptics remain
+unconfirmed. Saved evidence is in the October25 Preview26 handoff's
+`native-validation/receipt.json`, normal/enlarged comparisons and OCR. Ordinary
+Messages rollout remains disabled; physical and connected-service acceptance
+remain separate gates.
