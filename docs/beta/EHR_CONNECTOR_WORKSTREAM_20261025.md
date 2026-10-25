@@ -503,6 +503,17 @@ during that read and settlement. No production change was needed for those test
 corrections. Earlier failed receipts remain preserved. Browser, Mac and native
 qualification and physical installation are recorded separately when complete.
 
+Commit `4f216d8` subsequently passed all seven browser scenarios, one native
+hosted medication journey with 44px Done and zero attachments, and independent
+Mac Studio verification (502 Python cases, 331 web cases, lint and both type
+configurations). All 2,944 source hashes stayed unchanged. Preview34 is installed
+and launched on the phone; CoreDevice independently reports build34. The local
+rehearsal serves the same qualified source at its existing origin. The update
+used the existing app identity and performed no uninstall or storage reset.
+Physical touch, haptics, VoiceOver and draft contents across the update remain
+unverified. See `CHECKPOINT-ELATION-MEDICATIONS.json` and
+`native/preview34-phone-summary.json` in the connector workstream.
+
 ## Elation sandbox access
 
 The owner confirmed no sandbox is available and requested access requirements.

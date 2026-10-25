@@ -34,7 +34,7 @@ export function researchRehearsal(read:()=>Workspace,write:(workspace:Workspace)
    const observation=state.runs.find(item=>item.run_id===run&&item.bot===bot);if(!observation)throw new WorkspaceApiError(404);
    const selected=body.source_hashes.map(hash=>observation.results.find(item=>item.sha256===hash));if(selected.some(item=>!item))throw new WorkspaceApiError(422);
    const result=await validateResearchSaved({...await researchSaved(body),workspace_id:workspace,run_id:run,entry_id:crypto.randomUUID()},workspace,run,body);
-   const next=structuredClone(current);next.revision=result.entry_revision;next.entries.push({id:result.entry_id,revision:result.entry_revision,kind:'evidence',content:researchSavedText(selected.filter(item=>item!==undefined)),source_label:'Research · public source excerpts',origin:'synthetic_fixture',ticket:null,created_at:new Date().toISOString()});
+   const next=structuredClone(current);next.revision=result.entry_revision;next.entries.push({id:result.entry_id,revision:result.entry_revision,kind:'evidence',content:researchSavedText(selected.filter(item=>item!==undefined)),source_label:'Research · public source excerpts',origin:'synthetic_fixture',ticket:null,created_at:new Date().toISOString(),research_packet:{contract:'research.saved_packet_marker.v1',run_id:result.run_id,entry_id:result.entry_id,entry_revision:result.entry_revision}});
    write(next);state.packets.unshift({query:observation.query,saved:result});receipts.set(body.idempotency_key,result);persist();
    if(new URLSearchParams(location.search).get('research-scenario')==='lost-save-reply'&&!state.lostSaveReply){state.lostSaveReply=true;persist();throw new WorkspaceApiError(503);}
    return structuredClone(result);

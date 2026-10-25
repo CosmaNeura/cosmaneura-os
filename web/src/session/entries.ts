@@ -1,9 +1,10 @@
 import {botAddress,type DraftHandoff,type ProviderTeam,type Workspace,type WorkspaceEntry} from '../workspace-api';
+import {hasResearchPacketMarker,RESEARCH_PACKET_LABEL} from '../research-packet-marker';
 
 export type ConversationAction={kind:'review_handoff'|'retry_handoff'|'review_note'|'review_work'|'check_request';id:string;label:string};
 export type ConversationRow=
   {kind:'turn';id:string;entry:WorkspaceEntry;reviewLabel:string;actions:ConversationAction[]}|
-  {kind:'material';sourceKind:'ehr'|'outlook';id:string;sourceId:string;label:string;createdAt:string;state:'current'|'unavailable'}|
+  ({kind:'material';id:string;sourceId:string;label:string;createdAt:string}&({sourceKind:'ehr'|'outlook';state:'current'|'unavailable'}|{sourceKind:'research';state:'current'}))|
   {kind:'review';id:string;author:string;title:string;status:string;needsReview:boolean;actions:ConversationAction[]};
 export type ConversationProjection={workspaceId:string|null;botAddress:string;entries:ConversationRow[];turns:WorkspaceEntry[]};
 
@@ -32,6 +33,11 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
   const positions=new Map(turns.map(entry=>[entry.id,entry.revision]));
   if(bot?.role==='chief'){
     for(const source of workspace.entries){
+      if(hasResearchPacketMarker(source)){
+        const id=`source:${source.id}`;
+        entries.push({kind:'material',sourceKind:'research',id,sourceId:source.id,createdAt:source.created_at,state:'current',label:RESEARCH_PACKET_LABEL});
+        positions.set(id,source.revision);continue;
+      }
       const sourceKind=source.kind==='ehr_read_source'?'ehr':source.kind==='microsoft_message'?'outlook':null;
       const custody=sourceKind==='ehr'?source.ehr_source_state:sourceKind==='outlook'?source.microsoft_source_state:undefined;
       if(!sourceKind||(custody!=='current'&&custody!=='unavailable'))continue;

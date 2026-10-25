@@ -696,3 +696,34 @@ full-source read following the existing marked excerpt and prevent publication
 after access withdrawal. Mac, browser, native and phone delivery evidence is
 recorded in the connector workstream when completed. These additions do not
 complete the remaining Claude recommendations or establish live vendor access.
+
+The `4f216d8` medication slice subsequently passed seven browser scenarios,
+independent Mac Studio checks and one native hosted journey with zero media
+attachments. Preview34 is installed and launched on the phone, with its build
+number verified directly. The same source is served in the existing local
+rehearsal. This is an in-place update, without an uninstall or storage reset;
+physical-touch and cross-update draft-content acceptance are still separate.
+See `CHECKPOINT-ELATION-MEDICATIONS.json` and `native/preview34-phone-summary.json`
+in the connector workstream.
+
+### Saved Research packet cards
+
+Chief's conversation now displays a card for a saved public Research packet,
+with its fixed source label, save time and the existing **View saved source**
+action. Back restores the card's focus, reading position and existing Chief
+draft without reopening the keyboard. Research card arrival does not become a
+new reply or advance the conversation's read marker.
+
+The public workspace projection supplies a packet marker only after validating
+the actual saved receipt, lookup, owner, workspace, exact entry and revision.
+A manually entered note with the same label and text remains an ordinary
+reference. Missing or invalid proof produces no Research card. The marker
+describes saved provenance, not live source availability or clinical approval;
+the model context and existing source permissions are unchanged. Source details
+identify a saved public snapshot and preserve the need to review its claims.
+
+The slice passes 121 focused web cases and both TypeScript configurations,
+plus 121 focused Python cases and eight PostgreSQL provenance cases from an
+isolated source candidate. The database check confirms one joined proof query
+for multiple packets and unchanged model context. Final combined browser,
+Mac, native and phone delivery are recorded separately when completed.

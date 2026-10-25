@@ -346,7 +346,7 @@ def link_appointment(s: Session, box: str, actor: str, wid: str, *, expected: in
 
 
 def read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None = None):
-    return _read(s, box, actor, wid, at_revision=at_revision, include_handoffs=True)
+    return _read(s, box, actor, wid, at_revision=at_revision, include_handoffs=True, include_research_markers=True)
 
 
 def _read_model_context(s: Session, box: str, actor: str, wid: str):
@@ -355,7 +355,8 @@ def _read_model_context(s: Session, box: str, actor: str, wid: str):
     return _read(s, box, actor, wid, at_revision=None, include_handoffs=False)
 
 
-def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None, include_handoffs: bool):
+def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None, include_handoffs: bool,
+          include_research_markers: bool = False):
     from cosmas_os.application import follow_up, handoffs, note_review
 
     w = _workspace(s, box, actor, wid, allow_private=True)
@@ -385,7 +386,7 @@ def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None
     replies = {reply.entry_id: reply for reply in s.scalars(select(WorkspaceReply).where(
         WorkspaceReply.workspace_id == wid, WorkspaceReply.box_id == box, WorkspaceReply.owner_id == actor,
     ))}
-    for e in s.scalars(
+    visible_entries = list(s.scalars(
         select(WorkspaceEntry)
         .where(
             WorkspaceEntry.workspace_id == w.id,
@@ -393,7 +394,13 @@ def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None
             WorkspaceEntry.revision <= revision,
         )
         .order_by(WorkspaceEntry.revision)
-    ):
+    ))
+    research_markers = {}
+    if include_research_markers:
+        from cosmas_os.application import research
+
+        research_markers = research.saved_packet_markers(s, box, actor, w.id, visible_entries)
+    for e in visible_entries:
         t = _ticket(s, w, e.ticket_id) if e.ticket_id else None
         reply = replies.get(e.id)
         content = e.content
@@ -444,6 +451,7 @@ def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None
                 "ticket": {"id": t.id, "state": t.state, "lane": t.lane} if t else None,
                 "created_at": e.created_at.isoformat(),
                 **source_states,
+                **({"research_packet": research_markers[e.id]} if e.id in research_markers else {}),
                 "reply": {"agent_name": reply.agent_name, "agent_id": reply.agent_id, "role": reply.role,
                           "backend": reply.backend, "content": reply.content,
                           "team_revision_id": reply.team_revision_id,

@@ -83,3 +83,18 @@ describe('saved EHR material cards',()=>{
     const projection=projectConversation({...workspace,handoffs:[],entries:[{...source,ehr_source_state:'unavailable',source_label:'Private old label'}]},team,'chief');expect(projection.entries).toEqual([{kind:'material',sourceKind:'ehr',id:`source:${source.id}`,sourceId:source.id,label:'Unavailable EHR source',state:'unavailable',createdAt:source.created_at}]);expect(projection.turns).toEqual([]);
   });
 });
+
+describe('saved Research material cards',()=>{
+ const packet:WorkspaceEntry={id:teamUuid(300),revision:3,kind:'evidence',content:'Private invented excerpt and query must not enter the card.',source_label:'Research · public source excerpts',origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:00:00Z',research_packet:{contract:'research.saved_packet_marker.v1',run_id:teamUuid(301),entry_id:teamUuid(300),entry_revision:3}};
+ it('places proven packet metadata at the saved entry revision without reading body or using its label as a fallback',()=>{
+  const later={...turn,id:teamUuid(302),revision:5},source={...packet};Object.defineProperty(source,'content',{get:()=>{throw new Error('Projection must not read packet content');}});Object.defineProperty(source,'source_label',{get:()=>{throw new Error('Projection must use the fixed proven-packet label');}});
+  const projection=projectConversation({...workspace,revision:5,handoffs:[],entries:[later,source,turn]},team,'chief');expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${packet.id}`,later.id]);expect(projection.entries[1]).toEqual({kind:'material',sourceKind:'research',id:`source:${packet.id}`,sourceId:packet.id,label:'Research · public source excerpts',state:'current',createdAt:packet.created_at});expect(projection.turns).toEqual([later,turn]);
+ });
+ it('does not infer packet identity from matching evidence text/label, missing markers, or another bot',()=>{
+  const ordinary={...packet,research_packet:undefined};expect(projectConversation({...workspace,handoffs:[],entries:[ordinary]},team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[packet]},team,'research').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[packet]},team,'follow_up').entries).toEqual([]);
+ });
+ it.each(['unknown-contract','mismatched-entry','mismatched-revision','invalid-run','extra-key','wrong-kind'] as const)('does not expose a Research card with %s metadata',change=>{
+  const source=structuredClone(packet);if(change==='wrong-kind')source.kind='scratchpad';else if(change==='unknown-contract')source.research_packet={...source.research_packet!,contract:'research.saved_packet_marker.v2'} as unknown as WorkspaceEntry['research_packet'];else if(change==='mismatched-entry')source.research_packet!.entry_id=teamUuid(399);else if(change==='mismatched-revision')source.research_packet!.entry_revision=2;else if(change==='invalid-run')source.research_packet!.run_id='not-a-run';else source.research_packet={...source.research_packet!,content:'Untrusted body fallback'} as unknown as WorkspaceEntry['research_packet'];
+  expect(projectConversation({...workspace,handoffs:[],entries:[source]},team,'chief').entries).toEqual([]);
+ });
+});

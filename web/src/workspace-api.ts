@@ -75,6 +75,7 @@ export type WorkspaceEntry = {
   calendar_source_state?: "current" | "unavailable";
   practice_fax_source_state?: "current" | "unavailable";
   fax_source_state?: "current" | "unavailable";
+  research_packet?: {contract:"research.saved_packet_marker.v1";run_id:string;entry_id:string;entry_revision:number};
   reply?: AssistantReply | null;
   model_request?: EntryModelRequest;
 };

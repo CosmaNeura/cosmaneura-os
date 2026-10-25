@@ -2,7 +2,7 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
-vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
+vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED','VITE_EHR_READ_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {identity,installFixtures} from '../ux-acceptance/fixtures';
 import {openDraftStore} from './draft-store';
@@ -11,6 +11,7 @@ import {workspaceApi,type AuthenticatedWorkspaceIdentity} from './workspace-api'
 import {researchApi} from './research-api';
 import type {ResearchSaved} from './research-contract';
 import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
+import {conversationsApi} from './conversations-api';
 
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement,idb:IDBFactory,owner:AuthenticatedWorkspaceIdentity;
@@ -75,4 +76,22 @@ it('does not append or focus a Chief continuation when native foreground is lost
  await act(async()=>button('Prepare Chief draft')!.click());await wait(()=>expect(finish).toBeDefined());await act(async()=>notifyNativeWorkspaceForeground(owner,false));await act(async()=>finish(prior));
  expect(composer().value).not.toContain('Review the saved public Research packet');expect(document.activeElement).not.toBe(composer());expect(stats()).toEqual(before);expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();noDispatchReceipt();await act(async()=>notifyNativeWorkspaceForeground(owner,true));
  await remount();await openChief();expect(composer().value).toBe(prefix);
+});
+
+it.each([false,true])('opens a saved Research packet in Chief and returns to its exact card without draft, scroll, keyboard or readmark changes (native=%s)',async native=>{
+ if(native){owner={...identity,nativeSession:{revision:'00000000-0000-4000-8000-000000000992',isCurrent:()=>true}};await act(async()=>root.render(<EncounterWorkspace authenticated={owner} draftStorage={storage}/>));}
+ const prefix='Keep my exact original Chief directions while I inspect research.',ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append'),save=vi.spyOn(researchApi,'save'),marks=vi.spyOn(conversationsApi,'mark'),reads=vi.spyOn(conversationsApi,'read');
+ await openChief();await type(composer(),prefix);await click('‹ Messages');await chooseResearch();await searchAndSave();await wait(()=>expect(button('Prepare Chief draft')?.disabled).toBe(false));expect([...host.querySelectorAll('.conversation-material-card')].filter(visible)).toHaveLength(0);const receipt=await save.mock.results[0].value as ResearchSaved;
+ await click('Prepare Chief draft');await wait(()=>expect(composer().value).toContain('Review the saved public Research packet'));const draft=composer().value;expect(draft.startsWith(prefix+'\n\n')).toBe(true);const card=host.querySelector<HTMLElement>(`[data-entry-id="source:${receipt.entry_id}"]`)!,control=card.querySelector<HTMLButtonElement>('button')!;expect(card.getAttribute('aria-label')).toBe('Saved Research packet');expect(card.textContent).toContain('Research · public source excerpts');expect(card.querySelector('time')?.dateTime).toBeTruthy();expect(card.textContent).not.toContain('Invented source excerpt');expect(card.textContent).not.toContain(publicQuestion);expect(card.textContent).not.toContain('pubmed.ncbi.nlm.nih.gov');expect(host.querySelector('.team-conversation-empty')).toBeNull();
+ const scroll=host.querySelector<HTMLElement>('.mobile-chat-scroll')!;Object.defineProperty(scroll,'clientHeight',{configurable:true,value:200});Object.defineProperty(scroll,'scrollHeight',{configurable:true,value:1100});scroll.scrollTop=230;await act(async()=>scroll.dispatchEvent(new Event('scroll')));const before=structuredClone(stats()),markCount=marks.mock.calls.length,readCount=reads.mock.calls.length;
+ await act(async()=>control.click());await wait(()=>expect(document.activeElement?.id).toBe('source-'+receipt.entry_id));const shown=document.getElementById('source-'+receipt.entry_id)!;expect(shown.classList.contains('selected')).toBe(true);expect(shown.textContent).toContain('Saved public Research snapshot · source claims require review');expect(shown.textContent).toContain('Invented source excerpt. Not clinical evidence.');expect(shown.textContent).not.toContain('Reference note · entered by you, unverified');expect(composer().value).toBe(draft);expect(stats()).toEqual(before);
+ await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(control));expect(document.activeElement?.closest('[hidden]')).toBeNull();expect(document.activeElement).not.toBe(composer());expect(scroll.scrollTop).toBe(230);expect(composer().value).toBe(draft);expect(host.querySelector('.messages-new-replies')).toBeNull();expect(stats()).toEqual(before);expect(marks).toHaveBeenCalledTimes(markCount);expect(reads).toHaveBeenCalledTimes(readCount);expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();noDispatchReceipt();
+});
+
+it('prevents an older EHR task return from stealing focus after Research source navigation has completed',async()=>{
+ owner={...identity,nativeSession:{revision:'00000000-0000-4000-8000-000000000993',isCurrent:()=>true}};await act(async()=>root.render(<EncounterWorkspace authenticated={owner} draftStorage={storage}/>));
+ await openChief();await type(composer(),'Keep the newer Research source focus and this Chief draft.');await click('‹ Messages');await chooseResearch();await searchAndSave();await wait(()=>expect(button('Prepare Chief draft')?.disabled).toBe(false));await click('Prepare Chief draft');await wait(()=>expect(composer().value).toContain('Review the saved public Research packet'));const draft=composer().value;
+ await click('Details');await click('Review EHR records');await wait(()=>expect(button('Check Elation access')).toBeDefined());let oldReturn:FrameRequestCallback|undefined;vi.spyOn(window,'requestAnimationFrame').mockImplementationOnce(callback=>{oldReturn=callback;return 11001;});await click('‹ Back to Chief of Staff');await wait(()=>expect(oldReturn).toBeTypeOf('function'));
+ const card=host.querySelector<HTMLElement>('.conversation-material-card')!,control=card.querySelector<HTMLButtonElement>('button')!,id=card.dataset.entryId!.slice('source:'.length),scroll=host.querySelector<HTMLElement>('.mobile-chat-scroll')!;Object.defineProperty(scroll,'clientHeight',{configurable:true,value:200});Object.defineProperty(scroll,'scrollHeight',{configurable:true,value:1000});scroll.scrollTop=180;await act(async()=>scroll.dispatchEvent(new Event('scroll')));const before=structuredClone(stats());
+ await act(async()=>control.click());await wait(()=>expect(document.activeElement?.id).toBe('source-'+id));await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(control));await act(async()=>oldReturn!(0));expect(document.activeElement).toBe(control);expect(document.activeElement).not.toBe(composer());expect(scroll.scrollTop).toBe(180);expect(composer().value).toBe(draft);expect(stats()).toEqual(before);expect((window as Window&{ehrRehearsalStats?:{reads:number;externalCalls:number}}).ehrRehearsalStats).toMatchObject({reads:0,externalCalls:0});noDispatchReceipt();
 });
