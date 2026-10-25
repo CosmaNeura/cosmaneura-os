@@ -110,3 +110,29 @@
   .team-workspace[data-presentation=messages] button{transition:transform 120ms cubic-bezier(.2,0,0,1)}
   .team-workspace[data-presentation=messages] button:active:not(:disabled){transform:scale(.98)}
 }
+
+/* Native text styles follow the phone's preferred content size. Keep each
+   control on its own style so context and tab labels do not compound scaling. */
+@supports(font:-apple-system-body){
+  .team-workspace[data-presentation=messages][data-native-presentation=true] .messages-thread-header h1{
+    font:-apple-system-headline;
+    line-height:1.3;
+  }
+  .team-workspace[data-presentation=messages][data-native-presentation=true] .messages-thread-header button{
+    font:-apple-system-subheadline;
+    line-height:1.3;
+  }
+  .team-workspace[data-presentation=messages][data-native-presentation=true] .messages-thread-header .messages-context-button{
+    font:-apple-system-footnote;
+    line-height:1.3;
+  }
+  .team-workspace[data-presentation=messages][data-native-presentation=true] .messages-context-button small{
+    font:-apple-system-caption2;
+    line-height:1.35;
+  }
+  .team-workspace[data-presentation=messages][data-native-presentation=true] .practice-navigation button{
+    font:-apple-system-caption2;
+    line-height:1.2;
+    overflow-wrap:anywhere;
+  }
+}

@@ -458,3 +458,21 @@ the attempted typing/taps, so this does not establish a completed physical
 typing/Done cycle. Felt haptics, physical gestures, real microphone capture and
 authenticated backend acceptance remain open. Ordinary-build rollout stays off;
 the preview remains invented-data-only and PR #204 remains a draft.
+
+
+## Native text hierarchy follow-up — October 25
+
+The native Messages header now uses the system headline style; header actions
+use subheadline, the context uses footnote, and secondary context/tab labels use
+caption2. Each element gets its own style so nested labels do not multiply font
+scaling. Explicit line heights, the 44-point Back target, one header, existing
+bottom-tab measurement and UIKit keyboard owner are retained. Ordinary browser
+presentation keeps its existing typography.
+
+Independent source QC found no blocking change. The rebuilt mobile rehearsal
+passes six focused journeys: Chief/Details return, separate bot drafts, encrypted
+reload and tab isolation, 320px controls, short/enlarged text, and exact lost-save
+retry. Chromium reports that it does not support `-apple-system-body`; these
+checks establish browser behavior and geometry, not execution of the new native
+font rules. Installed iOS comparison at normal and enlarged preferred text sizes
+remains required before this typography change is accepted as native-qualified.
