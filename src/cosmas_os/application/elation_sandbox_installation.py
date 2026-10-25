@@ -80,7 +80,7 @@ def install(s, box, owner, account_id, *, installation_id, installation_sha256, 
     if old_version is not None:
         raise ws.WorkspaceError("ehr_sandbox_generation_already_installed")
     old = s.scalars(select(EhrReadBinding).where(EhrReadBinding.box_id == box,
-        EhrReadBinding.owner_id == owner, EhrReadBinding.account_id == account_id,
+        EhrReadBinding.owner_id == owner, EhrReadBinding.account_id == account_id, EhrReadBinding.vendor == "elation",
         EhrReadBinding.state == "active").with_for_update())
     now = model_work.now(s)
     for binding in old:

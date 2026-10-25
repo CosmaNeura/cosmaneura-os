@@ -37,7 +37,10 @@ class EhrReadBinding(OwnerScope, Base):
             name="uq_ehr_read_binding_version"),
         Index("uq_ehr_read_binding_active", "box_id", "owner_id", "account_id", "connection_id",
             unique=True, postgresql_where=text("state = 'active'")),
-        CheckConstraint("vendor='elation' AND environment='sandbox'", name="ck_ehr_read_binding_vendor"),
+        CheckConstraint("(vendor='elation' AND environment='sandbox' AND customer_id IS NULL AND practice_timezone IS NULL) OR "
+            "(vendor='tebra' AND environment='synthetic' AND customer_id IS NOT NULL AND customer_id ~ '^[1-9][0-9]{0,9}$' "
+            "AND customer_id::numeric<=2147483647 AND practice_id::numeric<=2147483647 "
+            "AND practice_timezone IS NOT NULL)", name="ck_ehr_read_binding_vendor"),
         CheckConstraint("practice_id ~ '^[1-9][0-9]*$' AND char_length(practice_id)<=19 "
             "AND practice_id::numeric<=9223372036854775807", name="ck_ehr_read_binding_practice"),
         CheckConstraint("char_length(practice_name) BETWEEN 1 AND 200 AND practice_name !~ '[[:cntrl:]]'",
@@ -52,6 +55,8 @@ class EhrReadBinding(OwnerScope, Base):
     connection_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     credential_generation: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     practice_id: Mapped[str] = mapped_column(String(20), nullable=False)
+    customer_id: Mapped[str | None] = mapped_column(String(10))
+    practice_timezone: Mapped[str | None] = mapped_column(String(100))
     practice_name: Mapped[str] = mapped_column(String(200), nullable=False)
     environment: Mapped[str] = mapped_column(String(16), nullable=False, default="sandbox")
     binding_digest: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -139,6 +144,7 @@ class EhrReadSourceReview(WorkspaceScope, Base):
         UniqueConstraint("entry_id", name="uq_ehr_read_review_entry"),
         UniqueConstraint("workspace_id", "snapshot_id", "item_handle", name="uq_ehr_read_review_item"),
         UniqueConstraint("workspace_id", "idempotency_key", name="uq_ehr_read_review_key"),
+        CheckConstraint("command_provider IS NULL OR command_provider IN ('elation','tebra')", name="ck_ehr_review_provider"),
         CheckConstraint("expected_revision>=1 AND workspace_revision=expected_revision+1",
             name="ck_ehr_read_review_revision"),
         CheckConstraint("reviewed_visit AND reviewed_patient_identity AND reviewed_exact_snapshot "
@@ -147,6 +153,7 @@ class EhrReadSourceReview(WorkspaceScope, Base):
         digest_check("request_hash", "observation_sha256", "item_sha256", "source_sha256", "content_sha256"),
     )
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    command_provider: Mapped[str | None] = mapped_column(String(16))
     entry_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)

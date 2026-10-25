@@ -1,6 +1,6 @@
 """Bounded EHR read and explicit human-review commands; no provider IDs or cursors."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Literal
 from uuid import UUID
 
@@ -10,11 +10,22 @@ from cosmas_os.api.workspace_schemas import IdempotencyKey
 from cosmas_os.ports.ehr_reads import Digest, Protected, Window
 
 
-class Status(Protected):
+class ProviderCommand(Protected):
+    provider: Literal["elation", "tebra"] | None = None
+
+    @field_validator("provider", mode="before")
+    @classmethod
+    def explicit_provider(cls, value):
+        if value not in ("elation", "tebra"):
+            raise ValueError("explicit_provider_required")
+        return value
+
+
+class Status(ProviderCommand):
     action: Literal["status"]
 
 
-class Observe(Protected):
+class Observe(ProviderCommand):
     action: Literal["observe"]
     connection_id: UUID
     binding_sha256: Digest
@@ -28,7 +39,27 @@ class Observe(Protected):
         return self
 
 
-class Verify(Protected):
+class Verify(ProviderCommand):
+    last_name: str | None = Field(default=None, strict=True, min_length=1, max_length=255)
+    birth_date: date | None = None
+
+    @model_validator(mode="after")
+    def patient_query(self):
+        if self.provider == "tebra":
+            if (self.last_name is None or self.last_name != self.last_name.strip()
+                    or any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in self.last_name) or self.birth_date is None
+                    or not date(1850, 1, 1) <= self.birth_date <= date.today()):
+                raise ValueError("exact_patient_query_required")
+        elif {"last_name", "birth_date"} & self.model_fields_set:
+            raise ValueError("unexpected_patient_query")
+        return self
+
+    @field_validator("birth_date", mode="before")
+    @classmethod
+    def exact_date(cls, value):
+        if value is not None and (type(value) is not str or len(value) != 10 or date.fromisoformat(value).isoformat() != value):
+            raise ValueError("exact_date_required")
+        return value
     action: Literal["verify"]
     connection_id: UUID
     binding_sha256: Digest
@@ -39,17 +70,23 @@ class Verify(Protected):
     idempotency_key: IdempotencyKey
 
 
-class Inspect(Protected):
+class Inspect(ProviderCommand):
     action: Literal["inspect"]
     observation_id: UUID
 
 
-class Resolve(Protected):
+class Resolve(ProviderCommand):
     action: Literal["resolve"]
     idempotency_key: IdempotencyKey
 
 
-class Install(Protected):
+class Install(ProviderCommand):
+    @model_validator(mode="after")
+    def elation_only(self):
+        if self.provider is not None:
+            raise ValueError("legacy_elation_install_shape_required")
+        return self
+
     action: Literal["install"]
     installation_id: UUID
     installation_sha256: Digest
@@ -59,7 +96,7 @@ class Install(Protected):
 EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Inspect | Resolve | Install, Field(discriminator="action")])
 
 
-class ReviewEhr(Protected):
+class ReviewEhr(ProviderCommand):
     expected_revision: int = Field(strict=True, ge=1)
     idempotency_key: IdempotencyKey
     observation_id: UUID

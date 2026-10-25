@@ -126,6 +126,85 @@ class PrivateSnapshot(Protected):
     provider_sources: tuple[Digest, ...] = Field(min_length=1, max_length=2)
 
 
+TebraStatus = Literal["Confirmed", "Check-in", "No-show", "Check-out", "Rescheduled", "Scheduled", "Cancelled"]
+
+
+class TebraPatientDisplay(Protected):
+    full_name: str = Field(strict=True, min_length=1, max_length=255)
+    birth_date: date
+
+
+class TebraWindowItem(WindowItem):
+    status: TebraStatus
+
+
+class TebraVerifiedItem(Protected):
+    handle: UUID
+    sha256: Digest
+    starts_at: datetime
+    ends_at: datetime
+    status: TebraStatus
+    patient: TebraPatientDisplay
+
+
+class TebraCommonObservation(Protected):
+    provider: Literal["tebra"]
+    mode: Literal["synthetic"]
+    practice: Practice
+    observed_at: datetime
+    window: Window
+    coverage: Literal["returned_rows_only"]
+
+
+class TebraWindowObservation(TebraCommonObservation):
+    kind: Literal["window"]
+    items: tuple[TebraWindowItem, ...] = Field(max_length=25)
+
+
+class TebraVerifiedObservation(TebraCommonObservation):
+    kind: Literal["verified_visit"]
+    item: TebraVerifiedItem
+
+
+class TebraPrivateAppointment(Protected):
+    appointment_id: ProviderId
+    patient_id: ProviderId
+    starts_at: datetime
+    ends_at: datetime
+    status: TebraStatus
+
+
+class TebraPrivatePatient(TebraPatientDisplay):
+    patient_id: ProviderId
+
+
+class TebraPrivateItem(Protected):
+    handle: UUID
+    appointment: TebraPrivateAppointment
+    patient: TebraPrivatePatient | None
+
+
+class TebraPrivateSnapshot(Protected):
+    transport: Literal["mock"]
+    binding_sha256: Digest
+    request_sha256: Digest
+    items: tuple[TebraPrivateItem, ...] = Field(max_length=25)
+    provider_sources: tuple[Digest, ...] = Field(min_length=1, max_length=2)
+
+
 class SnapshotPayload(Protected):
-    public: Annotated[WindowObservation | VerifiedObservation, Field(discriminator="kind")]
-    private: PrivateSnapshot
+    public: WindowObservation | VerifiedObservation | TebraWindowObservation | TebraVerifiedObservation
+    private: PrivateSnapshot | TebraPrivateSnapshot
+
+    @model_validator(mode="before")
+    @classmethod
+    def private_provider(cls, value):
+        if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("provider") == "tebra":
+            return {**value, "private": TebraPrivateSnapshot.model_validate(value["private"])}
+        return value
+
+    @model_validator(mode="after")
+    def same_provider(self):
+        if (self.public.provider == "tebra") != isinstance(self.private, TebraPrivateSnapshot):
+            raise ValueError("provider_payload_mismatch")
+        return self

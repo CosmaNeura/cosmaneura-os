@@ -7,8 +7,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 
-from cosmas_os.adapters.elation_read_runtime import SyntheticElationReads
-from cosmas_os.adapters.elation_sandbox_runtime import ManagedElationSandboxReads
+from cosmas_os.adapters.ehr_read_runtime import select_runtime
 from cosmas_os.api import ehr_read_schemas as schema
 from cosmas_os.api.capture_deadline import CaptureBoundary
 from cosmas_os.api.capture_schemas import _unique_object
@@ -39,9 +38,9 @@ class EhrReadBoundary:
 def router(*, runtime, configuration, identity_dependency, session_dependency, workspace_gate, fence):
     routes = APIRouter()
 
-    def service():
-        port = runtime()
-        if not configuration().workspace_ehr_read_available or type(port) not in (SyntheticElationReads, ManagedElationSandboxReads):
+    def service(provider=None):
+        port = select_runtime(runtime(), provider or "elation")
+        if not configuration().workspace_ehr_read_available or port is None:
             raise ws.WorkspaceError("ehr_read_unavailable", 404)
         return port
 
@@ -85,8 +84,8 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
             reauthenticate()
             if body.action == "status":
                 return ehr_reads.status(*scope, enabled=configuration().workspace_ehr_read_available,
-                    port=runtime(), reauthenticate=reauthenticate)
-            port = service()
+                    port=runtime(), reauthenticate=reauthenticate, provider=body.provider)
+            port = service(body.provider)
             if body.action == "install":
                 result = elation_sandbox_installation.install(*scope, key=body.idempotency_key,
                     installation_id=str(body.installation_id), installation_sha256=body.installation_sha256,
@@ -94,21 +93,21 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
             elif body.action == "observe":
                 result = ehr_reads.observe(*scope, key=body.idempotency_key,
                     connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
-                    starts_at=body.starts_at, ends_at=body.ends_at, port=port, reauthenticate=reauthenticate)
+                    starts_at=body.starts_at, ends_at=body.ends_at, port=port, reauthenticate=reauthenticate, provider=body.provider)
             elif body.action == "verify":
                 result = ehr_reads.verify(*scope, key=body.idempotency_key,
                     connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
                     observation_id=str(body.observation_id), observation_sha256=body.observation_sha256,
                     item_handle=str(body.item_handle), item_sha256=body.item_sha256,
-                    port=port, reauthenticate=reauthenticate)
+                    port=port, reauthenticate=reauthenticate, provider=body.provider, last_name=body.last_name, birth_date=body.birth_date)
             elif body.action == "inspect":
                 result = ehr_reads.inspect_observation(*scope, observation_id=str(body.observation_id),
-                    port=port, reauthenticate=reauthenticate)
+                    port=port, reauthenticate=reauthenticate, provider=body.provider)
             else:
                 result = ehr_reads.resolve_observation(*scope, key=body.idempotency_key,
-                    port=port, reauthenticate=reauthenticate)
+                    port=port, reauthenticate=reauthenticate, provider=body.provider)
             reauthenticate()
-            if service() is not port:
+            if service(body.provider) is not port:
                 raise ws.WorkspaceError("ehr_read_unavailable", 404)
             return result
         return JSONResponse(await run_in_threadpool(execute), headers=HEADERS)
@@ -121,7 +120,7 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
             body = schema.ReviewEhr.model_validate(await decoded(request))
         except (ValueError, TypeError, UnicodeError, RecursionError):
             raise ws.WorkspaceError("invalid_ehr_read_review", 422) from None
-        port = service()
+        port = service(body.provider)
 
         def execute():
             fence(request, session, identity)
@@ -131,10 +130,10 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                 reviewed_visit=body.reviewed_visit, reviewed_patient_identity=body.reviewed_patient_identity,
                 reviewed_exact_snapshot=body.reviewed_exact_snapshot, reviewed_untrusted_source=body.reviewed_untrusted_source,
                 port=port, external_identity_id=identity.external_identity_id,
-                reauthenticate=lambda: fence(request, session, identity))
+                reauthenticate=lambda: fence(request, session, identity), provider=body.provider)
             result["workspace"] = model_work.project_workspace(session, result["workspace"])
             fence(request, session, identity)
-            if service() is not port:
+            if service(body.provider) is not port:
                 raise ws.WorkspaceError("ehr_read_unavailable", 404)
             return result
         return JSONResponse(await run_in_threadpool(execute), headers=HEADERS)

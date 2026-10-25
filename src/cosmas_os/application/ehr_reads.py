@@ -3,14 +3,17 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import re
 from contextlib import contextmanager
 from contextvars import ContextVar
-from datetime import UTC, datetime, timedelta
+from dataclasses import asdict
+from datetime import UTC, date, datetime, timedelta
 from uuid import UUID, uuid4
 
 from sqlalchemy import func, select
 
+from cosmas_os.adapters.ehr_read_runtime import runtime_provider, select_runtime
 from cosmas_os.adapters.elation_read import (
     ElationAppointment,
     ElationPatient,
@@ -20,6 +23,13 @@ from cosmas_os.adapters.elation_read import (
 )
 from cosmas_os.adapters.elation_read_runtime import SyntheticElationReads
 from cosmas_os.adapters.elation_sandbox_runtime import ManagedElationSandboxReads
+from cosmas_os.adapters.tebra_read import (
+    TebraAppointment,
+    TebraPatient,
+    TebraPractice,
+    TebraReadError,
+)
+from cosmas_os.adapters.tebra_read_runtime import SyntheticTebraReads, TebraWorkspaceScope
 from cosmas_os.application import model_work
 from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import canonical_json, payload_hash
@@ -36,6 +46,11 @@ from cosmas_os.ports.ehr_reads import (
     PrivateItem,
     PrivatePatient,
     SnapshotPayload,
+    TebraPrivateAppointment,
+    TebraPrivateItem,
+    TebraPrivatePatient,
+    TebraVerifiedObservation,
+    TebraWindowObservation,
     VerifiedObservation,
     Window,
     WindowObservation,
@@ -63,11 +78,27 @@ def install_runtime_reader(reader):
         _runtime_reader = previous
 
 
-def _runtime(port=None) -> SyntheticElationReads | ManagedElationSandboxReads:
+def _runtime(port=None, provider=None):
     candidate = port if port is not None else _runtime_reader() if _runtime_reader else None
-    if type(candidate) is not SyntheticElationReads and type(candidate) is not ManagedElationSandboxReads:
+    chosen = provider or runtime_provider(candidate) or "elation"
+    selected = select_runtime(candidate, chosen)
+    if selected is None:
         raise ws.WorkspaceError("ehr_read_unavailable", 404)
-    return candidate
+    return selected
+
+
+def _provider_fields(provider):
+    return {} if provider is None else {"provider": provider}
+
+
+def _require_provider(s, read, provider):
+    binding = s.get(EhrReadBinding, read.binding_id)
+    if binding is None or binding.vendor != (provider or "elation"):
+        raise ws.WorkspaceError("ehr_read_provider_mismatch", 409)
+
+
+def source_label(provider):
+    return "Tebra: reviewed appointment" if provider == "tebra" else SOURCE_LABEL
 
 
 def _identity(s, box, actor, account_id, *, writing=False):
@@ -88,6 +119,10 @@ def _access(s, box, actor, account_id, reauthenticate):
 
 
 def _scope(binding):
+    if binding.vendor == "tebra":
+        return TebraWorkspaceScope(UUID(binding.box_id), UUID(binding.owner_id), UUID(binding.connection_id),
+            UUID(binding.credential_generation), int(binding.customer_id), int(binding.practice_id),
+            binding.practice_name, binding.practice_timezone)
     return ElationReadScope(UUID(binding.box_id), UUID(binding.owner_id), UUID(binding.connection_id),
         UUID(binding.credential_generation), int(binding.practice_id), binding.practice_name,
         environment=binding.environment)
@@ -103,7 +138,7 @@ def _binding(s, account, connection_id, digest, *, port=None):
     binding = rows[0]
     try:
         scope = _scope(binding)
-        runtime = _runtime(port)
+        runtime = _runtime(port, binding.vendor)
         if type(runtime) is ManagedElationSandboxReads:
             installed = runtime.selected(scope)
             receipt = s.scalar(select(ElationSandboxInstallationReceipt).where(
@@ -111,7 +146,7 @@ def _binding(s, account, connection_id, digest, *, port=None):
             if (installed is None or receipt is None or receipt.installation_id != str(installed.id)
                     or receipt.installation_sha256 != installed.commitment()):
                 raise ValueError
-        if (binding.vendor != "elation" or binding.environment != "sandbox"
+        if (binding.environment != ("synthetic" if binding.vendor == "tebra" else "sandbox")
                 or binding.binding_digest != scope.commitment() or digest != binding.binding_digest
                 or not runtime.current(scope)):
             raise ValueError
@@ -123,7 +158,7 @@ def _binding(s, account, connection_id, digest, *, port=None):
 def _authorize(s, read, *, port=None):
     account = _identity(s, read.box_id, read.owner_id, read.account_id)
     binding = _binding(s, account, read.connection_id, read.binding_digest, port=port)
-    if read.transport != _runtime(port).transport_mode:
+    if read.transport != _runtime(port, binding.vendor).transport_mode:
         raise ws.WorkspaceError("ehr_read_binding_changed")
     if (binding.id, binding.credential_generation, binding.practice_id) != (
             read.binding_id, read.credential_generation, read.practice_id):
@@ -132,20 +167,22 @@ def _authorize(s, read, *, port=None):
     snapshot = s.scalar(select(EhrReadSnapshot).where(EhrReadSnapshot.observation_id == root.id))
     if snapshot is not None:
         public = SnapshotPayload.model_validate(snapshot.payload).public
-        if public.practice.timezone != _runtime(port).timezone_for(_scope(binding)):
+        if public.practice.timezone != _runtime(port, binding.vendor).timezone_for(_scope(binding)):
             raise ws.WorkspaceError("ehr_read_binding_changed")
     return binding
 
 
-def status(s, box, actor, account_id, *, enabled, port=None, reauthenticate=None):
+def status(s, box, actor, account_id, *, enabled, port=None, reauthenticate=None, provider=None):
+    vendor = provider or "elation"
+    port = select_runtime(port, vendor)
     _identity(s, box, actor, account_id)
     if reauthenticate is not None:
         reauthenticate()
-    empty = dict(contract_version=1, provider="elation", mode="synthetic",
+    empty = dict(contract_version=1, provider=vendor, mode="synthetic",
         status="not_enabled" if not enabled else "not_configured", connection_id=None,
         binding_sha256=None, practice=None, installation=None,
-        transport=_runtime(port).transport_mode if type(port) in (SyntheticElationReads, ManagedElationSandboxReads) else "mock")
-    if not enabled or type(port) not in (SyntheticElationReads, ManagedElationSandboxReads):
+        transport=_runtime(port).transport_mode if runtime_provider(port) is not None else "mock")
+    if not enabled or runtime_provider(port) is None:
         return empty
     if type(port) is ManagedElationSandboxReads:
         if not port.available():
@@ -157,7 +194,7 @@ def status(s, box, actor, account_id, *, enabled, port=None, reauthenticate=None
                 "id": str(candidate.id), "sha256": candidate.commitment()},
                 "practice": {"label": candidate.scope.practice_name, "timezone": candidate.timezone}}
     rows = list(s.scalars(select(EhrReadBinding).where(EhrReadBinding.box_id == box,
-        EhrReadBinding.owner_id == actor, EhrReadBinding.account_id == account_id,
+        EhrReadBinding.owner_id == actor, EhrReadBinding.account_id == account_id, EhrReadBinding.vendor == vendor,
         EhrReadBinding.state == "active").execution_options(populate_existing=True)))
     if len(rows) != 1:
         return empty
@@ -192,18 +229,18 @@ def item_hash(kind, item):
     return payload_hash(dict(kind="ehr_window_item.v1" if kind == "window" else "ehr_verified_item.v1", item=value))
 
 
-def _display(kind, item: PrivateItem):
+def _display(kind, item):
     appointment = item.appointment.model_dump(mode="json")
     value: dict[str, object] = dict(handle=str(item.handle), starts_at=appointment["starts_at"], ends_at=appointment["ends_at"],
         status=appointment["status"])
     if kind == "window":
-        value["selectable"] = bool(item.appointment.patient_id is not None and item.appointment.deleted_at is None
+        value["selectable"] = bool(item.appointment.patient_id is not None and getattr(item.appointment, "deleted_at", None) is None
             and item.appointment.status is not None and item.appointment.status != "Cancelled")
     else:
         if item.patient is None:
             raise ws.WorkspaceError("ehr_read_source_invalid")
         patient = item.patient.model_dump(mode="json")
-        value["patient"] = {key: patient[key] for key in ("first_name", "last_name", "birth_date")}
+        value["patient"] = {key: patient[key] for key in (("full_name", "birth_date") if isinstance(item, TebraPrivateItem) else ("first_name", "last_name", "birth_date"))}
     return {**value, "sha256": item_hash(kind, value)}
 
 
@@ -234,7 +271,9 @@ def _snapshot(s, read):
     try:
         payload = SnapshotPayload.model_validate_json(canonical_json(snap.payload))
         public = payload.public
-        if ((snap.box_id, snap.owner_id) != (read.box_id, read.owner_id)
+        binding = s.get(EhrReadBinding, read.binding_id)
+        if (binding is None or public.provider != binding.vendor or (public.provider == "tebra" and read.transport != "mock")
+                or (snap.box_id, snap.owner_id) != (read.box_id, read.owner_id)
                 or read.request_hash != payload_hash(read.request_json)
                 or payload.private.binding_sha256 != read.binding_digest
                 or payload.private.request_sha256 != read.request_hash
@@ -246,7 +285,7 @@ def _snapshot(s, read):
                 or len(canonical_json(snap.payload).encode()) > 65536
                 or public.observed_at.utcoffset() is None):
             raise ValueError
-        displays = public.items if isinstance(public, WindowObservation) else (public.item,)
+        displays = public.items if isinstance(public, (WindowObservation, TebraWindowObservation)) else (public.item,)
         if (len(displays) != len(payload.private.items)
                 or len({str(item.handle) for item in displays}) != len(displays)):
             raise ValueError
@@ -254,20 +293,22 @@ def _snapshot(s, read):
         for display, item in zip(displays, payload.private.items, strict=True):
             a = item.appointment
             if (a.appointment_id in ids or int(a.appointment_id) > 2**63 - 1
-                    or int(a.physician_id) > 2**63 - 1 or a.starts_at.utcoffset() is None
+                    or (isinstance(a, PrivateAppointment) and int(a.physician_id) > 2**63 - 1) or a.starts_at.utcoffset() is None
                     or a.ends_at.utcoffset() is None or not timedelta(0) < a.ends_at - a.starts_at <= timedelta(days=1)
                     or not public.window.starts_at <= a.starts_at <= public.window.ends_at
-                    or datetime.fromisoformat(a.scheduled_date_raw.replace("Z", "+00:00")) != a.starts_at
+                    or (isinstance(a, PrivateAppointment) and datetime.fromisoformat(a.scheduled_date_raw.replace("Z", "+00:00")) != a.starts_at)
+                    or (public.provider == "tebra" and a.starts_at >= public.window.ends_at)
                     or display.model_dump(mode="json") != _display(public.kind, item)):
                 raise ValueError
             ids.add(a.appointment_id)
             if public.kind == "window" and item.patient is not None:
                 raise ValueError
-            if public.kind == "verified_visit" and (item.patient is None or item.patient.deleted_at is not None
-                    or a.deleted_at is not None or a.patient_id != item.patient.patient_id
-                    or a.status is None or a.status == "Cancelled" or str(item.handle) != read.item_handle):
+            if public.kind == "verified_visit" and (item.patient is None or getattr(item.patient, "deleted_at", None) is not None
+                    or getattr(a, "deleted_at", None) is not None or a.patient_id != item.patient.patient_id
+                    or a.status is None or a.status == "Cancelled" or str(item.handle) != read.item_handle
+                    or (isinstance(item.patient, TebraPrivatePatient) and item.patient.birth_date.isoformat() != read.request_json.get("birth_date"))):
                 raise ValueError
-        if isinstance(public, VerifiedObservation):
+        if isinstance(public, (VerifiedObservation, TebraVerifiedObservation)):
             parent = _window_root(s, read)
             parent_snap = _snapshot(s, parent)
             parent_payload = SnapshotPayload.model_validate(parent_snap.payload)
@@ -283,7 +324,7 @@ def _snapshot(s, read):
 
 def _receipt(read, snap):
     public = SnapshotPayload.model_validate(snap.payload).public.model_dump(mode="json")
-    return dict(contract_version=1, observation_id=read.id, observation_key=read.idempotency_key,
+    return dict(**({"provider": "tebra"} if public["provider"] == "tebra" else {}), contract_version=1, observation_id=read.id, observation_key=read.idempotency_key,
         transport=SnapshotPayload.model_validate(snap.payload).private.transport,
         connection_id=read.connection_id, binding_sha256=read.binding_digest,
         source_sha256=snap.source_sha256, payload_sha256=payload_hash(public), observation=public)
@@ -310,9 +351,10 @@ def _read(s, box, actor, account_id, observation_id):
     return read
 
 
-def inspect_observation(s, box, actor, account_id, *, observation_id, port=None, reauthenticate=None):
+def inspect_observation(s, box, actor, account_id, *, observation_id, port=None, reauthenticate=None, provider=None):
     _access(s, box, actor, account_id, reauthenticate)
     read = _read(s, box, actor, account_id, observation_id)
+    _require_provider(s, read, provider)
     _authorize(s, read, port=port)
     _current(s, read)
     _review_custody(s, read)
@@ -324,13 +366,15 @@ def inspect_observation(s, box, actor, account_id, *, observation_id, port=None,
     return receipt
 
 
-def resolve_observation(s, box, actor, account_id, *, key, port=None, reauthenticate=None):
+def resolve_observation(s, box, actor, account_id, *, key, port=None, reauthenticate=None, provider=None):
     _key(key)
     _access(s, box, actor, account_id, reauthenticate)
     from cosmas_os.application import elation_sandbox_installation
 
     installation = elation_sandbox_installation.resolve(s, box, actor, account_id, key, port)
     if installation is not None:
+        if provider == "tebra":
+            raise ws.WorkspaceError("ehr_read_provider_mismatch", 409)
         return installation
     read = s.scalar(select(EhrReadRequest).where(EhrReadRequest.box_id == box,
         EhrReadRequest.owner_id == actor, EhrReadRequest.idempotency_key == key))
@@ -338,12 +382,13 @@ def resolve_observation(s, box, actor, account_id, *, key, port=None, reauthenti
         return dict(status="not_found", observation_id=None, observation_key=key)
     if read.account_id != account_id:
         raise ws.WorkspaceError("idempotency_conflict")
+    _require_provider(s, read, provider)
     _authorize(s, read, port=port)
     _current(s, read)
     if not s.scalar(select(EhrReadSnapshot.id).where(EhrReadSnapshot.observation_id == read.id)):
         return dict(status="unconfirmed", observation_id=read.id, observation_key=key)
     return inspect_observation(s, box, actor, account_id, observation_id=read.id, port=port,
-        reauthenticate=reauthenticate)
+        reauthenticate=reauthenticate, provider=provider)
 
 
 def _key(key):
@@ -384,7 +429,7 @@ def _reserve(s, account, binding, body, window, *, parent=None, item_handle=None
         practice_id=binding.practice_id, binding_digest=binding.binding_digest,
         kind="window" if parent is None else "verify", idempotency_key=key, request_hash=request_hash,
         request_json=body, ordinal=ordinal, parent_snapshot_id=parent.id if parent else None,
-        transport=_runtime(port).transport_mode,
+        transport=_runtime(port, binding.vendor).transport_mode,
         item_handle=item_handle, window_start=window.starts_at, window_end=window.ends_at,
         valid_until=expires, created_at=now)
     s.add(read)
@@ -422,7 +467,7 @@ def _store(s, read_id, payload, port, reauthenticate):
     # Committing releases the authority locks. Reacquire the same inspection
     # fence used by recovery before exposing the now-persisted observation.
     return inspect_observation(s, read.box_id, read.owner_id, read.account_id,
-        observation_id=read_id, port=port, reauthenticate=reauthenticate)
+        observation_id=read_id, port=port, reauthenticate=reauthenticate, provider=read.request_json.get("provider"))
 
 
 def _appointment(row: ElationAppointment):
@@ -432,15 +477,16 @@ def _appointment(row: ElationAppointment):
 
 
 def _provider_error(error):
-    if isinstance(error, ElationReadError):
+    if isinstance(error, (ElationReadError, TebraReadError)):
         code = {"disabled": "unavailable", "invalid_response": "response_invalid",
-            "connection_changed": "binding_changed", "access_denied": "binding_changed"}.get(error.code, error.code)
+            "connection_changed": "binding_changed", "access_denied": "binding_changed",
+            "scope_changed": "binding_changed", "connector_disabled": "unavailable", "provider_throttled": "rate_limited"}.get(error.code, error.code)
         return ws.WorkspaceError("ehr_read_" + code, 429 if code == "rate_limited" else 503)
     return ws.WorkspaceError("ehr_read_unconfirmed", 503)
 
 
 def observe(s, box, actor, account_id, *, key, connection_id, binding_sha256, starts_at, ends_at,
-            port, reauthenticate=None):
+            port, reauthenticate=None, provider=None):
     _key(key)
     _digest(binding_sha256)
     try:
@@ -449,14 +495,21 @@ def observe(s, box, actor, account_id, *, key, connection_id, binding_sha256, st
         raise ws.WorkspaceError("invalid_ehr_read_request", 422) from None
     account = _access(s, box, actor, account_id, reauthenticate)
     binding = _binding(s, account, connection_id, binding_sha256, port=port)
-    body = dict(action="observe", connection_id=connection_id, binding_sha256=binding_sha256,
+    if binding.vendor != (provider or "elation"):
+        raise ws.WorkspaceError("ehr_read_provider_mismatch", 409)
+    body = dict(**_provider_fields(provider), action="observe", connection_id=connection_id, binding_sha256=binding_sha256,
         idempotency_key=key, **window.model_dump(mode="json"))
     read, replay = _reserve(s, account, binding, body, window, port=port)
     if replay is not None:
         return replay
     read_id, scope = read.id, _scope(binding)
+    if binding.vendor == "tebra":
+        return _observe_tebra(s, read, binding, window, port, reauthenticate)
     try:
-        practice_result, result = _runtime(port).window(scope, window.starts_at, window.ends_at,
+        runtime = _runtime(port)
+        assert isinstance(runtime, (SyntheticElationReads, ManagedElationSandboxReads))
+        assert isinstance(scope, ElationReadScope)
+        practice_result, result = runtime.window(scope, window.starts_at, window.ends_at,
             authorize=lambda: _provider_authorize(s, read_id, port, reauthenticate))
         if practice_result.scope != scope or result.scope != scope or len(practice_result.rows) != 1:
             raise ValueError
@@ -486,13 +539,14 @@ def observe(s, box, actor, account_id, *, key, connection_id, binding_sha256, st
 
 
 def verify(s, box, actor, account_id, *, key, connection_id, binding_sha256, observation_id,
-           observation_sha256, item_handle, item_sha256, port, reauthenticate=None):
+           observation_sha256, item_handle, item_sha256, port, reauthenticate=None, provider=None, last_name=None, birth_date=None):
     _key(key)
     for digest in (binding_sha256, observation_sha256, item_sha256):
         _digest(digest)
     account = _access(s, box, actor, account_id, reauthenticate)
     binding = _binding(s, account, connection_id, binding_sha256, port=port)
     parent = _read(s, box, actor, account_id, observation_id)
+    _require_provider(s, parent, provider)
     if parent.kind != "window" or parent.binding_id != binding.id:
         raise ws.WorkspaceError("ehr_read_not_observed")
     _authorize(s, parent, port=port)
@@ -504,16 +558,29 @@ def verify(s, box, actor, account_id, *, key, connection_id, binding_sha256, obs
             or _display("window", original)["sha256"] != item_sha256
             or not _display("window", original)["selectable"] or original.appointment.patient_id is None):
         raise ws.WorkspaceError("ehr_read_not_observed")
-    body = dict(action="verify", connection_id=connection_id, binding_sha256=binding_sha256,
+    body = dict(**_provider_fields(provider), action="verify", connection_id=connection_id, binding_sha256=binding_sha256,
         idempotency_key=key, observation_id=observation_id, observation_sha256=observation_sha256,
         item_handle=item_handle, item_sha256=item_sha256)
+    if binding.vendor == "tebra":
+        if (type(last_name) is not str or not 1 <= len(last_name) <= 255 or last_name != last_name.strip()
+                or any(ord(c) < 32 or 0xD800 <= ord(c) <= 0xDFFF for c in last_name) or type(birth_date) is not date
+                or not date(1850, 1, 1) <= birth_date <= date.today()):
+            raise ws.WorkspaceError("invalid_ehr_read_request", 422)
+        body.update(last_name=last_name, birth_date=birth_date.isoformat())
+    elif last_name is not None or birth_date is not None:
+        raise ws.WorkspaceError("invalid_ehr_read_request", 422)
     read, replay = _reserve(s, account, binding, body, payload.public.window,
         parent=parent_snap, item_handle=item_handle, port=port)
     if replay is not None:
         return replay
     read_id, scope = read.id, _scope(binding)
+    if binding.vendor == "tebra":
+        return _verify_tebra(s, read, binding, payload, original, port, reauthenticate)
     try:
-        appointment_result, patient_result = _runtime(port).visit(scope, int(original.appointment.appointment_id),
+        runtime = _runtime(port)
+        assert isinstance(runtime, (SyntheticElationReads, ManagedElationSandboxReads))
+        assert isinstance(scope, ElationReadScope)
+        appointment_result, patient_result = runtime.visit(scope, int(original.appointment.appointment_id),
             int(original.appointment.patient_id), authorize=lambda: _provider_authorize(s, read_id, port, reauthenticate))
         if appointment_result.scope != scope or patient_result.scope != scope:
             raise ValueError
@@ -542,20 +609,102 @@ def verify(s, box, actor, account_id, *, key, connection_id, binding_sha256, obs
         raise _provider_error(error) from None
 
 
+def _tebra_result_hash(result):
+    rows = json.loads(json.dumps([asdict(row) for row in result.rows], default=lambda value: value.isoformat()))
+    return payload_hash(dict(contract="tebra-read-result.v1", binding_sha256=result.scope.commitment(),
+        operation=result.operation, observed_at=result.observed_at.isoformat(), coverage=result.coverage, rows=rows))
+
+
+def _tebra_appointment(row):
+    if type(row) is not TebraAppointment:
+        raise ValueError
+    return TebraPrivateAppointment.model_validate(dict(appointment_id=str(row.appointment_id), patient_id=str(row.patient_id),
+        starts_at=row.starts_at, ends_at=row.ends_at, status=row.source_status))
+
+
+def _observe_tebra(s, read, binding, window, port, reauthenticate):
+    read_id, scope = read.id, _scope(binding)
+    try:
+        assert isinstance(scope, TebraWorkspaceScope)
+        runtime = _runtime(port, "tebra")
+        assert isinstance(runtime, SyntheticTebraReads)
+        practice_result, result = runtime.window(scope, window.starts_at, window.ends_at,
+            authorize=lambda: _provider_authorize(s, read_id, port, reauthenticate))
+        if len(result.rows) > 25:
+            raise TebraReadError("too_many_results")
+        if practice_result.scope != scope or result.scope != scope or len(practice_result.rows) != 1:
+            raise ValueError
+        practice = practice_result.rows[0]
+        if (type(practice) is not TebraPractice or practice.practice_id != scope.practice_id
+                or practice.practice_name != scope.practice_name or result.coverage != "returned_rows_only"):
+            raise ValueError
+        items = [TebraPrivateItem(handle=uuid4(), appointment=_tebra_appointment(row), patient=None) for row in result.rows]
+        payload = dict(public=dict(kind="window", provider="tebra", mode="synthetic",
+            practice=dict(label=scope.practice_name, timezone=scope.timezone), observed_at=result.observed_at,
+            window=window.model_dump(mode="json"), coverage="returned_rows_only",
+            items=[_display("window", item) for item in items]),
+            private=dict(transport="mock", binding_sha256=read.binding_digest, request_sha256=read.request_hash,
+                items=[item.model_dump(mode="json") for item in items],
+                provider_sources=[_tebra_result_hash(practice_result), _tebra_result_hash(result)]))
+        return _store(s, read_id, payload, port, reauthenticate)
+    except ws.WorkspaceError:
+        s.rollback()
+        raise
+    except Exception as error:
+        s.rollback()
+        raise _provider_error(error) from None
+
+
+def _verify_tebra(s, read, binding, payload, original, port, reauthenticate):
+    read_id, scope = read.id, _scope(binding)
+    try:
+        runtime = _runtime(port, "tebra")
+        assert isinstance(runtime, SyntheticTebraReads)
+        appointments, patients = runtime.visit(scope,
+            int(original.appointment.appointment_id), int(original.appointment.patient_id),
+            starts_at=read.window_start, ends_at=read.window_end, last_name=read.request_json["last_name"],
+            birth_date=date.fromisoformat(read.request_json["birth_date"]),
+            authorize=lambda: _provider_authorize(s, read_id, port, reauthenticate))
+        if appointments.scope != scope or patients.scope != scope or len(appointments.rows) != 1 or len(patients.rows) != 1:
+            raise ValueError
+        appointment, patient = appointments.rows[0], patients.rows[0]
+        if (not isinstance(appointment, TebraAppointment) or type(patient) is not TebraPatient or _tebra_appointment(appointment) != original.appointment
+                or appointment.patient_id != patient.patient_id):
+            raise ws.WorkspaceError("ehr_read_appointment_changed")
+        private = TebraPrivateItem(handle=original.handle, appointment=original.appointment,
+            patient=TebraPrivatePatient(patient_id=str(patient.patient_id), full_name=patient.full_name, birth_date=patient.birth_date))
+        public = payload.public.model_dump(mode="json")
+        public.pop("items")
+        public.update(kind="verified_visit", observed_at=appointments.observed_at, item=_display("verified_visit", private))
+        return _store(s, read_id, dict(public=public, private=dict(transport="mock", binding_sha256=read.binding_digest,
+            request_sha256=read.request_hash, items=[private.model_dump(mode="json")],
+            provider_sources=[_tebra_result_hash(appointments), _tebra_result_hash(patients)])), port, reauthenticate)
+    except ws.WorkspaceError:
+        s.rollback()
+        raise
+    except Exception as error:
+        s.rollback()
+        raise _provider_error(error) from None
+
+
 def source_content(observation):
     value = observation.model_dump(mode="json") if hasattr(observation, "model_dump") else observation
     item, patient = value["item"], value["item"]["patient"]
     coverage = "Showing this page; more appointments may be available." if value["coverage"] == "more_rows_available" else "Showing the returned page."
-    return ("Elation selected visit (synthetic frozen observation)\n"
-        f"Practice: {value['practice']['label']}\nPatient: {patient['first_name']} {patient['last_name']}\n"
+    provider_name = "Tebra" if value["provider"] == "tebra" else "Elation"
+    name = patient["full_name"] if value["provider"] == "tebra" else f"{patient['first_name']} {patient['last_name']}"
+    if value["provider"] == "tebra":
+        coverage = "Showing returned appointments only; this is not a complete schedule."
+    return (f"{provider_name} selected visit (synthetic frozen observation)\n"
+        f"Practice: {value['practice']['label']}\nPatient: {name}\n"
         f"Birth date: {patient['birth_date']}\nStarts: {item['starts_at']}\nEnds: {item['ends_at']}\n"
         f"Appointment status: {item['status'] or 'not provided'}\nObserved: {value['observed_at']}\n"
         f"Coverage: {coverage}\n\nThis reviewed snapshot does not book or update the EHR.")
 
 
 def _review_body(wid, expected, key, observation_id, observation_sha256, item_handle, item_sha256,
-                 reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source):
-    return dict(workspace_id=wid, expected_revision=expected, idempotency_key=key,
+                 reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source, provider=None):
+    return dict(**_provider_fields(provider), workspace_id=wid, expected_revision=expected, idempotency_key=key,
         observation_id=observation_id, observation_sha256=observation_sha256, item_handle=item_handle,
         item_sha256=item_sha256, reviewed_visit=reviewed_visit, reviewed_patient_identity=reviewed_patient_identity,
         reviewed_exact_snapshot=reviewed_exact_snapshot, reviewed_untrusted_source=reviewed_untrusted_source)
@@ -577,19 +726,19 @@ def historical_source(s, w, entry_id):
         raise ws.WorkspaceError("ehr_read_source_invalid")
     _snapshot(s, read)
     public = SnapshotPayload.model_validate(snap.payload).public
-    if not isinstance(public, VerifiedObservation):
+    if not isinstance(public, (VerifiedObservation, TebraVerifiedObservation)):
         raise ws.WorkspaceError("ehr_read_source_invalid")
     content = source_content(public)
     body = _review_body(w.id, review.expected_revision, review.idempotency_key, read.id,
         review.observation_sha256, review.item_handle, review.item_sha256, review.reviewed_visit,
-        review.reviewed_patient_identity, review.reviewed_exact_snapshot, review.reviewed_untrusted_source)
+        review.reviewed_patient_identity, review.reviewed_exact_snapshot, review.reviewed_untrusted_source, review.command_provider)
     if ((review.box_id, review.owner_id, review.workspace_id, review.patient_link_id, review.workspace_revision)
             != (w.box_id, w.owner_id, w.id, w.patient_link_id, entry.revision)
             or (snap.box_id, snap.owner_id, read.box_id, read.owner_id) != (w.box_id, w.owner_id, w.box_id, w.owner_id)
             or str(public.item.handle) != review.item_handle or public.item.sha256 != review.item_sha256
             or review.observation_sha256 != snap.source_sha256
             or review.source_sha256 != _selected_hash(review.observation_sha256, review.item_handle, review.item_sha256)
-            or review.valid_until != read.valid_until or entry.content != content or entry.source_label != SOURCE_LABEL
+            or review.valid_until != read.valid_until or entry.content != content or entry.source_label != source_label(public.provider)
             or review.content_sha256 != hashlib.sha256(content.encode()).hexdigest()
             or review.request_hash != payload_hash(body) or entry.request_hash != review.request_hash
             or entry.idempotency_key != review.idempotency_key or review.workspace_revision != review.expected_revision + 1
@@ -643,7 +792,7 @@ def _selection_receipt(s, w, read, review, entry):
         finally:
             _withheld_sources.reset(token)
     return dict(entry_id=entry.id, entry_revision=entry.revision, workspace=workspace,
-        transport=read.transport,
+        transport=read.transport, **({"provider": "tebra"} if s.get(EhrReadBinding, read.binding_id).vendor == "tebra" else {}),
         source=dict(entry_id=entry.id, source_sha256=review.source_sha256, content_sha256=review.content_sha256),
         request_sha256=review.request_hash, source_withheld=withheld)
 
@@ -651,7 +800,7 @@ def _selection_receipt(s, w, read, review, entry):
 def select_review(s, box, actor, wid, *, expected, key, observation_id, observation_sha256,
                   item_handle, item_sha256, reviewed_visit, reviewed_patient_identity,
                   reviewed_exact_snapshot, reviewed_untrusted_source, port=None, external_identity_id=None,
-                  reauthenticate=None):
+                  reauthenticate=None, provider=None):
     if (type(expected) is not int or expected < 1 or type(key) is not str or _KEY.fullmatch(key) is None
             or any(type(v) is not str or _DIGEST.fullmatch(v) is None for v in (observation_sha256, item_sha256))
             or any(v is not True for v in (reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source))):
@@ -664,10 +813,11 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
     if (read is None or read.kind != "verify" or (read.box_id, read.owner_id) != (box, actor)
             or external_identity_id is not None and read.account_id != external_identity_id):
         raise ws.WorkspaceError("ehr_read_observation_unavailable", 404)
+    _require_provider(s, read, provider)
     _identity(s, box, actor, read.account_id)
     snap = _snapshot(s, read)
     body = _review_body(wid, expected, key, observation_id, observation_sha256, item_handle, item_sha256,
-        reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source)
+        reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source, provider)
     request_hash = payload_hash(body)
     replay = s.scalar(select(EhrReadSourceReview).where(EhrReadSourceReview.workspace_id == wid,
         EhrReadSourceReview.idempotency_key == key))
@@ -683,7 +833,7 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
     if expected != w.revision:
         raise ws.WorkspaceError("workspace_revision_conflict")
     public = SnapshotPayload.model_validate(snap.payload).public
-    if (not isinstance(public, VerifiedObservation) or observation_sha256 != snap.source_sha256
+    if (not isinstance(public, (VerifiedObservation, TebraVerifiedObservation)) or observation_sha256 != snap.source_sha256
             or str(public.item.handle) != item_handle or public.item.sha256 != item_sha256):
         raise ws.WorkspaceError("ehr_read_source_changed")
     if w.revision >= 500:
@@ -696,11 +846,11 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
     content = source_content(public)
     w.revision += 1
     entry = WorkspaceEntry(workspace_id=wid, box_id=box, actor_id=actor, revision=w.revision,
-        kind="ehr_read_source", content=content, source_label=SOURCE_LABEL,
+        kind="ehr_read_source", content=content, source_label=source_label(public.provider),
         idempotency_key=key, request_hash=request_hash)
     s.add(entry)
     s.flush()
-    review = EhrReadSourceReview(workspace_id=wid, box_id=box, owner_id=actor, entry_id=entry.id,
+    review = EhrReadSourceReview(command_provider=provider, workspace_id=wid, box_id=box, owner_id=actor, entry_id=entry.id,
         snapshot_id=snap.id, patient_link_id=w.patient_link_id, expected_revision=expected, workspace_revision=w.revision,
         idempotency_key=key, request_hash=request_hash, observation_sha256=observation_sha256,
         item_handle=item_handle, item_sha256=item_sha256,
