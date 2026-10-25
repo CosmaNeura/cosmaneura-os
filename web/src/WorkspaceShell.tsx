@@ -1,3 +1,5 @@
+import {AthenaVisitTask} from './AthenaVisitTask';
+import {ATHENA_VISIT_LINK_BUILD} from './athena-visit-link-api';
 import {MessagesInbox,NewMessagePicker,MessagesThreadHeader,ConversationDetails,LayoutSetting} from './MessagesPresentation';
 import {nativePresentationFeedback,setNativePresentation} from './native-presentation';
 import {NotebookTitleEditor} from './NotebookTitleEditor';
@@ -41,7 +43,7 @@ import { CoreConnectionPanel, CORE_CONNECTION_BUILD, CONNECTION_ONBOARDING_BUILD
 import { setupChange, validTeamConfiguration, type SetupProjection } from "./team-setup-request";
 import { hasUnsavedWork, useUnsavedWork } from "./unsaved-work";
 import { openDraftStore, type DraftStore } from "./draft-store";
-import { notebookDraft as makeNotebookDraft, type RecoveryOffer } from "./draft-journal";
+import { notebookDraft as makeNotebookDraft, type DraftJournal, type RecoveryOffer } from "./draft-journal";
 import { EditorRecoveryContext } from "./editor-recovery";
 import { AccountRecoveryContext } from "./account-recovery";
 import { supportsSkill, validRecoveryScope } from "./workspace-api";
@@ -142,6 +144,16 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setWorkspace,setTeamDraft,setNote,setThought,setEvidence,setSource,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryState}=session;
   const messagesMode=session.presentation.current()==='messages';
   const [newMessage,setNewMessage]=useState(false),[conversationDetails,setConversationDetails]=useState(false);
+  const [athenaTask,setAthenaTask]=useState<{identity:AuthenticatedWorkspaceIdentity;open:boolean;view:string;returnLabel:string;target:HTMLElement|null}|null>(null);
+  const athenaOpening=useRef(0);
+  const [athenaNotebookNavigation,setAthenaNotebookNavigation]=useState<{command:CoreConnectionCommand;identity:AuthenticatedWorkspaceIdentity;generation:number;view:string;journal:DraftJournal;current:()=>boolean}|null>(null);
+  const athenaNotebookConsumed=useRef<object|null>(null);
+  const [athenaNotebookBlocked,setAthenaNotebookBlocked]=useState(true);
+  const [athenaNotebookError,setAthenaNotebookError]=useState('');
+  const athenaAvailable=ATHENA_VISIT_LINK_BUILD&&CORE_CONNECTION_BUILD&&authenticated?.mode==='clerk_jwt';
+  const athenaView=JSON.stringify([practicePage,settingsOpen,practiceOpen,workspace?.id,selected]);
+  const athenaTaskOpen=!!athenaTask&&athenaTask.identity===authenticated&&athenaTask.open&&athenaTask.view===athenaView;
+  useEffect(()=>{athenaOpening.current++;setAthenaTask(previous=>previous?.open&&previous.view!==athenaView?{...previous,open:false}:previous);},[athenaView,authenticated]);
   const [contextBot,setContextBot]=useState<string|null>(null),[messagesTaskChoice,setMessagesTask]=useState<'Tools'|'Activity'|null>(null);
   const [captureTransition,setCaptureTransition]=useState(false),[homePending,setHomePending]=useState(false),[privateLinkPending,setPrivateLinkPending]=useState(false);
   const contextBotRef=useRef(contextBot);contextBotRef.current=contextBot;
@@ -160,7 +172,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
-  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const {activityNavigation}=session;
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
@@ -312,6 +324,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const reportAgentResearchBusy=useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setAgentResearchBusy(blocked);
   },[connectionGeneration]);
+  const reportAthenaBusy = useCallback((blocked:boolean) => {
+    if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.athena===blocked?previous:{...previous,athena:blocked});
+  },[connectionGeneration]);
   const reportCoreBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.core===blocked?previous:{...previous,core:blocked});
   },[connectionGeneration]);
@@ -455,8 +470,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setInboxSelection(null);setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
-    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
-    setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;
+    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;setAthenaTask(null);setAthenaNotebookError('');athenaOpening.current++;
     ehrVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
@@ -527,13 +542,20 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       currentNavigation:()=>routeSequence.current,refreshRecordings:()=>setPrivateRecordingListEpoch(value=>value+1),
       show:()=>{setPracticePage('visits');setSettingsOpen(false);setPracticeOpen(false);}});
   }
-  function open(appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false){
+  function open(appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false,afterOpen?:()=>void){
     return session.loading.open({...loadingContext(),locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,
       begin:()=>{chiefNotebookFocus.current=null;},resetCapture:(record,useRecording)=>{setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(record?1:0);setRecordingSourceRequest(useRecording?1:0);},
       focusChief:(workspace,generation)=>{chiefNotebookFocus.current={workspace,generation};},focusFax:()=>setFocusFaxWork(true),showResearch:()=>setSavedResearchChat(false),
-      afterOpen:()=>{if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}},
+      afterOpen:()=>{afterOpen?.();if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}},
       retryRead:authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection,
     },appointmentId,coreSelection,incoming,recordVisit);
+  }
+  async function stageAthenaNotebook(command:CoreConnectionCommand,current:()=>boolean){
+    if(!authenticated||!athenaTaskOpen||!journal.current||!current())return;
+    setAthenaNotebookError('');
+    // The child can now release its read lock. Dispatch below still uses the
+    // ordinary unsaved-work admission after that lock has actually settled.
+    setAthenaNotebookNavigation({command:structuredClone(command),identity:authenticated,generation:generation.current,view:athenaView,journal:journal.current.value,current});
   }
   function saveContext():import('./session/saves').SaveContext {
     const savedRecordingForSave=savedRecordingEntry;
@@ -615,7 +637,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const ehrReviewOpen=ehrReviewOwned&&ehrReview.open&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen;
   const calendarImportOwned=CALENDAR_IMPORT_BUILD&&!!authenticated&&!!workspace&&calendarImportReview?.identity===authenticated&&calendarImportReview.generation===generation.current&&calendarImportReview.workspaceId===workspace.id;
   const calendarImportOpen=calendarImportOwned&&calendarImportReview.open&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen;
-  const visitSourceTaskOpen=ehrReviewOpen||calendarImportOpen;
+  const visitSourceTaskOpen=ehrReviewOpen||calendarImportOpen||athenaTaskOpen;
   const prepAvailable=!!(visitLinked&&bot&&supportsSkill(bot,"encounter_prep")&&ENCOUNTER_PREP_BUILD&&authenticated&&team?.capture?.prep_enabled&&
     template?.capabilities.some(capability=>capability.key==="core.session_prep.read"&&capability.state==="enabled"&&capability.contract==="core.session-prep.brief.v1"));
   const prepScope=useMemo(()=>Symbol(),[workspace?.id,authenticated,selected,team?.revision,bot?.enabled,bot?.include_evidence,prepAvailable,prepEpoch]);
@@ -671,7 +693,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   historyNavigation.current=async(target,from,to)=>{
     const operation=++historyOperation.current;historyHandling.current=operation;const origin=workspaceRouteHash(route());
     try{
-      if(visitSourceTaskOpen){if(calendarImportOpen)closeCalendarImportTask();else closeEhrTask();restoreConsumedHistory(from,to);return;}
+      if(visitSourceTaskOpen){if(athenaTaskOpen)closeAthenaTask();else if(calendarImportOpen)closeCalendarImportTask();else closeEhrTask();restoreConsumedHistory(from,to);return;}
       if(messagesMode){
         const dialog=[...document.querySelectorAll<HTMLElement>('[role="dialog"][aria-modal="true"]')].find(element=>!element.closest('[hidden]'));
         if(dialog){
@@ -738,6 +760,27 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   // final selection can still inspect independently retained unsaved work.
   useUnsavedWork(privateRecordingBusy || !!privateRecordingEntry || agentResearchBusy || handoffReviewPending || accessBusy || connectionEditorsLocked || !!pending || !!recoveryOffers.length || recoveryState === "saving" || captureNavigationLocked || note !== latestNote || !!thought || !!evidence || !!source ||
     !!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft));
+  // Read after this render's editor markers settle. Reading the global marker
+  // during render can leave the button disabled by the just-finished read.
+  useEffect(()=>{setAthenaNotebookBlocked(hasUnsavedWork());});
+  useEffect(()=>{
+    const request=athenaNotebookNavigation;
+    if(!request||athenaNotebookConsumed.current===request)return;
+    if(request.identity!==authenticated||request.generation!==generation.current||request.view!==athenaView||request.journal!==journal.current?.value||!athenaTaskOpen||!request.current()){
+      setAthenaNotebookNavigation(null);return;
+    }
+    if(connectionLocks.athena)return;
+    athenaNotebookConsumed.current=request;setAthenaNotebookNavigation(null);
+    let opened=false;
+    void open(undefined,request.command,undefined,false,()=>{
+      opened=true;
+      if(previousIdentity.current===request.identity&&request.current())setAthenaTask(previous=>previous?.identity===request.identity?{...previous,open:false}:previous);
+    }).then(()=>{
+      const view=session.getSnapshot(),currentView=JSON.stringify([view.practicePage,view.settingsOpen,view.practiceOpen,view.workspace?.id,view.selected]);
+      if(!opened&&previousIdentity.current===request.identity&&request.journal===journal.current?.value&&request.view===currentView&&request.current())
+        setAthenaNotebookError(view.error||'The linked notebook could not be opened. Check its current connection and try again.');
+    });
+  },[athenaNotebookNavigation,authenticated,athenaView,athenaTaskOpen,connectionLocks.athena]);
   useEffect(()=>{
     if(!inboxNavigation||inboxNavigationConsumed.current===inboxNavigation)return;
     if(inboxNavigation.identity!==authenticated||inboxNavigation.generation!==generation.current||!practiceOpen){setInboxNavigation(null);return;}
@@ -811,7 +854,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const clinicalModelPending=localModelPending?.type==='ask'?parseClinicalTeamRequest(localModelPending.body.content):null;
   const nativeChatOwner=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?authenticated:null;
   const nativePrivateNote=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&workspace?.private_draft?.state==='unlinked'&&!visitLinked;
-  const nativeHome=!messagesMode&&!!nativeChatOwner&&phoneLayout()&&(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&!savedRecordingEntry;
+  const nativeHome=!athenaTaskOpen&&!messagesMode&&!!nativeChatOwner&&phoneLayout()&&(practicePage==='home'||messagesMode&&practicePage==='notebook')&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&!savedRecordingEntry;
   const nativeConversationPending=bot?.role==='chief'&&localModelPending?.type==='ask'&&localModelPending.body.role===selected&&
     !localModelPending.body.research_analysis&&!localModelPending.body.inbox_analysis&&!localModelPending.body.membership_analysis&&!localModelPending.body.session_prep_analysis;
   const nativeSavedRecording=!!nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()&&phoneLayout()&&practicePage==='notebook'&&!settingsOpen&&!practiceOpen&&!privateRecordingEntry&&CAPTURE_WORKSPACE_BUILD&&!!team&&
@@ -932,6 +975,29 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function refreshGoogleVisit(){return session.sources.refresh(sourceContext());}
   function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){return session.sources.prepareGoogle(sourceContext(),source,kind);}
   const ehrReturnFocus=useRef<{element:HTMLElement|null;scroll:number|null}|null>(null);
+  async function openAthenaTask(origin:'conversation'|'connections'){
+    if(!athenaAvailable||!authenticated||!accountAccess||locked||viewNavigationLocked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    const owner=authenticated,view=athenaView,currentGeneration=generation.current,intent=++athenaOpening.current;
+    const target=document.activeElement instanceof HTMLElement?document.activeElement:null;
+    const invalidate=()=>{if(athenaOpening.current===intent)athenaOpening.current++;};
+    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')invalidate();};
+    document.addEventListener('click',invalidate,true);document.addEventListener('keydown',escape,true);
+    const host=conversationHost(),current=()=>athenaOpening.current===intent&&previousIdentity.current===owner&&generation.current===currentGeneration&&(!host||host.current());
+    try{
+      await accountAccess.authorize();if(!current())return;
+      if(workspace&&(!host||!await session.conversations.retain(host)||!current()))return;
+      setAthenaTask({identity:owner,open:true,view,returnLabel:origin==='conversation'?`Back to ${bot?.name??'chat'}`:'Back to connections',target});
+      setConversationDetails(false);
+    }catch(cause){if(current()){setError('Your Athena task could not be opened. Your current draft is retained.');if(cause instanceof WorkspaceApiError)failure(cause);}}
+    finally{document.removeEventListener('click',invalidate,true);document.removeEventListener('keydown',escape,true);}
+  }
+  function closeAthenaTask(){
+    if(connectionLocks.athena||busy||!!pending||captureNavigationLocked||captureDraftLocked)return;
+    athenaOpening.current++;const previous=athenaTask;setAthenaTask(value=>value?{...value,open:false}:value);
+    requestAnimationFrame(()=>{if(previous?.identity!==previousIdentity.current)return;
+      const target=previous?.target?.isConnected&&!previous.target.closest('[hidden]')?previous.target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child');
+      if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});});
+  }
   function openEhrTask(origin:'conversation'|'sources'|'connections'){return openVisitSourceTask(origin,'ehr');}
   function openCalendarImportTask(origin:'conversation'|'sources'){return openVisitSourceTask(origin,'calendar');}
   async function openVisitSourceTask(origin:'conversation'|'sources'|'connections',kind:'ehr'|'calendar'){
@@ -1132,7 +1198,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     </aside>
     <div className="team-main">
       {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)}/>}
-      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined}/>}
+      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined}/>}
       {nativeHome||nativeWorkspace?<header className="native-home-header">
         {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
         <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
@@ -1169,7 +1235,13 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         onChanged={() => { if (workspace) setConflict(true); }} onAccessLost={failure} />
         {ROUTINES_BUILD && authenticated && team && team.revision > 0 && <WorkRoutines identity={authenticated} team={team} onAccessLost={failure} onRefreshTeam={refreshRoutineTeam} />}
         {authenticated && team?.revision === 0 && <div className="team-banner"><p>Set up your private team to schedule work briefs.</p><button onClick={() => void openSettings()}>Set up your team</button></div>}</PracticeHub></fieldset></AccountRecoveryContext.Provider>}
-      <div className="workspace-main-content" hidden={practiceOpen}>
+      {athenaAvailable&&authenticated&&athenaTask?.identity===authenticated&&<AccountRecoveryContext.Provider value={accountAccess}>
+        <AthenaVisitTask identity={authenticated} open={athenaTaskOpen} returnLabel={athenaTask.returnLabel} contextLabel={workspace?.notebook?.title??workspace?.label} onReturn={closeAthenaTask}
+          locked={busy||!!pending||recoveryBlocked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='athena'&&value)}
+          onBusyChange={reportAthenaBusy} onAuthenticationLost={failure} openingError={athenaNotebookError} openBlocked={locked||captureNavigationLocked||captureDraftLocked||athenaNotebookBlocked}
+          onOpenNotebook={stageAthenaNotebook}/>
+      </AccountRecoveryContext.Provider>}
+      <div className="workspace-main-content" hidden={practiceOpen||athenaTaskOpen}>
       {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization}
         locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked}
         onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
@@ -1223,7 +1295,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         </AccountRecoveryContext.Provider>:undefined}
         microsoft={MICROSOFT_CONNECTION_BUILD&&authenticated?<MicrosoftConnectionPanel identity={authenticated} onBusyChange={reportMicrosoftBusy} onAuthenticationLost={failure}/>:undefined}
         scheduling={SCHEDULING_LOGIN_BUILD&&authenticated?<SchedulingConnectionPanel identity={authenticated} onBusyChange={reportSchedulingBusy} onAuthenticationLost={failure} onObserved={reportSchedulingObservation}/>:undefined}
-        core={CORE_CONNECTION_BUILD&&authenticated?<CoreConnectionPanel identity={authenticated} onBusyChange={reportCoreBusy} onAuthenticationLost={failure} openBlocked={locked||captureNavigationLocked||captureDraftLocked} onOpenNotebook={command=>open(undefined,command)}/>:undefined}
+        core={CORE_CONNECTION_BUILD&&authenticated?<CoreConnectionPanel identity={authenticated} athenaEnabled={false} onOpenAthena={athenaAvailable?()=>void openAthenaTask('connections'):undefined} onBusyChange={reportCoreBusy} onAuthenticationLost={failure} openBlocked={locked||captureNavigationLocked||captureDraftLocked} onOpenNotebook={command=>open(undefined,command)}/>:undefined}
         teamSummary={team?.revision ? `${team.configuration.bots.filter(bot => !bot.retired).length} coworkers · Names, instructions & preferences` : 'Choose your coworkers and make them yours'}
         teamDirty={!!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft)} onClose={closeSettings}
         team={team && teamDraft ? <TeamConfigurationFlow resetToken={setupEpoch} active={settingsOpen} identity={(authenticated || identity)!}
@@ -1436,6 +1508,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           {phoneChiefConversation&&<header className="chief-tools-heading"><h3>Chief tools</h3><button className="team-subtle" disabled={viewNavigationLocked} onClick={returnToPhoneChat}>Back to chat</button></header>}
           {phoneChiefToolsVisible&&thought!==''&&!(nativeChat&&clinicalTeamExpanded)&&<p className="team-fine chief-tools-draft" role="status">Your directions are kept in this plan. Prepare Follow-up and Research includes them with the saved note.</p>}
           {CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'&&<button className="calendar-import-chief-action" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void openCalendarImportTask('conversation')}>Import calendar file</button>}
+          {athenaAvailable&&authenticated&&bot?.role==='chief'&&<button className="athena-chief-action" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void openAthenaTask('conversation')}>Find or connect an Athena visit</button>}
           {EHR_READ_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'&&<button className="ehr-chief-action" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void openEhrTask('conversation')}>Review an appointment</button>}
           <div className="messages-activity-host" hidden={messagesMode&&messagesTask!=='Activity'}>{teamDrafts}</div>
           

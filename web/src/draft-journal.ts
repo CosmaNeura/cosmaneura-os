@@ -1,3 +1,4 @@
+import {validateAthenaVisitRecovery,validAthenaVisitRecoveryScope} from './athena-visit-link-recovery';
 import {validateCalendarRecovery,validCalendarOwner} from './calendar-import-recovery';
 import {ehrProvider} from './ehr-read-api';
 import {validateEhrReadRecovery,validEhrScope} from './ehr-read-recovery';
@@ -48,7 +49,7 @@ export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevisi
 export type EditorKind = `conversation:${string}` | "notebook-title" | "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "ehr-read" | "ehr-read:tebra" | "calendar-import" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
-export type AccountEditorKind = "conversation-preferences" | "practice-invite" | "private-draft" | "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
+export type AccountEditorKind = "athena-visit-link" | "conversation-preferences" | "practice-invite" | "private-draft" | "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
 export type AccountEditorDraft = {kind:"account-editor";editor:AccountEditorKind;data:unknown;pending:string|null};
 export const accountEditorAddress = (editor: AccountEditorKind) => `account-editor:${editor}`;
 export type RecoveredDraft = TeamDraft | NotebookDraft | EditorDraft | AccountOperationDraft | AccountEditorDraft;
@@ -110,7 +111,7 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   const draft = value.body as RecoveredDraft;
   if (draft && draft.kind === "account-editor") {
     if (Object.keys(draft).sort().join(",")!=="data,editor,kind,pending" ||
-        typeof draft.editor!=="string" || !(draft.editor==="conversation-preferences" || draft.editor==="practice-invite" || draft.editor==="private-draft" || draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="google-calendar" || draft.editor==="efax-inbound" || draft.editor==="fax-inbound" ||
+        typeof draft.editor!=="string" || !(draft.editor==="athena-visit-link" || draft.editor==="conversation-preferences" || draft.editor==="practice-invite" || draft.editor==="private-draft" || draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="google-calendar" || draft.editor==="efax-inbound" || draft.editor==="fax-inbound" ||
           draft.editor.startsWith("practice-result:") && UUID.test(draft.editor.slice("practice-result:".length)) ||
           draft.editor.startsWith("vendor-work:") && UUID.test(draft.editor.slice("vendor-work:".length))) ||
         address!==accountEditorAddress(draft.editor) || draft.pending!==null && !UUID.test(draft.pending) ||
@@ -152,6 +153,10 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if(draft?.kind==='account-editor'&&draft.editor==='athena-visit-link'){
+    try{const scope=(draft.data as {scope?:unknown}).scope;if(draft.pending!==null||!validAthenaVisitRecoveryScope(scope))throw new Error();await validateAthenaVisitRecovery(draft.data,scope);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
   if(draft?.kind==='account-editor'&&draft.editor==='conversation-preferences'){
     try{if(draft.pending!==null)throw new Error();parseConversationPreferences(draft.data);}
     catch{throw new DraftStoreError('integrity');}return;

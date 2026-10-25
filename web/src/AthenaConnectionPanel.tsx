@@ -5,6 +5,7 @@ import {AthenaVisitLinkPanel} from './AthenaVisitLinkPanel';
 import {ATHENA_VISIT_LINK_BUILD,type AthenaSourceSelection} from './athena-visit-link-api';
 import type {CoreConnection,CoreConnectionCommand} from './core-connection-contract';
 import type {AthenaAppointment} from './athena-connection-contract';
+import type {AthenaVisitRecoverySession} from './athena-visit-link-recovery';
 import {useSetupNavigationBusy} from './connection-setup-flow';
 import {WORKSPACE_AUTHENTICATED_BUILD,WORKSPACE_BUILD,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
@@ -24,7 +25,7 @@ export function athenaLocalTime(value:string):string{
 function zoneLabel(zone:string){return new Intl.DateTimeFormat(undefined,{timeZone:zone,timeZoneName:'longGeneric'}).formatToParts(new Date()).find(p=>p.type==='timeZoneName')?.value??zone;}
 const statusLabels:Record<string,string>={f:'Booked','2':'Checked in','3':'Checked out','4':'Charge entered',x:'Cancelled'};
 
-export function AthenaConnectionPanel({identity,connectionSha,connection,onBusyChange,onAccessLost,onOpenNotebook,openBlocked=false,visitLinkEnabled=ATHENA_VISIT_LINK_BUILD}:{identity:AuthenticatedWorkspaceIdentity;connectionSha:string;connection?:CoreConnection;onBusyChange?:(busy:boolean)=>void;onAccessLost:(error:unknown)=>void;onOpenNotebook?:(command:CoreConnectionCommand)=>Promise<void>;openBlocked?:boolean;visitLinkEnabled?:boolean}){
+export function AthenaConnectionPanel({identity,connectionSha,connection,onBusyChange,onAccessLost,onOpenNotebook,openBlocked=false,visitLinkEnabled=ATHENA_VISIT_LINK_BUILD,recovery,onRecoveryChange}:{identity:AuthenticatedWorkspaceIdentity;connectionSha:string;connection?:CoreConnection;onBusyChange?:(busy:boolean)=>void;onAccessLost:(error:unknown)=>void;onOpenNotebook?:(command:CoreConnectionCommand)=>Promise<void>;openBlocked?:boolean;visitLinkEnabled?:boolean;recovery?:AthenaVisitRecoverySession;onRecoveryChange?:()=>void}){
   const [snapshot,setSnapshot]=useState<{identity:AuthenticatedWorkspaceIdentity;sha:string;result:AthenaResult;requestWindow?:Window&{offset:number}}|null>(null);
   const [reviewedAccount,setReviewedAccount]=useState<{identity:AuthenticatedWorkspaceIdentity;sha:string;account:AthenaAccount}|null>(null);
   const [window,setWindow]=useState<Window|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -96,6 +97,6 @@ export function AthenaConnectionPanel({identity,connectionSha,connection,onBusyC
         <p className="team-fine">Refresh to see recent schedule changes.</p>
       </>}
     </>}
-    {visitLinkEnabled&&connection&&account&&page&&selected&&<AthenaVisitLinkPanel identity={identity} connection={connection} account={account} source={selected.source} selection={selected.selection} onBusyChange={setLinkBusy} onAccessLost={onAccessLost} onOpenNotebook={onOpenNotebook} openBlocked={openBlocked} onClose={()=>setSelected(null)}/>}
+    {visitLinkEnabled&&connection&&account&&page&&selected&&<AthenaVisitLinkPanel identity={identity} connection={connection} account={account} source={selected.source} selection={selected.selection} onBusyChange={setLinkBusy} onAccessLost={onAccessLost} onOpenNotebook={onOpenNotebook} openBlocked={openBlocked} recovery={recovery} onRecoveryChange={onRecoveryChange} onClose={()=>setSelected(null)}/>}
   </section>;
 }
