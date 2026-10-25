@@ -37,7 +37,7 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
       // Revision children remain associated with the same Chief conversation.
       if(!related.has(handoff.id))continue;
       const result=workspace.entries.find(entry=>entry.id===handoff.result_entry_id);
-      const withheld=!!result&&[result.google_source_state,result.calendar_source_state,result.fax_source_state,result.practice_fax_source_state,result.ehr_source_state,result.calendar_import_source_state].includes('unavailable');
+      const withheld=!!result&&[result.google_source_state,result.microsoft_source_state,result.calendar_source_state,result.fax_source_state,result.practice_fax_source_state,result.ehr_source_state,result.calendar_import_source_state].includes('unavailable');
       const available=!!result?.reply&&!withheld&&result.kind==='handoff_result'&&result.reply.role===handoff.recipient_role&&result.reply.agent_name===handoff.recipient_name&&(!handoff.recipient_agent_id||result.reply.agent_id===handoff.recipient_agent_id)&&typeof handoff.result_sha256==='string'&&/^[a-f0-9]{64}$/.test(handoff.result_sha256);
       const label=handoffReviewLabel(handoff),reviewed=label==='Draft accepted'||label==='Changes requested'&&!!handoff.review?.revision_handoff_id&&handoffs.some(child=>child.id===handoff.review?.revision_handoff_id&&child.revision_request?.parent_handoff_id===handoff.id);
       const status=withheld?'Source access needs checking':handoff.status==='completed'?available?label:'Result needs checking':

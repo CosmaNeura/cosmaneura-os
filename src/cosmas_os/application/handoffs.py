@@ -131,6 +131,7 @@ def read(s, w, revision):
                         unavailable_kinds.add(original.kind)
                         brief = {
                             "google_message": "The selected email is unavailable. Check its account access before using this draft.",
+                            "microsoft_message": "The selected email is unavailable. Check its account access before using this draft.",
                             "google_calendar": "The selected calendar summary is unavailable. Load and review a fresh summary before using this draft.",
                             "efax_inbound_source": "The reviewed fax passage is unavailable. Check its received-fax access and selected visit before using this draft.",
                             "fax_inbound_source": "The reviewed practice-fax passage is unavailable. Check its account access and selected visit before using this draft.",
@@ -148,7 +149,7 @@ def read(s, w, revision):
                 # Only their independently verified immutable digest is recoverable.
                 result_sha256 = handoff_review.result_recovery_digest(s, w, handoff, latest)
             feedback_notice = ("Email access must be checked before viewing this feedback."
-                               if unavailable_kinds == {"google_message"} else
+                               if unavailable_kinds and unavailable_kinds <= {"google_message", "microsoft_message"} else
                                "Check the reviewed fax passage before viewing this feedback."
                                if unavailable_kinds & {"efax_inbound_source", "fax_inbound_source"} else
                                "Check the reviewed EHR appointment before viewing this feedback."

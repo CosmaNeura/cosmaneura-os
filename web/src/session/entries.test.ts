@@ -21,8 +21,8 @@ describe('shared conversation projection',()=>{
     expect(savedDraftReviewLabel({...workspace,handoffs:[reviewed]},result)).toBe('Unreviewed draft');
     reviewed.review.result_sha256='a'.repeat(64);expect(savedDraftReviewLabel({...workspace,handoffs:[reviewed]},result)).toBe('Draft accepted');
   });
-  it('withholds a revoked source result and its review action',()=>{
-    const projection=projectConversation({...workspace,entries:[turn,{...result,content:'',reply:null,google_source_state:'unavailable'}]},team,'chief');
+  it.each(['google_source_state','microsoft_source_state'] as const)('withholds a revoked %s result and its review action',field=>{
+    const projection=projectConversation({...workspace,entries:[turn,{...result,content:'',reply:null,[field]:'unavailable'}]},team,'chief');
     expect(projection.entries[1]).toMatchObject({kind:'review',status:'Source access needs checking',actions:[]});
   });
   it('keeps direct specialist history separate from Chief',()=>{

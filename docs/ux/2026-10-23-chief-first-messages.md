@@ -555,3 +555,40 @@ all 30 focused presentation/frame tests and both TypeScript configurations pass.
 The cases retain the exact draft and reading position, preserve genuine replies
 during review, and acknowledge their exact watermark only after the user jumps
 to the latest message.
+
+### October 25: visible private drafts and phone update
+
+Commit `4d1de237` adds **Draft** and **Saved-note draft** indicators to the
+Messages inbox. They are derived from the existing encrypted per-bot/context
+journal after current account authorization. The inbox stores no second copy
+or plaintext preview and does not alter server unread/attention state. Clearing
+or sending removes the indicator; reload restores the exact retained draft.
+Account replacement, journal close and native suspension invalidate pending
+reads. Resume requires a fresh authorized read.
+
+Pulling down from the top of Messages now refreshes through the existing
+conversations controller. Horizontal/edge gestures, editing, dialogs,
+multi-touch, ordinary scrolling and native suspension cannot trigger it. The
+explicit Refresh control remains available. Ninety-five focused cases pass,
+including encrypted-storage mounted journeys and native lifecycle interruption.
+A browser run passes 39 checks at 390px, 390px with enlarged text/long names,
+and 1280px, with zero images or external requests. Those checks establish
+behavior and measured geometry; they do not establish physical touch behavior.
+
+The owner's explicit request to update the phone superseded the previous
+Preview24 preservation instruction. Preview28 was installed and launched first;
+Preview29 then replaced it in place with the current connector screens and
+`4d1de237` renderer. CoreDevice confirms build29 and successful launch. The
+bundle, signing team, private Keychain group, provisioning profile and existing
+preview storage namespace are preserved. No uninstall or reset occurred.
+The installed app uses invented services. Physical haptics, edge gestures and
+the complete VoiceOver experience are still unqualified.
+
+Evidence lives in the connector workstream: `messages-final-manifest.json`,
+`native/physical-preview29-01/signing-03/signing-result.json`,
+`native/preview29-phone-summary.json`, and the messages draft browser/review
+receipts. The 54-row `chief-first-plan-audit-20261025.json` separately records
+implemented, partial, superseded and explicitly deferred recommendations. Camera
+attachments, live dictation and push notifications remain deferred by the
+accepted decision; an all-kind inline recording/research/material transcript
+and universal semantic color conversion are not complete.

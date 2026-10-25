@@ -7,7 +7,7 @@ export function hasSavedBotContext(workspace:Workspace|null,bot:BotSettings|unde
   return !!bot&&!!workspace?.entries.some(entry=>entry.content.trim()&&
     (entry.kind==='scratchpad'&&entry.content===latestNotebookText(workspace)&&bot.include_notebook||
       (entry.kind==='evidence'||entry.kind==='synthetic_source'||
-        entry.kind==='google_message'&&entry.google_source_state==='current'||entry.kind==='google_calendar'&&entry.calendar_source_state==='current'||
+        entry.kind==='google_message'&&entry.google_source_state==='current'||entry.kind==='microsoft_message'&&entry.microsoft_source_state==='current'||entry.kind==='google_calendar'&&entry.calendar_source_state==='current'||
         entry.kind==='efax_inbound_source'&&entry.fax_source_state==='current'||entry.kind==='fax_inbound_source'&&entry.practice_fax_source_state==='current'||entry.kind==='ehr_read_source'&&entry.ehr_source_state==='current'||entry.kind==='calendar_import_source'&&entry.calendar_import_source_state==='current')&&bot.include_evidence));
 }
 export type ComposerContext={locked:boolean;connectionNavigationLocked:boolean;captureNavigationLocked:boolean;captureDraftLocked:boolean;recoveryBlocked:boolean;focus:()=>void;closeTools:()=>void;save:SaveContext};

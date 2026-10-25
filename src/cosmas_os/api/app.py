@@ -2093,6 +2093,7 @@ register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_
 
 allowed_headers = ["X-Cosmas-Handoff-Review", "X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
 allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection", "X-Cosmas-Google-Messages", "X-Cosmas-Google-Calendar"])
+allowed_headers.append("X-Cosmas-Microsoft-Messages")
 allowed_headers.append("X-Cosmas-EFax-Inbound")
 allowed_headers.extend(["X-Cosmas-Record-Contract", "X-Cosmas-Connection-Contract", "X-Cosmas-Activity-Contract"])
 if settings.cosmas_env == "synth_os" and settings.auth_mode == "synth_headers":
@@ -2154,6 +2155,15 @@ app.include_router(google_message_router(
     identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
     fence=_refresh_model_identity))
 app.add_middleware(GoogleMessageBoundary)
+
+from cosmas_os.api.microsoft_message_routes import MicrosoftMessageBoundary  # noqa: E402
+from cosmas_os.api.microsoft_message_routes import router as microsoft_message_router  # noqa: E402
+
+app.include_router(microsoft_message_router(
+    runtime=lambda: getattr(app.state, "microsoft_connection", None), configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(MicrosoftMessageBoundary)
 
 from cosmas_os.api.google_calendar_routes import GoogleCalendarBoundary  # noqa: E402
 from cosmas_os.api.google_calendar_routes import router as google_calendar_router  # noqa: E402

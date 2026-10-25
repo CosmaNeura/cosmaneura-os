@@ -1,6 +1,7 @@
 import {athenaRehearsal} from './athena';
 import {calendarImportRehearsal} from './calendar-import';
 import {ehrRehearsal} from './ehr';
+import {outlookRehearsal} from './outlook';
 import {recordingMetadata} from './recording-metadata';
 import {handoffReviewHash,validHandoffReviewInput,validHandoffRevisionInput} from '../src/handoff-review-api';
 import {conversationsApi,type ConversationSummary} from '../src/conversations-api';
@@ -103,6 +104,7 @@ export async function installFixtures(reset=false){
   const calendarServer=calendarImportRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),owner_id:inventedOwner,account_id:modelUuid(9050),patient_link_id:modelUuid(9051)});
   const athenaServer=await athenaRehearsal(storageKey,reset,()=>({workspace_id:state.id,appointment_id:state.appointment_id!}));
   const ehrServer=ehrRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
+  const outlookServer=outlookRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
   // Exact review contracts run through the real client, entirely in this tab.
   // Unsupported requests never leave this isolated, invented-data rehearsal.
   window.fetch=async(input,init)=>{
@@ -111,6 +113,7 @@ export async function installFixtures(reset=false){
     const calendarResponse=await calendarServer(path,init);if(calendarResponse)return calendarResponse;
     const athenaResponse=await athenaServer(path,init);if(athenaResponse)return athenaResponse;
     const ehrResponse=await ehrServer(path,init);if(ehrResponse)return ehrResponse;
+    const outlookResponse=await outlookServer(path,init);if(outlookResponse)return outlookResponse;
     const recordingResponse=await recordingServer(path,init);if(recordingResponse)return recordingResponse;
     const route=/^\/workspaces\/([a-f0-9-]{36})\/handoffs\/([a-f0-9-]{36})\/(review|revision)$/.exec(path);
     if(!route||init?.method!=='POST'||typeof init.body!=='string')throw new Error('Service operation unavailable in this isolated UI fixture');

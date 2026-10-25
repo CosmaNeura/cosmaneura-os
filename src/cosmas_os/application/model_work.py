@@ -602,7 +602,7 @@ def _context_for(
     from cosmas_os.application.clinical_note_share import clinical_request
 
     context = clinical_request(s, workspace, settings, command["content"], context)
-    bounded_connector_kinds = {"google_message", "google_calendar", "ehr_read_source", "calendar_import_source"}
+    bounded_connector_kinds = {"google_message", "microsoft_message", "google_calendar", "ehr_read_source", "calendar_import_source"}
     if any(s.get(WorkspaceEntry, source.entry_id).kind in bounded_connector_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
@@ -618,6 +618,9 @@ def _context_for(
         if any(s.get(WorkspaceEntry, source.entry_id).kind == "ehr_read_source"
                for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
             raise ws.WorkspaceError("ehr_read_source_context_too_large", 422)
+        if any(s.get(WorkspaceEntry, source.entry_id).kind == "microsoft_message"
+               for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
+            raise ws.WorkspaceError("microsoft_message_context_too_large", 422)
         raise ws.WorkspaceError("selected_google_context_too_large" if has_calendar else "google_message_context_too_large", 422)
     has_fax = any(s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
                   for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
@@ -691,6 +694,10 @@ def _selected_connector_passages(s, workspace, settings):
     from cosmas_os.ports.bot_capabilities import SourcePassage
 
     reviewed = []
+    if team.runtime_settings.workspace_microsoft_message_available:
+        from cosmas_os.application import microsoft_message
+
+        reviewed.extend(microsoft_message.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.workspace_calendar_import_available:
         from cosmas_os.application import calendar_imports
 

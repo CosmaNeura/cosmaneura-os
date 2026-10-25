@@ -423,6 +423,7 @@ def _read(s: Session, box: str, actor: str, wid: str, *, at_revision: int | None
                 source_states[field] = "unavailable"
         unavailable_label = {
             "google_message": "Unavailable email source",
+            "microsoft_message": "Unavailable email source",
             "google_calendar": "Unavailable calendar source",
             "efax_inbound_source": "Unavailable received-fax source",
             "fax_inbound_source": "Unavailable received practice-fax source",

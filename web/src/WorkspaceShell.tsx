@@ -100,6 +100,9 @@ import {EFAX_INBOUND_SOURCE_BUILD,type EFaxSourceOffer,type EFaxSourceReceipt} f
 import type {EFaxPending} from './efax-inbound-api';
 import { GOOGLE_CONNECTION_BUILD } from './google-connection-api';
 import { MicrosoftConnectionPanel } from './MicrosoftConnectionPanel';
+import {OutlookMessageMount} from './OutlookMessageMount';
+import {OUTLOOK_MESSAGE_BUILD} from './outlook-message-api';
+import type {OutlookMessageSaved} from './outlook-message-recovery';
 import { MICROSOFT_CONNECTION_BUILD } from './microsoft-connection-api';
 import { SchedulingConnectionPanel } from "./SchedulingConnectionPanel";
 import { APPOINTMENTS_BUILD } from "./appointment-api";
@@ -166,6 +169,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const savedRecordingHost=useRef<HTMLDivElement>(null);
   const recordingHome=useRef<HTMLDivElement|null>(null),recordingHost=useRef<HTMLDivElement|null>(null),previousRecordingOpen=useRef(false);
   const [googleMessageOpen,setGoogleMessageOpen]=useState(false);
+  const [outlookMessageOpen,setOutlookMessageOpen]=useState(false),[outlookMessageVisited,setOutlookMessageVisited]=useState(false);
+  const [outlookReturn,setOutlookReturn]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;origin:'conversation'|'sources';label:string;target:HTMLElement|null}|null>(null);
+  const microsoftVisitSelection=useRef(false),outlookOpening=useRef(0);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
   const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
   const ehrVisitSelection=useRef(false);
@@ -173,7 +179,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
   const schedulingReturn=useRef(SCHEDULING_LOGIN_BUILD&&['#scheduling-connected','#scheduling-sign-in'].includes(window.location.hash));
-  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+  const [connectionLocks, setConnectionLocks] = useState({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,microsoftMessages:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
   const activityEnabled = import.meta.env.VITE_AI_ACTIVITY_ENABLED === "true";
   const {activityNavigation}=session;
   const connectionEditorsLocked = Object.values(connectionLocks).some(Boolean);
@@ -312,6 +318,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   },[connectionGeneration]);
   const reportMicrosoftBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.microsoft===blocked?previous:{...previous,microsoft:blocked});
+  },[connectionGeneration]);
+  const reportMicrosoftMessageBusy = useCallback((blocked:boolean) => {
+    if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.microsoftMessages===blocked?previous:{...previous,microsoftMessages:blocked});
   },[connectionGeneration]);
   const reportSchedulingBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.scheduling===blocked?previous:{...previous,scheduling:blocked});
@@ -471,8 +480,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setInboxSelection(null);setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
-    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,microsoftMessages:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
     setGoogleMessageOpen(false);setGoogleCalendarOpen(false);googleVisitSelection.current=false;setAthenaTask(null);setAthenaNotebookError('');athenaOpening.current++;
+    setOutlookMessageOpen(false);setOutlookMessageVisited(false);setOutlookReturn(null);microsoftVisitSelection.current=false;outlookOpening.current++;
     ehrVisitSelection.current=false;
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
@@ -547,7 +557,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     return session.loading.open({...loadingContext(),locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,
       begin:()=>{chiefNotebookFocus.current=null;},resetCapture:(record,useRecording)=>{setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(record?1:0);setRecordingSourceRequest(useRecording?1:0);},
       focusChief:(workspace,generation)=>{chiefNotebookFocus.current={workspace,generation};},focusFax:()=>setFocusFaxWork(true),showResearch:()=>setSavedResearchChat(false),
-      afterOpen:()=>{afterOpen?.();if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}},
+      afterOpen:()=>{afterOpen?.();if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}else if(microsoftVisitSelection.current){microsoftVisitSelection.current=false;setOutlookMessageVisited(true);setOutlookMessageOpen(true);setOutlookReturn(null);setSettingsEntry('microsoft');setSettingsOpen(true);}},
       retryRead:authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection,
     },appointmentId,coreSelection,incoming,recordVisit);
   }
@@ -981,6 +991,34 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function receiveGoogleSource(latest:Workspace){return session.sources.receive(latest);}
   function refreshGoogleVisit(){return session.sources.refresh(sourceContext());}
   function prepareGoogleChief(source:GoogleMessageSaved|GoogleCalendarSaved,kind:'google_message'|'google_calendar'='google_message'){return session.sources.prepareGoogle(sourceContext(),source,kind);}
+  function prepareMicrosoftChief(source:OutlookMessageSaved){return session.sources.prepareMicrosoft(sourceContext(),source);}
+  async function openOutlookWork(origin:'conversation'|'sources'|'connections'){
+    if(!OUTLOOK_MESSAGE_BUILD||!authenticated||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    if(origin==='connections'){setOutlookReturn(null);setOutlookMessageVisited(true);setOutlookMessageOpen(true);return;}
+    const host=conversationHost(),view=session.getSnapshot(),owner=authenticated,currentGeneration=generation.current,route=session.navigation.sequence.current;
+    if(!host||!view.workspace?.appointment_id||host.blocked())return;
+    const target=document.activeElement instanceof HTMLElement?document.activeElement:null,intent=++outlookOpening.current;
+    const entry=workspaceFrame.current?.querySelector(origin==='sources'?'.outlook-source-action':'.messages-details');if(!entry||entry.closest('[hidden]'))return;
+    const invalidate=()=>{if(outlookOpening.current===intent)outlookOpening.current++;};
+    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')invalidate();};
+    const current=()=>{const now=session.getSnapshot();return outlookOpening.current===intent&&host.current()&&previousIdentity.current===owner&&generation.current===currentGeneration&&session.navigation.sequence.current===route&&now.workspace?.id===view.workspace?.id&&now.selected===view.selected&&now.settingsOpen===view.settingsOpen&&now.practicePage===view.practicePage&&entry.isConnected&&!entry.closest('[hidden]');};
+    document.addEventListener('click',invalidate,true);document.addEventListener('keydown',escape,true);
+    const removeNative=owner.mode==='clerk_jwt'&&owner.nativeSession?subscribeNativeWorkspaceForeground(owner,()=>{},invalidate):undefined;
+    try{
+      if(!await session.conversations.retain(host)||!current())return;await host.authorize();if(!current()||host.blocked())return;
+      setOutlookReturn({identity:owner,generation:currentGeneration,workspaceId:view.workspace.id,origin,label:origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`,target});
+      setOutlookMessageVisited(true);setOutlookMessageOpen(true);setSettingsEntry('microsoft');setSettingsOpen(true);setConversationDetails(false);setMessagesTask(null);setPhoneChatToolsOpen(false);
+    }catch(cause){if(current())failure(cause);}finally{removeNative?.();document.removeEventListener('click',invalidate,true);document.removeEventListener('keydown',escape,true);}
+  }
+  function closeOutlookWork(){
+    if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    const returned=outlookReturn;setOutlookMessageOpen(false);setOutlookReturn(null);
+    if(!returned||returned.identity!==authenticated||returned.generation!==generation.current||returned.workspaceId!==workspace?.id)return;
+    setSettingsOpen(false);if(returned.origin==='sources'){setPanel('Sources');setMobilePanel('Sources');}
+    requestAnimationFrame(()=>{if(previousIdentity.current!==returned.identity||generation.current!==returned.generation||session.getSnapshot().settingsOpen)return;
+      const target=returned.target?.isConnected&&!returned.target.closest('[hidden]')?returned.target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child');
+      if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});});
+  }
   const ehrReturnFocus=useRef<{element:HTMLElement|null;scroll:number|null}|null>(null);
   async function openAthenaTask(origin:'conversation'|'connections'){
     if(!athenaAvailable||!authenticated||!accountAccess||locked||viewNavigationLocked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
@@ -1205,7 +1243,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     </aside>
     <div className="team-main">
       {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)}/>}
-      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined}/>}
+      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openOutlookWork('conversation'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined}/>}
       {nativeHome||nativeWorkspace?<header className="native-home-header">
         {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
         <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
@@ -1301,7 +1339,19 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareGoogleChief(source,'google_calendar')}
               onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current='calendar';setSettingsOpen(false);void loadEncounters();}}/>:undefined}/>
         </AccountRecoveryContext.Provider>:undefined}
-        microsoft={MICROSOFT_CONNECTION_BUILD&&authenticated?<MicrosoftConnectionPanel identity={authenticated} onBusyChange={reportMicrosoftBusy} onAuthenticationLost={failure}/>:undefined}
+        microsoft={MICROSOFT_CONNECTION_BUILD&&authenticated?<AccountRecoveryContext.Provider value={accountAccess}><MicrosoftConnectionPanel identity={authenticated} onBusyChange={reportMicrosoftBusy} onAuthenticationLost={failure}
+          onOpenMessageWork={OUTLOOK_MESSAGE_BUILD?()=>void openOutlookWork('connections'):undefined} messageWorkOpen={outlookMessageOpen}
+          messageWorkLocked={locked||captureNavigationLocked||captureDraftLocked||connectionEditorsLocked}
+          messageWorkReturnLabel={outlookReturn?.identity===authenticated&&outlookReturn.generation===generation.current&&outlookReturn.workspaceId===workspace?.id?outlookReturn.label:'Back to Microsoft connection'}
+          onCloseMessageWork={closeOutlookWork} onShowConnection={()=>setOutlookMessageOpen(false)}
+          messageWork={OUTLOOK_MESSAGE_BUILD&&outlookMessageVisited?controls=><OutlookMessageMount identity={authenticated}
+            workspace={visitLinked&&workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
+            currentSources={workspace?.entries.filter(entry=>entry.kind==='microsoft_message'&&!!entry.microsoft_source_state).map(entry=>({entry_id:entry.id,state:entry.microsoft_source_state!}))}
+            locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='microsoftMessages'&&value)}
+            recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='microsoftMessages'&&value)}
+            onActiveChange={reportMicrosoftMessageBusy} onAuthenticationLost={failure} onConnectMicrosoft={controls.connectMicrosoft} connectionBusy={controls.connectionBusy}
+            onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareMicrosoftChief(source)}
+            onChooseVisit={()=>{if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;microsoftVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}/>:undefined}/></AccountRecoveryContext.Provider>:undefined}
         scheduling={SCHEDULING_LOGIN_BUILD&&authenticated?<SchedulingConnectionPanel identity={authenticated} onBusyChange={reportSchedulingBusy} onAuthenticationLost={failure} onObserved={reportSchedulingObservation}/>:undefined}
         core={CORE_CONNECTION_BUILD&&authenticated?<CoreConnectionPanel identity={authenticated} athenaEnabled={false} onOpenAthena={athenaAvailable?()=>void openAthenaTask('connections'):undefined} onBusyChange={reportCoreBusy} onAuthenticationLost={failure} openBlocked={locked||captureNavigationLocked||captureDraftLocked} onOpenNotebook={command=>open(undefined,command)}/>:undefined}
         teamSummary={team?.revision ? `${team.configuration.bots.filter(bot => !bot.retired).length} coworkers · Names, instructions & preferences` : 'Choose your coworkers and make them yours'}
@@ -1656,7 +1706,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
             {faxSourceOffer&&authenticated===faxSourceOffer.identity&&generation.current===faxSourceOffer.generation&&workspace.id===faxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><EFaxSourceReviewMount identity={faxSourceOffer.identity} offered={faxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='efax_inbound_source'&&e.fax_source_state).map(e=>({entry_id:e.id,state:e.fax_source_state!}))} onBusyChange={reportFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareFaxChief(value)} onRefreshDocument={refreshFaxDocument}/></div>}
             {providerFaxSourceOffer&&authenticated===providerFaxSourceOffer.identity&&generation.current===providerFaxSourceOffer.generation&&workspace.id===providerFaxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><FaxSourceReviewMount identity={providerFaxSourceOffer.identity} offered={providerFaxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='fax_inbound_source'&&e.practice_fax_source_state).map(e=>({entry_id:e.id,state:e.practice_fax_source_state!}))} onBusyChange={reportProviderFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareProviderFaxChief(value)} onRefreshDocument={refreshProviderFaxDocument}/></div>}
             {panel === "Sources" && <EncounterSources workspace={workspace} selectedSource={selectedSource} locked={locked}
-              onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('sources'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('sources'):undefined} appointmentReviewLocked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
+              onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked?()=>void openOutlookWork('sources'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('sources'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('sources'):undefined} appointmentReviewLocked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
               briefViewedAt={briefViewed?.workspace===workspace.id&&briefViewed.owner===authenticated&&briefViewed.teamRevision===team?.revision?briefViewed.at:undefined}
               onPrep={team?.configuration.bots.some(member=>member.role==='visit_prep'&&member.enabled)?()=>{const reader=team.configuration.bots.find(member=>member.role==='visit_prep'&&member.enabled)!;if(session.presentation.enabled){void openConversation(workspace.id,botAddress(reader)).then(()=>{if(session.getSnapshot().selected===botAddress(reader))showConversationTask('Tools');});}else{setSelected(botAddress(reader));setMobilePanel('Conversation');}}:undefined}
               source={source} evidence={evidence} setSource={setSource} setEvidence={setEvidence}

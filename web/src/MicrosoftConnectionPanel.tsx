@@ -1,4 +1,5 @@
-import {useCallback,useEffect,useRef,useState} from 'react';
+import {useCallback,useEffect,useRef,useState,type ReactNode} from 'react';
+import {EhrReadTask} from './EhrReadTask';
 import {microsoftConnectionRequest,type MicrosoftAction,type MicrosoftStatus,type MicrosoftStart,type MicrosoftView} from './microsoft-connection-api';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {useSetupNavigationBusy} from './connection-setup-flow';
@@ -29,7 +30,8 @@ function checkedState(identity:AuthenticatedWorkspaceIdentity,previous:PrivateSt
   return {owner:identity,status,start:null,scope,views:scope&&previous?.owner===identity&&previous.scope===scope?previous.views:{}};
 }
 
-export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthenticationLost}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void}){
+export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthenticationLost,messageWork,onOpenMessageWork,messageWorkOpen=false,messageWorkLocked=false,onCloseMessageWork,messageWorkReturnLabel='Back to Microsoft connection',onShowConnection}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(error:unknown)=>void;
+  messageWork?:ReactNode|((controls:{connectMicrosoft:()=>void;connectionBusy:boolean})=>ReactNode);onOpenMessageWork?:()=>void;messageWorkOpen?:boolean;messageWorkLocked?:boolean;onCloseMessageWork?:()=>void;messageWorkReturnLabel?:string;onShowConnection?:()=>void}){
   const [data,setData]=useState<PrivateState|null>(null),[busy,setBusy]=useState(false),[message,setMessage]=useState(''),[opening,setOpening]=useState(false);
   const [service,setService]=useState<MicrosoftService>('mail');
   const latest=useRef(data);latest.current=data;
@@ -175,13 +177,14 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
     if(native){navigationPending.current=requestId;setOpening(true);}
   };
   const blocked=busy||opening||nativeForeground.suspended;
-  return <section className="core-connection-setup microsoft-connection" aria-label="Microsoft email and calendar">
+  return <><section className="core-connection-setup microsoft-connection" aria-label="Microsoft email and calendar" hidden={messageWorkOpen}>
     <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">M</span><div><h2>{status?.state==='connected'?'Microsoft':'Connect Microsoft'}</h2><p>Email and the week ahead.</p></div></header>
     <p>{status?.state==='connected'?'Your account is connected. Check Outlook email and calendar access below.':'Connect your work account to see Outlook email and upcoming calendar events here. Microsoft will ask you to approve access.'}</p>
     <p className="connection-access-summary">This connection is read-only. It cannot send email, change appointments or update your clinical records.</p>
     {nativeForeground.suspended&&<p role="status">Microsoft details are hidden while the app is inactive. Your saved work is retained.</p>}
     {!status?.account&&!start&&unavailableFor!==identity&&<details><summary>How to connect</summary><ol className="personal-connection-steps"><li>Choose your Microsoft work or school account.</li><li>Review access on Microsoft’s secure sign-in page.</li><li>Return here to view your inbox or upcoming events.</li></ol></details>}
     <button disabled={blocked} onClick={()=>manual('status')}>Check Microsoft connection</button>
+    {onOpenMessageWork&&<button className="team-primary" disabled={blocked||messageWorkLocked} onClick={onOpenMessageWork}>Work with email</button>}
     {busy&&action&&<div className="connection-progress" role="status"><p>{personalConnectionProgress('microsoft',action)}</p>
       <small>{action==='recovery'?'Account recovery has a 10-second limit. The read will not repeat.':'This request has a 50-second limit.'} {action==='status'||action==='mail'||action==='calendar'||action==='recovery'?'You can keep working elsewhere.':''}</small>
       {action!=='start'&&action!=='disconnect'&&<button onClick={cancelRead}>Stop waiting</button>}</div>}
@@ -214,9 +217,12 @@ export function MicrosoftConnectionPanel({identity,onBusyChange,onAuthentication
       {view.more&&<p>Showing the first 25. More are available in Outlook.</p>}
     </section>}
     {status?.state==='connected'&&<details className="microsoft-account-controls"><summary>Manage Microsoft account</summary>
-      <div className="microsoft-actions"><button disabled={blocked||!nativeReady} onClick={()=>manual('start')}>Reconnect Microsoft</button>
-        <button disabled={blocked} onClick={()=>manual('disconnect')}>Disconnect Microsoft</button></div>
+      <div className="microsoft-actions"><button disabled={blocked||!nativeReady||messageWorkLocked} onClick={()=>manual('start')}>Reconnect Microsoft</button>
+        <button disabled={blocked||messageWorkLocked} onClick={()=>manual('disconnect')}>Disconnect Microsoft</button></div>
     </details>}
     {message&&<p role="status">{message}</p>}
-  </section>;
+  </section>{messageWork&&<EhrReadTask title="Review Outlook email" open={messageWorkOpen} context="Choose an email, then review it for the current visit. Your conversation draft stays in place."
+    returnLabel={messageWorkReturnLabel} returnBlocked={blocked||messageWorkLocked} onReturn={()=>onCloseMessageWork?.()}>
+    {typeof messageWork==='function'?messageWork({connectMicrosoft:()=>{if(!blocked&&!messageWorkLocked&&nativeReady){onShowConnection?.();manual('start');}},connectionBusy:blocked}):messageWork}
+  </EhrReadTask>}</>;
 }

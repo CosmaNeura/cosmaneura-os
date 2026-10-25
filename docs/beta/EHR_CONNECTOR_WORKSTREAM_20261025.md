@@ -377,8 +377,25 @@ Evidence is recorded in `CHECKPOINT-ATHENA.json`,
 `evidence/mac-studio/athena-final-20261025/receipt.json`, and
 `native/athena-native-review.json` in the connector workstream. The local UI
 rehearsal's address and process are recorded in `LOCAL-REHEARSAL.json`. The phone
-remains on Preview24. No vendor messages, prescriptions, bookings or production
+was on Preview24 at that checkpoint. No vendor messages, prescriptions, bookings or production
 rollout occurred.
+
+## Current phone and delivery limits
+
+On October25 the owner requested a phone update. Preview29 is now installed and
+launches on the connected iPhone, with the latest qualified EHR/calendar screens
+and `4d1de237` Messages draft-presence/pull-to-refresh changes. This was an
+in-place update of `com.cosmasos.synthetic.w206`, preserving its signing and
+storage identity. See `native/preview29-phone-summary.json` and the physical
+Preview29 signing receipts in this workstream. No app data reset occurred.
+
+These deliveries do not establish live vendor connections. Atlas.md currently
+has generic calendar-file intake, not synchronization. Elation and Tebra provide
+reviewed patient/appointment context; Athena provides the Core visit-link task.
+None of the four has passed live vendor acceptance in this workstream.
+Longitudinal chart history, medications, problems, labs, prescription relay/eRx
+and clinical writeback remain missing engineering capabilities. They are not
+merely credentials awaiting installation. The phone still uses invented data.
 
 ## Elation sandbox access
 

@@ -58,7 +58,7 @@ class ReviewReadSnapshot:
     def require_scope(self, w):
         self.team.require_scope(w.box_id, w.owner_id)
         if w.id not in self.workspace_ids or any(entry.workspace_id == w.id and entry.kind in
-                {'google_message', 'google_calendar', 'efax_inbound_source', 'fax_inbound_source', 'ehr_read_source', 'calendar_import_source'}
+                {'google_message', 'microsoft_message', 'google_calendar', 'efax_inbound_source', 'fax_inbound_source', 'ehr_read_source', 'calendar_import_source'}
                 for entry in self.clinical.entries.values()):
             raise ws.WorkspaceError('handoff_snapshot_unavailable', 503)
 

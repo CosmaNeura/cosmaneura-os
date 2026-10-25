@@ -10,10 +10,11 @@ import {memoryDraftStorage} from '../draft-test-fixture';
 import type {ConversationHost} from './conversations';
 import {WorkspaceSession} from './workspace-session';
 
-async function fixture(deps:SourceDependencies={}){
+async function fixture(deps:SourceDependencies={},kind:'google_message'|'microsoft_message'='google_message'){
   const authenticated:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null},content='Invented selected email';
   const workspace:Workspace={id:uuid(71),appointment_id:null,label:'Invented notebook',revision:2,work_candidates:[],entries:[{id:uuid(72),revision:2,kind:'google_message',content,source_label:'Invented email',origin:'human',ticket:null,created_at:'2026-10-23T12:00:00Z',google_source_state:'current'}]};
   const source:GoogleMessageSaved={workspace_id:workspace.id,entry_id:uuid(72),entry_revision:2,source_sha256:'a'.repeat(64),content_sha256:await vendorSha256(new TextEncoder().encode(content)),request_sha256:'b'.repeat(64),source_withheld:false};
+  if(kind==='microsoft_message'){workspace.appointment_id=uuid(73);workspace.entries[0]={...workspace.entries[0],kind,google_source_state:undefined,microsoft_source_state:'current'};}
   const session=new WorkspaceSession({sources:{read:async()=>workspace,...deps},conversationRead:async()=>workspace});session.setWorkspace(workspace);session.setTeam(teamFixture());session.setIdentity(authenticated);session.setSelected('chief');session.setPracticePage('notebook');
   const journal=new DraftJournal(await memoryDraftStorage()({scope:'invented'}));session.recovery.journal.current={scope:'invented',serverScope:'a'.repeat(64),value:journal};
   const host:ConversationHost={identity:authenticated,journal,scope:'invented',current:()=>session.getSnapshot().identity===authenticated,blocked:()=>session.getSnapshot().busy||!!session.getSnapshot().pending,authorize:vi.fn(async()=>{}),navigate:vi.fn(async route=>{session.navigation.sequence.current++;session.setSelected(route.helper!);session.setSettingsOpen(false);session.setPracticeOpen(false);session.setPracticePage('notebook');}),failure:vi.fn()};
@@ -38,6 +39,28 @@ describe('shared selected-source preparation',()=>{
     const f=await fixture();f.session.setNote('Invented unsaved notes');f.session.sources.receive({...f.workspace,revision:3,entries:[...f.workspace.entries,{id:'new-note',revision:3,kind:'scratchpad',content:'Another saved note',source_label:null,origin:'human',ticket:null,created_at:'2026-10-23T12:00:00Z'}]});
     expect(f.session.getSnapshot()).toMatchObject({note:'Invented unsaved notes',conflict:true});
   });
+});
+
+it('prepares a reviewed Outlook source in the retained Chief draft without moving specialist text or sending',async()=>{
+ const f=await fixture({},'microsoft_message'),save=vi.spyOn(f.session.models,'save');f.session.models.updateThought('Existing Chief directions');await f.session.conversations.observe(f.host);
+ await f.session.conversations.open(f.workspace.id,'follow_up',f.host);f.session.models.updateThought('Separate specialist directions');
+ await f.session.sources.prepareMicrosoft(f.context,f.source);
+ expect(f.session.getSnapshot().thought).toBe('Existing Chief directions\n\nReview the human-selected email source '+f.source.entry_id+' and prepare appropriate private assignments. Preserve the existing clinical note; ask me about missing details before proposing outside actions.');
+ expect(await f.journal.load(editorAddress(f.workspace.id,'conversation:follow_up'))).toMatchObject({data:{text:'Separate specialist directions'}});expect(save).not.toHaveBeenCalled();expect(f.context.focusQuestion).toHaveBeenCalledOnce();
+});
+it('requires Microsoft source custody and refuses Gmail substitution or withdrawn Outlook content',async()=>{
+ const gmail=await fixture();gmail.session.models.updateThought('Keep directions');await gmail.session.sources.prepareMicrosoft(gmail.context,gmail.source);
+ expect(gmail.session.getSnapshot().thought).toBe('Keep directions');expect(gmail.context.failure).toHaveBeenCalledOnce();
+ const outlook=await fixture({},'microsoft_message');outlook.workspace.entries[0].microsoft_source_state='unavailable';await outlook.session.sources.prepareMicrosoft(outlook.context,outlook.source);
+ expect(outlook.session.getSnapshot().thought).toBe('');expect(outlook.context.failure).toHaveBeenCalledOnce();
+});
+it('withholds Outlook draft preparation if access changes while authorization is pending',async()=>{
+ const f=await fixture({},'microsoft_message');f.session.models.updateThought('Keep directions');let release!:()=>void;
+ // Observe/retain first, so this deferred authorization is the final source check.
+ await f.session.conversations.observe(f.host);f.host.authorize=()=>new Promise<void>(resolve=>{release=resolve;});
+ const work=f.session.sources.prepareMicrosoft(f.context,f.source);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ f.session.sources.receive({...f.workspace,entries:f.workspace.entries.map(e=>({...e,microsoft_source_state:'unavailable' as const,content:''}))});release();await work;
+ expect(f.session.getSnapshot().thought).toBe('Keep directions');expect(f.context.focusQuestion).not.toHaveBeenCalled();
 });
 
 it('preserves a retained Chief saved-note task and the originating specialist draft',async()=>{
