@@ -4,13 +4,23 @@ import type {EhrProvider} from './ehr-read-api';
 import {TebraMedicationMount} from './TebraMedicationMount';
 import {AthenaAllergyMount} from './AthenaAllergyMount';
 import {AthenaMedicationMount} from './AthenaMedicationMount';
-type RecordsProvider=EhrProvider|'athena';
+export type RecordsProvider=EhrProvider|'athena';
+export type RecordsProviderRequest={provider:RecordsProvider;intent:object};
 
 /** Each provider keeps its own mounted journal; only explicit actions contact it. */
-export function EhrReadProviders(props:Omit<EhrReadMountProps,'provider'>){
- const [provider,setProvider]=useState<RecordsProvider>('elation'),[visited,setVisited]=useState<RecordsProvider[]>(['elation']);
+export function EhrReadProviders({requestedProvider,...props}:Omit<EhrReadMountProps,'provider'>&{requestedProvider?:RecordsProviderRequest}){
+ const initialProvider=props.active!==false&&!props.locked&&!props.recoveryLocked&&requestedProvider&&['elation','tebra','athena'].includes(requestedProvider.provider)?requestedProvider.provider:'elation';
+ const [provider,setProvider]=useState<RecordsProvider>(initialProvider),[visited,setVisited]=useState<RecordsProvider[]>([initialProvider]);
  const busy=useRef({elation:false,tebra:false,athena:false}),[dispatching,setDispatching]=useState(false),report=useRef(props.onBusyChange);report.current=props.onBusyChange;
  const update=useCallback((name:RecordsProvider,value:boolean)=>{busy.current[name]=value;const next=busy.current.elation||busy.current.tebra||busy.current.athena;setDispatching(next);report.current?.(next);},[]);
+ const consumedRequest=useRef<object|undefined>(undefined);
+ useEffect(()=>{
+  if(!requestedProvider||props.active===false||consumedRequest.current===requestedProvider.intent)return;
+  consumedRequest.current=requestedProvider.intent;
+  if(busy.current.elation||busy.current.tebra||busy.current.athena||props.locked||props.recoveryLocked)return;
+  const next=requestedProvider.provider;if(next!=='elation'&&next!=='tebra'&&next!=='athena')return;
+  setProvider(next);setVisited(old=>old.includes(next)?old:[...old,next]);
+ },[requestedProvider,props.active,props.locked,props.recoveryLocked]);
  const elationBusy=useCallback((value:boolean)=>update('elation',value),[update]),tebraBusy=useCallback((value:boolean)=>update('tebra',value),[update]),athenaBusy=useCallback((value:boolean)=>update('athena',value),[update]);
  useEffect(()=>()=>report.current?.(false),[]);
  return <>

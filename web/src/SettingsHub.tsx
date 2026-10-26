@@ -14,6 +14,13 @@ import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
 type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google' | 'ehr';
+export type PracticeRecordProvider = 'atlas_md' | 'elation' | 'tebra' | 'athena';
+const practiceRecordProviders: {id:PracticeRecordProvider;name:string;description:string}[] = [
+  {id:'atlas_md',name:'Atlas.MD',description:'Import an exported calendar file. No live connection.'},
+  {id:'elation',name:'Elation',description:'Appointments, problems, medication records and lab reports.'},
+  {id:'tebra',name:'Tebra',description:'Appointments and medication records.'},
+  {id:'athena',name:'Athena',description:'Allergy and medication records.'},
+];
 type Editor = Exclude<Screen, 'home' | 'connections'>;
 const titles: Record<Screen, string> = {
   home: 'Settings', connections: 'Connections', members:'Practice access', team: 'Your team',
@@ -22,7 +29,8 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({appearance,open,nativePresentation,googleTaskPresentation=false, receivedFaxTaskOpen=false, receivedFaxReturnLabel='Back to saved sources', onCloseReceivedFax, onReceivedFaxActiveChange, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+export function SettingsHub({appearance,accountControls,practiceRecordActions,open,nativePresentation,googleTaskPresentation=false, receivedFaxTaskOpen=false, receivedFaxReturnLabel='Back to saved sources', onCloseReceivedFax, onReceivedFaxActiveChange, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+  accountControls?:ReactNode;practiceRecordActions?:Partial<Record<PracticeRecordProvider,()=>void>>;
   appearance?:ReactNode;open: boolean;nativePresentation?:'workspace'|'messages'; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; ehr?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
   googleTaskPresentation?:boolean;receivedFaxTaskOpen?:boolean;receivedFaxReturnLabel?:string;onCloseReceivedFax?:()=>void;onReceivedFaxActiveChange?:(active:boolean)=>void;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
@@ -31,6 +39,16 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
   onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];onReviewProviderFaxDocument?:FaxInboundPanelProps['onReviewDocument'];
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
+  const [addingConnection,setAddingConnection]=useState(false);
+  const addConnectionButton=useRef<HTMLButtonElement>(null),catalogHeading=useRef<HTMLHeadingElement>(null);
+  useEffect(()=>{if(!open)setAddingConnection(false);},[open]);
+  const wasAddingConnection=useRef(false);
+  useEffect(()=>{
+    if(!open||screen!=='connections'){wasAddingConnection.current=false;return;}
+    if(addingConnection)catalogHeading.current?.focus({preventScroll:true});
+    else if(wasAddingConnection.current)addConnectionButton.current?.focus({preventScroll:true});
+    wasAddingConnection.current=addingConnection;
+  },[open,screen,addingConnection]);
   const [inboundBusy,setInboundBusy]=useState(false),[providerInboundBusy,setProviderInboundBusy]=useState(false);
   const [inboundOwner,setInboundOwner]=useState<AuthenticatedWorkspaceIdentity|null>(null);
   const inboundEpisode=useMemo(()=>({}),[connectionIdentity]),liveInboundEpisode=useRef(inboundEpisode);liveInboundEpisode.current=inboundEpisode;
@@ -104,7 +122,7 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
   function visit(next: Screen, accepted=false) {
     if (leaveLocked) return;
     if(!accepted&&screen==='team'&&next!=='team'&&teamDirty&&beforeLeaveTeam){beforeLeaveTeam(()=>visit(next,true));return;}
-    setRecovering(null);
+    setRecovering(null);setAddingConnection(false);
     if (next !== 'home' && next !== 'connections') {
       if(!(next in CONNECTION_GUIDES)||!connectionIdentity||catalog?.[next as ConnectionId]===true||catalogError&&!current?.denied)
         setVisited(previous => previous.includes(next) ? previous : [...previous, next]);
@@ -188,13 +206,20 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
         <span className="settings-card-icon" aria-hidden="true">＋</span>
         <span><strong>Practice access</strong><small>Teammates joining your practice workspace</small></span><span aria-hidden="true">›</span>
       </button>}
-      {(connectionCards.length > 0 || ehr != null) && <button disabled={navigationLocked} className="settings-card" onClick={() => visit('connections')}>
+      {(connectionCards.length > 0 || ehr != null || practiceRecordActions != null) && <button disabled={navigationLocked} className="settings-card" onClick={() => visit('connections')}>
         <span className="settings-card-icon" aria-hidden="true">↔</span>
         <span><strong>Connections</strong><small>{core?'Practice account, appointments & services':'Messaging, fax, payments & portals'}</small></span>
         <span aria-hidden="true">›</span>
       </button>}
     </div>}
-    {screen === 'connections' && <div className="connection-directory">
+    {screen==='home'&&accountControls&&<section className="settings-account" aria-label="Account"><h2>Account</h2>{accountControls}</section>}
+    {screen === 'connections' && <div className="connection-directory" data-catalog-open={addingConnection}>
+      <div className="connection-directory-actions">{addingConnection?<button disabled={leaveLocked} onClick={()=>setAddingConnection(false)}>Back to connections</button>:<button ref={addConnectionButton} className="team-primary" disabled={leaveLocked} onClick={()=>setAddingConnection(true)}>Add connection</button>}</div>
+      {addingConnection&&<section className="connection-add-catalog" aria-label="Add connection catalog"><h2 ref={catalogHeading} tabIndex={-1}>Choose a service</h2><p>Open a service to check access or see its setup steps.</p>
+        {practiceRecordActions&&<section className="connection-group" aria-label="Practice records catalog"><h3>Practice records</h3><div className="connection-cards">{practiceRecordProviders.map(item=><div className="connection-card-box" key={item.id}><button data-practice-record-provider={item.id} className="settings-card connection-card connection-record-row" disabled={leaveLocked||!practiceRecordActions[item.id]} onClick={()=>{if(!leaveLocked)practiceRecordActions[item.id]?.();}}>
+          <span className="connection-card-copy"><strong>{item.name}</strong><small>{item.description}</small><small className="connection-record-state">{!practiceRecordActions[item.id]?'Not available in this app':item.id==='atlas_md'?'Choose a calendar file':'Access checked when opened'}</small></span><span className="connection-row-chevron" aria-hidden="true">›</span>
+        </button></div>)}</div></section>}
+      </section>}
       {connectionIdentity&&<div className="connection-directory-status"><p role="status">{checking?(checkingAgain?'Checking again. Last confirmed results remain below.':'Checking connections…'):catalog?'Connected confirms the account. Read results and task outcomes are shown separately.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
         <button disabled={navigationLocked||checking||!catalog&&!catalogError} onClick={()=>setRefreshCatalog(value=>value+1)}>Refresh connections</button></div>}
       <details className="connection-state-help"><summary>What these states mean</summary><dl>
@@ -214,38 +239,38 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
             const canOpenFax=item.id==='messaging'&&!checking&&!catalogError&&catalog?.messaging&&fax?.enabled&&fax.work_enabled&&fax.providers.some(provider=>provider.prepare_enabled_accounts>0);
             return <div className="connection-card-box" key={item.id}><button disabled={navigationLocked||!!connectionIdentity&&!catalog&&!catalogError} className="settings-card connection-card" onClick={()=>visit(item.id)}>
             <span className="settings-card-icon" aria-hidden="true">{item.icon}</span>
-            <span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{state.reason}</small>
+            <span className="connection-card-copy"><strong>{titles[item.id]}</strong>
             </span>
             <span className="connection-card-state"><span role="status" aria-atomic="true" className={`connection-badge connection-badge-${state.tone}`}>{state.tone==='ready'&&<span aria-hidden="true">✓ </span>}{state.label}</span>
               {!state.checkedAt&&current?.checks[item.id]?.last&&<small>Last confirmed: {current.checks[item.id]!.last!.label}{current.checks[item.id]!.last!.checkedAt?` · ${new Date(current.checks[item.id]!.last!.checkedAt!).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}`:''}</small>}
-              <span className="connection-card-action">{state.action} <span aria-hidden="true">›</span></span></span>
-          </button>{(state.proof||state.checkedAt||!!state.services?.length)&&<details className="connection-state-help" aria-label={`${titles[item.id]} check details`}>
-            <summary>Check details</summary>
+              </span><span className="connection-row-chevron" aria-hidden="true">›</span>
+          </button><details className="connection-state-help" aria-label={`${titles[item.id]} check details`}>
+            <summary>Connection details</summary><p>{state.reason}</p><p>{state.action}</p>
             {state.services&&<dl className="connection-service-summary">{state.services.map(service=><div key={service.kind}><dt>{service.name}</dt><dd>{service.label}</dd></div>)}</dl>}
             {state.proof&&<p className="connection-proof">{state.proof}</p>}
             {state.checkedAt&&<p>{state.checkKind==='availability'?'Availability checked':'Account checked'} {new Date(state.checkedAt).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})}</p>}
             {state.services?.filter(service=>service.lastSuccessAt).map(service=><p key={service.kind}>{service.name} · Last successful read: {new Date(service.lastSuccessAt!).toLocaleString(undefined,{dateStyle:'short',timeStyle:'short'})}</p>)}
-          </details>}{item.id==='messaging'&&onOpenMessagingWork&&<div className="connection-task-action"><button className="team-primary" disabled={navigationLocked||messagingWorkBlocked||!canOpenFax} onClick={()=>{if(canOpenFax&&!navigationLocked&&!messagingWorkBlocked)onOpenMessagingWork();}}>{messagingWorkLabel}</button><small>Prepare and review a draft. Delivery is checked for each fax.</small></div>}</div>;})}</div>
+          </details>{item.id==='messaging'&&onOpenMessagingWork&&<div className="connection-task-action"><button className="team-primary" disabled={navigationLocked||messagingWorkBlocked||!canOpenFax} onClick={()=>{if(canOpenFax&&!navigationLocked&&!messagingWorkBlocked)onOpenMessagingWork();}}>{messagingWorkLabel}</button><small>Prepare and review a draft. Delivery is checked for each fax.</small></div>}</div>;})}</div>
         </section>;
       })}
       {(['practice_setup','coming_soon'] as const).map(kind=>{
         const cards=connectionCards.filter(item=>catalog?.readiness?.[item.id]?.state===kind&&(kind==='coming_soon'||guidedConnections&&!catalog?.[item.id]));
         return cards.length>0&&<section key={kind} className="connection-group" aria-label={kind==='coming_soon'?'Coming soon':'Managed by your practice'}>
           <h2>{kind==='coming_soon'?'Coming soon':'Managed by your practice'}</h2>{cards.map(item=><article key={item.id} className="connection-card-box">
-            <h3>{titles[item.id]}</h3><p>{summary(item.id).reason}</p><p>{kind==='coming_soon'?'No connection or request is started here.':'Ask your practice administrator to finish setup.'}</p>
-            <details className="connection-state-help"><summary>Saved work recovery</summary><p>Check a private draft or the exact outcome of an earlier request. This does not connect an account.</p>
+            <div className="connection-unavailable-row"><h3>{titles[item.id]}</h3><span className="connection-badge">{kind==='coming_soon'?'Coming soon':'Practice setup required'}</span></div>
+            <details className="connection-state-help"><summary>Setup and saved work</summary><p>{summary(item.id).reason}</p><p>{kind==='coming_soon'?'No connection or request is started here.':'Ask your practice administrator to finish setup.'}</p><p>Check a private draft or the exact outcome of an earlier request. This does not connect an account.</p>
               <button disabled={navigationLocked} onClick={()=>recoverConnection(item.id)}>Review saved {titles[item.id]} work</button></details>
           </article>)}
         </section>;
       })}
-      {ehr != null&&<section className="connection-group" aria-label="Practice records"><h2>Practice records</h2>
-        <button className="settings-card connection-card" disabled={navigationLocked} onClick={()=>visit('ehr')}>
-          <span className="connection-card-copy"><strong>Practice appointments</strong><small>Choose appointments for a visit. Practice access is checked when you open.</small></span>
-          <span className="connection-card-action">Open <span aria-hidden="true">›</span></span>
+      {!addingConnection&&(ehr != null||practiceRecordActions)&&<section className="connection-group" aria-label="Practice records"><h2>Practice records</h2>
+        <button className="settings-card connection-card connection-record-row" disabled={leaveLocked} onClick={()=>practiceRecordActions?setAddingConnection(true):visit('ehr')}>
+          <span className="connection-card-copy"><strong>{practiceRecordActions?'Choose your records system':'Practice appointments'}</strong><small>{practiceRecordActions?'Atlas.MD, Elation, Tebra and Athena':'Choose appointments for a visit. Access is checked when opened.'}</small></span>
+          <span className="connection-row-chevron" aria-hidden="true">›</span>
         </button>
       </section>}
-      {!connectionCards.length && ehr == null && <p>No connection setup is available for this account.</p>}
-      {guidedConnections&&<aside className="connection-next-services"><h2>Other services</h2>
+      {!connectionCards.length && ehr == null && !practiceRecordActions && <p>No connection setup is available for this account.</p>}
+      {guidedConnections&&!practiceRecordActions&&<aside className="connection-next-services"><h2>Other services</h2>
         <p>{ATHENA_CONNECTION_BUILD?'Athena schedule access is managed through your Cosmaneura practice connection.':'Additional EHR connections are managed by your practice.'}</p>
         <p>Connecting an account does not automatically import its contents into a visit or give a bot permission to act.</p>
       </aside>}

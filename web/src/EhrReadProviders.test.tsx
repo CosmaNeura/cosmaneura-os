@@ -58,3 +58,22 @@ it('keeps Athena allergy default and locks both selectors during an explicitly c
  await act(async()=>{records.value='medications';records.dispatchEvent(new Event('change',{bubbles:true}));});await click('Check Athena medication access');await act(async()=>button('Load authorized patients')!.click());await wait(()=>expect(finish).toBeTypeOf('function'));expect(records.disabled).toBe(true);expect(selector().disabled).toBe(true);expect(busy.mock.lastCall?.[0]).toBe(true);
  await act(async()=>{records.value='allergies';records.dispatchEvent(new Event('change',{bubbles:true}));});expect(button('Check Athena medication access')).toBeTruthy();expect(athenaAllergyApi.status).not.toHaveBeenCalled();const command=vi.mocked(athenaMedicationApi.execute).mock.calls[0][1];await act(async()=>finish(await athenaMedicationPatientsFixture(command)));await wait(()=>expect(selector().disabled).toBe(false));expect(records.disabled).toBe(false);expect(busy.mock.lastCall?.[0]).toBe(false);
 });
+
+it('applies one explicit catalog provider intent without reading records or resetting later manual choices',async()=>{
+ await mount();const request={provider:'athena' as const,intent:{}};
+ const render=()=>act(async()=>root.render(<EditorRecoveryContext.Provider value={context}><EhrReadProviders {...{requestedProvider:request}} identity={identity} enabled workspace={ehrVisit} onAuthenticationLost={denied} onBusyChange={busy}/></EditorRecoveryContext.Provider>));
+ await render();await wait(()=>expect(button('Check Athena allergy access')).toBeTruthy());expect(selector().value).toBe('athena');expect(ehrReadApi.status).not.toHaveBeenCalled();expect(ehrReadApi.execute).not.toHaveBeenCalled();
+ await choose('elation');await render();expect(selector().value).toBe('elation');expect(button('Check Elation access')).toBeTruthy();
+});
+
+it('waits for an explicit catalog task to become active, then keeps both provider journals mounted',async()=>{
+ const request={provider:'athena' as const,intent:{}};
+ const render=(active:boolean)=>act(async()=>root.render(<EditorRecoveryContext.Provider value={context}><EhrReadProviders requestedProvider={request} active={active} identity={identity} enabled workspace={ehrVisit} onAuthenticationLost={denied} onBusyChange={busy}/></EditorRecoveryContext.Provider>));
+ await render(false);expect(selector().value).toBe('elation');expect(ehrReadApi.status).not.toHaveBeenCalled();await render(true);await wait(()=>expect(button('Check Athena allergy access')).toBeTruthy());expect(selector().value).toBe('athena');
+ await choose('elation');const elation=host.querySelector('[aria-label="Elation appointments"]');expect(elation).toBeTruthy();await render(false);await render(true);expect(selector().value).toBe('elation');expect(host.querySelector('[aria-label="Elation appointments"]')).toBe(elation);expect(ehrReadApi.execute).not.toHaveBeenCalled();
+});
+it('rejects a provider intent during active work without switching later after cleanup',async()=>{
+ await mount();await click('Check Elation access');let finish!:(value:EhrReceipt)=>void;vi.mocked(ehrReadApi.execute).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));await act(async()=>button('Load appointments')!.click());await wait(()=>expect(finish).toBeTypeOf('function'));
+ const request={provider:'athena' as const,intent:{}};await act(async()=>root.render(<EditorRecoveryContext.Provider value={context}><EhrReadProviders requestedProvider={request} identity={identity} enabled workspace={ehrVisit} onAuthenticationLost={denied} onBusyChange={busy}/></EditorRecoveryContext.Provider>));expect(selector().value).toBe('elation');expect(selector().disabled).toBe(true);
+ const pending=(await retained('elation')).pending!;if(pending.kind!=='read')throw new Error();await act(async()=>finish(await ehrWindowReceipt(pending.request)));await wait(()=>expect(selector().disabled).toBe(false));expect(selector().value).toBe('elation');expect(button('Check Athena allergy access')).toBeUndefined();
+});
