@@ -18,6 +18,6 @@ export function PreviewSession({children,session=previewSession}:{
     <p>This preview uses invented information. No real account is signed in.</p>
     <p>Continue when you are ready to use the preview again. Saved draft recovery is kept separate from this choice.</p>
     {state.storageError&&<p role="alert">This device could not remember your preview session choice. The workspace is closed here. Close this window before leaving the device, or try again.</p>}
-    <button className="button" onClick={enter}>Continue preview</button>
+    <button className="button" style={{minHeight:44,whiteSpace:'normal'}} onClick={enter}>Continue preview</button>
   </section></main>;
 }
