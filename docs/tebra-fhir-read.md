@@ -200,3 +200,7 @@ invented examples are in `evidence/tebra-fhir-snapshot/` outside the repository.
 The patient-selection screen, human review, saved-source custody, recovery and
 Chief integration remain unfinished, as do live authentication and vendor
 qualification. This module adds no runtime or connected UI action.
+
+Mac Studio independently passes the same 36 focused cases and changed-file
+lint/type checks at `f9d70c6`; all 2,953 committed source files remain unchanged.
+Its receipts are in `evidence/mac-studio/tebra-fhir-snapshot/` outside the repo.

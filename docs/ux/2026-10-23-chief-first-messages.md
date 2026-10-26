@@ -775,3 +775,17 @@ returning to the same named chat. Generic task Back keeps its established
 compose-return behavior. The sources landmark is named **Saved sources** to
 match the visible task. Final compiled-browser/native and delivery outcomes are
 recorded separately in the workstream checkpoint when completed.
+
+The `f1c8bce` dialog slice subsequently passed 89 focused cases across 12 files,
+both type checks, independent source review and both mounted StrictMode cases.
+The compiled browser passed 93 checks across three scenarios; phone layouts
+retain simultaneous Back/Send visibility, while the desktop uses its normal
+document scrolling. One hosted native case verifies both Details entry paths
+from a focused composer, visible 44px Done targets, retained drafts/positions
+and correct return controls, with zero media attachments. All 2,955 frozen
+source files stayed unchanged. Preview37 is installed and launched on the
+phone, with build37 independently confirmed. The local rehearsal serves the
+same source at its existing origin. No uninstall or storage reset occurred.
+See `CHECKPOINT-DIALOG-FOCUS.json` and `native/preview37-phone-summary.json` in
+the connector workstream. Physical touch, VoiceOver, haptics and draft contents
+across the update remain unverified; the latest haptic report was "Not sure."

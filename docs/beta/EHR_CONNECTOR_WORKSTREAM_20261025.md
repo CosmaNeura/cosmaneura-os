@@ -540,14 +540,17 @@ or a connected action.
 
 ## Latest phone delivery
 
-Preview36 (`59a92dc`) is installed and launched in place, with the phone's
+Preview37 (`f1c8bce`) is installed and launched in place, with the phone's
 reported build independently verified. It includes the qualified Elation
 medication workflow above, saved Research packet cards in Chief, and exact
 reading-position restoration after source review without early reply
-acknowledgment. Its browser, Mac Studio and native checks pass, with zero
-images or native media attachments. The local rehearsal serves the same
-source. See `CHECKPOINT-RESEARCH-SCROLL.json` and
-`native/preview36-phone-summary.json` in the connector workstream.
+acknowledgment. It also corrects Details/Message-details return focus and cited
+source navigation without reopening the composer. Its focused, independent
+review, browser and native checks pass, with zero images or native media
+attachments. The local rehearsal serves the same source. See
+`CHECKPOINT-DIALOG-FOCUS.json` and `native/preview37-phone-summary.json` in the
+connector workstream. Mac Studio separately qualified the new Tebra snapshot
+formatter's 36 cases, lint and types against 2,953 unchanged committed files.
 
 This delivery uses invented provider data. It does not activate the Tebra
 FHIR reader or establish live EHR access, medication reconciliation, broader
