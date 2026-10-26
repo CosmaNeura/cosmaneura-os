@@ -8,7 +8,7 @@ const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const identity={mode:'clerk_jwt' as const,getToken:async()=>null},response=(value:unknown)=>new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 beforeEach(()=>vi.stubGlobal('crypto',webcrypto));afterEach(()=>vi.unstubAllGlobals());
 async function fixture(){const window=await ehrWindowReceipt(),verified=await ehrVerifiedReceipt(window),command=ehrMedicationsCommand(verified),medications=await ehrMedicationsReceipt(verified,command);return {window,verified,command,medications};}
-async function rehash(r:EhrReceipt){if(r.observation.kind==='window')throw new Error();r.observation.item.sha256=await ehrItemHash(r.observation.item);r.payload_sha256=await ehrHash(r.observation);return r;}
+async function rehash(r:EhrReceipt){if(r.observation.kind==='window'||r.observation.kind==='lab_reports')throw new Error();r.observation.item.sha256=await ehrItemHash(r.observation.item);r.payload_sha256=await ehrHash(r.observation);return r;}
 async function rowReceipt(row:Partial<EhrMedication>={}){const f=await fixture();return ehrMedicationsReceipt(f.verified,f.command,{coverage:'end_of_results',total_count:1,items:[{...ehrMedicationRow,...row}]});}
 
 it('opts into medication availability without changing legacy status or inferring unrequested access',async()=>{

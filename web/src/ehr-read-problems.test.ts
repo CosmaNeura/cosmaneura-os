@@ -8,7 +8,7 @@ const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const identity={mode:'clerk_jwt' as const,getToken:async()=>null},response=(value:unknown)=>new Response(JSON.stringify(value),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
 beforeEach(()=>vi.stubGlobal('crypto',webcrypto));afterEach(()=>vi.unstubAllGlobals());
 async function fixture(){const window=await ehrWindowReceipt(),verified=await ehrVerifiedReceipt(window),command=ehrProblemsCommand(verified),problems=await ehrProblemsReceipt(verified,command);return {window,verified,command,problems};}
-async function rehash(r:EhrReceipt){if(r.observation.kind==='window')throw new Error();r.observation.item.sha256=await ehrItemHash(r.observation.item);r.payload_sha256=await ehrHash(r.observation);return r;}
+async function rehash(r:EhrReceipt){if(r.observation.kind==='window'||r.observation.kind==='lab_reports')throw new Error();r.observation.item.sha256=await ehrItemHash(r.observation.item);r.payload_sha256=await ehrHash(r.observation);return r;}
 it('opts into problem availability without changing the legacy status command or reply',async()=>{
  const legacy={contract_version:1,provider:'elation',mode:'synthetic',status:'ready',...ehrBinding,practice:ehrPractice},fetcher=vi.fn().mockResolvedValueOnce(response(legacy)).mockResolvedValueOnce(response({...legacy,problems:'available'}));vi.stubGlobal('fetch',fetcher);
  expect(await ehrReadApi.status(identity)).toEqual(legacy);expect((await ehrReadApi.status(identity,undefined,'elation',true)).problems).toBe('available');expect(fetcher.mock.calls.map(c=>JSON.parse(c[1].body))).toEqual([{action:'status'},{action:'status',include_problems:true}]);

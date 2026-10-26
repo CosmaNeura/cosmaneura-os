@@ -164,7 +164,9 @@ class EhrReadRequest(OwnerScope, Base):
             "(kind='fhir_medications' AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL AND fhir_grant_id IS NOT NULL "
             "AND athena_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL) OR "
             "(kind='core_allergies' AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL AND athena_grant_id IS NOT NULL "
-            "AND fhir_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL)", name="ck_ehr_read_request_kind"),
+            "AND fhir_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL) OR "
+            "(kind IN ('lab_reports','lab_report') AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL AND fhir_grant_id IS NULL "
+            "AND athena_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL)", name="ck_ehr_read_request_kind"),
         CheckConstraint("(kind IN ('fhir_patients','fhir_medications') AND window_start IS NULL AND window_end IS NULL AND practice_id IS NULL) OR "
             "(kind IN ('core_patients','core_allergies') AND window_start IS NULL AND window_end IS NULL AND practice_id IS NOT NULL) OR "
             "(kind NOT IN ('fhir_patients','fhir_medications','core_patients','core_allergies') AND window_start IS NOT NULL AND window_end IS NOT NULL AND practice_id IS NOT NULL "

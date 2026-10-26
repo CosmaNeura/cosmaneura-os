@@ -34,16 +34,19 @@ class SyntheticElationReads:
     def __init__(self, scopes: tuple[ElationReadScope, ...], transport: httpx.MockTransport, *,
                  enabled: Callable[[], bool], timezone: str = "UTC",
                  problems_enabled: Callable[[], bool] = lambda: False,
-                 medications_enabled: Callable[[], bool] = lambda: False):
+                 medications_enabled: Callable[[], bool] = lambda: False,
+                 labs_enabled: Callable[[], bool] = lambda: False):
         if (type(scopes) is not tuple or not 1 <= len(scopes) <= 20
                 or any(type(scope) is not ElationReadScope or scope.environment != "sandbox" for scope in scopes)
                 or len({scope.commitment() for scope in scopes}) != len(scopes)
                 or type(transport) is not httpx.MockTransport or not callable(enabled)
-                or not callable(problems_enabled) or not callable(medications_enabled)):
+                or not callable(problems_enabled) or not callable(medications_enabled)
+                or not callable(labs_enabled)):
             raise ValueError("explicit_synthetic_ehr_installation_required")
         self._scopes, self._transport, self._enabled = scopes, transport, enabled
         self._problems_enabled = problems_enabled
         self._medications_enabled = medications_enabled
+        self._labs_enabled = labs_enabled
         ZoneInfo(timezone)
         self.timezone = timezone
 
@@ -55,6 +58,22 @@ class SyntheticElationReads:
 
     def medications_available(self, scope):
         return self.current(scope) and self._medications_enabled() is True
+
+    def labs_available(self, scope):
+        return self.current(scope) and self._labs_enabled() is True
+
+    def lab_reports(self, scope, appointment_id, *, authorize, verify_identity):
+        from cosmas_os.adapters.elation_lab_read_runtime import lab_reports
+
+        return lab_reports(self, scope, appointment_id, authorize=authorize, verify_identity=verify_identity)
+
+    def lab_report(self, scope, appointment_id, page, report_id, *, expected_candidates_sha256,
+                   authorize, verify_identity):
+        from cosmas_os.adapters.elation_lab_read_runtime import lab_report
+
+        return lab_report(self, scope, appointment_id, page, report_id,
+            expected_candidates_sha256=expected_candidates_sha256,
+            authorize=authorize, verify_identity=verify_identity)
 
     def _adapter(self, scope, authorize, *, problems=False, medications=False):
         async def allowed(selected):

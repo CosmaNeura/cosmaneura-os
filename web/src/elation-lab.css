@@ -1,0 +1,7 @@
+.elation-lab-items {padding-inline-start:1.1rem;min-width:0;}
+.elation-lab-items>li {margin-block:.7rem;min-width:0;}
+.elation-lab-fields {display:grid;gap:.55rem;min-width:0;}
+.elation-lab-fields>div {min-width:0;}
+.elation-lab-fields dt {font-weight:600;overflow-wrap:anywhere;}
+.elation-lab-fields dd {margin:0;min-width:0;}
+.elation-lab-value {white-space:pre-wrap;overflow-wrap:anywhere;}

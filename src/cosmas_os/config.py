@@ -107,6 +107,7 @@ class Settings(BaseSettings):
     # Additional clinical read scope; appointments retain their three-scope grant.
     workspace_elation_problems_enabled: bool = False
     workspace_elation_medications_enabled: bool = False
+    workspace_elation_labs_enabled: bool = False
     workspace_tebra_fhir_enabled: bool = False
     workspace_athena_allergies_enabled: bool = False
     google_connection_client_id: str = ""

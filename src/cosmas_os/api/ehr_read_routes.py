@@ -14,6 +14,7 @@ from cosmas_os.api.capture_schemas import _unique_object
 from cosmas_os.application import (
     athena_allergy_ehr,
     ehr_reads,
+    elation_lab_ehr,
     elation_sandbox_installation,
     model_work,
     tebra_fhir_ehr,
@@ -98,11 +99,13 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                     return tebra_fhir_ehr.status(*scope, enabled=configuration().workspace_ehr_read_available and configuration().workspace_tebra_fhir_enabled,
                         port=select_runtime(runtime(), "tebra", "fhir"), reauthenticate=reauthenticate)
                 result = ehr_reads.status(*scope, enabled=configuration().workspace_ehr_read_available,
-                    port=runtime(), reauthenticate=reauthenticate, provider=body.provider, include_problems=body.include_problems is True, include_medications=body.include_medications is True)
+                    port=runtime(), reauthenticate=reauthenticate, provider=body.provider, include_problems=body.include_problems is True, include_medications=body.include_medications is True, include_labs=body.include_labs is True)
                 if body.include_problems is True and not configuration().workspace_elation_problems_enabled:
                     result["problems"] = "not_enabled"
                 if body.include_medications is True and not configuration().workspace_elation_medications_enabled:
                     result["medications"] = "not_enabled"
+                if body.include_labs is True and not configuration().workspace_elation_labs_enabled:
+                    result["labs"] = "not_enabled"
                 return result
             port = service(body.provider, body.protocol)
             if body.action == "install":
@@ -135,6 +138,13 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                     observation_id=str(body.observation_id), observation_sha256=body.observation_sha256,
                     item_handle=str(body.item_handle), item_sha256=body.item_sha256,
                     port=port, reauthenticate=reauthenticate, provider=body.provider)
+            elif body.action in ("lab_reports", "lab_report"):
+                if not configuration().workspace_elation_labs_enabled:
+                    raise ws.WorkspaceError("ehr_read_labs_unavailable", 404)
+                result = elation_lab_ehr.perform(*scope, action=body.action, key=body.idempotency_key,
+                    connection_id=str(body.connection_id), binding_sha256=body.binding_sha256, workspace_id=str(body.workspace_id),
+                    observation_id=str(body.observation_id), observation_sha256=body.observation_sha256,
+                    item_handle=str(body.item_handle), item_sha256=body.item_sha256, port=port, reauthenticate=reauthenticate)
             elif body.action == "fhir_patients":
                 result = tebra_fhir_ehr.patients(*scope, key=body.idempotency_key,
                     connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,

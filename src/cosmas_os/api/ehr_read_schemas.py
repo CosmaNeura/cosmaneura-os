@@ -42,8 +42,9 @@ class ProviderCommand(Protected):
 class Status(ProviderCommand):
     include_problems: Literal[True] | None = None
     include_medications: Literal[True] | None = None
+    include_labs: Literal[True] | None = None
 
-    @field_validator("include_problems", "include_medications", mode="before")
+    @field_validator("include_problems", "include_medications", "include_labs", mode="before")
     @classmethod
     def explicit_capability(cls, value):
         if value is not True:
@@ -54,7 +55,9 @@ class Status(ProviderCommand):
 
     @model_validator(mode="after")
     def athena_shape(self):
-        if self.protocol == "core" and {"include_problems", "include_medications"} & self.model_fields_set:
+        if self.include_labs is True and (self.provider != "elation" or self.protocol is not None):
+            raise ValueError("invalid_elation_labs_status")
+        if self.protocol == "core" and {"include_problems", "include_medications", "include_labs"} & self.model_fields_set:
             raise ValueError("invalid_athena_status")
         return self
 
@@ -138,6 +141,24 @@ class Medications(ProviderCommand):
         return self
 
 
+class LabRead(ProviderCommand):
+    action: Literal["lab_reports", "lab_report"]
+    connection_id: UUID
+    binding_sha256: Digest
+    workspace_id: UUID
+    observation_id: UUID
+    observation_sha256: Digest
+    item_handle: UUID
+    item_sha256: Digest
+    idempotency_key: IdempotencyKey
+
+    @model_validator(mode="after")
+    def elation_only(self):
+        if self.provider != "elation" or self.protocol is not None:
+            raise ValueError("explicit_elation_labs_required")
+        return self
+
+
 class Inspect(ProviderCommand):
     action: Literal["inspect"]
     observation_id: UUID
@@ -211,7 +232,7 @@ class Install(ProviderCommand):
     idempotency_key: IdempotencyKey
 
 
-EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | Inspect | Resolve | Install | FhirPatients | FhirMedications | AthenaPatients | AthenaAllergies, Field(discriminator="action")])
+EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | LabRead | Inspect | Resolve | Install | FhirPatients | FhirMedications | AthenaPatients | AthenaAllergies, Field(discriminator="action")])
 
 
 class ReviewEhr(ProviderCommand):
