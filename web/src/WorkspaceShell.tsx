@@ -1171,6 +1171,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const presentationBlocked=busy||!!pending||clinicalPreparing||viewNavigationLocked||captureTransition||captureDraftLocked||recordingTransition||homeBusy||homePending||privateLinkPending||recoveryState==='failed'||conflict||!!recoveryOffers.length;
   const contextChoice=contextBot?team?.configuration.bots.find(item=>botAddress(item)===contextBot):null;
   const messagesTaskLabel=messagesTask??(mobilePanel!=='Conversation'?({Notebook:'Notes',Sources:'Saved sources',Review:'Review note',Work:'Follow-up and linked work'} as Record<string,string>)[mobilePanel]:null);
+  const dialogFocusEpisode=useMemo(()=>({generation:generation.current}),[authenticated,identity,accountAccess?.recoveryScope,connectionGeneration,generation.current,workspace?.id,selected,messagesMode,messagesTaskLabel,panel,settingsOpen,settingsEntry,practiceOpen,practicePage,contextBot,visitSourceTaskOpen,privateRecordingEntry,recordingMinimized,reviewHandoffId,selectedResult]);
+  const currentDialogFocusEpisode=useRef<typeof dialogFocusEpisode|null>(dialogFocusEpisode);currentDialogFocusEpisode.current=dialogFocusEpisode;
+  useLayoutEffect(()=>{currentDialogFocusEpisode.current=dialogFocusEpisode;return()=>{if(currentDialogFocusEpisode.current===dialogFocusEpisode)currentDialogFocusEpisode.current=null;};},[dialogFocusEpisode]);
+  const canRestoreDialogFocus=()=>currentDialogFocusEpisode.current===dialogFocusEpisode&&generation.current===dialogFocusEpisode.generation&&previousIdentity.current===authenticated&&!draftsSuspended.current&&document.visibilityState!=='hidden'&&
+    (!authenticated||(authenticated.mode==='desktop_native'?authenticated.isCurrent():!authenticated.nativeSession||authenticated.nativeSession.isCurrent()));
 
   useEffect(()=>{
     if(!messagesMode||settingsOpen||practiceOpen)return;
@@ -1270,8 +1275,8 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       <div className="team-sidebar-bottom"><p><span className="team-local-dot" />{authenticated ? "Signed-in workspace" : "Local workspace"}</p><small>Invented data · private to you</small></div>
     </aside>
     <div className="team-main">
-      {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)}/>}
-      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openOutlookWork('conversation'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined}/>}
+      {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)} canRestoreFocus={canRestoreDialogFocus}/>}
+      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openOutlookWork('conversation'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined} canRestoreFocus={canRestoreDialogFocus}/>}
       {nativeHome||nativeWorkspace?<header className="native-home-header">
         {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
         <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
@@ -1293,7 +1298,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           {(authenticated || identity) && <button disabled={connectionNavigationLocked || !practiceOpen && (busy || !!pending || captureDraftLocked || captureNavigationLocked)}
           onClick={() => leaveTeamSettings(()=>{setSettingsOpen(false);setPracticeOpen(!practiceOpen);setPracticeOpened(true);})}>{practiceOpen ? "Back to notebook" : "Practice work"}</button>}
           <span className="team-pill">Synthetic preview</span>{!phoneLayout()&&accountControls}</div></header>}
-      {confirmTeamExit&&<WorkspaceDialog title="Unsaved team changes" onClose={()=>{setConfirmTeamExit(false);setTeamSaveExit(false);}}>
+      {confirmTeamExit&&<WorkspaceDialog title="Unsaved team changes" onClose={()=>{setConfirmTeamExit(false);setTeamSaveExit(false);}} canRestoreFocus={canRestoreDialogFocus}>
         <p>Your team has unsaved changes. Save them, discard this local draft, or keep editing.</p>
         {pending?.type==='team'?<p>The team save is unconfirmed. Its exact request is retained; check or retry it before discarding.</p>:null}
         <button className="team-primary" disabled={busy||!!pending||!teamDraft||!validTeamConfiguration(teamDraft)||!!team&&setupChange(team.configuration,teamDraft!)&&!(setupApproval?.revision===team.revision&&setupApproval.configurationKey===JSON.stringify(teamDraft))} onClick={()=>{setTeamSaveExit(true);saveTeam();}}>Save changes</button>
@@ -1315,14 +1320,14 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onOpenNotebook={stageAthenaNotebook}/>
       </AccountRecoveryContext.Provider>}
       <div className="workspace-main-content" hidden={practiceOpen||athenaTaskOpen}>
-      {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox identity={authenticated} inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization}
+      {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox identity={authenticated} inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization} canRestoreFocus={canRestoreDialogFocus}
         drafts={currentInboxDrafts} onRefreshDrafts={()=>void session.conversations.drafts.refresh()}
         locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked}
         onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
         onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated,failure)}
         onOrganize={(row,change)=>session.inboxPreferences.set(row,change)} onRestoreAll={()=>session.inboxPreferences.restoreAll()} onInspect={row=>void session.inboxPreferences.inspect(row)} onCloseMenu={()=>session.inboxPreferences.closeMenu()}
         onReloadOrganization={()=>void session.inboxPreferences.bind(inboxPreferencesHost(),true)} onRename={target=>setInboxRename({target,identity:authenticated,scope:accountAccess?.recoveryScope})}/>}
-      {inboxRename&&inboxRename.identity===authenticated&&accountAccess?.recoveryScope===inboxRename.scope&&<WorkspaceDialog title="Rename notebook" closeLabel="Close rename notebook" onClose={closeInboxRename}>
+      {inboxRename&&inboxRename.identity===authenticated&&accountAccess?.recoveryScope===inboxRename.scope&&<WorkspaceDialog title="Rename notebook" closeLabel="Close rename notebook" onClose={closeInboxRename} canRestoreFocus={canRestoreDialogFocus}>
         <NotebookTitleEditor identity={inboxRename.identity} recovery={accountAccess??null} workspaceId={inboxRename.target.workspaceId} title={inboxRename.target.title} titleRevision={inboxRename.target.titleRevision} onClose={closeInboxRename} onAccessLost={failure}
           onSaved={receipt=>{setWorkspace(current=>current?.id===receipt.workspace_id&&current.notebook?{...current,notebook:{...current.notebook,title:receipt.title,title_revision:receipt.title_revision}}:current);closeInboxRename();void session.conversations.refresh(inboxRename.identity,false,failure);}}/>
       </WorkspaceDialog>}
@@ -1669,7 +1674,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               <p>{team?.llm.enabled ? phoneChiefConversation?"Write naturally. Chief can help organize your notes and coordinate your team.":"Ask a question, organize your notes, or think through the next step. Your team works from the saved context you choose." : "Review saved sources with your team. Advanced skills will connect here as their services become ready."}</p>
               {messagesMode&&bot?.role==='chief'&&chiefStarters}
               {bot?.role!=='chief'&&<button disabled={locked || !team?.revision || !bot?.enabled} onClick={() => {if(session.presentation.enabled){updateThought(template?.prompt??'Review this encounter');setQuestionFocus(value=>value+1);}else ask(template?.prompt);}}>{template?.prompt ?? "Review this encounter"}<span aria-hidden="true"> ↗</span></button>}</div>}
-            <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
+            <ConversationEntries presentation={messagesMode?'messages':'workspace'} projection={conversation} latestSourceRevision={latestSourceRevision} busy={busy} recoveryBlocked={recoveryBlocked} locked={locked||viewNavigationLocked||captureNavigationLocked||captureDraftLocked} canRestoreFocus={canRestoreDialogFocus}
               onWork={()=>{setPanel('Work');setMobilePanel('Work');}} onSource={openConversationSource}
               onCheck={checkEntryResult} onAction={action=>{
                 if(action.kind==='review_note'){setPanel('Review');setMobilePanel('Review');}

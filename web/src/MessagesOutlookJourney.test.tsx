@@ -45,7 +45,7 @@ it('uses one retained Outlook owner from Chief and sources, then appends a revie
  await click('Prepare Chief draft');await wait(()=>expect(question().disabled).toBe(false));expect(question().value).toContain('Keep my exact invented Chief directions.');expect(question().value).toContain('Review the human-selected email source');expect(task()).toBeUndefined();
  expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();
  await click('Details');await click('Saved sources');await click('Review Outlook email');await wait(()=>expect(task()).toBeDefined());expect(host.querySelectorAll('.outlook-message-panel')).toHaveLength(1);expect(stats().reads).toBe(2);await click('‹ Back to saved sources');
- expect([...host.querySelectorAll('[aria-label="Scribe sources"]')].find(visible)?.textContent).toContain('Invented message for Jordan Cypress');expect(ask).not.toHaveBeenCalled();
+ expect([...host.querySelectorAll('section[aria-label="Saved sources"]')].find(visible)?.textContent).toContain('Invented message for Jordan Cypress');expect(ask).not.toHaveBeenCalled();
 });
 it('resolves a lost body result after reload with the same encrypted command and no additional Outlook read',async()=>{
  history.replaceState(null,'','?scenario=outlook-lost-read#cosmas/home');await openChat();await type('Retain these invented directions through reload.');await openTask();await click('Check email access');await click('Select email');

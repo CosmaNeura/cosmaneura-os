@@ -31,6 +31,9 @@ it('closes provenance when the conversation changes and retains Workspace markup
   await render('messages',{...projection,botAddress:'follow_up'});expect(host.querySelector('[role=dialog]')).toBeNull();
   await render('workspace');expect(host.textContent).not.toContain('GPT-4.1');expect(host.querySelectorAll('details')).toHaveLength(3);expect(host.querySelector('.messages-delivery')).toBeNull();
 });
+it('does not refocus a retained Message details button after its local conversation episode changes',async()=>{
+ await render();const opener=host.querySelector<HTMLButtonElement>('.messages-source-details')!;await act(async()=>opener.click());const focus=vi.spyOn(opener,'focus');await render('messages',{...projection,botAddress:'follow_up'});expect(host.querySelector('.messages-source-details')).toBe(opener);expect(focus).not.toHaveBeenCalled();await render();expect(focus).not.toHaveBeenCalled();
+});
 
 it.each(['messages','workspace'] as const)('shows two saved-source cards in %s with distinct time associations and exact source actions',async presentation=>{
  const material=(id:string,createdAt:string)=>({kind:'material' as const,sourceKind:'ehr' as const,id:`source:${id}`,sourceId:id,label:'Elation: reviewed problem list',createdAt,state:'current' as const});

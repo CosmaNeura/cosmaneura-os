@@ -10,7 +10,7 @@ export function EncounterSources({ workspace, selectedSource, locked, source, ev
   const reviewedThrough=workspace.note?.latest?.source_revision;
   const entries = [...workspace.entries].reverse().filter(e => ["synthetic_source", "evidence", "scratchpad", "google_message", "microsoft_message", "google_calendar", "efax_inbound_source", "fax_inbound_source", "ehr_read_source", "calendar_import_source"].includes(e.kind)||parseSharedClinicalNote(e));
   const current=currentSharedNote(workspace);
-  return <section aria-label="Scribe sources">
+  return <section aria-label="Saved sources">
     <div className="team-notebook-title"><h2>Saved visit sources</h2><span className="team-pill">{entries.length} saved</span></div>
     {onReviewOutlook&&<section className="outlook-source-action" aria-label="Outlook email source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewOutlook}>Review Outlook email</button><p>Choose an email and check that it belongs to this visit before saving a source.</p></section>}
     {onReviewAppointment&&<section className="ehr-source-action" aria-label="Appointment source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewAppointment}>Review EHR records</button><p>Choose the patient and appointment, then review the available records before saving a source. Your conversation draft stays in place.</p></section>}

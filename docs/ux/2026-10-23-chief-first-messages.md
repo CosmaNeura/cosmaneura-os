@@ -757,3 +757,21 @@ remains held and was never installed. See `CHECKPOINT-RESEARCH-SCROLL.json` and
 touch, haptics, VoiceOver and draft contents across the phone update remain
 unverified. The complete all-kind material transcript and remaining accepted
 mobile recommendations are not claimed complete.
+
+### Dialog return focus
+
+Details and Message details now explicitly retain their invoking button when
+opening a sheet, including when native button activation leaves the composer
+focused. Closing restores the eligible control without scrolling or reopening
+the composer. A citation opens its source with the surviving message button as
+the return target, so Back preserves the draft and reading position.
+
+The shared dialog captures its opener before descendant autofocus and retains
+it through effect replay. It refuses hidden, disabled, inert or obsolete
+controls, respects focus already owned by another task/dialog, and preserves
+legitimate editor restoration for ordinary same-context dialogs. The existing
+shell identity and view lifetime fence stale callbacks, including leaving and
+returning to the same named chat. Generic task Back keeps its established
+compose-return behavior. The sources landmark is named **Saved sources** to
+match the visible task. Final compiled-browser/native and delivery outcomes are
+recorded separately in the workstream checkpoint when completed.
