@@ -1,14 +1,17 @@
-# Tebra FHIR medication-history reader
+# Tebra clinical medication review
 
-This is an isolated, synthetic-only engineering slice. It reads and projects one
-already-authorized FHIR patient's medication records. It is not a connected Tebra
-product, a reconciled medication list, or an end-to-end Chief workflow.
+This synthetic workflow takes an explicitly authorized clinical patient through
+medication-record review, saved-source recovery and preparation of an existing
+Chief draft. It does not establish live Tebra access, a reconciled medication
+list, prescribing or dispensing.
 
 `TebraFhirReadAdapter` is disabled by default. Even when enabled it accepts only an
 exact `httpx.MockTransport`; a real HTTP transport is refused before any request.
-No runtime registration, OAuth acquisition, UI action, source persistence, or
-write capability imports or invokes this adapter. Existing Tebra SOAP behavior is
-unchanged. A SOAP patient ID must never be substituted for a FHIR patient ID.
+`SyntheticTebraFhirReads` explicitly registers this reader behind a separate
+clinical connection and the default-off `workspace_tebra_fhir_enabled` switch.
+Existing Tebra SOAP appointment behavior is preserved. A SOAP patient ID must
+never be substituted for a FHIR patient ID. No OAuth acquisition or clinical
+write capability is implemented.
 
 ## Implemented contract
 
@@ -24,8 +27,9 @@ two server-owned callbacks:
 The scope commitment binds Box, owner, connection, credential generation, FHIR
 patient ID, fixed resource origin, and an opaque current authorization hash. This
 hash is not an OAuth scope string, proof that a token has clinical access, or a
-client-provided permission. Future application code must obtain and verify that
-authority through a qualified server-owned connection. The credential must match
+client-provided permission. The application verifies an immutable, revocable server-owned grant for the
+current account, connection, workspace and patient link; a live installation
+still requires separately qualified vendor authorization. The credential must match
 the exact scope commitment. Neither credential nor access token is persisted in
 the returned projection or provider proof hashes.
 
@@ -90,17 +94,19 @@ or empty pages do not establish an empty complete medication history.
 
 The identity snapshot retains supplied names, identifiers, date of birth,
 administrative gender, active/deceased values, links and managing organization.
-It is available only to the private identity callback/result; the caller must
-decide whether it proves the intended patient.
+The authorized selection and review screens show the recorded identity for an
+explicit human check. Clinical reads reverify the returned Patient against the
+server grant before requesting medication records.
 
 This is a bounded projection, not a complete FHIR validator or display-ready
 clinical summary. Known clinical primitives and selected instruction fields are
 checked; preserved context JSON is not interpreted. Unknown `modifierExtension`
 or unqualified `implicitRules` anywhere in a response causes refusal, since
 silently ignoring one can change clinical meaning. Unsupported representations
-are refused whole. A future human
-review screen and canonical Chief source formatter must explicitly represent the
-retained negation, history, instructions, context and unknowns before admission.
+are refused whole. The review screen presents readable groups of all retained
+clinical fields, including structured-only directions and original numeric
+spelling. The complete canonical source remains available in a nested expansion.
+Neither the display nor the formatter infers missing directions or current use.
 
 ## Limits and custody boundaries
 
@@ -110,8 +116,8 @@ caps aggregate uncompressed response bytes at 262,144 and the complete canonical
 projection at 65,536 bytes. JSON depth/node/string and instruction counts/lengths
 are bounded. A result beyond a limit is refused whole; no field or instruction is
 silently truncated. This projection limit is not the existing 5,000-character
-saved-source allowance, which must be separately enforced by future application
-admission and SQL custody.
+saved-source allowance. The formatter, application admission, browser parser and
+SQL custody separately enforce the complete-source limit.
 
 The returned Bundle must be a searchset. Its `self` link must retain exactly the
 four requested parameters and values; silently ignored or extra clinical filters
@@ -129,7 +135,38 @@ Errors use a fixed local code and never include response bodies or token values.
 All private record/result/credential dataclasses disable generated value reprs.
 No HTTP/logging framework or dependency was added.
 
-## Remaining integration requirements
+## Clinical patient to Chief
+
+In Chief, open **Details → Review EHR records**, choose **Tebra**, then choose
+**Medication records**. Check clinical access, load the authorized patient list,
+select the intended patient and explicitly read medication records. Readable
+original details retain partial dates, negation, recorded qualifiers, codes,
+structured dosing and unknown values. Three explicit confirmations cover patient
+identity, the complete snapshot, and checking outside information before relying
+on it. Saving a source and preparing a Chief draft do not send a message.
+
+The clinical connection is independent of the SOAP appointment connection. Its
+`protocol: fhir` discriminator is required on actions, status, inspection,
+recovery and review. It has no invented numeric practice/customer IDs and does
+not require an external appointment. The existing CosmaBot visit still owns the
+workspace and confirmed patient link. Server-owned grants pin that exact context,
+FHIR identity, authorization hash and connection generation. SQL rejects malformed
+or mutable grant proofs and fences concurrent withdrawal.
+
+The existing EHR request, snapshot, review and source tables provide custody.
+Intent is persisted before provider I/O, no SQL transaction crosses an HTTP
+request, and recovery resolves the original request key without automatically
+resending it. A separate encrypted `ehr-read:tebra:fhir` journal prevents clinical
+work from replacing SOAP or Elation work. Leaving or reopening the task retains
+the Chief draft; active requests block departure.
+
+Reviewed text is saved as `ehr_read_source`. Preparing Chief rereads the current
+workspace and verifies the exact entry/revision/content hash. Current grants,
+patient links, binding generations and both feature switches are checked when
+releasing sources and admitting or settling model work. Withdrawal hides saved
+source text and derived replies while preserving their historical records.
+
+## Remaining vendor requirements
 
 The vendor guide does not establish exact sandbox URLs, usable literal clinical
 OAuth scopes, complete public-client PKCE/token details, issuer/practice context,
@@ -139,11 +176,12 @@ authorization-code instructions coexist with a generic client-secret instruction
 its backend instructions offer `client_credentials` and a JWKS selection while
 explicitly stating JWKS is unsupported. No token flow has been selected or wired.
 
-Next application work needs qualified authorization/custody, exact patient
-selection and verification, runtime opt-in, human review, a faithful bounded source
-formatter, saved-source parent/proof validation, recovery, Chief admission, and
-native UI qualification. None of those gates is claimed by this adapter's unit
-tests. There have been no live clinical API calls or vendor outreach.
+Live authentication, vendor-authorized grant provisioning and actual vendor
+response qualification remain outstanding. Broader chart/lab coverage, medication
+reconciliation, prescriptions and clinical writeback are separate work. No live
+clinical API calls or vendor outreach have occurred. Browser/native release
+qualification is tracked separately from the synthetic API and database tests;
+physical touch, VoiceOver and haptics are not established by programmatic tests.
 
 ## Evidence and reusable references
 
@@ -197,10 +235,25 @@ medications or a reconciled current list.
 
 The formatter passes 36 focused tests, Ruff and Pyright. Review evidence and
 invented examples are in `evidence/tebra-fhir-snapshot/` outside the repository.
-The patient-selection screen, human review, saved-source custody, recovery and
-Chief integration remain unfinished, as do live authentication and vendor
-qualification. This module adds no runtime or connected UI action.
+The clinical workflow above now integrates this formatter with patient selection,
+human review, saved-source custody, recovery and Chief. Live authentication and
+vendor qualification remain outstanding.
 
 Mac Studio independently passes the same 36 focused cases and changed-file
 lint/type checks at `f9d70c6`; all 2,953 committed source files remain unchanged.
 Its receipts are in `evidence/mac-studio/tebra-fhir-snapshot/` outside the repo.
+
+## Workflow acceptance
+
+The new interface passes 69 focused cases across eight files and both renderer
+type configurations. An actual signed API/SQL/mounted interface journey confirms
+Unicode and fractional-value fidelity, a lost response recovered after reopening,
+the original request key, exact saved content, retained Chief directions and
+source withdrawal. The clinical read makes two invented HTTP GETs; recovery,
+review and draft preparation make no additional provider calls or model admissions.
+
+The initial joined suite passes 21 cases, including eight actual model/source
+checks for exact text delivery, unmodified reviewed notes, grant withdrawal and
+feature-switch withdrawal. Further SQL adversarial, legacy regression and release
+artifact qualification are tracked in the workstream checkpoint; these initial
+results alone do not establish phone delivery. All tests use invented records.

@@ -8,6 +8,12 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cosmas_os.ports.tebra_fhir_ehr import (
+    FhirMedicationsObservation,
+    FhirPatientsObservation,
+    FhirPrivateSnapshot,
+)
+
 Digest = Annotated[str, Field(strict=True, pattern=r"^[0-9a-f]{64}$")]
 ProviderId = Annotated[str, Field(strict=True, pattern=r"^[1-9][0-9]{0,18}$")]
 Status = Literal["Scheduled", "Confirmed", "Checked Out", "Cancelled", "With Doctor",
@@ -349,12 +355,14 @@ class TebraPrivateSnapshot(Protected):
 
 
 class SnapshotPayload(Protected):
-    public: WindowObservation | VerifiedObservation | ProblemsObservation | MedicationsObservation | TebraWindowObservation | TebraVerifiedObservation
-    private: MedicationsPrivateSnapshot | ProblemsPrivateSnapshot | PrivateSnapshot | TebraPrivateSnapshot
+    public: WindowObservation | VerifiedObservation | ProblemsObservation | MedicationsObservation | TebraWindowObservation | TebraVerifiedObservation | FhirPatientsObservation | FhirMedicationsObservation
+    private: MedicationsPrivateSnapshot | ProblemsPrivateSnapshot | PrivateSnapshot | TebraPrivateSnapshot | FhirPrivateSnapshot
 
     @model_validator(mode="before")
     @classmethod
     def private_provider(cls, value):
+        if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("protocol") == "fhir":
+            return {**value, "private": FhirPrivateSnapshot.model_validate(value["private"])}
         if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("kind") == "verified_medications":
             return {**value, "private": MedicationsPrivateSnapshot.model_validate(value["private"])}
         if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("kind") == "verified_problems":
@@ -365,6 +373,12 @@ class SnapshotPayload(Protected):
 
     @model_validator(mode="after")
     def same_provider(self):
+        if isinstance(self.public, (FhirPatientsObservation, FhirMedicationsObservation)):
+            if not isinstance(self.private, FhirPrivateSnapshot):
+                raise ValueError("fhir_payload_mismatch")
+            return self
+        if isinstance(self.private, FhirPrivateSnapshot):
+            raise ValueError("fhir_payload_mismatch")
         if isinstance(self.public, MedicationsObservation) != isinstance(self.private, MedicationsPrivateSnapshot):
             raise ValueError("medication_payload_mismatch")
         if isinstance(self.public, ProblemsObservation) != isinstance(self.private, ProblemsPrivateSnapshot):

@@ -1,6 +1,7 @@
 import {athenaRehearsal} from './athena';
 import {calendarImportRehearsal} from './calendar-import';
 import {ehrRehearsal} from './ehr';
+import {tebraMedicationRehearsal} from './tebra-medications';
 import {outlookRehearsal} from './outlook';
 import {recordingMetadata} from './recording-metadata';
 import {handoffReviewHash,validHandoffReviewInput,validHandoffRevisionInput} from '../src/handoff-review-api';
@@ -94,6 +95,7 @@ export async function installFixtures(reset=false){
   } satisfies Partial<typeof clinicalTeamApi>);
   const calendarServer=calendarImportRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),owner_id:inventedOwner,account_id:modelUuid(9050),patient_link_id:modelUuid(9051)});
   const athenaServer=await athenaRehearsal(storageKey,reset,()=>({workspace_id:state.id,appointment_id:state.appointment_id!}));
+  const tebraMedicationServer=tebraMedicationRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const ehrServer=ehrRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const outlookServer=outlookRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
   // Exact review contracts run through the real client, entirely in this tab.
@@ -103,6 +105,7 @@ export async function installFixtures(reset=false){
     if(path==='/provider-team/identity'&&init?.method==='GET')return new Response(JSON.stringify({contract_version:1,box_id:modelUuid(9000),actor_id:inventedOwner,recovery_scope:team.recovery_scope}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
     const calendarResponse=await calendarServer(path,init);if(calendarResponse)return calendarResponse;
     const athenaResponse=await athenaServer(path,init);if(athenaResponse)return athenaResponse;
+    const tebraMedicationResponse=await tebraMedicationServer(path,init);if(tebraMedicationResponse)return tebraMedicationResponse;
     const ehrResponse=await ehrServer(path,init);if(ehrResponse)return ehrResponse;
     const outlookResponse=await outlookServer(path,init);if(outlookResponse)return outlookResponse;
     const recordingResponse=await recordingServer(path,init);if(recordingResponse)return recordingResponse;

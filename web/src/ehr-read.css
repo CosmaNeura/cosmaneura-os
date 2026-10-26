@@ -38,3 +38,25 @@
 .ehr-read-panel [aria-label="Returned medication records"] dt {font-weight:600;overflow-wrap:anywhere;}
 .ehr-read-panel [aria-label="Returned medication records"] dd {margin:0;white-space:pre-wrap;overflow-wrap:anywhere;}
 @media(max-width:480px){.ehr-read-panel [aria-label="Returned medication records"] dl>div {grid-template-columns:minmax(0,1fr);gap:.1rem;}}
+
+.ehr-read-panel [aria-label="Review Tebra medication records"] {display:grid;gap:.8rem;}
+.ehr-read-panel [aria-label="Tebra medication records"] li {padding-block:.8rem;border-top:1px solid var(--team-line,#d5dbe5);}
+.ehr-read-panel [aria-label="Tebra medication records"] h5,.ehr-read-panel [aria-label="Tebra medication records"] h6 {font:inherit;font-weight:600;margin:.2rem 0;overflow-wrap:anywhere;}
+.ehr-medication-details {display:grid;gap:.5rem;margin:.2rem 0;min-width:0;}
+.ehr-medication-details>div {display:grid;grid-template-columns:minmax(0,9rem) minmax(0,1fr);gap:.35rem;}
+.ehr-medication-details dt {font-weight:600;overflow-wrap:anywhere;}
+.ehr-medication-details dd {margin:0;white-space:pre-wrap;overflow-wrap:anywhere;}
+.ehr-medication-directions,.ehr-recorded-source {white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;max-width:100%;font:inherit;}
+.ehr-read-panel summary {min-height:44px;display:list-item;align-content:center;font-weight:600;cursor:pointer;overflow-wrap:anywhere;}
+@media(max-width:480px){.ehr-medication-details>div {grid-template-columns:minmax(0,1fr);gap:.1rem;}}
+.tebra-original-details,.tebra-original-details>section {display:grid;gap:.6rem;min-width:0;}
+.tebra-original-details>section {padding-block:.7rem;border-top:1px solid var(--team-line,#d5dbe5);}
+.ehr-read-panel .tebra-original-details h5,.ehr-read-panel .tebra-original-details h6 {font:inherit;font-weight:600;margin:.2rem 0;overflow-wrap:anywhere;}
+.tebra-recorded-fields {display:grid;gap:.5rem;margin:0;min-width:0;}
+.tebra-recorded-fields>div {display:grid;gap:.15rem;min-width:0;}
+.tebra-recorded-fields dt {font-weight:600;overflow-wrap:anywhere;}
+.tebra-recorded-fields dd {margin:0;padding-inline-start:.75rem;border-inline-start:1px solid var(--team-line,#d5dbe5);min-width:0;}
+.tebra-recorded-value {white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;}
+.tebra-recorded-items {margin:0;padding-inline-start:1rem;min-width:0;}
+.tebra-recorded-fields .tebra-recorded-fields dd {padding-inline-start:0;border-inline-start:0;}
+.tebra-recorded-items .tebra-recorded-items {padding-inline-start:0;list-style:none;}

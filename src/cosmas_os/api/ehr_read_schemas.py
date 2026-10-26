@@ -12,6 +12,20 @@ from cosmas_os.ports.ehr_reads import Digest, Protected, Window
 
 class ProviderCommand(Protected):
     provider: Literal["elation", "tebra"] | None = None
+    protocol: Literal["fhir"] | None = None
+
+    @field_validator("protocol", mode="before")
+    @classmethod
+    def explicit_protocol(cls, value):
+        if value != "fhir":
+            raise ValueError("explicit_protocol_required")
+        return value
+
+    @model_validator(mode="after")
+    def correct_protocol(self):
+        if self.protocol is not None and (self.provider != "tebra" or getattr(self, "action", "review") not in ("status", "inspect", "resolve", "fhir_patients", "fhir_medications", "review")):
+            raise ValueError("invalid_ehr_protocol")
+        return self
 
     @field_validator("provider", mode="before")
     @classmethod
@@ -119,6 +133,31 @@ class Inspect(ProviderCommand):
     observation_id: UUID
 
 
+class FhirContext(ProviderCommand):
+    connection_id: UUID
+    binding_sha256: Digest
+    workspace_id: UUID
+    idempotency_key: IdempotencyKey
+
+    @model_validator(mode="after")
+    def explicit_fhir(self):
+        if self.provider != "tebra" or self.protocol != "fhir":
+            raise ValueError("explicit_fhir_required")
+        return self
+
+
+class FhirPatients(FhirContext):
+    action: Literal["fhir_patients"]
+
+
+class FhirMedications(FhirContext):
+    action: Literal["fhir_medications"]
+    observation_id: UUID
+    observation_sha256: Digest
+    item_handle: UUID
+    item_sha256: Digest
+
+
 class Resolve(ProviderCommand):
     action: Literal["resolve"]
     idempotency_key: IdempotencyKey
@@ -137,7 +176,7 @@ class Install(ProviderCommand):
     idempotency_key: IdempotencyKey
 
 
-EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | Inspect | Resolve | Install, Field(discriminator="action")])
+EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | Inspect | Resolve | Install | FhirPatients | FhirMedications, Field(discriminator="action")])
 
 
 class ReviewEhr(ProviderCommand):
@@ -147,10 +186,19 @@ class ReviewEhr(ProviderCommand):
     observation_sha256: Digest
     item_handle: UUID
     item_sha256: Digest
-    reviewed_visit: Literal[True]
+    reviewed_visit: Literal[True] | None = None
     reviewed_patient_identity: Literal[True]
     reviewed_exact_snapshot: Literal[True]
     reviewed_untrusted_source: Literal[True]
+
+    @model_validator(mode="after")
+    def review_kind(self):
+        if self.protocol == "fhir":
+            if "reviewed_visit" in self.model_fields_set:
+                raise ValueError("unexpected_visit_review")
+        elif self.reviewed_visit is not True:
+            raise ValueError("visit_review_required")
+        return self
 
     @field_validator("reviewed_visit", "reviewed_patient_identity", "reviewed_exact_snapshot", "reviewed_untrusted_source", mode="before")
     @classmethod

@@ -514,29 +514,27 @@ Physical touch, haptics, VoiceOver and draft contents across the update remain
 unverified. See `CHECKPOINT-ELATION-MEDICATIONS.json` and
 `native/preview34-phone-summary.json` in the connector workstream.
 
-### Tebra clinical reader foundation
+### Tebra clinical medication workflow
 
-A separate [FHIR medication-history reader](../tebra-fhir-read.md) now handles
-ordered and reported medication requests, verifies the FHIR patient, resolves
-bounded medication references and preserves recorded instructions, negation and
-original reference provenance. It rejects unsafe references and unknown rules
-that could change clinical meaning. The final reader passes 82 focused cases,
-lint/type checks and independent review.
+The [Tebra clinical medication workflow](../tebra-fhir-read.md) now adds an
+independent clinical patient selection, explicit medication read, readable full
+review, saved-source custody and recovery, and preparation of an existing Chief
+draft. SOAP appointment and FHIR clinical work use separate encrypted journals
+and authority; patient IDs are never matched by equality or a guessed name/date.
+Complete instructions, negation, structured dosing, context and original numeric
+spelling remain available, with whole-packet refusal above the 5,000-character
+source limit.
 
-This is an inactive, synthetic-only adapter. It does not add a Tebra medication
-button or Chief workflow to the app, and it cannot use a real HTTP transport.
-Exact vendor authentication, sandbox URLs, clinical scopes and patient/practice
-correspondence remain unresolved. Existing SOAP appointment behavior is
-unchanged; SOAP and FHIR patient IDs are not assumed to match. Human review,
-saved-source custody, recovery and UI integration are still engineering work.
+The interface passes 69 focused checks and both type configurations. The first
+actual signed API/SQL/mounted-interface plus model suite passes 21 cases: exact
+Unicode/fractional source text, lost-result recovery after reopening, retained
+Chief directions, current access checks and withdrawal of source/derived replies.
+Further SQL adversarial, legacy and release qualification are still being
+completed. The existing phone build below does not yet contain this workflow.
 
-A private review model and canonical snapshot formatter now preserve those
-records for the next integration step. It revalidates patient and authorization
-bindings and retains the complete projected instructions and provenance under
-the existing 5,000-character source limit. A larger packet is refused whole.
-The 36 focused formatter cases, lint and type checks pass. This prepares inputs
-for a future review screen and source custody; it does not add either workflow
-or a connected action.
+The runtime is default-off and accepts only an exact MockTransport. Live vendor
+authentication, sandbox URLs, clinical scopes and grant provisioning remain
+unqualified. No external clinical read, prescription or writeback is enabled.
 
 ## Latest phone delivery
 
