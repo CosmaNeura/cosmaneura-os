@@ -177,9 +177,14 @@ export class WorkspaceSources {
       const account=await this.accountRead(owner,signal);if(!current())return null;
       const scope={box_id:account.box_id,owner_id:account.actor_id};
       const receipt=await this.resolveEFax(owner,scope,request,signal);if(!current())return null;
-      if(efaxMissing(receipt)||receipt.kind!=='acquire'||receipt.state!=='acquired'||!receipt.content_available||receipt.source_withheld||!receipt.document||
+      if(efaxMissing(receipt)||receipt.kind!=='acquire'||
         receipt.scope.box_id!==scope.box_id||receipt.scope.owner_id!==scope.owner_id||receipt.idempotency_key!==request.request.idempotency_key||
-        receipt.operation_id!==document.operation_id||receipt.document.sha256!==document.document_sha256||receipt.document.pages!==document.pages)return null;
+        receipt.operation_id!==document.operation_id)return null;
+      if(receipt.source_withheld||!receipt.content_available){
+        const latest=await this.read(owner,view.workspace.id,signal);if(!current())return null;
+        this.receive(latest);return null;
+      }
+      if(receipt.state!=='acquired'||!receipt.document||receipt.document.sha256!==document.document_sha256||receipt.document.pages!==document.pages)return null;
       const bytes=await this.documentEFax(owner,receipt,signal);if(!current())return null;
       await access.authorize();if(!current())return null;
       const latestAccount=await this.accountRead(owner,signal);if(!current())return null;

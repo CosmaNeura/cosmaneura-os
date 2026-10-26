@@ -2,7 +2,7 @@
 import {afterEach,describe,expect,it,vi} from 'vitest';
 import {teamFixture,teamUuid as uuid} from '../team-setup-test-fixture';
 import {vendorSha256} from '../vendor-contract';
-import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from '../workspace-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from '../workspace-api';
 import {efaxInboundApi,type EFaxPending,type EFaxReceipt} from '../efax-inbound-api';
 import {efaxPdf,efaxReceipt,efaxScope} from '../efax-inbound-fixtures.test-support';
 import type {GoogleMessageSaved} from '../google-message-recovery';
@@ -158,5 +158,27 @@ describe('reopening the exact saved received-fax PDF',()=>{
   const f=await faxFixture(),controller=new AbortController();controller.abort();expect(await f.session.sources.loadFaxDocument(f.context,controller.signal)).toBeNull();
   f.session.setWorkspace({...f.workspace,appointment_id:null});expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();
   f.session.setWorkspace(f.workspace);f.session.setIdentity(null);expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();expect(f.authorize).not.toHaveBeenCalled();expect(f.accountRead).not.toHaveBeenCalled();expect(f.documentEFax).not.toHaveBeenCalled();
+ });
+ it.each([true,false])('refreshes the current unavailable fax projection while preserving edits (withheld=%s)',async source_withheld=>{
+  const read=vi.fn<typeof workspaceApi.read>(),f=await faxFixture({read}),controller=new AbortController(),command=vi.spyOn(efaxInboundApi,'command');
+  f.workspace.entries=[{...f.workspace.entries[0],kind:'efax_inbound_source',content:'Earlier reviewed fax passage',google_source_state:undefined,fax_source_state:'current'},
+   {id:uuid(81),revision:1,kind:'scratchpad',content:'Saved note before refresh',source_label:null,origin:'human',ticket:null,created_at:'2026-10-23T12:00:00Z'}];
+  f.session.setThought('Keep unsent Chief directions');f.session.setNote('Keep my unsaved note edit');
+  const latest:Workspace={...f.workspace,revision:3,entries:[{...f.workspace.entries[0],content:'',fax_source_state:'unavailable',source_label:'Unavailable fax source'},
+   {...f.workspace.entries[1],revision:3,content:'A newer saved note'}]};read.mockResolvedValue(latest);
+  f.resolveEFax.mockResolvedValue({...f.receipt,content_available:false,source_withheld,document:null});
+  expect(await f.session.sources.loadFaxDocument(f.context,controller.signal)).toBeNull();
+  expect(read).toHaveBeenCalledExactlyOnceWith(f.context.authenticated,f.workspace.id,controller.signal);
+  expect(f.session.getSnapshot()).toMatchObject({workspace:latest,thought:'Keep unsent Chief directions',note:'Keep my unsaved note edit',conflict:true});
+  expect(f.session.getSnapshot().workspace!.entries[0]).toMatchObject({content:'',fax_source_state:'unavailable'});expect(f.documentEFax).not.toHaveBeenCalled();expect(command).not.toHaveBeenCalled();
+ });
+ it.each(['replaced offer','changed workspace','newer projection'] as const)('does not publish a withheld-source refresh after %s',async change=>{
+  const read=vi.fn<typeof workspaceApi.read>(),f=await faxFixture({read});let finish!:(value:Workspace)=>void;
+  read.mockImplementationOnce(()=>new Promise<Workspace>(resolve=>{finish=resolve;}));f.resolveEFax.mockResolvedValue({...f.receipt,content_available:false,source_withheld:true,document:null});
+  const work=f.session.sources.loadFaxDocument(f.context);await vi.waitFor(()=>expect(read).toHaveBeenCalledOnce());
+  if(change==='replaced offer')f.session.setFaxSourceOffer({...f.offer});
+  else f.session.setWorkspace({...f.workspace,id:change==='changed workspace'?uuid(82):f.workspace.id,revision:9,label:'Newer authoritative workspace'});
+  const before=f.session.getSnapshot();finish({...f.workspace,revision:3,label:'Late old fax refresh',entries:[]});expect(await work).toBeNull();
+  expect(f.session.getSnapshot()).toBe(before);expect(f.documentEFax).not.toHaveBeenCalled();
  });
 });
