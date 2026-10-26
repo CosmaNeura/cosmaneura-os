@@ -176,3 +176,27 @@ date precision, unknown modifiers/implicit rules, original request provenance,
 unsafe/ambiguous references, filter changes,
 outcomes, aggregate/projection limits, cookies and fixed transport errors.
 Verification artifacts are in `evidence/tebra-fhir-reader/` outside the repository.
+
+## Private review snapshot
+
+`application/tebra_fhir_snapshot.py` prepares one immutable review model and
+deterministic source string from the reader's exact observation. The caller
+must supply current server-owned scope, observation and patient-identity pins;
+client-provided hashes do not establish authority. Preparation rechecks current
+access before releasing the model and grants neither human approval nor source
+admission.
+
+The source retains every projected clinical value, including original and
+resolved medication descriptions, structured dose/timing/PRN instructions,
+negation, reported state, context and date precision. It distinguishes absent
+fields from recorded values without accepting invalid FHIR null primitives.
+The entire string must fit the existing 5,000-character EHR source limit.
+Oversized histories are refused whole; records or instructions are never
+dropped to make them fit. Empty and bounded pages do not establish absence of
+medications or a reconciled current list.
+
+The formatter passes 36 focused tests, Ruff and Pyright. Review evidence and
+invented examples are in `evidence/tebra-fhir-snapshot/` outside the repository.
+The patient-selection screen, human review, saved-source custody, recovery and
+Chief integration remain unfinished, as do live authentication and vendor
+qualification. This module adds no runtime or connected UI action.

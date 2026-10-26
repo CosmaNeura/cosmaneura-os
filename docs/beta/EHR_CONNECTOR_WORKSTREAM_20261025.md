@@ -530,6 +530,14 @@ correspondence remain unresolved. Existing SOAP appointment behavior is
 unchanged; SOAP and FHIR patient IDs are not assumed to match. Human review,
 saved-source custody, recovery and UI integration are still engineering work.
 
+A private review model and canonical snapshot formatter now preserve those
+records for the next integration step. It revalidates patient and authorization
+bindings and retains the complete projected instructions and provenance under
+the existing 5,000-character source limit. A larger packet is refused whole.
+The 36 focused formatter cases, lint and type checks pass. This prepares inputs
+for a future review screen and source custody; it does not add either workflow
+or a connected action.
+
 ## Latest phone delivery
 
 Preview36 (`59a92dc`) is installed and launched in place, with the phone's
