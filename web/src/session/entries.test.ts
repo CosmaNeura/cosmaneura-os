@@ -48,6 +48,23 @@ describe('saved Outlook material cards',()=>{
   });
 });
 
+describe('saved received-fax material cards',()=>{
+ const fax:WorkspaceEntry={id:teamUuid(330),revision:4,kind:'efax_inbound_source',content:'Private selected fax passage must not enter the card.',source_label:'Received eFax: human-reviewed passage',fax_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-26T12:20:00Z'};
+ it('projects only exact saved metadata at its source revision without reading the passage or adding a reply',()=>{
+  const source={...fax};Object.defineProperty(source,'content',{get:()=>{throw new Error('Projection must not read fax contents');}});
+  const later={...turn,id:teamUuid(331),revision:5},projection=projectConversation({...workspace,revision:5,handoffs:[],entries:[later,source,turn]},team,'chief');
+  expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${fax.id}`,later.id]);expect(projection.turns).toEqual([later,turn]);expect(projection.entries[1]).toEqual({kind:'material',sourceKind:'efax',id:`source:${fax.id}`,sourceId:fax.id,label:fax.source_label,createdAt:fax.created_at,state:'current'});expect(JSON.stringify(projection)).not.toContain(fax.content);
+ });
+ it('requires the received eFax kind and its own explicit custody, without guessing another fax provider or bot',()=>{
+  const variants:WorkspaceEntry[]=[{...fax,kind:'evidence'},{...fax,kind:'fax_inbound_source',practice_fax_source_state:'current'},{...fax,fax_source_state:undefined},{...fax,fax_source_state:undefined,google_source_state:'current'},{...fax,fax_source_state:'unknown'} as unknown as WorkspaceEntry];
+  expect(projectConversation({...workspace,handoffs:[],entries:variants},team,'chief').entries).toEqual([]);for(const role of ['research','follow_up'])expect(projectConversation({...workspace,handoffs:[],entries:[fax]},team,role).entries).toEqual([]);
+ });
+ it('masks unavailable metadata even when stale label and body remain in input',()=>{
+  const source={...fax,fax_source_state:'unavailable' as const,source_label:'Private stale fax subject'};Object.defineProperty(source,'content',{get:()=>{throw new Error('Unavailable fax must not read contents');}});
+  const projection=projectConversation({...workspace,handoffs:[],entries:[source]},team,'chief');expect(projection.entries).toEqual([{kind:'material',sourceKind:'efax',id:`source:${fax.id}`,sourceId:fax.id,label:'Unavailable fax passage',createdAt:fax.created_at,state:'unavailable'}]);expect(projection.turns).toEqual([]);expect(JSON.stringify(projection)).not.toContain('Private');
+ });
+});
+
 describe('saved Gmail material cards',()=>{
  const email:WorkspaceEntry={id:teamUuid(320),revision:4,kind:'google_message',content:'Private Gmail body must not enter the card.',source_label:'Google message: Invented visit follow-up',google_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-26T12:15:00Z'};
  it('projects exact Gmail metadata beside Outlook at saved revisions without reading body or adding a reply',()=>{
