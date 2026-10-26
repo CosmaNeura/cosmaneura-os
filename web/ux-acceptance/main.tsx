@@ -5,6 +5,7 @@ import {EncounterWorkspace} from '../src/EncounterWorkspace';
 import {openDraftStore} from '../src/draft-store';
 import {identity,installFixtures} from './fixtures';
 import {installTextRehearsal} from './text-rehearsal';
+import {PreviewSession} from './PreviewSession';
 import '../src/styles.css';
 import '../src/encounter-workspace.css';
 import './rehearsal.css';
@@ -21,7 +22,7 @@ createRoot(root).render(<>
       <p>Real interface with scripted services. Example saved notes stay in this tab. Working drafts and simulated audio are encrypted in this browser and can be recovered after reload. Your microphone stays off. Account sign-in, public lookups and external delivery are unavailable. Do not enter real information.</p>
     </details>
   </aside>
-  <EncounterWorkspace authenticated={identity} draftStorage={options=>openDraftStore({...options,native:false})}/>
+  <PreviewSession>{(current,controls)=><EncounterWorkspace authenticated={current} accountControls={controls} draftStorage={options=>openDraftStore({...options,native:false})}/>}</PreviewSession>
 </>);
 
 }

@@ -31,7 +31,7 @@ import {subscribeNativeWorkspaceForeground} from './native-workspace-foreground'
 import {useMobileChatFrame} from './MobileChatFrame';
 import {useMessageComposerSize} from './useMessageComposerSize';
 import type {AiActivitySelection} from "./model-activity-contract";
-import { SettingsHub } from "./SettingsHub";
+import { SettingsHub, type PracticeRecordProvider } from "./SettingsHub";
 import { WelcomeActions } from './WelcomeActions';
 import {PracticeHome} from './PracticeHome';
 import {PrivateRecordingPanel,type PrivateNotebookResult} from './PrivateRecordingPanel';
@@ -203,7 +203,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const microsoftVisitSelection=useRef(false),outlookOpening=useRef(0);
   const [googleCalendarOpen,setGoogleCalendarOpen]=useState(false);
   const googleVisitSelection=useRef<'message'|'calendar'|false>(false);
-  const ehrVisitSelection=useRef(false);
+  type PracticeRecordIntent={owner:AuthenticatedWorkspaceIdentity;provider:PracticeRecordProvider;intent:object};
+  const ehrVisitSelection=useRef<boolean|(PracticeRecordIntent&{stage:'loading'|'shown'})>(false);
+  const [queuedRecordLaunch,setQueuedRecordLaunch]=useState<(PracticeRecordIntent&{workspaceId:string;generation:number})|null>(null);
+  const [requestedEhrProvider,setRequestedEhrProvider]=useState<(PracticeRecordIntent&{workspaceId:string})|null>(null);
+  useEffect(()=>{setRequestedEhrProvider(previous=>previous&&previous.owner===authenticated&&previous.workspaceId===workspace?.id?previous:null);},[authenticated,workspace?.id]);
+  useEffect(()=>{const selected=ehrVisitSelection.current;if(typeof selected==='object'&&(selected.owner!==authenticated||selected.stage==='shown'&&practicePage!=='visits'))ehrVisitSelection.current=false;},[authenticated,practicePage]);
   const ehrOpeningIntent=useRef(0),ehrOpeningCleanup=useRef<(()=>void)|null>(null);
   const googleReturn=useRef(GOOGLE_CONNECTION_BUILD&&['#google-connected','#google-sign-in'].includes(window.location.hash));
   const microsoftReturn=useRef(MICROSOFT_CONNECTION_BUILD&&['#microsoft-connected','#microsoft-sign-in'].includes(window.location.hash));
@@ -516,7 +521,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setReceivedFaxOpen(false);setReceivedFaxReturn(null);setFaxPassageOpen(true);setDirectFaxOffer(false);setReceivedFaxBusy(false);receivedFaxOpening.current++;
     setGoogleMessageOpen(false);setGoogleMessageVisited(false);setGoogleMailReturn(null);googleMailOpening.current++;setGoogleCalendarOpen(false);googleVisitSelection.current=false;setAthenaTask(null);setAthenaNotebookError('');athenaOpening.current++;
     setOutlookMessageOpen(false);setOutlookMessageVisited(false);setOutlookReturn(null);microsoftVisitSelection.current=false;outlookOpening.current++;
-    ehrVisitSelection.current=false;
+    ehrVisitSelection.current=false;setQueuedRecordLaunch(null);setRequestedEhrProvider(null);
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
     setEntryIntent(null);setRecordingSourceRequest(0);setSelectedSource(null); setSelectedResult(null);
@@ -599,16 +604,20 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   async function loadEncounters(skipTeamExit=false) {
     if (!authenticated || homeBusy) return;
     if(!skipTeamExit&&settingsOpen&&team&&teamDraft&&teamConfigurationChanged(team.configuration,teamDraft)){leaveTeamSettings(()=>void loadEncounters(true));return;}
-    await session.loading.catalog({authenticated,failure,retry:()=>loadEncounters(),
+    const recordChoice=ehrVisitSelection.current;
+    await session.loading.catalog({authenticated,failure:(cause,retry)=>{if(typeof recordChoice==='object'&&ehrVisitSelection.current===recordChoice)ehrVisitSelection.current=false;failure(cause,retry);},retry:()=>loadEncounters(),
       begin:()=>{const token=++routeSequence.current;routeApplying.current=false;routeReady.current=true;setRecordingMinimized(true);return token;},
       currentNavigation:()=>routeSequence.current,refreshRecordings:()=>setPrivateRecordingListEpoch(value=>value+1),
-      show:()=>{setPracticePage('visits');setSettingsOpen(false);setPracticeOpen(false);}});
+      show:()=>{const choice=ehrVisitSelection.current;if(typeof choice==='object')choice.stage='shown';setPracticePage('visits');setSettingsOpen(false);setPracticeOpen(false);}});
   }
   function open(appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false,afterOpen?:()=>void){
+    const recordChoice=ehrVisitSelection.current;
+    const selectedRecord=typeof recordChoice==='object'&&recordChoice.owner===authenticated&&recordChoice.stage==='shown'&&practicePage==='visits'?recordChoice:null;
+    if(typeof recordChoice==='object')ehrVisitSelection.current=false;
     return session.loading.open({...loadingContext(),locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,
       begin:()=>{chiefNotebookFocus.current=null;},resetCapture:(record,useRecording)=>{setObservedCaptureDraft(null);setSelectedSource(null);setSelectedResult(null);setCaptureRequest(record?1:0);setRecordingSourceRequest(useRecording?1:0);},
       focusChief:(workspace,generation)=>{chiefNotebookFocus.current={workspace,generation};},focusFax:()=>setFocusFaxWork(true),showResearch:()=>setSavedResearchChat(false),
-      afterOpen:()=>{afterOpen?.();if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');if(service==='message')setGoogleMessageVisited(true);setGoogleMailReturn(null);setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}else if(microsoftVisitSelection.current){microsoftVisitSelection.current=false;setOutlookMessageVisited(true);setOutlookMessageOpen(true);setOutlookReturn(null);setSettingsEntry('microsoft');setSettingsOpen(true);}},
+      afterOpen:()=>{afterOpen?.();if(selectedRecord){const opened=session.getSnapshot().workspace;if(opened?.appointment_id){setSettingsEntry('connections');setSettingsOpen(true);setQueuedRecordLaunch({...selectedRecord,workspaceId:opened.id,generation:generation.current});}}else if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');if(service==='message')setGoogleMessageVisited(true);setGoogleMailReturn(null);setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}else if(microsoftVisitSelection.current){microsoftVisitSelection.current=false;setOutlookMessageVisited(true);setOutlookMessageOpen(true);setOutlookReturn(null);setSettingsEntry('microsoft');setSettingsOpen(true);}},
       retryRead:authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection,
     },appointmentId,coreSelection,incoming,recordVisit);
   }
@@ -1175,11 +1184,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});});
   }
   function openEhrTask(origin:'conversation'|'sources'|'connections'){return openVisitSourceTask(origin,'ehr');}
-  function openCalendarImportTask(origin:'conversation'|'sources'){return openVisitSourceTask(origin,'calendar');}
-  async function openVisitSourceTask(origin:'conversation'|'sources'|'connections',kind:'ehr'|'calendar'){
+  function openCalendarImportTask(origin:'conversation'|'sources'|'connections'){return openVisitSourceTask(origin,'calendar');}
+  async function openVisitSourceTask(origin:'conversation'|'sources'|'connections',kind:'ehr'|'calendar',launcher?:HTMLElement){
     const target=document.activeElement instanceof HTMLElement?document.activeElement:null,scroll=mobileChatFrame.scrollRef.current?.scrollTop??null;
     const context=sourceContext(),host=context.conversationHost;if(!host)return;
-    const entry=workspaceFrame.current?.querySelector<HTMLElement>(origin==='connections'?'[aria-label="Choose a visit for appointment review"]':origin==='sources'?(kind==='ehr'?'.ehr-source-action':'.calendar-import-action'):conversationDetails?'.messages-details':kind==='ehr'?'.ehr-chief-action':'.calendar-import-chief-action');
+    const entry=launcher??workspaceFrame.current?.querySelector<HTMLElement>(origin==='connections'?'[aria-label="Choose a visit for appointment review"]':origin==='sources'?(kind==='ehr'?'.ehr-source-action':'.calendar-import-action'):conversationDetails?'.messages-details':kind==='ehr'?'.ehr-chief-action':'.calendar-import-chief-action');
     if(!entry||entry.closest('[hidden]'))return;
     ehrOpeningCleanup.current?.();const intent=++ehrOpeningIntent.current,view=session.getSnapshot();
     const sameView=()=>{const now=session.getSnapshot();return (['practicePage','practiceOpen','settingsOpen','settingsEntry','panel','mobilePanel'] as const).every(key=>view[key]===now[key]);};
@@ -1192,15 +1201,47 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     const cleanup=()=>{document.removeEventListener('click',invalidate,true);document.removeEventListener('keydown',escape,true);};ehrOpeningCleanup.current=cleanup;
     try{
       const current=()=>ehrOpeningIntent.current===intent&&sameView()&&entry.isConnected&&!entry.closest('[hidden]')&&host.current();
-      if(await (kind==='calendar'&&origin!=='connections'?session.sources.openCalendarImport({...context,conversationHost:{...host,current}},origin):session.sources.openEhr({...context,conversationHost:{...host,current}},origin))){ehrReturnFocus.current={element:target,scroll};setConversationDetails(false);setMessagesTask(null);setPhoneChatToolsOpen(false);}
+      if(await (kind==='calendar'?session.sources.openCalendarImport({...context,conversationHost:{...host,current}},origin):session.sources.openEhr({...context,conversationHost:{...host,current}},origin))){ehrReturnFocus.current={element:launcher??target,scroll};setConversationDetails(false);setMessagesTask(null);setPhoneChatToolsOpen(false);return true;}return false;
     }finally{cleanup();if(ehrOpeningCleanup.current===cleanup)ehrOpeningCleanup.current=null;}
   }
+  async function openPracticeRecord(provider:PracticeRecordProvider,continued?:PracticeRecordIntent){
+    if(!authenticated||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||
+      (provider==='atlas_md'?!CALENDAR_IMPORT_BUILD:!EHR_READ_BUILD))return;
+    const choice=continued??{owner:authenticated,provider,intent:{}};
+    if(choice.owner!==authenticated)return;
+    if(!visitLinked){const selection={...choice,stage:'loading' as 'loading'|'shown'};ehrVisitSelection.current=selection;setSettingsOpen(false);try{await loadEncounters();}finally{if(ehrVisitSelection.current===selection&&selection.stage==='loading')ehrVisitSelection.current=false;}return;}
+    const directory=continued?workspaceFrame.current?.querySelector<HTMLElement>('.connection-directory'):null;
+    const launcher=continued?directory?.closest('.settings-hub')?.querySelector<HTMLElement>('.settings-hub-heading h1'):workspaceFrame.current?.querySelector<HTMLElement>(`[data-practice-record-provider="${provider}"]`);
+    if(!launcher||launcher.closest('[hidden]'))return;
+    const id=workspace!.id;
+    if(await openVisitSourceTask('connections',provider==='atlas_md'?'calendar':'ehr',launcher)){
+      if(provider!=='atlas_md')setRequestedEhrProvider({...choice,workspaceId:id});
+    }
+  }
+  useEffect(()=>{
+    if(!queuedRecordLaunch)return;
+    const choice=queuedRecordLaunch;
+    if(choice.owner!==authenticated||choice.workspaceId!==workspace?.id||choice.generation!==generation.current){setQueuedRecordLaunch(null);return;}
+    if(!settingsOpen||settingsEntry!=='connections'){setQueuedRecordLaunch(null);return;}
+    // Settings applies its selected screen in an effect. Wait one paint for
+    // its current heading; a later user choice or suspension cancels the launch.
+    let current=true;
+    const cancel=()=>{current=false;setQueuedRecordLaunch(previous=>previous===choice?null:previous);};
+    const frame=requestAnimationFrame(()=>{
+      if(!current||previousIdentity.current!==choice.owner||generation.current!==choice.generation)return;
+      setQueuedRecordLaunch(previous=>previous===choice?null:previous);void openPracticeRecord(choice.provider,choice);
+    });
+    const visibility=()=>{if(document.visibilityState==='hidden')cancel();};
+    document.addEventListener('click',cancel,true);document.addEventListener('keydown',cancel,true);document.addEventListener('visibilitychange',visibility);window.addEventListener('pagehide',cancel);
+    const remove=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?subscribeNativeWorkspaceForeground(authenticated,()=>{},cancel):undefined;
+    return()=>{current=false;cancelAnimationFrame(frame);document.removeEventListener('click',cancel,true);document.removeEventListener('keydown',cancel,true);document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',cancel);remove?.();};
+  },[queuedRecordLaunch,authenticated,workspace?.id,settingsOpen,settingsEntry]);
   function closeEhrTask(){closeVisitSourceTask('ehr');}
   function closeCalendarImportTask(){closeVisitSourceTask('calendar');}
   function closeVisitSourceTask(kind:'ehr'|'calendar'){if(kind==='calendar'?session.sources.closeCalendarImport(sourceContext()):session.sources.closeEhr(sourceContext())){const returned=ehrReturnFocus.current,current=generation.current,route=session.navigation.sequence.current,view=session.getSnapshot();requestAnimationFrame(()=>{
     const now=session.getSnapshot();if(returned!==ehrReturnFocus.current||current!==generation.current||route!==session.navigation.sequence.current||now.identity!==view.identity||now.workspace?.id!==view.workspace?.id||now.ehrReview?.open||now.calendarImportReview?.open||now.mobilePanel!==view.mobilePanel||now.settingsOpen!==view.settingsOpen||now.practicePage!==view.practicePage)return;
     if(returned?.scroll!==null&&returned?.scroll!==undefined&&mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=returned.scroll;
-    const target=returned?.element;if(target?.isConnected&&!target.closest('[hidden]'))target.focus({preventScroll:true});else{const fallback=workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child')??conversationHeaderRef.current?.querySelector<HTMLElement>('h2');if(fallback&&!fallback.closest('[hidden]')){fallback.tabIndex=-1;fallback.focus({preventScroll:true});}}
+    const target=returned?.element;if(target?.isConnected&&!target.closest('[hidden]'))target.focus({preventScroll:true});else{const fallback=now.settingsOpen?workspaceFrame.current?.querySelector<HTMLElement>('.settings-hub-heading h1'):workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header > button:last-child')??conversationHeaderRef.current?.querySelector<HTMLElement>('h2');if(fallback&&!fallback.closest('[hidden]')){fallback.tabIndex=-1;fallback.focus({preventScroll:true});}}
   });}}
   function prepareCalendarChief(source:CalendarSavedSource){return session.sources.prepareCalendarImport(sourceContext(),source);}
   function prepareEhrChief(source:EhrReadSaved){return session.sources.prepareEhr(sourceContext(),source);}
@@ -1456,7 +1497,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       {!messagesChat&&workspaceNotices}
       {activityEnabled && settingsOpen && activityContextBusy && <p className="team-fine" role="status">Checking optional AI activity access…</p>}
       {activityEnabled && settingsOpen && activityContextError && <div className="team-banner error" role="alert"><p>{activityContextError}</p><button disabled={locked || activityContextBusy} onClick={()=>setActivityAttempt(value=>value+1)}>Recheck AI activity access</button></div>}
-      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} nativePresentation={nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()?(messagesMode?'messages':'workspace'):undefined} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
+      {(authenticated || identity) && <AccountRecoveryContext.Provider value={accountAccess}><SettingsHub accountControls={accountControls} practiceRecordActions={authenticated&&(EHR_READ_BUILD||CALENDAR_IMPORT_BUILD)?{
+        ...(CALENDAR_IMPORT_BUILD?{atlas_md:()=>void openPracticeRecord('atlas_md')}:{}),
+        ...(EHR_READ_BUILD?{elation:()=>void openPracticeRecord('elation'),tebra:()=>void openPracticeRecord('tebra'),athena:()=>void openPracticeRecord('athena')}:{}),
+      }:undefined} appearance={session.presentation.enabled&&!!team?.revision?<LayoutSetting value={session.presentation.current()} blocked={presentationBlocked} error={presentationError} onChoose={value=>{if(session.presentation.choose(value,presentationBlocked))nativePresentationFeedback('selection');}}/>:undefined} key={generation.current} open={settingsOpen} nativePresentation={nativeChatOwner&&nativeChatOwner.nativeSession!.isCurrent()?(messagesMode?'messages':'workspace'):undefined} navigationLocked={viewNavigationLocked} beforeLeaveTeam={leaveTeamSettings}
         onOpenMessagingWork={authenticated?openMessagingWork:undefined} messagingWorkLabel={workspace?'Open fax work for this visit':'Choose a visit for fax work'}
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
         onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveFaxDocument:undefined}
@@ -1580,7 +1624,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       {ehrReviewOwned&&authenticated&&workspace&&<EhrReadTask open={ehrReviewOpen} context={workspace.notebook?.title??workspace.label}
         returnLabel={ehrReview.origin==='connections'?'Back to connections':ehrReview.origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`}
         returnBlocked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onReturn={closeEhrTask}>
-        <EhrReadProviders identity={authenticated} active={ehrReviewOpen} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
+        <EhrReadProviders requestedProvider={requestedEhrProvider?.owner===authenticated&&requestedEhrProvider.workspaceId===workspace.id&&requestedEhrProvider.provider!=='atlas_md'?{provider:requestedEhrProvider.provider,intent:requestedEhrProvider.intent}:undefined} identity={authenticated} active={ehrReviewOpen} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
           currentSources={workspace.entries.filter(entry=>entry.kind==='ehr_read_source'&&!!entry.ehr_source_state).map(entry=>({id:entry.id,state:entry.ehr_source_state!}))}
           locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
           recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='ehr'&&value)}
@@ -1588,7 +1632,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareEhrChief(source)}/>
       </EhrReadTask>}
       {calendarImportOwned&&authenticated&&workspace&&<EhrReadTask title="Import calendar file" open={calendarImportOpen} context={workspace.notebook?.title??workspace.label}
-        returnLabel={calendarImportReview.origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`} returnBlocked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onReturn={closeCalendarImportTask}>
+        returnLabel={calendarImportReview.origin==='connections'?'Back to connections':calendarImportReview.origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`} returnBlocked={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onReturn={closeCalendarImportTask}>
         <CalendarImportMount identity={authenticated} active={calendarImportOpen} workspace={{id:workspace.id,label:workspace.label,revision:workspace.revision}}
           currentSources={workspace.entries.filter(entry=>entry.kind==='calendar_import_source'&&!!entry.calendar_import_source_state).map(entry=>({id:entry.id,state:entry.calendar_import_source_state!}))}
           locked={locked||captureNavigationLocked||captureDraftLocked||Object.entries(connectionLocks).some(([key,value])=>key!=='calendarImport'&&value)}

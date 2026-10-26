@@ -20,9 +20,8 @@ import {clinicalTeamApi} from '../src/clinical-team-api';
 import {CLINICAL_NOTE_LABEL,verifyClinicalNoteShareReceipt} from '../src/clinical-team-contract';
 import {researchApi} from '../src/research-api';
 import {researchRehearsal} from './research';
-import {nativeRehearsal} from './native-rehearsal';
-export const identity={mode:'clerk_jwt' as const,getToken:async()=>'invented-ui-rehearsal-token',
-  ...(nativeRehearsal(new URL(location.href),window.top===window)?{nativeSession:{revision:modelUuid(999),isCurrent:()=>true}}:{})};
+import {identity} from './preview-session';
+export {identity} from './preview-session';
 const roles:BotRole[]=['visit_prep','scribe','follow_up','chief','research'];
 const longNames=new URLSearchParams(location.search).get('long-names')==='1';
 const names=longNames?['Visit Preparation and Care Coordination','Visit Notes and Recording Assistant','Follow-up and Patient Care Planning','Chief of Staff for Complex Care','Clinical Evidence Research Assistant']:['Visit Prep','Scribe','Follow-up','Chief of Staff','Research'];
