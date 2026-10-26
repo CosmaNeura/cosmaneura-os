@@ -529,7 +529,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     if(address&&previousIdentity.current===result.identity&&session.getSnapshot().workspace?.id===result.workspace.id){setContextBot(null);await openConversation(result.workspace.id,address,undefined,true);}
   }
   const taskFocusPending=useRef(false),taskScrollReturn=useRef<number|null>(null);
-  const sourceTaskReturn=useRef<{owner:typeof authenticated;identity:typeof identity;workspaceId:string;address:string;generation:number;target:HTMLElement|null}|null>(null);
+  const sourceTaskReturn=useRef<{owner:typeof authenticated;identity:typeof identity;workspaceId:string;address:string;generation:number;target:HTMLElement|null;documentScroll:{element:Element;top:number;left:number}|null}|null>(null);
   const ownsSourceReturn=()=>{const target=sourceTaskReturn.current,view=session.getSnapshot();return !!target&&target.owner===authenticated&&target.identity===identity&&target.generation===generation.current&&target.workspaceId===view.workspace?.id&&target.address===view.selected;};
   useEffect(()=>{if(sourceTaskReturn.current){sourceTaskReturn.current=null;taskScrollReturn.current=null;taskFocusPending.current=false;}},[authenticated,identity,workspace?.id,selected,messagesMode,connectionGeneration]);
   function showConversationTask(task:'Review'|'Notebook'|'Sources'|'Work'|'Activity'|'Tools'){
@@ -544,7 +544,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     // A new source intent cancels an older task-return animation frame, even
     // when the user returns to this conversation again before that frame runs.
     ehrReturnFocus.current=null;outlookOpening.current++;
-    if(messagesMode){mobileChatFrame.restoreReadingPosition(mobileChatFrame.scrollRef.current?.scrollTop??0);showConversationTask('Sources');sourceTaskReturn.current={owner:authenticated,identity,workspaceId:view.workspace.id,address:selected,generation:generation.current,target};}
+    if(messagesMode){
+      // Desktop Messages scrolls the document; the phone owns an inner frame.
+      // Capture both before the source task can scroll either surface.
+      const element=document.scrollingElement,documentScroll=element?{element,top:element.scrollTop,left:element.scrollLeft}:null;
+      mobileChatFrame.restoreReadingPosition(mobileChatFrame.scrollRef.current?.scrollTop??0);showConversationTask('Sources');sourceTaskReturn.current={owner:authenticated,identity,workspaceId:view.workspace.id,address:selected,generation:generation.current,target,documentScroll};
+    }
     else{setPanel('Sources');setMobilePanel('Sources');}
     setSelectedSource(id);
   }
@@ -1192,6 +1197,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       if(ownsSourceReturn()){
         const target=sourceTaskReturn.current?.target,visible=target?.isConnected&&!target.closest('[hidden]')&&!target.matches(':disabled');
         (visible?target:workspaceFrame.current?.querySelector<HTMLElement>('.messages-thread-header h1'))?.focus({preventScroll:true});
+        const saved=sourceTaskReturn.current?.documentScroll;
+        if(saved?.element.isConnected&&saved.element===document.scrollingElement){
+          saved.element.scrollTop=Math.max(0,Math.min(saved.top,saved.element.scrollHeight-saved.element.clientHeight));
+          saved.element.scrollLeft=Math.max(0,Math.min(saved.left,saved.element.scrollWidth-saved.element.clientWidth));
+        }
       }
       sourceTaskReturn.current=null;
     }
