@@ -8,6 +8,7 @@ import type {ConversationDraftSnapshot} from './session/conversation-drafts';
 import {conversationPreferenceKey} from './conversation-preferences';
 import {conversationActivityDate,organizedConversations,type InboxPreferencesSnapshot,type InboxRenameTarget} from './session/inbox-preferences';
 import {useInboxPullRefresh} from './use-inbox-pull-refresh';
+import {useInboxSearch} from './use-inbox-search';
 import './messages-presentation.css';
 
 const attention={idle:'',working:'Working',needs_review:'Needs you',needs_check:'Check status'};
@@ -20,8 +21,9 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
   onInspect:(row:ConversationSummary)=>void;onCloseMenu:()=>void;onRename:(target:InboxRenameTarget)=>void;onReloadOrganization:()=>void;
   canRestoreFocus?:()=>boolean;
 }){
-  const [search,setSearch]=useState(''),[hidden,setHidden]=useState(false),[menu,setMenu]=useState<ConversationSummary|null>(null),heading=useRef<HTMLHeadingElement>(null);
+  const [hidden,setHidden]=useState(false),[menu,setMenu]=useState<ConversationSummary|null>(null),heading=useRef<HTMLHeadingElement>(null);
   const pull=useInboxPullRefresh({disabled:locked||loading||!!menu,scope:team?.recovery_scope??'',onRefresh,identity});
+  const searchControl=useInboxSearch({container:pull.ref,identity,scope:team?.recovery_scope??''}),{search,setSearch}=searchControl;
   const activeMenu=useRef(menu),alive=useRef(true);activeMenu.current=menu;useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const chief=team?.configuration.bots.find(bot=>bot.role==='chief'&&!bot.retired);
   const chiefReady=!!chief?.enabled;
@@ -31,7 +33,7 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
   const preference=(row:ConversationSummary)=>organization.value.items.find(item=>conversationPreferenceKey(item.workspace_id,item.bot)===conversationPreferenceKey(row.workspace_id,row.bot.address));
   const organizationLocked=locked||organization.busy||!organization.ready;
   const closeMenu=()=>{setMenu(null);onCloseMenu();};
-  useEffect(()=>{setMenu(null);setSearch('');setHidden(false);onCloseMenu();},[team?.recovery_scope]);
+  useEffect(()=>{setMenu(null);setHidden(false);onCloseMenu();},[team?.recovery_scope]);
   useEffect(()=>{if(menu&&!inbox?.rows.some(row=>row.workspace_id===menu.workspace_id&&row.bot.address===menu.bot.address))closeMenu();},[inbox]);
   async function organize(change:{pinned?:boolean;hidden?:boolean}){if(!menu||organizationLocked)return;const selected=menu;if(await onOrganize(menu,change)&&alive.current&&activeMenu.current===selected){closeMenu();if(change.hidden!==undefined)queueMicrotask(()=>heading.current?.focus());}}
   return <section ref={pull.ref} className="messages-inbox" aria-labelledby="messages-title">
@@ -40,10 +42,13 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
     {error&&<p role="alert">{error}</p>}
     {drafts?.error&&<p role="status">{drafts.error} <button disabled={locked||drafts.checking} onClick={onRefreshDrafts}>Check saved drafts</button></p>}
     {organization.error&&!menu&&<p role="alert">{organization.error} <button disabled={organization.busy||locked} onClick={onReloadOrganization}>Retry organization</button></p>}
-    <div className="messages-inbox-tools"><label>Search conversations<input type="search" maxLength={200} value={search} onChange={event=>setSearch(event.target.value)} placeholder="Bot, note or message"/></label>
-      {(hiddenCount>0||hidden)&&<button disabled={locked} onClick={()=>setHidden(!hidden)}>{hidden?'Back to conversations':`Hidden conversations (${hiddenCount})`}</button>}</div>
+    <div className="messages-inbox-tools" data-search-compact={searchControl.compact}>
+      <label hidden={searchControl.compact}>Search conversations<input ref={searchControl.input} id={searchControl.id} type="search" maxLength={200} value={search} onFocus={searchControl.onFocus} onBlur={searchControl.onBlur} onChange={event=>setSearch(event.target.value)} placeholder="Bot, note or message"/></label>
+      {searchControl.compact&&<button type="button" aria-label="Search conversations" aria-expanded={false} aria-controls={searchControl.id} onClick={searchControl.open}>Search</button>}
+      {(hiddenCount>0||hidden)&&<button disabled={locked} onClick={()=>setHidden(!hidden)}>{hidden?'Back to conversations':`Hidden conversations (${hiddenCount})`}</button>}
+      {search.trim()&&<p className="team-fine messages-search-summary" role="status">{count} {count===1?'match':'matches'} among {inbox?.rows.length??0} loaded conversations.{inbox?.next_cursor?' Load earlier conversations to search more.':''}</p>}
+    </div>
     {hidden&&<p className="team-fine">Hidden on this device. Open a row’s actions to restore it.{hiddenCount>0&&<> <button disabled={organizationLocked} onClick={()=>void onRestoreAll().then(saved=>{if(saved){setHidden(false);queueMicrotask(()=>heading.current?.focus());}})}>Restore all hidden conversations</button></>}</p>}
-    {search.trim()&&<p className="team-fine" role="status">{count} {count===1?'match':'matches'} among {inbox?.rows.length??0} loaded conversations.{inbox?.next_cursor?' Load earlier conversations to search more.':''}</p>}
     {!hidden&&!search.trim()&&!chiefRows.length&&<section className="messages-chief-start"><BotAvatar role="chief"/><div><h2>{chief?.name??'Chief'}</h2>
       <p>{chiefReady?'A private conversation to plan your next step. Choose a visit or a private note.':'Chief is unavailable. Your saved conversations remain here.'}</p>
       {chiefReady?<button disabled={locked} onClick={()=>onChief(botAddress(chief!))}>Chat with {chief!.name}</button>:<button disabled={locked} onClick={onSettings}>Review team settings</button>}</div></section>}
