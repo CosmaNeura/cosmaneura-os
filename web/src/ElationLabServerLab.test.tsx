@@ -68,7 +68,9 @@ it.skipIf(!base)('uses actual signed custody and preserves Chief directions thro
  expect(candidates.textContent).toContain('Other report types excluded: 1');
  expect(candidates.textContent).not.toContain('9223372036854775807');
  const selectedButton=candidates.querySelector<HTMLButtonElement>('button')!;
- expect(selectedButton.textContent).toBe('Review report: Invented corrected panel · 2026-10-24T09:00:00-04:00');
+ expect(selectedButton.querySelector('.elation-lab-candidate-title')?.textContent).toBe('Review report: Invented corrected panel');
+ expect(selectedButton.querySelector('.elation-lab-candidate-date')?.textContent).toBe('Document date: Oct 24, 2026 · 9:00 AM (recorded offset -04:00)');
+ expect(selectedButton.getAttribute('aria-label')).toBe('Review report: Invented corrected panel. Document date: Oct 24, 2026 · 9:00 AM (recorded offset -04:00)');
  await act(async()=>selectedButton.click());
  await wait(()=>expect(find('Check saved laboratory-report result')?.disabled).toBe(false));
  const read=wire.find(row=>row.action==='lab_report')!;expect(read.key).toBeTruthy();

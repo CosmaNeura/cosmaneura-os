@@ -5,3 +5,7 @@
 .elation-lab-fields dt {font-weight:600;overflow-wrap:anywhere;}
 .elation-lab-fields dd {margin:0;min-width:0;}
 .elation-lab-value {white-space:pre-wrap;overflow-wrap:anywhere;}
+
+.ehr-read-panel .elation-lab-candidate {display:flex;flex-direction:column;align-items:flex-start;gap:.3rem;}
+.elation-lab-candidate-title {font-weight:600;}
+.elation-lab-candidate-date {font-weight:400;line-height:1.4;}
