@@ -6,6 +6,7 @@ import {ehrRehearsal} from './ehr';
 import {tebraMedicationRehearsal} from './tebra-medications';
 import {outlookRehearsal} from './outlook';
 import {gmailRehearsal} from './gmail';
+import {receivedFaxRehearsal} from './efax';
 import {recordingMetadata} from './recording-metadata';
 import {handoffReviewHash,validHandoffReviewInput,validHandoffRevisionInput} from '../src/handoff-review-api';
 import {conversationsApi,type ConversationSummary} from '../src/conversations-api';
@@ -104,11 +105,13 @@ export async function installFixtures(reset=false){
   const ehrServer=ehrRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const outlookServer=outlookRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
   const gmailServer=gmailRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
+  const receivedFaxServer=receivedFaxRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),owner_id:inventedOwner});
   // Exact review contracts run through the real client, entirely in this tab.
   // Unsupported requests never leave this isolated, invented-data rehearsal.
   window.fetch=async(input,init)=>{
     const path=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url,location.href).pathname;
     if(path==='/provider-team/identity'&&init?.method==='GET')return new Response(JSON.stringify({contract_version:1,box_id:modelUuid(9000),actor_id:inventedOwner,recovery_scope:team.recovery_scope}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+    const receivedFaxResponse=await receivedFaxServer(path,init);if(receivedFaxResponse)return receivedFaxResponse;
     const calendarResponse=await calendarServer(path,init);if(calendarResponse)return calendarResponse;
     const athenaResponse=await athenaServer(path,init);if(athenaResponse)return athenaResponse;
     const tebraMedicationResponse=await tebraMedicationServer(path,init);if(tebraMedicationResponse)return tebraMedicationResponse;
