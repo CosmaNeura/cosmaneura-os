@@ -3,7 +3,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from cosmas_os.application import microsoft_message, google_message, model_work, note_review
+from cosmas_os.application import google_message, microsoft_message, model_work, note_review
 from cosmas_os.application import selected_connector_sources as sources
 from cosmas_os.application import workspace as ws
 from cosmas_os.ports.bot_capabilities import SourcePassage
