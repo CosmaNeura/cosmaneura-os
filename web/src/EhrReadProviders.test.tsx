@@ -1,3 +1,6 @@
+import {athenaMedicationApi,ATHENA_MEDICATION_CORE,type AthenaMedicationCoreReceipt} from './athena-medication-api';
+import {athenaAllergyApi} from './athena-allergy-api';
+import {athenaMedicationFixtureBinding,athenaMedicationPatientsFixture} from '../ux-acceptance/athena-medication-fixtures';
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
@@ -47,4 +50,11 @@ it('keeps the shared busy lock while the selected provider dispatches despite th
 });
 it('rejects placing a Tebra record under the legacy Elation journal address and vice versa',async()=>{
  const tebra=emptyEhrReadRecovery({...ehrScope,provider:'tebra'}),elation=emptyEhrReadRecovery(ehrScope);await journal.load(address('elation'));await journal.load(address('tebra'));await expect(journal.persist(address('elation'),{kind:'editor',workspaceId:ehrVisit.id,editor:'ehr-read',pending:null,data:tebra})).rejects.toThrow();await expect(journal.persist(address('tebra'),{kind:'editor',workspaceId:ehrVisit.id,editor:'ehr-read:tebra',pending:null,data:elation})).rejects.toThrow();
+});
+it('keeps Athena allergy default and locks both selectors during an explicitly chosen medication read',async()=>{
+ vi.spyOn(athenaAllergyApi,'status');vi.spyOn(athenaMedicationApi,'status').mockResolvedValue({contract_version:1,...ATHENA_MEDICATION_CORE,mode:'synthetic',transport:'mock',status:'ready',...athenaMedicationFixtureBinding,practice_label:'Invented medication access'});
+ let finish!:(value:AthenaMedicationCoreReceipt)=>void;vi.spyOn(athenaMedicationApi,'execute').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
+ await mount();await act(async()=>{selector().value='athena';selector().dispatchEvent(new Event('change',{bubbles:true}));});await wait(()=>expect(button('Check Athena allergy access')).toBeTruthy());const records=host.querySelector<HTMLSelectElement>('[aria-label="Athena records"]')!;expect(records.value).toBe('allergies');expect(athenaAllergyApi.status).not.toHaveBeenCalled();expect(athenaMedicationApi.status).not.toHaveBeenCalled();
+ await act(async()=>{records.value='medications';records.dispatchEvent(new Event('change',{bubbles:true}));});await click('Check Athena medication access');await act(async()=>button('Load authorized patients')!.click());await wait(()=>expect(finish).toBeTypeOf('function'));expect(records.disabled).toBe(true);expect(selector().disabled).toBe(true);expect(busy.mock.lastCall?.[0]).toBe(true);
+ await act(async()=>{records.value='allergies';records.dispatchEvent(new Event('change',{bubbles:true}));});expect(button('Check Athena medication access')).toBeTruthy();expect(athenaAllergyApi.status).not.toHaveBeenCalled();const command=vi.mocked(athenaMedicationApi.execute).mock.calls[0][1];await act(async()=>finish(await athenaMedicationPatientsFixture(command)));await wait(()=>expect(selector().disabled).toBe(false));expect(records.disabled).toBe(false);expect(busy.mock.lastCall?.[0]).toBe(false);
 });

@@ -1,3 +1,4 @@
+import {athenaMedicationRehearsal} from './athena-medications';
 import {athenaRehearsal} from './athena';
 import {athenaAllergyRehearsal} from './athena-allergies';
 import {calendarImportRehearsal} from './calendar-import';
@@ -97,6 +98,7 @@ export async function installFixtures(reset=false){
   const calendarServer=calendarImportRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),owner_id:inventedOwner,account_id:modelUuid(9050),patient_link_id:modelUuid(9051)});
   const athenaServer=await athenaRehearsal(storageKey,reset,()=>({workspace_id:state.id,appointment_id:state.appointment_id!}));
   const tebraMedicationServer=tebraMedicationRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
+  const athenaMedicationServer=athenaMedicationRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const athenaAllergyServer=athenaAllergyRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const ehrServer=ehrRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const outlookServer=outlookRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
@@ -108,6 +110,7 @@ export async function installFixtures(reset=false){
     const calendarResponse=await calendarServer(path,init);if(calendarResponse)return calendarResponse;
     const athenaResponse=await athenaServer(path,init);if(athenaResponse)return athenaResponse;
     const tebraMedicationResponse=await tebraMedicationServer(path,init);if(tebraMedicationResponse)return tebraMedicationResponse;
+    const athenaMedicationResponse=await athenaMedicationServer(path,init);if(athenaMedicationResponse)return athenaMedicationResponse;
     const athenaAllergyResponse=await athenaAllergyServer(path,init);if(athenaAllergyResponse)return athenaAllergyResponse;
     const ehrResponse=await ehrServer(path,init);if(ehrResponse)return ehrResponse;
     const outlookResponse=await outlookServer(path,init);if(outlookResponse)return outlookResponse;
