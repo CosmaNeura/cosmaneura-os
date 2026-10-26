@@ -48,6 +48,25 @@ describe('saved Outlook material cards',()=>{
   });
 });
 
+describe('saved calendar file material cards',()=>{
+ const calendar:WorkspaceEntry={id:teamUuid(310),revision:3,kind:'calendar_import_source',content:'Private invented event and Atlas.md body must not enter the card.',source_label:'Imported calendar snapshot',calendar_import_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:10:00Z'};
+ it('projects only calendar metadata at its saved revision without reading the source body or creating a reply',()=>{
+  const source={...calendar};Object.defineProperty(source,'content',{get:()=>{throw new Error('Card projection must not read calendar body');}});
+  const later={...turn,id:teamUuid(311),revision:5},projection=projectConversation({...workspace,handoffs:[],entries:[later,source,turn]},team,'chief');
+  expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${source.id}`,later.id]);expect(projection.entries[1]).toEqual({kind:'material',sourceKind:'calendar-import',id:`source:${source.id}`,sourceId:source.id,label:'Imported calendar snapshot',createdAt:source.created_at,state:'current'});expect(projection.turns).toEqual([later,turn]);expect(JSON.stringify(projection)).not.toContain('Atlas.md');
+ });
+ it('does not infer calendar material from a matching note, another calendar kind, or absent/wrong/unknown custody',()=>{
+  const variants:WorkspaceEntry[]=[{...calendar,kind:'evidence'},{...calendar,id:teamUuid(312),kind:'google_calendar',calendar_source_state:'current'},{...calendar,id:teamUuid(313),calendar_import_source_state:undefined},{...calendar,id:teamUuid(314),calendar_import_source_state:undefined,calendar_source_state:'current'},{...calendar,id:teamUuid(315),calendar_import_source_state:'unknown'} as unknown as WorkspaceEntry];
+  expect(projectConversation({...workspace,handoffs:[],entries:variants},team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[calendar]},team,'follow_up').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[]},team,'chief').entries).toEqual([]);
+ });
+ it('masks unavailable metadata even if stale source label and body remain',()=>{
+  const projection=projectConversation({...workspace,handoffs:[],entries:[{...calendar,source_label:'Private stale appointment label',calendar_import_source_state:'unavailable'}]},team,'chief');expect(projection.entries).toEqual([{kind:'material',sourceKind:'calendar-import',id:`source:${calendar.id}`,sourceId:calendar.id,label:'Unavailable calendar file summary',createdAt:calendar.created_at,state:'unavailable'}]);expect(JSON.stringify(projection)).not.toContain('Private');expect(projection.turns).toEqual([]);
+ });
+ it('uses a neutral label when the current typed source has no label',()=>{
+  const projection=projectConversation({...workspace,handoffs:[],entries:[{...calendar,source_label:null}]},team,'chief');expect(projection.entries[0]).toMatchObject({sourceKind:'calendar-import',label:'Imported calendar snapshot'});
+ });
+});
+
 describe('saved conversation order',()=>{
   const later:WorkspaceEntry={...turn,id:teamUuid(260),revision:9,content:'Invented later question',created_at:'2026-10-23T13:00:00Z'};
   it('keeps old result, note and linked work cards before a newly delivered turn',()=>{

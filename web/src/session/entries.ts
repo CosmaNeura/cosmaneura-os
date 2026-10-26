@@ -4,7 +4,7 @@ import {hasResearchPacketMarker,RESEARCH_PACKET_LABEL} from '../research-packet-
 export type ConversationAction={kind:'review_handoff'|'retry_handoff'|'review_note'|'review_work'|'check_request';id:string;label:string};
 export type ConversationRow=
   {kind:'turn';id:string;entry:WorkspaceEntry;reviewLabel:string;actions:ConversationAction[]}|
-  ({kind:'material';id:string;sourceId:string;label:string;createdAt:string}&({sourceKind:'ehr'|'outlook';state:'current'|'unavailable'}|{sourceKind:'research';state:'current'}))|
+  ({kind:'material';id:string;sourceId:string;label:string;createdAt:string}&({sourceKind:'ehr'|'outlook'|'calendar-import';state:'current'|'unavailable'}|{sourceKind:'research';state:'current'}))|
   {kind:'review';id:string;author:string;title:string;status:string;needsReview:boolean;actions:ConversationAction[]};
 export type ConversationProjection={workspaceId:string|null;botAddress:string;entries:ConversationRow[];turns:WorkspaceEntry[]};
 
@@ -38,10 +38,10 @@ export function projectConversation(workspace:Workspace|null,team:ProviderTeam|n
         entries.push({kind:'material',sourceKind:'research',id,sourceId:source.id,createdAt:source.created_at,state:'current',label:RESEARCH_PACKET_LABEL});
         positions.set(id,source.revision);continue;
       }
-      const sourceKind=source.kind==='ehr_read_source'?'ehr':source.kind==='microsoft_message'?'outlook':null;
-      const custody=sourceKind==='ehr'?source.ehr_source_state:sourceKind==='outlook'?source.microsoft_source_state:undefined;
+      const sourceKind=source.kind==='ehr_read_source'?'ehr':source.kind==='microsoft_message'?'outlook':source.kind==='calendar_import_source'?'calendar-import':null;
+      const custody=sourceKind==='ehr'?source.ehr_source_state:sourceKind==='outlook'?source.microsoft_source_state:sourceKind==='calendar-import'?source.calendar_import_source_state:undefined;
       if(!sourceKind||(custody!=='current'&&custody!=='unavailable'))continue;
-      const state=custody,id=`source:${source.id}`,fallback=sourceKind==='ehr'?'Reviewed EHR source':'Reviewed Outlook email',unavailable=sourceKind==='ehr'?'Unavailable EHR source':'Unavailable email source';
+      const state=custody,id=`source:${source.id}`,fallback=sourceKind==='ehr'?'Reviewed EHR source':sourceKind==='calendar-import'?'Imported calendar snapshot':'Reviewed Outlook email',unavailable=sourceKind==='ehr'?'Unavailable EHR source':sourceKind==='calendar-import'?'Unavailable calendar file summary':'Unavailable email source';
       // Material is metadata only. It is neither a reply nor an unread clock.
       entries.push({kind:'material',sourceKind,id,sourceId:source.id,createdAt:source.created_at,state,label:state==='current'?source.source_label??fallback:unavailable});
       positions.set(id,source.revision);
