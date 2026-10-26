@@ -53,3 +53,27 @@ it.each(['withheld','deleted','changed'] as const)('preserves the draft when the
  expect(f.context.focusQuestion).not.toHaveBeenCalled();
  expect(await f.journal.load(editorAddress(calVisit.id,'conversation:chief'))).toMatchObject({data:{text}});
 });
+
+
+describe('calendar import from the connection catalog',()=>{
+ it('retains the draft and returns to connections after a blocked Back is resolved',async()=>{
+  const f=await fixture();f.session.models.updateThought('Keep my calendar directions');f.session.setSettingsEntry('connections');f.session.setSettingsOpen(true);
+  expect(await f.session.sources.openCalendarImport(f.context,'connections')).toBe(true);
+  expect(f.session.getSnapshot()).toMatchObject({settingsOpen:false,calendarImportReview:{open:true,origin:'connections'},ehrReview:null});
+  expect(f.session.sources.closeCalendarImport({...f.context,connectionNavigationLocked:true})).toBe(false);
+  expect(f.session.getSnapshot().calendarImportReview?.open).toBe(true);
+  expect(f.session.sources.closeCalendarImport(f.context)).toBe(true);
+  expect(f.session.getSnapshot()).toMatchObject({settingsOpen:true,settingsEntry:'connections',thought:'Keep my calendar directions',calendarImportReview:{open:false}});
+  expect(await f.journal.load(editorAddress(calVisit.id,'conversation:chief'))).toMatchObject({data:{text:'Keep my calendar directions'}});
+ });
+ it('keeps the catalog and draft when authorization fails',async()=>{
+  const f=await fixture();f.session.setSettingsEntry('connections');f.session.setSettingsOpen(true);f.session.models.updateThought('Keep these directions');vi.mocked(f.host.authorize).mockRejectedValueOnce(new WorkspaceApiError(403,'not_authorized'));
+  expect(await f.session.sources.openCalendarImport(f.context,'connections')).toBe(false);
+  expect(f.session.getSnapshot()).toMatchObject({settingsOpen:true,settingsEntry:'connections',calendarImportReview:null,thought:'Keep these directions'});expect(f.context.failure).toHaveBeenCalledOnce();
+ });
+ it('does not open an old account catalog request after account replacement',async()=>{
+  const f=await fixture();f.session.setSettingsEntry('connections');f.session.setSettingsOpen(true);let release!:()=>void;vi.mocked(f.host.authorize).mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+  const opening=f.session.sources.openCalendarImport(f.context,'connections');await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+  f.session.setIdentity({mode:'clerk_jwt',getToken:async()=>null});release();expect(await opening).toBe(false);expect(f.session.getSnapshot().calendarImportReview).toBeNull();
+ });
+});

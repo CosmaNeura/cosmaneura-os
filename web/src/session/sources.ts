@@ -105,7 +105,7 @@ export class WorkspaceSources {
     finally{this.preparingSource=false;if(busyGeneration!==null&&busyGeneration===this.session.generation.current)this.session.setBusy(false);}
   }
   openEhr(context:SourceContext,origin:'conversation'|'sources'|'connections'){return this.openVisitSource(context,origin,'ehr');}
-  openCalendarImport(context:SourceContext,origin:'conversation'|'sources'){return this.openVisitSource(context,origin,'calendar');}
+  openCalendarImport(context:SourceContext,origin:'conversation'|'sources'|'connections'){return this.openVisitSource(context,origin,'calendar');}
   private async openVisitSource(context:SourceContext,origin:'conversation'|'sources'|'connections',kind:'ehr'|'calendar'):Promise<boolean>{
     const view=this.session.getSnapshot(),host=context.conversationHost,owner=context.authenticated;
     if(!owner||!host||host.identity!==owner||!view.workspace?.appointment_id||context.locked||context.connectionNavigationLocked||context.captureNavigationLocked||context.captureDraftLocked||context.connectionEditorsLocked||context.accessBusy||view.handoffReviewPending||view.privateRecordingEntry||view.privateRecordingBusy)return false;
@@ -114,7 +114,7 @@ export class WorkspaceSources {
     try{
       if(!await this.session.conversations.retain(host)||!current())return false;
       await host.authorize();if(!current()||host.blocked())return false;
-      if(kind==='calendar'){if(origin==='connections')return false;this.session.setCalendarImportReview({identity:owner,generation,workspaceId:id,open:true,origin});this.session.setEhrReview(old=>old?{...old,open:false}:null);}
+      if(kind==='calendar'){this.session.setCalendarImportReview({identity:owner,generation,workspaceId:id,open:true,origin});this.session.setEhrReview(old=>old?{...old,open:false}:null);}
       else {this.session.setEhrReview({identity:owner,generation,workspaceId:id,open:true,origin});this.session.setCalendarImportReview(old=>old?{...old,open:false}:null);}
       this.session.setSettingsOpen(false);this.session.setPracticeOpen(false);this.session.setPracticePage('notebook');
       return true;
