@@ -55,6 +55,7 @@ export async function validGoogleCalendarReceipt(v:unknown):Promise<boolean> {
  return teamClosed(v,'contract_version,observation_id,observation_key,source_sha256,payload_sha256,observation')&&v.contract_version===1&&teamUuid(v.observation_id)&&googleCalendarKey(v.observation_key)&&teamHash(v.source_sha256)&&teamHash(v.payload_sha256)&&validGoogleCalendarObservation(v.observation)&&await sha(teamCanonical(v.observation))===v.payload_sha256;
 }
 export class GoogleCalendarRefusal extends WorkspaceApiError {constructor(status:number,code:string){super(status,code);this.name='GoogleCalendarRefusal';}}
+export const googleCalendarServiceUnavailable=(e:unknown)=>e instanceof GoogleCalendarRefusal&&e.status===404&&e.code==='google_calendar_unavailable';
 const REFUSALS=new Set(['google_calendar_consent_required','google_calendar_grant_unavailable','google_calendar_grant_changed','google_calendar_source_invalid','google_calendar_source_superseded','google_calendar_source_expired','google_calendar_source_changed','google_calendar_observation_unconfirmed','google_calendar_observation_unavailable','google_calendar_observation_limit','google_calendar_source_unavailable','invalid_google_calendar_review','google_calendar_not_observed','google_calendar_patient_mismatch','google_calendar_already_selected','workspace_revision_conflict','workspace_history_limit','idempotency_conflict','invalid_google_calendar_request']);
 export const googleCalendarReviewProvesNoCommit=(e:unknown)=>e instanceof GoogleCalendarRefusal&&['workspace_revision_conflict','google_calendar_patient_mismatch','google_calendar_already_selected','invalid_google_calendar_request'].includes(e.code??'');
 type Request=GoogleCalendarObserveRequest|GoogleCalendarReviewRequest|{action:'status'}|{action:'inspect';observation_id:string}|{action:'resolve';idempotency_key:string};
@@ -75,7 +76,7 @@ async function send<T>(identity:AuthenticatedWorkspaceIdentity,path:string,body:
     if(signal?.aborted)abort();check();const headers=await wait(workspaceAuthHeaders(identity,base).catch(()=>{throw new WorkspaceApiError(401);}));check();
     headers.set('X-Cosmas-Google-Calendar','1');headers.set('Accept','application/json');
     response=await wait(workspaceFetch(identity,base+path,{method:'POST',headers,body:encoded,signal:controller.signal,cache:'no-store',credentials:'omit',redirect:'error',referrerPolicy:'no-referrer'}));check();
-    if([401,403,404,426].includes(response.status))throw new WorkspaceApiError(response.status);
+    if([401,403,426].includes(response.status))throw new WorkspaceApiError(response.status);
     if(response.redirected||response.headers.has('content-encoding')||response.headers.get('content-type')?.split(';',1)[0].trim().toLowerCase()!=='application/json'||
       !response.headers.get('cache-control')?.split(',').some(v=>v.trim().toLowerCase()==='no-store'))throw new WorkspaceApiError(502);
     reader=response.body?.getReader();if(!reader)throw new WorkspaceApiError(502);const cap=response.ok?(large?MODEL_WORKSPACE_BYTES:131072):2048;
@@ -83,9 +84,14 @@ async function send<T>(identity:AuthenticatedWorkspaceIdentity,path:string,body:
     for(;;){const part=await wait(reader.read());check();if(part.done)break;size+=part.value.length;if(size>cap)throw new WorkspaceApiError(502);chunks.push(part.value);}
     const bytes=new Uint8Array(size);let at=0;for(const chunk of chunks){bytes.set(chunk,at);at+=chunk.length;}
     let value:unknown;try{value=parseVendorJson(new TextDecoder('utf-8',{fatal:true}).decode(bytes));}catch{throw new WorkspaceApiError(502);}
+    if(response.status===404&&teamClosed(value,'detail')&&value.detail==='google_calendar_unavailable')throw new GoogleCalendarRefusal(404,value.detail);
     if(response.status!==200){if([400,409,422].includes(response.status)&&teamClosed(value,'detail')&&typeof value.detail==='string'&&REFUSALS.has(value.detail))throw new GoogleCalendarRefusal(response.status,value.detail);throw new WorkspaceApiError(response.status);}
     const result=await wait(validate(value));check();return result;
-  }catch(error){if(error instanceof WorkspaceApiError)throw error;throw new WorkspaceApiError(503);}
+  }catch(error){
+    // Only a validated named service refusal narrows a404. Malformed or unknown
+    // responses retain the existing authority-denial behavior.
+    if(response?.status===404&&!googleCalendarServiceUnavailable(error)&&!(error instanceof WorkspaceApiError&&[401,403,426].includes(error.status)))throw new WorkspaceApiError(404);
+    if(error instanceof WorkspaceApiError)throw error;throw new WorkspaceApiError(503);}
   finally{clearTimeout(timer);signal?.removeEventListener('abort',abort);controller.signal.removeEventListener('abort',rejectAbort);cancel(reader??response?.body);try{reader?.releaseLock();}catch{/* Discarded read may settle. */}controller.abort();}
 }
 const invalid=():never=>{throw new WorkspaceApiError(502);};

@@ -1,11 +1,11 @@
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');});
 vi.mock('./workspace-auth-headers',()=>({assertCurrentDesktopSession:()=>{},workspaceAuthHeaders:async()=>new Headers({'Content-Type':'application/json','Authorization':'Bearer invented'})}));
-import {googleCalendarApi,googleCalendarEventHash,googleCalendarSourceContent,googleCalendarValidUntil,validGoogleCalendarReceipt,validGoogleCalendarObservation,type GoogleCalendarReceipt} from './google-calendar-api';
+import {googleCalendarApi,GoogleCalendarRefusal,googleCalendarReviewProvesNoCommit,googleCalendarEventHash,googleCalendarSourceContent,googleCalendarValidUntil,validGoogleCalendarReceipt,validGoogleCalendarObservation,type GoogleCalendarReceipt} from './google-calendar-api';
 import {calendarReceipt,calendarBody,calendarReview,calendarSha,calendarUuid,calendarVisit} from './google-calendar-fixtures.test-support';
 import {modelCanonical} from './model-work-request';
 import {teamCanonical} from './team-setup-request';
-import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
+import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null};let receipt:GoogleCalendarReceipt;
 const response=(v:unknown,status=200,headers?:Record<string,string>)=>new Response(JSON.stringify(v),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store',...headers}});
@@ -40,4 +40,23 @@ it('matches the independently specified backend source text with real newlines a
  ].join(String.fromCharCode(10));
  expect(googleCalendarSourceContent(receipt.observation,event)).toBe(expected);
  expect(googleCalendarSourceContent(receipt.observation,event)).not.toContain(String.fromCharCode(92)+'n');
+});
+
+it('preserves only the exact named service404 as a typed refusal without claiming no commit',async()=>{
+ const fetcher=vi.fn().mockResolvedValue(response({detail:'google_calendar_unavailable'},404));vi.stubGlobal('fetch',fetcher);
+ const cause=await googleCalendarApi.status(identity).catch(e=>e);
+ expect(cause).toBeInstanceOf(GoogleCalendarRefusal);expect(cause).toMatchObject({status:404,code:'google_calendar_unavailable'});
+ expect(googleCalendarReviewProvesNoCommit(cause)).toBe(false);expect(fetcher).toHaveBeenCalledOnce();
+});
+it.each([401,403,426])('does not reinterpret named calendar errors with authority status%s',async status=>{
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(response({detail:'google_calendar_unavailable'},status)));
+ const cause=await googleCalendarApi.status(identity).catch(e=>e);expect(cause).toBeInstanceOf(WorkspaceApiError);expect(cause).not.toBeInstanceOf(GoogleCalendarRefusal);expect(cause.status).toBe(status);
+});
+it.each(['unknown','extra','duplicate','invalid-json','wrong-type','wrong-content-type','encoded','oversized'])('keeps %s404 fail-closed instead of treating it as service unavailability',async mode=>{
+ let body=JSON.stringify({detail:'google_calendar_unavailable'});const headers:Record<string,string>={'Content-Type':'application/json','Cache-Control':'no-store'};
+ if(mode==='unknown')body=JSON.stringify({detail:'calendar_not_found'});if(mode==='extra')body=JSON.stringify({detail:'google_calendar_unavailable',extra:true});
+ if(mode==='duplicate')body='{"detail":"google_calendar_unavailable","detail":"google_calendar_unavailable"}';if(mode==='invalid-json')body='{';
+ if(mode==='wrong-type')body=JSON.stringify({detail:null});if(mode==='wrong-content-type')headers['Content-Type']='text/plain';if(mode==='encoded')headers['Content-Encoding']='gzip';if(mode==='oversized')body=' '.repeat(2048)+body;
+ vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(body,{status:404,headers})));
+ const cause=await googleCalendarApi.status(identity).catch(e=>e);expect(cause).toBeInstanceOf(WorkspaceApiError);expect(cause).not.toBeInstanceOf(GoogleCalendarRefusal);expect(cause.status).toBe(404);
 });

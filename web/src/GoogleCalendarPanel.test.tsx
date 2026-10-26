@@ -82,3 +82,32 @@ it.each(['revoke','account','reconnect'])('immediately hides private content aft
 it('hides an unavailable projected source including its title and blocks Chief',async()=>{await prepare();await click('Save calendar summary to visit');const prior=structuredClone(saved);props={...props,currentSources:[{entry_id:calendarUuid(5),state:'unavailable'}]};await mount();expect(host.querySelector('pre')).toBeNull();expect(host.textContent).not.toContain('Invented café follow-up');expect(button('Ask Chief about this calendar summary')).toBeUndefined();expect(saved).toEqual(prior);});
 it.each(['invented-timed','invented-allday'])('expires %s at its conservative authority deadline without a provider call',async id=>{let expire:(()=>void)|undefined,delay:number|undefined;const original=globalThis.setTimeout;vi.spyOn(globalThis,'setTimeout').mockImplementation(((fn:TimerHandler,ms?:number,...args:unknown[])=>{if(ms&&ms>3600000){expire=fn as ()=>void;delay=ms;}return original(fn,ms,...args);}) as typeof setTimeout);await prepare(id);const end=id==='invented-timed'?'2026-10-02T15:00:00Z':'2026-10-05T00:00:00Z';expect(delay).toBe(Date.parse(end)-Date.parse('2026-10-02T12:30:00Z'));expect(expire).toBeTruthy();vi.mocked(Date.now).mockReturnValue(Date.parse(end));await act(async()=>expire!());expect(host.querySelector('pre')).toBeNull();expect(host.textContent).toContain('expired for new work');expect(vi.mocked(globalThis.setTimeout).mock.calls.filter(c=>c[1]===0)).toHaveLength(0);expect(googleCalendarApi.observe).toHaveBeenCalledOnce();});
 it('withholds revoked inspection and retains the source in private recovery',async()=>{await prepare();const prior=structuredClone(saved);vi.mocked(googleCalendarApi.inspect).mockRejectedValueOnce(new GoogleCalendarRefusal(409,'google_calendar_grant_changed'));await click('Check calendar access');expect(host.querySelector('pre')).toBeNull();expect(saved).toEqual(prior);});
+
+it('keeps the workspace and retry available when calendar status names an unavailable service',async()=>{
+ await mount();vi.mocked(googleCalendarApi.status).mockRejectedValueOnce(new GoogleCalendarRefusal(404,'google_calendar_unavailable'));await click('Check calendar access');
+ expect(props.onAuthenticationLost).not.toHaveBeenCalled();expect(access.denied).not.toHaveBeenCalled();expect(saved).toBeNull();expect(access.persist).not.toHaveBeenCalled();
+ expect(host.textContent).toContain('Calendar work is unavailable from the practice service.');expect(button('Check calendar access')!.disabled).toBe(false);expect(button('Load next 7 days')!.disabled).toBe(true);
+ expect(props.onBusyChange).toHaveBeenLastCalledWith(false);expect(googleCalendarApi.observe).not.toHaveBeenCalled();expect(props.onSaved).not.toHaveBeenCalled();
+});
+it('masks prior calendar contents on named service404 and restores only after explicit access and inspection',async()=>{
+ await prepare();const prior=structuredClone(saved);vi.mocked(googleCalendarApi.status).mockRejectedValueOnce(new GoogleCalendarRefusal(404,'google_calendar_unavailable'));await click('Check calendar access');
+ expect(host.querySelector('pre')).toBeNull();expect(host.textContent).not.toContain('Invented café follow-up');expect(saved).toEqual(prior);expect(props.onAuthenticationLost).not.toHaveBeenCalled();expect(access.denied).not.toHaveBeenCalled();
+ expect(props.onBusyChange).toHaveBeenLastCalledWith(false);expect(googleCalendarApi.observe).toHaveBeenCalledOnce();expect(googleCalendarApi.review).not.toHaveBeenCalled();
+ await click('Check calendar access');expect(googleCalendarApi.inspect).toHaveBeenCalledOnce();expect(host.querySelector('pre')).toBeTruthy();expect([...host.querySelectorAll<HTMLInputElement>('.google-calendar-checks input')].every(i=>!i.checked)).toBe(true);expect(button('Save calendar summary to visit')!.disabled).toBe(true);expect(saved).toEqual(prior);
+});
+it.each(['observe','review'] as const)('retains an exact pending%s request when the service becomes unavailable',async kind=>{
+ if(kind==='observe'){await mount();await click('Check calendar access');vi.mocked(googleCalendarApi.observe).mockRejectedValueOnce(new GoogleCalendarRefusal(404,'google_calendar_unavailable'));await click('Load next 7 days');}
+ else{await prepare();vi.mocked(googleCalendarApi.review).mockRejectedValueOnce(new GoogleCalendarRefusal(404,'google_calendar_unavailable'));await click('Save calendar summary to visit');}
+ const pending=structuredClone(saved!.pending);expect(pending?.kind).toBe(kind);expect(host.querySelector('pre')).toBeNull();expect(props.onAuthenticationLost).not.toHaveBeenCalled();expect(access.denied).not.toHaveBeenCalled();expect(props.onSaved).not.toHaveBeenCalled();
+ expect(button(kind==='observe'?'Check saved calendar result':'Retry exact calendar source save')!.disabled).toBe(false);expect(saved!.pending).toEqual(pending);
+ expect(googleCalendarApi.observe).toHaveBeenCalledOnce();expect(googleCalendarApi.review).toHaveBeenCalledTimes(kind==='review'?1:0);expect(googleCalendarApi.resolve).not.toHaveBeenCalled();
+});
+it.each([401,403,404,426])('keeps unknown or genuine authority%s fail-closed',async status=>{
+ await prepare();const prior=structuredClone(saved),cause=new WorkspaceApiError(status);vi.mocked(googleCalendarApi.status).mockRejectedValueOnce(cause);await click('Check calendar access');
+ expect(host.querySelector('pre')).toBeNull();expect(props.onAuthenticationLost).toHaveBeenCalledWith(cause);expect(access.denied).toHaveBeenCalledWith(cause);expect(saved).toEqual(prior);expect(props.onSaved).not.toHaveBeenCalled();
+});
+it('ignores a late service404 after the native owner is suspended',async()=>{
+ useNative();await mount();let reject!:(cause:unknown)=>void;vi.mocked(googleCalendarApi.status).mockReturnValueOnce(new Promise((_resolve,no)=>{reject=no;}));
+ await act(async()=>button('Check calendar access')!.click());await nativeHint(false);await act(async()=>reject(new GoogleCalendarRefusal(404,'google_calendar_unavailable')));
+ expect(props.onAuthenticationLost).not.toHaveBeenCalled();expect(access.denied).not.toHaveBeenCalled();expect(host.textContent).not.toContain('Calendar work is unavailable from the practice service.');expect(host.querySelector('pre')).toBeNull();expect(saved).toBeNull();
+});
