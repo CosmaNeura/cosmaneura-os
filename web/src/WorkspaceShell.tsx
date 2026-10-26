@@ -1403,7 +1403,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
         onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveFaxDocument:undefined}
         onReviewProviderFaxDocument={FAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveProviderFaxDocument:undefined}
-        initialScreen={settingsEntry} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
+        initialScreen={settingsEntry} googleTaskPresentation={googleMessageOpen&&googleMessageVisited} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
         ehr={EHR_READ_BUILD&&authenticated?<section aria-label="Choose a visit for appointment review"><p>{visitLinked?'Choose the patient and appointment, then read the available records for this visit. Your conversation draft stays in place.':'Choose the existing visit that will receive your reviewed EHR source.'}</p>
           <button className="team-primary" disabled={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>{if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;if(visitLinked)void openEhrTask('connections');else{ehrVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}}>{visitLinked?'Review EHR records':'Choose a visit'}</button></section>:undefined}

@@ -1,8 +1,8 @@
 .settings-hub { max-width: 860px; margin: 0 auto; padding: 24px 32px 48px; }
 .settings-hub[hidden], .settings-hub [hidden] { display: none !important; }
-.settings-hub-nav { display: flex; gap: 12px; justify-content: space-between; margin-bottom: 20px; }
+.settings-hub-nav { display: flex; flex-wrap: wrap; gap: 12px; justify-content: space-between; margin-bottom: 20px; }
 .team-workspace .settings-hub button { min-height: 44px; }
-.settings-hub-nav button { padding: 9px 14px; }
+.settings-hub-nav button { padding: 9px 14px; min-width: 0; max-width: 100%; box-sizing: border-box; white-space: normal; overflow-wrap: anywhere; }
 .settings-hub-nav .settings-done { margin-left: auto; }
 .settings-hub-heading h1 { margin: 0 0 6px; font-size: clamp(26px, 4vw, 34px); line-height: 1.2; letter-spacing: -.8px; scroll-margin-top: 16px; }
 .settings-hub-heading h1:focus { outline: none; }
@@ -18,6 +18,8 @@
 .settings-card-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; background: #eef3ed; color: #326c59; font-size: 25px; }
 .settings-hub fieldset { min-width: 0; }
 .settings-hub > [data-settings-screen] { margin-top: 20px; }
+.settings-hub[data-editor-task="google"] { padding: 0; }
+.settings-hub[data-editor-task="google"] > [data-settings-screen="google"] { margin-top: 0; }
 .settings-hub input, .settings-hub select, .settings-hub textarea { max-width: 100%; box-sizing: border-box; }
 @media (max-width: 600px) {
   .settings-hub { padding: 16px 16px 32px; }

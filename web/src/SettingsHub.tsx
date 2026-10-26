@@ -21,8 +21,9 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({appearance,open,nativePresentation, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+export function SettingsHub({appearance,open,nativePresentation,googleTaskPresentation=false, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
   appearance?:ReactNode;open: boolean;nativePresentation?:'workspace'|'messages'; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; ehr?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
+  googleTaskPresentation?:boolean;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
   initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'|'ehr';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
@@ -96,12 +97,6 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
   useEffect(() => {
     if(open){setScreen(initialScreen);if(initialScreen==='ehr'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google'))setVisited(previous=>previous.includes(initialScreen)?previous:[...previous,initialScreen]);}
   }, [initialScreen,connectionIdentity]);
-  useEffect(() => {
-    if (!open) return;
-    title.current?.focus({preventScroll:true});
-    // Native scrolling must keep the navigation before the title in view.
-    (nativePresentation ? section.current : title.current)?.scrollIntoView?.({block:'start'});
-  }, [open, screen, nativePresentation]);
   function visit(next: Screen, accepted=false) {
     if (leaveLocked) return;
     if(!accepted&&screen==='team'&&next!=='team'&&teamDirty&&beforeLeaveTeam){beforeLeaveTeam(()=>visit(next,true));return;}
@@ -126,6 +121,15 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
     if(id==='messaging'&&connectionIdentity)setInboundOwner(connectionIdentity);
   }
   const availabilityPending=!!selectedGuide&&!!connectionIdentity&&!catalog&&!catalogError;
+  // Presentation follows the existing editor gate; requesting a task cannot
+  // remove the only escape while catalog/access/setup keeps its editor hidden.
+  const presentingGoogleTask=googleTaskPresentation&&open&&screen==='google'&&google!=null&&visited.includes('google')&&!hiddenSetup&&!availabilityPending&&!current?.denied;
+  useEffect(() => {
+    if (!open||presentingGoogleTask) return;
+    title.current?.focus({preventScroll:true});
+    // Native scrolling must keep the navigation before the title in view.
+    (nativePresentation ? section.current : title.current)?.scrollIntoView?.({block:'start'});
+  }, [open, screen, nativePresentation, presentingGoogleTask]);
   useEffect(()=>{
     if(open&&screen in CONNECTION_GUIDES&&(!connectionIdentity||catalog?.[screen as ConnectionId]===true||catalogError&&!current?.denied))
       setVisited(previous=>previous.includes(screen as Editor)?previous:[...previous,screen as Editor]);
@@ -150,15 +154,15 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
     return catalog?connectionSetupSummary(catalog,id)??{label:'Ready to connect',reason:'Sign in and review the access for this service.',action:'Connect account',tone:'neutral'}:
       {label:'Not checked',reason:'Account status has not been checked.',action:'Check connection',tone:'neutral'};
   }
-  return <section ref={section} className="settings-hub" hidden={!open} aria-label="Settings">
-    <nav className="settings-hub-nav" aria-label="Settings navigation">
+  return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingGoogleTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':undefined}>
+    <nav className="settings-hub-nav" aria-label="Settings navigation" hidden={presentingGoogleTask}>
       {screen !== 'home' && <button disabled={leaveLocked} onClick={() => visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
         <span aria-hidden="true">← </span>{screen === 'members' || screen === 'team' || screen === 'connections' ? 'All settings' : 'All connections'}
       </button>}
       <button className="settings-done" disabled={leaveLocked} onClick={onClose}>Done</button>
     </nav>
-    {leaveLocked && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
-    <header className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
+    {leaveLocked&&!presentingGoogleTask && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
+    <header hidden={presentingGoogleTask} className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
       <h1 ref={title} tabIndex={-1}>{titles[screen]}</h1>
       {screen === 'home' && <p>A little setup. A team that fits your practice.</p>}
       {screen === 'connections' && <p>Choose a service, check what is ready, and take the next step.</p>}
@@ -254,7 +258,7 @@ export function SettingsHub({appearance,open,nativePresentation, team, members, 
       <h3>Administrator steps</h3><p>{selectedGuide.setup}</p>
       <details><summary>Your steps after setup</summary><ol>{selectedGuide.steps.filter(step=>!step.startsWith("Have an administrator")).map(step=><li key={step}>{step}</li>)}</ol><p className="connection-access-summary">{selectedGuide.access}</p></details>
     </section>}
-    {selectedGuide&&readiness&&<details className="connection-state-help"><summary>Supported actions</summary><ul>{readiness.actions.map(action=><li key={action.id}>{CONNECTION_ACTION_LABELS[action.id]} · {!action.supported?'Coming soon':!connectionActionClientAvailable(action.id,screen as ConnectionId)?'Not available in this app':action.runtime_available?'Setup available; account and task checks required':'Practice setup required'}</li>)}</ul></details>}
+    {selectedGuide&&readiness&&!presentingGoogleTask&&<details className="connection-state-help"><summary>Supported actions</summary><ul>{readiness.actions.map(action=><li key={action.id}>{CONNECTION_ACTION_LABELS[action.id]} · {!action.supported?'Coming soon':!connectionActionClientAvailable(action.id,screen as ConnectionId)?'Not available in this app':action.runtime_available?'Setup available; account and task checks required':'Practice setup required'}</li>)}</ul></details>}
     {recoverSelected&&<p role="status">Review your saved work and exact unresolved requests. Current access is still required for source content and new work.</p>}
     {visited.map(id => <div key={id} ref={id==='messaging'?messagingEditor:undefined} tabIndex={id==='messaging'?-1:undefined} data-settings-screen={id} hidden={screen !== id||hiddenSetup||availabilityPending||!!current?.denied}>{editors[id]}</div>)}
   </section>;
