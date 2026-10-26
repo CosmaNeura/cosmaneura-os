@@ -8,6 +8,11 @@ from zoneinfo import ZoneInfo
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from cosmas_os.ports.athena_allergy_ehr import (
+    AthenaAllergiesObservation,
+    AthenaPatientsObservation,
+    AthenaPrivateSnapshot,
+)
 from cosmas_os.ports.tebra_fhir_ehr import (
     FhirMedicationsObservation,
     FhirPatientsObservation,
@@ -355,12 +360,14 @@ class TebraPrivateSnapshot(Protected):
 
 
 class SnapshotPayload(Protected):
-    public: WindowObservation | VerifiedObservation | ProblemsObservation | MedicationsObservation | TebraWindowObservation | TebraVerifiedObservation | FhirPatientsObservation | FhirMedicationsObservation
-    private: MedicationsPrivateSnapshot | ProblemsPrivateSnapshot | PrivateSnapshot | TebraPrivateSnapshot | FhirPrivateSnapshot
+    public: WindowObservation | VerifiedObservation | ProblemsObservation | MedicationsObservation | TebraWindowObservation | TebraVerifiedObservation | FhirPatientsObservation | FhirMedicationsObservation | AthenaPatientsObservation | AthenaAllergiesObservation
+    private: MedicationsPrivateSnapshot | ProblemsPrivateSnapshot | PrivateSnapshot | TebraPrivateSnapshot | FhirPrivateSnapshot | AthenaPrivateSnapshot
 
     @model_validator(mode="before")
     @classmethod
     def private_provider(cls, value):
+        if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("protocol") == "core":
+            return {**value, "private": AthenaPrivateSnapshot.model_validate(value["private"])}
         if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("protocol") == "fhir":
             return {**value, "private": FhirPrivateSnapshot.model_validate(value["private"])}
         if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("kind") == "verified_medications":
@@ -373,6 +380,12 @@ class SnapshotPayload(Protected):
 
     @model_validator(mode="after")
     def same_provider(self):
+        if isinstance(self.public, (AthenaPatientsObservation, AthenaAllergiesObservation)):
+            if not isinstance(self.private, AthenaPrivateSnapshot):
+                raise ValueError("athena_payload_mismatch")
+            return self
+        if isinstance(self.private, AthenaPrivateSnapshot):
+            raise ValueError("athena_payload_mismatch")
         if isinstance(self.public, (FhirPatientsObservation, FhirMedicationsObservation)):
             if not isinstance(self.private, FhirPrivateSnapshot):
                 raise ValueError("fhir_payload_mismatch")

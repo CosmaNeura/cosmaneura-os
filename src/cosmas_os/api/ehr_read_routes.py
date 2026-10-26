@@ -12,6 +12,7 @@ from cosmas_os.api import ehr_read_schemas as schema
 from cosmas_os.api.capture_deadline import CaptureBoundary
 from cosmas_os.api.capture_schemas import _unique_object
 from cosmas_os.application import (
+    athena_allergy_ehr,
     ehr_reads,
     elation_sandbox_installation,
     model_work,
@@ -45,7 +46,9 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
 
     def service(provider=None, protocol=None):
         port = select_runtime(runtime(), provider or "elation", protocol)
-        if not configuration().workspace_ehr_read_available or port is None or protocol == "fhir" and not configuration().workspace_tebra_fhir_enabled:
+        if (not configuration().workspace_ehr_read_available or port is None
+                or protocol == "fhir" and not configuration().workspace_tebra_fhir_enabled
+                or protocol == "core" and not configuration().workspace_athena_allergies_enabled):
             raise ws.WorkspaceError("ehr_read_unavailable", 404)
         return port
 
@@ -88,6 +91,9 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
         def execute():
             reauthenticate()
             if body.action == "status":
+                if body.protocol == "core":
+                    return athena_allergy_ehr.status(*scope, enabled=configuration().workspace_ehr_read_available and configuration().workspace_athena_allergies_enabled,
+                        port=select_runtime(runtime(), "athena", "core"), reauthenticate=reauthenticate)
                 if body.protocol == "fhir":
                     return tebra_fhir_ehr.status(*scope, enabled=configuration().workspace_ehr_read_available and configuration().workspace_tebra_fhir_enabled,
                         port=select_runtime(runtime(), "tebra", "fhir"), reauthenticate=reauthenticate)
@@ -135,6 +141,16 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                     workspace_id=str(body.workspace_id), port=port, reauthenticate=reauthenticate)
             elif body.action == "fhir_medications":
                 result = tebra_fhir_ehr.medications(*scope, key=body.idempotency_key,
+                    connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
+                    workspace_id=str(body.workspace_id), observation_id=str(body.observation_id),
+                    observation_sha256=body.observation_sha256, item_handle=str(body.item_handle),
+                    item_sha256=body.item_sha256, port=port, reauthenticate=reauthenticate)
+            elif body.action == "core_patients":
+                result = athena_allergy_ehr.patients(*scope, key=body.idempotency_key,
+                    connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
+                    workspace_id=str(body.workspace_id), port=port, reauthenticate=reauthenticate)
+            elif body.action == "core_allergies":
+                result = athena_allergy_ehr.allergies(*scope, key=body.idempotency_key,
                     connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
                     workspace_id=str(body.workspace_id), observation_id=str(body.observation_id),
                     observation_sha256=body.observation_sha256, item_handle=str(body.item_handle),

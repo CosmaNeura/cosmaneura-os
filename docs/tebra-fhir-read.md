@@ -252,8 +252,20 @@ the original request key, exact saved content, retained Chief directions and
 source withdrawal. The clinical read makes two invented HTTP GETs; recovery,
 review and draft preparation make no additional provider calls or model admissions.
 
-The initial joined suite passes 21 cases, including eight actual model/source
-checks for exact text delivery, unmodified reviewed notes, grant withdrawal and
-feature-switch withdrawal. Further SQL adversarial, legacy regression and release
-artifact qualification are tracked in the workstream checkpoint; these initial
-results alone do not establish phone delivery. All tests use invented records.
+At source commit `5106698`, the frozen backend suite passes all 811 cases,
+including ten adversarial SQL cases and eight actual model/source checks for
+exact text delivery, unmodified reviewed notes, grant withdrawal and feature-switch
+withdrawal. All 2,977 source files remain unchanged during qualification.
+
+The rebuilt browser passes 65 checks across three scenarios, including a 320-pixel
+native frame with 200% text. One hosted native workflow passes with zero media
+attachments, covering review, Chief draft retention, source return, reachable
+controls and the visible native Done control. Preview38 is installed in place on
+the owner's phone, its reported build is independently verified, and launch
+succeeds. Existing signing and storage identities are preserved; no uninstall or
+storage reset occurred. See `CHECKPOINT-TEBRA-CLINICAL.json` and
+`native/preview38-phone-summary.json` in the adjacent connector workstream.
+
+All tests use invented records. Hosted native checks and successful installation
+do not establish physical VoiceOver, tactile haptics, edge gestures, or actual
+draft contents retained across the update.

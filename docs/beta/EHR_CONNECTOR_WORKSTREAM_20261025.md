@@ -380,7 +380,10 @@ rehearsal's address and process are recorded in `LOCAL-REHEARSAL.json`. The phon
 was on Preview24 at that checkpoint. No vendor messages, prescriptions, bookings or production
 rollout occurred.
 
-## Current phone and delivery limits
+## Earlier Preview29 and Preview30 delivery
+
+This section records those earlier deliveries. The latest verified build is
+listed under **Latest phone delivery** below.
 
 On October25 the owner requested a phone update. Preview29 was installed and
 launched on the connected iPhone, with the latest qualified EHR/calendar screens
@@ -392,8 +395,8 @@ Preview29 signing receipts in this workstream. No app data reset occurred.
 Preview30 has since been installed in place, and the phone confirms build30.
 It includes the `484e5b4` Outlook review-to-Chief workflow. The phone was locked
 when CoreDevice attempted to launch it, so that launch was denied by iOS;
-installation and version confirmation succeeded. The current browser rehearsal
-also serves this build at its existing origin. Neither update reset storage.
+installation and version confirmation succeeded. At that checkpoint, the browser
+rehearsal also served this build at its existing origin. Neither update reset storage.
 See `CHECKPOINT-OUTLOOK.json` and `native/preview30-phone-summary.json`.
 
 Outlook now reads a selected email through the existing delegated Mail.Read
@@ -408,8 +411,8 @@ The native test had no media attachments. Two final backend-file changes only
 removed trailing whitespace; their before/after hashes are recorded alongside
 the 142-check receipt. No real Microsoft account was connected.
 
-These deliveries do not establish live vendor connections. Atlas.md currently
-has generic calendar-file intake, not synchronization. Elation provides reviewed
+Those deliveries did not establish live vendor connections. At that checkpoint,
+Atlas.md had generic calendar-file intake, not synchronization. Elation provided reviewed
 patient/appointment context and the problem-list slice described below; Tebra
 provides reviewed patient/appointment context. Athena provides the Core visit-link task.
 None of the four has passed live vendor acceptance in this workstream.
@@ -525,35 +528,57 @@ Complete instructions, negation, structured dosing, context and original numeric
 spelling remain available, with whole-packet refusal above the 5,000-character
 source limit.
 
-The interface passes 69 focused checks and both type configurations. The first
-actual signed API/SQL/mounted-interface plus model suite passes 21 cases: exact
-Unicode/fractional source text, lost-result recovery after reopening, retained
-Chief directions, current access checks and withdrawal of source/derived replies.
-Further SQL adversarial, legacy and release qualification are still being
-completed. The existing phone build below does not yet contain this workflow.
+The interface passes 69 focused checks and both type configurations. At frozen
+source `5106698`, all 811 backend cases pass, including the actual signed
+API/SQL/mounted-interface journey, ten adversarial SQL cases and eight model/source
+cases. These prove exact Unicode/fractional source text, lost-result recovery after
+reopening, retained Chief directions, current access checks and withdrawal of
+source/derived replies. All 2,977 frozen source files remain unchanged.
+
+The rebuilt browser passes 65 checks across three scenarios, including a
+320-pixel native frame with 200% text. One hosted native workflow passes with zero
+attachments, covering review, source return, retained draft, reachable controls
+and native Done. Preview38 below contains this workflow.
 
 The runtime is default-off and accepts only an exact MockTransport. Live vendor
 authentication, sandbox URLs, clinical scopes and grant provisioning remain
 unqualified. No external clinical read, prescription or writeback is enabled.
 
+### Athena clinical allergy workflow
+
+The [Athena clinical allergy workflow](../athena-allergy-read.md) now adds
+independent authorized patient and chart-department selection, original allergy
+review, exact saved-source recovery and preparation of an existing Chief draft.
+Recorded reactions, severity, criticality, notes, dates and int64 codes are
+retained. Missing, false and true NKDA statements remain distinct, and an empty
+list does not become a no-allergy claim. Existing Core visit-link authority is
+not reused as clinical authority.
+
+The integrated signed API/SQL/interface and model gate passes 35 cases, including
+14 adversarial SQL cases and eight model/source cases. A lost response resolves
+after reopening without a second clinical read; source withdrawal also withholds
+derived replies. The UI passes 91 focused cases and both type configurations.
+Mac Studio passes 27 runtime cases and changed-Python lint/types. Rebuilt
+browser/native and phone delivery are being qualified separately.
+
 ## Latest phone delivery
 
-Preview37 (`f1c8bce`) is installed and launched in place, with the phone's
-reported build independently verified. It includes the qualified Elation
-medication workflow above, saved Research packet cards in Chief, and exact
-reading-position restoration after source review without early reply
-acknowledgment. It also corrects Details/Message-details return focus and cited
-source navigation without reopening the composer. Its focused, independent
-review, browser and native checks pass, with zero images or native media
-attachments. The local rehearsal serves the same source. See
-`CHECKPOINT-DIALOG-FOCUS.json` and `native/preview37-phone-summary.json` in the
-connector workstream. Mac Studio separately qualified the new Tebra snapshot
-formatter's 36 cases, lint and types against 2,953 unchanged committed files.
+Preview38 (`5106698`) is installed and launched in place, with the phone's
+reported build independently verified. It adds the qualified Tebra clinical
+medication workflow and retains the Elation medication workflow, Research cards,
+source reading-position restoration, and Details/Message-details focus fixes.
+The signed archive and restored product match all 258 file hashes. Signing and
+storage identities are preserved, with no uninstall or storage reset. See
+`CHECKPOINT-TEBRA-CLINICAL.json` and `native/preview38-phone-summary.json` in the
+connector workstream. The first launch attempt was blocked by the phone lock;
+launch succeeded after the owner unlocked it.
 
-This delivery uses invented provider data. It does not activate the Tebra
-FHIR reader or establish live EHR access, medication reconciliation, broader
-chart/lab coverage, prescription transmission or clinical writeback. Those
-remain separate implementation and vendor-acceptance work.
+This delivery uses invented provider data. The clinical runtime remains
+default-off and MockTransport-only outside the synthetic preview. Live EHR
+access, medication reconciliation, broader chart/lab coverage, prescription
+transmission and clinical writeback remain separate implementation and vendor
+acceptance work. Physical VoiceOver, tactile haptics, edge gestures and actual
+draft contents retained across the update have not been verified.
 
 ## Elation sandbox access
 

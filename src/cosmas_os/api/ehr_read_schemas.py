@@ -11,26 +11,30 @@ from cosmas_os.ports.ehr_reads import Digest, Protected, Window
 
 
 class ProviderCommand(Protected):
-    provider: Literal["elation", "tebra"] | None = None
-    protocol: Literal["fhir"] | None = None
+    provider: Literal["elation", "tebra", "athena"] | None = None
+    protocol: Literal["fhir", "core"] | None = None
 
     @field_validator("protocol", mode="before")
     @classmethod
     def explicit_protocol(cls, value):
-        if value != "fhir":
+        if value not in ("fhir", "core"):
             raise ValueError("explicit_protocol_required")
         return value
 
     @model_validator(mode="after")
     def correct_protocol(self):
-        if self.protocol is not None and (self.provider != "tebra" or getattr(self, "action", "review") not in ("status", "inspect", "resolve", "fhir_patients", "fhir_medications", "review")):
+        action = getattr(self, "action", "review")
+        if self.protocol == "core" or self.provider == "athena":
+            if self.protocol != "core" or self.provider != "athena" or action not in ("status", "inspect", "resolve", "core_patients", "core_allergies", "review"):
+                raise ValueError("invalid_ehr_protocol")
+        elif self.protocol is not None and (self.provider != "tebra" or action not in ("status", "inspect", "resolve", "fhir_patients", "fhir_medications", "review")):
             raise ValueError("invalid_ehr_protocol")
         return self
 
     @field_validator("provider", mode="before")
     @classmethod
     def explicit_provider(cls, value):
-        if value not in ("elation", "tebra"):
+        if value not in ("elation", "tebra", "athena"):
             raise ValueError("explicit_provider_required")
         return value
 
@@ -47,6 +51,12 @@ class Status(ProviderCommand):
         return value
 
     action: Literal["status"]
+
+    @model_validator(mode="after")
+    def athena_shape(self):
+        if self.protocol == "core" and {"include_problems", "include_medications"} & self.model_fields_set:
+            raise ValueError("invalid_athena_status")
+        return self
 
 
 class Observe(ProviderCommand):
@@ -158,6 +168,31 @@ class FhirMedications(FhirContext):
     item_sha256: Digest
 
 
+class AthenaContext(ProviderCommand):
+    connection_id: UUID
+    binding_sha256: Digest
+    workspace_id: UUID
+    idempotency_key: IdempotencyKey
+
+    @model_validator(mode="after")
+    def explicit_athena(self):
+        if self.provider != "athena" or self.protocol != "core":
+            raise ValueError("explicit_athena_required")
+        return self
+
+
+class AthenaPatients(AthenaContext):
+    action: Literal["core_patients"]
+
+
+class AthenaAllergies(AthenaContext):
+    action: Literal["core_allergies"]
+    observation_id: UUID
+    observation_sha256: Digest
+    item_handle: UUID
+    item_sha256: Digest
+
+
 class Resolve(ProviderCommand):
     action: Literal["resolve"]
     idempotency_key: IdempotencyKey
@@ -176,7 +211,7 @@ class Install(ProviderCommand):
     idempotency_key: IdempotencyKey
 
 
-EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | Inspect | Resolve | Install | FhirPatients | FhirMedications, Field(discriminator="action")])
+EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | Inspect | Resolve | Install | FhirPatients | FhirMedications | AthenaPatients | AthenaAllergies, Field(discriminator="action")])
 
 
 class ReviewEhr(ProviderCommand):
@@ -193,7 +228,7 @@ class ReviewEhr(ProviderCommand):
 
     @model_validator(mode="after")
     def review_kind(self):
-        if self.protocol == "fhir":
+        if self.protocol in ("fhir", "core"):
             if "reviewed_visit" in self.model_fields_set:
                 raise ValueError("unexpected_visit_review")
         elif self.reviewed_visit is not True:
