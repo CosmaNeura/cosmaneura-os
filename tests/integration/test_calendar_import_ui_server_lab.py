@@ -90,6 +90,8 @@ def test_signed_calendar_import_ui_recovers_lost_replies_and_preserves_chief_dra
         assert evidence["reviews"] == evidence["revocations"] == 1
         assert not evidence["raw_retained"]
         assert evidence["model_admissions"] == initial_models
+        assert evidence["calendar_card_current_and_unavailable"]
+        assert evidence["calendar_card_action_exact_source_id"]
     finally:
         server.shutdown()
         server.server_close()

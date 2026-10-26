@@ -3,6 +3,8 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_CALENDAR_IMPORT_ENABLED','true');});
 import {CalendarImportMount} from './CalendarImportMount';
+import {ConversationEntries} from './ConversationEntries';
+import {projectConversation} from './session/entries';
 import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
 import {createHandoffReviewTestRecovery} from './handoff-review-test-recovery';
 import {WorkspaceSession} from './session/workspace-session';
@@ -39,7 +41,7 @@ it.skipIf(!base)('imports one bounded file through actual signed custody and pre
  const session=new WorkspaceSession();session.setIdentity(identity);session.setWorkspace(packet.workspace);session.setTeam(packet.team);session.setSelected('chief');session.setPracticePage('notebook');session.models.updateThought('Keep my existing Chief directions.');
  const retainedJournal=await createHandoffReviewTestRecovery(packet.workspace.id,()=>workspaceApi.read(identity,packet.workspace.id),webcrypto);
  session.recovery.journal.current={scope:'e'.repeat(64),serverScope:packet.team.recovery_scope!,value:retainedJournal.journal};
- const failures:unknown[]=[];
+ const failures:unknown[]=[],sourceActions:string[]=[];
  const access=session.recovery.editorAccess(identity,packet.team.recovery_scope,retainedJournal.journal,packet.workspace.id,true,false,e=>failures.push(e))!;
  recovery=access;
  const conversation:ConversationHost={identity,journal:access.journal,scope:'e'.repeat(64),current:()=>true,blocked:()=>session.getSnapshot().busy,
@@ -47,7 +49,10 @@ it.skipIf(!base)('imports one bounded file through actual signed custody and pre
  const sourceContext:SourceContext={authenticated:identity,locked:false,connectionNavigationLocked:false,captureNavigationLocked:false,captureDraftLocked:false,connectionEditorsLocked:false,activityBusy:false,accessBusy:false,scribeSourceBusy:false,schedulingPatientBusy:false,accountAccess:null,conversationHost:conversation,failure:e=>failures.push(e),focusQuestion:()=>{}};
  function Harness(){const view=useWorkspaceSession(session),w=view.workspace!;return <><EditorRecoveryContext.Provider value={access}><CalendarImportMount identity={identity} workspace={{id:w.id,label:w.label,revision:w.revision}}
   currentSources={w.entries.filter(e=>e.kind==='calendar_import_source'&&!!e.calendar_import_source_state).map(e=>({id:e.id,state:e.calendar_import_source_state!}))}
-  onAuthenticationLost={e=>failures.push(e)} onAskChief={saved=>void session.sources.prepareCalendarImport(sourceContext,saved)}/></EditorRecoveryContext.Provider><textarea aria-label="Chief directions" readOnly value={view.thought}/></>;}
+  onAuthenticationLost={e=>failures.push(e)} onAskChief={saved=>void session.sources.prepareCalendarImport(sourceContext,saved)}/></EditorRecoveryContext.Provider>
+  <ConversationEntries presentation="messages" projection={projectConversation(w,packet.team,'chief')} latestSourceRevision={w.revision} busy={view.busy} recoveryBlocked={false} locked={false}
+   onWork={()=>{throw new Error('Unexpected work action');}} onSource={id=>sourceActions.push(id)} onCheck={async()=>{throw new Error('Unexpected model check');}} onAction={()=>{throw new Error('Unexpected conversation action');}}/>
+  <textarea aria-label="Chief directions" readOnly value={view.thought}/></>;}
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root!.render(<Harness/>));
  const diagnostic=()=>{const copy=host.cloneNode(true) as HTMLDivElement;copy.querySelectorAll('option').forEach(option=>option.remove());return copy.textContent?.slice(0,3000);};
  const find=(name:string)=>[...host.querySelectorAll('button')].find(b=>b.textContent===name);
@@ -76,6 +81,15 @@ it.skipIf(!base)('imports one bounded file through actual signed custody and pre
  expect(session.getSnapshot().selectedSource).toBeTruthy();
  const draft=await access.journal.load(editorAddress(packet.workspace.id,'conversation:chief'));
  expect(draft).toMatchObject({data:{text:session.getSnapshot().thought}});
+ const selectedSource=session.getSnapshot().workspace!.entries.find(entry=>entry.id===session.getSnapshot().selectedSource)!;
+ expect(selectedSource.kind).toBe('calendar_import_source');expect(selectedSource.calendar_import_source_state).toBe('current');
+ const card=host.querySelector<HTMLElement>('[aria-label="Saved calendar file summary"]');expect(card).toBeTruthy();
+ expect(card!.dataset.entryId).toBe('source:'+selectedSource.id);expect(card!.querySelector('h3')?.textContent).toBe(selectedSource.source_label);
+ expect(card!.textContent).toContain('Saved snapshot available');expect(card!.textContent).toContain('File snapshot only');
+ expect(card!.textContent).not.toContain(packet.event_title);expect(card!.textContent).not.toContain(selectedSource.content);
+ expect(card!.querySelectorAll('button')).toHaveLength(1);expect(card!.querySelector('button')!.textContent).toBe('View saved source');
+ const wireBeforeCard=wire.length;await act(async()=>card!.querySelector('button')!.click());
+ expect(sourceActions).toEqual([selectedSource.id]);expect(wire).toHaveLength(wireBeforeCard);
  const counts=await (await realFetch(base!.origin+'/lab/counts')).json() as {imports:number;reviews:number;revocations:number;model_admissions:number;raw_retained:boolean};
  expect(counts.imports).toBe(1);expect(counts.reviews).toBe(1);expect(counts.raw_retained).toBe(false);expect(wire.filter(row=>row.action==='upload')).toHaveLength(1);
  expect(wire.find(row=>row.action==='resolve')?.key).toBe(wire.find(row=>row.action==='upload')?.key);
@@ -99,8 +113,12 @@ it.skipIf(!base)('imports one bounded file through actual signed custody and pre
  await wait(()=>expect(session.getSnapshot().workspace?.entries.find(e=>e.id===session.getSnapshot().selectedSource)?.calendar_import_source_state).toBe('unavailable'));
  const revoked=await workspaceApi.read(identity,packet.workspace.id),entry=revoked.entries.find(e=>e.id===session.getSnapshot().selectedSource)!;
  expect(entry.calendar_import_source_state).toBe('unavailable');expect(entry.content).toBe('');
+ const unavailableCard=host.querySelector<HTMLElement>('[data-entry-id="source:'+entry.id+'"]');
+ expect(unavailableCard?.getAttribute('aria-label')).toBe('Saved calendar file summary');
+ expect(unavailableCard?.querySelector('h3')?.textContent).toBe('Unavailable calendar file summary');
+ expect(unavailableCard?.textContent).toContain('Unavailable — check access');expect(unavailableCard?.textContent).not.toContain(packet.event_title);
  expect(find('Prepare Chief draft')?.disabled??true).toBe(true);expect(session.getSnapshot().thought).toContain('Keep my existing Chief directions.');expect(failures).toEqual([]);
  const finalCounts=await (await realFetch(base!.origin+'/lab/counts')).json();expect(finalCounts).toEqual({...counts,imports:2,revocations:1});
  const fsName='node:fs/promises';const fs=await import(/* @vite-ignore */fsName) as {writeFile:(path:string,value:string)=>Promise<void>};
- await fs.writeFile(env!.COSMAS_CALENDAR_IMPORT_UI_LAB_REPORT!,JSON.stringify({passed:true,screenshots:0,...finalCounts,lost_upload_and_review_recovered:true,wrong_workspace_withheld:true,draft_preserved:true,reviewed_first_import_revisited_and_withdrawn:true,revoked_source_withheld:true,wire},null,2));
+ await fs.writeFile(env!.COSMAS_CALENDAR_IMPORT_UI_LAB_REPORT!,JSON.stringify({passed:true,screenshots:0,...finalCounts,lost_upload_and_review_recovered:true,wrong_workspace_withheld:true,draft_preserved:true,reviewed_first_import_revisited_and_withdrawn:true,revoked_source_withheld:true,calendar_card_current_and_unavailable:true,calendar_card_action_exact_source_id:true,wire},null,2));
 },90000);
