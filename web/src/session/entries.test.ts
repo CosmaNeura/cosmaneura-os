@@ -48,6 +48,26 @@ describe('saved Outlook material cards',()=>{
   });
 });
 
+describe('saved Gmail material cards',()=>{
+ const email:WorkspaceEntry={id:teamUuid(320),revision:4,kind:'google_message',content:'Private Gmail body must not enter the card.',source_label:'Google message: Invented visit follow-up',google_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-26T12:15:00Z'};
+ it('projects exact Gmail metadata beside Outlook at saved revisions without reading body or adding a reply',()=>{
+  const source={...email};Object.defineProperty(source,'content',{get:()=>{throw new Error('Projection must not read Gmail contents');}});
+  const outlook:WorkspaceEntry={...email,id:teamUuid(321),revision:3,kind:'microsoft_message',google_source_state:undefined,microsoft_source_state:'current',source_label:'Outlook: Another reviewed email'},later={...turn,id:teamUuid(322),revision:5};
+  const projection=projectConversation({...workspace,revision:5,handoffs:[],entries:[later,source,outlook,turn]},team,'chief');expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${outlook.id}`,`source:${email.id}`,later.id]);expect(projection.turns).toEqual([later,turn]);expect(projection.entries[2]).toEqual({kind:'material',sourceKind:'gmail',id:`source:${email.id}`,sourceId:email.id,label:email.source_label,state:'current',createdAt:email.created_at});expect(projection.entries[1]).toMatchObject({sourceKind:'outlook'});expect(JSON.stringify(projection)).not.toContain(email.content);
+ });
+ it('requires exact Google custody and kind, not a lookalike label, another state field, or another bot',()=>{
+  const variants:WorkspaceEntry[]=[{...email,kind:'evidence'},{...email,id:teamUuid(323),kind:'microsoft_message'},{...email,id:teamUuid(324),google_source_state:undefined},{...email,id:teamUuid(325),google_source_state:undefined,microsoft_source_state:'current'},{...email,id:teamUuid(326),google_source_state:'unknown'} as unknown as WorkspaceEntry];
+  expect(projectConversation({...workspace,handoffs:[],entries:variants},team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[email]},team,'follow_up').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[]},team,'chief').entries).toEqual([]);
+ });
+ it('uses generic unavailable metadata without inspecting retained private subject or body',()=>{
+  const source={...email,google_source_state:'unavailable' as const};for(const field of ['source_label','content'])Object.defineProperty(source,field,{get:()=>{throw new Error('Unavailable Gmail metadata must not read private fields');}});
+  const projection=projectConversation({...workspace,handoffs:[],entries:[source]},team,'chief');expect(projection.entries).toEqual([{kind:'material',sourceKind:'gmail',id:`source:${email.id}`,sourceId:email.id,label:'Unavailable email source',createdAt:email.created_at,state:'unavailable'}]);expect(projection.turns).toEqual([]);
+ });
+ it('uses a neutral Gmail fallback for a current source with no label',()=>{
+  expect(projectConversation({...workspace,handoffs:[],entries:[{...email,source_label:null}]},team,'chief').entries[0]).toMatchObject({sourceKind:'gmail',label:'Reviewed Gmail email'});
+ });
+});
+
 describe('saved calendar file material cards',()=>{
  const calendar:WorkspaceEntry={id:teamUuid(310),revision:3,kind:'calendar_import_source',content:'Private invented event and Atlas.md body must not enter the card.',source_label:'Imported calendar snapshot',calendar_import_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-25T12:10:00Z'};
  it('projects only calendar metadata at its saved revision without reading the source body or creating a reply',()=>{
