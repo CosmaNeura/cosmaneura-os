@@ -7,6 +7,7 @@ import type {InboxRenameTarget,InboxPreferencesHost} from './session/inbox-prefe
 import type {ConversationSummary} from './conversations-api';
 import {projectConversation} from './session/entries';
 import {ConversationEntries} from './ConversationEntries';
+import {MessageRequestStatus,messageRequestStatusId} from './MessageRequestStatus';
 import {hasSavedBotContext,latestNotebookText} from './session/composer';
 import {WorkspaceDialog} from './WorkspaceDialog';
 import {WorkspaceSession} from './session/workspace-session';
@@ -936,8 +937,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     !scribeSourceBusy&&!handoffReviewPending&&!schedulingPatientBusy&&!agentResearchBusy&&!captureNavigationLocked&&!captureDraftLocked&&!connectionEditorsLocked&&!activityBusy&&!accessBusy&&(!clinicalPreparing||modelBusy.current||!!clinicalPreparation.current)&&
     (!pending||pending.type==='ask')&&(!busy||modelBusy.current);
   const chatGeneration=generation.current;
-  const localQuestionRepresented=pending?.type==='ask'&&workspace?.entries.some(entry=>entry.model_request?.request.kind==='conversation'&&
-    entry.model_request.request.idempotency_key===pending.body.idempotency_key&&entry.model_request.request_sha256===modelHashes[pending.body.idempotency_key]);
+  const localQuestionEntry=pending?.type==='ask'?workspace?.entries.find(entry=>entry.model_request?.request.kind==='conversation'&&
+    entry.model_request.request.idempotency_key===pending.body.idempotency_key&&entry.model_request.request_sha256===modelHashes[pending.body.idempotency_key]):undefined;
+  const localQuestionRepresented=!!localQuestionEntry;
+  const currentRequestStatusId=pending?.type==='ask'&&pending.body.role===selected?
+    localQuestionEntry?(localQuestionEntry.reply?undefined:messageRequestStatusId(localQuestionEntry.id)):messageRequestStatusId('local'):undefined;
   const recoveryAppearance=useRef<string|null>(null);
   // Reveal newly displayed recovery content; a hidden check, draft save or
   // typing must not move the reader while the same recovery is retained.
@@ -1691,15 +1695,15 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
                 else if(action.kind==='review_work'){setPanel('Work');setMobilePanel('Work');}
                 else {const handoff=workspace.handoffs?.find(item=>item.id===action.id);if(handoff){if(action.kind==='retry_handoff')retryTeamTask(handoff);else reviewTeamResult(handoff,true);}}
               }}/>
-            {pending?.type === "ask" && !localQuestionRepresented && <div className="team-turn"><article className="team-human-message"><small>You · {busy?'request in progress':'unconfirmed request'}</small><p>{clinicalRequestDisplay(pending.body.content)}</p></article>
-              {busy && <p className="team-thinking" role="status">{team?.configuration.bots.find(b => botAddress(b) === pending.body.role)?.name} is {team?.llm.enabled ? "thinking" : "reviewing"}…</p>}</div>}
+            {pending?.type === "ask" && pending.body.role===selected && !localQuestionRepresented && <div className="team-turn"><article className="team-human-message"><small>You · {busy?'awaiting confirmation':'unconfirmed request'}</small><p>{clinicalRequestDisplay(pending.body.content)}</p></article>
+              <MessageRequestStatus id={messageRequestStatusId('local')} state={busy?'awaiting_confirmation':'unknown'}/></div>}
             {(!chiefNoteCompose||!phoneNoteMatches)&&nativeNoteShortcut}
             
             <div ref={conversationEnd} />
           </div>
           {nativeChat&&(clinicalPreparing||busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected||inlineModelRecovery||message)&&
-            <p id="team-request-progress" className="team-fine native-chat-progress" role="status">{clinicalPreparing?'Preparing your private drafts…':busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?
-              `Waiting for ${bot?.name??'your teammate'}’s result. You can keep typing.`:inlineModelRecovery?'Your last message is unconfirmed. Check its saved result above.':message}</p>}
+            <p id="team-request-progress" className="team-fine native-chat-progress" role={currentRequestStatusId&&!clinicalPreparing?undefined:'status'}>{clinicalPreparing?'Preparing your private drafts…':busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?
+              currentRequestStatusId?'You can keep typing.':'Waiting for confirmation. You can keep typing.':inlineModelRecovery?'Check the saved result above before retrying.':message}</p>}
           {inlineModelRecovery&&modelRecovery}
           </div>
           {messagesMode&&mobileChatFrame.newMessages>0&&!messagesTask&&!phoneChiefToolsVisible&&<button className="messages-new-replies" aria-live="polite" onClick={mobileChatFrame.jumpToLatest}>{mobileChatFrame.newMessages} new {mobileChatFrame.newMessages===1?'message':'messages'} ↓</button>}
@@ -1712,11 +1716,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               {chiefNoteCompose&&(!phoneNoteMatches?<p className="chief-note-compose-attention" role="status">The saved note changed. Choose its current version above; your directions are kept.</p>:phoneNoteDirectionsError?<p className="chief-note-compose-attention" role="status">{phoneNoteDirectionsError}</p>:phoneNoteDirectionsUnsupported?<p className="chief-note-compose-attention" role="status">This practice service needs an update to include your directions with the saved note. Your text is kept.</p>:phoneNoteAlreadyRequested?<p className="chief-note-compose-attention" role="status">These exact drafts are already requested. Review their saved result above.</p>:!phoneNoteTeamReady?<p className="chief-note-compose-attention" role="status">Enable Chief, Follow-up and Research with private draft handoffs to prepare these drafts.</p>:null)}
               {selectedPrep&&!chiefNoteCompose&&<div className="session-prep-included" role="status"><span>Session Prep included · v{selectedPrep.brief_version}</span>
                 <button type="button" className="team-subtle" disabled={locked} onClick={()=>setPrepSelection(null)} aria-label="Remove Session Prep from this question">Remove</button></div>}
-              {!nativeChat&&busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected&&<p id="team-request-progress" className="team-fine" role="status">
-                {`${authenticated?'Your request is saved on this device. ':''}Waiting for ${bot?.name??'your teammate'}’s result. Keep this visit open; review the answer when it appears.`}
+              {!nativeChat&&busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected&&<p id="team-request-progress" className="team-fine" role={currentRequestStatusId?undefined:'status'}>
+                {`${authenticated?'Your request is saved on this device. ':''}${currentRequestStatusId?'':'Waiting for confirmation. '}Keep this visit open; review the answer when it appears.`}
               </p>}
               <label className="team-sr-only" htmlFor="team-question">{chiefNoteCompose?'Directions for Chief':'Thought or question'}</label>
-              <textarea ref={questionRef} id="team-question" className={chiefNoteCompose?'clinical-team-directions':undefined} aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?"team-request-progress":undefined} rows={messagesMode?1:2} maxLength={4000} disabled={conversationBusy || phoneChiefToolsVisible || (nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => updateThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? chiefNoteCompose?'Optional directions for these drafts…':messagesMode?'Message…':phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
+              <textarea ref={questionRef} id="team-question" className={chiefNoteCompose?'clinical-team-directions':undefined} aria-describedby={busy&&localModelPending?.type==='ask'&&localModelPending.body.role===selected?[currentRequestStatusId,'team-request-progress'].filter(Boolean).join(' '):undefined} rows={messagesMode?1:2} maxLength={4000} disabled={conversationBusy || phoneChiefToolsVisible || (nativeChatOwner?!nativeComposerEditable:locked) || !bot?.enabled || !!bot?.retired} value={thought} onChange={e => updateThought(e.target.value)} placeholder={bot?.retired ? `${bot.name} is retired. Saved history remains available.` : bot?.enabled ? chiefNoteCompose?'Optional directions for these drafts…':messagesMode?'Message…':phoneChiefConversation?`Message ${bot.name}…`:`Ask ${bot.name} about this encounter…` : `${bot?.name} is paused. Enable in settings.`}
                 onFocus={mobileChatFrame.releaseReadingPosition} onKeyDown={event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.nativeEvent.isComposing&&
                   !(authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession)){event.preventDefault();if(!conversationBusy&&!locked){if(chiefNoteCompose)submitPhoneNoteTask();else if(thought.trim())ask();}}}}/>
               <div><span>{bot?.name} <span className="team-fine">· {selectedPrep?"saved encounter + selected brief":"saved encounter only"}</span></span><button className="team-send" disabled={conversationBusy || locked || !!nativeChatOwner&&!nativeComposerEditable || (chiefNoteCompose?phoneNoteTaskBlocked:!thought.trim()) || !bot?.enabled}

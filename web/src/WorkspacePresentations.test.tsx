@@ -61,7 +61,7 @@ describe('presentation parity',()=>{
       actions:[...host.querySelectorAll<HTMLButtonElement>('.team-messages [data-action]')].map(node=>[node.dataset.action,node.disabled]),
       delivery:[...host.querySelectorAll('.team-messages [data-delivery]')].map(node=>[node.getAttribute('data-entry-id'),node.getAttribute('data-delivery')]),
       unconfirmed:host.querySelector('.team-recovery[aria-label="Unconfirmed model request"]')?.textContent??null,
-      inProgress:host.textContent?.includes('Request in progress')??false,
+      inProgress:host.textContent?.includes('Working on your request…')??false,
     });
     const messages=surface();expect(messages.entries).toEqual(expectedIds);expect(messages.attention).toEqual(expectedAttention);
     expect(messages.delivery).toEqual(scenario==='empty'||scenario==='unconfirmed request'?[]:[[chief.id,'delivered']]);

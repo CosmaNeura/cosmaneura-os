@@ -117,25 +117,29 @@ it('settles an exact queued historical retry independently of the newer current 
 });
 it('renders a second-device terminal request without a reply or local journal and only resolves on explicit choice',async()=>{
   const workspace=await pendingWorkspace(undefined,'unknown');vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team});vi.mocked(workspaceApi.read).mockResolvedValue(workspace);
-  await open();expect(element.textContent).toContain(conversationFixture.content);expect(element.textContent).toContain('Outcome unconfirmed');expect(modelWorkApi.resolve).not.toHaveBeenCalled();
+  await open();expect(element.textContent).toContain(conversationFixture.content);expect(element.textContent).toContain('Result not confirmed');expect(modelWorkApi.resolve).not.toHaveBeenCalled();
   vi.mocked(modelWorkApi.resolve).mockResolvedValue(await unresolved({type:'ask',body:conversationFixture},'unknown'));await click('Check saved result');
   await act(async()=>{await vi.waitFor(()=>expect(modelWorkApi.resolve).toHaveBeenCalledOnce());});expect(vi.mocked(modelWorkApi.resolve).mock.calls[0][2].body).toEqual(conversationFixture);expect(workspaceApi.ask).not.toHaveBeenCalled();
 });
-it('merges a same-revision lifecycle poll and preserves unsaved notebook text, stopping when hidden or terminal',async()=>{
-  const workspace=await pendingWorkspace(),terminal=await pendingWorkspace(undefined,'unknown');vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team});vi.mocked(workspaceApi.read).mockResolvedValue(terminal);
+it('updates one polite recorded lifecycle status without replacing draft focus, and stops observing while hidden or terminal',async()=>{
+  const workspace=await pendingWorkspace(),running=await pendingWorkspace(undefined,'running'),terminal=await pendingWorkspace(undefined,'unknown');vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace,team});vi.mocked(workspaceApi.read).mockResolvedValueOnce(running).mockResolvedValue(terminal);
   const visibility=vi.spyOn(document,'visibilityState','get').mockReturnValue('hidden');vi.useFakeTimers();await open();await input('#team-notebook','Keep my typing');
+  const editor=element.querySelector<HTMLTextAreaElement>('#team-notebook')!;editor.focus();const status=element.querySelector('.message-request-status')!;
+  expect(status.textContent).toBe('Waiting to start');expect(status.getAttribute('role')).toBe('status');expect(status.getAttribute('aria-live')).toBe('polite');expect(status.getAttribute('aria-atomic')).toBe('true');expect(status.querySelector('.message-request-status-dots')).toBeNull();
   await act(async()=>vi.advanceTimersByTimeAsync(15000));expect(workspaceApi.read).not.toHaveBeenCalled();visibility.mockReturnValue('visible');await act(async()=>document.dispatchEvent(new Event('visibilitychange')));
-  expect(workspaceApi.read).toHaveBeenCalledOnce();expect(element.textContent).toContain('Outcome unconfirmed');expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Keep my typing');
-  await act(async()=>vi.advanceTimersByTimeAsync(15000));expect(workspaceApi.read).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
-  await act(async()=>window.dispatchEvent(new Event('focus')));expect(workspaceApi.read).toHaveBeenCalledOnce();
-  expect(element.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Keep my typing');
+  expect(workspaceApi.read).toHaveBeenCalledOnce();expect(element.querySelector('.message-request-status')).toBe(status);expect(status.textContent).toBe('Working on your request…');const dots=status.querySelector('.message-request-status-dots')!;expect(dots.getAttribute('aria-hidden')).toBe('true');expect(dots.textContent).toBe('');expect(dots.children).toHaveLength(3);expect(document.activeElement).toBe(editor);expect(editor.value).toBe('Keep my typing');
+  await act(async()=>vi.advanceTimersByTimeAsync(5000));expect(workspaceApi.read).toHaveBeenCalledTimes(2);expect(element.querySelector('.message-request-status')).toBe(status);expect(status.textContent).toBe('Result not confirmed');expect(status.querySelector('.message-request-status-dots')).toBeNull();expect(document.activeElement).toBe(editor);
+  await act(async()=>vi.advanceTimersByTimeAsync(15000));expect(workspaceApi.read).toHaveBeenCalledTimes(2);expect(workspaceApi.ask).not.toHaveBeenCalled();
+  await act(async()=>window.dispatchEvent(new Event('focus')));expect(workspaceApi.read).toHaveBeenCalledTimes(2);expect(modelWorkApi.resolve).not.toHaveBeenCalled();
+  expect(editor.value).toBe('Keep my typing');
 });
 it('deduplicates the local bubble against an admitted server question while keeping the original encrypted body',async()=>{
   await open();await input('#team-question',conversationFixture.content);
   vi.mocked(workspaceApi.ask).mockImplementation(async(_access,_id,body)=>{const receipt=await modelReceipt(body,id),workspace=await pendingWorkspace(body);
     vi.mocked(workspaceApi.read).mockResolvedValue(workspace);return {...receipt,outcome:'reserved',admission:admissionFixture(),saved_entry:null};});
-  await click('Send message');await vi.waitFor(async()=>{await act(async()=>{});expect(element.querySelectorAll('.team-human-message')).toHaveLength(1);expect(element.textContent).toContain('Request recorded');});
-  expect(currentDraft()?.pending).not.toBeNull();expect(element.textContent).toContain('Request recorded');expect(workspaceApi.ask).toHaveBeenCalledOnce();
+  await click('Send message');await vi.waitFor(async()=>{await act(async()=>{});expect(element.querySelectorAll('.team-human-message')).toHaveLength(1);expect(element.textContent).toContain('Waiting to start');});
+  expect(currentDraft()?.pending).not.toBeNull();expect(element.textContent).toContain('Waiting to start');expect(workspaceApi.ask).toHaveBeenCalledOnce();
+  expect(element.querySelectorAll('.message-request-status')).toHaveLength(1);expect(element.querySelector('.message-request-status-dots')).toBeNull();
 });
 
 it('retains superseded exact uncertainty after the replacement settles and later notebook autosaves',async()=>{

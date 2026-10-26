@@ -1056,14 +1056,16 @@ describe("private encounter workspace", () => {
     expect(container.textContent).toContain("My Prep Partner");
   });
 
-  it("uses the selected bot and shows thinking then an attributed GPT-4.1 answer", async () => {
+  it("uses the selected bot and waits for confirmation before showing its attributed answer", async () => {
     const connected = structuredClone(team); connected.llm.enabled = true;
     vi.mocked(workspaceApi.open).mockResolvedValue({ identity, workspace: fixture, team: connected });
     await click("Open synthetic encounter"); await input("Thought or question", "What needs attention?");
     let resolve!: (result: Awaited<ReturnType<typeof workspaceApi.ask>>) => void;
     vi.mocked(workspaceApi.ask).mockReturnValue(new Promise(done => { resolve = done; }));
     await click("Send message");
-    expect(container.textContent).toContain("Visit Prep is thinking");
+    expect(container.textContent).toContain("Waiting for confirmation…");
+    expect(container.textContent).not.toContain("Visit Prep is thinking");
+    expect(container.querySelector(".message-request-status-dots")).toBeNull();
     expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({ role: "visit_prep", expected_revision: 1, team_revision: 1 });
     const result = structuredClone(fixture);
     result.revision = 2;

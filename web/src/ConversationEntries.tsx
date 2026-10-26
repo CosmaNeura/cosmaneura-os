@@ -3,7 +3,7 @@ import {BotAvatar} from './BotAvatar';
 import {WorkspaceMarkdown} from './WorkspaceMarkdown';
 import {canFocusWorkspaceControl,WorkspaceDialog} from './WorkspaceDialog';
 import {clinicalRequestDisplay} from './clinical-team-contract';
-import {modelActive,modelStateLabel} from './model-work-request';
+import {MessageRequestStatus,messageRequestStatusId} from './MessageRequestStatus';
 import type {WorkspaceEntry} from './workspace-api';
 import type {ConversationAction,ConversationProjection} from './session/entries';
 
@@ -50,8 +50,8 @@ export function ConversationEntries({presentation='workspace',projection,latestS
                 <WorkspaceMarkdown content={entry.reply.content}/>
                 {messages?<button className="messages-source-details" aria-label={`Message details from ${entry.reply.agent_name}`} onClick={event=>{event.currentTarget.focus({preventScroll:true});detailOpener.current={element:event.currentTarget,episode:detailEpisode,isCurrent:canRestoreMessageFocus};setDetails(entry.id);}}>{latestSourceRevision>entry.reply.context_revision?'Newer sources available — review details':'Message details'}</button>:<>{citations(entry)}<details className="team-fine"><summary>{latestSourceRevision > entry.reply.context_revision ? "Newer sources available — ask again to review them" : "Source details"}</summary>Saved context through revision {entry.reply.context_revision}</details></>}
               </article>}
-              {!entry.reply&&entry.model_request&&<article className="team-bot-message"><header><BotAvatar role={entry.model_request.bot.role} active={modelActive(entry)}/>
-                <strong>{entry.model_request.bot.name}</strong></header><p role="status">{modelStateLabel(entry.model_request.admission.state)}</p>
+              {!entry.reply&&entry.model_request&&<article className="team-bot-message"><header><BotAvatar role={entry.model_request.bot.role} active={entry.model_request.admission.state==='running'}/>
+                <strong>{entry.model_request.bot.name}</strong></header><MessageRequestStatus id={messageRequestStatusId(entry.id)} state={entry.model_request.admission.state}/>
                 <p className="team-fine">A saved request is not a completed draft or clinical evidence.</p>
                 {entry.model_request.request.kind==='conversation'&&<button data-action="check_request" disabled={busy||recoveryBlocked} onClick={()=>void onCheck(entry)}>Check saved result</button>}</article>}
 
