@@ -1,8 +1,10 @@
 // @vitest-environment node
-import {describe,expect,it,vi} from 'vitest';
+import {afterEach,describe,expect,it,vi} from 'vitest';
 import {teamFixture,teamUuid as uuid} from '../team-setup-test-fixture';
 import {vendorSha256} from '../vendor-contract';
-import type {AuthenticatedWorkspaceIdentity,Workspace} from '../workspace-api';
+import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type Workspace} from '../workspace-api';
+import {efaxInboundApi,type EFaxPending,type EFaxReceipt} from '../efax-inbound-api';
+import {efaxPdf,efaxReceipt,efaxScope} from '../efax-inbound-fixtures.test-support';
 import type {GoogleMessageSaved} from '../google-message-recovery';
 import type {SourceContext,SourceDependencies} from './sources';
 import {DraftJournal,editorAddress} from '../draft-journal';
@@ -80,4 +82,81 @@ it('does not focus a newer navigation when appended draft persistence settles',a
 });
 it('keeps calendar preparation on the same safe per-bot journal path',async()=>{
  const f=await fixture();f.workspace.entries[0]={...f.workspace.entries[0],kind:'google_calendar',calendar_source_state:'current'};f.session.models.updateThought('Chief calendar directions');await f.session.conversations.observe(f.host);await f.session.conversations.open(f.workspace.id,'follow_up',f.host);f.session.models.updateThought('Separate follow-up directions');await f.session.sources.prepareGoogle(f.context,f.source,'google_calendar');expect(f.session.getSnapshot().thought).toContain('Chief calendar directions\n\nReview the human-selected calendar summary');expect(f.session.getSnapshot().thought).not.toContain('Separate follow-up directions');expect(await f.journal.load(editorAddress(f.workspace.id,'conversation:follow_up'))).toMatchObject({data:{text:'Separate follow-up directions'}});
+});
+
+describe('reopening the exact saved received-fax PDF',()=>{
+ afterEach(()=>vi.restoreAllMocks());
+ async function faxFixture(deps:SourceDependencies={}){
+  const request:Extract<EFaxPending,{kind:'acquire'}>={kind:'acquire',request:{idempotency_key:uuid(91),ticket_id:uuid(92),revision_id:uuid(93),expected_version:2,approval_sha256:'e'.repeat(64)}};
+  const receipt:EFaxReceipt={...await efaxReceipt(request),state:'acquired',content_available:true,source_withheld:false,document:{sha256:await vendorSha256(efaxPdf),byte_length:efaxPdf.length,pages:1}};
+  const account={contract_version:1 as const,box_id:efaxScope.box_id,actor_id:efaxScope.owner_id,recovery_scope:'c'.repeat(64)};
+  const authorize=vi.fn(async()=>{}),accountRead=vi.fn(async()=>account),resolveEFax=vi.fn<typeof efaxInboundApi.resolve>(async()=>receipt),documentEFax=vi.fn<typeof efaxInboundApi.document>(async()=>new Uint8Array(efaxPdf));
+  const f=await fixture({accountRead,resolveEFax,documentEFax,...deps});f.workspace.appointment_id=uuid(73);f.context.accountAccess={authorize};f.session.setMobilePanel('Sources');f.session.setPanel('Sources');
+  const document={operation_id:receipt.operation_id!,document_sha256:receipt.document!.sha256,pages:1};
+  f.session.setFaxSourceOffer({identity:f.context.authenticated!,generation:f.session.generation.current,workspaceId:f.workspace.id,document,request});
+  return {...f,request,receipt,account,authorize,accountRead,resolveEFax,documentEFax,offer:f.session.getSnapshot().faxSourceOffer!};
+ }
+ it('reopens only the already acquired exact PDF without acquiring, saving or changing the Chief draft',async()=>{
+  const f=await faxFixture(),controller=new AbortController(),command=vi.spyOn(efaxInboundApi,'command');f.session.setThought('Keep exact Chief directions');const before=f.session.getSnapshot();
+  expect(await f.session.sources.loadFaxDocument(f.context,controller.signal)).toEqual(efaxPdf);
+  expect(f.resolveEFax).toHaveBeenCalledExactlyOnceWith(f.context.authenticated,efaxScope,f.request,controller.signal);
+  expect(f.documentEFax).toHaveBeenCalledExactlyOnceWith(f.context.authenticated,f.receipt,controller.signal);
+  expect(f.authorize).toHaveBeenCalledTimes(2);expect(f.accountRead).toHaveBeenCalledTimes(2);expect(f.accountRead).toHaveBeenNthCalledWith(1,f.context.authenticated,controller.signal);expect(f.accountRead).toHaveBeenNthCalledWith(2,f.context.authenticated,controller.signal);
+  expect(command).not.toHaveBeenCalled();expect(f.session.getSnapshot()).toBe(before);
+ });
+ it.each(['missing','withheld','unconfirmed','hash','operation','pages','account'] as const)('withholds a %s saved receipt before loading any PDF',async change=>{
+  const f=await faxFixture();
+  if(change==='missing'){const missing={contract_version:1 as const,scope:efaxScope,idempotency_key:f.request.request.idempotency_key,kind:'acquire' as const,state:'not_found' as const,retry_allowed:false,content_available:false,source_withheld:false,document:null};f.resolveEFax.mockResolvedValue(missing);}
+  else if(change==='withheld')f.receipt.source_withheld=true;
+  else if(change==='unconfirmed')f.receipt.state='outcome_unconfirmed';
+  else if(change==='hash')f.receipt.document!.sha256='f'.repeat(64);
+  else if(change==='operation')f.receipt.operation_id=uuid(94);
+  else if(change==='pages')f.receipt.document!.pages=2;
+  else f.receipt.scope={...efaxScope,owner_id:uuid(95)};
+  expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();expect(f.documentEFax).not.toHaveBeenCalled();
+ });
+ const phases=['initial authorization','account lookup','saved result','document load','final authorization','final account lookup'] as const;
+ it.each(phases)('rejects the old offer after same-visit replacement during %s',async phase=>{
+  const f=await faxFixture();let release!:()=>void;const pause=()=>new Promise<void>(resolve=>{release=resolve;});
+  if(phase==='initial authorization')f.authorize.mockImplementationOnce(pause);
+  else if(phase==='account lookup')f.accountRead.mockImplementationOnce(async()=>{await pause();return f.account;});
+  else if(phase==='saved result')f.resolveEFax.mockImplementationOnce(async()=>{await pause();return f.receipt;});
+  else if(phase==='document load')f.documentEFax.mockImplementationOnce(async()=>{await pause();return new Uint8Array(efaxPdf);});
+  else if(phase==='final authorization')f.authorize.mockResolvedValueOnce(undefined).mockImplementationOnce(pause);
+  else f.accountRead.mockResolvedValueOnce(f.account).mockImplementationOnce(async()=>{await pause();return f.account;});
+  const work=f.session.sources.loadFaxDocument(f.context);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+  f.session.setFaxSourceOffer({...f.offer,document:{...f.offer.document,operation_id:uuid(96)}});release();expect(await work).toBeNull();
+  expect(f.session.getSnapshot().faxSourceOffer?.document.operation_id).toBe(uuid(96));
+  if(['initial authorization','account lookup','saved result'].includes(phase))expect(f.documentEFax).not.toHaveBeenCalled();
+ });
+ it.each(['offer away and back','identity away and back','navigation away and back','visit link','request mutation','abort','native session'] as const)('withholds delayed bytes after %s',async change=>{
+  const f=await faxFixture(),controller=new AbortController();let release!:(bytes:Uint8Array)=>void;
+  if(change==='native session'){let active=true;const identity={mode:'desktop_native' as const,revision:'invented',isCurrent:()=>active};f.context.authenticated=identity;f.session.setIdentity(identity);f.offer.identity=identity;f.context.accountAccess={authorize:async()=>{if(!active)throw new WorkspaceApiError(401);}};f.documentEFax.mockImplementationOnce(async()=>{active=false;return new Uint8Array(efaxPdf);});expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();return;}
+  f.documentEFax.mockImplementationOnce(()=>new Promise<Uint8Array>(resolve=>{release=resolve;}));const work=f.session.sources.loadFaxDocument(f.context,controller.signal);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+  if(change==='offer away and back'){f.session.setFaxSourceOffer({...f.offer});f.session.setFaxSourceOffer(f.offer);}
+  else if(change==='identity away and back'){f.session.setIdentity({mode:'clerk_jwt',getToken:async()=>null});f.session.setIdentity(f.context.authenticated!);}
+  else if(change==='navigation away and back'){f.session.setMobilePanel('Conversation');f.session.setMobilePanel('Sources');}
+  else if(change==='visit link')f.session.setWorkspace({...f.workspace,appointment_id:uuid(97)});
+  else if(change==='request mutation')f.offer.request.request.idempotency_key=uuid(98);
+  else controller.abort();
+  release(new Uint8Array(efaxPdf));expect(await work).toBeNull();
+ });
+ it('rejects a newer route epoch even if the screen and offer are otherwise unchanged',async()=>{
+  const f=await faxFixture();f.resolveEFax.mockImplementationOnce(async()=>{f.session.navigation.sequence.current+=2;return f.receipt;});
+  expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();expect(f.documentEFax).not.toHaveBeenCalled();
+ });
+ it.each(['box_id','actor_id','recovery_scope'] as const)('withholds verified bytes if the final account %s changes',async field=>{
+  const f=await faxFixture();f.accountRead.mockResolvedValueOnce(f.account).mockResolvedValueOnce({...f.account,[field]:field==='recovery_scope'?'d'.repeat(64):uuid(99)});
+  expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();expect(f.documentEFax).toHaveBeenCalledOnce();
+ });
+ it('propagates current authorization and byte-verification failures without retry or retaining bytes',async()=>{
+  const f=await faxFixture(),denied=new WorkspaceApiError(403);f.authorize.mockRejectedValueOnce(denied);
+  await expect(f.session.sources.loadFaxDocument(f.context)).rejects.toBe(denied);expect(f.accountRead).not.toHaveBeenCalled();expect(f.documentEFax).not.toHaveBeenCalled();
+  const mismatch=new WorkspaceApiError(502);f.documentEFax.mockRejectedValueOnce(mismatch);await expect(f.session.sources.loadFaxDocument(f.context)).rejects.toBe(mismatch);expect(f.resolveEFax).toHaveBeenCalledOnce();expect(f.documentEFax).toHaveBeenCalledOnce();
+ });
+ it('does no I/O for an aborted, unlinked or unauthenticated offer',async()=>{
+  const f=await faxFixture(),controller=new AbortController();controller.abort();expect(await f.session.sources.loadFaxDocument(f.context,controller.signal)).toBeNull();
+  f.session.setWorkspace({...f.workspace,appointment_id:null});expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();
+  f.session.setWorkspace(f.workspace);f.session.setIdentity(null);expect(await f.session.sources.loadFaxDocument(f.context)).toBeNull();expect(f.authorize).not.toHaveBeenCalled();expect(f.accountRead).not.toHaveBeenCalled();expect(f.documentEFax).not.toHaveBeenCalled();
+ });
 });

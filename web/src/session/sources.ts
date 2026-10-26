@@ -13,7 +13,7 @@ import type {WorkspaceSession} from './workspace-session';
 export type SourceContext={authenticated?:AuthenticatedWorkspaceIdentity;locked:boolean;connectionNavigationLocked:boolean;captureNavigationLocked:boolean;captureDraftLocked:boolean;
   connectionEditorsLocked:boolean;activityBusy:boolean;accessBusy:boolean;scribeSourceBusy:boolean;schedulingPatientBusy:boolean;
   conversationHost?:ConversationHost|null;accountAccess:{authorize:()=>Promise<void>}|null|undefined;failure:(cause:unknown)=>void;focusQuestion:()=>void};
-export type SourceDependencies={read?:typeof workspaceApi.read;hash?:typeof vendorSha256;accountRead?:typeof accountIdentityApi.read;resolveEFax?:typeof efaxInboundApi.resolve;resolveFax?:typeof faxInboundApi.resolve};
+export type SourceDependencies={read?:typeof workspaceApi.read;hash?:typeof vendorSha256;accountRead?:typeof accountIdentityApi.read;resolveEFax?:typeof efaxInboundApi.resolve;documentEFax?:typeof efaxInboundApi.document;resolveFax?:typeof faxInboundApi.resolve};
 
 type DraftSourceKind='google_message'|'microsoft_message'|'google_calendar'|'ehr_read_source'|'calendar_import_source'|'efax_inbound_source'|'fax_inbound_source';
 type DraftSourceProof={workspace_id:string;entry_id:string;entry_revision:number;content_sha256:string;source_withheld:boolean};
@@ -32,10 +32,11 @@ function sourceDirections(kind:DraftSourceKind,id:string):string{
 export class WorkspaceSources {
   private preparingSource=false;
   private readonly read:typeof workspaceApi.read;private readonly hash:typeof vendorSha256;
-  private readonly accountRead:typeof accountIdentityApi.read;private readonly resolveEFax:typeof efaxInboundApi.resolve;private readonly resolveFax:typeof faxInboundApi.resolve;
+  private readonly accountRead:typeof accountIdentityApi.read;private readonly resolveEFax:typeof efaxInboundApi.resolve;private readonly documentEFax:typeof efaxInboundApi.document;private readonly resolveFax:typeof faxInboundApi.resolve;
   constructor(private readonly session:WorkspaceSession,deps:SourceDependencies={}){
     this.read=deps.read??((...args)=>workspaceApi.read(...args));this.hash=deps.hash??vendorSha256;
     this.accountRead=deps.accountRead??((...args)=>accountIdentityApi.read(...args));this.resolveEFax=deps.resolveEFax??((...args)=>efaxInboundApi.resolve(...args));this.resolveFax=deps.resolveFax??((...args)=>faxInboundApi.resolve(...args));
+    this.documentEFax=deps.documentEFax??((...args)=>efaxInboundApi.document(...args));
   }
   receive(latest:Workspace){
     const {setConflict,setNote,setWorkspace}=this.session;
@@ -151,6 +152,41 @@ export class WorkspaceSources {
     if(offer.generation!==generation.current||offer.workspaceId!==this.session.getSnapshot().workspace?.id||efaxMissing(receipt)||receipt.state!=='acquired'||!receipt.content_available||receipt.source_withheld||!receipt.document||!receipt.operation_id)return null;
     const document={operation_id:receipt.operation_id,document_sha256:receipt.document.sha256,pages:receipt.document.pages};
     return vendorCanonical(document)===vendorCanonical(offer.document)?document:null;
+  }
+  /** Reopen the local, verified PDF only. Resolving its saved claim never acquires it again. */
+  async loadFaxDocument(context:SourceContext,signal?:AbortSignal):Promise<Uint8Array|null>{
+    const view=this.session.getSnapshot(),offer=view.faxSourceOffer,owner=context.authenticated,access=context.accountAccess;
+    if(!offer||!owner||!access||!view.workspace?.appointment_id||!validEFaxSourceOffer(offer.document))return null;
+    const generation=this.session.generation.current,route=this.session.navigation.sequence.current,visit=view.workspace.appointment_id;
+    const document=structuredClone(offer.document),request=structuredClone(offer.request),requestKey=vendorCanonical(request);
+    let active=true;
+    const matches=()=>{
+      const live=this.session.getSnapshot();
+      return !signal?.aborted&&live.identity===owner&&(owner.mode!=='desktop_native'||owner.isCurrent())&&live.faxSourceOffer===offer&&offer.identity===owner&&
+        generation===this.session.generation.current&&offer.generation===generation&&route===this.session.navigation.sequence.current&&
+        live.workspace?.id===offer.workspaceId&&live.workspace.appointment_id===visit&&live.workspace.id===view.workspace!.id&&
+        live.practicePage===view.practicePage&&live.settingsOpen===view.settingsOpen&&live.practiceOpen===view.practiceOpen&&
+        live.mobilePanel===view.mobilePanel&&live.panel===view.panel&&live.selected===view.selected&&
+        offer.document.operation_id===document.operation_id&&offer.document.document_sha256===document.document_sha256&&offer.document.pages===document.pages&&vendorCanonical(offer.request)===requestKey;
+    };
+    const current=()=>active&&matches();if(!current())return null;
+    // An old callback must stay invalid even if an offer, owner or screen is restored before an await finishes.
+    const unsubscribe=this.session.subscribe(()=>{if(!matches())active=false;});
+    try{
+      await access.authorize();if(!current())return null;
+      const account=await this.accountRead(owner,signal);if(!current())return null;
+      const scope={box_id:account.box_id,owner_id:account.actor_id};
+      const receipt=await this.resolveEFax(owner,scope,request,signal);if(!current())return null;
+      if(efaxMissing(receipt)||receipt.kind!=='acquire'||receipt.state!=='acquired'||!receipt.content_available||receipt.source_withheld||!receipt.document||
+        receipt.scope.box_id!==scope.box_id||receipt.scope.owner_id!==scope.owner_id||receipt.idempotency_key!==request.request.idempotency_key||
+        receipt.operation_id!==document.operation_id||receipt.document.sha256!==document.document_sha256||receipt.document.pages!==document.pages)return null;
+      const bytes=await this.documentEFax(owner,receipt,signal);if(!current())return null;
+      await access.authorize();if(!current())return null;
+      const latestAccount=await this.accountRead(owner,signal);if(!current())return null;
+      if(latestAccount.box_id!==account.box_id||latestAccount.actor_id!==account.actor_id||latestAccount.recovery_scope!==account.recovery_scope)return null;
+      return bytes;
+    }catch(cause){if(!current())return null;throw cause;}
+    finally{active=false;unsubscribe();}
   }
   prepareFax(context:SourceContext,source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
     const receipt=source.receipt;
