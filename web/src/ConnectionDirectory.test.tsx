@@ -120,7 +120,10 @@ it('drops a cached account label and proof when a background check changes or re
   expect(host.textContent).not.toContain(connected.account.email);expect(host.textContent).toContain('Account connection changed');expect(host.textContent).not.toContain('Verified in this session');
   await act(async()=>observeConnectionStatus(identity,'google',{state:'sign_in_required',account:null,connected_at:null}));
   const row=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
-  expect(row.textContent).toContain('Needs setup');expect(row.textContent).not.toContain('Account connected');expect(row.textContent).toContain('Connect account');
+  expect(row.textContent).toContain('Needs setup');expect(row.textContent).not.toContain('Account connected');
+  const details=row.parentElement!.querySelector<HTMLDetailsElement>('details')!;expect(details.open).toBe(false);
+  await act(async()=>details.querySelector('summary')!.click());expect(details.open).toBe(true);
+  expect(details.textContent).toContain('Connect account');expect(details.textContent).not.toContain('Account connected');expect(details.textContent).not.toContain('Sign-in confirmed');
 });
 it('connects fax setup to work and withdraws stale readiness when rechecking fails',async()=>{
   const work=vi.fn();vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,messaging:true});
@@ -157,8 +160,10 @@ it('keeps legacy setup unqualified when current action and account readiness wer
  await mount(<p>Google</p>);
  const payments=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Payments'))!;
  expect(payments.querySelector('.connection-badge')?.textContent).toBe('Not checked');
- expect(payments.textContent).toContain('Supported actions and installed accounts have not been checked');
- expect(payments.textContent).toContain('Review accounts and permissions');
+ const details=payments.parentElement!.querySelector<HTMLDetailsElement>('details')!;expect(details.open).toBe(false);
+ await act(async()=>details.querySelector('summary')!.click());expect(details.open).toBe(true);
+ expect(details.textContent).toContain('Supported actions and installed accounts have not been checked');
+ expect(details.textContent).toContain('Review accounts and permissions');
  expect(readConnectionSummary).not.toHaveBeenCalled();
  await act(async()=>root.render(<SettingsHub open initialScreen="connections" team={<p>Team</p>} google={<p>Google editor</p>} teamSummary="Team" teamDirty={false} onClose={()=>{}}/>));
  expect(host.querySelector('.connection-card .connection-badge')?.textContent).toBe('Not checked');
@@ -179,18 +184,19 @@ it('launches fax work from the overview only with current preparation evidence a
  await click('Refresh connections');expect(action().disabled).toBe(false);expect(editor).not.toHaveBeenCalled();
 });
 
-it('keeps next steps and independent service states visible while disclosing check evidence on demand',async()=>{
+it('keeps the row compact and discloses next steps, independent service states and check evidence on demand',async()=>{
  const connected={state:'connected',account:{email:'invented@example.invalid'},connected_at:new Date(Date.now()-600000).toISOString(),capabilities:{mail:true,calendar:true}};
  vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,core:false,google:true});
  vi.mocked(readConnectionSummary).mockImplementation(async(owner)=>{observeConnectionStatus(owner,'google',connected);return personalConnectionSummary('google',connectionHealth(owner,'google'),connected.account.email);});
  await mount(<p>Google</p>);
  const card=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
- expect(card.textContent).toContain('📨');expect(card.parentElement!.textContent).toContain('EmailNot verified');expect(card.parentElement!.textContent).toContain('CalendarNot verified');expect(card.textContent).toContain('Read recent email');
+ expect(card.textContent).toContain('📨');expect(card.textContent).not.toContain('Read recent email');
  expect(card.textContent).not.toContain('Account checked');expect(card.textContent).not.toContain('Sign-in confirmed');
  const details=card.parentElement!.querySelector<HTMLDetailsElement>('details')!;
  expect(details.open).toBe(false);expect(details.textContent).toContain('Account checked');expect(details.textContent).toContain('Sign-in confirmed');
- await act(async()=>{details.open=true;details.dispatchEvent(new Event('toggle'));});
- expect(details.open).toBe(true);expect(readConnectionSummary).toHaveBeenCalledOnce();
+ await act(async()=>details.querySelector('summary')!.click());
+ expect(details.open).toBe(true);expect(details.textContent).toContain('EmailNot verified');expect(details.textContent).toContain('CalendarNot verified');
+ expect(details.textContent).toContain('Read recent email');expect(readConnectionSummary).toHaveBeenCalledOnce();
 });
 
 it.each(['google','microsoft','scheduling','core'] as const)('checks disabled %s availability on direct entry before mounting its editor',async initialScreen=>{

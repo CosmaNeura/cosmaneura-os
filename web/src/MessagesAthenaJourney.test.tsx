@@ -8,6 +8,8 @@ import {workspaceApi} from './workspace-api';
 import {memoryDraftStorage} from './draft-test-fixture';
 import {PRESENTATION_KEY} from './session/presentation';
 import {useUnsavedWork} from './unsaved-work';
+import {readinessFixture} from './connection-readiness-fixture';
+import {CONNECTION_IDS} from './connection-catalog-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement;
 const visible=(e:Element)=>!e.closest('[hidden]');
@@ -33,6 +35,11 @@ it('opens the shared Athena task from Chief and Settings while keeping the exact
  await draft('Keep my Chief directions verbatim.');const composer=question();await click('Details');await click('Find or connect an Athena visit');
  await wait(()=>expect(button('Check connection status')).toBeDefined());const task=host.querySelector('[aria-label="Find or connect an Athena visit"]');expect(task?.textContent).toContain('Jordan');expect(composer.closest('[hidden]')).not.toBeNull();
  await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(button('Details')));expect(question()).toBe(composer);expect(question().value).toBe('Keep my Chief directions verbatim.');
+ // This path requires an enabled Core service; the shared email fixture intentionally reports practice setup.
+ const originalFetch=window.fetch,catalog=readinessFixture({core:'user_connectable'});
+ vi.spyOn(window,'fetch').mockImplementation(async(input,init)=>new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url,location.href).pathname==='/connections/catalog'
+  ?new Response(JSON.stringify({version:2,services:CONNECTION_IDS.map(id=>({id,setup_available:catalog[id],...catalog.readiness![id]}))}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}})
+  :originalFetch(input,init));
  await click('Settings');await clickCard('Connections');await clickCard('Cosmaneura account & appointments');await click('Find or connect an Athena visit');
  await wait(()=>expect(button('Check connection status')).toBeDefined());expect(host.querySelector('[aria-label="Find or connect an Athena visit"]')).toBe(task);await click('‹ Back to connections');
  await wait(()=>expect(button('Find or connect an Athena visit')).toBeDefined());expect(question().value).toBe('Keep my Chief directions verbatim.');expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();

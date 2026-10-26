@@ -54,10 +54,10 @@ it('consumes browser Back to dismiss the task without losing the Chief conversat
  await act(async()=>{history.replaceState(history.state,'','#cosmas/home');window.dispatchEvent(new PopStateEvent('popstate'));});
  await wait(()=>expect(host.querySelector('.ehr-read-task')?.hasAttribute('hidden')).toBe(true));expect(location.hash).toBe(origin);expect(question().value).toBe('Keep this browser Back draft.');expect(workspaceApi.ask).not.toHaveBeenCalled();
 });
-async function delayedOpening(){
+async function delayedOpening(launch:()=>Promise<void>=()=>click('Review EHR records')){
  const result=await workspaceApi.team(identity);let release!:()=>void;
  vi.spyOn(workspaceApi,'team').mockImplementationOnce(()=>new Promise(resolve=>{release=()=>resolve(result);}));
- await click('Review EHR records');await wait(()=>expect(release).toBeTypeOf('function'));
+ await launch();await wait(()=>expect(release).toBeTypeOf('function'));
  return async()=>{await act(async()=>{release();});};
 }
 it.each(['Escape','Saved sources'] as const)('does not reopen Elation after %s wins during opening authorization',async choice=>{
@@ -78,7 +78,10 @@ it('does not open Elation after leaving its connection entry during authorizatio
  await act(async()=>connections.click());
  await wait(()=>expect(host.querySelector<HTMLButtonElement>('[aria-label="Practice records"] button')?.disabled).toBe(false));
  await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Practice records"] button')!.click());
- const finish=await delayedOpening();await click('← All connections');await finish();
+ const finish=await delayedOpening(async()=>{
+  const elation=host.querySelector<HTMLButtonElement>('[data-practice-record-provider="elation"]')!;expect(elation.disabled).toBe(false);
+  await act(async()=>{elation.focus();elation.click();});
+ });await click('Back to connections');await finish();
  expect(host.querySelector('.ehr-read-task')).toBeNull();expect(host.querySelector('.settings-hub h1')?.textContent).toBe('Connections');expect(workspaceApi.ask).not.toHaveBeenCalled();
 });
 
