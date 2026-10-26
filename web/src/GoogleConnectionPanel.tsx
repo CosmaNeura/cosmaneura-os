@@ -202,8 +202,8 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       </div>
       <PersonalConnectionHealth identity={identity} provider="google"
         mailAction={<button className={service==='mail'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('mail')}>{visible?.views.mail?'Refresh email':'Read recent email'}</button>}
-        calendarAction={calendarWorkEnabled&&onOpenCalendarWork?<button disabled={blocked||messageWorkLocked||calendarWorkLocked} onClick={()=>{setService('calendar');onOpenCalendarWork();}}>Choose calendar summary for work</button>:calendarNeedsPermission?<button className={service==='calendar'?'team-primary':undefined} disabled={blocked||!nativeReady} onClick={()=>manual('start')}>Add calendar access</button>:
-          <button className={service==='calendar'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('calendar')}>{visible?.views.calendar?'Refresh calendar':'View next 7 days'}</button>}/>
+        calendarAction={calendarNeedsPermission?<button className={service==='calendar'?'team-primary':undefined} disabled={blocked||!nativeReady||messageWorkLocked||calendarWorkLocked} onClick={()=>manual('start')}>Add calendar access</button>:
+          <button className={service==='calendar'?'team-primary':undefined} disabled={blocked||messageWorkLocked||calendarWorkLocked} onClick={()=>manual('calendar')}>{visible?.views.calendar?'Refresh calendar':'View next 7 days'}</button>}/>
       {!view&&<p className="google-results-hint">{service==='mail'?'Read recent email to see up to 10 inbox headers.':calendarNeedsPermission?'Choose Add calendar access to view your week.':'View the next 7 days to see event titles and times.'}</p>}
     </>}
     {calendarWorkEnabled&&calendarWork&&<div className="google-calendar-work">{typeof calendarWork==='function'?calendarWork({requestCalendarAccess:()=>{if(!blocked&&!calendarWorkLocked&&nativeReady)manual('start');},calendarAccessBusy:blocked}):calendarWork}</div>}
