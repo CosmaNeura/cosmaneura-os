@@ -11,10 +11,10 @@ import {emptyGoogleMessageRecovery,validateGoogleMessageRecovery,type GoogleMess
 import './google-message.css';
 
 export type GoogleMessagePanelProps={identity:AuthenticatedWorkspaceIdentity;scope:GoogleMessageRecoveryScope;recovery:GoogleMessageRecoveryAccess|null;
-  workspace:GoogleMessageVisit|null;locked?:boolean;recoveryLocked?:boolean;onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;
+  workspace:GoogleMessageVisit|null;locked?:boolean;recoveryLocked?:boolean;onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;
   currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;
   onAuthenticationLost:(cause:unknown)=>void;onRequestFullMailAccess?:()=>void;fullMailAccessBusy?:boolean;
-  onChooseVisit?:()=>void;onAskChief?:(source:GoogleMessageSaved)=>void;onRefreshVisit?:()=>Promise<void>};
+  taskActive?:boolean;isTaskCurrent?:()=>boolean;onChooseVisit?:()=>void;onAskChief?:(source:GoogleMessageSaved)=>void;onRefreshVisit?:()=>Promise<void>};
 const reasons={attachment:'This email contains an attachment. Review the whole message in Gmail before using it for work.',
   html_only:'This email has no supported plain text. Review it in Gmail.',unsupported_mime:'This email format needs a person to review it in Gmail.',
   oversize:'This email exceeds the supported size. Review the whole message in Gmail.',ambiguous:'This message has conflicting contents. Review it in Gmail.',
@@ -22,20 +22,20 @@ const reasons={attachment:'This email contains an attachment. Review the whole m
 const when=(value:string)=>new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});
 const authority=(cause:unknown)=>cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status);
 const same=(a:unknown,b:unknown)=>modelCanonical(a)===modelCanonical(b);
-export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=false,recoveryLocked,onSaved,onBusyChange,onAuthenticationLost,
-  onRequestFullMailAccess,fullMailAccessBusy=false,onChooseVisit,onAskChief,onRefreshVisit,currentSources}:GoogleMessagePanelProps){
+export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=false,recoveryLocked,onSaved,onBusyChange,onActiveChange,onAuthenticationLost,
+  onRequestFullMailAccess,fullMailAccessBusy=false,taskActive=true,isTaskCurrent,onChooseVisit,onAskChief,onRefreshVisit,currentSources}:GoogleMessagePanelProps){
   const [record,setRecord]=useState(()=>emptyGoogleMessageRecovery(scope)),[offer,setOffer]=useState<GoogleMessageRecoveryRecord|null>(null),
-    [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState<GoogleMessageStatus|null>(null),
+    [ready,setReady]=useState(false),[busy,setBusy]=useState(false),[dispatching,setDispatching]=useState(false),[error,setError]=useState(''),[status,setStatus]=useState<GoogleMessageStatus|null>(null),
     [reviewed,setReviewed]=useState(false),[resolved,setResolved]=useState<GoogleMessageResolve|null>(null),[sourceStale,setSourceStale]=useState(false),[loadEpoch,setLoadEpoch]=useState(0),
     [sourceWithheld,setSourceWithheld]=useState(false),[connectionStamp,setConnectionStamp]=useState<ConnectionReadScope|null>(null);
   const health=useConnectionHealth(identity,'google'),healthScope=connectionReadScope(identity,'google');
   const latest=useRef(record);latest.current=record;
-  const current=useRef({identity,recovery,scopeKey:modelCanonical(scope),alive:true,generation:0});
+  const current=useRef({identity,recovery,scopeKey:modelCanonical(scope),taskActive,alive:true,generation:0});
   const shownOwner=useRef({identity,recovery,scopeKey:modelCanonical(scope)});
   const scopeKey=modelCanonical(scope);
-  if(current.current.identity!==identity||current.current.recovery!==recovery||current.current.scopeKey!==scopeKey)
-    current.current={identity,recovery,scopeKey,alive:true,generation:current.current.generation+1};
-  const active=useRef(false),controller=useRef<AbortController|null>(null),callbacks=useRef({onBusyChange,onAuthenticationLost,onSaved});callbacks.current={onBusyChange,onAuthenticationLost,onSaved};
+  if(current.current.identity!==identity||current.current.recovery!==recovery||current.current.scopeKey!==scopeKey||current.current.taskActive!==taskActive)
+    current.current={identity,recovery,scopeKey,taskActive,alive:true,generation:current.current.generation+1};
+  const active=useRef(false),controller=useRef<AbortController|null>(null),callbacks=useRef({onBusyChange,onActiveChange,onAuthenticationLost,onSaved});callbacks.current={onBusyChange,onActiveChange,onAuthenticationLost,onSaved};
   const reloadAfterResume=useRef(false),requiresNativeCheck=useRef(false);
   const nativeForeground=useGoogleNativeForeground(identity,{
     suspended:()=>{
@@ -52,27 +52,32 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
     },
   });
   const owned=shownOwner.current.identity===identity&&shownOwner.current.recovery===recovery&&shownOwner.current.scopeKey===scopeKey;
-  const valid=(gen:number)=>nativeForeground.foreground.current&&current.current.alive&&current.current.generation===gen&&current.current.identity===identity&&current.current.recovery===recovery&&current.current.scopeKey===scopeKey;
-  useEffect(()=>{current.current.alive=true;return()=>{current.current.alive=false;current.current.generation++;controller.current?.abort();callbacks.current.onBusyChange?.(false);};},[]);
+  const valid=(gen:number)=>nativeForeground.foreground.current&&current.current.alive&&taskActive&&(isTaskCurrent?.()??true)&&current.current.generation===gen&&current.current.identity===identity&&current.current.recovery===recovery&&current.current.scopeKey===scopeKey;
+  useEffect(()=>{current.current.alive=true;return()=>{current.current.alive=false;current.current.generation++;controller.current?.abort();callbacks.current.onBusyChange?.(false);callbacks.current.onActiveChange?.(false);};},[]);
   useEffect(()=>{
-    const gen=++current.current.generation;controller.current?.abort();shownOwner.current={identity,recovery,scopeKey};setReady(false);setOffer(null);setRecord(emptyGoogleMessageRecovery(scope));setStatus(null);setError('');setReviewed(false);setResolved(null);setSourceStale(false);setSourceWithheld(false);setConnectionStamp(null);
-    if(recovery&&nativeForeground.foreground.current)void(async()=>{await recovery.authorize();const saved=await recovery.load();if(!valid(gen))return;
-      if(saved!==null&&saved!==undefined){const checked=await validateGoogleMessageRecovery(saved,scope);if(valid(gen))setOffer(checked);}else setReady(true);
-    })().catch(cause=>{if(!valid(gen))return;setError('Private saved email work is unavailable. Your earlier work is retained.');if(authority(cause))callbacks.current.onAuthenticationLost(cause);});
-    return()=>{current.current.generation++;controller.current?.abort();};
+    current.current.generation++;controller.current?.abort();shownOwner.current={identity,recovery,scopeKey};setReady(false);setBusy(false);setOffer(null);setRecord(emptyGoogleMessageRecovery(scope));setStatus(null);setError('');setReviewed(false);setResolved(null);setSourceStale(false);setSourceWithheld(false);setConnectionStamp(null);
+    // Loading the one account journal is independent of task visibility. Hiding
+    // the retained task must not strand a still-pending storage read on reveal.
+    let loading=true;const ownsLoad=()=>loading&&current.current.alive&&current.current.identity===identity&&current.current.recovery===recovery&&current.current.scopeKey===scopeKey;
+    if(recovery&&nativeForeground.foreground.current)void(async()=>{await recovery.authorize();const saved=await recovery.load();if(!ownsLoad())return;
+      if(saved!==null&&saved!==undefined){const checked=await validateGoogleMessageRecovery(saved,scope);if(ownsLoad())setOffer(checked);}else setReady(true);
+    })().catch(cause=>{if(!ownsLoad())return;setError('Private saved email work is unavailable. Your earlier work is retained.');if(authority(cause))callbacks.current.onAuthenticationLost(cause);});
+    return()=>{loading=false;current.current.generation++;controller.current?.abort();};
   },[identity,recovery,scopeKey,loadEpoch]);
   const checkedDisconnected=health.checkedAt!==null&&!health.connected;
   const connectionChanged=checkedDisconnected||!!record.list&&healthScope!==connectionStamp||connectionStamp!==null&&(!health.accountCurrent||!health.connected);
   const projectedSourceUnavailable=workspace?.id===record.saved?.workspace_id&&!!record.saved&&
     currentSources?.some(source=>source.entry_id===record.saved!.entry_id&&source.state==='unavailable')===true;
-  const showSource=owned&&!nativeForeground.suspended&&!sourceWithheld&&!connectionChanged&&!record.saved?.source_withheld&&!projectedSourceUnavailable;
+  const showSource=taskActive&&owned&&!nativeForeground.suspended&&!sourceWithheld&&!connectionChanged&&!record.saved?.source_withheld&&!projectedSourceUnavailable;
   const pending=owned?record.pending:null,message=showSource?record.message?.message:null;
   const sourceAllowed=showSource&&status?.state==='connected'&&status.full_mail_read&&!sourceStale;
-  const blocked=nativeForeground.suspended||!owned||!ready||busy||!!offer||!!pending||locked||fullMailAccessBusy;
-  const unsaved=owned&&(!!offer||!!pending||busy||reviewed);
-  useUnsavedWork(unsaved);
+  const blocked=!taskActive||nativeForeground.suspended||!owned||!ready||busy||dispatching||!!offer||!!pending||locked||fullMailAccessBusy;
+  const unsaved=owned&&(!!offer||!!pending||busy||dispatching||reviewed);
+  // Durable pending work stays in the account journal; only an active operation
+  // can still be between persistence and its confirmed result.
+  useUnsavedWork(dispatching);
   useEffect(()=>{callbacks.current.onBusyChange?.(unsaved);},[unsaved,onBusyChange]);
-  useEffect(()=>{setReviewed(false);},[workspace?.id,workspace?.revision,record.message?.source_sha256,locked]);
+  useEffect(()=>{setReviewed(false);},[workspace?.id,workspace?.revision,record.message?.source_sha256,locked,taskActive]);
   useEffect(()=>{if(connectionChanged){setReviewed(false);setSourceStale(true);setStatus(null);setSourceWithheld(true);controller.current?.abort();}},[connectionChanged]);
   async function persist(value:GoogleMessageRecoveryRecord,gen:number){
     if(!recovery||!valid(gen))throw new WorkspaceApiError(403);const checked=await validateGoogleMessageRecovery(value,scope);
@@ -80,7 +85,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
     latest.current=checked;setRecord(checked);return checked;
   }
   async function run(action:(gen:number,signal:AbortSignal)=>Promise<void>){
-    if(!nativeForeground.foreground.current||active.current||!recovery)return;active.current=true;setBusy(true);setError('');const gen=current.current.generation,c=new AbortController();controller.current=c;
+    if(!taskActive||!(isTaskCurrent?.()??true)||!nativeForeground.foreground.current||active.current||!recovery)return;active.current=true;const notifyActive=callbacks.current.onActiveChange;setDispatching(true);notifyActive?.(true);setBusy(true);setError('');const gen=current.current.generation,c=new AbortController();controller.current=c;
     try{await recovery.authorize();if(!valid(gen))return;await action(gen,c.signal);}catch(cause){
       if(!valid(gen))return;
       if(authority(cause)){setStatus(null);setReviewed(false);setRecord(emptyGoogleMessageRecovery(scope));setReady(false);recovery.denied?.(cause);callbacks.current.onAuthenticationLost(cause);setError('Email access is unavailable. Sign in and reopen your saved work.');}
@@ -89,7 +94,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
         setError(cause instanceof WorkspaceApiError&&cause.code==='google_mail_consent_required'?'Full email access is needed. Add access before reading a message.':
         cause instanceof WorkspaceApiError&&cause.code?.includes('superseded')?'This email source changed. Load and review the current message before new work.':
         'The result could not be confirmed. Your exact saved request is retained; check its saved result before starting another request.');}
-    }finally{if(valid(gen)){controller.current=null;setBusy(false);}active.current=false;
+    }finally{if(valid(gen)){controller.current=null;setBusy(false);}active.current=false;if(current.current.alive){setDispatching(false);if(current.current.identity===identity&&current.current.recovery===recovery)setBusy(false);}notifyActive?.(false);
       if(current.current.alive&&current.current.identity===identity&&nativeForeground.foreground.current&&reloadAfterResume.current){reloadAfterResume.current=false;setLoadEpoch(n=>n+1);}}
   }
   async function settle(receipt:GoogleMessageReceipt,p:GoogleMessagePending,gen:number){
@@ -124,7 +129,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
   const review=()=>{if(!workspace||!record.selected_visit||!same(workspace,record.selected_visit)||!record.message||record.message.status!=='complete'||!reviewed||!sourceAllowed)return;
     submit({kind:'review',request:{expected_revision:workspace.revision,idempotency_key:crypto.randomUUID(),read_id:record.message.read_id,source_sha256:record.message.source_sha256,
       reviewed_patient:true,reviewed_exact_message:true,reviewed_untrusted_source:true},workspace:structuredClone(workspace),list_anchor:record.list,message_anchor:record.message});};
-  const recover=()=>{if(!pending||busy||(recoveryLocked??locked))return;void run(async(gen,signal)=>{
+  const recover=()=>{if(!pending||busy||dispatching||(recoveryLocked??locked))return;void run(async(gen,signal)=>{
     if(pending.kind==='review'){await execute(pending,gen,signal);return;}
     const result=await googleMessageApi.resolve(identity,pending.request.idempotency_key,pending.kind,signal);
     if('source_sha256'in result)await settle(result,pending,gen);else {if(!valid(gen))return;setResolved(result);setError(result.status==='not_found'?
@@ -133,7 +138,7 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
   const restore=()=>void run(async(gen)=>{if(!offer)return;const checked=await validateGoogleMessageRecovery(offer,scope);await recovery!.authorize();if(!valid(gen))return;
     const accountChecked=health.checkedAt!==null||requiresNativeCheck.current;
     latest.current=checked;setRecord(checked);setOffer(null);setReady(true);setReviewed(false);setStatus(null);setSourceStale(accountChecked);setSourceWithheld(accountChecked);setConnectionStamp(connectionReadScope(identity,'google'));setError('Saved email work restored. Check email access and compare the visit before continuing; nothing was sent.');});
-  const stopWaiting=()=>{if(!busy)return;controller.current?.abort();};
+  const stopWaiting=()=>{if(!busy&&!dispatching)return;controller.current?.abort();};
   const choose=(id:string)=>{if(blocked)return;void run(async(gen)=>{await persist({...latest.current,selected_message_id:id,message:null,selected_visit:null,saved:null},gen);setReviewed(false);});};
   const selectVisit=()=>{if(blocked||!sourceAllowed||!workspace||!message||message.status!=='complete')return;void run(async(gen)=>{await persist({...latest.current,selected_visit:structuredClone(workspace)},gen);setReviewed(false);});};
   return <section className="google-message-panel" aria-label="Work with Gmail">
@@ -142,10 +147,10 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
     {nativeForeground.suspended&&<p role="status">Email contents are hidden while the app is inactive. Your private saved work is retained.</p>}
     {!recovery&&<p role="alert">Private saved-work storage is required. Email work is unavailable.</p>}
     {owned&&offer&&<div className="google-message-recovery"><p>Email work is saved on this device.{offer.pending?' Its exact request is still unresolved.':''}</p>
-      <button disabled={busy||(recoveryLocked??locked)} onClick={restore}>Restore saved email work</button>
-      {!offer.pending&&<button disabled={busy||locked} onClick={()=>void run(async(gen)=>{await recovery!.persist(null);if(valid(gen)){setOffer(null);setReady(true);setRecord(emptyGoogleMessageRecovery(scope));}})}>Discard local email draft</button>}</div>}
+      <button disabled={busy||dispatching||(recoveryLocked??locked)} onClick={restore}>Restore saved email work</button>
+      {!offer.pending&&<button disabled={busy||dispatching||locked} onClick={()=>void run(async(gen)=>{await recovery!.persist(null);if(valid(gen)){setOffer(null);setReady(true);setRecord(emptyGoogleMessageRecovery(scope));}})}>Discard local email draft</button>}</div>}
     {(!owned||!ready)&&!offer&&recovery&&<><p role="status">{error&&owned?'Email work could not be opened.':'Checking private saved-work storage…'}</p>{error&&owned&&<button disabled={busy} onClick={()=>setLoadEpoch(n=>n+1)}>Reopen saved email work</button>}</>}
-    {busy&&<div role="status"><p>Waiting for the current email operation…</p><p>This request has a 50-second limit.</p><button onClick={stopWaiting}>Stop waiting</button></div>}
+    {(busy||dispatching)&&<div role="status"><p>Waiting for the current email operation…</p><p>This request has a 50-second limit.</p><button onClick={stopWaiting}>Stop waiting</button></div>}
     {error&&owned&&<p role={pending?'status':'alert'}>{error}</p>}
     {owned&&ready&&<>
       <button disabled={blocked} onClick={()=>void run(async(gen,signal)=>{
@@ -190,8 +195,8 @@ export function GoogleMessagePanel({identity,scope,recovery,workspace,locked=fal
       </article>}
       {sourceStale&&<div role="alert"><p>Confirm the current visit and review a fresh email source before new work.</p>{onRefreshVisit&&<button disabled={busy||!!pending||(recoveryLocked??locked)} onClick={()=>void run(async()=>{await onRefreshVisit();setSourceStale(false);})}>Refresh current visit</button>}</div>}
       {pending&&<div className="google-message-recovery"><h4>Saved request needs a confirmed result</h4><p>{pending.kind==='review'?'This source save may already be recorded. Retry uses the same visit, message and key.':'Check the saved result without repeating the Google read.'}</p>
-        <button disabled={busy||(recoveryLocked??locked)} onClick={recover}>{pending.kind==='review'?'Retry exact source save':'Check saved email result'}</button>
-        {resolved?.status==='not_found'&&pending.kind!=='review'&&<button disabled={busy||(recoveryLocked??locked)} onClick={()=>void run(async(gen,signal)=>execute(pending,gen,signal))}>Send this saved read request</button>}
+        <button disabled={busy||dispatching||!taskActive||(recoveryLocked??locked)} onClick={recover}>{pending.kind==='review'?'Retry exact source save':'Check saved email result'}</button>
+        {resolved?.status==='not_found'&&pending.kind!=='review'&&<button disabled={busy||dispatching||!taskActive||(recoveryLocked??locked)} onClick={()=>void run(async(gen,signal)=>execute(pending,gen,signal))}>Send this saved read request</button>}
         {resolved?.status==='unconfirmed'&&<p>The original read remains unconfirmed. No new read will be started for it.</p>}</div>}
     </>}
   </section>;

@@ -43,6 +43,33 @@ async function click(label:string){await wait(()=>{expect(button(label),label).t
 async function selectRead(){await mount();await click('Check email access');await click('Select email');await act(async()=>host.querySelector<HTMLButtonElement>('.google-message-list button')!.click());await idle();await click('Read full email');}
 async function ack(){await act(async()=>host.querySelector<HTMLInputElement>('input[type=checkbox]')!.click());}
 async function prepareReview(){await selectRead();await click('Use for current visit');await ack();}
+it('finishes one delayed account journal load across hiding and revealing the retained task',async()=>{
+ let release!:(value:GoogleMessageRecoveryRecord|null)=>void;vi.mocked(access.load).mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));
+ await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive/>));await wait(()=>expect(release).toBeTypeOf('function'));
+ await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive={false}/>));await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive/>));
+ await act(async()=>release(null));await wait(()=>expect(button('Check email access')?.disabled).toBe(false));
+ expect(access.load).toHaveBeenCalledOnce();expect(googleMessageApi.status).not.toHaveBeenCalled();expect(googleMessageApi.list).not.toHaveBeenCalled();
+});
+it('releases only the active navigation lock after an unconfirmed read and retains its exact key across task return',async()=>{
+ const navigation=vi.fn();props={...props,onActiveChange:navigation};vi.mocked(googleMessageApi.read).mockRejectedValueOnce(new WorkspaceApiError(503));
+ await selectRead();const pending=structuredClone(saved!.pending!);expect(pending.kind).toBe('message');expect(navigation).toHaveBeenLastCalledWith(false);expect(props.onBusyChange).toHaveBeenLastCalledWith(true);
+ await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive={false}/>));const loadCount=vi.mocked(access.load).mock.calls.length;
+ await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive/>));expect(saved?.pending).toEqual(pending);expect(access.load).toHaveBeenCalledTimes(loadCount);
+ vi.mocked(googleMessageApi.resolve).mockResolvedValueOnce({...message,read_key:pending.request.idempotency_key});await click('Check saved email result');
+ expect(googleMessageApi.resolve).toHaveBeenCalledWith(props.identity,pending.request.idempotency_key,'message',expect.any(AbortSignal));expect(googleMessageApi.read).toHaveBeenCalledOnce();expect(saved?.pending).toBeNull();
+});
+it('keeps navigation active until an aborted operation settles and does not notify the replacement owner',async()=>{
+ const first=vi.fn(),replacement=vi.fn();useNative();props={...props,onActiveChange:first};await mount();await click('Check email access');let release!:(value:GoogleMessageReceipt)=>void;
+ vi.mocked(googleMessageApi.list).mockReturnValueOnce(new Promise(resolve=>{release=resolve;}));await act(async()=>button('Select email')!.click());await wait(()=>expect(saved?.pending?.kind).toBe('list'));expect(first).toHaveBeenLastCalledWith(true);
+ await nativeHint(false);expect(first).toHaveBeenLastCalledWith(true);await nativeHint(true);expect(first).toHaveBeenLastCalledWith(true);
+ const key=saved!.pending!.request.idempotency_key;props={...props,identity:{mode:'clerk_jwt',getToken:vi.fn()},onActiveChange:replacement,recovery:{...access,load:async()=>null}};
+ await act(async()=>root.render(<GoogleMessagePanel {...props}/>));await act(async()=>release({...list,read_key:key}));expect(first).toHaveBeenLastCalledWith(false);expect(replacement).not.toHaveBeenCalled();expect(props.onSaved).not.toHaveBeenCalled();
+});
+it('clears an ephemeral review on task hide without changing its saved source or permitting hidden actions',async()=>{
+ await prepareReview();const prior=structuredClone(saved);expect(host.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
+ await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive={false}/>));expect(host.querySelector('pre')).toBeNull();await act(async()=>button('Check email access')!.click());expect(googleMessageApi.status).toHaveBeenCalledOnce();
+ await act(async()=>root.render(<GoogleMessagePanel {...props} taskActive/>));expect(host.querySelector<HTMLInputElement>('input')!.checked).toBe(false);expect(saved).toEqual(prior);expect(googleMessageApi.review).not.toHaveBeenCalled();
+});
 it('opens private email storage only after an initially suspended native scene is revalidated',async()=>{
  useNative();await nativeHint(false);await act(async()=>root.render(<GoogleMessagePanel {...props}/>));
  expect(access.load).not.toHaveBeenCalled();expect(googleMessageApi.status).not.toHaveBeenCalled();expect(host.querySelector('pre')).toBeNull();

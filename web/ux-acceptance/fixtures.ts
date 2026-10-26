@@ -5,6 +5,7 @@ import {calendarImportRehearsal} from './calendar-import';
 import {ehrRehearsal} from './ehr';
 import {tebraMedicationRehearsal} from './tebra-medications';
 import {outlookRehearsal} from './outlook';
+import {gmailRehearsal} from './gmail';
 import {recordingMetadata} from './recording-metadata';
 import {handoffReviewHash,validHandoffReviewInput,validHandoffRevisionInput} from '../src/handoff-review-api';
 import {conversationsApi,type ConversationSummary} from '../src/conversations-api';
@@ -102,6 +103,7 @@ export async function installFixtures(reset=false){
   const athenaAllergyServer=athenaAllergyRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const ehrServer=ehrRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const outlookServer=outlookRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
+  const gmailServer=gmailRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
   // Exact review contracts run through the real client, entirely in this tab.
   // Unsupported requests never leave this isolated, invented-data rehearsal.
   window.fetch=async(input,init)=>{
@@ -113,6 +115,7 @@ export async function installFixtures(reset=false){
     const athenaMedicationResponse=await athenaMedicationServer(path,init);if(athenaMedicationResponse)return athenaMedicationResponse;
     const athenaAllergyResponse=await athenaAllergyServer(path,init);if(athenaAllergyResponse)return athenaAllergyResponse;
     const ehrResponse=await ehrServer(path,init);if(ehrResponse)return ehrResponse;
+    const gmailResponse=await gmailServer(path,init);if(gmailResponse)return gmailResponse;
     const outlookResponse=await outlookServer(path,init);if(outlookResponse)return outlookResponse;
     const recordingResponse=await recordingServer(path,init);if(recordingResponse)return recordingResponse;
     const route=/^\/workspaces\/([a-f0-9-]{36})\/handoffs\/([a-f0-9-]{36})\/(review|revision)$/.exec(path);
