@@ -25,7 +25,11 @@ const foundations = ['VITE_WORKSPACE_ENABLED', 'VITE_WORKSPACE_AUTHENTICATED_ENA
 const forbidden = ['VITE_DESKTOP_SYNTHETIC_ENABLED', 'VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED', 'VITE_COMPACT_LOCAL'];
 const captureFlags = ['VITE_CAPTURE_E2E_MICROPHONE_ENABLED', 'VITE_CAPTURE_IOS_NATIVE_PCM_ENABLED'];
 const patientSetupFlag = 'VITE_WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED';
-const knownGates = new Set([patientSetupFlag, ...BETA_FEATURE_FLAGS, ...foundations, ...forbidden, ...captureFlags,
+// These reviewed consumers require separate matching API contracts. Omission
+// preserves existing releases; a retained native environment must opt in.
+const pilotFlags = ['VITE_MESSAGES_ENABLED', 'VITE_EHR_READ_ENABLED',
+  'VITE_CALENDAR_IMPORT_ENABLED', 'VITE_MICROSOFT_MESSAGE_ENABLED'];
+const knownGates = new Set([patientSetupFlag, ...pilotFlags, ...BETA_FEATURE_FLAGS, ...foundations, ...forbidden, ...captureFlags,
   'VITE_WORKSPACE_NATIVE_AUTH_ENABLED', 'VITE_WORKSPACE_DESKTOP_AUTH_ENABLED']);
 const fail = message => { throw new Error(`Beta feature profile refused: ${message}`); };
 function set(env, name, value) {
@@ -51,6 +55,10 @@ function resolveProfile(input, checkPublishableKey) {
   // Catch stale recipes and misspelled gates instead of silently shipping partial UI.
   for (const key of Object.keys(env)) {
     if (key.startsWith('VITE_') && key.endsWith('_ENABLED') && !knownGates.has(key)) fail(`unknown feature gate ${key}`);
+  }
+  for (const key of pilotFlags) if (Object.hasOwn(env, key)) {
+    if (!['true', 'false'].includes(env[key])) fail(`select an explicit true or false for ${key}`);
+    if (staging && env[key] === 'true') fail('pilot features are disabled for first-owner staging');
   }
   set(env, 'VITE_COSMAS_ENV', 'early_adopter_beta');
   for (const key of foundations) set(env, key, 'true');
@@ -86,14 +94,14 @@ function resolveProfile(input, checkPublishableKey) {
   set(env, captureFlags[1], captureMode === 'ios_native' ? 'true' : 'false');
   const uploadOrigins = uploads(env.VITE_CAPTURE_UPLOAD_ORIGINS);
   const manifest = {version: 1, profile: BETA_FEATURE_PROFILE, ...hosted,
-    enabledFlags: [...BETA_FEATURE_FLAGS], captureMode, captureUploadOrigins: uploadOrigins,
+    enabledFlags: [...BETA_FEATURE_FLAGS, ...pilotFlags.filter(key => env[key] === 'true')], captureMode, captureUploadOrigins: uploadOrigins,
     coreWebOrigin: env.VITE_COSMANEURA_WEB_ORIGIN, athenaAccess: 'read_only'};
   return {env: Object.freeze(env), manifest};
 }
 
 /** Validate emitted public configuration without requiring an authentication key. */
 export function validateBetaFeatureManifest(manifest) {
-  if (!manifest || !Array.isArray(manifest.captureUploadOrigins)) fail('feature manifest is missing');
+  if (!manifest || !Array.isArray(manifest.captureUploadOrigins) || !Array.isArray(manifest.enabledFlags)) fail('feature manifest is missing');
   const resolved = resolveProfile({
     VITE_WORKSPACE_FEATURE_PROFILE: manifest.profile,
     VITE_WORKSPACE_HOSTED_CLIENT: manifest.client, VITE_WORKSPACE_DATA_MODE: manifest.dataMode,
@@ -102,6 +110,7 @@ export function validateBetaFeatureManifest(manifest) {
     VITE_WORKSPACE_CAPTURE_MODE: manifest.captureMode,
     VITE_CAPTURE_UPLOAD_ORIGINS: manifest.captureUploadOrigins.join(','),
     VITE_COSMANEURA_WEB_ORIGIN: manifest.coreWebOrigin,
+    ...Object.fromEntries(pilotFlags.filter(key => manifest.enabledFlags.includes(key)).map(key => [key, 'true'])),
   }, false).manifest;
   const canonical = value => JSON.stringify(value, Object.keys(value).sort());
   // Arrays are ordered public configuration; no extra or omitted keys accepted.
