@@ -36,3 +36,17 @@ it('withholds a foreign owner record without deleting encrypted recovery',async(
 it('rechecks owner before every journal load and never adopts a changed actor',async()=>{const load=vi.spyOn(journal,'load');vi.mocked(accountIdentityApi.read).mockResolvedValueOnce(account).mockResolvedValue({...account,actor_id:efaxUuid(99)});await render();await wait(()=>expect(host.textContent).toContain('could not be opened'));expect(load).not.toHaveBeenCalled();expect(denied).toHaveBeenCalled();});
 it.each([401,403,404,426])('hides access controls after signed denial %s',async status=>{vi.mocked(accountIdentityApi.read).mockRejectedValueOnce(new WorkspaceApiError(status));await render();await wait(()=>expect(host.textContent).toContain('could not be opened'));expect(denied).toHaveBeenCalled();expect(efaxInboundApi.command).not.toHaveBeenCalled();expect(host.querySelector('input,select,a')).toBeNull();});
 it('rejects an unreviewed image request journal without exact prior proposal and approval',async()=>{record={...record,pending:{kind:'acquire',request:{idempotency_key:efaxUuid(41),ticket_id:efaxUuid(7),revision_id:efaxUuid(9),expected_version:2,approval_sha256:'e'.repeat(64)}}};await expect(seed()).rejects.toThrow();});
+
+it('reports active authorization before the panel exists and releases only after its private journal is ready',async()=>{
+ let release!:()=>void;const active=vi.fn();vi.mocked(context.authorize).mockImplementationOnce(()=>new Promise<void>(resolve=>{release=resolve;}));
+ await act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><EFaxInboundMount identity={identity} enabled onAuthenticationLost={denied} onActiveChange={active}/></AccountRecoveryContext.Provider>));
+ expect(active).toHaveBeenLastCalledWith(true);expect(button('Check received-fax access')).toBeUndefined();await act(async()=>release());await wait(()=>expect(button('Check received-fax access')?.disabled).toBe(false));expect(active).toHaveBeenLastCalledWith(false);expect(efaxInboundApi.status).not.toHaveBeenCalled();
+});
+it('does not let a late old account proof unlock replacement account authorization',async()=>{
+ let releaseOld!:()=>void,releaseNew!:()=>void;const active=vi.fn(),nextIdentity={...identity};
+ const oldContext={...context,authorize:vi.fn(()=>new Promise<void>(resolve=>{releaseOld=resolve;}))},nextContext={...context,authorize:vi.fn(async()=>{})};
+ vi.mocked(nextContext.authorize).mockImplementationOnce(()=>new Promise<void>(resolve=>{releaseNew=resolve;}));
+ const renderOwner=(owner:typeof identity,access:AccountRecoveryAccess)=>act(async()=>root.render(<AccountRecoveryContext.Provider value={access}><EFaxInboundMount identity={owner} enabled onAuthenticationLost={denied} onActiveChange={active}/></AccountRecoveryContext.Provider>));
+ await renderOwner(identity,oldContext);await renderOwner(nextIdentity,nextContext);expect(active).toHaveBeenLastCalledWith(true);active.mockClear();await act(async()=>releaseOld());expect(active).not.toHaveBeenCalledWith(false);expect(button('Check received-fax access')).toBeUndefined();
+ await act(async()=>releaseNew());await wait(()=>expect(button('Check received-fax access')?.disabled).toBe(false));expect(active).toHaveBeenLastCalledWith(false);
+});

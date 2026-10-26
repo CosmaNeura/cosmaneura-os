@@ -2,16 +2,17 @@ import type { Workspace } from "./workspace-api";
 import {currentSharedNote,parseSharedClinicalNote} from './clinical-team-contract';
 import {hasResearchPacketMarker,RESEARCH_PACKET_LABEL} from './research-packet-marker';
 
-export function EncounterSources({ workspace, selectedSource, locked, source, evidence, setSource, setEvidence, onSave, onNotebook, briefViewedAt, onPrep, onReviewAppointment, onImportCalendar, onReviewOutlook, onReviewGoogle, appointmentReviewLocked }: {
+export function EncounterSources({ workspace, selectedSource, locked, source, evidence, setSource, setEvidence, onSave, onNotebook, briefViewedAt, onPrep, onReviewAppointment, onImportCalendar, onReviewOutlook, onReviewGoogle, onReviewReceivedFax, appointmentReviewLocked }: {
   workspace: Workspace; selectedSource: string | null; locked: boolean;
   source: string; evidence: string; setSource: (value: string) => void; setEvidence: (value: string) => void;
-  onSave: () => void; onNotebook: () => void; briefViewedAt?:string; onPrep?:()=>void; onReviewAppointment?:()=>void; onImportCalendar?:()=>void; onReviewOutlook?:()=>void; onReviewGoogle?:()=>void; appointmentReviewLocked?:boolean;
+  onSave: () => void; onNotebook: () => void; briefViewedAt?:string; onPrep?:()=>void; onReviewAppointment?:()=>void; onImportCalendar?:()=>void; onReviewOutlook?:()=>void; onReviewGoogle?:()=>void; onReviewReceivedFax?:()=>void; appointmentReviewLocked?:boolean;
 }) {
   const reviewedThrough=workspace.note?.latest?.source_revision;
   const entries = [...workspace.entries].reverse().filter(e => ["synthetic_source", "evidence", "scratchpad", "google_message", "microsoft_message", "google_calendar", "efax_inbound_source", "fax_inbound_source", "ehr_read_source", "calendar_import_source"].includes(e.kind)||parseSharedClinicalNote(e));
   const current=currentSharedNote(workspace);
   return <section aria-label="Saved sources">
     <div className="team-notebook-title"><h2>Saved visit sources</h2><span className="team-pill">{entries.length} saved</span></div>
+    {onReviewReceivedFax&&<section className="received-fax-source-action" aria-label="Received fax source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewReceivedFax}>Review received fax</button><p>Choose a received fax, then check the original document and selected passage for this visit.</p></section>}
     {onReviewGoogle&&<section className="gmail-source-action" aria-label="Gmail email source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewGoogle}>Review Gmail email</button><p>Choose an email and check that it belongs to this visit before saving a source.</p></section>}
     {onReviewOutlook&&<section className="outlook-source-action" aria-label="Outlook email source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewOutlook}>Review Outlook email</button><p>Choose an email and check that it belongs to this visit before saving a source.</p></section>}
     {onReviewAppointment&&<section className="ehr-source-action" aria-label="Appointment source"><button disabled={locked||appointmentReviewLocked} onClick={onReviewAppointment}>Review EHR records</button><p>Choose the patient and review the available records before saving a source. Your conversation draft stays in place.</p></section>}

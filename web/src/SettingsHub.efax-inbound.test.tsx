@@ -29,7 +29,7 @@ it('reaches the actual private inbound panel below fax readiness and keeps its u
  const close=vi.fn();await act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><SettingsHub open team={<p>Team</p>} messaging={<p>Provider accounts</p>} teamSummary="5 coworkers" teamDirty={false} connectionIdentity={identity} onClose={close}/></AccountRecoveryContext.Provider>));
  await click('Connections');await click('Messaging & fax');await wait(()=>expect(visible('Check received-fax access')).toBeDefined());expect(host.querySelector('[aria-label="Received eFax"]')).toBeTruthy();expect(efaxInboundApi.status).not.toHaveBeenCalled();await click('Check received-fax access');expect(efaxInboundApi.status).toHaveBeenCalledOnce();
  await act(async()=>{const select=host.querySelector<HTMLSelectElement>('.efax-inbound-panel select')!;select.value=efaxStatus.installations[0].installation_id;select.dispatchEvent(new Event('change',{bubbles:true}));host.querySelector<HTMLInputElement>('.efax-inbound-panel input')!.click();});
- expect(visible('Done')!.disabled).toBe(true);await act(async()=>visible('Done')!.click());expect(close).not.toHaveBeenCalled();expect(efaxInboundApi.command).not.toHaveBeenCalled();
+ expect(visible('Done')!.disabled).toBe(false);await act(async()=>visible('Done')!.click());expect(close).toHaveBeenCalledOnce();expect(efaxInboundApi.command).not.toHaveBeenCalled();
 });
 
 it.each(['disabled','denied','unknown'] as const)('does not open received-fax storage on initially %s availability',async mode=>{
@@ -54,4 +54,28 @@ it('hides a previously mounted received-fax panel during pending, disabled and d
  expect(panel.hasAttribute('hidden')).toBe(true);expect(select.value).toBe(selection);
  vi.mocked(readConnectionCatalog).mockResolvedValue({core:false,scheduling:false,google:false,microsoft:false,messaging:true,payments:false,portals:false});await click('Check fax setup');
  expect(panel.hasAttribute('hidden')).toBe(false);expect(host.querySelector('[data-settings-inbound]')).toBe(panel);expect(panel.querySelector('select')).toBe(select);expect(select.value).toBe(selection);expect(efaxInboundApi.status).toHaveBeenCalledOnce();expect(efaxInboundApi.command).not.toHaveBeenCalled();
+});
+
+
+it('presents one retained received-fax task without outer Settings chrome and returns that exact task origin',async()=>{
+ const close=vi.fn(),back=vi.fn();const render=(requested:boolean)=>act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><SettingsHub open initialScreen="messaging" receivedFaxTaskOpen={requested} receivedFaxReturnLabel="Back to Chief" onCloseReceivedFax={back} team={<p>Team</p>} messaging={<p>Provider accounts</p>} teamSummary="5 coworkers" teamDirty={false} connectionIdentity={identity} onClose={close}/></AccountRecoveryContext.Provider>));
+ await render(true);await wait(()=>expect(visible('Check received-fax access')).toBeDefined());const panel=host.querySelector('.efax-inbound-panel');expect(host.querySelector('.settings-hub-nav')?.hasAttribute('hidden')).toBe(true);expect(host.querySelector('[aria-label="Review received fax"]')).not.toBeNull();await click('Back to Chief');expect(back).toHaveBeenCalledOnce();expect(close).not.toHaveBeenCalled();
+ await render(false);expect(host.querySelector('.settings-hub-nav')?.hasAttribute('hidden')).toBe(false);expect(host.querySelector('.efax-inbound-panel')).toBe(panel);expect(visible('Done')).toBeDefined();expect(efaxInboundApi.command).not.toHaveBeenCalled();
+});
+
+it.each(['pending','denied','setup'] as const)('keeps ordinary escape controls while a requested received-fax task has %s access',async state=>{
+ let resolve!:(value:Awaited<ReturnType<typeof readConnectionCatalog>>)=>void;
+ if(state==='pending')vi.mocked(readConnectionCatalog).mockReturnValueOnce(new Promise(done=>{resolve=done;}));
+ if(state==='denied')vi.mocked(readConnectionCatalog).mockRejectedValueOnce(new WorkspaceApiError(403));
+ if(state==='setup')vi.mocked(readConnectionCatalog).mockResolvedValueOnce({core:false,scheduling:false,google:false,microsoft:false,messaging:false,payments:false,portals:false});
+ const close=vi.fn();await act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><SettingsHub open initialScreen="messaging" receivedFaxTaskOpen receivedFaxReturnLabel="Back to Chief" onCloseReceivedFax={()=>{}} team={<p>Team</p>} messaging={<p>Provider accounts</p>} teamSummary="5 coworkers" teamDirty={false} connectionIdentity={identity} onClose={close}/></AccountRecoveryContext.Provider>));
+ await wait(()=>expect(visible('Done')?.disabled).toBe(false));expect(host.querySelector('[data-editor-task="efax"]')).toBeNull();expect(visible('All connections')).toBeDefined();expect(host.querySelector('.efax-inbound-panel')).toBeNull();expect(efaxInboundApi.status).not.toHaveBeenCalled();
+ if(state==='pending'){await act(async()=>resolve({core:false,scheduling:false,google:false,microsoft:false,messaging:true,payments:false,portals:false}));await wait(()=>expect(visible('Back to Chief')?.disabled).toBe(false));expect(host.querySelector('[data-editor-task="efax"]')).not.toBeNull();expect(visible('Done')).toBeUndefined();}
+ else{await click('Done');expect(close).toHaveBeenCalledOnce();}
+});
+
+it('does not let a canceled old task-heading frame steal focus after hide and reopen',async()=>{
+ const frames:FrameRequestCallback[]=[];vi.spyOn(window,'requestAnimationFrame').mockImplementation(callback=>{frames.push(callback);return frames.length;});vi.spyOn(window,'cancelAnimationFrame').mockImplementation(()=>{});
+ const render=(requested:boolean)=>act(async()=>root.render(<AccountRecoveryContext.Provider value={context}><SettingsHub open initialScreen="messaging" receivedFaxTaskOpen={requested} receivedFaxReturnLabel="Back to Chief" onCloseReceivedFax={()=>{}} team={<p>Team</p>} messaging={<p>Provider accounts</p>} teamSummary="5 coworkers" teamDirty={false} connectionIdentity={identity} onClose={()=>{}}/></AccountRecoveryContext.Provider>));
+ await render(true);await wait(()=>expect(visible('Check received-fax access')?.disabled).toBe(false));expect(frames).toHaveLength(1);const oldFrame=frames[0];await render(false);await render(true);await act(async()=>visible('Back to Chief')!.focus());const focus=document.activeElement;await act(async()=>oldFrame(0));expect(document.activeElement).toBe(focus);
 });

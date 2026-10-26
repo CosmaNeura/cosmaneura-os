@@ -18,7 +18,7 @@
 .settings-card-icon { display: grid; place-items: center; width: 44px; height: 44px; flex: 0 0 44px; border-radius: 12px; background: #eef3ed; color: #326c59; font-size: 25px; }
 .settings-hub fieldset { min-width: 0; }
 .settings-hub > [data-settings-screen] { margin-top: 20px; }
-.settings-hub[data-editor-task="google"] { padding: 0; }
+.settings-hub[data-editor-task] { padding: 0; }
 .settings-hub[data-editor-task="google"] > [data-settings-screen="google"] { margin-top: 0; }
 .settings-hub input, .settings-hub select, .settings-hub textarea { max-width: 100%; box-sizing: border-box; }
 @media (max-width: 600px) {

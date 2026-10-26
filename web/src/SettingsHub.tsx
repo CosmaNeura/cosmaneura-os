@@ -1,5 +1,6 @@
-import {useEffect, useRef, useState, type ReactNode} from 'react';
+import {useCallback, useEffect, useMemo, useRef, useState, type ReactNode} from 'react';
 import './settings-hub.css';
+import './ehr-read.css';
 import {ATHENA_CONNECTION_BUILD} from './AthenaConnectionPanel';
 import {connectionActionClientAvailable,readConnectionCatalog, type ConnectionCatalog, type ConnectionId} from './connection-catalog-api';
 import {CONNECTION_GUIDES,CONNECTION_ACTION_LABELS} from './connection-guides';
@@ -21,21 +22,24 @@ const titles: Record<Screen, string> = {
 };
 
 /** Visit editors on demand and retain their recovery/write lifecycle until account exit. */
-export function SettingsHub({appearance,open,nativePresentation,googleTaskPresentation=false, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
+export function SettingsHub({appearance,open,nativePresentation,googleTaskPresentation=false, receivedFaxTaskOpen=false, receivedFaxReturnLabel='Back to saved sources', onCloseReceivedFax, onReceivedFaxActiveChange, team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals, teamSummary, teamDirty, onClose, beforeLeaveTeam, navigationLocked = false, initialScreen='home', guidedConnections=false, connectionIdentity, onConnectionAccessLost,onOpenMessagingWork,messagingWorkLabel='Open fax work',messagingWorkBlocked=false,onReviewFaxDocument,onReviewProviderFaxDocument}: {
   appearance?:ReactNode;open: boolean;nativePresentation?:'workspace'|'messages'; team: ReactNode; members?:ReactNode; core?:ReactNode; scheduling?:ReactNode; microsoft?:ReactNode; google?:ReactNode; ehr?:ReactNode; messaging?: ReactNode; payments?: ReactNode; portals?: ReactNode;
-  googleTaskPresentation?:boolean;
+  googleTaskPresentation?:boolean;receivedFaxTaskOpen?:boolean;receivedFaxReturnLabel?:string;onCloseReceivedFax?:()=>void;onReceivedFaxActiveChange?:(active:boolean)=>void;
   teamSummary: string; teamDirty: boolean; onClose: () => void; beforeLeaveTeam?:(next:()=>void)=>void; navigationLocked?: boolean;
-  initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'|'ehr';guidedConnections?:boolean;
+  initialScreen?:'home'|'connections'|'core'|'scheduling'|'microsoft'|'google'|'ehr'|'messaging';guidedConnections?:boolean;
   connectionIdentity?:AuthenticatedWorkspaceIdentity;onConnectionAccessLost?:(error:unknown)=>void;
   onOpenMessagingWork?:()=>void;messagingWorkLabel?:string;messagingWorkBlocked?:boolean;onReviewFaxDocument?:EFaxInboundPanelProps['onReviewDocument'];onReviewProviderFaxDocument?:FaxInboundPanelProps['onReviewDocument'];
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [inboundBusy,setInboundBusy]=useState(false),[providerInboundBusy,setProviderInboundBusy]=useState(false);
   const [inboundOwner,setInboundOwner]=useState<AuthenticatedWorkspaceIdentity|null>(null);
+  const inboundEpisode=useMemo(()=>({}),[connectionIdentity]),liveInboundEpisode=useRef(inboundEpisode);liveInboundEpisode.current=inboundEpisode;
+  const inboundActiveCallback=useRef(onReceivedFaxActiveChange);inboundActiveCallback.current=onReceivedFaxActiveChange;
+  const reportInboundActive=useCallback((active:boolean)=>{if(liveInboundEpisode.current!==inboundEpisode)return;setInboundBusy(active);inboundActiveCallback.current?.(active);},[inboundEpisode]);
   const leaveLocked=navigationLocked||inboundBusy||providerInboundBusy;
   const [visited, setVisited] = useState<Editor[]>(initialScreen==='ehr'||!connectionIdentity&&(initialScreen==='core'||initialScreen==='scheduling'||initialScreen==='microsoft'||initialScreen==='google')?[initialScreen as Editor]:[]);
   const [recovering,setRecovering]=useState<ConnectionId|null>(null);
-  const title = useRef<HTMLHeadingElement>(null);
+  const title = useRef<HTMLHeadingElement>(null),receivedFaxHeading=useRef<HTMLHeadingElement>(null);
   const section = useRef<HTMLElement>(null);
   const messagingEditor=useRef<HTMLDivElement|null>(null);
   const googleHealth=useConnectionHealth(connectionIdentity,'google'),microsoftHealth=useConnectionHealth(connectionIdentity,'microsoft');
@@ -124,12 +128,18 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
   // Presentation follows the existing editor gate; requesting a task cannot
   // remove the only escape while catalog/access/setup keeps its editor hidden.
   const presentingGoogleTask=googleTaskPresentation&&open&&screen==='google'&&google!=null&&visited.includes('google')&&!hiddenSetup&&!availabilityPending&&!current?.denied;
+  const receivedFaxVisible=!!(open&&screen==='messaging'&&inboundOwner===connectionIdentity&&connectionIdentity&&!hiddenSetup&&!availabilityPending&&!current?.denied);
+  const presentingReceivedFaxTask=receivedFaxTaskOpen&&receivedFaxVisible;
+  const presentingTask=presentingGoogleTask||presentingReceivedFaxTask;
+  const liveReceivedFaxVisible=useRef(receivedFaxVisible);liveReceivedFaxVisible.current=receivedFaxVisible;
+  const isReceivedFaxCurrent=useCallback(()=>liveReceivedFaxVisible.current,[]);
+  useEffect(()=>{if(!presentingReceivedFaxTask)return;let current=true;const frame=requestAnimationFrame(()=>{const target=receivedFaxHeading.current;if(current&&target&&!target.closest('[hidden]')){target.focus({preventScroll:true});target.scrollIntoView?.({block:'start'});}});return()=>{current=false;cancelAnimationFrame(frame);};},[presentingReceivedFaxTask,inboundEpisode]);
   useEffect(() => {
-    if (!open||presentingGoogleTask) return;
+    if (!open||presentingTask) return;
     title.current?.focus({preventScroll:true});
     // Native scrolling must keep the navigation before the title in view.
     (nativePresentation ? section.current : title.current)?.scrollIntoView?.({block:'start'});
-  }, [open, screen, nativePresentation, presentingGoogleTask]);
+  }, [open, screen, nativePresentation, presentingTask]);
   useEffect(()=>{
     if(open&&screen in CONNECTION_GUIDES&&(!connectionIdentity||catalog?.[screen as ConnectionId]===true||catalogError&&!current?.denied))
       setVisited(previous=>previous.includes(screen as Editor)?previous:[...previous,screen as Editor]);
@@ -154,15 +164,15 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
     return catalog?connectionSetupSummary(catalog,id)??{label:'Ready to connect',reason:'Sign in and review the access for this service.',action:'Connect account',tone:'neutral'}:
       {label:'Not checked',reason:'Account status has not been checked.',action:'Check connection',tone:'neutral'};
   }
-  return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingGoogleTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':undefined}>
-    <nav className="settings-hub-nav" aria-label="Settings navigation" hidden={presentingGoogleTask}>
+  return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':presentingReceivedFaxTask?'efax':undefined}>
+    <nav className="settings-hub-nav" aria-label="Settings navigation" hidden={presentingTask}>
       {screen !== 'home' && <button disabled={leaveLocked} onClick={() => visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
         <span aria-hidden="true">← </span>{screen === 'members' || screen === 'team' || screen === 'connections' ? 'All settings' : 'All connections'}
       </button>}
       <button className="settings-done" disabled={leaveLocked} onClick={onClose}>Done</button>
     </nav>
-    {leaveLocked&&!presentingGoogleTask && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
-    <header hidden={presentingGoogleTask} className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
+    {leaveLocked&&!presentingTask && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
+    <header hidden={presentingTask} className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
       <h1 ref={title} tabIndex={-1}>{titles[screen]}</h1>
       {screen === 'home' && <p>A little setup. A team that fits your practice.</p>}
       {screen === 'connections' && <p>Choose a service, check what is ready, and take the next step.</p>}
@@ -240,11 +250,14 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
         <p>Connecting an account does not automatically import its contents into a visit or give a bot permission to act.</p>
       </aside>}
     </div>}
-    {screen==='messaging'&&connectionIdentity&&<FaxConnectionOverview value={!catalogError&&catalog?.messaging?current?.checks.messaging?.value?.faxReadiness:undefined}
+    {screen==='messaging'&&connectionIdentity&&<div hidden={presentingReceivedFaxTask}><FaxConnectionOverview value={!catalogError&&catalog?.messaging?current?.checks.messaging?.value?.faxReadiness:undefined}
       loading={checking} unavailable={!!setupUnavailable} locked={navigationLocked}
       onRefresh={()=>setRefreshCatalog(value=>value+1)} onSetup={()=>{messagingEditor.current?.focus();messagingEditor.current?.scrollIntoView?.({block:'start'});}}
-      onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/>}
-    {inboundOwner===connectionIdentity&&connectionIdentity&&<div data-settings-inbound="messaging" hidden={screen!=='messaging'||hiddenSetup||availabilityPending||!!current?.denied}><EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/><FaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setProviderInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewProviderFaxDocument}/></div>}
+      onOpenWork={onOpenMessagingWork} workLabel={messagingWorkLabel} workBlocked={messagingWorkBlocked}/></div>}
+    {inboundOwner===connectionIdentity&&connectionIdentity&&<div data-settings-inbound="messaging" hidden={screen!=='messaging'||hiddenSetup||availabilityPending||!!current?.denied}><section className={presentingReceivedFaxTask?'ehr-read-task':undefined} aria-label={presentingReceivedFaxTask?'Review received fax':undefined}>
+      <header hidden={!presentingReceivedFaxTask}><button className="team-subtle" disabled={leaveLocked} onClick={onCloseReceivedFax}><span aria-hidden="true">‹ </span>{receivedFaxReturnLabel}</button><h1 ref={receivedFaxHeading} tabIndex={-1}>Review received fax</h1><p>Choose a received fax and review it for this visit. Your conversation draft stays in place.</p></header>
+      <EFaxInboundMount identity={connectionIdentity} locked={navigationLocked} onActiveChange={reportInboundActive} taskActive={receivedFaxVisible} isTaskCurrent={isReceivedFaxCurrent} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewFaxDocument}/>
+    </section><div hidden={presentingReceivedFaxTask}><FaxInboundMount identity={connectionIdentity} locked={navigationLocked} onBusyChange={setProviderInboundBusy} onAuthenticationLost={e=>accessLost.current?.(e)} onReviewDocument={onReviewProviderFaxDocument}/></div></div>}
     {selectedGuide&&connectionIdentity&&(availabilityPending||catalogError)&&<section className="connection-setup-guide" aria-label="Connection availability">
       <p role="status">{availabilityPending?'Checking whether this service is enabled…':current?.updateRequired?'On desktop, use CosmaBot → Update CosmaBot… for installation steps, then check availability again. Your saved work and unresolved requests are retained.':current?.denied?'Sign in to CosmasOS again to check this connection.':'Service availability could not be confirmed. Check again, or review the connection status below to finish sign-in.'}</p>
       {catalogError&&<button disabled={navigationLocked||!!current?.busy} onClick={()=>setRefreshCatalog(value=>value+1)}>Check availability again</button>}
@@ -258,8 +271,8 @@ export function SettingsHub({appearance,open,nativePresentation,googleTaskPresen
       <h3>Administrator steps</h3><p>{selectedGuide.setup}</p>
       <details><summary>Your steps after setup</summary><ol>{selectedGuide.steps.filter(step=>!step.startsWith("Have an administrator")).map(step=><li key={step}>{step}</li>)}</ol><p className="connection-access-summary">{selectedGuide.access}</p></details>
     </section>}
-    {selectedGuide&&readiness&&!presentingGoogleTask&&<details className="connection-state-help"><summary>Supported actions</summary><ul>{readiness.actions.map(action=><li key={action.id}>{CONNECTION_ACTION_LABELS[action.id]} · {!action.supported?'Coming soon':!connectionActionClientAvailable(action.id,screen as ConnectionId)?'Not available in this app':action.runtime_available?'Setup available; account and task checks required':'Practice setup required'}</li>)}</ul></details>}
+    {selectedGuide&&readiness&&!presentingTask&&<details className="connection-state-help"><summary>Supported actions</summary><ul>{readiness.actions.map(action=><li key={action.id}>{CONNECTION_ACTION_LABELS[action.id]} · {!action.supported?'Coming soon':!connectionActionClientAvailable(action.id,screen as ConnectionId)?'Not available in this app':action.runtime_available?'Setup available; account and task checks required':'Practice setup required'}</li>)}</ul></details>}
     {recoverSelected&&<p role="status">Review your saved work and exact unresolved requests. Current access is still required for source content and new work.</p>}
-    {visited.map(id => <div key={id} ref={id==='messaging'?messagingEditor:undefined} tabIndex={id==='messaging'?-1:undefined} data-settings-screen={id} hidden={screen !== id||hiddenSetup||availabilityPending||!!current?.denied}>{editors[id]}</div>)}
+    {visited.map(id => <div key={id} ref={id==='messaging'?messagingEditor:undefined} tabIndex={id==='messaging'?-1:undefined} data-settings-screen={id} hidden={screen !== id||hiddenSetup||availabilityPending||!!current?.denied||presentingReceivedFaxTask&&id==='messaging'}>{editors[id]}</div>)}
   </section>;
 }

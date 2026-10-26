@@ -99,7 +99,7 @@ import {FaxSourceReviewMount} from './FaxSourceReviewMount';
 import {FAX_INBOUND_SOURCE_BUILD,type FaxSourceOffer,type FaxSourceReceipt} from './fax-inbound-source-api';
 import type {FaxPending} from './fax-inbound-api';
 import {EFAX_INBOUND_SOURCE_BUILD,type EFaxSourceOffer,type EFaxSourceReceipt} from './efax-inbound-source-api';
-import type {EFaxPending} from './efax-inbound-api';
+import {EFAX_INBOUND_BUILD,type EFaxPending} from './efax-inbound-api';
 import { GOOGLE_CONNECTION_BUILD } from './google-connection-api';
 import { MicrosoftConnectionPanel } from './MicrosoftConnectionPanel';
 import {OutlookMessageMount} from './OutlookMessageMount';
@@ -184,6 +184,20 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     const remove=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?subscribeNativeWorkspaceForeground(authenticated,()=>{},invalidate):undefined;
     return()=>{invalidate();document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',invalidate);remove?.();};
   },[authenticated,googleMailScope]);
+  const [receivedFaxOpen,setReceivedFaxOpen]=useState(false),[faxPassageOpen,setFaxPassageOpen]=useState(true),[directFaxOffer,setDirectFaxOffer]=useState(false),[receivedFaxBusy,setReceivedFaxBusy]=useState(false);
+  const receivedFaxOpening=useRef(0);
+  const receivedFaxScope=useMemo(()=>({}),[authenticated,identity,workspace?.id,selected,messagesMode]);
+  const liveReceivedFaxScope=useRef<object|null>(receivedFaxScope);liveReceivedFaxScope.current=receivedFaxScope;
+  const [receivedFaxReturn,setReceivedFaxReturn]=useState<{scope:object;owner:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;address:string;origin:'conversation'|'sources';phase:'task'|'passage';route:number;label:string;target:HTMLElement|null;scroll:number|null;documentScroll:{element:Element;top:number;left:number}|null}|null>(null);
+  useLayoutEffect(()=>{liveReceivedFaxScope.current=receivedFaxScope;return()=>{if(liveReceivedFaxScope.current===receivedFaxScope)liveReceivedFaxScope.current=null;receivedFaxOpening.current++;};},[receivedFaxScope]);
+  useEffect(()=>{if(receivedFaxReturn&&receivedFaxReturn.scope!==receivedFaxScope)clearReceivedFaxReturn();},[receivedFaxScope,receivedFaxReturn]);
+  useEffect(()=>{
+    const invalidate=()=>{receivedFaxOpening.current++;};
+    const visibility=()=>{if(document.visibilityState==='hidden')invalidate();};
+    document.addEventListener('visibilitychange',visibility);window.addEventListener('pagehide',invalidate);
+    const remove=authenticated?.mode==='clerk_jwt'&&authenticated.nativeSession?subscribeNativeWorkspaceForeground(authenticated,()=>{},invalidate):undefined;
+    return()=>{invalidate();document.removeEventListener('visibilitychange',visibility);window.removeEventListener('pagehide',invalidate);remove?.();};
+  },[authenticated,receivedFaxScope]);
   const [outlookMessageOpen,setOutlookMessageOpen]=useState(false),[outlookMessageVisited,setOutlookMessageVisited]=useState(false);
   const [outlookReturn,setOutlookReturn]=useState<{identity:AuthenticatedWorkspaceIdentity;generation:number;workspaceId:string;origin:'conversation'|'sources';label:string;target:HTMLElement|null}|null>(null);
   const microsoftVisitSelection=useRef(false),outlookOpening=useRef(0);
@@ -203,7 +217,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const [schedulingPatientBusy,setSchedulingPatientBusy]=useState(false);
   const [agentResearchBusy,setAgentResearchBusy]=useState(false);
   const {preparation:clinicalPreparation,safety:clinicalSafety}=session.clinical;
-  const navigationWorkLocks={researchPending,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,handoffReviewPending,schedulingPatientBusy,agentResearchBusy,efax:faxSourceBusy,fax:providerFaxSourceBusy,clinicalPreparing};
+  const navigationWorkLocks={receivedFaxBusy,researchPending,connectionEditorsLocked,activityBusy,accessBusy,scribeSourceBusy,handoffReviewPending,schedulingPatientBusy,agentResearchBusy,efax:faxSourceBusy,fax:providerFaxSourceBusy,clinicalPreparing};
   const liveNavigationWorkLocks=useRef(navigationWorkLocks);liveNavigationWorkLocks.current=navigationWorkLocks;
   const viewNavigationLocked = Object.values(navigationWorkLocks).some(Boolean);
   function sourceViewNavigationLocked(ownSource?:'efax'|'fax'){
@@ -316,6 +330,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const reportFaxSourceBusy = useCallback((blocked:boolean)=>{
     if(generation.current===connectionGeneration)setFaxSourceBusy(blocked);
   },[connectionGeneration]);
+  const reportReceivedFaxBusy=useCallback((blocked:boolean)=>{if(generation.current===connectionGeneration)setReceivedFaxBusy(blocked);},[connectionGeneration]);
+  const faxOfferEpisode=useMemo(()=>({}),[faxSourceOffer,authenticated,connectionGeneration]),liveFaxOfferEpisode=useRef(faxOfferEpisode);liveFaxOfferEpisode.current=faxOfferEpisode;
+  const reportDirectFaxSourceBusy=useCallback((blocked:boolean)=>{if(liveFaxOfferEpisode.current===faxOfferEpisode&&generation.current===connectionGeneration)setFaxSourceBusy(blocked);},[faxOfferEpisode,connectionGeneration]);
   const reportGoogleBusy = useCallback((blocked:boolean) => {
     if(generation.current===connectionGeneration)setConnectionLocks(previous=>previous.google===blocked?previous:{...previous,google:blocked});
   }, [connectionGeneration]);
@@ -496,6 +513,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,ehr:false,calendarImport:false,athena:false,microsoft:false,microsoftMessages:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
+    setReceivedFaxOpen(false);setReceivedFaxReturn(null);setFaxPassageOpen(true);setDirectFaxOffer(false);setReceivedFaxBusy(false);receivedFaxOpening.current++;
     setGoogleMessageOpen(false);setGoogleMessageVisited(false);setGoogleMailReturn(null);googleMailOpening.current++;setGoogleCalendarOpen(false);googleVisitSelection.current=false;setAthenaTask(null);setAthenaNotebookError('');athenaOpening.current++;
     setOutlookMessageOpen(false);setOutlookMessageVisited(false);setOutlookReturn(null);microsoftVisitSelection.current=false;outlookOpening.current++;
     ehrVisitSelection.current=false;
@@ -518,7 +536,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     return session.lifecycle.recheckSyntheticConnection(lifecycleContext(),connectionNavigationLocked||captureNavigationLocked||captureDraftLocked);
   }
   function navigationContext(ownSource?:'efax'|'fax'):import('./session/navigation').NavigationContext{const viewLocked=sourceViewNavigationLocked(ownSource);return {...loadingContext(),viewNavigationLocked:viewLocked,connectionNavigationLocked:!!privateRecordingEntry||privateRecordingBusy||viewLocked,captureNavigationLocked,captureDraftLocked,minimizeRecording:()=>setRecordingMinimized(true),hasUnsavedWork,replaceRoute:target=>writeHistoryRoute(target,false),openPrivateNotebook,loadEncounters,currentTeam};}
-  function goHome(){googleMailOpening.current++;setContextBot(null);setMessagesTask(null);setConversationDetails(false);session.navigation.goHome(navigationContext());}
+  function goHome(){clearReceivedFaxReturn();googleMailOpening.current++;setContextBot(null);setMessagesTask(null);setConversationDetails(false);session.navigation.goHome(navigationContext());}
   function conversationHost(allowHomeResult=false,ownSource?:'efax'|'fax'):import('./session/conversations').ConversationHost|null{
     const owner=authenticated,owned=journal.current;if(!owner||!owned||!accountAccess)return null;
     return {identity:owner,journal:owned.value,scope:owned.scope,current:()=>previousIdentity.current===owner&&journal.current?.value===owned.value&&(owner.mode==='desktop_native'?owner.isCurrent():!owner.nativeSession||owner.nativeSession.isCurrent()),
@@ -546,7 +564,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const ownsSourceReturn=()=>{const target=sourceTaskReturn.current,view=session.getSnapshot();return !!target&&target.owner===authenticated&&target.identity===identity&&target.generation===generation.current&&target.workspaceId===view.workspace?.id&&target.address===view.selected;};
   useEffect(()=>{if(sourceTaskReturn.current){sourceTaskReturn.current=null;taskScrollReturn.current=null;taskFocusPending.current=false;}},[authenticated,identity,workspace?.id,selected,messagesMode,connectionGeneration]);
   function showConversationTask(task:'Review'|'Notebook'|'Sources'|'Work'|'Activity'|'Tools'){
-    if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;setConversationDetails(false);sourceTaskReturn.current=null;googleMailOpening.current++;
+    if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;clearReceivedFaxReturn();setConversationDetails(false);sourceTaskReturn.current=null;googleMailOpening.current++;
     taskFocusPending.current=true;taskScrollReturn.current=mobileChatFrame.scrollRef.current?.scrollTop??null;
     if(task==='Activity'||task==='Tools'){setMessagesTask(task);setMobilePanel('Conversation');setPhoneChatToolsOpen(true);setTeamWorkExpanded(task==='Activity');}
     else{setMessagesTask(null);setPanel(task);setMobilePanel(task);setPhoneChatToolsOpen(false);}
@@ -566,7 +584,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     else{setPanel('Sources');setMobilePanel('Sources');}
     setSelectedSource(id);
   }
-  function returnToMessagesChat(){if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;const returnToSource=ownsSourceReturn();setMessagesTask(null);setMobilePanel('Conversation');setPhoneChatToolsOpen(false);if(!returnToSource)setQuestionFocus(value=>value+1);}
+  function returnToMessagesChat(){if(viewNavigationLocked||captureNavigationLocked||captureDraftLocked)return;if(receivedFaxReturn?.phase==='passage'&&ownsReceivedFaxReturn()){closeReceivedFaxWork();return;}const returnToSource=ownsSourceReturn();setMessagesTask(null);setMobilePanel('Conversation');setPhoneChatToolsOpen(false);if(!returnToSource)setQuestionFocus(value=>value+1);}
 
   function clearPageError(){session.navigation.clearPageError({hasUnsavedWork});}
   function goNotebook(){session.navigation.goNotebook(navigationContext());}
@@ -636,7 +654,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     invalidateSetup:()=>{setSetupApproval(null);setSetupEpoch(value=>value+1);},invalidatePrep:()=>setPrepEpoch(value=>value+1)});}
   function refreshHandoffReview(){return session.loading.refreshHandoff({authenticated,failure,blocked:captureNavigationLocked||captureDraftLocked||recoveryBlocked});}
   function recheckRecovery(){return session.loading.recheckRecovery(loadingContext());}
-  function openSettings(entry:'home'|'connections'|'core'='home'){return session.navigation.openSettings(navigationContext(),entry);}
+  function openSettings(entry:'home'|'connections'|'core'='home'){if(!viewNavigationLocked)clearReceivedFaxReturn();return session.navigation.openSettings(navigationContext(),entry);}
   async function refreshRoutineTeam(){await session.team.refresh({authenticated,failure});currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function receiveSetupTeam(value:ProviderTeam,projection:SetupProjection){session.team.receive(value,{authenticated},projection);currentTeam.current=session.getSnapshot().team;currentTeamDraft.current=session.getSnapshot().teamDraft;}
   function saveTeam(){void session.team.save(saveContext());}
@@ -645,7 +663,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function discardTeamExit(){return session.team.discardExit();}
   function closeSettings() {
     if (viewNavigationLocked) return;
-    leaveTeamSettings(()=>{setPracticeOpen(false);if(!team?.configuration.bots.some(b=>botAddress(b)===selected))setSelected('scribe');setSettingsOpen(false);});
+    leaveTeamSettings(()=>{clearReceivedFaxReturn();setPracticeOpen(false);if(!team?.configuration.bots.some(b=>botAddress(b)===selected))setSelected('scribe');setSettingsOpen(false);});
   }
   useEffect(()=>{if(teamSaveExit&&!busy&&!pending&&team&&teamDraft&&!teamConfigurationChanged(team.configuration,teamDraft))finishTeamExit();},[teamSaveExit,busy,pending,team,teamDraft]);
   function openMessagingWork(){
@@ -1069,6 +1087,42 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       const saved=returned.documentScroll;if(saved?.element.isConnected&&saved.element===document.scrollingElement){saved.element.scrollTop=Math.max(0,Math.min(saved.top,saved.element.scrollHeight-saved.element.clientHeight));saved.element.scrollLeft=Math.max(0,Math.min(saved.left,saved.element.scrollWidth-saved.element.clientWidth));}
     });
   }
+  function clearReceivedFaxReturn(){receivedFaxOpening.current++;setReceivedFaxOpen(false);setReceivedFaxReturn(null);setFaxPassageOpen(false);}
+  function ownsReceivedFaxReturn(){const returned=receivedFaxReturn,view=session.getSnapshot();return !!returned&&returned.scope===liveReceivedFaxScope.current&&returned.owner===authenticated&&returned.generation===generation.current&&returned.route===session.navigation.sequence.current&&returned.workspaceId===view.workspace?.id&&returned.address===view.selected;}
+  async function openReceivedFaxWork(origin:'conversation'|'sources'){
+    if(!EFAX_INBOUND_BUILD||!EFAX_INBOUND_SOURCE_BUILD||!authenticated||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    const host=conversationHost(),view=session.getSnapshot(),owner=authenticated,scope=receivedFaxScope,currentGeneration=generation.current,route=session.navigation.sequence.current;
+    if(!host||!view.workspace?.appointment_id||host.blocked())return;
+    const target=document.activeElement instanceof HTMLElement?document.activeElement:null,intent=++receivedFaxOpening.current;
+    const entry=workspaceFrame.current?.querySelector(origin==='sources'?'.received-fax-source-action':'.messages-details');if(!entry||entry.closest('[hidden]'))return;
+    const scroll=mobileChatFrame.scrollRef.current?.scrollTop??null,element=document.scrollingElement,documentScroll=element?{element,top:element.scrollTop,left:element.scrollLeft}:null;
+    const invalidate=()=>{if(receivedFaxOpening.current===intent)receivedFaxOpening.current++;};
+    const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')invalidate();};
+    const current=()=>receivedFaxOpening.current===intent&&liveReceivedFaxScope.current===scope&&host.current()&&previousIdentity.current===owner&&generation.current===currentGeneration&&session.navigation.sequence.current===route&&entry.isConnected&&!entry.closest('[hidden]')&&(['settingsOpen','settingsEntry','practicePage','practiceOpen','panel','mobilePanel'] as const).every(key=>session.getSnapshot()[key]===view[key]);
+    document.addEventListener('click',invalidate,true);document.addEventListener('keydown',escape,true);
+    const removeNative=owner.mode==='clerk_jwt'&&owner.nativeSession?subscribeNativeWorkspaceForeground(owner,()=>{},invalidate):undefined;
+    try{
+      if(!await session.conversations.retain(host)||!current())return;await host.authorize();if(!current()||host.blocked())return;
+      if(origin==='conversation'&&scroll!==null)mobileChatFrame.restoreReadingPosition(scroll);
+      setReceivedFaxReturn({scope,owner,generation:currentGeneration,workspaceId:view.workspace.id,address:view.selected,origin,phase:'task',route,label:origin==='sources'?'Back to saved sources':`Back to ${bot?.name??'chat'}`,target,scroll,documentScroll});
+      setReceivedFaxOpen(true);setSettingsEntry('connections');setSettingsOpen(true);setConversationDetails(false);setMessagesTask(null);setPhoneChatToolsOpen(false);
+    }catch(cause){if(current())failure(cause);}finally{removeNative?.();document.removeEventListener('click',invalidate,true);document.removeEventListener('keydown',escape,true);}
+  }
+  function closeReceivedFaxWork(){
+    if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
+    const returned=receivedFaxReturn,intent=++receivedFaxOpening.current,focusAtClose=document.activeElement;setReceivedFaxOpen(false);setReceivedFaxReturn(null);setFaxPassageOpen(false);
+    if(!returned||returned.route!==session.navigation.sequence.current||returned.scope!==liveReceivedFaxScope.current||returned.owner!==authenticated||returned.generation!==generation.current||returned.workspaceId!==workspace?.id||returned.address!==selected)return;
+    setSettingsOpen(false);setMessagesTask(null);setConversationDetails(false);setPhoneChatToolsOpen(false);if(returned.origin==='sources'){setPanel('Sources');setMobilePanel('Sources');}else setMobilePanel('Conversation');
+    const view=session.getSnapshot();
+    requestAnimationFrame(()=>{const now=session.getSnapshot();
+      if(receivedFaxOpening.current!==intent||returned.route!==session.navigation.sequence.current||returned.scope!==liveReceivedFaxScope.current||previousIdentity.current!==returned.owner||generation.current!==returned.generation||now.workspace?.id!==returned.workspaceId||now.selected!==returned.address||(['settingsOpen','settingsEntry','practicePage','practiceOpen','panel','mobilePanel'] as const).some(key=>now[key]!==view[key]))return;
+      if(document.activeElement!==focusAtClose&&document.activeElement!==document.body&&!document.activeElement?.closest('[hidden]'))return;
+      if(returned.scroll!==null){if(returned.origin==='conversation')mobileChatFrame.restoreReadingPosition(returned.scroll);else if(mobileChatFrame.scrollRef.current)mobileChatFrame.scrollRef.current.scrollTop=returned.scroll;}
+      const target=returned.target?.isConnected&&!returned.target.closest('[hidden]')&&!returned.target.matches(':disabled')?returned.target:workspaceFrame.current?.querySelector<HTMLElement>(returned.origin==='sources'?'.received-fax-source-action button':'.messages-thread-header > button:last-child');
+      if(target&&!target.closest('[hidden]'))target.focus({preventScroll:true});
+      const saved=returned.documentScroll;if(saved?.element.isConnected&&saved.element===document.scrollingElement){saved.element.scrollTop=Math.max(0,Math.min(saved.top,saved.element.scrollHeight-saved.element.clientHeight));saved.element.scrollLeft=Math.max(0,Math.min(saved.left,saved.element.scrollWidth-saved.element.clientWidth));}
+    });
+  }
   async function openOutlookWork(origin:'conversation'|'sources'|'connections'){
     if(!OUTLOOK_MESSAGE_BUILD||!authenticated||locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;
     if(origin==='connections'){setOutlookReturn(null);setOutlookMessageVisited(true);setOutlookMessageOpen(true);return;}
@@ -1152,9 +1206,13 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function prepareEhrChief(source:EhrReadSaved){return session.sources.prepareEhr(sourceContext(),source);}
 
 
-  function receiveFaxDocument(document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){return session.sources.receiveFax(sourceContext(),document,request);}
+  function receiveFaxDocument(document:EFaxSourceOffer,request:Extract<EFaxPending,{kind:'acquire'}>){const owned=receivedFaxOpen&&ownsReceivedFaxReturn();setDirectFaxOffer(owned);setFaxPassageOpen(true);if(owned)setReceivedFaxReturn(current=>current?{...current,phase:'passage'}:null);setReceivedFaxOpen(false);return session.sources.receiveFax(sourceContext(),document,request);}
   function refreshFaxDocument(){return session.sources.refreshFax(sourceContext());}
-  function prepareFaxChief(source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){return session.sources.prepareFax(sourceContext('efax'),source);}
+  async function prepareFaxChief(source:{receipt:EFaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry}){
+    const scope=receivedFaxScope,intent=receivedFaxOpening.current,owner=authenticated;
+    await session.sources.prepareFax(sourceContext('efax'),source);
+    const view=session.getSnapshot();if(scope===liveReceivedFaxScope.current&&intent===receivedFaxOpening.current&&view.identity===owner&&view.workspace?.id===source.receipt.scope.workspace_id&&view.mobilePanel==='Conversation'&&view.selectedSource===source.receipt.entry_id)clearReceivedFaxReturn();
+  }
 
   function receiveProviderFaxDocument(document:FaxSourceOffer,request:Extract<FaxPending,{kind:'acquire'}>){return session.sources.receiveProviderFax(sourceContext(),document,request);}
   function refreshProviderFaxDocument(){return session.sources.refreshProviderFax(sourceContext());}
@@ -1337,7 +1395,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     </aside>
     <div className="team-main">
       {newMessage&&team&&<NewMessagePicker team={team} locked={conversationBusy||homeBusy||homePending||viewNavigationLocked} onChoose={address=>void chooseConversationContext(address)} onClose={()=>setNewMessage(false)} canRestoreFocus={canRestoreDialogFocus}/>}
-      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onReviewGoogle={GOOGLE_CONNECTION_BUILD&&GOOGLE_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openGoogleMailWork('conversation'):undefined} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openOutlookWork('conversation'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined} canRestoreFocus={canRestoreDialogFocus}/>}
+      {conversationDetails&&workspace&&<ConversationDetails name={bot?.name??'Conversation'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClose={()=>setConversationDetails(false)} onTask={showConversationTask} onReviewReceivedFax={EFAX_INBOUND_BUILD&&EFAX_INBOUND_SOURCE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openReceivedFaxWork('conversation'):undefined} onReviewGoogle={GOOGLE_CONNECTION_BUILD&&GOOGLE_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openGoogleMailWork('conversation'):undefined} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked&&bot?.role==='chief'?()=>void openOutlookWork('conversation'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('conversation'):undefined} onFindAthena={athenaAvailable&&authenticated?()=>void openAthenaTask('conversation'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('conversation'):undefined} canRestoreFocus={canRestoreDialogFocus}/>}
       {nativeHome||nativeWorkspace?<header className="native-home-header">
         {nativeWorkspace&&practicePage!=='home'&&<button className="team-subtle" aria-label="Home" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goHome}>‹ Home</button>}
         <strong>{nativeSavedRecording?'Scribe':'CosmaBot'}</strong>
@@ -1403,7 +1461,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
         messagingWorkBlocked={locked||captureNavigationLocked||captureDraftLocked}
         onReviewFaxDocument={EFAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveFaxDocument:undefined}
         onReviewProviderFaxDocument={FAX_INBOUND_SOURCE_BUILD&&visitLinked?receiveProviderFaxDocument:undefined}
-        initialScreen={settingsEntry} googleTaskPresentation={googleMessageOpen&&googleMessageVisited} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
+        initialScreen={receivedFaxOpen?'messaging':settingsEntry} receivedFaxTaskOpen={receivedFaxOpen} receivedFaxReturnLabel={receivedFaxReturn?.label??'Back to saved sources'} onCloseReceivedFax={closeReceivedFaxWork} onReceivedFaxActiveChange={reportReceivedFaxBusy} googleTaskPresentation={googleMessageOpen&&googleMessageVisited} guidedConnections={CONNECTION_ONBOARDING_BUILD} connectionIdentity={authenticated ?? undefined} onConnectionAccessLost={failure}
         members={authenticated&&practiceAccess?<PracticeAccessPanel identity={authenticated} access={practiceAccess} onBusyChange={reportAccessBusy}/>:undefined}
         ehr={EHR_READ_BUILD&&authenticated?<section aria-label="Choose a visit for appointment review"><p>{visitLinked?'Choose the patient and appointment, then read the available records for this visit. Your conversation draft stays in place.':'Choose the existing visit that will receive your reviewed EHR source.'}</p>
           <button className="team-primary" disabled={locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>{if(locked||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked)return;if(visitLinked)void openEhrTask('connections');else{ehrVisitSelection.current=true;setSettingsOpen(false);void loadEncounters();}}}>{visitLinked?'Review EHR records':'Choose a visit'}</button></section>:undefined}
@@ -1539,7 +1597,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       </EhrReadTask>}
       {workspace&&<div className="workspace-notebook" data-native-private-note={nativePrivateNote} hidden={practicePage!=="notebook"||visitSourceTaskOpen}>
         {messagesMode&&!settingsOpen&&!savedRecordingFocused&&!reviewHandoffId&&<MessagesThreadHeader name={bot?.name??'Conversation'} role={bot?.role??'chief'} context={workspace.notebook?.title??workspace.label} contextKind={workspace.appointment_id?`Linked visit · ${workspace.label}`:'Private note · no visit linked'} task={messagesTaskLabel}
-          locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onBack={goHome} onContext={()=>void chooseConversationContext(selected)} onDetails={()=>setConversationDetails(true)} onReturn={returnToMessagesChat}/>}
+          locked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onBack={goHome} onContext={()=>void chooseConversationContext(selected)} onDetails={()=>setConversationDetails(true)} onReturn={returnToMessagesChat} returnLabel={receivedFaxReturn?.phase==='passage'&&ownsReceivedFaxReturn()?receivedFaxReturn.label:undefined}/>}
 
         <section hidden={settingsOpen||savedRecordingFocused} className="team-encounter-heading"><div><p className="team-kicker">{workspace.private_draft?.state==='unlinked'?'PRIVATE NOTE':'ENCOUNTER NOTEBOOK'}</p><h1>{workspace.notebook?.title??workspace.label}</h1>
           <p>{workspace.private_draft?.state==='unlinked'?'No patient yet · Unlinked note':workspace.label+' · Linked visit'}{workspace.notebook?.created_at?' · '+new Date(workspace.notebook.created_at).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):''}</p>
@@ -1800,10 +1858,10 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               {!nativePrivateNote&&notebookEditor}
               <details className="team-history"><summary>Saved notebook history</summary>{workspace.entries.filter(e => e.kind === "scratchpad").map(e => <article key={e.id}><small>Revision {e.revision}</small><p>{e.content}</p></article>)}</details>
             </>}
-            {faxSourceOffer&&authenticated===faxSourceOffer.identity&&generation.current===faxSourceOffer.generation&&workspace.id===faxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><EFaxSourceReviewMount identity={faxSourceOffer.identity} offered={faxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='efax_inbound_source'&&e.fax_source_state).map(e=>({entry_id:e.id,state:e.fax_source_state!}))} onBusyChange={reportFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareFaxChief(value)} onRefreshDocument={refreshFaxDocument}/></div>}
+            {faxSourceOffer&&authenticated===faxSourceOffer.identity&&generation.current===faxSourceOffer.generation&&workspace.id===faxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'||!faxPassageOpen}>{!messagesMode&&receivedFaxReturn?.phase==='passage'&&ownsReceivedFaxReturn()&&<button className="received-fax-passage-return" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={closeReceivedFaxWork}>‹ {receivedFaxReturn.label}</button>}<EFaxSourceReviewMount identity={faxSourceOffer.identity} offered={faxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='efax_inbound_source'&&e.fax_source_state).map(e=>({entry_id:e.id,state:e.fax_source_state!}))} visible={faxPassageOpen&&panel==='Sources'&&!settingsOpen&&!practiceOpen&&practicePage==='notebook'&&(!messagesMode||mobilePanel==='Sources')} onOpenDocument={signal=>session.sources.loadFaxDocument(sourceContext('efax'),signal)} onBusyChange={directFaxOffer?undefined:reportFaxSourceBusy} onOperationBusyChange={directFaxOffer?reportDirectFaxSourceBusy:undefined} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareFaxChief(value)} onRefreshDocument={refreshFaxDocument}/></div>}
             {providerFaxSourceOffer&&authenticated===providerFaxSourceOffer.identity&&generation.current===providerFaxSourceOffer.generation&&workspace.id===providerFaxSourceOffer.workspaceId&&<div hidden={panel!=='Sources'}><FaxSourceReviewMount identity={providerFaxSourceOffer.identity} offered={providerFaxSourceOffer.document} visit={{id:workspace.id,label:workspace.label,revision:workspace.revision}} locked={locked||captureNavigationLocked||captureDraftLocked} currentSources={workspace.entries.filter(e=>e.kind==='fax_inbound_source'&&e.practice_fax_source_state).map(e=>({entry_id:e.id,state:e.practice_fax_source_state!}))} onBusyChange={reportProviderFaxSourceBusy} onAuthenticationLost={failure} onSaved={(_,latest)=>receiveGoogleSource(latest)} onAskChief={value=>void prepareProviderFaxChief(value)} onRefreshDocument={refreshProviderFaxDocument}/></div>}
             {panel === "Sources" && <EncounterSources workspace={workspace} selectedSource={selectedSource} locked={locked}
-              onReviewGoogle={GOOGLE_CONNECTION_BUILD&&GOOGLE_MESSAGE_BUILD&&authenticated&&visitLinked?()=>void openGoogleMailWork('sources'):undefined} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked?()=>void openOutlookWork('sources'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('sources'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('sources'):undefined} appointmentReviewLocked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
+              onReviewReceivedFax={EFAX_INBOUND_BUILD&&EFAX_INBOUND_SOURCE_BUILD&&authenticated&&visitLinked?()=>void openReceivedFaxWork('sources'):undefined} onReviewGoogle={GOOGLE_CONNECTION_BUILD&&GOOGLE_MESSAGE_BUILD&&authenticated&&visitLinked?()=>void openGoogleMailWork('sources'):undefined} onReviewOutlook={OUTLOOK_MESSAGE_BUILD&&authenticated&&visitLinked?()=>void openOutlookWork('sources'):undefined} onImportCalendar={CALENDAR_IMPORT_BUILD&&authenticated&&visitLinked?()=>void openCalendarImportTask('sources'):undefined} onReviewAppointment={EHR_READ_BUILD&&authenticated&&visitLinked?()=>void openEhrTask('sources'):undefined} appointmentReviewLocked={viewNavigationLocked||captureNavigationLocked||captureDraftLocked}
               briefViewedAt={briefViewed?.workspace===workspace.id&&briefViewed.owner===authenticated&&briefViewed.teamRevision===team?.revision?briefViewed.at:undefined}
               onPrep={team?.configuration.bots.some(member=>member.role==='visit_prep'&&member.enabled)?()=>{const reader=team.configuration.bots.find(member=>member.role==='visit_prep'&&member.enabled)!;if(session.presentation.enabled){void openConversation(workspace.id,botAddress(reader)).then(()=>{if(session.getSnapshot().selected===botAddress(reader))showConversationTask('Tools');});}else{setSelected(botAddress(reader));setMobilePanel('Conversation');}}:undefined}
               source={source} evidence={evidence} setSource={setSource} setEvidence={setEvidence}
