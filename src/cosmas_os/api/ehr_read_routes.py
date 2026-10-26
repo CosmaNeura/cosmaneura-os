@@ -13,6 +13,7 @@ from cosmas_os.api.capture_deadline import CaptureBoundary
 from cosmas_os.api.capture_schemas import _unique_object
 from cosmas_os.application import (
     athena_allergy_ehr,
+    athena_medication_ehr,
     ehr_reads,
     elation_lab_ehr,
     elation_sandbox_installation,
@@ -45,11 +46,12 @@ class EhrReadBoundary:
 def router(*, runtime, configuration, identity_dependency, session_dependency, workspace_gate, fence):
     routes = APIRouter()
 
-    def service(provider=None, protocol=None):
-        port = select_runtime(runtime(), provider or "elation", protocol)
+    def service(provider=None, protocol=None, clinical_scope=None):
+        port = select_runtime(runtime(), provider or "elation", protocol, clinical_scope)
         if (not configuration().workspace_ehr_read_available or port is None
                 or protocol == "fhir" and not configuration().workspace_tebra_fhir_enabled
-                or protocol == "core" and not configuration().workspace_athena_allergies_enabled):
+                or clinical_scope == "medications" and not configuration().workspace_athena_medications_enabled
+                or protocol == "core" and clinical_scope is None and not configuration().workspace_athena_allergies_enabled):
             raise ws.WorkspaceError("ehr_read_unavailable", 404)
         return port
 
@@ -92,6 +94,9 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
         def execute():
             reauthenticate()
             if body.action == "status":
+                if body.clinical_scope == "medications":
+                    return athena_medication_ehr.status(*scope, enabled=configuration().workspace_ehr_read_available and configuration().workspace_athena_medications_enabled,
+                        port=select_runtime(runtime(), "athena", "core", "medications"), reauthenticate=reauthenticate)
                 if body.protocol == "core":
                     return athena_allergy_ehr.status(*scope, enabled=configuration().workspace_ehr_read_available and configuration().workspace_athena_allergies_enabled,
                         port=select_runtime(runtime(), "athena", "core"), reauthenticate=reauthenticate)
@@ -107,7 +112,7 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                 if body.include_labs is True and not configuration().workspace_elation_labs_enabled:
                     result["labs"] = "not_enabled"
                 return result
-            port = service(body.provider, body.protocol)
+            port = service(body.provider, body.protocol, body.clinical_scope)
             if body.action == "install":
                 result = elation_sandbox_installation.install(*scope, key=body.idempotency_key,
                     installation_id=str(body.installation_id), installation_sha256=body.installation_sha256,
@@ -156,7 +161,8 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                     observation_sha256=body.observation_sha256, item_handle=str(body.item_handle),
                     item_sha256=body.item_sha256, port=port, reauthenticate=reauthenticate)
             elif body.action == "core_patients":
-                result = athena_allergy_ehr.patients(*scope, key=body.idempotency_key,
+                handler = athena_medication_ehr if body.clinical_scope == "medications" else athena_allergy_ehr
+                result = handler.patients(*scope, key=body.idempotency_key,
                     connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
                     workspace_id=str(body.workspace_id), port=port, reauthenticate=reauthenticate)
             elif body.action == "core_allergies":
@@ -165,14 +171,20 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                     workspace_id=str(body.workspace_id), observation_id=str(body.observation_id),
                     observation_sha256=body.observation_sha256, item_handle=str(body.item_handle),
                     item_sha256=body.item_sha256, port=port, reauthenticate=reauthenticate)
+            elif body.action == "core_medications":
+                result = athena_medication_ehr.medications(*scope, key=body.idempotency_key,
+                    connection_id=str(body.connection_id), binding_sha256=body.binding_sha256,
+                    workspace_id=str(body.workspace_id), observation_id=str(body.observation_id),
+                    observation_sha256=body.observation_sha256, item_handle=str(body.item_handle),
+                    item_sha256=body.item_sha256, port=port, reauthenticate=reauthenticate)
             elif body.action == "inspect":
                 result = ehr_reads.inspect_observation(*scope, observation_id=str(body.observation_id),
-                    port=port, reauthenticate=reauthenticate, provider=body.provider, protocol=body.protocol)
+                    port=port, reauthenticate=reauthenticate, provider=body.provider, protocol=body.protocol, clinical_scope=body.clinical_scope)
             else:
                 result = ehr_reads.resolve_observation(*scope, key=body.idempotency_key,
-                    port=port, reauthenticate=reauthenticate, provider=body.provider, protocol=body.protocol)
+                    port=port, reauthenticate=reauthenticate, provider=body.provider, protocol=body.protocol, clinical_scope=body.clinical_scope)
             reauthenticate()
-            if service(body.provider, body.protocol) is not port:
+            if service(body.provider, body.protocol, body.clinical_scope) is not port:
                 raise ws.WorkspaceError("ehr_read_unavailable", 404)
             return result
         return JSONResponse(await run_in_threadpool(execute), headers=HEADERS)
@@ -185,7 +197,7 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
             body = schema.ReviewEhr.model_validate(await decoded(request))
         except (ValueError, TypeError, UnicodeError, RecursionError):
             raise ws.WorkspaceError("invalid_ehr_read_review", 422) from None
-        port = service(body.provider, body.protocol)
+        port = service(body.provider, body.protocol, body.clinical_scope)
 
         def execute():
             fence(request, session, identity)
@@ -195,10 +207,10 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
                 reviewed_visit=body.reviewed_visit, reviewed_patient_identity=body.reviewed_patient_identity,
                 reviewed_exact_snapshot=body.reviewed_exact_snapshot, reviewed_untrusted_source=body.reviewed_untrusted_source,
                 port=port, external_identity_id=identity.external_identity_id,
-                reauthenticate=lambda: fence(request, session, identity), provider=body.provider, protocol=body.protocol)
+                reauthenticate=lambda: fence(request, session, identity), provider=body.provider, protocol=body.protocol, clinical_scope=body.clinical_scope)
             result["workspace"] = model_work.project_workspace(session, result["workspace"])
             fence(request, session, identity)
-            if service(body.provider, body.protocol) is not port:
+            if service(body.provider, body.protocol, body.clinical_scope) is not port:
                 raise ws.WorkspaceError("ehr_read_unavailable", 404)
             return result
         return JSONResponse(await run_in_threadpool(execute), headers=HEADERS)

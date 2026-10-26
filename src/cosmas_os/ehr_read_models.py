@@ -38,6 +38,8 @@ class EhrReadBinding(OwnerScope, Base):
             name="uq_ehr_read_binding_version"),
         Index("uq_ehr_read_binding_active", "box_id", "owner_id", "account_id", "connection_id",
             unique=True, postgresql_where=text("state = 'active'")),
+        CheckConstraint("coalesce(clinical_scope IS NULL OR (clinical_scope='medications' AND vendor='athena' AND protocol='core' AND public.ehr_athena_nonblank(practice_name)),false)",
+            name="ck_ehr_read_binding_clinical_scope"),
         CheckConstraint("coalesce((protocol IS NULL AND vendor='elation' AND environment='sandbox' AND customer_id IS NULL AND practice_timezone IS NULL) OR "
             "(protocol IS NULL AND vendor='tebra' AND environment='synthetic' AND customer_id IS NOT NULL AND customer_id ~ '^[1-9][0-9]{0,9}$' "
             "AND customer_id::numeric<=2147483647 AND practice_id::numeric<=2147483647 "
@@ -56,6 +58,7 @@ class EhrReadBinding(OwnerScope, Base):
     account_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     vendor: Mapped[str] = mapped_column(String(16), nullable=False, default="elation")
     protocol: Mapped[str | None] = mapped_column(String(4))
+    clinical_scope: Mapped[str | None] = mapped_column(String(16))
     connection_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     credential_generation: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     practice_id: Mapped[str | None] = mapped_column(String(20))
@@ -139,6 +142,42 @@ class EhrAthenaCorePatientGrant(OwnerScope, Base):
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class EhrAthenaMedicationPatientGrant(OwnerScope, Base):
+    """Medication-only independent authority; an allergy or schedule grant is insufficient."""
+
+    __tablename__ = "ehr_athena_medication_patient_grants"
+    __table_args__ = (
+        ForeignKeyConstraint(["binding_id", "box_id", "owner_id", "account_id"],
+            ["ehr_read_bindings.id", "ehr_read_bindings.box_id", "ehr_read_bindings.owner_id", "ehr_read_bindings.account_id"]),
+        ForeignKeyConstraint(["workspace_id", "box_id", "owner_id"],
+            ["encounter_workspaces.id", "encounter_workspaces.box_id", "encounter_workspaces.owner_id"]),
+        ForeignKeyConstraint(["patient_link_id", "box_id"], ["patient_links.id", "patient_links.box_id"]),
+        UniqueConstraint("id", "box_id", "owner_id", "workspace_id", "patient_link_id", name="uq_ehr_athena_med_grant_scope"),
+        Index("uq_ehr_athena_med_grant_active", "binding_id", "workspace_id", "patient_link_id", "department_id", "patient_id", unique=True,
+            postgresql_where=text("state='active'")),
+        CheckConstraint("patient_id ~ '^[1-9][0-9]{0,17}$' AND department_id ~ '^[1-9][0-9]{0,17}$'", name="ck_ehr_athena_med_grant_patient"),
+        CheckConstraint("char_length(identity_json) BETWEEN 2 AND 20000", name="ck_ehr_athena_med_grant_identity_size"),
+        CheckConstraint("(state='active' AND revoked_at IS NULL) OR (state='revoked' AND revoked_at IS NOT NULL)", name="ck_ehr_athena_med_grant_state"),
+        CheckConstraint("char_length(department_label) BETWEEN 1 AND 200 AND department_label !~ '[[:cntrl:]]' AND public.ehr_athena_nonblank(department_label)", name="ck_ehr_athena_med_department_label"),
+        digest_check("authorization_sha256", "identity_sha256", "grant_digest"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
+    binding_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    account_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    workspace_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    patient_id: Mapped[str] = mapped_column(String(18), nullable=False)
+    department_id: Mapped[str] = mapped_column(String(18), nullable=False)
+    department_label: Mapped[str] = mapped_column(String(200), nullable=False)
+    authorization_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    identity_json: Mapped[str] = mapped_column(Text, nullable=False)
+    identity_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    grant_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    state: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp())
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
 class EhrReadRequest(OwnerScope, Base):
     __tablename__ = "ehr_read_requests"
     __table_args__ = (
@@ -151,12 +190,14 @@ class EhrReadRequest(OwnerScope, Base):
             ["ehr_fhir_patient_grants.id", "ehr_fhir_patient_grants.box_id", "ehr_fhir_patient_grants.owner_id", "ehr_fhir_patient_grants.workspace_id", "ehr_fhir_patient_grants.patient_link_id"]),
         ForeignKeyConstraint(["athena_grant_id", "box_id", "owner_id", "workspace_id", "patient_link_id"],
             ["ehr_athena_core_patient_grants.id", "ehr_athena_core_patient_grants.box_id", "ehr_athena_core_patient_grants.owner_id", "ehr_athena_core_patient_grants.workspace_id", "ehr_athena_core_patient_grants.patient_link_id"]),
+        ForeignKeyConstraint(["athena_medication_grant_id", "box_id", "owner_id", "workspace_id", "patient_link_id"],
+            ["ehr_athena_medication_patient_grants.id", "ehr_athena_medication_patient_grants.box_id", "ehr_athena_medication_patient_grants.owner_id", "ehr_athena_medication_patient_grants.workspace_id", "ehr_athena_medication_patient_grants.patient_link_id"]),
         UniqueConstraint("id", "box_id", "owner_id", name="uq_ehr_read_request_scope"),
         UniqueConstraint("binding_id", "ordinal", name="uq_ehr_read_request_ordinal"),
         UniqueConstraint("box_id", "owner_id", "idempotency_key", name="uq_ehr_read_request_key"),
         CheckConstraint("ordinal BETWEEN 1 AND 500 AND idempotency_key ~ '^[A-Za-z0-9:_-]{8,100}$'",
             name="ck_ehr_read_request_key"),
-        CheckConstraint("(((kind='window' AND parent_snapshot_id IS NULL AND item_handle IS NULL) OR "
+        CheckConstraint("coalesce((clinical_scope IS NULL AND athena_medication_grant_id IS NULL AND ((((kind='window' AND parent_snapshot_id IS NULL AND item_handle IS NULL) OR "
             "(kind IN ('verify','problems','medications') AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL)) "
             "AND workspace_id IS NULL AND patient_link_id IS NULL AND fhir_grant_id IS NULL AND athena_grant_id IS NULL) OR "
             "(kind IN ('fhir_patients','core_patients') AND parent_snapshot_id IS NULL AND item_handle IS NULL AND fhir_grant_id IS NULL "
@@ -166,10 +207,13 @@ class EhrReadRequest(OwnerScope, Base):
             "(kind='core_allergies' AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL AND athena_grant_id IS NOT NULL "
             "AND fhir_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL) OR "
             "(kind IN ('lab_reports','lab_report') AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL AND fhir_grant_id IS NULL "
-            "AND athena_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL)", name="ck_ehr_read_request_kind"),
+            "AND athena_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL))) OR "
+            "(clinical_scope='medications' AND fhir_grant_id IS NULL AND athena_grant_id IS NULL AND workspace_id IS NOT NULL AND patient_link_id IS NOT NULL AND "
+            "((kind='core_patients' AND parent_snapshot_id IS NULL AND item_handle IS NULL AND athena_medication_grant_id IS NULL) OR "
+            "(kind='core_medications' AND parent_snapshot_id IS NOT NULL AND item_handle IS NOT NULL AND athena_medication_grant_id IS NOT NULL))),false)", name="ck_ehr_read_request_kind"),
         CheckConstraint("(kind IN ('fhir_patients','fhir_medications') AND window_start IS NULL AND window_end IS NULL AND practice_id IS NULL) OR "
-            "(kind IN ('core_patients','core_allergies') AND window_start IS NULL AND window_end IS NULL AND practice_id IS NOT NULL) OR "
-            "(kind NOT IN ('fhir_patients','fhir_medications','core_patients','core_allergies') AND window_start IS NOT NULL AND window_end IS NOT NULL AND practice_id IS NOT NULL "
+            "(kind IN ('core_patients','core_allergies','core_medications') AND window_start IS NULL AND window_end IS NULL AND practice_id IS NOT NULL) OR "
+            "(kind NOT IN ('fhir_patients','fhir_medications','core_patients','core_allergies','core_medications') AND window_start IS NOT NULL AND window_end IS NOT NULL AND practice_id IS NOT NULL "
             "AND isfinite(window_start) AND isfinite(window_end) AND window_end>window_start "
             "AND window_end<=window_start+interval '168 hours')", name="ck_ehr_read_request_window"),
         CheckConstraint("isfinite(valid_until) AND valid_until>created_at "
@@ -186,6 +230,7 @@ class EhrReadRequest(OwnerScope, Base):
     practice_id: Mapped[str | None] = mapped_column(String(20))
     binding_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    clinical_scope: Mapped[str | None] = mapped_column(String(16))
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
     request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -197,6 +242,7 @@ class EhrReadRequest(OwnerScope, Base):
     patient_link_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     fhir_grant_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     athena_grant_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    athena_medication_grant_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
     window_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     window_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
@@ -238,6 +284,7 @@ class EhrReadSourceReview(WorkspaceScope, Base):
         UniqueConstraint("workspace_id", "idempotency_key", name="uq_ehr_read_review_key"),
         CheckConstraint("command_provider IS NULL OR command_provider IN ('elation','tebra','athena')", name="ck_ehr_review_provider"),
         CheckConstraint("coalesce(command_protocol IS NULL OR (command_protocol='fhir' AND command_provider='tebra') OR (command_protocol='core' AND command_provider='athena'),false)", name="ck_ehr_review_protocol"),
+        CheckConstraint("coalesce(command_clinical_scope IS NULL OR (command_clinical_scope='medications' AND command_protocol='core' AND command_provider='athena'),false)", name="ck_ehr_review_clinical_scope"),
         CheckConstraint("expected_revision>=1 AND workspace_revision=expected_revision+1",
             name="ck_ehr_read_review_revision"),
         CheckConstraint("coalesce(((command_protocol IS NULL AND reviewed_visit IS TRUE) OR (command_protocol IN ('fhir','core') AND reviewed_visit IS NULL)) "
@@ -248,6 +295,7 @@ class EhrReadSourceReview(WorkspaceScope, Base):
     id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     command_provider: Mapped[str | None] = mapped_column(String(16))
     command_protocol: Mapped[str | None] = mapped_column(String(4))
+    command_clinical_scope: Mapped[str | None] = mapped_column(String(16))
     entry_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     patient_link_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)

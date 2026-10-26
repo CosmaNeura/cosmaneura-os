@@ -13,6 +13,11 @@ from cosmas_os.ports.athena_allergy_ehr import (
     AthenaPatientsObservation,
     AthenaPrivateSnapshot,
 )
+from cosmas_os.ports.athena_medication_ehr import (
+    AthenaMedicationPatientsObservation,
+    AthenaMedicationPrivateSnapshot,
+    AthenaMedicationsObservation,
+)
 from cosmas_os.ports.elation_lab_ehr import (
     LabPrivateSnapshot,
     LabReportObservation,
@@ -365,12 +370,14 @@ class TebraPrivateSnapshot(Protected):
 
 
 class SnapshotPayload(Protected):
-    public: WindowObservation | VerifiedObservation | ProblemsObservation | MedicationsObservation | TebraWindowObservation | TebraVerifiedObservation | FhirPatientsObservation | FhirMedicationsObservation | AthenaPatientsObservation | AthenaAllergiesObservation | LabReportsObservation | LabReportObservation
-    private: MedicationsPrivateSnapshot | ProblemsPrivateSnapshot | PrivateSnapshot | TebraPrivateSnapshot | FhirPrivateSnapshot | AthenaPrivateSnapshot | LabPrivateSnapshot
+    public: WindowObservation | VerifiedObservation | ProblemsObservation | MedicationsObservation | TebraWindowObservation | TebraVerifiedObservation | FhirPatientsObservation | FhirMedicationsObservation | AthenaPatientsObservation | AthenaAllergiesObservation | LabReportsObservation | LabReportObservation | AthenaMedicationPatientsObservation | AthenaMedicationsObservation
+    private: MedicationsPrivateSnapshot | ProblemsPrivateSnapshot | PrivateSnapshot | TebraPrivateSnapshot | FhirPrivateSnapshot | AthenaPrivateSnapshot | LabPrivateSnapshot | AthenaMedicationPrivateSnapshot
 
     @model_validator(mode="before")
     @classmethod
     def private_provider(cls, value):
+        if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("clinical_scope") == "medications":
+            return {**value, "private": AthenaMedicationPrivateSnapshot.model_validate(value["private"])}
         if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("kind") in ("lab_reports", "verified_lab_report"):
             return {**value, "private": LabPrivateSnapshot.model_validate(value["private"])}
         if isinstance(value, dict) and isinstance(value.get("public"), dict) and value["public"].get("protocol") == "core":
@@ -387,6 +394,12 @@ class SnapshotPayload(Protected):
 
     @model_validator(mode="after")
     def same_provider(self):
+        if isinstance(self.public, (AthenaMedicationPatientsObservation, AthenaMedicationsObservation)):
+            if not isinstance(self.private, AthenaMedicationPrivateSnapshot):
+                raise ValueError("athena_medication_payload_mismatch")
+            return self
+        if isinstance(self.private, AthenaMedicationPrivateSnapshot):
+            raise ValueError("athena_medication_payload_mismatch")
         if isinstance(self.public, (LabReportsObservation, LabReportObservation)):
             if not isinstance(self.private, LabPrivateSnapshot):
                 raise ValueError("lab_payload_mismatch")

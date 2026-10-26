@@ -14,7 +14,13 @@ from uuid import UUID, uuid4
 from sqlalchemy import func, select
 
 from cosmas_os.adapters.athena_allergy_read import AthenaAllergyError
-from cosmas_os.adapters.ehr_read_runtime import runtime_protocol, runtime_provider, select_runtime
+from cosmas_os.adapters.athena_medication_read import AthenaMedicationError
+from cosmas_os.adapters.ehr_read_runtime import (
+    runtime_clinical_scope,
+    runtime_protocol,
+    runtime_provider,
+    select_runtime,
+)
 from cosmas_os.adapters.elation_lab_read import ElationLabError
 from cosmas_os.adapters.elation_read import (
     ElationAppointment,
@@ -36,6 +42,7 @@ from cosmas_os.adapters.tebra_read import (
 )
 from cosmas_os.adapters.tebra_read_runtime import SyntheticTebraReads, TebraWorkspaceScope
 from cosmas_os.application import athena_allergy_ehr as athena
+from cosmas_os.application import athena_medication_ehr as athena_medications
 from cosmas_os.application import elation_lab_ehr as labs
 from cosmas_os.application import model_work
 from cosmas_os.application import tebra_fhir_ehr as fhir
@@ -54,6 +61,11 @@ from cosmas_os.ports.athena_allergy_ehr import (
     AthenaAllergiesObservation,
     AthenaPatientsObservation,
     AthenaPrivateSnapshot,
+)
+from cosmas_os.ports.athena_medication_ehr import (
+    AthenaMedicationPatientsObservation,
+    AthenaMedicationPrivateSnapshot,
+    AthenaMedicationsObservation,
 )
 from cosmas_os.ports.ehr_reads import (
     MedicationDisplay,
@@ -112,10 +124,11 @@ def install_runtime_reader(reader):
         _runtime_reader = previous
 
 
-def _runtime(port=None, provider=None, protocol=None):
+def _runtime(port=None, provider=None, protocol=None, clinical_scope=None):
     candidate = port if port is not None else _runtime_reader() if _runtime_reader else None
     chosen = provider or runtime_provider(candidate) or "elation"
-    selected = select_runtime(candidate, chosen, protocol if provider is not None else protocol or runtime_protocol(candidate))
+    selected = select_runtime(candidate, chosen, protocol if provider is not None else protocol or runtime_protocol(candidate),
+        clinical_scope if provider is not None else clinical_scope or runtime_clinical_scope(candidate))
     if selected is None:
         raise ws.WorkspaceError("ehr_read_unavailable", 404)
     return selected
@@ -136,19 +149,22 @@ def _legacy_runtime(port=None, provider=None):
     return runtime
 
 
-def _provider_fields(provider, protocol=None):
-    return ({} if provider is None else {"provider": provider}) | ({} if protocol is None else {"protocol": protocol})
+def _provider_fields(provider, protocol=None, clinical_scope=None):
+    return (({} if provider is None else {"provider": provider}) | ({} if protocol is None else {"protocol": protocol})
+        | ({} if clinical_scope is None else {"clinical_scope": clinical_scope}))
 
 
-def _require_provider(s, read, provider, protocol=None):
+def _require_provider(s, read, provider, protocol=None, clinical_scope=None):
     binding = s.get(EhrReadBinding, read.binding_id)
-    if binding is None or binding.vendor != (provider or "elation") or binding.protocol != protocol:
+    if binding is None or binding.vendor != (provider or "elation") or binding.protocol != protocol or binding.clinical_scope != clinical_scope or read.clinical_scope != clinical_scope:
         raise ws.WorkspaceError("ehr_read_provider_mismatch", 409)
 
 
 def source_label(provider, kind=None):
     if provider == "elation" and kind == "verified_lab_report":
         return "Elation: reviewed laboratory report"
+    if kind == "core_medications":
+        return "Athena: reviewed medication records"
     if kind == "core_allergies":
         return "Athena: reviewed allergy records"
     if kind == "fhir_medications":
@@ -178,6 +194,10 @@ def _access(s, box, actor, account_id, reauthenticate):
 
 
 def _scope(binding):
+    if binding.clinical_scope is not None:
+        if (binding.vendor, binding.protocol, binding.clinical_scope) != ("athena", "core", "medications"):
+            raise ws.WorkspaceError("ehr_read_binding_changed")
+        return athena_medications.scope(binding)
     if binding.protocol == "core":
         return athena.scope(binding)
     if binding.protocol == "fhir":
@@ -201,7 +221,7 @@ def _binding(s, account, connection_id, digest, *, port=None):
     binding = rows[0]
     try:
         scope = _scope(binding)
-        runtime = _runtime(port, binding.vendor, binding.protocol)
+        runtime = _runtime(port, binding.vendor, binding.protocol, binding.clinical_scope)
         if type(runtime) is ManagedElationSandboxReads:
             installed = runtime.selected(scope)
             receipt = s.scalar(select(ElationSandboxInstallationReceipt).where(
@@ -221,11 +241,13 @@ def _binding(s, account, connection_id, digest, *, port=None):
 def _authorize(s, read, *, port=None):
     account = _identity(s, read.box_id, read.owner_id, read.account_id)
     binding = _binding(s, account, read.connection_id, read.binding_digest, port=port)
-    if read.transport != _runtime(port, binding.vendor, binding.protocol).transport_mode:
+    if read.transport != _runtime(port, binding.vendor, binding.protocol, binding.clinical_scope).transport_mode:
         raise ws.WorkspaceError("ehr_read_binding_changed")
-    if (binding.id, binding.credential_generation, binding.practice_id) != (
-            read.binding_id, read.credential_generation, read.practice_id):
+    if (binding.id, binding.credential_generation, binding.practice_id, binding.clinical_scope) != (
+            read.binding_id, read.credential_generation, read.practice_id, read.clinical_scope):
         raise ws.WorkspaceError("ehr_read_binding_changed")
+    if binding.clinical_scope == "medications":
+        return athena_medications.authorize(s, read, binding, _runtime(port, binding.vendor, "core", "medications"))
     if binding.protocol == "core":
         return athena.authorize(s, read, binding, _runtime(port, binding.vendor, "core"))
     if binding.protocol == "fhir":
@@ -245,7 +267,7 @@ def _authorize(s, read, *, port=None):
     snapshot = s.scalar(select(EhrReadSnapshot).where(EhrReadSnapshot.observation_id == root.id))
     if snapshot is not None:
         public = SnapshotPayload.model_validate(snapshot.payload).public
-        if isinstance(public, (FhirPatientsObservation, FhirMedicationsObservation, AthenaPatientsObservation, AthenaAllergiesObservation, LabReportsObservation, LabReportObservation)):
+        if isinstance(public, (FhirPatientsObservation, FhirMedicationsObservation, AthenaPatientsObservation, AthenaAllergiesObservation, AthenaMedicationPatientsObservation, AthenaMedicationsObservation, LabReportsObservation, LabReportObservation)):
             raise ws.WorkspaceError("ehr_read_source_invalid")
         if public.practice.timezone != _legacy_runtime(port, binding.vendor).timezone_for(_scope(binding)):
             raise ws.WorkspaceError("ehr_read_binding_changed")
@@ -318,7 +340,7 @@ def _commitment(read, digest):
 def item_hash(kind, item):
     value = item.model_dump(mode="json") if hasattr(item, "model_dump") else dict(item)
     value.pop("sha256", None)
-    domain = "ehr_elation_lab_candidate_item.v1" if kind == "lab_reports" else "ehr_elation_lab_report_item.v1" if kind == "verified_lab_report" else "ehr_athena_core_patient_item.v1" if kind == "core_patients" else "ehr_athena_core_allergies_item.v1" if kind == "core_allergies" else "ehr_fhir_patient_item.v1" if kind == "fhir_patients" else "ehr_tebra_fhir_medications_item.v1" if kind == "fhir_medications" else "ehr_verified_medications_item.v1" if kind == "verified_medications" else "ehr_verified_problems_item.v1" if kind == "verified_problems" else "ehr_window_item.v1" if kind == "window" else "ehr_verified_item.v1"
+    domain = "ehr_athena_medication_patient_item.v1" if kind == "core_medication_patients" else "ehr_athena_medications_item.v1" if kind == "core_medications" else "ehr_elation_lab_candidate_item.v1" if kind == "lab_reports" else "ehr_elation_lab_report_item.v1" if kind == "verified_lab_report" else "ehr_athena_core_patient_item.v1" if kind == "core_patients" else "ehr_athena_core_allergies_item.v1" if kind == "core_allergies" else "ehr_fhir_patient_item.v1" if kind == "fhir_patients" else "ehr_tebra_fhir_medications_item.v1" if kind == "fhir_medications" else "ehr_verified_medications_item.v1" if kind == "verified_medications" else "ehr_verified_problems_item.v1" if kind == "verified_problems" else "ehr_window_item.v1" if kind == "window" else "ehr_verified_item.v1"
     return payload_hash(dict(kind=domain, item=value))
 
 
@@ -352,8 +374,8 @@ def _window_root(s, read):
         return read
     snap = s.get(EhrReadSnapshot, read.parent_snapshot_id)
     parent = s.get(EhrReadRequest, snap.observation_id) if snap is not None else None
-    if read.kind in ("fhir_medications", "core_allergies"):
-        if parent is None or parent.kind != ("core_patients" if read.kind == "core_allergies" else "fhir_patients") or (parent.binding_id, parent.workspace_id, parent.patient_link_id) != (read.binding_id, read.workspace_id, read.patient_link_id):
+    if read.kind in ("fhir_medications", "core_allergies", "core_medications"):
+        if parent is None or parent.kind != ("core_patients" if read.kind in ("core_allergies", "core_medications") else "fhir_patients") or (parent.binding_id, parent.workspace_id, parent.patient_link_id, parent.clinical_scope) != (read.binding_id, read.workspace_id, read.patient_link_id, read.clinical_scope):
             raise ws.WorkspaceError("ehr_read_source_invalid")
         return parent
     if read.kind in ("problems", "medications"):
@@ -373,7 +395,7 @@ def _current(s, read):
     root = _window_root(s, read)
     query = select(EhrReadRequest.id).where(EhrReadRequest.binding_id == read.binding_id,
         EhrReadRequest.kind == root.kind, EhrReadRequest.ordinal > root.ordinal)
-    if read.kind in (*fhir.KINDS, *athena.KINDS):
+    if read.kind in (*fhir.KINDS, *athena.KINDS, *athena_medications.KINDS):
         query = query.where(EhrReadRequest.workspace_id == read.workspace_id)
     if s.scalar(query.limit(1)):
         raise ws.WorkspaceError("ehr_read_superseded")
@@ -388,13 +410,15 @@ def _snapshot(s, read):
     try:
         if read.kind in labs.KINDS:
             return labs.validate_snapshot(s, read, snap)
+        if read.clinical_scope == "medications":
+            return athena_medications.validate_snapshot(s, read, snap)
         if read.kind in athena.KINDS:
             return athena.validate_snapshot(s, read, snap)
         if read.kind in fhir.KINDS:
             return fhir.validate_snapshot(s, read, snap)
         payload = SnapshotPayload.model_validate_json(canonical_json(snap.payload))
         public = payload.public
-        if isinstance(public, (FhirPatientsObservation, FhirMedicationsObservation, AthenaPatientsObservation, AthenaAllergiesObservation, LabReportsObservation, LabReportObservation)) or isinstance(payload.private, (FhirPrivateSnapshot, AthenaPrivateSnapshot, LabPrivateSnapshot)):
+        if isinstance(public, (FhirPatientsObservation, FhirMedicationsObservation, AthenaPatientsObservation, AthenaAllergiesObservation, AthenaMedicationPatientsObservation, AthenaMedicationsObservation, LabReportsObservation, LabReportObservation)) or isinstance(payload.private, (FhirPrivateSnapshot, AthenaPrivateSnapshot, AthenaMedicationPrivateSnapshot, LabPrivateSnapshot)):
             raise ValueError
         binding = s.get(EhrReadBinding, read.binding_id)
         if (binding is None or public.provider != binding.vendor or (public.provider == "tebra" and read.transport != "mock")
@@ -439,7 +463,7 @@ def _snapshot(s, read):
             parent = _window_root(s, read)
             parent_snap = _snapshot(s, parent)
             parent_payload = SnapshotPayload.model_validate(parent_snap.payload)
-            if isinstance(parent_payload.private, (FhirPrivateSnapshot, AthenaPrivateSnapshot, LabPrivateSnapshot)):
+            if isinstance(parent_payload.private, (FhirPrivateSnapshot, AthenaPrivateSnapshot, AthenaMedicationPrivateSnapshot, LabPrivateSnapshot)):
                 raise ValueError
             original = next((i for i in parent_payload.private.items if str(i.handle) == read.item_handle), None)
             if original is None or original.appointment != payload.private.items[0].appointment:
@@ -507,7 +531,7 @@ def _snapshot(s, read):
 
 def _receipt(read, snap):
     public = SnapshotPayload.model_validate(snap.payload).public.model_dump(mode="json")
-    return dict(**({"provider": public["provider"]} if public["provider"] in ("tebra", "athena") else {}), **({"protocol": public["protocol"]} if public.get("protocol") in ("fhir", "core") else {}), contract_version=1, observation_id=read.id, observation_key=read.idempotency_key,
+    return dict(**({"provider": public["provider"]} if public["provider"] in ("tebra", "athena") else {}), **({"protocol": public["protocol"]} if public.get("protocol") in ("fhir", "core") else {}), **({"clinical_scope": public["clinical_scope"]} if public.get("clinical_scope") == "medications" else {}), contract_version=1, observation_id=read.id, observation_key=read.idempotency_key,
         transport=SnapshotPayload.model_validate(snap.payload).private.transport,
         connection_id=read.connection_id, binding_sha256=read.binding_digest,
         source_sha256=snap.source_sha256, payload_sha256=payload_hash(public), observation=public)
@@ -534,10 +558,10 @@ def _read(s, box, actor, account_id, observation_id):
     return read
 
 
-def inspect_observation(s, box, actor, account_id, *, observation_id, port=None, reauthenticate=None, provider=None, protocol=None):
+def inspect_observation(s, box, actor, account_id, *, observation_id, port=None, reauthenticate=None, provider=None, protocol=None, clinical_scope=None):
     _access(s, box, actor, account_id, reauthenticate)
     read = _read(s, box, actor, account_id, observation_id)
-    _require_provider(s, read, provider, protocol)
+    _require_provider(s, read, provider, protocol, clinical_scope)
     _authorize(s, read, port=port)
     _current(s, read)
     _review_custody(s, read)
@@ -549,7 +573,7 @@ def inspect_observation(s, box, actor, account_id, *, observation_id, port=None,
     return receipt
 
 
-def resolve_observation(s, box, actor, account_id, *, key, port=None, reauthenticate=None, provider=None, protocol=None):
+def resolve_observation(s, box, actor, account_id, *, key, port=None, reauthenticate=None, provider=None, protocol=None, clinical_scope=None):
     _key(key)
     _access(s, box, actor, account_id, reauthenticate)
     from cosmas_os.application import elation_sandbox_installation
@@ -562,16 +586,16 @@ def resolve_observation(s, box, actor, account_id, *, key, port=None, reauthenti
     read = s.scalar(select(EhrReadRequest).where(EhrReadRequest.box_id == box,
         EhrReadRequest.owner_id == actor, EhrReadRequest.idempotency_key == key))
     if read is None:
-        return dict(**(_provider_fields(provider, protocol) if protocol in ("fhir", "core") else {}), status="not_found", observation_id=None, observation_key=key)
+        return dict(**(_provider_fields(provider, protocol, clinical_scope) if protocol in ("fhir", "core") else {}), status="not_found", observation_id=None, observation_key=key)
     if read.account_id != account_id:
         raise ws.WorkspaceError("idempotency_conflict")
-    _require_provider(s, read, provider, protocol)
+    _require_provider(s, read, provider, protocol, clinical_scope)
     _authorize(s, read, port=port)
     _current(s, read)
     if not s.scalar(select(EhrReadSnapshot.id).where(EhrReadSnapshot.observation_id == read.id)):
-        return dict(**(_provider_fields(provider, protocol) if protocol in ("fhir", "core") else {}), status="unconfirmed", observation_id=read.id, observation_key=key)
+        return dict(**(_provider_fields(provider, protocol, clinical_scope) if protocol in ("fhir", "core") else {}), status="unconfirmed", observation_id=read.id, observation_key=key)
     return inspect_observation(s, box, actor, account_id, observation_id=read.id, port=port,
-        reauthenticate=reauthenticate, provider=provider, protocol=protocol)
+        reauthenticate=reauthenticate, provider=provider, protocol=protocol, clinical_scope=clinical_scope)
 
 
 def _key(key):
@@ -609,14 +633,15 @@ def _reserve(s, account, binding, body, window, *, parent=None, item_handle=None
         expires = min(expires, s.get(EhrReadRequest, parent.observation_id).valid_until)
     read = EhrReadRequest(box_id=account.box_id, owner_id=account.principal_id, account_id=account.id,
         binding_id=binding.id, connection_id=binding.connection_id, credential_generation=binding.credential_generation,
-        practice_id=binding.practice_id, binding_digest=binding.binding_digest,
-        kind=body["action"] if body["action"] in (*fhir.KINDS, *athena.KINDS, *labs.KINDS) else "window" if parent is None else body["action"] if body["action"] in ("problems", "medications") else "verify", idempotency_key=key, request_hash=request_hash,
+        practice_id=binding.practice_id, binding_digest=binding.binding_digest, clinical_scope=binding.clinical_scope,
+        kind=body["action"] if body["action"] in (*fhir.KINDS, *athena.KINDS, *athena_medications.KINDS, *labs.KINDS) else "window" if parent is None else body["action"] if body["action"] in ("problems", "medications") else "verify", idempotency_key=key, request_hash=request_hash,
         request_json=body, ordinal=ordinal, parent_snapshot_id=parent.id if parent else None,
-        transport=_runtime(port, binding.vendor, binding.protocol).transport_mode,
+        transport=_runtime(port, binding.vendor, binding.protocol, binding.clinical_scope).transport_mode,
         item_handle=item_handle, window_start=window.starts_at if window is not None else None, window_end=window.ends_at if window is not None else None,
         workspace_id=workspace.id if workspace is not None else None, patient_link_id=workspace.patient_link_id if workspace is not None else None,
         fhir_grant_id=grant.id if grant is not None and binding.protocol == "fhir" else None,
-        athena_grant_id=grant.id if grant is not None and binding.protocol == "core" else None,
+        athena_grant_id=grant.id if grant is not None and binding.protocol == "core" and binding.clinical_scope is None else None,
+        athena_medication_grant_id=grant.id if grant is not None and binding.clinical_scope == "medications" else None,
         valid_until=expires, created_at=now)
     s.add(read)
     s.flush()
@@ -653,7 +678,7 @@ def _store(s, read_id, payload, port, reauthenticate):
     # Committing releases the authority locks. Reacquire the same inspection
     # fence used by recovery before exposing the now-persisted observation.
     return inspect_observation(s, read.box_id, read.owner_id, read.account_id,
-        observation_id=read_id, port=port, reauthenticate=reauthenticate, provider=read.request_json.get("provider"), protocol=read.request_json.get("protocol"))
+        observation_id=read_id, port=port, reauthenticate=reauthenticate, provider=read.request_json.get("provider"), protocol=read.request_json.get("protocol"), clinical_scope=read.request_json.get("clinical_scope"))
 
 
 def _appointment(row: ElationAppointment):
@@ -663,7 +688,7 @@ def _appointment(row: ElationAppointment):
 
 
 def _provider_error(error):
-    if isinstance(error, (ElationReadError, TebraReadError, TebraFhirReadError, TebraFhirSnapshotError, AthenaAllergyError, ElationLabError)):
+    if isinstance(error, (ElationReadError, TebraReadError, TebraFhirReadError, TebraFhirSnapshotError, AthenaAllergyError, AthenaMedicationError, ElationLabError)):
         code = {"disabled": "unavailable", "invalid_response": "response_invalid",
             "connection_changed": "binding_changed", "access_denied": "binding_changed",
             "scope_changed": "binding_changed", "connector_disabled": "unavailable", "provider_throttled": "rate_limited",
@@ -740,7 +765,7 @@ def verify(s, box, actor, account_id, *, key, connection_id, binding_sha256, obs
     _current(s, parent)
     parent_snap = _snapshot(s, parent)
     payload = SnapshotPayload.model_validate(parent_snap.payload)
-    if not isinstance(payload.public, (WindowObservation, TebraWindowObservation)) or isinstance(payload.private, (FhirPrivateSnapshot, AthenaPrivateSnapshot, LabPrivateSnapshot)):
+    if not isinstance(payload.public, (WindowObservation, TebraWindowObservation)) or isinstance(payload.private, (FhirPrivateSnapshot, AthenaPrivateSnapshot, AthenaMedicationPrivateSnapshot, LabPrivateSnapshot)):
         raise ws.WorkspaceError("ehr_read_source_invalid")
     original = next((item for item in payload.private.items if str(item.handle) == item_handle), None)
     if (parent_snap.source_sha256 != observation_sha256 or original is None
@@ -1058,7 +1083,7 @@ def source_content(observation):
     value = observation.model_dump(mode="json") if hasattr(observation, "model_dump") else observation
     if value["kind"] == "verified_lab_report":
         return value["item"]["source_content"]
-    if (value.get("protocol"), value["kind"]) in (("fhir", "fhir_medications"), ("core", "core_allergies")):
+    if (value.get("protocol"), value["kind"]) in (("fhir", "fhir_medications"), ("core", "core_allergies"), ("core", "core_medications")):
         return value["item"]["source_content"]
     item, patient = value["item"], value["item"]["patient"]
     if value["kind"] == "verified_problems":
@@ -1136,8 +1161,8 @@ def medication_source_content(value):
 
 
 def _review_body(wid, expected, key, observation_id, observation_sha256, item_handle, item_sha256,
-                 reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source, provider=None, protocol=None):
-    return dict(**_provider_fields(provider, protocol), **({} if protocol in ("fhir", "core") else {"reviewed_visit": reviewed_visit}), workspace_id=wid, expected_revision=expected, idempotency_key=key,
+                 reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source, provider=None, protocol=None, clinical_scope=None):
+    return dict(**_provider_fields(provider, protocol, clinical_scope), **({} if protocol in ("fhir", "core") else {"reviewed_visit": reviewed_visit}), workspace_id=wid, expected_revision=expected, idempotency_key=key,
         observation_id=observation_id, observation_sha256=observation_sha256, item_handle=item_handle,
         item_sha256=item_sha256, reviewed_patient_identity=reviewed_patient_identity,
         reviewed_exact_snapshot=reviewed_exact_snapshot, reviewed_untrusted_source=reviewed_untrusted_source)
@@ -1155,16 +1180,16 @@ def historical_source(s, w, entry_id):
         raise ws.WorkspaceError("ehr_read_source_unavailable", 404)
     snap = s.get(EhrReadSnapshot, review.snapshot_id)
     read = s.get(EhrReadRequest, snap.observation_id) if snap is not None else None
-    if read is None or snap is None or read.kind not in ("verify", "problems", "medications", "fhir_medications", "core_allergies", "lab_report"):
+    if read is None or snap is None or read.kind not in ("verify", "problems", "medications", "fhir_medications", "core_allergies", "core_medications", "lab_report"):
         raise ws.WorkspaceError("ehr_read_source_invalid")
     _snapshot(s, read)
     public = SnapshotPayload.model_validate(snap.payload).public
-    if not isinstance(public, (VerifiedObservation, TebraVerifiedObservation, ProblemsObservation, MedicationsObservation, FhirMedicationsObservation, AthenaAllergiesObservation, LabReportObservation)):
+    if not isinstance(public, (VerifiedObservation, TebraVerifiedObservation, ProblemsObservation, MedicationsObservation, FhirMedicationsObservation, AthenaAllergiesObservation, AthenaMedicationsObservation, LabReportObservation)):
         raise ws.WorkspaceError("ehr_read_source_invalid")
     content = source_content(public)
     body = _review_body(w.id, review.expected_revision, review.idempotency_key, read.id,
         review.observation_sha256, review.item_handle, review.item_sha256, review.reviewed_visit,
-        review.reviewed_patient_identity, review.reviewed_exact_snapshot, review.reviewed_untrusted_source, review.command_provider, review.command_protocol)
+        review.reviewed_patient_identity, review.reviewed_exact_snapshot, review.reviewed_untrusted_source, review.command_provider, review.command_protocol, review.command_clinical_scope)
     if ((review.box_id, review.owner_id, review.workspace_id, review.patient_link_id, review.workspace_revision)
             != (w.box_id, w.owner_id, w.id, w.patient_link_id, entry.revision)
             or (snap.box_id, snap.owner_id, read.box_id, read.owner_id) != (w.box_id, w.owner_id, w.box_id, w.owner_id)
@@ -1176,9 +1201,10 @@ def historical_source(s, w, entry_id):
             or review.request_hash != payload_hash(body) or entry.request_hash != review.request_hash
             or entry.idempotency_key != review.idempotency_key or review.workspace_revision != review.expected_revision + 1
             or review.command_protocol != getattr(public, "protocol", None)
+            or review.command_clinical_scope != getattr(public, "clinical_scope", None)
             or (review.reviewed_visit is not None if review.command_protocol in ("fhir", "core") else review.reviewed_visit is not True)
             or not all((review.reviewed_patient_identity, review.reviewed_exact_snapshot, review.reviewed_untrusted_source))
-            or read.kind in ("fhir_medications", "core_allergies", "lab_report") and (read.workspace_id, read.patient_link_id) != (w.id, w.patient_link_id)):
+            or read.kind in ("fhir_medications", "core_allergies", "core_medications", "lab_report") and (read.workspace_id, read.patient_link_id) != (w.id, w.patient_link_id)):
         raise ws.WorkspaceError("ehr_read_source_invalid")
     return entry
 
@@ -1229,6 +1255,7 @@ def _selection_receipt(s, w, read, review, entry):
     return dict(entry_id=entry.id, entry_revision=entry.revision, workspace=workspace,
         transport=read.transport, **({"provider": s.get(EhrReadBinding, read.binding_id).vendor} if s.get(EhrReadBinding, read.binding_id).vendor in ("tebra", "athena") else {}),
         **({"protocol": review.command_protocol} if review.command_protocol in ("fhir", "core") else {}),
+        **({"clinical_scope": review.command_clinical_scope} if review.command_clinical_scope is not None else {}),
         source=dict(entry_id=entry.id, source_sha256=review.source_sha256, content_sha256=review.content_sha256),
         request_sha256=review.request_hash, source_withheld=withheld)
 
@@ -1236,7 +1263,7 @@ def _selection_receipt(s, w, read, review, entry):
 def select_review(s, box, actor, wid, *, expected, key, observation_id, observation_sha256,
                   item_handle, item_sha256, reviewed_visit, reviewed_patient_identity,
                   reviewed_exact_snapshot, reviewed_untrusted_source, port=None, external_identity_id=None,
-                  reauthenticate=None, provider=None, protocol=None):
+                  reauthenticate=None, provider=None, protocol=None, clinical_scope=None):
     if (type(expected) is not int or expected < 1 or type(key) is not str or _KEY.fullmatch(key) is None
             or any(type(v) is not str or _DIGEST.fullmatch(v) is None for v in (observation_sha256, item_sha256))
             or (reviewed_visit is not None if protocol in ("fhir", "core") else reviewed_visit is not True)
@@ -1247,16 +1274,16 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
         reauthenticate()
     w = ws._workspace(s, box, actor, wid, writing=True)
     read = s.get(EhrReadRequest, observation_id)
-    if (read is None or read.kind not in ("verify", "problems", "medications", "fhir_medications", "core_allergies", "lab_report") or (read.box_id, read.owner_id) != (box, actor)
+    if (read is None or read.kind not in ("verify", "problems", "medications", "fhir_medications", "core_allergies", "core_medications", "lab_report") or (read.box_id, read.owner_id) != (box, actor)
             or external_identity_id is not None and read.account_id != external_identity_id):
         raise ws.WorkspaceError("ehr_read_observation_unavailable", 404)
-    _require_provider(s, read, provider, protocol)
+    _require_provider(s, read, provider, protocol, clinical_scope)
     if (protocol in ("fhir", "core") or read.kind == "lab_report") and (read.workspace_id, read.patient_link_id) != (wid, w.patient_link_id):
         raise ws.WorkspaceError("ehr_read_patient_changed")
     _identity(s, box, actor, read.account_id)
     snap = _snapshot(s, read)
     body = _review_body(wid, expected, key, observation_id, observation_sha256, item_handle, item_sha256,
-        reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source, provider, protocol)
+        reviewed_visit, reviewed_patient_identity, reviewed_exact_snapshot, reviewed_untrusted_source, provider, protocol, clinical_scope)
     request_hash = payload_hash(body)
     replay = s.scalar(select(EhrReadSourceReview).where(EhrReadSourceReview.workspace_id == wid,
         EhrReadSourceReview.idempotency_key == key))
@@ -1272,7 +1299,7 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
     if expected != w.revision:
         raise ws.WorkspaceError("workspace_revision_conflict")
     public = SnapshotPayload.model_validate(snap.payload).public
-    if (not isinstance(public, (VerifiedObservation, TebraVerifiedObservation, ProblemsObservation, MedicationsObservation, FhirMedicationsObservation, AthenaAllergiesObservation, LabReportObservation)) or observation_sha256 != snap.source_sha256
+    if (not isinstance(public, (VerifiedObservation, TebraVerifiedObservation, ProblemsObservation, MedicationsObservation, FhirMedicationsObservation, AthenaAllergiesObservation, AthenaMedicationsObservation, LabReportObservation)) or observation_sha256 != snap.source_sha256
             or str(public.item.handle) != item_handle or public.item.sha256 != item_sha256):
         raise ws.WorkspaceError("ehr_read_source_changed")
     if w.revision >= 500:
@@ -1289,7 +1316,7 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
         idempotency_key=key, request_hash=request_hash)
     s.add(entry)
     s.flush()
-    review = EhrReadSourceReview(command_provider=provider, command_protocol=protocol, workspace_id=wid, box_id=box, owner_id=actor, entry_id=entry.id,
+    review = EhrReadSourceReview(command_provider=provider, command_protocol=protocol, command_clinical_scope=clinical_scope, workspace_id=wid, box_id=box, owner_id=actor, entry_id=entry.id,
         snapshot_id=snap.id, patient_link_id=w.patient_link_id, expected_revision=expected, workspace_revision=w.revision,
         idempotency_key=key, request_hash=request_hash, observation_sha256=observation_sha256,
         item_handle=item_handle, item_sha256=item_sha256,

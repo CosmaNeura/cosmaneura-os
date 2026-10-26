@@ -50,7 +50,7 @@ def grant(s, identifier, *, current=False):
     query = select(EhrAthenaCorePatientGrant).where(EhrAthenaCorePatientGrant.id == str(identifier)).execution_options(populate_existing=True)
     row = s.scalar(query.with_for_update(read=True) if current else query)
     binding = s.get(EhrReadBinding, row.binding_id) if row else None
-    if row is None or binding is None or binding.protocol != "core":
+    if row is None or binding is None or binding.protocol != "core" or binding.clinical_scope is not None:
         raise ws.WorkspaceError("ehr_read_core_grant_unavailable")
     value = AthenaAuthorizedPatient(UUID(row.id), scope(binding), UUID(row.workspace_id), UUID(row.patient_link_id),
         row.department_id, row.department_label, row.patient_id, row.authorization_sha256, row.identity_json, row.identity_sha256)
@@ -103,7 +103,7 @@ def status(s, box, actor, account_id, *, enabled, port, reauthenticate=None):
     if not enabled or type(port) is not SyntheticAthenaAllergyReads:
         return empty
     rows = list(s.scalars(select(EhrReadBinding).where(EhrReadBinding.box_id == box, EhrReadBinding.owner_id == actor,
-        EhrReadBinding.account_id == account_id, EhrReadBinding.vendor == "athena", EhrReadBinding.protocol == "core", EhrReadBinding.state == "active")))
+        EhrReadBinding.account_id == account_id, EhrReadBinding.vendor == "athena", EhrReadBinding.protocol == "core", EhrReadBinding.clinical_scope.is_(None), EhrReadBinding.state == "active")))
     if len(rows) != 1:
         return empty
     try:

@@ -13,6 +13,14 @@ from cosmas_os.ports.ehr_reads import Digest, Protected, Window
 class ProviderCommand(Protected):
     provider: Literal["elation", "tebra", "athena"] | None = None
     protocol: Literal["fhir", "core"] | None = None
+    clinical_scope: Literal["medications"] | None = None
+
+    @field_validator("clinical_scope", mode="before")
+    @classmethod
+    def explicit_clinical_scope(cls, value):
+        if value != "medications":
+            raise ValueError("explicit_clinical_scope_required")
+        return value
 
     @field_validator("protocol", mode="before")
     @classmethod
@@ -24,8 +32,13 @@ class ProviderCommand(Protected):
     @model_validator(mode="after")
     def correct_protocol(self):
         action = getattr(self, "action", "review")
+        if self.clinical_scope is not None:
+            if (self.provider, self.protocol, self.clinical_scope) != ("athena", "core", "medications") or action not in ("status", "inspect", "resolve", "core_patients", "core_medications", "review"):
+                raise ValueError("invalid_ehr_clinical_scope")
+        elif action == "core_medications":
+            raise ValueError("explicit_medication_scope_required")
         if self.protocol == "core" or self.provider == "athena":
-            if self.protocol != "core" or self.provider != "athena" or action not in ("status", "inspect", "resolve", "core_patients", "core_allergies", "review"):
+            if self.protocol != "core" or self.provider != "athena" or action not in ("status", "inspect", "resolve", "core_patients", "core_allergies", "core_medications", "review"):
                 raise ValueError("invalid_ehr_protocol")
         elif self.protocol is not None and (self.provider != "tebra" or action not in ("status", "inspect", "resolve", "fhir_patients", "fhir_medications", "review")):
             raise ValueError("invalid_ehr_protocol")
@@ -214,6 +227,14 @@ class AthenaAllergies(AthenaContext):
     item_sha256: Digest
 
 
+class AthenaMedications(AthenaContext):
+    action: Literal["core_medications"]
+    observation_id: UUID
+    observation_sha256: Digest
+    item_handle: UUID
+    item_sha256: Digest
+
+
 class Resolve(ProviderCommand):
     action: Literal["resolve"]
     idempotency_key: IdempotencyKey
@@ -232,7 +253,7 @@ class Install(ProviderCommand):
     idempotency_key: IdempotencyKey
 
 
-EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | LabRead | Inspect | Resolve | Install | FhirPatients | FhirMedications | AthenaPatients | AthenaAllergies, Field(discriminator="action")])
+EHR_COMMAND = TypeAdapter(Annotated[Status | Observe | Verify | Problems | Medications | LabRead | Inspect | Resolve | Install | FhirPatients | FhirMedications | AthenaPatients | AthenaAllergies | AthenaMedications, Field(discriminator="action")])
 
 
 class ReviewEhr(ProviderCommand):
