@@ -3,6 +3,7 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_EHR_READ_ENABLED','true');});
 import {AthenaMedicationMount} from './AthenaMedicationMount';
+import {athenaMedicationApi,type AthenaMedicationCoreReceipt} from './athena-medication-api';
 import golden from './__fixtures__/athena-medication-source.json';
 import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
 import {createHandoffReviewTestRecovery} from './handoff-review-test-recovery';
@@ -26,14 +27,14 @@ afterEach(async()=>{if(root){await act(async()=>root!.unmount());root=undefined;
 it.skipIf(!base)('restores an exact clinical read after reload and preserves Chief directions through actual signed custody and grant withdrawal',async()=>{
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);vi.stubEnv('VITE_API_BASE',base!.origin);
  vi.stubGlobal('ArrayBuffer',structuredClone(new ArrayBuffer(0)).constructor);vi.stubGlobal('Uint8Array',structuredClone(new Uint8Array(0)).constructor);
- let dropped=false;const wire:{path:string;action?:string;key?:string;provider?:string;protocol?:string;clinical_scope?:string}[]=[];
+ let dropped=false,savedMedication:AthenaMedicationCoreReceipt|undefined;const wire:{path:string;action?:string;key?:string;provider?:string;protocol?:string;clinical_scope?:string}[]=[];
  vi.stubGlobal('fetch',async(input:RequestInfo|URL,init?:RequestInit)=>{
   const url=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url);if(url.origin!==base!.origin)throw new Error('External request rejected by synthetic Athena lab.');
   let options=init;if(init?.signal){const c=transferableAbortController(),signal=init.signal,abort=()=>c.abort();signal.addEventListener('abort',abort,{once:true});if(signal.aborted)abort();abortCleanup.push(()=>signal.removeEventListener('abort',abort));options={...init,signal:c.signal};}
   const body=init?.method==='POST'?JSON.parse(String(init.body)) as {action?:string;idempotency_key?:string;provider?:string;protocol?:string;clinical_scope?:string}:null;
   wire.push({path:url.pathname,action:body?.action,key:body?.idempotency_key,provider:body?.provider,protocol:body?.protocol,clinical_scope:body?.clinical_scope});
   const request=realFetch(input,options);pending.add(request);
-  try{const response=await request;if(body?.action==='core_medications'&&!dropped&&response.ok){await response.arrayBuffer();dropped=true;throw new Error('Invented lost success response');}return response;}finally{pending.delete(request);}
+  try{const response=await request;if(body?.action==='core_medications'&&!dropped&&response.ok){savedMedication=await response.json() as AthenaMedicationCoreReceipt;dropped=true;throw new Error('Invented lost success response');}return response;}finally{pending.delete(request);}
  });
  const packet=await (await realFetch(base!.origin+'/lab/state')).json() as {workspace:Workspace;team:ProviderTeam;token:string;patient_name:string};
  const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>packet.token};
@@ -96,8 +97,11 @@ it.skipIf(!base)('restores an exact clinical read after reload and preserves Chi
  expect(counts.provider_calls).toBe(2);expect(wire.filter(row=>row.action==='core_patients')).toHaveLength(1);expect(wire.filter(row=>row.action==='core_medications')).toHaveLength(1);
  expect(wire.find(row=>row.action==='resolve')?.key).toBe(read.key);
  expect(wire.some(row=>/ask|model-work/.test(row.path))).toBe(false);
- expect(wire.filter(row=>row.path==='/connections/ehr/reads'||row.path.endsWith('/ehr-read/review')).every(row=>row.provider==='athena'&&row.protocol==='core'&&row.clinical_scope==='medications')).toBe(true);
  await realFetch(base!.origin+'/lab/revoke',{method:'POST',body:'{}'});
+ expect(savedMedication?.observation.kind).toBe('core_medications');
+ await expect(athenaMedicationApi.inspect(identity,savedMedication!)).rejects.toMatchObject({status:409,code:'ehr_read_core_medication_grant_changed'});
+ expect(wire.filter(row=>row.action==='inspect')).toHaveLength(1);
+ expect(wire.filter(row=>row.path==='/connections/ehr/reads'||row.path.endsWith('/ehr-read/review')).every(row=>row.provider==='athena'&&row.protocol==='core'&&row.clinical_scope==='medications')).toBe(true);
  const revoked=await workspaceApi.read(identity,packet.workspace.id);
  const entry=revoked.entries.find(e=>e.id===session.getSnapshot().selectedSource)!;
  expect(entry.ehr_source_state).toBe('unavailable');expect(entry.content).toBe('');
@@ -107,5 +111,5 @@ it.skipIf(!base)('restores an exact clinical read after reload and preserves Chi
  expect(failures).toEqual([]);
  const finalCounts=await (await realFetch(base!.origin+'/lab/counts')).json();expect(finalCounts).toEqual(counts);
  const fsName='node:fs/promises';const fs=await import(/* @vite-ignore */fsName) as {writeFile:(path:string,value:string)=>Promise<void>};
- await fs.writeFile(env!.COSMAS_ATHENA_MEDICATION_UI_LAB_REPORT!,JSON.stringify({passed:true,screenshots:0,...counts,lossless_clinical_section:true,explicit_medication_scope:true,lost_response_recovered:true,wrong_protocol_withheld:true,reload_did_not_resend:true,draft_preserved:true,revoked_source_withheld:true,wire},null,2));
+ await fs.writeFile(env!.COSMAS_ATHENA_MEDICATION_UI_LAB_REPORT!,JSON.stringify({passed:true,screenshots:0,...counts,lossless_clinical_section:true,explicit_medication_scope:true,withdrawn_grant_code_preserved:true,lost_response_recovered:true,wrong_protocol_withheld:true,reload_did_not_resend:true,draft_preserved:true,revoked_source_withheld:true,wire},null,2));
 },90000);

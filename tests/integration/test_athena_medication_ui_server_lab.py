@@ -9,7 +9,9 @@ from pathlib import Path
 from threading import Thread
 
 from sqlalchemy import func, select
-from tests.integration.test_athena_medication_ehr import athena_medication_case as _athena_medication_case
+from tests.integration.test_athena_medication_ehr import (
+    athena_medication_case as _athena_medication_case,
+)
 from tests.integration.test_athena_medication_ehr import revoke
 from tests.integration.test_athena_medication_ehr import signed_workspace as _signed_workspace
 
@@ -79,6 +81,7 @@ def test_signed_core_ui_restores_one_medication_read_and_prepares_existing_chief
         evidence = json.loads(report.read_text())
         assert evidence["passed"] and evidence["screenshots"] == 0
         assert evidence["lossless_clinical_section"] and evidence["explicit_medication_scope"]
+        assert evidence["withdrawn_grant_code_preserved"]
         assert evidence["provider_calls"] == 2
         assert evidence["model_admissions"] == initial_models
         assert len(f.provider.calls) == 2
