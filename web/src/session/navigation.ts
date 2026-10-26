@@ -25,7 +25,8 @@ export class WorkspaceNavigation {
     return {page:practiceOpen?'work':settingsOpen?'settings':practicePage,...(practicePage==='notebook'&&workspace?{workspaceId:workspace.id,helper:selected,material:mobilePanel}:{})};
   };
   goHome(context:NavigationContext){
-    const {settingsOpen}=this.session.getSnapshot();
+    const {settingsOpen,pending}=this.session.getSnapshot();
+    if(pending){this.session.setError('Finish or check the current action before going back. Your text is retained.');return;}
     const {setPracticeOpen,setSettingsOpen,setPracticePage}=this.session;
     const {scheduledDraftSave}=this.session.recovery;
     const {viewNavigationLocked,captureNavigationLocked,captureDraftLocked}=context;

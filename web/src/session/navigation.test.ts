@@ -137,3 +137,19 @@ describe('browser and native history navigation',()=>{
     f.session.setRecordingTransition(true);expect(await f.session.navigation.followHistory({page:'notebook',workspaceId:workspace.id,helper:'chief'},f.host,f.conversation)).toBe(false);expect(f.session.getSnapshot().practicePage).toBe('home');
   });
 });
+
+
+it('keeps a retained save and current route on Home until that exact operation is settled',()=>{
+  const session=new WorkspaceSession();open(session);const host=context(session);
+  const pending={type:'entry' as const,body:{kind:'scratchpad' as const,content:'Exact retained note',expected_revision:1,idempotency_key:'invented-retained-note'}};
+  session.setPending(pending);session.models.updateThought('Keep this independent Chief draft');
+  const before=session.navigation.route(),sequence=session.navigation.sequence.current;
+  const flush=vi.fn(async()=>{});session.recovery.scheduledDraftSave.current={run:flush,cancel:()=>{},drain:async()=>{}};
+  session.navigation.goHome(host);
+  expect(session.navigation.route()).toEqual(before);expect(session.navigation.sequence.current).toBe(sequence);
+  expect(session.getSnapshot().pending).toBe(pending);expect(session.getSnapshot().thought).toBe('Keep this independent Chief draft');
+  expect(host.minimizeRecording).not.toHaveBeenCalled();expect(flush).not.toHaveBeenCalled();
+  session.setPending(null);session.navigation.goHome(host);
+  expect(session.getSnapshot().practicePage).toBe('home');expect(session.getSnapshot().thought).toBe('Keep this independent Chief draft');
+  expect(host.minimizeRecording).toHaveBeenCalledOnce();expect(flush).toHaveBeenCalledOnce();
+});
