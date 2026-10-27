@@ -25,12 +25,14 @@ async function connect(){
  await wait(()=>expect(confirmation()?.matches(':disabled')).toBe(false));await act(async()=>confirmation()!.click());expect(confirmation()?.checked).toBe(true);await click('Save visit connection');
 }
 beforeEach(async()=>{
+ // UTC has crossed midnight while the Athena practice is still on October 26.
+ vi.setSystemTime(new Date('2026-10-27T00:30:00Z'));
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();sessionStorage.clear();localStorage.setItem(PRESENTATION_KEY,'messages');history.replaceState(null,'','#cosmas/home');
  window.matchMedia=vi.fn().mockReturnValue({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()});window.scrollTo=vi.fn();HTMLElement.prototype.scrollIntoView=vi.fn();await installFixtures(true);vi.spyOn(workspaceApi,'ask');vi.spyOn(workspaceApi,'append');
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
  await wait(()=>expect(host.querySelector<HTMLButtonElement>('.messages-row')?.disabled).toBe(false));await act(async()=>host.querySelector<HTMLButtonElement>('.messages-row')!.click());await wait(()=>expect(question()?.disabled).toBe(false));
 });
-afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();history.replaceState(null,'','/');});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.useRealTimers();vi.unstubAllGlobals();history.replaceState(null,'','/');});
 it('opens the shared Athena task from Chief and Settings while keeping the exact draft and one host',async()=>{
  await draft('Keep my Chief directions verbatim.');const composer=question();await click('Details');await click('Find or connect an Athena visit');
  await wait(()=>expect(button('Check connection status')).toBeDefined());const task=host.querySelector('[aria-label="Find or connect an Athena visit"]');expect(task?.textContent).toContain('Jordan');expect(composer.closest('[hidden]')).not.toBeNull();

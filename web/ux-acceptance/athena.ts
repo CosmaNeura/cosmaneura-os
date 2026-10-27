@@ -6,8 +6,8 @@ import {validateAthenaVisitLinkCommand,type AthenaVisitLinkCommand} from '../src
 /** Invented, tab-local Core receiver. No request leaves this fixture. */
 export async function athenaRehearsal(storageKey:string,reset=false,openWorkspace?:()=>{workspace_id:string;appointment_id:string}){
  const key=storageKey+':athena';
- type Entry={hash:string;operation:'link'|'unlink'};
- const saved: {linked:boolean;lost:string[];commands:[string,Entry][]}=reset?{linked:false,lost:[],commands:[]}:JSON.parse(sessionStorage.getItem(key)??'{"linked":false,"lost":[],"commands":[]}');
+ type Entry={hash:string;operation:'link'|'unlink';day?:string};
+ const saved: {linked:boolean;linkedDay?:string;lost:string[];commands:[string,Entry][]}=reset?{linked:false,lost:[],commands:[]}:JSON.parse(sessionStorage.getItem(key)??'{"linked":false,"lost":[],"commands":[]}');
  const ledger=new Map(saved.commands),persist=()=>sessionStorage.setItem(key,JSON.stringify({...saved,commands:[...ledger]}));persist();
  const connection=structuredClone(fixture.lookup.response.athena_visit_link.connection);connection.practice_label='Local example — invented Athena practice';
  const {connection_sha256:_oldConnection,...c}=connection;connection.connection_sha256=await coreDigest(c);
@@ -26,7 +26,10 @@ export async function athenaRehearsal(storageKey:string,reset=false,openWorkspac
   if(init?.method!=='POST'||typeof init.body!=='string')return response({detail:'invalid_core_connection_request'},422);
   const command=JSON.parse(init.body),action=command.action as string;
   stats.actions.push({action,key:command.command_key??null,hash:command.command_sha256??null,nonce:command.request_nonce});
-  const checked_at=new Date().toISOString(),day=command.source?.start_date??command.start_date??command.window?.start_date??new Date().toISOString().slice(0,10),{source,encounter}=await projection(day);
+  // Open/status commands have no date window. Retain their selected visit date
+  // across local/UTC midnight and receiver reload instead of moving the visit.
+  const retainedDay=action==='athena_visit_status'?ledger.get(command.command_key)?.day:saved.linkedDay;
+  const checked_at=new Date().toISOString(),day=command.source?.start_date??command.start_date??command.window?.start_date??retainedDay??new Date().toISOString().slice(0,10),{source,encounter}=await projection(day);
   if(action==='open'&&openWorkspace){
    validateCoreCommand(command);
    if(!saved.linked||command.connection_sha256!==connection.connection_sha256||command.appointment_ref!==encounter.appointment.appointment_ref||command.source_sha256!==encounter.source_sha256)return response({detail:'core_connection_changed'},409);
@@ -57,7 +60,7 @@ export async function athenaRehearsal(storageKey:string,reset=false,openWorkspac
     link_ref:prior?fixture.link.response.athena_visit_link.link_ref:null,command_sha256:request.command_sha256,operation:prior?.operation??null,applied:!!prior});
   }else{
    const prior=ledger.get(request.command_key!);if(prior&&prior.hash!==digest)return response({detail:'core_connection_changed'},409);
-   ledger.set(request.command_key!,{hash:digest,operation});saved.linked=operation==='link';persist();
+   ledger.set(request.command_key!,{hash:digest,operation,day});saved.linked=operation==='link';if(saved.linked)saved.linkedDay=day;persist();
    Object.assign(base,{state:operation==='link'?'linked':'removed',encounter:operation==='link'?encounter:null,link_ref:fixture.link.response.athena_visit_link.link_ref,plan_sha256:plan,command_sha256:digest,operation,applied:true});
    const scenario=new URLSearchParams(location.search).get('scenario');if(scenario===`athena-lost-${operation}`&&!saved.lost.includes(operation)){saved.lost.push(operation);persist();throw new Error('Invented lost Athena mutation response');}
   }
