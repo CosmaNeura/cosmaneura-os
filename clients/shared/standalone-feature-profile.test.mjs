@@ -11,6 +11,7 @@ const standalone={VITE_WORKSPACE_FEATURE_PROFILE:STANDALONE_FEATURE_PROFILE,
   VITE_WORKSPACE_HOSTED_CLIENT:'web',VITE_WORKSPACE_DATA_MODE:'synthetic',
   VITE_WORKSPACE_HOSTED_API_ORIGIN:'https://api.example.invalid',VITE_API_BASE:'https://api.example.invalid',
   VITE_WORKSPACE_WEB_ORIGIN:'https://workspace.example.invalid',VITE_CLERK_PUBLISHABLE_KEY:'pk_test_invented_fixture',
+  VITE_WORKSPACE_ORGANIZATION_ID:'org_invented_standalone',
   VITE_COSMANEURA_WEB_ORIGIN:'',VITE_CAPTURE_UPLOAD_ORIGINS:'',VITE_WORKSPACE_CAPTURE_MODE:'disabled'};
 const platformFlags=['VITE_CORE_CONNECTION_ENABLED','VITE_CORE_APPOINTMENT_SETUP_ENABLED',
   'VITE_COSMANEURA_RECORD_ENABLED','VITE_ATHENA_CONNECTION_ENABLED','VITE_ATHENA_VISIT_LINK_ENABLED',
@@ -41,6 +42,7 @@ test('standalone keeps own notes and passive connection guidance while closing u
     assert.equal(manifest.platformAccess,'disabled');assert.equal(manifest.athenaAccess,'disabled');
     assert.equal(manifest.coreWebOrigin,'');assert.deepEqual(manifest.captureUploadOrigins,[]);
     assert.equal(validateBetaFeatureManifest(manifest),manifest);
+    assert.equal(manifest.organizationId,client==='web'?standalone.VITE_WORKSPACE_ORGANIZATION_ID:undefined);
     if(client!=='web'){
       const expected={client,apiOrigin:standalone.VITE_API_BASE,coreWebOrigin:'',captureUploadOrigins:[],microphoneCapture:false,
         renewableNativeCapture:true,nativeRendererRecovery:true};
@@ -62,6 +64,9 @@ test('standalone rejects stale Core, capture, local-auth bypass and broader data
     {VITE_WORKSPACE_DATA_MODE:'authorized_beta'},{VITE_WORKSPACE_DATA_MODE:undefined},
     {VITE_WORKSPACE_AUTHENTICATED_ENABLED:'false'},{VITE_DESKTOP_SYNTHETIC_ENABLED:'true'},
     {VITE_WORKSPACE_APPLE_LOCAL_TRANSPORT_ENABLED:'true'},{VITE_CLERK_PUBLISHABLE_KEY:''},
+    {VITE_WORKSPACE_ORGANIZATION_ID:undefined},{VITE_WORKSPACE_ORGANIZATION_ID:''},
+    {VITE_WORKSPACE_ORGANIZATION_ID:'org_bad space'},{VITE_WORKSPACE_ORGANIZATION_ID:'org_'+'x'.repeat(252)},
+    {VITE_WORKSPACE_ORGANIZATION_ID:'org_invented\n'},
     {VITE_SCRIBE_UNREVIEWED_ENABLED:'true'},{VITE_MESSAGES_ENABLED:'false'}])
     assert.throws(()=>resolveBetaFeatureProfile({...standalone,...change}));
   for(const host of ['app.cosmaneura.com','staging-app.cosmaneura.com','chat.cosmaneura.com','staging-chat.cosmaneura.com']){
@@ -76,7 +81,7 @@ test('standalone evidence rejects missing, reordered or inflated feature claims'
     {disabledFlags:[...manifest.disabledFlags].reverse()},{enabledFlags:[...manifest.enabledFlags,'VITE_CORE_CONNECTION_ENABLED']},
     {authentication:'email_only'},{platformAccess:'enabled'},{athenaAccess:'read_only'},
     {coreWebOrigin:'https://core.example.invalid'},{captureUploadOrigins:['https://uploads.example.invalid']},
-    {profile:'operational-beta-v1'},{extra:true}])assert.throws(()=>validateBetaFeatureManifest({...manifest,...change}));
+    {organizationId:undefined},{organizationId:'invalid'},{profile:'operational-beta-v1'},{extra:true}])assert.throws(()=>validateBetaFeatureManifest({...manifest,...change}));
 });
 
 test('ordinary Vite build emits the standalone feature values and cannot accept ambient capture promotion',async()=>{
@@ -93,6 +98,7 @@ test('ordinary Vite build emits the standalone feature values and cannot accept 
     for(const key of platformFlags)assert.equal(compiled.default[key],'false',key);
     for(const key of STANDALONE_FEATURE_FLAGS)assert.equal(compiled.default[key],'true',key);
     assert.equal(compiled.capture,'false');
+    assert.equal(compiled.default.VITE_WORKSPACE_ORGANIZATION_ID,standalone.VITE_WORKSPACE_ORGANIZATION_ID);
     const manifest=JSON.parse(result.output.find(item=>item.fileName==='cosmas-beta-features.json').source);
     assert.deepEqual(manifest,resolveBetaFeatureProfile(standalone).manifest);
     process.env.VITE_WORKSPACE_CAPTURE_ENABLED='true';

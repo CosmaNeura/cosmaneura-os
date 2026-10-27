@@ -32,6 +32,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
       VITE_API_BASE:client==='desktop'?'app://cosmas/api':desktop.apiOrigin,
       VITE_WORKSPACE_WEB_ORIGIN:client==='web'?webOrigin:'',
       VITE_CLERK_PUBLISHABLE_KEY:desktop.publishableKey,
+      ...(standalone&&client==='web'?{VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId}:{}),
       VITE_COSMANEURA_WEB_ORIGIN:staging?'':coreWebOrigin,
       VITE_CAPTURE_UPLOAD_ORIGINS:staging?'':captureUploadOrigins.join(','),
       VITE_WORKSPACE_CAPTURE_MODE:standalone||staging?'disabled':client==='apple'?'ios_native':'browser_microphone',
@@ -41,7 +42,8 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
   const webArgs=Object.fromEntries(['VITE_CLERK_PUBLISHABLE_KEY','VITE_WORKSPACE_HOSTED_API_ORIGIN',
     'VITE_WORKSPACE_WEB_ORIGIN','VITE_WORKSPACE_DATA_MODE','VITE_COSMANEURA_WEB_ORIGIN',
     'VITE_CAPTURE_UPLOAD_ORIGINS','VITE_WORKSPACE_CAPTURE_MODE'].map(key=>[key,builds.web.env[key]]));
-  if(standalone)Object.assign(webArgs,{VITE_WORKSPACE_FEATURE_PROFILE:STANDALONE_FEATURE_PROFILE,VITE_MESSAGES_ENABLED:'true'});
+  if(standalone)Object.assign(webArgs,{VITE_WORKSPACE_FEATURE_PROFILE:STANDALONE_FEATURE_PROFILE,VITE_MESSAGES_ENABLED:'true',
+    VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId});
   return {
     'desktop-identity.json':desktop,
     'apple-identity.json':apple,

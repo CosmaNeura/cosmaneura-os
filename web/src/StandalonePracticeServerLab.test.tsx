@@ -31,6 +31,7 @@ it.skipIf(!base)('admits the standalone renderer and exercises its owned practic
     VITE_WORKSPACE_HOSTED_CLIENT:'web',VITE_WORKSPACE_DATA_MODE:'synthetic',
     VITE_WORKSPACE_HOSTED_API_ORIGIN:logical,VITE_API_BASE:logical,VITE_WORKSPACE_WEB_ORIGIN:page,
     VITE_CLERK_PUBLISHABLE_KEY:'pk_test_invented_lab_only',VITE_COSMANEURA_WEB_ORIGIN:'',
+    VITE_WORKSPACE_ORGANIZATION_ID:'org_invented_lab_only',
     VITE_CAPTURE_UPLOAD_ORIGINS:'',VITE_WORKSPACE_CAPTURE_MODE:'disabled'});
   for(const [key,value] of Object.entries(profile.env))vi.stubEnv(key,value);
   const originalWindow=window;

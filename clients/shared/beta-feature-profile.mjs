@@ -90,6 +90,11 @@ function resolveProfile(input, checkPublishableKey) {
   const hosted = resolveHostedWorkspace(env);
   if (!hosted) fail('hosted identity, data mode or origin configuration is incomplete or inconsistent');
   if (standalone) {
+    const organization = env.VITE_WORKSPACE_ORGANIZATION_ID;
+    if (client === 'web' && (typeof organization !== 'string' || organization !== organization.trim()
+        || !/^org_[A-Za-z0-9_]{1,251}$/.test(organization))) {
+      fail('standalone web requires its explicit reviewed organization');
+    }
     for (const origin of [hosted.apiOrigin, ...(client === 'web' ? [hosted.pageOrigin] : [])]) {
       if (platformHosts.has(new URL(origin).hostname)) fail('standalone practice requires dedicated CosmaBot API and web origins');
     }
@@ -99,6 +104,7 @@ function resolveProfile(input, checkPublishableKey) {
     set(env, 'VITE_WORKSPACE_CAPTURE_MODE', 'disabled');
     for (const key of captureFlags) set(env, key, 'false');
     return {env: Object.freeze(env), manifest: {version: 1, profile: STANDALONE_FEATURE_PROFILE, ...hosted,
+      ...(client === 'web' ? {organizationId: env.VITE_WORKSPACE_ORGANIZATION_ID} : {}),
       enabledFlags: [...STANDALONE_FEATURE_FLAGS], disabledFlags: [...knownGates].filter(key => env[key] === 'false'),
       authentication: 'verified_hosted_identity', platformAccess: 'disabled',
       captureMode: 'disabled', captureUploadOrigins: [], coreWebOrigin: '', athenaAccess: 'disabled'}};
@@ -137,6 +143,7 @@ export function validateBetaFeatureManifest(manifest) {
     VITE_WORKSPACE_HOSTED_CLIENT: manifest.client, VITE_WORKSPACE_DATA_MODE: manifest.dataMode,
     VITE_WORKSPACE_HOSTED_API_ORIGIN: manifest.apiOrigin, VITE_API_BASE: manifest.apiBase,
     VITE_WORKSPACE_WEB_ORIGIN: manifest.client === 'web' ? manifest.pageOrigin : '',
+    VITE_WORKSPACE_ORGANIZATION_ID: manifest.organizationId,
     VITE_WORKSPACE_CAPTURE_MODE: manifest.captureMode,
     VITE_CAPTURE_UPLOAD_ORIGINS: manifest.captureUploadOrigins.join(','),
     VITE_COSMANEURA_WEB_ORIGIN: manifest.coreWebOrigin,

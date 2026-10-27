@@ -24,11 +24,14 @@ test('standalone preparation emits every client and hosted build argument under 
     assert.equal(env.VITE_WORKSPACE_AUTHENTICATED_ENABLED,'true');
     assert.equal(env.VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED,'false');assert.equal(env.VITE_MESSAGES_ENABLED,'true');
     assert.equal(env.VITE_CONNECTION_ONBOARDING_ENABLED,'true');
+    assert.equal(env.VITE_WORKSPACE_ORGANIZATION_ID,client==='web'?identity.organizationId:undefined);
+    assert.equal(proof.clients[client].organizationId,client==='web'?identity.organizationId:undefined);
     assert.equal(validateBetaFeatureManifest(proof.clients[client]),proof.clients[client]);
   }
   assert.equal(files['web-build-arguments.json'].VITE_WORKSPACE_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE);
   assert.equal(files['web-build-arguments.json'].VITE_WORKSPACE_CAPTURE_MODE,'disabled');
   assert.equal(files['web-build-arguments.json'].VITE_MESSAGES_ENABLED,'true');
+  assert.equal(files['web-build-arguments.json'].VITE_WORKSPACE_ORGANIZATION_ID,identity.organizationId);
   assert.equal(files['identity-bindings.json'].native_feature_profile,STANDALONE_FEATURE_PROFILE);
   assert.equal(files['identity-bindings.json'].core_web_origin,'');
   assert.equal(proof.identity_sha256,files['identity-bindings.json'].identity_sha256);

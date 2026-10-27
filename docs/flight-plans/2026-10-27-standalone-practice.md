@@ -76,6 +76,21 @@ An existing application audience can therefore be reused without changing
 global Clerk claims or introducing named JWT templates. Actual signed sessions
 must still be qualified; a dashboard configuration review is not a login test.
 
+The standalone web build also carries the exact reviewed organization from the
+same identity input used by the native clients. Before loading work, it reads
+the signed-in user's actual memberships and requires that practice to be active.
+If another practice is selected, a single Continue button selects the verified
+membership. A completed selection request alone does not unlock the workspace.
+Token requests check the current user, session and practice before and after
+renewal so an account switch cannot reuse an old workspace's token request.
+This gate neither creates memberships nor changes Clerk configuration.
+
+The account portal and its destination must use the same production application.
+A production portal that returns to a development-configured web build requests
+a second login and shows that development application's organizations. The own
+web build uses its matching identity directly; do not use that old redirect as
+proof of standalone account access or change shared portal settings to mask it.
+
 Independent HTTPS hosting preparation belongs under `infra/standalone/`. Its
 target is a dedicated CosmaBot host with its own processes, service identities,
 data directories and loopback PostgreSQL. Public client configuration comes from

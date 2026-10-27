@@ -9,6 +9,7 @@ export type BetaFeatureManifest = {
   enabledFlags: string[]; captureMode: "synthetic" | "browser_microphone" | "ios_native" | "disabled";
   captureUploadOrigins: string[]; coreWebOrigin: string; athenaAccess: "read_only" | "disabled";
   disabledFlags?: string[]; authentication?: "verified_hosted_identity"; platformAccess?: "disabled";
+  organizationId?: string;
 };
 export function resolveBetaFeatureProfile(env: Record<string, string | undefined>): {
   env: Readonly<Record<string, string>>; manifest: BetaFeatureManifest;
