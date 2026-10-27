@@ -110,8 +110,6 @@
 .settings-account button { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
 .connection-directory-actions { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
 .connection-directory-actions button { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
-.connection-add-catalog h2 { margin:14px 0 6px; font-size:20px; }
-.connection-add-catalog h2:focus { outline:none; }
 .connection-add-catalog > p { color:var(--team-muted); font-size:14px; }
 .connection-group h3 { margin:0 0 8px; font-size:15px; }
 .connection-card-box > .connection-state-help { padding:0 12px; margin:0; }
@@ -119,3 +117,16 @@
 .connection-unavailable-row { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding:12px; }
 .connection-unavailable-row h3 { margin:0; font-size:15px; }
 .connection-record-state { color:var(--team-muted); font-weight:500; }
+
+/* The picker replaces the directory visually; editors remain mounted for drafts. */
+.connection-search { display:grid; gap:7px; margin:16px 0 10px; font-size:14px; font-weight:600; }
+.connection-search input { width:100%; min-width:0; min-height:46px; padding:11px 12px; border:1px solid var(--team-line); border-radius:10px; background:#fff; font:inherit; font-size:16px; }
+.connection-search input:focus-visible { outline:3px solid #326c59; outline-offset:2px; }
+.connection-catalog-filters { display:flex; flex-wrap:wrap; gap:6px; }
+.team-workspace .connection-catalog-filters button { min-height:44px; padding:8px 12px; border:1px solid var(--team-line); border-radius:20px; font-size:13px; white-space:normal; }
+.connection-catalog-filters button[aria-pressed="true"] { color:#fff; background:#326c59; border-color:#326c59; }
+.connection-add-catalog .connection-catalog-count { margin:12px 0 0; font-size:13px; }
+.connection-catalog-empty { padding:12px 0; color:var(--team-muted); }
+.connection-catalog-empty button { min-height:44px; }
+.team-workspace .connection-picker-service { border-bottom:1px solid var(--team-line); }
+.team-workspace .connection-picker-service:last-child { border-bottom:0; }

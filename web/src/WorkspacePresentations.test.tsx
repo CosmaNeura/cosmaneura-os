@@ -15,7 +15,7 @@ import {conversationsApi} from './conversations-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement;
 const visible=(element:Element)=>!element.closest('[hidden]');
-const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>visible(item)&&item.textContent?.trim()===name);
+const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>visible(item)&&(item.textContent?.trim()===name||item.getAttribute('aria-label')===name));
 const click=async(name:string)=>{await vi.waitFor(()=>expect(button(name)).toBeTruthy());await act(async()=>button(name)!.click());};
 const input=async(element:HTMLTextAreaElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});};
 beforeEach(async()=>{
@@ -155,7 +155,7 @@ describe('presentation parity',()=>{
     await open(mode);
     expect([...host.querySelectorAll('.conversation-review-card')].map(item=>item.getAttribute('aria-label'))).toEqual(['Visit Prep draft','Scribe draft','Follow-up draft']);
     const append=vi.spyOn(workspaceApi,'append'),ask=vi.spyOn(workspaceApi,'ask');
-    if(mode==='messages'){await click('Details');await click('Notebook and recording');}else await click('Private note');
+    if(mode==='messages'){await click('Details');await click('Choose notes or sources');await click('Notebook and recording');}else await click('Private note');
     await input(host.querySelector('#team-notebook')!,'Invented jottings for parity.');await click('Save notebook revision');
     await vi.waitFor(()=>expect(append).toHaveBeenCalledOnce());expect(append.mock.calls[0][2]).toMatchObject({expected_revision:5,kind:'scratchpad',content:'Invented jottings for parity.'});
     await vi.waitFor(()=>expect(button('Save notebook revision')!.disabled).toBe(true));
@@ -258,7 +258,7 @@ describe('presentation parity',()=>{
   it.each(['messages','workspace'] as const)('replays the same save after a lost response from %s',async mode=>{
     await open(mode);const append=workspaceApi.append;let lost=false;
     const save=vi.spyOn(workspaceApi,'append').mockImplementation(async(...args)=>{const result=await append(...args);if(!lost){lost=true;throw new WorkspaceApiError(503);}return result;});
-    if(mode==='messages'){await click('Details');await click('Notebook and recording');}else await click('Private note');
+    if(mode==='messages'){await click('Details');await click('Choose notes or sources');await click('Notebook and recording');}else await click('Private note');
     await input(host.querySelector('#team-notebook')!,'Save these invented notes exactly once.');await click('Save notebook revision');
     await vi.waitFor(()=>expect(button('Retry same save')?.disabled).toBe(false));
     if(mode==='messages'){

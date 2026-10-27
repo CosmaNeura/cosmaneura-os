@@ -65,6 +65,16 @@
 }
 
 .team-workspace .messages-details-return{max-width:100%;white-space:normal;overflow-wrap:anywhere}
+.messages-details [hidden]{display:none!important}
+.messages-details-context{overflow-wrap:anywhere}
+.messages-details section .messages-source-entry{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:52px;white-space:normal;overflow-wrap:anywhere}
+.messages-source-entry>span:first-child{min-width:0}
+.messages-source-entry small{display:block;margin-top:3px;color:var(--team-muted);font-size:13px;line-height:1.4;font-weight:400}
+.messages-source-entry>span:last-child{flex:none;font-size:24px}
+.messages-details .messages-source-choices section{padding:12px 0 0}
+.messages-details .messages-source-choices h2{color:var(--team-muted);font-size:14px;font-weight:600}
+.messages-details .messages-source-choices section button{min-height:48px;margin:0;padding:12px 4px;border:0;border-bottom:1px solid var(--team-line);border-radius:0;background:transparent;white-space:normal;overflow-wrap:anywhere;line-height:1.4}
+.messages-details .messages-source-back{min-height:44px;max-width:100%;margin:0 0 12px;white-space:normal;overflow-wrap:anywhere}
 
 .workspace-dialog-heading{position:sticky;top:0;z-index:2;display:flex;align-items:start;gap:12px;padding:16px 0 12px;margin-top:0;background:#fffdf7}
 .workspace-dialog-heading h2{min-width:0;flex:1;margin:0;overflow-wrap:anywhere}

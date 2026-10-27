@@ -41,7 +41,7 @@ it.each(['athena','atlas_md'])('retains the selected %s provider through the exi
  await click('‹ Back to connections');await wait(()=>expect(document.activeElement).toBe(host.querySelector('.settings-hub-heading h1')));expect(ehrReadApi.execute).not.toHaveBeenCalled();
 });
 it('discarding the visit picker does not later replay a vendor launch',async()=>{
- await records();await choose('tebra');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')?.disabled).toBe(false));await click('Messages');await openChat();expect(task()).toBeUndefined();await click('Details');await click('Review EHR records');await wait(()=>expect(task()?.querySelector<HTMLSelectElement>('[aria-label="Records system"]')?.value).toBe('elation'));
+ await records();await choose('tebra');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')?.disabled).toBe(false));await click('Messages');await openChat();expect(task()).toBeUndefined();await click('Details');await click('Choose notes or sources');await click('Review EHR records');await wait(()=>expect(task()?.querySelector<HTMLSelectElement>('[aria-label="Records system"]')?.value).toBe('elation'));
 });
 it('a denied opening cannot publish the requested provider or leave Connections',async()=>{
  await openChat();await click('‹ Messages');await records();vi.spyOn(workspaceApi,'team').mockRejectedValueOnce(new WorkspaceApiError(403));await choose('tebra');await wait(()=>expect(task()).toBeUndefined());expect(ehrReadApi.execute).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();

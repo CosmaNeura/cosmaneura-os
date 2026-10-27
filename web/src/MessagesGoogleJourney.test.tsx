@@ -25,7 +25,7 @@ async function click(name:string){await wait(()=>expect(button(name)?.disabled,n
 async function type(value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),value);question().dispatchEvent(new Event('input',{bubbles:true}));});}
 async function openChat(){const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(b=>visible(b)&&b.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(question()?.disabled).toBe(false));}
 const stats=()=>(window as Window&{gmailRehearsalStats?:GmailRehearsalStats}).gmailRehearsalStats!;
-async function openTask(){await click('Details');await click('Review Gmail email');await wait(()=>expect(task()).toBeDefined());await wait(()=>expect((button('Check email access')??button('Restore saved email work'))?.disabled).toBe(false));}
+async function openTask(){await click('Details');await click('Choose notes or sources');await click('Review Gmail email');await wait(()=>expect(task()).toBeDefined());await wait(()=>expect((button('Check email access')??button('Restore saved email work'))?.disabled).toBe(false));}
 async function readEmail(){await openTask();await click('Check email access');await click('Select email');await wait(()=>expect(task()?.querySelector<HTMLButtonElement>('.google-message-list button')?.disabled).toBe(false));await act(async()=>task()!.querySelector<HTMLButtonElement>('.google-message-list button')!.click());await click('Read full email');}
 async function mount(){await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));await wait(()=>expect(host.querySelector('.messages-row')).not.toBeNull());}
 beforeEach(async()=>{
@@ -37,13 +37,13 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();history.replaceState(null,'','/');});
 it('opens the existing Gmail review from Chief Details and returns the exact draft to the visible opener',async()=>{
  const ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append');await openChat();await type('Keep my exact Chief directions.');const opener=button('Details')!;
- await click('Details');await click('Review Gmail email');await wait(()=>expect(task()).toBeDefined());
+ await click('Details');await click('Choose notes or sources');await click('Review Gmail email');await wait(()=>expect(task()).toBeDefined());
  expect(host.querySelectorAll('.google-message-panel')).toHaveLength(1);expect(host.querySelector('.messages-details')).toBeNull();
  await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(button('Details')));expect(opener.isConnected).toBe(false);expect(document.activeElement?.closest('[hidden]')).toBeNull();expect(question().value).toBe('Keep my exact Chief directions.');expect(task()).toBeUndefined();
  expect(document.activeElement).not.toBe(question());expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();
 });
 it('opens the same retained Gmail task from Saved sources and returns to that origin',async()=>{
- await openChat();await type('Retain source-review directions.');await click('Details');await click('Saved sources');const opener=button('Review Gmail email');
+ await openChat();await type('Retain source-review directions.');await click('Details');await click('Choose notes or sources');await click('Saved sources');const opener=button('Review Gmail email');
  await click('Review Gmail email');await wait(()=>expect(task()).toBeDefined());const owner=host.querySelector('.google-message-panel');expect(owner).not.toBeNull();
  await click('‹ Back to saved sources');await wait(()=>expect(document.activeElement).toBe(opener));expect([...host.querySelectorAll('section[aria-label="Saved sources"]')].some(visible)).toBe(true);
  await click('Review Gmail email');expect(host.querySelectorAll('.google-message-panel')).toHaveLength(1);expect(host.querySelector('.google-message-panel')).toBe(owner);
@@ -65,7 +65,7 @@ it('returns to Chief with a durable unconfirmed request and recovers the same ke
 it('does not strand a delayed initial Gmail journal load when Back is followed by reopening',async()=>{
  await openChat();await type('Keep the draft during storage recovery.');const load=DraftJournal.prototype.load;let release!:(value:Awaited<ReturnType<typeof load>>)=>void,count=0;
  vi.spyOn(DraftJournal.prototype,'load').mockImplementation(function(this:DraftJournal,address){if(address===accountEditorAddress('google-messages')){count++;if(count===1)return new Promise(resolve=>{release=resolve;});}return load.call(this,address);});
- await click('Details');await click('Review Gmail email');await wait(()=>expect(release).toBeTypeOf('function'));await click('‹ Back to Chief of Staff');expect(question().value).toBe('Keep the draft during storage recovery.');await click('Details');await click('Review Gmail email');await act(async()=>release(null));
+ await click('Details');await click('Choose notes or sources');await click('Review Gmail email');await wait(()=>expect(release).toBeTypeOf('function'));await click('‹ Back to Chief of Staff');expect(question().value).toBe('Keep the draft during storage recovery.');await click('Details');await click('Choose notes or sources');await click('Review Gmail email');await act(async()=>release(null));
  await wait(()=>expect(button('Check email access')?.disabled).toBe(false));expect(count).toBe(1);expect(stats()).toMatchObject({lists:0,reads:0,reviews:0});expect(host.querySelectorAll('.google-message-panel')).toHaveLength(1);
 });
 it('restores the exact older reading position and current Details control without a new read mark',async()=>{
@@ -74,7 +74,7 @@ it('restores the exact older reading position and current Details control withou
  await wait(()=>expect(scroll().scrollTop).toBe(230));expect(document.activeElement).toBe(button('Details'));expect(question().value).toBe('Keep my place and draft.');expect(mark).not.toHaveBeenCalled();expect(stats()).toMatchObject({lists:0,reads:0,reviews:0});
 });
 it('cancels a deferred Gmail opening when Details is dismissed during authorization',async()=>{
- await openChat();await type('Keep the current draft.');await click('Details');const team=workspaceApi.team,prior=await team(identity);let finish!:(value:typeof prior)=>void;
+ await openChat();await type('Keep the current draft.');await click('Details');await click('Choose notes or sources');const team=workspaceApi.team,prior=await team(identity);let finish!:(value:typeof prior)=>void;
  vi.spyOn(workspaceApi,'team').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));await act(async()=>button('Review Gmail email')!.click());await wait(()=>expect(finish).toBeTypeOf('function'));await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));await act(async()=>finish(prior));expect(task()).toBeUndefined();expect(question().value).toBe('Keep the current draft.');expect(stats().reads).toBe(0);
 });
 it('ignores a retained Back callback after native suspend and resume',async()=>{
