@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID
@@ -14,6 +16,10 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://cosmas:cosmas@localhost:54329/cosmas_os"
     redis_url: str = "redis://localhost:63799/0"
     cosmas_env: str = "synth_os"
+    # Offline, independent practice proof. Never an alias for hosted beta.
+    standalone_instance_id: str = ""
+    standalone_root: str = ""
+    standalone_jwks_path: str = ""
     data_mode: Literal["synthetic", "authorized_beta"] = "synthetic"
     auth_mode: Literal["synth_headers", "clerk_jwt"] = "synth_headers"
     cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -324,6 +330,8 @@ class Settings(BaseSettings):
 
     @property
     def workspace_available(self) -> bool:
+        if self.cosmas_env == "standalone_synthetic":
+            return not self._standalone_configuration_errors()
         if self.workspace_hosted_enabled:
             return bool(
                 self.workspace_enabled and self.workspace_authenticated_enabled
@@ -470,7 +478,11 @@ class Settings(BaseSettings):
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
+        if self.cosmas_env == "standalone_synthetic":
+            return self._standalone_configuration_errors()
         errors: list[str] = []
+        if self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path:
+            errors.append("Standalone settings require the explicit standalone synthetic profile")
         if self.clerk_session_policy == "shared_staging":
             errors.extend(self.clerk_session_configuration_errors())
         if self.workspace_scheduling_enrollment_enabled:
@@ -561,6 +573,72 @@ class Settings(BaseSettings):
             return errors
 
         return errors + self._beta_configuration_errors()
+
+    def _standalone_configuration_errors(self) -> list[str]:
+        """Closed local proof profile; existing beta prerequisites remain independent."""
+        errors: list[str] = []
+        try:
+            instance = UUID(self.standalone_instance_id)
+            if instance.version != 4 or str(instance) != self.standalone_instance_id:
+                raise ValueError
+        except ValueError:
+            errors.append("Standalone instance must be a canonical UUIDv4")
+            instance = None
+        root = Path(self.standalone_root)
+        if (not self.standalone_root or not root.is_absolute()
+                or str(root) != self.standalone_root or ".." in root.parts
+                or self.blob_root != str(root / "blobs")
+                or self.standalone_jwks_path != str(root / "keys" / "jwks.json")):
+            errors.append("Standalone storage and public keys require one explicit owned root")
+        if (self.data_mode != "synthetic" or self.auth_mode != "clerk_jwt"
+                or not self.workspace_enabled or not self.workspace_authenticated_enabled
+                or not self.workspace_draft_recovery_required or self.synth_seed
+                or self.sync_worker or self.execution_backend != "celery"
+                or self.blob_backend != "local" or self.redis_url):
+            errors.append("Standalone requires authenticated synthetic mode with local storage and no queue transport")
+        try:
+            database = urlparse(self.database_url)
+            valid_database = (database.scheme == "postgresql+psycopg"
+                and database.hostname == "127.0.0.1" and database.port is not None
+                and database.username and database.password
+                and re.fullmatch(r"/cosmabot_standalone_[a-z0-9_]+", database.path)
+                and not database.query and not database.fragment and not database.params)
+        except ValueError:
+            valid_database = False
+        if not valid_database:
+            errors.append("Standalone requires an authenticated dedicated loopback PostgreSQL database")
+        # This profile is an offline signed-identity proof, not a deployed IdP.
+        if instance is not None:
+            issuer = f"https://{instance}.cosmabot.invalid"
+            if (self.clerk_issuer != issuer or self.clerk_jwks_url != issuer + "/.well-known/jwks.json"
+                    or self.clerk_audience != f"cosmabot-standalone:{instance}"
+                    or self.clerk_organization_id != "org_cosmabot_" + instance.hex
+                    or self.clerk_session_policy != "audience"):
+                errors.append("Standalone identity must use its instance-specific offline namespace")
+        errors.extend(self.workspace_authentication_errors())
+        if (not self.allowed_origins
+                or not all(self._is_workspace_origin(origin) for origin in self.allowed_origins)):
+            errors.append("Standalone origins must be explicit local workspace origins")
+        enabled_allowlist = {"workspace_enabled", "workspace_authenticated_enabled",
+            "workspace_draft_recovery_required", "workspace_apple_local_transport_enabled",
+            "workspace_desktop_local_transport_enabled"}
+        for name in type(self).model_fields:
+            if name.endswith("_enabled") and name not in enabled_allowlist and getattr(self, name):
+                errors.append("Standalone external features and background workers must remain disabled")
+                break
+        empty_prefixes = ("core_", "azure_", "google_connection_", "microsoft_connection_",
+            "scheduling_", "managed_services_config_")
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            if ((name.startswith(empty_prefixes) or name.endswith("_api_key")
+                 or name.endswith("_encryption_key")) and value):
+                errors.append("Standalone cannot contain external service addresses or credentials")
+                break
+        if (self.workspace_capture_backend != "disabled" or self.workspace_llm_backend != "disabled"
+                or self.workspace_llm_endpoint or self.compact_web_root
+                or self.workspace_native_synthetic_enabled):
+            errors.append("Standalone capture, models and alternate execution paths must be disabled")
+        return errors
 
     def clerk_session_configuration_errors(self) -> list[str]:
         if self.clerk_session_policy == "audience":

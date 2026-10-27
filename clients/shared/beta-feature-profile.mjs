@@ -3,6 +3,7 @@ import {exactHostedOrigin, resolveHostedWorkspace} from './hosted-workspace-conf
 /** One client feature set. Server/account grants and action approvals remain separate. */
 export const BETA_FEATURE_PROFILE = 'operational-beta-v1';
 export const NATIVE_STAGING_FEATURE_PROFILE = 'first-owner-staging-v1';
+export const STANDALONE_FEATURE_PROFILE = 'standalone-practice-v1';
 const stagingFlags = ['VITE_AI_ACTIVITY_ENABLED', 'VITE_WORKSPACE_ROUTINES_ENABLED'];
 export const BETA_FEATURE_FLAGS = Object.freeze([
   'VITE_AI_ACTIVITY_ENABLED', 'VITE_ATHENA_CONNECTION_ENABLED', 'VITE_ATHENA_VISIT_LINK_ENABLED',
@@ -29,11 +30,29 @@ const patientSetupFlag = 'VITE_WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED';
 // preserves existing releases; a retained native environment must opt in.
 const pilotFlags = ['VITE_MESSAGES_ENABLED', 'VITE_EHR_READ_ENABLED',
   'VITE_CALENDAR_IMPORT_ENABLED', 'VITE_MICROSOFT_MESSAGE_ENABLED'];
+// These clients use CosmaBot's own API. Provider accounts and server grants
+// remain separately configured; this list never activates an external service.
+export const STANDALONE_FEATURE_FLAGS = Object.freeze([
+  'VITE_AI_ACTIVITY_ENABLED', 'VITE_CONNECTION_ONBOARDING_ENABLED',
+  'VITE_EFAX_INBOUND_ENABLED', 'VITE_EFAX_INBOUND_SOURCE_ENABLED',
+  'VITE_FAX_INBOUND_ENABLED', 'VITE_FAX_INBOUND_SOURCE_ENABLED',
+  'VITE_INBOX_ENABLED', 'VITE_INBOX_HANDOFF_ENABLED', 'VITE_VENDOR_SETUP_ENABLED',
+  'VITE_WORKSPACE_APPOINTMENTS_ENABLED', 'VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED',
+  'VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED', 'VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED',
+  'VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED', 'VITE_WORKSPACE_ROUTINES_ENABLED',
+  'VITE_WORKSPACE_SCHEDULING_ENABLED', 'VITE_WORKSPACE_SCHEDULING_LOGIN_ENABLED',
+  'VITE_WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED', ...pilotFlags,
+]);
+// The same existing platform hosts are reserved by infra/beta/environment.
+// This rejects known collisions, not a claim that arbitrary public DNS proves
+// deployment isolation; resource ownership must also be reviewed before use.
+const platformHosts = new Set(['app.cosmaneura.com', 'staging-app.cosmaneura.com',
+  'chat.cosmaneura.com', 'staging-chat.cosmaneura.com']);
 const knownGates = new Set([patientSetupFlag, ...pilotFlags, ...BETA_FEATURE_FLAGS, ...foundations, ...forbidden, ...captureFlags,
   'VITE_WORKSPACE_NATIVE_AUTH_ENABLED', 'VITE_WORKSPACE_DESKTOP_AUTH_ENABLED']);
 const fail = message => { throw new Error(`Beta feature profile refused: ${message}`); };
 function set(env, name, value) {
-  if (env[name] !== undefined && env[name] !== '' && env[name] !== value) fail(`${name} conflicts with ${BETA_FEATURE_PROFILE}`);
+  if (env[name] !== undefined && env[name] !== '' && env[name] !== value) fail(`${name} conflicts with ${env.VITE_WORKSPACE_FEATURE_PROFILE}`);
   env[name] = value;
 }
 function uploads(value) {
@@ -50,7 +69,8 @@ export function resolveBetaFeatureProfile(input) {
 
 function resolveProfile(input, checkPublishableKey) {
   const staging = input.VITE_WORKSPACE_FEATURE_PROFILE === NATIVE_STAGING_FEATURE_PROFILE;
-  if (!staging && input.VITE_WORKSPACE_FEATURE_PROFILE !== BETA_FEATURE_PROFILE) fail(`select VITE_WORKSPACE_FEATURE_PROFILE=${BETA_FEATURE_PROFILE}`);
+  const standalone = input.VITE_WORKSPACE_FEATURE_PROFILE === STANDALONE_FEATURE_PROFILE;
+  if (!staging && !standalone && input.VITE_WORKSPACE_FEATURE_PROFILE !== BETA_FEATURE_PROFILE) fail(`select a supported VITE_WORKSPACE_FEATURE_PROFILE`);
   const env = {...input};
   // Catch stale recipes and misspelled gates instead of silently shipping partial UI.
   for (const key of Object.keys(env)) {
@@ -62,17 +82,34 @@ function resolveProfile(input, checkPublishableKey) {
   }
   set(env, 'VITE_COSMAS_ENV', 'early_adopter_beta');
   for (const key of foundations) set(env, key, 'true');
-  for (const key of BETA_FEATURE_FLAGS) set(env, key, !staging || stagingFlags.includes(key) ? 'true' : 'false');
+  for (const key of BETA_FEATURE_FLAGS) set(env, key,
+    (standalone ? STANDALONE_FEATURE_FLAGS.includes(key) : !staging || stagingFlags.includes(key)) ? 'true' : 'false');
+  if (standalone) for (const key of pilotFlags) set(env, key, 'true');
   for (const key of forbidden) set(env, key, 'false');
   // Receiver remains unqualified; ship the correspondence capability dark.
   set(env, patientSetupFlag, 'false');
   const client = env.VITE_WORKSPACE_HOSTED_CLIENT;
   if (!['web', 'desktop', 'apple'].includes(client)) fail('select the web, desktop or apple client');
   if (staging && (client === 'web' || env.VITE_WORKSPACE_DATA_MODE !== 'synthetic')) fail('first-owner staging requires a native client and synthetic data');
+  if (standalone && env.VITE_WORKSPACE_DATA_MODE !== 'synthetic') fail('standalone practice requires explicit synthetic data');
   set(env, 'VITE_WORKSPACE_NATIVE_AUTH_ENABLED', client === 'apple' ? 'true' : 'false');
   set(env, 'VITE_WORKSPACE_DESKTOP_AUTH_ENABLED', client === 'desktop' ? 'true' : 'false');
   const hosted = resolveHostedWorkspace(env);
   if (!hosted) fail('hosted identity, data mode or origin configuration is incomplete or inconsistent');
+  if (standalone) {
+    for (const origin of [hosted.apiOrigin, ...(client === 'web' ? [hosted.pageOrigin] : [])]) {
+      if (platformHosts.has(new URL(origin).hostname)) fail('standalone practice requires dedicated CosmaBot API and web origins');
+    }
+    if (checkPublishableKey && !/^pk_(test|live)_\S+$/.test(env.VITE_CLERK_PUBLISHABLE_KEY ?? '')) fail('standalone practice requires an explicit Clerk public identity');
+    set(env, 'VITE_COSMANEURA_WEB_ORIGIN', '');
+    set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', '');
+    set(env, 'VITE_WORKSPACE_CAPTURE_MODE', 'disabled');
+    for (const key of captureFlags) set(env, key, 'false');
+    return {env: Object.freeze(env), manifest: {version: 1, profile: STANDALONE_FEATURE_PROFILE, ...hosted,
+      enabledFlags: [...STANDALONE_FEATURE_FLAGS], disabledFlags: [...knownGates].filter(key => env[key] === 'false'),
+      authentication: 'verified_hosted_identity', platformAccess: 'disabled',
+      captureMode: 'disabled', captureUploadOrigins: [], coreWebOrigin: '', athenaAccess: 'disabled'}};
+  }
   if (staging) {
     set(env, 'VITE_COSMANEURA_WEB_ORIGIN', '');
     set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', '');
@@ -126,6 +163,7 @@ export function validateNativeBetaProfile(manifest, expected) {
       manifest.apiOrigin !== expected.apiOrigin || manifest.coreWebOrigin !== expected.coreWebOrigin ||
       JSON.stringify(manifest.captureUploadOrigins) !== JSON.stringify(expected.captureUploadOrigins)) fail('native and web feature/origin profiles differ');
   if (manifest.profile === NATIVE_STAGING_FEATURE_PROFILE && expected.microphoneCapture === true) fail('native capture is disabled for first-owner staging');
+  if (manifest.profile === STANDALONE_FEATURE_PROFILE && expected.microphoneCapture === true) fail('native capture is disabled for standalone practice');
   if (expected.client === 'desktop' && expected.microphoneCapture !== (manifest.captureMode === 'browser_microphone') ||
       expected.client === 'apple' && manifest.captureMode === 'ios_native' &&
       (!expected.renewableNativeCapture || !expected.nativeRendererRecovery ||

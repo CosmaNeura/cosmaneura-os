@@ -710,6 +710,8 @@ def decide(
 def _dispatch_operation(c: Container, operation: Operation) -> None:
     """Dispatch one durable pending operation without creating a replacement."""
 
+    if settings.cosmas_env == "standalone_synthetic":
+        raise PolicyDenied("standalone_operation_unavailable")
     if settings.execution_backend == "postgres_local":
         settings.validate_runtime_configuration()
         # Approval already committed the intent. The independent DB worker

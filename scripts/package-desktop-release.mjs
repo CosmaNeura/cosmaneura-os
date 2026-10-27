@@ -10,7 +10,7 @@ import {basename, dirname, extname, isAbsolute, join, relative, resolve, sep} fr
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {promisify} from 'node:util';
 import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
-import {validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
+import {STANDALONE_FEATURE_PROFILE,validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
 import {verifyNativeHelper} from '../clients/desktop/spawn-auth-helper.mjs';
 import {verifyDesktopCapturePackage,CAPTURE_HELPERS} from '../clients/desktop/native-capture-package.mjs';
 
@@ -250,9 +250,11 @@ export function validateOperationalReleaseProfile(config, manifest, info) {
       profile.dataMode!==config.dataMode || profile.apiOrigin!==config.apiOrigin || config.appVersion!==info.CFBundleShortVersionString ||
       config.buildNumber!==info.CFBundleVersion || config.installation?.bundleIdentifier!==info.CFBundleIdentifier) fail();
   if (profile.captureMode==='disabled' && (config.nativeCaptureEnabled!==false || config.microphoneCaptureEnabled===true ||
-      config.captureUploadOrigins?.length || ['cosmaneuraWebOrigin','googleConnectionClientId','googleConnectionCallbackUri',
+      config.captureUploadOrigins?.length || config.cosmaneuraWebOrigin)) fail();
+  if (profile.captureMode==='disabled' && profile.profile!==STANDALONE_FEATURE_PROFILE &&
+      ['googleConnectionClientId','googleConnectionCallbackUri',
         'microsoftConnectionTenantId','microsoftConnectionClientId','microsoftConnectionCallbackUri',
-        'schedulingGoogleClientId','schedulingGoogleCallbackUri'].some(key=>config[key]))) fail();
+        'schedulingGoogleClientId','schedulingGoogleCallbackUri'].some(key=>config[key])) fail();
   return identity;
 }
 

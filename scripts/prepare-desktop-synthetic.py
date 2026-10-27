@@ -99,14 +99,15 @@ def main():
                               captureUploadOrigins=args.capture_upload_origin,
                               microphoneCapture=args.microphone_capture)
     staging = feature_manifest is not None and feature_manifest["profile"] == _beta.NATIVE_STAGING_PROFILE
-    if staging and (not operational or data_mode != "synthetic"):
-        parser.error("First-owner staging requires the operational native identity and synthetic data.")
+    capture_disabled = feature_manifest is not None and feature_manifest["profile"] in _beta.CAPTURE_DISABLED_PROFILES
+    if capture_disabled and (not operational or data_mode != "synthetic"):
+        parser.error("A capture-disabled profile requires the operational native identity and synthetic data.")
     if staging and any((args.google_connection_client_id, args.google_connection_callback_uri,
                         args.microsoft_connection_tenant_id, args.microsoft_connection_client_id,
                         args.microsoft_connection_callback_uri, args.scheduling_google_client_id,
                         args.scheduling_google_callback_uri)):
         parser.error("External account connections are disabled for first-owner staging.")
-    native_capture = operational and not staging
+    native_capture = operational and not capture_disabled
     _navigation.validate_google(args.google_connection_client_id, args.google_connection_callback_uri)
     if args.google_connection_client_id and not args.native_auth_helper:
         parser.error("Google connection requires authenticated desktop composition.")

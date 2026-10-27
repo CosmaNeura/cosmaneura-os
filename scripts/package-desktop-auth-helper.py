@@ -28,7 +28,7 @@ def main():
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--verification-variant", default="")
     parser.add_argument("--native-identity-config", type=Path, help="Explicit public operational identity; never read from the environment")
-    parser.add_argument("--native-feature-profile", choices=("operational-beta-v1", "first-owner-staging-v1"), default="operational-beta-v1")
+    parser.add_argument("--native-feature-profile", choices=("operational-beta-v1", "first-owner-staging-v1", "standalone-practice-v1"), default="operational-beta-v1")
     args = parser.parse_args()
     products = _binding.directory(args.products)
     qualification = _binding.directory(args.qualification)
@@ -37,8 +37,9 @@ def main():
     identity = _identity.load(args.native_identity_config, "desktop")
     if identity and args.verification_variant:
         parser.error("Operational and synthetic helper identities cannot be combined.")
-    if args.native_feature_profile == "first-owner-staging-v1" and not identity:
-        parser.error("First-owner staging requires an operational native identity.")
+    capture_disabled = args.native_feature_profile in ("first-owner-staging-v1", "standalone-practice-v1")
+    if capture_disabled and not identity:
+        parser.error("A capture-disabled profile requires an operational native identity.")
     if args.output.is_symlink() or output.exists() or output.suffix != ".app" or not identity and not re.fullmatch(r"w[1-9][0-9]*[a-z]?", args.verification_variant):
         parser.error("Use a fresh .app output and a milestone verification variant.")
     if (output.is_relative_to(products) or output.is_relative_to(qualification)
@@ -74,7 +75,7 @@ def main():
     }
     if identity:
         info["CosmasNativeIdentity"] = identity["identity"]
-        info["CosmasConfiguredCapture"] = ({"enabled": False} if args.native_feature_profile == "first-owner-staging-v1"
+        info["CosmasConfiguredCapture"] = ({"enabled": False} if capture_disabled
                                            else {"enabled": True, "apiOrigin": identity["identity"]["apiOrigin"]})
         info["CFBundleURLTypes"] = [{"CFBundleURLName": identity["bundle"], "CFBundleURLSchemes": [identity["bundle"]]}]
     info_bytes = plistlib.dumps(info, sort_keys=False)

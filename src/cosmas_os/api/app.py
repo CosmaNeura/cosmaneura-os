@@ -128,6 +128,14 @@ def session_scope() -> Iterator[Session]:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings.validate_runtime_configuration()
+    if settings.cosmas_env == "standalone_synthetic":
+        from cosmas_os.standalone_runtime import validate_standalone_runtime
+
+        validate_standalone_runtime(settings, engine)
+        application.state.workspace_worker_progress = {}
+        # No connector lifespans, queue clients, refresh loops or background work.
+        yield
+        return
     async with portal_services_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
         with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), microsoft_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_login_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_lifespan(application, settings), managed_services_lifespan(
                 application, settings, lambda: new_capture_session(SessionLocal)):
@@ -162,6 +170,17 @@ app = FastAPI(
     description="Box-scoped practice work queue",
     lifespan=lifespan,
 )
+
+
+@app.middleware("http")
+async def standalone_mutation_boundary(request: Request, call_next):
+    if settings.cosmas_env == "standalone_synthetic":
+        from cosmas_os.standalone_runtime import standalone_request_allowed
+
+        if not standalone_request_allowed(request.method, request.url.path):
+            return JSONResponse({"detail": "standalone_operation_unavailable"}, status_code=403,
+                                headers={"Cache-Control": "no-store"})
+    return await call_next(request)
 
 
 class SeedResponse(BaseModel):
@@ -233,6 +252,10 @@ class IdentitySummaryResponse(BaseModel):
 
 @lru_cache(maxsize=3)
 def _clerk_verifier(native_origin: str | None = None) -> ClerkTokenVerifier:
+    if settings.cosmas_env == "standalone_synthetic":
+        from cosmas_os.standalone_runtime import StandaloneTokenVerifier
+
+        return StandaloneTokenVerifier(settings)
     return ClerkTokenVerifier(settings, native_origin=native_origin)
 
 
@@ -285,6 +308,8 @@ def _map_err(exc: Exception) -> HTTPException:
 
 
 def _require_data_entry_authorized() -> None:
+    if settings.cosmas_env == "standalone_synthetic":
+        raise HTTPException(status_code=403, detail="standalone_operation_unavailable")
     if settings.cosmas_env == "early_adopter_beta" and settings.data_mode != "authorized_beta":
         raise HTTPException(
             status_code=403,

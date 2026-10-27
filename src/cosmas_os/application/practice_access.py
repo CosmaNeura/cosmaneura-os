@@ -29,8 +29,9 @@ class VerifiedMember:
 
 def _scope(s, runtime, member, fence):
     runtime.validate_runtime_configuration()
-    if (not runtime.workspace_hosted_enabled or not runtime.workspace_available
-            or runtime.auth_mode != "clerk_jwt" or runtime.cosmas_env != "early_adopter_beta"
+    standalone = runtime.cosmas_env == "standalone_synthetic"
+    if ((not runtime.workspace_hosted_enabled and not standalone) or not runtime.workspace_available
+            or runtime.auth_mode != "clerk_jwt" or runtime.cosmas_env not in {"early_adopter_beta", "standalone_synthetic"}
             or member.box_id != runtime.beta_box_id or member.issuer != runtime.clerk_issuer
             or member.organization_id != runtime.clerk_organization_id):
         raise PracticeAccessError("practice_access_denied", 403)
