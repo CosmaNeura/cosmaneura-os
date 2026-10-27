@@ -157,7 +157,8 @@ def test_missing_duplicate_and_future_protocols_stop_real_stack_before_dispatch(
     assert c.dispatched == [b"current"]
 
 
-def test_every_workspace_family_is_fenced_without_consuming_request_body():
+@pytest.mark.parametrize("standalone", [False, True])
+def test_every_workspace_family_is_fenced_without_consuming_request_body(standalone):
     called = []
 
     async def inner(*_):
@@ -176,7 +177,8 @@ def test_every_workspace_family_is_fenced_without_consuming_request_body():
 
                 scope = {"type": "http", "path": "/" + root + suffix, "method": "POST", "headers": []}
                 await WorkspaceProtocolBoundary(inner, lambda: SimpleNamespace(
-                    workspace_hosted_enabled=True, workspace_draft_recovery_required=True))(scope, receive, send)
+                    workspace_hosted_enabled=not standalone, workspace_draft_recovery_required=True,
+                    cosmas_env="standalone_synthetic" if standalone else "early_adopter_beta"))(scope, receive, send)
                 assert messages[0]["status"] == 426
         assert not called
     asyncio.run(check())

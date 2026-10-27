@@ -15,7 +15,7 @@ import {conversationsApi} from './conversations-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 let root:Root,host:HTMLDivElement;
 const visible=(element:Element)=>!element.closest('[hidden]');
-const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>visible(item)&&item.textContent?.trim()===name);
+const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>visible(item)&&(item.textContent?.trim()===name||item.getAttribute('aria-label')===name));
 const click=async(name:string)=>{await vi.waitFor(()=>expect(button(name)).toBeTruthy());await act(async()=>button(name)!.click());};
 const input=async(element:HTMLTextAreaElement,value:string)=>{await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});};
 beforeEach(async()=>{
@@ -35,6 +35,24 @@ async function open(mode:'messages'|'workspace'){
   await vi.waitFor(()=>expect((host.querySelector('#team-question') as HTMLTextAreaElement)?.disabled).toBe(false));
 }
 describe('presentation parity',()=>{
+  it.each(['service unavailable','capability blocked'] as const)('retains an editable draft and notebook access when %s',async reason=>{
+    await open('messages');const session=observedSession.value!;
+    const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!,draft='Keep these invented directions for later.';
+    await input(composer,draft);
+    const team=structuredClone(session.getSnapshot().team!);
+    if(reason==='service unavailable')team.llm.enabled=false;
+    else team.configuration.bots.find(bot=>bot.role==='chief')!.blocked_capabilities=['model_answer'];
+    await act(async()=>session.setTeam(team));
+    expect(composer.disabled).toBe(false);expect(composer.placeholder).toBe('Draft for later…');
+    expect(host.querySelector<HTMLButtonElement>('.team-send')!.disabled).toBe(true);
+    const ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append');
+    await act(async()=>{composer.closest('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));composer.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+    expect(ask).not.toHaveBeenCalled();expect(session.getSnapshot().pending).toBeNull();expect(composer.value).toBe(draft);
+    await click('Open notebook');
+    await input(host.querySelector<HTMLTextAreaElement>('#team-notebook')!,'Invented notes remain available while AI chat is unavailable.');
+    await click('Save notebook revision');await vi.waitFor(()=>expect(append).toHaveBeenCalledOnce());
+    await click('‹ Back to Chief of Staff');expect(composer.value).toBe(draft);
+  });
   it.each(['empty','unconfirmed request','active model request','draft awaiting review','edited draft','handoff pending','recording saved'] as const)('compares the same session across both layouts: %s',async scenario=>{
     await open('messages');const session=observedSession.value!,base=structuredClone(session.getSnapshot().workspace!);
     const chief=base.entries.find(entry=>entry.kind==='conversation')!,handoff=base.handoffs![0],team=session.getSnapshot().team!;
@@ -155,7 +173,7 @@ describe('presentation parity',()=>{
     await open(mode);
     expect([...host.querySelectorAll('.conversation-review-card')].map(item=>item.getAttribute('aria-label'))).toEqual(['Visit Prep draft','Scribe draft','Follow-up draft']);
     const append=vi.spyOn(workspaceApi,'append'),ask=vi.spyOn(workspaceApi,'ask');
-    if(mode==='messages'){await click('Details');await click('Notebook and recording');}else await click('Private note');
+    if(mode==='messages'){await click('Details');await click('Choose notes or sources');await click('Notebook');}else await click('Private note');
     await input(host.querySelector('#team-notebook')!,'Invented jottings for parity.');await click('Save notebook revision');
     await vi.waitFor(()=>expect(append).toHaveBeenCalledOnce());expect(append.mock.calls[0][2]).toMatchObject({expected_revision:5,kind:'scratchpad',content:'Invented jottings for parity.'});
     await vi.waitFor(()=>expect(button('Save notebook revision')!.disabled).toBe(true));
@@ -258,7 +276,7 @@ describe('presentation parity',()=>{
   it.each(['messages','workspace'] as const)('replays the same save after a lost response from %s',async mode=>{
     await open(mode);const append=workspaceApi.append;let lost=false;
     const save=vi.spyOn(workspaceApi,'append').mockImplementation(async(...args)=>{const result=await append(...args);if(!lost){lost=true;throw new WorkspaceApiError(503);}return result;});
-    if(mode==='messages'){await click('Details');await click('Notebook and recording');}else await click('Private note');
+    if(mode==='messages'){await click('Details');await click('Choose notes or sources');await click('Notebook');}else await click('Private note');
     await input(host.querySelector('#team-notebook')!,'Save these invented notes exactly once.');await click('Save notebook revision');
     await vi.waitFor(()=>expect(button('Retry same save')?.disabled).toBe(false));
     if(mode==='messages'){

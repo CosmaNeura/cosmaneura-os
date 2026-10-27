@@ -117,6 +117,9 @@ it('rejects a notebook read completed after native owner access ends',async()=>{
 });
 
 it('keeps both private recording entry points visibly locked while an exact conversation save is unconfirmed',async()=>{
+  const connected=structuredClone(team);connected.llm.enabled=true;
+  vi.mocked(workspaceApi.team).mockResolvedValue(connected);
+  vi.mocked(workspaceApi.createPrivateDraft).mockImplementation(async()=>({...notebookResult(),team:connected}));
   await open();vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
   await click('Send message');
   await vi.waitFor(async()=>{await act(async()=>{});expect(workspaceApi.ask).toHaveBeenCalledOnce();});

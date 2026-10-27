@@ -128,6 +128,16 @@ def session_scope() -> Iterator[Session]:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings.validate_runtime_configuration()
+    if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"}:
+        from cosmas_os.standalone_runtime import validate_standalone_runtime
+
+        validate_standalone_runtime(settings, engine)
+        application.state.workspace_worker_progress = {}
+        # Only the explicitly configured personal Google service. No queue,
+        # handoff/routine workers, Core or unrelated connector runtimes.
+        with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
+            yield
+        return
     async with portal_services_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
         with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), microsoft_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_login_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_lifespan(application, settings), managed_services_lifespan(
                 application, settings, lambda: new_capture_session(SessionLocal)):
@@ -233,6 +243,10 @@ class IdentitySummaryResponse(BaseModel):
 
 @lru_cache(maxsize=3)
 def _clerk_verifier(native_origin: str | None = None) -> ClerkTokenVerifier:
+    if settings.cosmas_env == "standalone_synthetic":
+        from cosmas_os.standalone_runtime import StandaloneTokenVerifier
+
+        return StandaloneTokenVerifier(settings)
     return ClerkTokenVerifier(settings, native_origin=native_origin)
 
 
@@ -285,6 +299,8 @@ def _map_err(exc: Exception) -> HTTPException:
 
 
 def _require_data_entry_authorized() -> None:
+    if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"}:
+        raise HTTPException(status_code=403, detail="standalone_operation_unavailable")
     if settings.cosmas_env == "early_adopter_beta" and settings.data_mode != "authorized_beta":
         raise HTTPException(
             status_code=403,
@@ -1101,6 +1117,8 @@ async def converse(request: Request, workspace_id: UUID, session: Session = Depe
     negotiated = model_header(request)
     body = await read_model_request(request, ConversationRequest)
     def submit():
+        if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"} and not settings.workspace_llm_available:
+            raise ws.WorkspaceError("model_unavailable", 503)
         if body.inbox_analysis:
             session.info["inbox_analysis_sources"] = _inbox_analysis_sources()
         if body.session_prep_analysis:
@@ -2197,7 +2215,9 @@ allowed_headers.append("X-Cosmas-Ehr-Read")
 
 
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402
+from cosmas_os.standalone_runtime import StandaloneRequestBoundary  # noqa: E402
 
+app.add_middleware(StandaloneRequestBoundary, runtime=lambda: settings)
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")
 allowed_headers.append("X-Cosmas-Clinical-Team")

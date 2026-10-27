@@ -34,7 +34,7 @@ beforeEach(async()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.useRealTimers();vi.unstubAllGlobals();history.replaceState(null,'','/');});
 it('opens the shared Athena task from Chief and Settings while keeping the exact draft and one host',async()=>{
- await draft('Keep my Chief directions verbatim.');const composer=question();await click('Details');await click('Find or connect an Athena visit');
+ await draft('Keep my Chief directions verbatim.');const composer=question();await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');
  await wait(()=>expect(button('Check connection status')).toBeDefined());const task=host.querySelector('[aria-label="Find or connect an Athena visit"]');expect(task?.textContent).toContain('Jordan');expect(composer.closest('[hidden]')).not.toBeNull();
  await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(button('Details')));expect(question()).toBe(composer);expect(question().value).toBe('Keep my Chief directions verbatim.');
  // This path requires an enabled Core service; the shared email fixture intentionally reports practice setup.
@@ -49,7 +49,7 @@ it('opens the shared Athena task from Chief and Settings while keeping the exact
 it.each(['fresh','recovered'] as const)('does not open a %s notebook selection while Chief has unfinished text',async mode=>{
  const open=vi.spyOn(workspaceApi,'openExisting');
  if(mode==='recovered')history.replaceState(null,'','/?scenario=athena-lost-link'+location.hash);
- await draft('Unsent Chief question.');await click('Details');await click('Find or connect an Athena visit');
+ await draft('Unsent Chief question.');await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');
  await connect();
  if(mode==='recovered'){await click('Check saved visit result');await wait(()=>expect(host.textContent).toContain('Connected to Jordan Cypress'));}
  await wait(()=>expect(button('Open linked notebook')?.disabled).toBe(true));expect(host.textContent).toContain('Save or recover unfinished work');await click('‹ Back to Chief of Staff');expect(question().value).toBe('Unsent Chief question.');
@@ -60,7 +60,7 @@ it.each(['fresh','recovered'] as const)('opens the already-current notebook from
  expect(location.hash).toContain(current.id);
  const open=vi.spyOn(workspaceApi,'openExisting');
  if(mode==='recovered')history.replaceState(null,'','/?scenario=athena-lost-link'+location.hash);
- await click('Details');await click('Find or connect an Athena visit');await connect();
+ await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');await connect();
  if(mode==='recovered'){await click('Check saved visit result');await wait(()=>expect(host.textContent).toContain('Connected to Jordan Cypress'));}
  await wait(()=>expect(button('Open linked notebook')?.disabled).toBe(false));
  const original=workspaceApi.team;let finish!:()=>void,started!:()=>void;const entered=new Promise<void>(resolve=>{started=resolve;});
@@ -73,7 +73,7 @@ it.each(['fresh','recovered'] as const)('opens the already-current notebook from
 });
 it('keeps unrelated unsaved work admission after the Athena authorization finishes',async()=>{
  history.replaceState(null,'','/?scenario=athena-lost-link'+location.hash);
- await click('Details');await click('Find or connect an Athena visit');await connect();await click('Check saved visit result');
+ await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');await connect();await click('Check saved visit result');
  await wait(()=>expect(button('Open linked notebook')?.disabled).toBe(false));
  const open=vi.spyOn(workspaceApi,'openExisting'),original=workspaceApi.team;let finish!:()=>void,started!:()=>void;const entered=new Promise<void>(resolve=>{started=resolve;});
  vi.spyOn(workspaceApi,'team').mockImplementationOnce(async(...args)=>{started();await new Promise<void>(resolve=>{finish=resolve;});return original(...args);});
@@ -88,7 +88,7 @@ it('keeps unrelated unsaved work admission after the Athena authorization finish
 });
 it('shows an opening failure in the active task and retries only notebook opening',async()=>{
  history.replaceState(null,'','/?scenario=athena-lost-link'+location.hash);
- await click('Details');await click('Find or connect an Athena visit');await connect();await click('Check saved visit result');
+ await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');await connect();await click('Check saved visit result');
  await wait(()=>expect(button('Open linked notebook')?.disabled).toBe(false));
  const original=window.fetch;let failed=false;const attempts:string[]=[];
  vi.spyOn(window,'fetch').mockImplementation(async(input,init)=>{

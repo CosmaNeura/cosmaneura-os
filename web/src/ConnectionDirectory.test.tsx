@@ -24,7 +24,8 @@ it('shows disabled services with useful setup steps without mounting a dead edit
   const unavailable=[...host.querySelectorAll('.connection-card')].find(item=>item.textContent?.includes('Google email & calendar'))!;
   expect(unavailable.parentElement!.textContent).toContain('Availability checked');expect(unavailable.parentElement!.textContent).not.toContain('Account checked');
   await click('Google email & calendar');expect(editor).not.toHaveBeenCalled();expect(host.textContent).toContain('Google sign-in has not been enabled');
-  expect(host.textContent).toContain('Review the requested email and calendar access');
+  expect(host.textContent).toContain('Choose your Google account and approve access on Google.');
+  expect(host.textContent).toContain('Return to CosmaBot and check that the account is connected.');
   vi.mocked(readConnectionCatalog).mockResolvedValue({...catalog,google:true});await click('Check availability again');await click('Google email & calendar');
   expect(editor).toHaveBeenCalledOnce();expect(host.querySelector('[data-settings-screen="google"]')?.hasAttribute('hidden')).toBe(false);
 });

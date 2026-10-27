@@ -23,6 +23,19 @@ async function durable(session:WorkspaceSession,workspace:Workspace,authenticate
 }
 
 describe('shared model request ownership',()=>{
+  it.each(['service unavailable','capability blocked','bot retired'] as const)('keeps a draft without creating pending work when %s',async reason=>{
+    const workspace=await pendingWorkspace(),ask=vi.fn();
+    const session=new WorkspaceSession({models:{workspace:{ask}}});open(session,workspace);
+    const unavailable=structuredClone(team);
+    if(reason==='service unavailable')unavailable.llm.enabled=false;
+    if(reason==='capability blocked')unavailable.configuration.bots[0].blocked_capabilities=['model_answer'];
+    if(reason==='bot retired')unavailable.configuration.bots[0].retired=true;
+    session.setTeam(unavailable);
+    const save=vi.spyOn(session.models,'save');
+    expect(session.models.ask('visit_prep',null,context(session))).toBeUndefined();
+    expect(save).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();
+    expect(session.getSnapshot()).toMatchObject({thought:conversationFixture.content,pending:null,busy:false});
+  });
   it.each(['ask','save'] as const)('blocks %s during conversation restoration and sends only the restored bot draft afterward',async command=>{
     const workspace=await pendingWorkspace(),ask=vi.fn(async(_owner,_id,body:typeof conversationFixture)=>modelReceipt(body,workspace.id));
     const session=new WorkspaceSession({models:{workspace:{ask,read:async()=>workspace,team:async()=>teamFixture()}}});open(session,workspace);

@@ -54,6 +54,50 @@ def test_only_enabled_workers_from_this_application_are_required():
     assert not workspace_workers_ready(FastAPI(), config)
 
 
+@pytest.mark.parametrize("profile", ["standalone_synthetic", "standalone_clerk_synthetic"])
+def test_standalone_direct_chief_model_requires_no_queue_worker(profile):
+    config = SimpleNamespace(cosmas_env=profile, workspace_llm_available=True,
+                             workspace_available=True, workspace_routines_enabled=False)
+    assert workspace_workers_ready(FastAPI(), config)
+    config.cosmas_env = "early_adopter_beta"
+    assert not workspace_workers_ready(FastAPI(), config)
+
+
+def test_standalone_http_ready_keeps_schema_gate_with_direct_chief_model(monkeypatch):
+    from cosmas_os.api import app as api
+
+    config = SimpleNamespace(cosmas_env="standalone_clerk_synthetic", workspace_llm_available=True,
+        workspace_available=True, workspace_routines_enabled=False, execution_backend="celery",
+        validate_runtime_configuration=lambda: None)
+    monkeypatch.setattr(api, "settings", config)
+    application = FastAPI()
+    application.state.workspace_worker_progress = {}  # Actual standalone lifespan state.
+    application.add_api_route("/ready", api.ready, methods=["GET"])
+    revision = [EXPECTED_SCHEMA_REVISION]
+    checks = []
+
+    class Database:
+        def execute(self, statement):
+            checks.append(str(statement))
+            return SimpleNamespace(scalar_one=lambda: revision[0])
+
+    application.dependency_overrides[api.get_session] = lambda: Database()
+
+    async def exercise():
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=application), base_url="http://local") as client:
+            response = await client.get("/ready")
+            assert response.status_code == 200
+            assert response.json() == {"status": "ready", "env": config.cosmas_env}
+            assert len(checks) == 2
+            revision[0] = "outdated-invented-schema"
+            response = await client.get("/ready")
+            assert response.status_code == 503
+            assert response.json() == {"detail": "runtime is not ready"}
+            assert len(checks) == 4
+
+    asyncio.run(exercise())
+
+
 @pytest.mark.parametrize("worker", ["handoffs", "routines"])
 def test_actual_loop_reports_empty_success_failure_recovery_and_exit(worker, monkeypatch):
     progress = WorkerProgress(300)

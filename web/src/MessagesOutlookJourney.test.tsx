@@ -21,7 +21,7 @@ async function wait(check:()=>void){for(let n=0;n<500;n++){let done=false;await 
 async function click(name:string){await wait(()=>expect(button(name)?.disabled,name).toBe(false));await act(async()=>button(name)!.click());}
 async function type(value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),value);question().dispatchEvent(new Event('input',{bubbles:true}));});}
 async function openChat(){const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(b=>visible(b)&&b.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(question()?.disabled).toBe(false));}
-async function openTask(){await click('Details');await click('Review Outlook email');await wait(()=>expect(task()).toBeDefined());await wait(()=>expect((button('Check email access')??button('Restore saved email work'))?.disabled).toBe(false));}
+async function openTask(){await click('Details');await click('Choose notes or sources');await click('Review Outlook email');await wait(()=>expect(task()).toBeDefined());await wait(()=>expect((button('Check email access')??button('Restore saved email work'))?.disabled).toBe(false));}
 async function saveReviewedEmail(){
  await openTask();await click('Check email access');await click('Select email');await wait(()=>expect(task()?.querySelector<HTMLButtonElement>('.outlook-message-list button')?.disabled).toBe(false));await act(async()=>task()!.querySelector<HTMLButtonElement>('.outlook-message-list button')!.click());await click('Read full email');await click('Use for current visit');
  await wait(()=>expect(task()?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled).toBe(false));await act(async()=>task()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());await click('Save reviewed email for this visit');await wait(()=>expect(button('Prepare Chief draft')?.disabled).toBe(false));
@@ -44,7 +44,7 @@ it('uses one retained Outlook owner from Chief and sources, then appends a revie
  await click('Save reviewed email for this visit');await wait(()=>expect(button('Prepare Chief draft')?.disabled).toBe(false));expect(stats().reads).toBe(2);expect(stats().reviews).toBe(1);
  await click('Prepare Chief draft');await wait(()=>expect(question().disabled).toBe(false));expect(question().value).toContain('Keep my exact invented Chief directions.');expect(question().value).toContain('Review the human-selected email source');expect(task()).toBeUndefined();
  expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();
- await click('Details');await click('Saved sources');await click('Review Outlook email');await wait(()=>expect(task()).toBeDefined());expect(host.querySelectorAll('.outlook-message-panel')).toHaveLength(1);expect(stats().reads).toBe(2);await click('‹ Back to saved sources');
+ await click('Details');await click('Choose notes or sources');await click('Saved sources');await click('Review Outlook email');await wait(()=>expect(task()).toBeDefined());expect(host.querySelectorAll('.outlook-message-panel')).toHaveLength(1);expect(stats().reads).toBe(2);await click('‹ Back to saved sources');
  expect([...host.querySelectorAll('section[aria-label="Saved sources"]')].find(visible)?.textContent).toContain('Invented message for Jordan Cypress');expect(ask).not.toHaveBeenCalled();
 });
 it('resolves a lost body result after reload with the same encrypted command and no additional Outlook read',async()=>{
@@ -56,7 +56,7 @@ it('resolves a lost body result after reload with the same encrypted command and
  expect(stats().reads).toBe(0);expect(stats().resolves).toBe(1);expect(stats().requests.find(item=>item.action==='resolve')?.key).toBe(request.key);
 });
 it('does not open Outlook after Details is dismissed during its final account authorization',async()=>{
- await openChat();await type('Keep this draft.');await click('Details');const team=workspaceApi.team;let finish!:(value:Awaited<ReturnType<typeof team>>)=>void;
+ await openChat();await type('Keep this draft.');await click('Details');await click('Choose notes or sources');const team=workspaceApi.team;let finish!:(value:Awaited<ReturnType<typeof team>>)=>void;
  const prior=await team(identity);vi.spyOn(workspaceApi,'team').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
  await act(async()=>button('Review Outlook email')!.click());await wait(()=>expect(finish).toBeDefined());await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
  await act(async()=>finish(prior));expect(task()).toBeUndefined();expect(question().value).toBe('Keep this draft.');expect(stats().reads).toBe(0);
@@ -71,7 +71,7 @@ it('chooses an existing visit from Microsoft settings while retaining the read a
 });
 it('cancels a deferred task opening on native suspend without discarding the Chief draft',async()=>{
  const native={...identity,nativeSession:{revision:'00000000-0000-4000-8000-000000000901',isCurrent:()=>true}};
- await act(async()=>root.render(<EncounterWorkspace authenticated={native} draftStorage={storage}/>));await openChat();await type('Keep native draft.');await click('Details');const team=workspaceApi.team,prior=await team(native);let finish!:(value:typeof prior)=>void;
+ await act(async()=>root.render(<EncounterWorkspace authenticated={native} draftStorage={storage}/>));await openChat();await type('Keep native draft.');await click('Details');await click('Choose notes or sources');const team=workspaceApi.team,prior=await team(native);let finish!:(value:typeof prior)=>void;
  vi.spyOn(workspaceApi,'team').mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));await act(async()=>button('Review Outlook email')!.click());await wait(()=>expect(finish).toBeDefined());
  await act(async()=>notifyNativeWorkspaceForeground(native,false));await act(async()=>finish(prior));expect(task()).toBeUndefined();expect(question().value).toBe('Keep native draft.');expect(stats().reads).toBe(0);await act(async()=>notifyNativeWorkspaceForeground(native,true));
 });
@@ -80,7 +80,7 @@ it('returns from an unconfirmed read to type in Chief and reopens the same pendi
  await wait(()=>expect(task()?.querySelector<HTMLButtonElement>('.outlook-message-list button')?.disabled).toBe(false));await act(async()=>task()!.querySelector<HTMLButtonElement>('.outlook-message-list button')!.click());await click('Read full email');await click('Check saved email result');
  await wait(()=>expect(task()?.textContent).toContain('its result is unconfirmed'));const request=stats().requests.find(item=>item.action==='read')!,reads=stats().reads;
  await click('‹ Back to Chief of Staff');await wait(()=>expect(question().disabled).toBe(false));expect(question().value).toBe('Chief directions before email.');await type('Chief directions edited while email stays unresolved.');
- await click('‹ Messages');await openChat();expect(question().value).toBe('Chief directions edited while email stays unresolved.');await click('Details');await click('Review Outlook email');await wait(()=>expect(button('Check saved email result')?.disabled).toBe(false));
+ await click('‹ Messages');await openChat();expect(question().value).toBe('Chief directions edited while email stays unresolved.');await click('Details');await click('Choose notes or sources');await click('Review Outlook email');await wait(()=>expect(button('Check saved email result')?.disabled).toBe(false));
  await click('Check saved email result');expect(stats().reads).toBe(reads);expect(stats().requests.filter(item=>item.action==='resolve').every(item=>item.key===request.key)).toBe(true);expect(stats().reviews).toBe(0);
 });
 

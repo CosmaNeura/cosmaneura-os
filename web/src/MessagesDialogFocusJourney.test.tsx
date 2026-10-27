@@ -47,8 +47,15 @@ it('does not refocus an obsolete dialog opener after Chief changes context and r
 });
 
 it('keeps task focus when Details opens Saved sources and preserves the existing compose-return action',async()=>{
- await draft();const input=composer(),focus=vi.spyOn(input,'focus');await click('Details');await click('Saved sources');await wait(()=>expect(document.activeElement).toBe(host.querySelector('.messages-thread-header h1')));expect(document.activeElement?.textContent).toBe('Saved sources');expect(focus).not.toHaveBeenCalled();expect(input.value).toBe('Keep my native Chief draft and reading position.');
+ await draft();const input=composer(),focus=vi.spyOn(input,'focus');await click('Details');await click('Choose notes or sources');await click('Saved sources');await wait(()=>expect(document.activeElement).toBe(host.querySelector('.messages-thread-header h1')));expect(document.activeElement?.textContent).toBe('Saved sources');expect(focus).not.toHaveBeenCalled();expect(input.value).toBe('Keep my native Chief draft and reading position.');
  await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(input));expect(input.value).toBe('Keep my native Chief draft and reading position.');
+});
+
+it('returns through source choices and Details to the unchanged native chat draft and reading position',async()=>{
+ await draft();const scroll=reader(),input=composer(),focus=vi.spyOn(input,'focus'),opener=button('Details');await click('Details');const dialog=host.querySelector<HTMLElement>('[role="dialog"]')!;dialog.scrollTop=161;
+ await click('Choose notes or sources');expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(1);expect(host.querySelector('[role="dialog"]')).toBe(dialog);expect(document.activeElement).toBe(button('Back to details'));
+ await click('Back to details');expect(document.activeElement).toBe(button('Choose notes or sources'));expect(dialog.scrollTop).toBe(161);await click('Back to Chief of Staff');
+ expect(document.activeElement).toBe(opener);expect(focus).not.toHaveBeenCalled();expect(scroll.scrollTop).toBe(3423);expect(input.value).toBe('Keep my native Chief draft and reading position.');
 });
 
 it.each(['conversation','message'] as const)('expires the actual %s dialog guard when the workspace unmounts',async kind=>{

@@ -1,5 +1,5 @@
 import {BotAvatar} from './BotAvatar';
-import {useEffect,useRef,useState} from 'react';
+import {useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {WorkspaceDialog} from './WorkspaceDialog';
 import {botAddress,type ProviderTeam,type BotRole,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import type {ConversationInbox,ConversationSummary} from './conversations-api';
@@ -26,7 +26,8 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
   const searchControl=useInboxSearch({container:pull.ref,identity,scope:team?.recovery_scope??''}),{search,setSearch}=searchControl;
   const activeMenu=useRef(menu),alive=useRef(true);activeMenu.current=menu;useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const chief=team?.configuration.bots.find(bot=>bot.role==='chief'&&!bot.retired);
-  const chiefReady=!!chief?.enabled;
+  const notesOnly=['standalone-practice-v1','independent-beta-v1'].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE??'')&&!team?.llm.enabled;
+  const chiefReady=!!chief?.enabled&&(notesOnly||!!team?.llm.enabled&&!chief.blocked_capabilities?.includes('model_answer'));
   const chiefRows=inbox?.rows.filter(row=>row.bot.role==='chief')??[];
   const groups=organizedConversations(inbox?.rows??[],organization.value,search,hidden),count=groups.reduce((total,group)=>total+group.rows.length,0);
   const hiddenCount=organization.value.items.filter(item=>item.hidden).length;
@@ -38,7 +39,7 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
   async function organize(change:{pinned?:boolean;hidden?:boolean}){if(!menu||organizationLocked)return;const selected=menu;if(await onOrganize(menu,change)&&alive.current&&activeMenu.current===selected){closeMenu();if(change.hidden!==undefined)queueMicrotask(()=>heading.current?.focus());}}
   return <section ref={pull.ref} className="messages-inbox" aria-labelledby="messages-title">
     <div className="messages-pull-refresh" style={{height:pull.distance}} role="status" aria-live="polite">{pull.distance>0&&(pull.ready?'Release to refresh':'Pull to refresh')}</div>
-    <header><h1 id="messages-title" ref={heading} tabIndex={-1}>{hidden?'Hidden conversations':'Messages'}</h1><button className="team-primary" disabled={locked} onClick={onNew}>New message</button></header>
+    <header><h1 id="messages-title" ref={heading} tabIndex={-1}>{hidden?'Hidden conversations':'Messages'}</h1><button className="team-primary" disabled={locked} onClick={onNew}>{notesOnly?'Open notes':'New message'}</button></header>
     {error&&<p role="alert">{error}</p>}
     {drafts?.error&&<p role="status">{drafts.error} <button disabled={locked||drafts.checking} onClick={onRefreshDrafts}>Check saved drafts</button></p>}
     {organization.error&&!menu&&<p role="alert">{organization.error} <button disabled={organization.busy||locked} onClick={onReloadOrganization}>Retry organization</button></p>}
@@ -50,8 +51,8 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
     </div>
     {hidden&&<p className="team-fine">Hidden on this device. Open a row’s actions to restore it.{hiddenCount>0&&<> <button disabled={organizationLocked} onClick={()=>void onRestoreAll().then(saved=>{if(saved){setHidden(false);queueMicrotask(()=>heading.current?.focus());}})}>Restore all hidden conversations</button></>}</p>}
     {!hidden&&!search.trim()&&!chiefRows.length&&<section className="messages-chief-start"><BotAvatar role="chief"/><div><h2>{chief?.name??'Chief'}</h2>
-      <p>{chiefReady?'A private conversation to plan your next step. Choose a visit or a private note.':'Chief is unavailable. Your saved conversations remain here.'}</p>
-      {chiefReady?<button disabled={locked} onClick={()=>onChief(botAddress(chief!))}>Chat with {chief!.name}</button>:<button disabled={locked} onClick={onSettings}>Review team settings</button>}</div></section>}
+      <p>{chiefReady?notesOnly?'Use your visit notebook. AI chat is not connected yet.':'A private conversation to plan your next step. Choose a visit or a private note.':'Chief is unavailable. Your saved conversations remain here.'}</p>
+      {chiefReady?<button disabled={locked} onClick={()=>onChief(botAddress(chief!))}>{notesOnly?'Visits and notes':`Chat with ${chief!.name}`}</button>:<button disabled={locked} onClick={onSettings}>Review team settings</button>}</div></section>}
     {!organization.ready&&organization.busy?<p role="status">Loading conversation organization…</p>:groups.map(group=><section className="messages-inbox-group" key={group.title}><h2>{group.title}</h2><ul className="messages-list" aria-label={`${group.title} conversations`}>{group.rows.map(row=><li key={`${row.workspace_id}:${row.bot.address}`}>
       <button className="messages-row" disabled={locked} onClick={()=>onOpen(row)}><BotAvatar role={row.bot.role}/><span className="messages-row-copy"><strong>{row.bot.name}{row.unread&&<><span className="messages-unread" aria-hidden="true"/><span className="team-sr-only">Unread</span></>}</strong><span className="messages-context">{row.context_label}</span><span className="messages-preview">{row.preview||'No messages yet'}</span>
         {drafts?.items[conversationPreferenceKey(row.workspace_id,row.bot.address)]&&<span className="messages-status" data-draft-presence={drafts.items[conversationPreferenceKey(row.workspace_id,row.bot.address)]}>{drafts.items[conversationPreferenceKey(row.workspace_id,row.bot.address)]==='note'?'Saved-note draft':'Draft'}</span>}
@@ -74,19 +75,45 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
   </section>;
 }
 export function NewMessagePicker({team,locked,onChoose,onClose,canRestoreFocus}:{team:ProviderTeam;locked:boolean;onChoose:(address:string)=>void;onClose:()=>void;canRestoreFocus?:()=>boolean}){
-  return <WorkspaceDialog title="New message" onClose={onClose} closeLabel="Close new message" canRestoreFocus={canRestoreFocus}><p>Choose who can help. You’ll choose the visit or private note next.</p><div className="messages-bot-choices">
-    {[...team.configuration.bots].filter(bot=>!bot.retired).sort((a,b)=>Number(b.role==='chief')-Number(a.role==='chief')).map(bot=><button key={botAddress(bot)} disabled={locked||!bot.enabled} onClick={()=>onChoose(botAddress(bot))}><BotAvatar role={bot.role}/><span><strong>{bot.name}</strong><small>{!bot.enabled?'Paused in Settings':bot.role==='scribe'?'Notes and recording':bot.role==='research'?'Choose a visit, query and sources':'Private conversation'}</small></span></button>)}
+  const independent=import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE==='independent-beta-v1';
+  const notesOnly=['standalone-practice-v1','independent-beta-v1'].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE??'')&&!team.llm.enabled;
+  return <WorkspaceDialog title={notesOnly?'Open notes':'New message'} onClose={onClose} closeLabel={notesOnly?'Close notes':'Close new message'} canRestoreFocus={canRestoreFocus}><p>{notesOnly?'Choose Chief to open a visit notebook or private note. AI chat is not connected yet.':independent?'Start with Chief. Choose a visit or private note next.':'Choose who can help. You’ll choose the visit or private note next.'}</p><div className="messages-bot-choices">
+    {[...team.configuration.bots].filter(bot=>!bot.retired&&(!(independent||notesOnly)||bot.role==='chief')).sort((a,b)=>Number(b.role==='chief')-Number(a.role==='chief')).map(bot=><button key={botAddress(bot)} disabled={locked||!bot.enabled} onClick={()=>onChoose(botAddress(bot))}><BotAvatar role={bot.role}/><span><strong>{bot.name}</strong><small>{!bot.enabled?'Paused in Settings':notesOnly?'Visit notebook and saved drafts':bot.role==='scribe'?'Notes and recording':bot.role==='research'?'Choose a visit, query and sources':'Private conversation'}</small></span></button>)}
   </div><button onClick={onClose} disabled={locked}>Cancel</button></WorkspaceDialog>;
 }
 export function MessagesThreadHeader({name,role,context,contextKind,task,locked,onBack,onContext,onDetails,onReturn,returnLabel}:{name:string;role:BotRole;context:string;contextKind:string;task:string|null;locked:boolean;onBack:()=>void;onContext:()=>void;onDetails:()=>void;onReturn:()=>void;returnLabel?:string}){
   return <header className="messages-thread-header"><button className="messages-back" aria-label={task?`‹ ${returnLabel??`Back to ${name}`}`:'‹ Messages'} disabled={locked} onClick={task?onReturn:onBack}><span aria-hidden="true">‹</span>{' '}<span className="messages-back-label">{task?(returnLabel??`Back to ${name}`):'Messages'}</span></button><BotAvatar role={role}/><div><h1 tabIndex={-1} title={task??name}>{task??name}</h1><button className="messages-context-button" disabled={locked} onClick={onContext} aria-label={`Change conversation context: ${context}`}><span className="messages-context-label">{context} <span aria-hidden="true">⌄</span></span><small>{contextKind}</small></button></div>{!task&&<button disabled={locked} onClick={event=>{event.currentTarget.focus({preventScroll:true});onDetails();}}>Details</button>}</header>;
 }
-export function ConversationDetails({name,context,contextKind,locked,onClose,onTask,onReviewAppointment,onImportCalendar,onFindAthena,onReviewOutlook,onReviewGoogle,onReviewGoogleCalendar,onReviewReceivedFax,canRestoreFocus}:{name:string;context:string;contextKind:string;locked:boolean;onClose:()=>void;onReviewAppointment?:()=>void;onImportCalendar?:()=>void;onFindAthena?:()=>void;onReviewOutlook?:()=>void;onReviewGoogle?:()=>void;onReviewGoogleCalendar?:()=>void;onReviewReceivedFax?:()=>void;onTask:(task:'Review'|'Notebook'|'Sources'|'Work'|'Activity'|'Tools')=>void;canRestoreFocus?:()=>boolean}){
-  return <WorkspaceDialog title="Conversation details" onClose={onClose} closeLabel="Close conversation details" canRestoreFocus={canRestoreFocus}><p>{context}<br/>{contextKind}</p><div className="messages-details">
-    <section><h2>Review</h2><button disabled={locked} onClick={()=>onTask('Review')}>Visit note</button><button disabled={locked} onClick={()=>onTask('Work')}>Follow-up and linked work</button></section>
-    <section><h2>Notes and sources</h2>{onReviewReceivedFax&&<button disabled={locked} onClick={onReviewReceivedFax}>Review received fax</button>}{onReviewGoogle&&<button disabled={locked} onClick={onReviewGoogle}>Review Gmail email</button>}{onReviewGoogleCalendar&&<button disabled={locked} onClick={onReviewGoogleCalendar}>Review Google Calendar</button>}{onReviewOutlook&&<button disabled={locked} onClick={onReviewOutlook}>Review Outlook email</button>}{onFindAthena&&<button disabled={locked} onClick={onFindAthena}>Find or connect an Athena visit</button>}{onImportCalendar&&<button disabled={locked} onClick={onImportCalendar}>Import calendar file</button>}{onReviewAppointment&&<button disabled={locked} onClick={onReviewAppointment}>Review EHR records</button>}<button disabled={locked} onClick={()=>onTask('Notebook')}>Notebook and recording</button><button disabled={locked} onClick={()=>onTask('Sources')}>Saved sources</button><button disabled={locked} onClick={()=>onTask('Tools')}>Tools for this conversation</button></section>
-    <section><h2>Activity</h2><button disabled={locked} onClick={()=>onTask('Activity')}>Team activity and drafts</button></section>
-  </div><button className="messages-details-return" disabled={locked} onClick={onClose}>Back to {name}</button></WorkspaceDialog>;
+export function ConversationDetails({name,context,contextKind,recordingAvailable=false,locked,onClose,onTask,onReviewAppointment,onImportCalendar,onFindAthena,onReviewOutlook,onReviewGoogle,onReviewGoogleCalendar,onReviewReceivedFax,canRestoreFocus}:{name:string;context:string;contextKind:string;recordingAvailable?:boolean;locked:boolean;onClose:()=>void;onReviewAppointment?:()=>void;onImportCalendar?:()=>void;onFindAthena?:()=>void;onReviewOutlook?:()=>void;onReviewGoogle?:()=>void;onReviewGoogleCalendar?:()=>void;onReviewReceivedFax?:()=>void;onTask:(task:'Review'|'Notebook'|'Sources'|'Work'|'Activity'|'Tools')=>void;canRestoreFocus?:()=>boolean}){
+  const [choosingSources,setChoosingSources]=useState(false),details=useRef<HTMLDivElement>(null),sourceEntry=useRef<HTMLButtonElement>(null),sourceBack=useRef<HTMLButtonElement>(null);
+  const detailsScroll=useRef(0),transition=useRef<'sources'|'details'|null>(null);
+  const changeView=(sources:boolean)=>{if(locked)return;const dialog=details.current?.closest<HTMLElement>('[role="dialog"]');if(sources)detailsScroll.current=dialog?.scrollTop??0;transition.current=sources?'sources':'details';setChoosingSources(sources);};
+  useLayoutEffect(()=>{if(!transition.current)return;const dialog=details.current?.closest<HTMLElement>('[role="dialog"]');(choosingSources?sourceBack:sourceEntry).current?.focus({preventScroll:true});if(dialog)dialog.scrollTop=choosingSources?0:detailsScroll.current;transition.current=null;},[choosingSources]);
+  const sources=[
+    {label:'Review EHR records',open:onReviewAppointment},
+    {label:'Find or connect an Athena visit',open:onFindAthena},
+    {label:'Review Gmail email',open:onReviewGoogle},
+    {label:'Review Outlook email',open:onReviewOutlook},
+    {label:'Review Google Calendar',open:onReviewGoogleCalendar},
+    {label:'Import calendar file',open:onImportCalendar},
+    {label:'Review received fax',open:onReviewReceivedFax},
+  ].filter(source=>source.open);
+  return <WorkspaceDialog title={choosingSources?'Notes and sources':'Conversation details'} onClose={onClose} closeLabel="Close conversation details" canRestoreFocus={canRestoreFocus}>
+    <p className="messages-details-context">{context}<br/>{contextKind}</p>
+    <div ref={details} className="messages-details">
+      <div hidden={choosingSources}>
+        <section><h2>Review</h2><button disabled={locked} onClick={()=>onTask('Review')}>Visit note</button><button disabled={locked} onClick={()=>onTask('Work')}>Follow-up and linked work</button></section>
+        <section><h2>Notes and sources</h2><button ref={sourceEntry} className="messages-source-entry" aria-label="Choose notes or sources" disabled={locked} onClick={()=>changeView(true)}><span>Choose notes or sources<small>Notebook, saved sources and available records</small></span><span aria-hidden="true">›</span></button></section>
+        <section><h2>Activity</h2><button disabled={locked} onClick={()=>onTask('Activity')}>Team activity and drafts</button></section>
+      </div>
+      <div className="messages-source-choices" hidden={!choosingSources}>
+        <button ref={sourceBack} className="messages-source-back" disabled={locked} onClick={()=>changeView(false)}>Back to details</button>
+        <section><h2>In this conversation</h2><button disabled={locked} onClick={()=>onTask('Notebook')}>{recordingAvailable?'Notebook and recording':'Notebook'}</button><button disabled={locked} onClick={()=>onTask('Sources')}>Saved sources</button><button disabled={locked} onClick={()=>onTask('Tools')}>Tools for this conversation</button></section>
+        {sources.length>0&&<section><h2>Review a source</h2>{sources.map(source=><button key={source.label} disabled={locked} onClick={source.open}>{source.label}</button>)}</section>}
+      </div>
+    </div>
+    {!choosingSources&&<button className="messages-details-return" disabled={locked} onClick={onClose}>Back to {name}</button>}
+  </WorkspaceDialog>;
 }
 export function LayoutSetting({value,blocked,error,onChoose}:{value:Presentation;blocked:boolean;error:string;onChoose:(value:Presentation)=>void}){
   return <fieldset className="messages-layout-setting" disabled={blocked}><legend>Layout on this device</legend><div>{(['messages','workspace'] as const).map(mode=><label key={mode}><input type="radio" name="cosmas-layout" checked={value===mode} onChange={()=>onChoose(mode)}/>{mode==='messages'?'Messages':'Workspace'}</label>)}</div><p>{blocked?'Finish or check the current request before changing layouts.':'Your conversations, drafts and recording stay in place.'}</p>{error&&<p role="alert">{error}</p>}</fieldset>;

@@ -40,13 +40,21 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
 }) {
   const [screen, setScreen] = useState<Screen>(initialScreen);
   const [addingConnection,setAddingConnection]=useState(false);
-  const addConnectionButton=useRef<HTMLButtonElement>(null),catalogHeading=useRef<HTMLHeadingElement>(null);
+  const addConnectionButton=useRef<HTMLButtonElement>(null),recordsButton=useRef<HTMLButtonElement>(null),catalogHeading=useRef<HTMLHeadingElement>(null);
+  const [connectionSearch,setConnectionSearch]=useState('');
+  const [connectionCategory,setConnectionCategory]=useState<'all'|'records'|'email'|'services'>('all');
+  const pickerOrigin=useRef<'add'|'records'>('add');
+  function openPicker(origin:'add'|'records'){
+    if(leaveLocked)return;
+    pickerOrigin.current=origin;setConnectionSearch('');setConnectionCategory(origin==='records'?'records':'all');setAddingConnection(true);
+  }
   useEffect(()=>{if(!open)setAddingConnection(false);},[open]);
+  useEffect(()=>{setAddingConnection(false);setConnectionSearch('');setConnectionCategory('all');},[connectionIdentity]);
   const wasAddingConnection=useRef(false);
   useEffect(()=>{
     if(!open||screen!=='connections'){wasAddingConnection.current=false;return;}
     if(addingConnection)catalogHeading.current?.focus({preventScroll:true});
-    else if(wasAddingConnection.current)addConnectionButton.current?.focus({preventScroll:true});
+    else if(wasAddingConnection.current)(pickerOrigin.current==='records'?recordsButton.current:addConnectionButton.current)?.focus({preventScroll:true});
     wasAddingConnection.current=addingConnection;
   },[open,screen,addingConnection]);
   const [inboundBusy,setInboundBusy]=useState(false),[providerInboundBusy,setProviderInboundBusy]=useState(false);
@@ -132,6 +140,14 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   const editors = {team, members, core, scheduling, microsoft, google, ehr, messaging, payments, portals};
   const connectionCards = (['core','scheduling','google','microsoft','messaging','payments','portals'] as const)
     .filter(id=>editors[id]!=null).map(id=>({id,...CONNECTION_GUIDES[id]}));
+  const search=connectionSearch.trim().toLowerCase();
+  const matchesSearch=(...values:string[])=>!search||values.join(' ').toLowerCase().includes(search);
+  const pickerRecords=practiceRecordActions&&(connectionCategory==='all'||connectionCategory==='records')
+    ?practiceRecordProviders.filter(item=>matchesSearch(item.name,item.description,'EHR practice records')):[];
+  const pickerServices=connectionCards.filter(item=>connectionCategory!=='records'
+    &&(connectionCategory==='all'||(connectionCategory==='email')===(item.group==='Email & calendar'))
+    &&matchesSearch(titles[item.id],item.description,item.group));
+  const pickerCount=pickerRecords.length+pickerServices.length;
   const selectedGuide=screen in CONNECTION_GUIDES?CONNECTION_GUIDES[screen as ConnectionId]:null;
   const setupUnavailable=selectedGuide&&catalog?.[screen as ConnectionId]===false;
   const readiness=selectedGuide?catalog?.readiness?.[screen as ConnectionId]:undefined;
@@ -184,16 +200,16 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
   }
   return <section ref={section} className="settings-hub" hidden={!open} aria-label={presentingTask?undefined:'Settings'} data-editor-task={presentingGoogleTask?'google':presentingReceivedFaxTask?'efax':undefined}>
     <nav className="settings-hub-nav" aria-label="Settings navigation" hidden={presentingTask}>
-      {screen !== 'home' && <button disabled={leaveLocked} onClick={() => visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
-        <span aria-hidden="true">← </span>{screen === 'members' || screen === 'team' || screen === 'connections' ? 'All settings' : 'All connections'}
+      {screen !== 'home' && <button aria-label={addingConnection?'Back to connections':undefined} disabled={leaveLocked} onClick={() => addingConnection?setAddingConnection(false):visit(screen === 'members' || screen === 'team' || screen === 'connections' ? 'home' : 'connections')}>
+        <span aria-hidden="true">← </span>{addingConnection?'Back to connections':screen === 'members' || screen === 'team' || screen === 'connections' ? 'All settings' : 'All connections'}
       </button>}
       <button className="settings-done" disabled={leaveLocked} onClick={onClose}>Done</button>
     </nav>
     {leaveLocked&&!presentingTask && <p className="settings-navigation-notice" role="status">Wait for this step to finish, or recover any unsaved edits before leaving.</p>}
     <header hidden={presentingTask} className={`settings-hub-heading${screen !== 'home' && screen !== 'connections' ? ' settings-hub-heading-quiet' : ''}`}>
-      <h1 ref={title} tabIndex={-1}>{titles[screen]}</h1>
+      <h1 ref={addingConnection?catalogHeading:title} tabIndex={-1}>{addingConnection?'Choose a service':titles[screen]}</h1>
       {screen === 'home' && <p>A little setup. A team that fits your practice.</p>}
-      {screen === 'connections' && <p>Choose a service, check what is ready, and take the next step.</p>}
+      {screen === 'connections' && !addingConnection && <p>Choose a service, check what is ready, and take the next step.</p>}
     </header>
     {screen === 'home' && appearance}
     {screen === 'home' && <div className="settings-cards">
@@ -214,12 +230,21 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
     </div>}
     {screen==='home'&&accountControls&&<section className="settings-account" aria-label="Account"><h2>Account</h2>{accountControls}</section>}
     {screen === 'connections' && <div className="connection-directory" data-catalog-open={addingConnection}>
-      <div className="connection-directory-actions">{addingConnection?<button disabled={leaveLocked} onClick={()=>setAddingConnection(false)}>Back to connections</button>:<button ref={addConnectionButton} className="team-primary" disabled={leaveLocked} onClick={()=>setAddingConnection(true)}>Add connection</button>}</div>
-      {addingConnection&&<section className="connection-add-catalog" aria-label="Add connection catalog"><h2 ref={catalogHeading} tabIndex={-1}>Choose a service</h2><p>Open a service to check access or see its setup steps.</p>
-        {practiceRecordActions&&<section className="connection-group" aria-label="Practice records catalog"><h3>Practice records</h3><div className="connection-cards">{practiceRecordProviders.map(item=><div className="connection-card-box" key={item.id}><button data-practice-record-provider={item.id} className="settings-card connection-card connection-record-row" disabled={leaveLocked||!practiceRecordActions[item.id]} onClick={()=>{if(!leaveLocked)practiceRecordActions[item.id]?.();}}>
-          <span className="connection-card-copy"><strong>{item.name}</strong><small>{item.description}</small><small className="connection-record-state">{!practiceRecordActions[item.id]?'Not available in this app':item.id==='atlas_md'?'Choose a calendar file':'Access checked when opened'}</small></span><span className="connection-row-chevron" aria-hidden="true">›</span>
-        </button>{!practiceRecordActions[item.id]&&<details className="connection-state-help"><summary aria-label={`${item.name} setup requirements`}>Setup requirements</summary><p>{item.setup}</p></details>}</div>)}</div></section>}
+      {addingConnection&&<section className="connection-add-catalog" aria-label="Add connection catalog">
+        <label className="connection-search"><span>Find a service</span><input type="search" value={connectionSearch} maxLength={100} autoComplete="off" spellCheck={false} disabled={leaveLocked} placeholder="Elation, Gmail, fax…" onChange={event=>setConnectionSearch(event.target.value)}/></label>
+        <div className="connection-catalog-filters" role="group" aria-label="Filter services">{([['all','All'],['records','Records'],['email','Email & calendar'],['services','Other services']] as const).map(([id,label])=><button key={id} aria-pressed={connectionCategory===id} disabled={leaveLocked} onClick={()=>setConnectionCategory(id)}>{label}</button>)}</div>
+        <p className="connection-catalog-count" role="status">{pickerCount===0?'No services match your search.':`${pickerCount} ${pickerCount===1?'service':'services'}`}</p>
+        {pickerCount===0&&<div className="connection-catalog-empty"><p>Try a provider name or choose All.</p><button disabled={leaveLocked} onClick={()=>{setConnectionSearch('');setConnectionCategory('all');}}>Show all services</button></div>}
+        {pickerRecords.length>0&&<section className="connection-group" aria-label="Practice records catalog"><h3>Practice records</h3><div className="connection-cards">{pickerRecords.map(item=><div className="connection-card-box" key={item.id}><button data-practice-record-provider={item.id} className="settings-card connection-card connection-record-row" disabled={leaveLocked||!practiceRecordActions?.[item.id]} onClick={()=>{if(!leaveLocked)practiceRecordActions?.[item.id]?.();}}>
+          <span className="connection-card-copy"><strong>{item.name}</strong><small>{item.description}</small><small className="connection-record-state">{!practiceRecordActions?.[item.id]?'Not available in this app':item.id==='atlas_md'?'Choose a calendar file':'Access checked when opened'}</small></span><span className="connection-row-chevron" aria-hidden="true">›</span>
+        </button>{!practiceRecordActions?.[item.id]&&<details className="connection-state-help"><summary aria-label={`${item.name} setup requirements`}>Setup requirements</summary><p>{item.setup}</p></details>}</div>)}</div></section>}
+        {['Your practice','Email & calendar','Practice services'].map(group=>{const cards=pickerServices.filter(item=>item.group===group);return cards.length>0&&<section className="connection-group" key={group} aria-label={`${group} catalog`}><h3>{group}</h3><div className="connection-cards">{cards.map(item=>{const state=summary(item.id);return <button key={item.id} className="settings-card connection-card connection-picker-service" disabled={leaveLocked||!!connectionIdentity&&!catalog&&!catalogError} onClick={()=>visit(item.id)}>
+          <span className="settings-card-icon" aria-hidden="true">{item.icon}</span><span className="connection-card-copy"><strong>{titles[item.id]}</strong><small>{item.description}</small></span>
+          <span className="connection-card-state"><span className={`connection-badge connection-badge-${state.tone}`}>{state.label}</span></span><span className="connection-row-chevron" aria-hidden="true">›</span>
+        </button>;})}</div></section>;})}
       </section>}
+      <div className="connection-directory-list" hidden={addingConnection}>
+      <div className="connection-directory-actions"><button ref={addConnectionButton} className="team-primary" disabled={leaveLocked} onClick={()=>openPicker('add')}>Add connection</button></div>
       {connectionIdentity&&<div className="connection-directory-status"><p role="status">{checking?(checkingAgain?'Checking again. Last confirmed results remain below.':'Checking connections…'):catalog?'Connected confirms the account. Read results and task outcomes are shown separately.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
         <button disabled={navigationLocked||checking||!catalog&&!catalogError} onClick={()=>setRefreshCatalog(value=>value+1)}>Refresh connections</button></div>}
       <details className="connection-state-help"><summary>What these states mean</summary><dl>
@@ -263,8 +288,8 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
           </article>)}
         </section>;
       })}
-      {!addingConnection&&(ehr != null||practiceRecordActions)&&<section className="connection-group" aria-label="Practice records"><h2>Practice records</h2>
-        <button className="settings-card connection-card connection-record-row" disabled={leaveLocked} onClick={()=>practiceRecordActions?setAddingConnection(true):visit('ehr')}>
+      {(ehr != null||practiceRecordActions)&&<section className="connection-group" aria-label="Practice records"><h2>Practice records</h2>
+        <button ref={recordsButton} className="settings-card connection-card connection-record-row" disabled={leaveLocked} onClick={()=>practiceRecordActions?openPicker('records'):visit('ehr')}>
           <span className="connection-card-copy"><strong>{practiceRecordActions?'Choose your records system':'Practice appointments'}</strong><small>{practiceRecordActions?'Atlas.MD, Elation, Tebra and Athena':'Choose appointments for a visit. Access is checked when opened.'}</small></span>
           <span className="connection-row-chevron" aria-hidden="true">›</span>
         </button>
@@ -274,6 +299,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
         <p>{ATHENA_CONNECTION_BUILD?'Athena schedule access is managed through your Cosmaneura practice connection.':'Additional EHR connections are managed by your practice.'}</p>
         <p>Connecting an account does not automatically import its contents into a visit or give a bot permission to act.</p>
       </aside>}
+      </div>
     </div>}
     {screen==='messaging'&&connectionIdentity&&<div hidden={presentingReceivedFaxTask}><FaxConnectionOverview value={!catalogError&&catalog?.messaging?current?.checks.messaging?.value?.faxReadiness:undefined}
       loading={checking} unavailable={!!setupUnavailable} locked={navigationLocked}

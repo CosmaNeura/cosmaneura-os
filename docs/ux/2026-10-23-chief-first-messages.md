@@ -5,6 +5,16 @@ Baseline: merged PR #203, `b1a76cc` (source tree identical to `7134cf1`).
 
 ## Accepted experience
 
+The October 27 owner direction prioritizes feature development and mobile UI/UX
+over further broad backend and systems qualification. The next full-feature phone
+preview simplifies two remaining crowded navigation surfaces: Add connection is
+a searchable service picker, and Details opens a contextual Notes and sources
+chooser within its existing sheet. Back preserves the originating focus, scroll
+and draft; attributed review cards still open their complete workflow directly.
+The unfinished standalone hosting preparation is separate from this preview.
+Changed workflows are checked with DOM geometry and native interaction evidence,
+with no screenshots emitted in this chat.
+
 Messages is the phone default after setup, with Chief as the first conversation
 when available. Owner-disabled bots stay disabled. Other bots are opened through
 existing chats or New message, using their actual supported workflows. Scribe's

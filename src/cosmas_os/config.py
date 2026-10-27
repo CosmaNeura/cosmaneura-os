@@ -1,11 +1,16 @@
 from __future__ import annotations
 
+import base64
+import re
+from pathlib import Path
 from typing import Literal
 from urllib.parse import parse_qs, urlparse
 from uuid import UUID
 
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+STANDALONE_ENVS = frozenset({"standalone_synthetic", "standalone_clerk_synthetic"})
 
 
 class Settings(BaseSettings):
@@ -14,6 +19,14 @@ class Settings(BaseSettings):
     database_url: str = "postgresql+psycopg://cosmas:cosmas@localhost:54329/cosmas_os"
     redis_url: str = "redis://localhost:63799/0"
     cosmas_env: str = "synth_os"
+    # Offline, independent practice proof. Never an alias for hosted beta.
+    standalone_instance_id: str = ""
+    standalone_root: str = ""
+    standalone_jwks_path: str = ""
+    # Separate reviewed issuer selection; never inferred from email or an old account.
+    standalone_clerk_issuer_allowlist: str = ""
+    # Explicit owned model-resource selection; never inherit the legacy endpoint.
+    standalone_model_origin_allowlist: str = ""
     data_mode: Literal["synthetic", "authorized_beta"] = "synthetic"
     auth_mode: Literal["synth_headers", "clerk_jwt"] = "synth_headers"
     cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -317,6 +330,9 @@ class Settings(BaseSettings):
 
     @property
     def workspace_llm_available(self) -> bool:
+        if self.cosmas_env == "standalone_clerk_synthetic":
+            return bool(self.workspace_llm_backend == "azure_gpt41" and self.workspace_available
+                        and not self._standalone_model_errors())
         return bool(self.workspace_available and self.workspace_llm_backend == "azure_gpt41"
                     and self.workspace_llm_endpoint == "https://cosmascode.services.ai.azure.com/openai/v1"
                     and self.workspace_llm_deployment == "gpt-4.1"
@@ -324,6 +340,8 @@ class Settings(BaseSettings):
 
     @property
     def workspace_available(self) -> bool:
+        if self.cosmas_env in STANDALONE_ENVS:
+            return not self._standalone_configuration_errors()
         if self.workspace_hosted_enabled:
             return bool(
                 self.workspace_enabled and self.workspace_authenticated_enabled
@@ -424,7 +442,7 @@ class Settings(BaseSettings):
         )
 
     def _is_hosted_workspace_origin(self, value: str) -> bool:
-        if self.cosmas_env != "early_adopter_beta":
+        if self.cosmas_env not in {"early_adopter_beta", "standalone_clerk_synthetic"}:
             return False
         if value == "app://cosmas":
             return self.workspace_desktop_hosted_transport_enabled
@@ -470,7 +488,12 @@ class Settings(BaseSettings):
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
+        if self.cosmas_env in STANDALONE_ENVS:
+            return self._standalone_configuration_errors()
         errors: list[str] = []
+        if (self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path
+                or self.standalone_clerk_issuer_allowlist or self.standalone_model_origin_allowlist):
+            errors.append("Standalone settings require the explicit standalone synthetic profile")
         if self.clerk_session_policy == "shared_staging":
             errors.extend(self.clerk_session_configuration_errors())
         if self.workspace_scheduling_enrollment_enabled:
@@ -562,11 +585,170 @@ class Settings(BaseSettings):
 
         return errors + self._beta_configuration_errors()
 
+    def _standalone_configuration_errors(self) -> list[str]:
+        """Closed owned profiles; external identity never enables a provider or worker."""
+        errors: list[str] = []
+        real_clerk = self.cosmas_env == "standalone_clerk_synthetic"
+        try:
+            instance = UUID(self.standalone_instance_id)
+            if instance.version != 4 or str(instance) != self.standalone_instance_id:
+                raise ValueError
+        except ValueError:
+            errors.append("Standalone instance must be a canonical UUIDv4")
+            instance = None
+        root = Path(self.standalone_root)
+        if (not self.standalone_root or not root.is_absolute()
+                or str(root) != self.standalone_root or ".." in root.parts
+                or self.blob_root != str(root / "blobs")
+                or self.standalone_jwks_path != ("" if real_clerk else str(root / "keys" / "jwks.json"))):
+            errors.append("Standalone storage and public keys require one explicit owned root")
+        if (self.data_mode != "synthetic" or self.auth_mode != "clerk_jwt"
+                or not self.workspace_enabled or not self.workspace_authenticated_enabled
+                or not self.workspace_draft_recovery_required or self.synth_seed
+                or self.sync_worker or self.execution_backend != "celery"
+                or self.blob_backend != "local" or self.redis_url):
+            errors.append("Standalone requires authenticated synthetic mode with local storage and no queue transport")
+        try:
+            database = urlparse(self.database_url)
+            valid_database = (database.scheme == "postgresql+psycopg"
+                and database.hostname == "127.0.0.1" and database.port is not None
+                and database.username and database.password
+                and re.fullmatch(r"/cosmabot_standalone_[a-z0-9_]+", database.path)
+                and not database.query and not database.fragment and not database.params)
+        except ValueError:
+            valid_database = False
+        if not valid_database:
+            errors.append("Standalone requires an authenticated dedicated loopback PostgreSQL database")
+        if real_clerk:
+            issuer = urlparse(self.clerk_issuer or "")
+            hostname = issuer.hostname or ""
+            # A real issuer is one explicit reviewed selection, never a discovery
+            # URL or the offline key namespace. Signature verification is unchanged.
+            if (not self.clerk_issuer or self._csv(self.standalone_clerk_issuer_allowlist) != (self.clerk_issuer,)
+                    or not self._is_exact_https_origin(self.clerk_issuer)
+                    or self.clerk_issuer != "https://" + hostname
+                    or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}", hostname)
+                    or hostname == "cosmaneura.com"
+                    or hostname.endswith((".invalid", ".localhost", ".cosmaneura.com"))):
+                errors.append("Standalone Clerk requires one explicitly allowlisted HTTPS issuer")
+            if ("clerk_session_policy" not in self.model_fields_set
+                    or self.clerk_session_policy not in {"audience", "shared_staging"}):
+                errors.append("Standalone Clerk requires an explicit existing session policy")
+            # Audience selects the reviewed application, not a storage instance.
+            # Exact issuer/org/owner checks and the owned database marker remain
+            # independent boundaries; the same selected application contract can
+            # intentionally admit its bearer session at more than one instance.
+            if self.clerk_session_policy == "audience" and (
+                    "clerk_audience" not in self.model_fields_set
+                    or not re.fullmatch(r"[\x21-\x7e]{1,255}", self.clerk_audience or "")
+                    or hostname.endswith(".clerk.accounts.dev")):
+                errors.append("Standalone audience sessions require an explicit application audience and production issuer")
+            if (not re.fullmatch(r"org_[A-Za-z0-9_]{1,251}", self.clerk_organization_id or "")
+                    or not self.human_deploy_evidence_ref or len(self.human_deploy_evidence_ref) > 255
+                    or self.human_deploy_evidence_ref != self.human_deploy_evidence_ref.strip()
+                    or any(ord(c) < 32 for c in self.human_deploy_evidence_ref)):
+                errors.append("Standalone Clerk requires an explicit organization and reviewed deployment reference")
+            if (not self.workspace_hosted_enabled or self.workspace_apple_local_transport_enabled
+                    or self.workspace_desktop_local_transport_enabled):
+                errors.append("Standalone Clerk requires explicit hosted transports")
+            if any((urlparse(origin).hostname or "") == "cosmaneura.com"
+                   or (urlparse(origin).hostname or "").endswith(".cosmaneura.com")
+                   for origin in self.allowed_origins):
+                errors.append("Standalone Clerk cannot admit separate platform web origins")
+        elif instance is not None:
+            # Offline proof retains its original identity contract and key file.
+            issuer = f"https://{instance}.cosmabot.invalid"
+            if (self.clerk_issuer != issuer or self.clerk_jwks_url != issuer + "/.well-known/jwks.json"
+                    or self.clerk_audience != f"cosmabot-standalone:{instance}"
+                    or self.clerk_organization_id != "org_cosmabot_" + instance.hex
+                    or self.clerk_session_policy != "audience"):
+                errors.append("Standalone identity must use its instance-specific offline namespace")
+            if self.standalone_clerk_issuer_allowlist:
+                errors.append("Offline standalone identity cannot select a remote issuer")
+        errors.extend(self.workspace_authentication_errors())
+        if (not self.allowed_origins
+                or not all(self._is_workspace_origin(origin) for origin in self.allowed_origins)):
+            errors.append("Standalone origins must match its explicit workspace transports")
+        enabled_allowlist = {"workspace_enabled", "workspace_authenticated_enabled",
+            "workspace_draft_recovery_required"}
+        if real_clerk:
+            enabled_allowlist.update({"workspace_google_connection_enabled", "workspace_google_message_enabled",
+                                      "workspace_google_calendar_enabled"})
+        enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
+            "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
+            "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
+        for name in type(self).model_fields:
+            if name.endswith("_enabled") and name not in enabled_allowlist and getattr(self, name):
+                errors.append("Standalone external features and background workers must remain disabled")
+                break
+        empty_prefixes = ("core_", "azure_", "microsoft_connection_",
+            "scheduling_", "managed_services_config_")
+        for name in type(self).model_fields:
+            value = getattr(self, name)
+            reviewed_optional = real_clerk and name in {"workspace_llm_api_key", "google_connection_encryption_key"}
+            if ((name.startswith(empty_prefixes) or name.endswith("_api_key")
+                 or name.endswith("_encryption_key")) and value and not reviewed_optional):
+                errors.append("Standalone cannot contain external service addresses or credentials")
+                break
+        if (self.workspace_capture_backend != "disabled" or self.compact_web_root
+                or self.workspace_native_synthetic_enabled):
+            errors.append("Standalone capture and alternate execution paths must be disabled")
+        if real_clerk:
+            errors.extend(self._standalone_model_errors())
+            errors.extend(self._standalone_google_errors())
+        elif (self.workspace_llm_backend != "disabled" or self.workspace_llm_endpoint
+              or self.standalone_model_origin_allowlist or any(getattr(self, name)
+                    for name in type(self).model_fields if name.startswith("google_connection_"))):
+            errors.append("Offline standalone models and Google credentials must remain disabled")
+        return errors
+
+    def _standalone_model_errors(self) -> list[str]:
+        if self.workspace_llm_backend == "disabled":
+            return (["Disabled standalone model must have no endpoint, origin selection or key"]
+                    if self.workspace_llm_endpoint or self.standalone_model_origin_allowlist or self.workspace_llm_api_key else [])
+        endpoint = self.workspace_llm_endpoint
+        parsed = urlparse(endpoint)
+        origin = "https://" + (parsed.hostname or "")
+        if (self.workspace_llm_backend != "azure_gpt41" or self.workspace_llm_deployment != "gpt-4.1"
+                or not re.fullmatch(r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1", endpoint)
+                or self._csv(self.standalone_model_origin_allowlist) != (origin,)
+                or not self.workspace_llm_api_key or not self.workspace_llm_api_key.get_secret_value()):
+            return ["Standalone Chief requires one reviewed Azure OpenAI origin, GPT-4.1 and its own key"]
+        return []
+
+    def _standalone_google_errors(self) -> list[str]:
+        names = [name for name in type(self).model_fields if name.startswith("google_connection_")]
+        if not self.workspace_google_connection_enabled:
+            return (["Disabled standalone Google connection must have no credentials or read flags"]
+                    if self.workspace_google_message_enabled or self.workspace_google_calendar_enabled
+                    or any(getattr(self, name) for name in names) else [])
+        callback = urlparse(self.google_connection_callback_uri)
+        origin = callback.scheme + "://" + callback.netloc
+        hostname = callback.hostname or ""
+        valid_key = False
+        if self.google_connection_encryption_key:
+            try:
+                key = base64.b64decode(self.google_connection_encryption_key.get_secret_value(), altchars=b"-_", validate=True)
+                valid_key = len(key) == 32
+            except (ValueError, UnicodeError):
+                pass
+        if (not re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", self.google_connection_client_id)
+                or not self._is_exact_https_origin(origin) or origin != "https://" + hostname
+                or hostname == "cosmaneura.com" or hostname.endswith(".cosmaneura.com")
+                or callback.path != "/connections/google/callback" or callback.query or callback.fragment or callback.params
+                or not self._is_exact_https_origin(self.google_connection_return_origin)
+                or self.google_connection_return_origin not in self.allowed_origins
+                or not self.google_connection_client_secret or not self.google_connection_client_secret.get_secret_value()
+                or not valid_key):
+            return ["Standalone Google requires its reviewed client, exact owned callback/return origins and custody key"]
+        return []
+
     def clerk_session_configuration_errors(self) -> list[str]:
         if self.clerk_session_policy == "audience":
             return [] if self.clerk_audience else ["CLERK_AUDIENCE is required"]
         if (self.clerk_session_policy != "shared_staging" or self.clerk_audience != ""
-                or self.cosmas_env != "early_adopter_beta" or self.data_mode != "synthetic"
+                or self.cosmas_env not in {"early_adopter_beta", "standalone_clerk_synthetic"}
+                or self.data_mode != "synthetic"
                 or self.auth_mode != "clerk_jwt"
                 or not self._is_exact_https_origin(self.clerk_issuer or "")
                 or not (urlparse(self.clerk_issuer or "").hostname or "").endswith(".clerk.accounts.dev")):

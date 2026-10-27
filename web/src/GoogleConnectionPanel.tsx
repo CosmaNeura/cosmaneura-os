@@ -89,7 +89,11 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
           views:{...(previous?.owner===identity&&previous.scope===scope?previous.views:{}),
             ...(result.kind==='mail'?{mail:result}:{calendar:result})}}));
       }
-      else if(result.state==='disconnected'){setData(null);setMessage('Google disconnected from CosmasOS. You can reconnect when ready.');}
+      else if(result.state==='disconnected'){
+        const disconnected:GoogleStatus={state:'sign_in_required',account:null,connected_at:null};
+        observeConnectionStatus(identity,'google',disconnected);setData(checkedState(identity,null,disconnected));
+        setMessage('Google disconnected from CosmaBot. You can reconnect when ready.');
+      }
       else {observeConnectionStatus(identity,'google',result);setData(checkedState(identity,previous,result));return result.state;}
     }catch(error){
       if(epoch.current!==current||owner.current!==identity)return;
@@ -180,13 +184,25 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
   const calendarNeedsPermission=status?.state==='connected'&&status.capabilities?.calendar===false;
   const messageWorkEnabled=import.meta.env.VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED==='true';
   const calendarWorkEnabled=import.meta.env.VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED==='true';
+  const canStartConnection=status?.state==='sign_in_required'||status?.state==='sign_in_pending';
+  const needsSignIn=status?.state==='sign_in_required';
+  const mailWorkAvailable=messageWorkEnabled&&!!onOpenMessageWork,calendarWorkAvailable=calendarWorkEnabled&&!!onOpenCalendarWork;
+  const primaryWork=status?.state!=='connected'?null:service==='mail'&&mailWorkAvailable?'mail':service==='calendar'&&calendarWorkAvailable?'calendar':mailWorkAvailable?'mail':calendarWorkAvailable?'calendar':null;
+  const nextStep=unavailableFor===identity
+    ?{title:'Google setup is not ready',detail:'Your practice needs to enable Google first. After setup, check the connection again here.'}
+    :!nativeReady?{title:'Use a configured CosmaBot app',detail:'Google sign-in is not available in this app build. Ask your practice administrator for the updated app; your saved work stays in place.'}
+    :start?{title:'Continue on Google',detail:'Choose your Google account and review access. Then return to CosmaBot; it will check the result.'}
+    :status?.state==='connected'?{title:primaryWork?'Choose what to review with Chief':'Choose email or calendar',detail:primaryWork?'Open email or calendar work, choose one item, then review it before saving it for Chief. Nothing is sent.':'Choose a service below, then read its preview. Connecting an account does not read the mailbox or calendar.'}
+    :status?.state==='completing_sign_in'||status?.state==='sign_in_pending'?{title:'Finish Google sign-in',detail:'Finish in your browser, then return here to check the connection. Restart only if you need a new sign-in link.'}
+    :status?.state==='sign_in_required'?{title:'Connect your Google account',detail:'Choose your account and approve the requested access on Google. Your existing CosmaBot notes and drafts stay in place.'}
+    :{title:busy&&(action==='start'||action==='start_full_mail')?'Preparing Google sign-in':busy?'Checking your Google connection':'Check your Google connection',detail:'Confirm the current connection before starting sign-in again. Your saved work is retained.'};
   return <><section className="core-connection-setup microsoft-connection google-connection" aria-label="Google email and calendar" hidden={messageWorkOpen||calendarWorkOpen}>
     <header className="personal-connection-heading"><span className="settings-card-icon" aria-hidden="true">G</span><div><h2>{status?.state==='connected'?'Google Workspace':'Connect Google Workspace'}</h2><p>Email and the week ahead.</p></div></header>
-    <p>{status?.state==='connected'?'Your account is connected. Check email and calendar access below.':'Connect your Google account to see recent Gmail headers and your primary calendar here. Google will ask you to approve access.'}</p>
+    <p className="google-next-step"><strong>{nextStep.title}</strong><span>{nextStep.detail}</span></p>
     <p className="connection-access-summary">These connection checks read email headers and event titles and times. {messageWorkEnabled?'Full email work asks for separate access below.':'Message bodies and attachments stay in Gmail.'} CosmaBot cannot send email or change calendar events.</p>
     {nativeForeground.suspended&&<p role="status">Google details are hidden while the app is inactive. Your saved work is retained.</p>}
     {!status?.account&&!start&&unavailableFor!==identity&&<details><summary>How to connect</summary><ol className="personal-connection-steps"><li>Choose your Google account.</li><li>Review access on Google’s secure sign-in page.</li><li>Return here to read recent email.</li></ol></details>}
-    <button disabled={blocked} onClick={()=>manual('status')}>Check Google connection</button>
+    <button className={!start&&(!needsSignIn||!nativeReady||unavailableFor===identity)&&status?.state!=='connected'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('status')}>Check Google connection</button>
     {busy&&action&&<div className="connection-progress" role="status"><p>{action==='start_full_mail'?'Preparing full email permission…':personalConnectionProgress('google',action)}</p>
       <small>{action==='recovery'?'Account recovery has a 10-second limit. The read will not repeat.':'This request has a 50-second limit.'} {action==='status'||action==='mail'||action==='calendar'||action==='recovery'?'You can keep working elsewhere.':''}</small>
       {action!=='start'&&action!=='start_full_mail'&&action!=='disconnect'&&<button onClick={cancelRead}>Stop waiting</button>}</div>}
@@ -194,7 +210,7 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
       {status.account&&<><h3>{status.account.label}</h3><p>{status.account.email}</p></>}
       <p role="status">{status.state==='connected'?'Google connected.':status.state==='completing_sign_in'?'Completing Google sign-in…':status.state==='sign_in_pending'?'Google sign-in is ready to continue.':'Connect your Google account to continue.'}</p>
     </div>}
-    {(!status||status.state!=='completing_sign_in'&&status.state!=='connected')&&!start&&<button className="team-primary" disabled={blocked||calendarAccountLocked||messageWorkLocked||!nativeReady||unavailableFor===identity} onClick={()=>manual('start')}>Connect with Google</button>}
+    {(!status||status.state!=='completing_sign_in'&&status.state!=='connected')&&!start&&<button className={needsSignIn&&nativeReady&&unavailableFor!==identity?'team-primary':undefined} disabled={blocked||calendarAccountLocked||messageWorkLocked||!nativeReady||unavailableFor===identity||!canStartConnection} onClick={()=>manual('start')}>{status?.state==='sign_in_pending'?'Restart Google sign-in':'Connect with Google'}</button>}
     {start&&<p>{native?<button type="button" className="team-primary" disabled={blocked||calendarAccountLocked||messageWorkLocked||!nativeReady}
       data-google-connection={blocked||calendarAccountLocked||messageWorkLocked?undefined:JSON.stringify({schemaVersion:1,requestId,expectedRevision:native.revision,href:start.authorization_url})}
       onClick={begin}>{opening?'Opening Google…':'Continue with Google'}</button>:
@@ -202,8 +218,8 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
     {!nativeReady&&<p>Google connection is unavailable in this app build. Ask your practice administrator for the configured beta build.</p>}
     {(status?.state==='connected'||status?.state==='sign_in_required')&&<>
       {status.state==='sign_in_required'&&(messageWorkEnabled||calendarWorkEnabled)&&<p>Open saved work to check an unresolved request. Email and calendar contents need current Google access.</p>}
-      {calendarWorkEnabled&&onOpenCalendarWork&&<button className="team-primary" disabled={blocked||calendarWorkLocked||messageWorkLocked} onClick={()=>{setService('calendar');onOpenCalendarWork();}}>📅 Work with calendar</button>}
-      {messageWorkEnabled&&onOpenMessageWork&&<button className="team-primary" disabled={blocked||messageWorkLocked||calendarAccountLocked} onClick={()=>{setService('mail');onOpenMessageWork();}}>Work with email</button>}
+      <div className="google-work-actions">{calendarWorkEnabled&&onOpenCalendarWork&&<button className={primaryWork==='calendar'?'team-primary':undefined} disabled={blocked||calendarWorkLocked||messageWorkLocked} onClick={()=>{setService('calendar');onOpenCalendarWork();}}>📅 Work with calendar</button>}
+      {messageWorkEnabled&&onOpenMessageWork&&<button className={primaryWork==='mail'?'team-primary':undefined} disabled={blocked||messageWorkLocked||calendarAccountLocked} onClick={()=>{setService('mail');onOpenMessageWork();}}>Work with email</button>}</div>
     </>}
     {status?.state==='connected'&&<>
       <div className="google-service-tabs" role="group" aria-label="Choose Google service">
@@ -211,9 +227,9 @@ export function GoogleConnectionPanel({identity,onBusyChange,onAuthenticationLos
         <button disabled={messageWorkLocked||calendarAccountLocked} aria-pressed={service==='calendar'} onClick={()=>setService('calendar')}>Calendar</button>
       </div>
       <PersonalConnectionHealth identity={identity} provider="google"
-        mailAction={<button className={service==='mail'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('mail')}>{visible?.views.mail?'Refresh email':'Read recent email'}</button>}
-        calendarAction={calendarNeedsPermission?<button className={service==='calendar'?'team-primary':undefined} disabled={blocked||!nativeReady||messageWorkLocked||calendarAccountLocked} onClick={()=>manual('start')}>Add calendar access</button>:
-          <button className={service==='calendar'?'team-primary':undefined} disabled={blocked||messageWorkLocked||calendarAccountLocked} onClick={()=>manual('calendar')}>{visible?.views.calendar?'Refresh calendar':'View next 7 days'}</button>}/>
+        mailAction={<button className={!primaryWork&&service==='mail'?'team-primary':undefined} disabled={blocked} onClick={()=>manual('mail')}>{visible?.views.mail?'Refresh email':'Read recent email'}</button>}
+        calendarAction={calendarNeedsPermission?<button className={!primaryWork&&service==='calendar'?'team-primary':undefined} disabled={blocked||!nativeReady||messageWorkLocked||calendarAccountLocked} onClick={()=>manual('start')}>Add calendar access</button>:
+          <button className={!primaryWork&&service==='calendar'?'team-primary':undefined} disabled={blocked||messageWorkLocked||calendarAccountLocked} onClick={()=>manual('calendar')}>{visible?.views.calendar?'Refresh calendar':'View next 7 days'}</button>}/>
       {!view&&<p className="google-results-hint">{service==='mail'?'Read recent email to see up to 10 inbox headers.':calendarNeedsPermission?'Choose Add calendar access to view your week.':'View the next 7 days to see event titles and times.'}</p>}
     </>}
 

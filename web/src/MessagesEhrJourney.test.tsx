@@ -15,7 +15,7 @@ const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
 async function wait(check:()=>void){for(let i=0;i<300;i++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,2));try{check();done=true;}catch{}});if(done)return;}check();}
 async function click(label:string){await wait(()=>expect(visibleButton(label)?.disabled,label).toBe(false));await act(async()=>{visibleButton(label)!.focus();visibleButton(label)!.click();});}
 async function draft(value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),value);question().dispatchEvent(new Event('input',{bubbles:true}));});}
-async function openTask(){await click('Details');await click('Review EHR records');await wait(()=>expect(visibleButton('Check Elation access')??visibleButton('Restore saved Elation work')).toBeTruthy());}
+async function openTask(){await click('Details');await click('Choose notes or sources');await click('Review EHR records');await wait(()=>expect(visibleButton('Check Elation access')??visibleButton('Restore saved Elation work')).toBeTruthy());}
 async function review(){await click('Check Elation access');await click('Load appointments');await wait(()=>expect(host.querySelector<HTMLButtonElement>('ul[aria-label="Appointments"] button')?.disabled).toBe(false));await act(async()=>host.querySelector<HTMLButtonElement>('ul[aria-label="Appointments"] button')!.click());await wait(()=>expect(host.querySelector('[aria-label="Review patient and visit"]')).toBeTruthy());for(const input of host.querySelectorAll<HTMLInputElement>('.ehr-read-panel input[type="checkbox"]'))await act(async()=>input.click());}
 beforeEach(async()=>{
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();localStorage.setItem(PRESENTATION_KEY,'messages');history.replaceState(null,'','#cosmas/home');
@@ -39,7 +39,7 @@ it('retains an unconfirmed source save through Back and resolves the same comman
  await click('‹ Back to Chief of Staff');await openTask();await click('Restore saved Elation work');await click('Check saved source result');await click('Check Elation access');await wait(()=>expect(visibleButton('Prepare Chief draft')?.disabled).toBe(false));expect(stats().reads).toBe(before.reads);expect(stats().reviews).toBe(before.reviews+1);await click('Prepare Chief draft');await wait(()=>expect(question().value).toContain('Keep directions during recovery.'));expect(workspaceApi.ask).not.toHaveBeenCalled();
 });
 it('returns to the saved-sources entry control after opening the same task from Sources',async()=>{
- await draft('Retain the visit instructions.');await click('Details');await click('Saved sources');await click('Review EHR records');await wait(()=>expect(visibleButton('Check Elation access')).toBeTruthy());await click('‹ Back to saved sources');await wait(()=>expect(document.activeElement).toBe(visibleButton('Review EHR records')));expect(document.activeElement?.closest('[hidden]')).toBeNull();expect(question().value).toBe('Retain the visit instructions.');
+ await draft('Retain the visit instructions.');await click('Details');await click('Choose notes or sources');await click('Saved sources');await click('Review EHR records');await wait(()=>expect(visibleButton('Check Elation access')).toBeTruthy());await click('‹ Back to saved sources');await wait(()=>expect(document.activeElement).toBe(visibleButton('Review EHR records')));expect(document.activeElement?.closest('[hidden]')).toBeNull();expect(question().value).toBe('Retain the visit instructions.');
 });
 it('returns from an unresolved read to edit Chief and navigate Messages, then restores the exact request without a new read',async()=>{
  await draft('Directions before EHR recovery.');await openTask();await click('Check Elation access');let reject!:(error:unknown)=>void;
@@ -60,16 +60,16 @@ async function delayedOpening(launch:()=>Promise<void>=()=>click('Review EHR rec
  await launch();await wait(()=>expect(release).toBeTypeOf('function'));
  return async()=>{await act(async()=>{release();});};
 }
-it.each(['Escape','Saved sources'] as const)('does not reopen Elation after %s wins during opening authorization',async choice=>{
- await draft('Keep the original directions.');await click('Details');const finish=await delayedOpening();
+it.each(['Escape','Saved sources','Back to details'] as const)('does not reopen Elation after %s wins during opening authorization',async choice=>{
+ await draft('Keep the original directions.');await click('Details');await click('Choose notes or sources');const finish=await delayedOpening();
  if(choice==='Escape')await act(async()=>document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})));
- else await click('Saved sources');
+ else await click(choice);
  await finish();expect(host.querySelector('.ehr-read-task')).toBeNull();expect(question().value).toBe('Keep the original directions.');
  expect(document.activeElement?.closest('[hidden]')).toBeNull();expect(workspaceApi.ask).not.toHaveBeenCalled();
- if(choice==='Escape')expect(visibleButton('Details')).toBeTruthy();else expect(visibleButton('Review EHR records')).toBeTruthy();
+ if(choice==='Escape')expect(visibleButton('Details')).toBeTruthy();else if(choice==='Back to details'){expect(document.activeElement).toBe(visibleButton('Choose notes or sources'));expect(visibleButton('Review EHR records')).toBeUndefined();}else expect(visibleButton('Review EHR records')).toBeTruthy();
 });
 it('does not open Elation after leaving the source entry during authorization',async()=>{
- await click('Details');await click('Saved sources');const finish=await delayedOpening();await click('Open notebook');await finish();
+ await click('Details');await click('Choose notes or sources');await click('Saved sources');const finish=await delayedOpening();await click('Open notebook');await finish();
  expect(host.querySelector('.ehr-read-task')).toBeNull();expect(visibleButton('Review EHR records')).toBeUndefined();expect(workspaceApi.ask).not.toHaveBeenCalled();
 });
 it('does not open Elation after leaving its connection entry during authorization',async()=>{
@@ -90,6 +90,6 @@ it('keeps the Tebra task choice and retained Chief draft through patient review,
  await act(async()=>{selector.value='tebra';selector.dispatchEvent(new Event('change',{bubbles:true}));});const tebraRecords=host.querySelector<HTMLSelectElement>('[aria-label="Tebra records"]')!;await act(async()=>{tebraRecords.value='appointments';tebraRecords.dispatchEvent(new Event('change',{bubbles:true}));});await click('Check Tebra access');await click('Load appointments');
  const panel=()=>host.querySelector<HTMLElement>('[aria-label="Tebra appointments"]')!;await wait(()=>expect(panel().querySelector<HTMLButtonElement>('ul button')?.disabled).toBe(false));await act(async()=>panel().querySelector<HTMLButtonElement>('ul button')!.click());expect(panel().querySelector('[aria-label="Review patient and visit"]')).toBeNull();
  const inputs=panel().querySelectorAll<HTMLInputElement>('fieldset input:not([type="datetime-local"])');expect(inputs).toHaveLength(2);for(const [i,value] of ['Cypress','1990-03-04'].entries())await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(inputs[i],value);inputs[i].dispatchEvent(new Event('input',{bubbles:true}));});
- await click('Verify selected appointment');await wait(()=>expect(panel().textContent).toContain('Jordan Cypress'));await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(visibleButton('Details')));expect(question().value).toBe('Keep my Tebra visit directions.');await click('Details');await click('Review EHR records');await click('Restore saved Tebra work');expect(selector.value).toBe('tebra');await click('Check Tebra access');await wait(()=>expect(panel().textContent).not.toContain('Checking and saving this step'));
+ await click('Verify selected appointment');await wait(()=>expect(panel().textContent).toContain('Jordan Cypress'));await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(visibleButton('Details')));expect(question().value).toBe('Keep my Tebra visit directions.');await click('Details');await click('Choose notes or sources');await click('Review EHR records');await click('Restore saved Tebra work');expect(selector.value).toBe('tebra');await click('Check Tebra access');await wait(()=>expect(panel().textContent).not.toContain('Checking and saving this step'));
  for(const input of panel().querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))await act(async()=>input.click());await click('Save reviewed appointment');await click('Prepare Chief draft');await wait(()=>expect(question().value).toContain('human-selected EHR source'));expect(question().value).toContain('Keep my Tebra visit directions.');expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();expect((window as unknown as {ehrRehearsalStats:{reads:number}}).ehrRehearsalStats.reads).toBe(2);
 });

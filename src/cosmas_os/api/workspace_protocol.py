@@ -29,7 +29,8 @@ CALLBACKS = frozenset({
 
 
 def required(runtime):
-    return bool(runtime.workspace_hosted_enabled and runtime.workspace_draft_recovery_required)
+    return bool((runtime.workspace_hosted_enabled or runtime.cosmas_env == "standalone_synthetic")
+                and runtime.workspace_draft_recovery_required)
 
 
 def protected(scope):

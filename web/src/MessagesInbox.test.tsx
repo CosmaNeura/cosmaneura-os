@@ -1,7 +1,7 @@
 import {act,useSyncExternalStore} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {MessagesInbox} from './MessagesPresentation';
+import {MessagesInbox,NewMessagePicker} from './MessagesPresentation';
 import {WorkspaceInboxPreferences} from './session/inbox-preferences';
 import {DraftJournal} from './draft-journal';
 import {memoryDraftStorage} from './draft-test-fixture';
@@ -21,7 +21,7 @@ beforeEach(async()=>{vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);journal=new 
   controller=new WorkspaceInboxPreferences(read);await controller.bind({identity:{mode:'clerk_jwt',getToken:async()=>null},recovery:{journal,recoveryScope:'a'.repeat(64),authorize:async()=>{}},current:()=>true,denied:()=>{}});
   more=vi.fn();rename=vi.fn();host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<Harness/>));
 });
-afterEach(async()=>{await act(async()=>root.unmount());journal.close();host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+afterEach(async()=>{await act(async()=>root.unmount());journal.close();host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();vi.unstubAllEnvs();});
 const button=(text:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>item.textContent===text)!;
 const click=async(text:string)=>{await act(async()=>button(text).click());};
 async function menu(){await act(async()=>host.querySelector<HTMLButtonElement>('.messages-row-menu')!.click());}
@@ -46,4 +46,13 @@ it('shows a storage failure without claiming the conversation was hidden',async(
 it('opens the existing rename workflow only with verified notebook metadata',async()=>{
   await menu();await vi.waitFor(()=>expect(button('Rename notebook')).toBeTruthy());await click('Rename notebook');
   expect(rename).toHaveBeenCalledExactlyOnceWith({workspaceId:first.workspace_id,title:first.context_label,titleRevision:3});expect(host.querySelector('[role="dialog"]')).toBeNull();
+});
+it.each([false,true])('keeps the independent beta focused on Chief when model readiness is %s',async enabled=>{
+  vi.stubEnv('VITE_WORKSPACE_FEATURE_PROFILE','independent-beta-v1');
+  const team=teamFixture(),choose=vi.fn();team.llm.enabled=enabled;
+  await act(async()=>root.render(<NewMessagePicker team={team} locked={false} onChoose={choose} onClose={()=>{}}/>));
+  const choices=host.querySelectorAll<HTMLButtonElement>('.messages-bot-choices button');
+  expect(choices).toHaveLength(1);expect(choices[0].textContent).toMatch(/chief/i);
+  expect(host.textContent).not.toContain('recording');
+  await act(async()=>choices[0].click());expect(choose).toHaveBeenCalledExactlyOnceWith('chief');
 });

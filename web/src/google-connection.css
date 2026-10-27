@@ -6,6 +6,10 @@
 .google-account-controls summary {min-height:44px;align-content:center;cursor:pointer}
 .google-connection .connection-service-action button {width:100%;margin:0;white-space:normal}
 .google-account-controls .microsoft-actions button {margin:0}
+.google-next-step {display:grid;gap:4px;margin:12px 0;font-size:14px;line-height:1.5}
+.google-next-step span {color:var(--team-muted)}
+.google-work-actions {display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
+.google-work-actions button {min-width:44px;min-height:44px;max-width:100%;margin:0;white-space:normal;overflow-wrap:anywhere}
 @media(max-width:420px) {
   .google-connection .connection-service-action {width:100%}
   .google-account-controls .microsoft-actions {display:grid;grid-template-columns:minmax(0,1fr)}
