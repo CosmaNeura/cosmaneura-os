@@ -79,7 +79,12 @@ export async function installFixtures(reset=false){
   const recordingServer=recordingMetadata(inventedOwner,()=>team,()=>state);
   if(reset){state=initial();saved.clear();persist();}
   const calendarPrivate=new URLSearchParams(location.search).get('scenario')==='google-calendar-private';
-  if((reset||!sessionStorage.getItem(storageKey))&&calendarPrivate){state={...initial(),id:modelUuid(73),appointment_id:null,label:'Private Chief planning',private_draft:{state:'unlinked',title:'Private Chief planning',link_receipt_id:null,linked_at:null}};state.notebook={title:'Private Chief planning',title_revision:0,created_at:stamp};persist();}
+  if((reset||!sessionStorage.getItem(storageKey))&&calendarPrivate){
+    const chief=entry(modelUuid(600),2,'conversation','Help me organize a nonclinical planning session.');
+    chief.reply={agent_name:names[3],agent_id:modelUuid(103),role:'chief',backend:'synthetic_fixture',content:'Choose the planning items you want to review.',context_revision:1,citations:[]};
+    state={...initial(),id:modelUuid(73),appointment_id:null,label:'Private Chief planning',revision:2,entries:[entry(modelUuid(1),1,'scratchpad','Invented private planning notes. No patient or visit.'),chief],handoffs:[],private_draft:{state:'unlinked',title:'Private Chief planning',link_receipt_id:null,linked_at:null}};
+    state.notebook={title:'Private Chief planning',title_revision:0,created_at:stamp};persist();
+  }
   state.model_contract_version=1;state.model_observed_at=stamp;
   for(const handoff of state.handoffs??[]){const result=state.entries.find(entry=>entry.id===handoff.result_entry_id);if(result?.reply){handoff.result_sha256=await hash(result.reply.content);handoff.review_status=handoff.review?'current':'not_reviewed';}}
   const markers=new Map<string,{version:number;manual:boolean;seen:boolean}>();

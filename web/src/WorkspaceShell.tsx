@@ -1533,7 +1533,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
               onRefreshVisit={refreshGoogleVisit} onAskChief={source=>void prepareGoogleChief(source)}
               onChooseVisit={()=>{if(locked||connectionNavigationLocked)return;googleVisitSelection.current='message';setSettingsOpen(false);void loadEncounters();}}/>:undefined}
             calendarWork={GOOGLE_CALENDAR_BUILD&&googleCalendarVisited?controls=><GoogleCalendarMount identity={authenticated}
-              workspace={visitLinked&&workspace?{id:workspace.id,label:workspace.label,revision:workspace.revision}:null}
+              workspace={workspace&&(visitLinked||workspace.private_draft?.state==='unlinked')?{id:workspace.id,label:workspace.notebook?.title??workspace.label,revision:workspace.revision,...(visitLinked?{}:{kind:'private_notebook' as const})}:null}
               currentSources={workspace?.entries.filter(entry=>entry.kind==='google_calendar'&&!!entry.calendar_source_state).map(entry=>({entry_id:entry.id,state:entry.calendar_source_state!}))}
               locked={locked||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleMessages}
               recoveryLocked={busy||!!pending||!!recoveryOffers.length||recoveryState==='failed'||recoveryBlocked||scribeSourceBusy||captureNavigationLocked||captureDraftLocked||connectionLocks.google||connectionLocks.googleMessages}
