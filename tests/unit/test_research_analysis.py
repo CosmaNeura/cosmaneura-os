@@ -20,6 +20,7 @@ from cosmas_os.application import conversation, research
 from cosmas_os.application import model_work as work
 from cosmas_os.application import research_analysis as analysis
 from cosmas_os.application.workspace import WorkspaceError
+from cosmas_os.calendar_import_models import CalendarImportRequest, CalendarImportRevocation
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import ModelWorkAdmission, ProviderTeamRevision, WorkspaceEntry
 from cosmas_os.ports.research import research_digest
@@ -42,8 +43,17 @@ class MemoryProofs:
         return self.rows.get((cls, identity))
 
     def scalar(self, statement):
-        assert statement.column_descriptions[0]["entity"] is ResearchSave
+        selected = statement.column_descriptions[0]
+        entity = selected["entity"]
         values = statement.compile().params
+        if entity in (CalendarImportRequest, CalendarImportRevocation):
+            assert selected["name"] == "id"
+            assert set(values) == {"workspace_id_1", "idempotency_key_1"}
+            scope = (values["workspace_id_1"], values["idempotency_key_1"])
+            self.reads.append((entity, scope))
+            return next((row.id for (cls, _), row in self.rows.items() if cls is entity
+                         and (row.workspace_id, row.idempotency_key) == scope), None)
+        assert entity is ResearchSave
         self.reads.append((ResearchSave, values["entry_id_1"]))
         return next((row for (cls, _), row in self.rows.items() if cls is ResearchSave
                      and row.entry_id == values["entry_id_1"]), None)
@@ -445,6 +455,27 @@ def test_selected_analysis_never_uses_local_fallback_or_missing_model_contract(m
     for negotiated, code in ((False, "model_contract_required"), (True, "model_unavailable")):
         with pytest.raises(WorkspaceError, match=code):
             conversation.ask(cast(Session, s), w.box_id, w.owner_id, w.id, **arguments(command), model_contract=negotiated)
+    assert not s.added and not s.commits
+
+
+@pytest.mark.parametrize("reservation", [CalendarImportRequest, CalendarImportRevocation])
+@pytest.mark.parametrize("scope", ["same", "other_workspace", "other_key"])
+def test_selected_analysis_preserves_calendar_command_key_ownership(monkeypatch, reservation, scope):
+    case = fixture()
+    s, w = gates(monkeypatch, case)
+    command = case[-1]
+    row = NS(id=str(uuid4()), workspace_id=str(uuid4()) if scope == "other_workspace" else w.id,
+             idempotency_key="another-key" if scope == "other_key" else command["idempotency_key"])
+    s.rows[(reservation, row.id)] = row
+    monkeypatch.setattr(conversation, "runtime_settings", NS(workspace_llm_available=False))
+    monkeypatch.setattr(work, "now", lambda *_a, **_k: STAMP)
+    monkeypatch.setattr(work, "conversation_observation", lambda *_a, **_k: {"outcome": "not_found"})
+    monkeypatch.setattr(conversation, "generate_reply", lambda *_a: pytest.fail("local fallback"))
+    code = "idempotency_conflict" if scope == "same" else "model_unavailable"
+    with pytest.raises(WorkspaceError, match=code):
+        conversation.ask(cast(Session, s), w.box_id, w.owner_id, w.id,
+                         **arguments(command), model_contract=True)
+    assert (reservation, (w.id, command["idempotency_key"])) in s.reads
     assert not s.added and not s.commits
 
 

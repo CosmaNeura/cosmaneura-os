@@ -41,8 +41,11 @@ def write_config(tmp_path: Path, value: object) -> Path:
 def test_generated_key_contract_matches_current_docker_arguments(tmp_path: Path) -> None:
     config = configuration()
     assert web_build.load_config(write_config(tmp_path, config)) == config
-    docker_keys = re.findall(r"^ARG (VITE_[A-Z_]+)", (REPO / "Dockerfile.web").read_text(), re.M)
-    assert set(docker_keys) == set(config)
+    docker_args = dict(re.findall(r"^ARG (VITE_[A-Z_]+)(?:=([^\n]*))?$",
+                                 (REPO / "Dockerfile.web").read_text(), re.M))
+    # The locked runner retains seven inputs; Messages is a separate package opt-in.
+    assert set(docker_args) == set(config) | {"VITE_MESSAGES_ENABLED"}
+    assert docker_args["VITE_MESSAGES_ENABLED"] == "false"
     assert web_build.docker_argument_lines(config) == [f"{key}={value}" for key, value in config.items()]
 
 
@@ -55,7 +58,8 @@ def test_missing_input_is_rejected(tmp_path: Path, missing: str) -> None:
 
 
 @pytest.mark.parametrize("extra", ["VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_HOSTED_CLIENT",
-                                  "VITE_API_BASE", "CLERK_SECRET_KEY", "NODE_BUILD_IMAGE"])
+                                  "VITE_API_BASE", "CLERK_SECRET_KEY", "NODE_BUILD_IMAGE",
+                                  "VITE_MESSAGES_ENABLED"])
 def test_extra_fields_cannot_override_fixed_build_or_carry_secrets(tmp_path: Path, extra: str) -> None:
     with pytest.raises(web_build.WebBuildError, match="seven"):
         web_build.load_config(write_config(tmp_path, configuration() | {extra: "unexpected"}))
