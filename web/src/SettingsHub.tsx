@@ -15,11 +15,11 @@ import {WorkspaceApiError, type AuthenticatedWorkspaceIdentity} from './workspac
 
 type Screen = 'home' | 'connections' | 'members' | 'team' | 'core' | 'messaging' | 'payments' | 'portals' | 'scheduling' | 'microsoft' | 'google' | 'ehr';
 export type PracticeRecordProvider = 'atlas_md' | 'elation' | 'tebra' | 'athena';
-const practiceRecordProviders: {id:PracticeRecordProvider;name:string;description:string}[] = [
-  {id:'atlas_md',name:'Atlas.MD',description:'Import an exported calendar file. No live connection.'},
-  {id:'elation',name:'Elation',description:'Appointments, problems, medication records and lab reports.'},
-  {id:'tebra',name:'Tebra',description:'Appointments and medication records.'},
-  {id:'athena',name:'Athena',description:'Allergy and medication records.'},
+const practiceRecordProviders: {id:PracticeRecordProvider;name:string;description:string;setup:string}[] = [
+  {id:'atlas_md',name:'Atlas.MD',description:'Import an exported calendar file. No live connection.',setup:'Ask your practice administrator to make calendar-file import available in this app. Once available, you can choose an exported Atlas.MD calendar file. Imported appointments do not stay in sync automatically.'},
+  {id:'elation',name:'Elation',description:'Appointments, problems, medication records and lab reports.',setup:'Your practice needs approved Elation API access. Ask your practice administrator to arrange access and verify the practice account before enabling Elation records here.'},
+  {id:'tebra',name:'Tebra',description:'Appointments and medication records.',setup:'Your practice needs approved Tebra access. Ask your practice administrator to configure and verify the supported records connection before enabling it here.'},
+  {id:'athena',name:'Athena',description:'Allergy and medication records.',setup:'Ask your practice administrator to connect the approved Athena account through Cosmaneura and confirm your access before enabling Athena records here.'},
 ];
 type Editor = Exclude<Screen, 'home' | 'connections'>;
 const titles: Record<Screen, string> = {
@@ -218,7 +218,7 @@ export function SettingsHub({appearance,accountControls,practiceRecordActions,op
       {addingConnection&&<section className="connection-add-catalog" aria-label="Add connection catalog"><h2 ref={catalogHeading} tabIndex={-1}>Choose a service</h2><p>Open a service to check access or see its setup steps.</p>
         {practiceRecordActions&&<section className="connection-group" aria-label="Practice records catalog"><h3>Practice records</h3><div className="connection-cards">{practiceRecordProviders.map(item=><div className="connection-card-box" key={item.id}><button data-practice-record-provider={item.id} className="settings-card connection-card connection-record-row" disabled={leaveLocked||!practiceRecordActions[item.id]} onClick={()=>{if(!leaveLocked)practiceRecordActions[item.id]?.();}}>
           <span className="connection-card-copy"><strong>{item.name}</strong><small>{item.description}</small><small className="connection-record-state">{!practiceRecordActions[item.id]?'Not available in this app':item.id==='atlas_md'?'Choose a calendar file':'Access checked when opened'}</small></span><span className="connection-row-chevron" aria-hidden="true">›</span>
-        </button></div>)}</div></section>}
+        </button>{!practiceRecordActions[item.id]&&<details className="connection-state-help"><summary aria-label={`${item.name} setup requirements`}>Setup requirements</summary><p>{item.setup}</p></details>}</div>)}</div></section>}
       </section>}
       {connectionIdentity&&<div className="connection-directory-status"><p role="status">{checking?(checkingAgain?'Checking again. Last confirmed results remain below.':'Checking connections…'):catalog?'Connected confirms the account. Read results and task outcomes are shown separately.':catalogError?'Connections could not be checked. Try again or open a service.':'Checking connections…'}</p>
         <button disabled={navigationLocked||checking||!catalog&&!catalogError} onClick={()=>setRefreshCatalog(value=>value+1)}>Refresh connections</button></div>}
