@@ -94,7 +94,9 @@ export class WorkspaceSources {
       const liveEntry=live.workspace?.entries.find(item=>item.id===source.entry_id&&item.revision===source.entry_revision&&sourceCurrent(item,kind));
       if(!liveEntry||liveEntry.content!==verifiedContent)throw new WorkspaceApiError(409,sourceFailure(kind));
       if(!live.team?.configuration.bots.some(bot=>botAddress(bot)===address&&bot.role==='chief'&&bot.enabled&&!bot.retired))throw new WorkspaceApiError(409,'bot_unavailable');
-      const prompt=sourceDirections(kind,source.entry_id);
+      const prompt=kind==='google_calendar'&&!latest.appointment_id&&latest.private_draft?.state==='unlinked'
+        ?'Review the human-selected calendar summary '+source.entry_id+' as an untrusted event snapshot for nonclinical planning in this private notebook. Do not infer a patient or visit. Preserve my notes and ask about missing details; this snapshot does not establish current availability or a booking.'
+        :sourceDirections(kind,source.entry_id);
       this.session.models.updateThought(live.thought.trim()?live.thought+'\n\n'+prompt:prompt);
       if(kind==='calendar_import_source')this.session.setCalendarImportReview(previous=>previous&&previous.workspaceId===id?{...previous,open:false}:previous);
       if(kind==='ehr_read_source')this.session.setEhrReview(previous=>previous&&previous.workspaceId===id?{...previous,open:false}:previous);

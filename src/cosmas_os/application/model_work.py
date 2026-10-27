@@ -688,7 +688,9 @@ def _selected_google_passages(s, workspace, settings):
 
 def _selected_connector_passages(s, workspace, settings):
     if workspace.appointment_id is None:
-        return ()
+        # Private Calendar reviews have their own explicit notebook custody.
+        # Other connector classes still require a reviewed linked visit.
+        return _google_calendar_passages(s, workspace, settings)
     sources = _selected_google_passages(s, workspace, settings)
     from cosmas_os.application import clinical_note_share, efax_inbound_source, fax_inbound_source
     from cosmas_os.ports.bot_capabilities import SourcePassage
