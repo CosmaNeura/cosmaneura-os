@@ -92,9 +92,9 @@ describe('saved calendar file material cards',()=>{
   const later={...turn,id:teamUuid(311),revision:5},projection=projectConversation({...workspace,handoffs:[],entries:[later,source,turn]},team,'chief');
   expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${source.id}`,later.id]);expect(projection.entries[1]).toEqual({kind:'material',sourceKind:'calendar-import',id:`source:${source.id}`,sourceId:source.id,label:'Imported calendar snapshot',createdAt:source.created_at,state:'current'});expect(projection.turns).toEqual([later,turn]);expect(JSON.stringify(projection)).not.toContain('Atlas.md');
  });
- it('does not infer calendar material from a matching note, another calendar kind, or absent/wrong/unknown custody',()=>{
+ it('keeps Google Calendar separate and does not infer imported calendar material from notes or absent/wrong/unknown custody',()=>{
   const variants:WorkspaceEntry[]=[{...calendar,kind:'evidence'},{...calendar,id:teamUuid(312),kind:'google_calendar',calendar_source_state:'current'},{...calendar,id:teamUuid(313),calendar_import_source_state:undefined},{...calendar,id:teamUuid(314),calendar_import_source_state:undefined,calendar_source_state:'current'},{...calendar,id:teamUuid(315),calendar_import_source_state:'unknown'} as unknown as WorkspaceEntry];
-  expect(projectConversation({...workspace,handoffs:[],entries:variants},team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[calendar]},team,'follow_up').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[]},team,'chief').entries).toEqual([]);
+  expect(projectConversation({...workspace,handoffs:[],entries:variants},team,'chief').entries).toEqual([expect.objectContaining({kind:'material',sourceKind:'google-calendar',sourceId:teamUuid(312)})]);expect(projectConversation({...workspace,handoffs:[],entries:[calendar]},team,'follow_up').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[]},team,'chief').entries).toEqual([]);
  });
  it('masks unavailable metadata even if stale source label and body remain',()=>{
   const projection=projectConversation({...workspace,handoffs:[],entries:[{...calendar,source_label:'Private stale appointment label',calendar_import_source_state:'unavailable'}]},team,'chief');expect(projection.entries).toEqual([{kind:'material',sourceKind:'calendar-import',id:`source:${calendar.id}`,sourceId:calendar.id,label:'Unavailable calendar file summary',createdAt:calendar.created_at,state:'unavailable'}]);expect(JSON.stringify(projection)).not.toContain('Private');expect(projection.turns).toEqual([]);
@@ -152,5 +152,21 @@ describe('saved Research material cards',()=>{
  it.each(['unknown-contract','mismatched-entry','mismatched-revision','invalid-run','extra-key','wrong-kind'] as const)('does not expose a Research card with %s metadata',change=>{
   const source=structuredClone(packet);if(change==='wrong-kind')source.kind='scratchpad';else if(change==='unknown-contract')source.research_packet={...source.research_packet!,contract:'research.saved_packet_marker.v2'} as unknown as WorkspaceEntry['research_packet'];else if(change==='mismatched-entry')source.research_packet!.entry_id=teamUuid(399);else if(change==='mismatched-revision')source.research_packet!.entry_revision=2;else if(change==='invalid-run')source.research_packet!.run_id='not-a-run';else source.research_packet={...source.research_packet!,content:'Untrusted body fallback'} as unknown as WorkspaceEntry['research_packet'];
   expect(projectConversation({...workspace,handoffs:[],entries:[source]},team,'chief').entries).toEqual([]);
+ });
+});
+
+describe('saved Google Calendar material cards',()=>{
+ const source:WorkspaceEntry={id:teamUuid(390),revision:3,kind:'google_calendar',content:'Private invented event details must stay out of metadata.',source_label:'Google calendar: Invented follow-up',calendar_source_state:'current',origin:'authenticated_human',ticket:null,created_at:'2026-10-26T12:15:00Z'};
+ it('projects only exact calendar custody at the saved revision without reading event content or altering conversation turns',()=>{
+  const snapshot={...source};Object.defineProperty(snapshot,'content',{get:()=>{throw Error('Do not read event content for a card');}});
+  const later={...turn,id:teamUuid(391),revision:5},projection=projectConversation({...workspace,revision:5,handoffs:[],entries:[later,snapshot,turn]},team,'chief');
+  expect(projection.entries.map(row=>row.id)).toEqual([turn.id,`source:${source.id}`,later.id]);expect(projection.turns).toEqual([later,turn]);expect(projection.entries[1]).toEqual({kind:'material',sourceKind:'google-calendar',id:`source:${source.id}`,sourceId:source.id,label:source.source_label,createdAt:source.created_at,state:'current'});
+ });
+ it('does not infer a Google Calendar card from labels, a different source kind, wrong custody, missing custody or another bot',()=>{
+  const entries:WorkspaceEntry[]=[{...source,kind:'scratchpad'},{...source,id:teamUuid(392),calendar_source_state:undefined,google_source_state:'current'},{...source,id:teamUuid(393),calendar_source_state:undefined}];
+  expect(projectConversation({...workspace,handoffs:[],entries},team,'chief').entries).toEqual([]);expect(projectConversation({...workspace,handoffs:[],entries:[source]},team,'follow_up').entries).toEqual([]);
+ });
+ it('masks unavailable labels and bodies while preserving the exact source ID',()=>{
+  const projection=projectConversation({...workspace,handoffs:[],entries:[{...source,calendar_source_state:'unavailable'}]},team,'chief');expect(projection.entries).toEqual([{kind:'material',sourceKind:'google-calendar',id:`source:${source.id}`,sourceId:source.id,label:'Unavailable calendar summary',createdAt:source.created_at,state:'unavailable'}]);expect(projection.turns).toEqual([]);expect(JSON.stringify(projection.entries)).not.toContain('Invented follow-up');
  });
 });
