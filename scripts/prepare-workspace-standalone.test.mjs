@@ -22,7 +22,8 @@ test('standalone preparation emits every client and hosted build argument under 
     assert.equal(env.VITE_WORKSPACE_CAPTURE_MODE,'disabled');assert.equal(env.VITE_COSMANEURA_WEB_ORIGIN,'');
     assert.equal(env.VITE_CAPTURE_UPLOAD_ORIGINS,'');assert.equal(env.VITE_CORE_CONNECTION_ENABLED,'false');
     assert.equal(env.VITE_WORKSPACE_AUTHENTICATED_ENABLED,'true');
-    assert.equal(env.VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED,'true');assert.equal(env.VITE_MESSAGES_ENABLED,'true');
+    assert.equal(env.VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED,'false');assert.equal(env.VITE_MESSAGES_ENABLED,'true');
+    assert.equal(env.VITE_CONNECTION_ONBOARDING_ENABLED,'true');
     assert.equal(validateBetaFeatureManifest(proof.clients[client]),proof.clients[client]);
   }
   assert.equal(files['web-build-arguments.json'].VITE_WORKSPACE_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE);

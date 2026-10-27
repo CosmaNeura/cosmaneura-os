@@ -9,6 +9,8 @@ from uuid import UUID
 from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+STANDALONE_ENVS = frozenset({"standalone_synthetic", "standalone_clerk_synthetic"})
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
@@ -20,6 +22,8 @@ class Settings(BaseSettings):
     standalone_instance_id: str = ""
     standalone_root: str = ""
     standalone_jwks_path: str = ""
+    # Separate reviewed issuer selection; never inferred from email or an old account.
+    standalone_clerk_issuer_allowlist: str = ""
     data_mode: Literal["synthetic", "authorized_beta"] = "synthetic"
     auth_mode: Literal["synth_headers", "clerk_jwt"] = "synth_headers"
     cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -330,7 +334,7 @@ class Settings(BaseSettings):
 
     @property
     def workspace_available(self) -> bool:
-        if self.cosmas_env == "standalone_synthetic":
+        if self.cosmas_env in STANDALONE_ENVS:
             return not self._standalone_configuration_errors()
         if self.workspace_hosted_enabled:
             return bool(
@@ -432,7 +436,7 @@ class Settings(BaseSettings):
         )
 
     def _is_hosted_workspace_origin(self, value: str) -> bool:
-        if self.cosmas_env != "early_adopter_beta":
+        if self.cosmas_env not in {"early_adopter_beta", "standalone_clerk_synthetic"}:
             return False
         if value == "app://cosmas":
             return self.workspace_desktop_hosted_transport_enabled
@@ -478,10 +482,11 @@ class Settings(BaseSettings):
     def runtime_configuration_errors(self) -> list[str]:
         """Return configuration faults without exposing configured values."""
 
-        if self.cosmas_env == "standalone_synthetic":
+        if self.cosmas_env in STANDALONE_ENVS:
             return self._standalone_configuration_errors()
         errors: list[str] = []
-        if self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path:
+        if (self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path
+                or self.standalone_clerk_issuer_allowlist):
             errors.append("Standalone settings require the explicit standalone synthetic profile")
         if self.clerk_session_policy == "shared_staging":
             errors.extend(self.clerk_session_configuration_errors())
@@ -575,8 +580,9 @@ class Settings(BaseSettings):
         return errors + self._beta_configuration_errors()
 
     def _standalone_configuration_errors(self) -> list[str]:
-        """Closed local proof profile; existing beta prerequisites remain independent."""
+        """Closed owned profiles; external identity never enables a provider or worker."""
         errors: list[str] = []
+        real_clerk = self.cosmas_env == "standalone_clerk_synthetic"
         try:
             instance = UUID(self.standalone_instance_id)
             if instance.version != 4 or str(instance) != self.standalone_instance_id:
@@ -588,7 +594,7 @@ class Settings(BaseSettings):
         if (not self.standalone_root or not root.is_absolute()
                 or str(root) != self.standalone_root or ".." in root.parts
                 or self.blob_root != str(root / "blobs")
-                or self.standalone_jwks_path != str(root / "keys" / "jwks.json")):
+                or self.standalone_jwks_path != ("" if real_clerk else str(root / "keys" / "jwks.json"))):
             errors.append("Standalone storage and public keys require one explicit owned root")
         if (self.data_mode != "synthetic" or self.auth_mode != "clerk_jwt"
                 or not self.workspace_enabled or not self.workspace_authenticated_enabled
@@ -607,21 +613,61 @@ class Settings(BaseSettings):
             valid_database = False
         if not valid_database:
             errors.append("Standalone requires an authenticated dedicated loopback PostgreSQL database")
-        # This profile is an offline signed-identity proof, not a deployed IdP.
-        if instance is not None:
+        if real_clerk:
+            issuer = urlparse(self.clerk_issuer or "")
+            hostname = issuer.hostname or ""
+            # A real issuer is one explicit reviewed selection, never a discovery
+            # URL or the offline key namespace. Signature verification is unchanged.
+            if (not self.clerk_issuer or self._csv(self.standalone_clerk_issuer_allowlist) != (self.clerk_issuer,)
+                    or not self._is_exact_https_origin(self.clerk_issuer)
+                    or self.clerk_issuer != "https://" + hostname
+                    or not re.fullmatch(r"[a-z0-9][a-z0-9.-]*\.[a-z]{2,63}", hostname)
+                    or hostname == "cosmaneura.com"
+                    or hostname.endswith((".invalid", ".localhost", ".cosmaneura.com"))):
+                errors.append("Standalone Clerk requires one explicitly allowlisted HTTPS issuer")
+            if ("clerk_session_policy" not in self.model_fields_set
+                    or self.clerk_session_policy not in {"audience", "shared_staging"}):
+                errors.append("Standalone Clerk requires an explicit existing session policy")
+            # Audience selects the reviewed application, not a storage instance.
+            # Exact issuer/org/owner checks and the owned database marker remain
+            # independent boundaries; the same selected application contract can
+            # intentionally admit its bearer session at more than one instance.
+            if self.clerk_session_policy == "audience" and (
+                    "clerk_audience" not in self.model_fields_set
+                    or not re.fullmatch(r"[\x21-\x7e]{1,255}", self.clerk_audience or "")
+                    or hostname.endswith(".clerk.accounts.dev")):
+                errors.append("Standalone audience sessions require an explicit application audience and production issuer")
+            if (not re.fullmatch(r"org_[A-Za-z0-9_]{1,251}", self.clerk_organization_id or "")
+                    or not self.human_deploy_evidence_ref or len(self.human_deploy_evidence_ref) > 255
+                    or self.human_deploy_evidence_ref != self.human_deploy_evidence_ref.strip()
+                    or any(ord(c) < 32 for c in self.human_deploy_evidence_ref)):
+                errors.append("Standalone Clerk requires an explicit organization and reviewed deployment reference")
+            if (not self.workspace_hosted_enabled or self.workspace_apple_local_transport_enabled
+                    or self.workspace_desktop_local_transport_enabled):
+                errors.append("Standalone Clerk requires explicit hosted transports")
+            if any((urlparse(origin).hostname or "") == "cosmaneura.com"
+                   or (urlparse(origin).hostname or "").endswith(".cosmaneura.com")
+                   for origin in self.allowed_origins):
+                errors.append("Standalone Clerk cannot admit separate platform web origins")
+        elif instance is not None:
+            # Offline proof retains its original identity contract and key file.
             issuer = f"https://{instance}.cosmabot.invalid"
             if (self.clerk_issuer != issuer or self.clerk_jwks_url != issuer + "/.well-known/jwks.json"
                     or self.clerk_audience != f"cosmabot-standalone:{instance}"
                     or self.clerk_organization_id != "org_cosmabot_" + instance.hex
                     or self.clerk_session_policy != "audience"):
                 errors.append("Standalone identity must use its instance-specific offline namespace")
+            if self.standalone_clerk_issuer_allowlist:
+                errors.append("Offline standalone identity cannot select a remote issuer")
         errors.extend(self.workspace_authentication_errors())
         if (not self.allowed_origins
                 or not all(self._is_workspace_origin(origin) for origin in self.allowed_origins)):
-            errors.append("Standalone origins must be explicit local workspace origins")
+            errors.append("Standalone origins must match its explicit workspace transports")
         enabled_allowlist = {"workspace_enabled", "workspace_authenticated_enabled",
-            "workspace_draft_recovery_required", "workspace_apple_local_transport_enabled",
-            "workspace_desktop_local_transport_enabled"}
+            "workspace_draft_recovery_required"}
+        enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
+            "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
+            "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
         for name in type(self).model_fields:
             if name.endswith("_enabled") and name not in enabled_allowlist and getattr(self, name):
                 errors.append("Standalone external features and background workers must remain disabled")
@@ -644,7 +690,8 @@ class Settings(BaseSettings):
         if self.clerk_session_policy == "audience":
             return [] if self.clerk_audience else ["CLERK_AUDIENCE is required"]
         if (self.clerk_session_policy != "shared_staging" or self.clerk_audience != ""
-                or self.cosmas_env != "early_adopter_beta" or self.data_mode != "synthetic"
+                or self.cosmas_env not in {"early_adopter_beta", "standalone_clerk_synthetic"}
+                or self.data_mode != "synthetic"
                 or self.auth_mode != "clerk_jwt"
                 or not self._is_exact_https_origin(self.clerk_issuer or "")
                 or not (urlparse(self.clerk_issuer or "").hostname or "").endswith(".clerk.accounts.dev")):

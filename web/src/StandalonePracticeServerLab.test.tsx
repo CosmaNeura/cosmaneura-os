@@ -101,7 +101,7 @@ it.skipIf(!base)('admits the standalone renderer and exercises its owned practic
       await act(async()=>messages.click());await click('Done');
     }
     await wait(()=>expect(host.querySelector('.messages-inbox'),host.textContent??'').toBeTruthy());
-    await click('New message');
+    await click('Open notes');
     const chiefStart=host.querySelector<HTMLButtonElement>('.messages-bot-choices button')!;
     const chiefName=chiefStart.querySelector('strong')!.textContent!;
     expect(chiefName).toContain('Chief');expect(chiefStart.disabled).toBe(false);
@@ -116,7 +116,15 @@ it.skipIf(!base)('admits the standalone renderer and exercises its owned practic
     await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-question')?.disabled,host.textContent??'').toBe(false));
     const draft='Invented standalone Chief directions. Keep these unsent while reviewing my own practice.';
     await change(host.querySelector<HTMLTextAreaElement>('#team-question')!,draft);
-    await click('Details');expect(button('Notebook and recording')).toBeUndefined();await click('Notebook');
+    const composer=host.querySelector<HTMLTextAreaElement>('#team-question')!;
+    expect(composer.placeholder).toBe('Draft for later…');
+    expect(host.querySelector<HTMLButtonElement>('.team-send')!.disabled).toBe(true);
+    await act(async()=>{composer.closest('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));composer.dispatchEvent(new KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));});
+    expect(composer.value).toBe(draft);
+    expect(calls.some(call=>call.path.includes('/ask'))).toBe(false);
+    await click('Details');expect(button('Notebook and recording')).toBeUndefined();
+    for(const label of ['Review Gmail email','Review Outlook email','Review Google Calendar','Review received fax','Review EHR records','Import calendar file'])expect(button(label)).toBeUndefined();
+    await click('Back to '+chiefName);await click('Open notebook');
     await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled,host.textContent??'').toBe(false));
     const note=`Invented standalone practice planning note, saved only in this isolated CosmaBot database. Qualification ${new Date().toISOString()}.`;
     await change(host.querySelector<HTMLTextAreaElement>('#team-notebook')!,note);
@@ -139,6 +147,8 @@ it.skipIf(!base)('admits the standalone renderer and exercises its owned practic
     await wait(()=>expect(host.querySelector('.settings-hub:not([hidden]) h1')?.textContent).toBe('Connections'));
     await wait(()=>expect(calls.some(call=>call.path==='/connections/catalog'&&call.status===200)).toBe(true));
     expect(button('Add connection')).toBeTruthy();
+    await click('Add connection');
+    for(const provider of ['atlas_md','elation','tebra','athena'])expect(host.querySelector<HTMLButtonElement>(`[data-practice-record-provider="${provider}"]`)?.disabled).toBe(true);
     expect(host.querySelector('.settings-hub:not([hidden])')?.textContent).not.toContain('Cosmaneura account & appointments');
     await click('Done');
     await wait(()=>expect(button('Find another visit')).toBeTruthy());

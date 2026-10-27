@@ -128,7 +128,7 @@ def session_scope() -> Iterator[Session]:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings.validate_runtime_configuration()
-    if settings.cosmas_env == "standalone_synthetic":
+    if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"}:
         from cosmas_os.standalone_runtime import validate_standalone_runtime
 
         validate_standalone_runtime(settings, engine)
@@ -170,17 +170,6 @@ app = FastAPI(
     description="Box-scoped practice work queue",
     lifespan=lifespan,
 )
-
-
-@app.middleware("http")
-async def standalone_mutation_boundary(request: Request, call_next):
-    if settings.cosmas_env == "standalone_synthetic":
-        from cosmas_os.standalone_runtime import standalone_request_allowed
-
-        if not standalone_request_allowed(request.method, request.url.path):
-            return JSONResponse({"detail": "standalone_operation_unavailable"}, status_code=403,
-                                headers={"Cache-Control": "no-store"})
-    return await call_next(request)
 
 
 class SeedResponse(BaseModel):
@@ -308,7 +297,7 @@ def _map_err(exc: Exception) -> HTTPException:
 
 
 def _require_data_entry_authorized() -> None:
-    if settings.cosmas_env == "standalone_synthetic":
+    if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"}:
         raise HTTPException(status_code=403, detail="standalone_operation_unavailable")
     if settings.cosmas_env == "early_adopter_beta" and settings.data_mode != "authorized_beta":
         raise HTTPException(
@@ -2222,7 +2211,9 @@ allowed_headers.append("X-Cosmas-Ehr-Read")
 
 
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402
+from cosmas_os.standalone_runtime import StandaloneRequestBoundary  # noqa: E402
 
+app.add_middleware(StandaloneRequestBoundary, runtime=lambda: settings)
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")
 allowed_headers.append("X-Cosmas-Clinical-Team")

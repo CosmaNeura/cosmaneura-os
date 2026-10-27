@@ -30,18 +30,11 @@ const patientSetupFlag = 'VITE_WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED';
 // preserves existing releases; a retained native environment must opt in.
 const pilotFlags = ['VITE_MESSAGES_ENABLED', 'VITE_EHR_READ_ENABLED',
   'VITE_CALENDAR_IMPORT_ENABLED', 'VITE_MICROSOFT_MESSAGE_ENABLED'];
-// These clients use CosmaBot's own API. Provider accounts and server grants
-// remain separately configured; this list never activates an external service.
+// This first standalone stage supports local notes and passive setup guidance.
+// Provider and model work need their own qualified runtime before admission.
 export const STANDALONE_FEATURE_FLAGS = Object.freeze([
-  'VITE_AI_ACTIVITY_ENABLED', 'VITE_CONNECTION_ONBOARDING_ENABLED',
-  'VITE_EFAX_INBOUND_ENABLED', 'VITE_EFAX_INBOUND_SOURCE_ENABLED',
-  'VITE_FAX_INBOUND_ENABLED', 'VITE_FAX_INBOUND_SOURCE_ENABLED',
-  'VITE_INBOX_ENABLED', 'VITE_INBOX_HANDOFF_ENABLED', 'VITE_VENDOR_SETUP_ENABLED',
-  'VITE_WORKSPACE_APPOINTMENTS_ENABLED', 'VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED',
-  'VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED', 'VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED',
-  'VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED', 'VITE_WORKSPACE_ROUTINES_ENABLED',
-  'VITE_WORKSPACE_SCHEDULING_ENABLED', 'VITE_WORKSPACE_SCHEDULING_LOGIN_ENABLED',
-  'VITE_WORKSPACE_SCHEDULING_ENROLLMENT_ENABLED', ...pilotFlags,
+  'VITE_CONNECTION_ONBOARDING_ENABLED', 'VITE_WORKSPACE_APPOINTMENTS_ENABLED',
+  'VITE_MESSAGES_ENABLED',
 ]);
 // The same existing platform hosts are reserved by infra/beta/environment.
 // This rejects known collisions, not a claim that arbitrary public DNS proves
@@ -84,7 +77,7 @@ function resolveProfile(input, checkPublishableKey) {
   for (const key of foundations) set(env, key, 'true');
   for (const key of BETA_FEATURE_FLAGS) set(env, key,
     (standalone ? STANDALONE_FEATURE_FLAGS.includes(key) : !staging || stagingFlags.includes(key)) ? 'true' : 'false');
-  if (standalone) for (const key of pilotFlags) set(env, key, 'true');
+  if (standalone) for (const key of pilotFlags) set(env, key, STANDALONE_FEATURE_FLAGS.includes(key) ? 'true' : 'false');
   for (const key of forbidden) set(env, key, 'false');
   // Receiver remains unqualified; ship the correspondence capability dark.
   set(env, patientSetupFlag, 'false');

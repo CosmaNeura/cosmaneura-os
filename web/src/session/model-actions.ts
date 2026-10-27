@@ -169,7 +169,9 @@ export class WorkspaceModelActions {
   }
   ask(selected:string,selectedPrep:SessionPrepAnalysis|null,context:ModelActionContext,content=this.session.getSnapshot().thought){
     const {workspace,team,pending,conflict}=this.session.getSnapshot();
-    if (!workspace || !team?.revision || !content.trim() || pending || conflict || !team.configuration.bots.find(b => botAddress(b) === selected)?.enabled) return;
+    const bot=team?.configuration.bots.find(b=>botAddress(b)===selected);
+    if (!workspace || !team?.revision || !team.llm.enabled || !content.trim() || pending || conflict ||
+        !bot?.enabled || bot.retired || bot.blocked_capabilities?.includes('model_answer')) return;
     return this.save({ type: "ask", model_contract:1,origin:'durable_admission_v1',body: { expected_revision: workspace.revision, team_revision: team.revision,
       idempotency_key: crypto.randomUUID(), role: selected, content, ...(selectedPrep?{session_prep_analysis:structuredClone(selectedPrep)}:{}) } },'submit',context);
   }

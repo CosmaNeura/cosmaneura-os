@@ -23,11 +23,17 @@ function input(client){return {...standalone,VITE_WORKSPACE_HOSTED_CLIENT:client
   VITE_WORKSPACE_WEB_ORIGIN:client==='web'?standalone.VITE_WORKSPACE_WEB_ORIGIN:'',
   VITE_API_BASE:client==='desktop'?'app://cosmas/api':standalone.VITE_API_BASE};}
 
-test('standalone keeps own authenticated work and independent connections while explicitly closing every platform feature',()=>{
+test('standalone keeps own notes and passive connection guidance while closing unavailable work',()=>{
   for(const client of ['web','desktop','apple']){
     const {env,manifest}=resolveBetaFeatureProfile(input(client));
     for(const key of platformFlags){assert.equal(env[key],'false',key);assert.ok(manifest.disabledFlags.includes(key),key);}
     for(const key of STANDALONE_FEATURE_FLAGS)assert.equal(env[key],'true',key);
+    for(const key of ['VITE_EHR_READ_ENABLED','VITE_CALENDAR_IMPORT_ENABLED','VITE_MICROSOFT_MESSAGE_ENABLED',
+      'VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED',
+      'VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','VITE_FAX_INBOUND_SOURCE_ENABLED','VITE_EFAX_INBOUND_SOURCE_ENABLED']){
+      assert.equal(env[key],'false',key);
+      assert.throws(()=>resolveBetaFeatureProfile({...input(client),[key]:'true'}),undefined,key);
+    }
     for(const key of BETA_FEATURE_FLAGS)assert.equal(env[key],STANDALONE_FEATURE_FLAGS.includes(key)?'true':'false',key);
     for(const key of ['VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED','VITE_WORKSPACE_HOSTED_ENABLED'])assert.equal(env[key],'true');
     assert.equal(env.VITE_WORKSPACE_NATIVE_AUTH_ENABLED,client==='apple'?'true':'false');

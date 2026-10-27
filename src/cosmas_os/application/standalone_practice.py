@@ -114,7 +114,7 @@ def _guard(s, runtime, manifest):
         runtime.validate_runtime_configuration()
     except (ValueError, RuntimeError):
         raise StandalonePracticeError("standalone_runtime_required") from None
-    if (runtime.cosmas_env != "standalone_synthetic" or runtime.data_mode != "synthetic"
+    if (runtime.cosmas_env not in {"standalone_synthetic", "standalone_clerk_synthetic"} or runtime.data_mode != "synthetic"
             or not runtime.workspace_available
             or runtime.standalone_instance_id != str(manifest.instance_id)
             or not _matches_runtime(manifest.identity, runtime)

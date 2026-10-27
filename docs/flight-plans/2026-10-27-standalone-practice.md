@@ -57,6 +57,50 @@ used as a production login. A real owner must complete verified membership;
 email addresses or matching practice names never establish account equivalence.
 No main-platform data, identities or secrets are copied by this change.
 
+The next prepared backend, `standalone_clerk_synthetic`, uses the existing Clerk
+verifier with an explicit reviewed issuer allowlist. It retains the independent
+database, restricted local operations and synthetic-only data boundary. It does
+not turn the offline test owner into a real person or enable models and vendors.
+The ordinary audience policy requires an explicitly configured application
+audience in actual session tokens. It need not equal the storage instance UUID:
+the audience identifies the application recipient, while exact issuer,
+organization and reviewed owner bindings restrict account access. Two runtimes
+deliberately configured for the same identity contract can accept the same
+bearer token; storage UUIDs do not imply independent bearer-token audiences.
+The explicit `shared_staging` policy supports the existing development
+identity schema with an exact development issuer, organization and authorized
+parties and an empty audience. Neither policy falls back to the other. A named
+JWT template alone is not enough: the current clients request ordinary sessions.
+Production readiness requires the separately reviewed production identity path.
+An existing application audience can therefore be reused without changing
+global Clerk claims or introducing named JWT templates. Actual signed sessions
+must still be qualified; a dashboard configuration review is not a login test.
+
+Independent HTTPS hosting preparation belongs under `infra/standalone/`. Its
+target is a dedicated CosmaBot host with its own processes, service identities,
+data directories and loopback PostgreSQL. Public client configuration comes from
+the existing identity generator so web, Apple and desktop claims/origins agree.
+These are review-only inputs with startup held. Rendering them does not prove
+host ownership, TLS operation, network egress restrictions, secret custody,
+backup restoration or real account access, and does not provision any resource.
+The old staging renderer is not a deployment dependency for this instance.
+
+Complete account administration only after verifying the CosmaBot Clerk
+application. Review John's exact issuer, subject and new Cosmas MD organization
+membership, then reserve those claims in a fresh database and have the signed
+owner complete setup. Preserve the fixture practice as fixture evidence rather
+than renaming or remapping its owner. The remaining acceptance is real sign-in,
+saved notes/draft recovery, correct availability in Connections, and a matching
+signed mobile client against the independently hosted service. The qualified
+Preview50 on the phone remains separate from these new standalone profiles.
+
+The current standalone stage exposes saved notes and editable drafts. AI Send,
+external connector operations and member management stay unavailable because
+this runtime has no corresponding execution service. Connections retains the
+compact vendor requirements directory. Do not replace the fuller Preview
+experience with this preparation build before its service capabilities and
+signed mobile workflows are ready.
+
 Future historical access should use a separately verified, revocable read-only
 Cosmaneura account link with source provenance and patient authorization. It
 must not merge principals or silently equate patients by names. The earlier

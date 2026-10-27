@@ -9,9 +9,10 @@ from typing import Any
 import jwt
 from sqlalchemy import text
 from sqlalchemy.engine import Engine
+from starlette.responses import JSONResponse
 
 from cosmas_os.api.auth import AuthenticationFailed, ClerkTokenVerifier
-from cosmas_os.config import Settings
+from cosmas_os.config import STANDALONE_ENVS, Settings
 from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 
@@ -31,9 +32,24 @@ def standalone_request_allowed(method: str, path: str) -> bool:
         + bot + r"/read)", path))
 
 
+class StandaloneRequestBoundary:
+    """Outer ASGI fence, including route middleware that dispatches directly."""
+
+    def __init__(self, app, runtime):
+        self.app, self.runtime = app, runtime
+
+    async def __call__(self, scope, receive, send):
+        if (scope["type"] == "http" and self.runtime().cosmas_env in STANDALONE_ENVS
+                and not standalone_request_allowed(scope["method"], scope["path"])):
+            await JSONResponse({"detail": "standalone_operation_unavailable"}, status_code=403,
+                               headers={"Cache-Control": "no-store"})(scope, receive, send)
+            return
+        await self.app(scope, receive, send)
+
+
 def _owned_root(runtime: Settings) -> Path:
     runtime.validate_runtime_configuration()
-    if runtime.cosmas_env != "standalone_synthetic":
+    if runtime.cosmas_env not in STANDALONE_ENVS:
         raise RuntimeError("Standalone runtime profile is required")
     root = Path(runtime.standalone_root)
     if (not root.is_dir() or root.is_symlink() or root.stat().st_mode & 0o077
@@ -55,6 +71,8 @@ class LocalPublicKeys:
     """Immutable public keys; never performs discovery, refresh or network I/O."""
 
     def __init__(self, runtime: Settings) -> None:
+        if runtime.cosmas_env != "standalone_synthetic":
+            raise RuntimeError("Local public keys require the offline standalone profile")
         root = _owned_root(runtime)
         path = root / "keys" / "jwks.json"
         if (path.is_symlink() or not path.is_file() or path.stat().st_mode & 0o077
@@ -105,7 +123,8 @@ class StandaloneTokenVerifier(ClerkTokenVerifier):
 def validate_standalone_runtime(runtime: Settings, engine: Engine) -> None:
     """Validate before API readiness; never migrate or create application state."""
     _owned_root(runtime)
-    LocalPublicKeys(runtime)
+    if runtime.cosmas_env == "standalone_synthetic":
+        LocalPublicKeys(runtime)
     if engine.url.render_as_string(hide_password=False) != runtime.database_url:
         raise RuntimeError("Standalone engine is not the configured owned database")
     with engine.connect() as connection:
