@@ -1,3 +1,4 @@
+import {googleCalendarRehearsal} from './google-calendar';
 import {athenaMedicationRehearsal} from './athena-medications';
 import {athenaRehearsal} from './athena';
 import {athenaAllergyRehearsal} from './athena-allergies';
@@ -77,6 +78,8 @@ export async function installFixtures(reset=false){
   team.recovery_scope=await hash(modelCanonical({contract:'cosmas-private-drafts-v1',box_id:modelUuid(9000),owner_id:inventedOwner}));
   const recordingServer=recordingMetadata(inventedOwner,()=>team,()=>state);
   if(reset){state=initial();saved.clear();persist();}
+  const calendarPrivate=new URLSearchParams(location.search).get('scenario')==='google-calendar-private';
+  if((reset||!sessionStorage.getItem(storageKey))&&calendarPrivate){state={...initial(),id:modelUuid(73),appointment_id:null,label:'Private Chief planning',private_draft:{state:'unlinked',title:'Private Chief planning',link_receipt_id:null,linked_at:null}};state.notebook={title:'Private Chief planning',title_revision:0,created_at:stamp};persist();}
   state.model_contract_version=1;state.model_observed_at=stamp;
   for(const handoff of state.handoffs??[]){const result=state.entries.find(entry=>entry.id===handoff.result_entry_id);if(result?.reply){handoff.result_sha256=await hash(result.reply.content);handoff.review_status=handoff.review?'current':'not_reviewed';}}
   const markers=new Map<string,{version:number;manual:boolean;seen:boolean}>();
@@ -103,13 +106,15 @@ export async function installFixtures(reset=false){
   const athenaAllergyServer=athenaAllergyRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const ehrServer=ehrRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset);
   const outlookServer=outlookRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
-  const gmailServer=gmailRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner});
+  const gmailServer=gmailRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner},import.meta.env.VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED==='true');
+  const googleCalendarServer=googleCalendarRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),actor_id:inventedOwner},gmailServer.calendarConnection);
   const receivedFaxServer=receivedFaxRehearsal(()=>state,value=>{state=value;persist();},storageKey,reset,{box_id:modelUuid(9000),owner_id:inventedOwner});
   // Exact review contracts run through the real client, entirely in this tab.
   // Unsupported requests never leave this isolated, invented-data rehearsal.
   window.fetch=async(input,init)=>{
     const path=new URL(typeof input==='string'?input:input instanceof URL?input.href:input.url,location.href).pathname;
     if(path==='/provider-team/identity'&&init?.method==='GET')return new Response(JSON.stringify({contract_version:1,box_id:modelUuid(9000),actor_id:inventedOwner,recovery_scope:team.recovery_scope}),{headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+    const googleCalendarResponse=await googleCalendarServer(path,init);if(googleCalendarResponse)return googleCalendarResponse;
     const receivedFaxResponse=await receivedFaxServer(path,init);if(receivedFaxResponse)return receivedFaxResponse;
     const calendarResponse=await calendarServer(path,init);if(calendarResponse)return calendarResponse;
     const athenaResponse=await athenaServer(path,init);if(athenaResponse)return athenaResponse;
@@ -145,14 +150,14 @@ export async function installFixtures(reset=false){
   };
   for(const key of Object.keys(workspaceApi) as (keyof typeof workspaceApi)[])Object.assign(workspaceApi,{[key]:async()=>{throw new WorkspaceApiError(503);}});
   Object.assign(workspaceApi,{
-    catalog:async()=>[{appointment_id:state.appointment_id!,label:state.label,workspace_id:state.id,start_at:new Date().toISOString(),source:'synthetic_fixture'}],
+    catalog:async()=>{const visit=calendarPrivate?initial():state;return [{appointment_id:visit.appointment_id!,label:visit.label,workspace_id:visit.id,start_at:new Date().toISOString(),source:'synthetic_fixture'}];},
     privateDraftSummaries:async()=>({contract_version:2,drafts:[{workspace_id:state.id,title:state.notebook?.title??'Jordan · sleep diary follow-up',title_revision:state.notebook?.title_revision??0,revision:state.revision,created_at:stamp,updated_at:stamp,link_state:state.appointment_id?'linked':'unlinked',appointment_id:state.appointment_id,patient_label:state.appointment_id?'Jordan Cypress':null,visit_at:state.appointment_id?new Date().toISOString():null,note_state:state.note?.latest?.review?'reviewed':state.note?.latest?'needs_review':'draft',duration_seconds:null,recording_state:'none'}],has_more:false}),
     createPrivateDraft:async(_identity:unknown,body:Parameters<typeof workspaceApi.createPrivateDraft>[1])=>{state=initial();state.id=crypto.randomUUID();state.appointment_id=null;state.label=body.title;state.notebook={title:body.title,title_revision:0,created_at:new Date().toISOString()};state.private_draft={state:'unlinked',title:body.title,link_receipt_id:null,linked_at:null};state.entries=[];state.handoffs=[];state.revision=1;persist();return {identity,workspace:copy(),team:structuredClone(team)};},
     openPrivateDraft:async()=>({identity,workspace:copy(),team:structuredClone(team)}),
     saveTeam:async(_identity:unknown,body:Parameters<typeof workspaceApi.saveTeam>[1])=>{team={...team,revision:team.revision+1,configuration:structuredClone(body.configuration)};return structuredClone(team);},
     renameNotebook:async(_identity:unknown,id:string,body:Parameters<typeof workspaceApi.renameNotebook>[2])=>{check(id);state.notebook={title:body.title,title_revision:(state.notebook?.title_revision??0)+1,created_at:state.notebook?.created_at??stamp};persist();return {contract_version:1,workspace_id:id,title:body.title,title_revision:state.notebook.title_revision,receipt_id:crypto.randomUUID()};},
     team:async()=>structuredClone(team),
-    open:async()=>({identity,workspace:copy(),team:structuredClone(team)}),
+    open:async()=>{if(calendarPrivate&&!state.appointment_id){state=initial();persist();}return {identity,workspace:copy(),team:structuredClone(team)};},
     openExisting:async()=>({identity,workspace:copy(),team:structuredClone(team)}),
     read:async(_identity:unknown,id:string)=>{check(id);return copy();},
     append:async(_identity:unknown,id:string,body:Parameters<typeof workspaceApi.append>[2])=>{const result=await once(body.idempotency_key,async()=>{

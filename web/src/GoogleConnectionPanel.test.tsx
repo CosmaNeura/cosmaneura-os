@@ -1,7 +1,7 @@
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
-import {GoogleConnectionPanel} from './GoogleConnectionPanel';
+import {GoogleConnectionPanel,type GoogleCalendarWorkControls,type GoogleMessageWorkControls} from './GoogleConnectionPanel';
 import {googleConnectionRequest} from './google-connection-api';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
@@ -163,4 +163,20 @@ it('withholds private recovery entry until the current identity account check fi
   await act(async()=>release(disconnected));expect(host.textContent).toContain('Work with email');
   expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','status']);
  }finally{vi.unstubAllEnvs();}
+});
+
+it('keeps Calendar recovery reopenable while blocking every account mutation and Gmail permission escalation',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED','true');vi.mocked(googleConnectionRequest).mockResolvedValue(connected);
+ let calendar!:GoogleCalendarWorkControls,mail!:GoogleMessageWorkControls;const open=vi.fn(),show=vi.fn();
+ await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} onOpenCalendarWork={open} onShowConnection={show} calendarWork={controls=>{calendar=controls;return <p>Retained calendar recovery</p>;}} messageWork={controls=>{mail=controls;return <p>Retained email work</p>;}}/>));
+ await act(async()=>calendar.onBusyChange(true));expect(mail.fullMailAccessBusy).toBe(true);expect(host.textContent).toContain('Review your saved Calendar work before continuing with email.');const buttons=[...host.querySelectorAll<HTMLButtonElement>('button')];expect(buttons.find(b=>b.textContent==='Reconnect Google')?.disabled).toBe(true);expect(buttons.find(b=>b.textContent==='Disconnect Google')?.disabled).toBe(true);expect(buttons.find(b=>b.textContent==='📅 Work with calendar')?.disabled).toBe(false);
+ await act(async()=>{mail.requestFullMailAccess();calendar.requestCalendarAccess();});await click('📅 Work with calendar');expect(open).toHaveBeenCalledOnce();expect(show).not.toHaveBeenCalled();expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status']);
+ await act(async()=>calendar.onBusyChange(false));await click('Check Google connection');await act(async()=>calendar.requestCalendarAccess());expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','status','start']);vi.unstubAllEnvs();
+});
+
+it('withholds a previously prepared browser authorization URL while Calendar work is unresolved and restores it only after unlock',async()=>{
+ vi.stubEnv('VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED','true');vi.mocked(googleConnectionRequest).mockResolvedValueOnce(disconnected).mockResolvedValueOnce(link);let calendar!:GoogleCalendarWorkControls;
+ await act(async()=>root.render(<GoogleConnectionPanel identity={browser} onAuthenticationLost={()=>{}} calendarWork={controls=>{calendar=controls;return <p>Retained calendar work</p>;}}/>));await click('Connect with Google');const anchor=host.querySelector<HTMLAnchorElement>('a.microsoft-continue')!;expect(anchor.getAttribute('href')).toBe(link.authorization_url);
+ await act(async()=>calendar.onBusyChange(true));expect(anchor.hasAttribute('href')).toBe(false);expect(anchor.getAttribute('aria-disabled')).toBe('true');expect(anchor.tabIndex).toBe(-1);expect(host.querySelector('[data-google-connection]')).toBeNull();expect([...host.querySelectorAll('[href]')].some(e=>e.getAttribute('href')===link.authorization_url)).toBe(false);
+ await act(async()=>calendar.onBusyChange(false));expect(anchor.getAttribute('href')).toBe(link.authorization_url);expect(anchor.hasAttribute('aria-disabled')).toBe(false);expect(vi.mocked(googleConnectionRequest).mock.calls.map(c=>c[1])).toEqual(['status','start']);vi.unstubAllEnvs();
 });

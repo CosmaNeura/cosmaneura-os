@@ -12,6 +12,7 @@ export const GMAIL_REHEARSAL_TEXT='Subject: Invented visit follow-up\nFrom: send
 export const GMAIL_REHEARSAL_HEADER={id:'invented-ui-message',thread_id:'invented-thread',subject:'Invented visit follow-up',sender:'sender@example.invalid',received_at:'2026-10-26T12:00:00Z',is_read:false};
 const account={label:'Invented UI account',email:'owner@example.invalid'};
 type Scope={box_id:string;actor_id:string};
+export type GoogleRehearsalConnection={scope:Scope;account:{label:string;email:string};connected:boolean;calendar_read:boolean;grant:number};
 type Value=GoogleMessageReceipt|GoogleMessageReviewResponse;
 type Row={hash:string;grant:number;value:Value};
 type Reservation={key:string;hash:string;kind:'message';read_id:string;grant:number};
@@ -19,7 +20,7 @@ type State={scope:Scope;connected:boolean;full_mail_read:boolean;connected_at:st
 export type GmailRehearsalStats={lists:number;reads:number;reviews:number;resolves:number;inspects:number;status:number;externalCalls:number;requests:{action:string;key:string|null;body:unknown}[]};
 
 /** Tab-local saved-result ledger. All requests still pass the real API validators. */
-export function gmailRehearsal(read:()=>Workspace,write:(value:Workspace)=>void,storageKey:string,reset:boolean,scope:Scope){
+export function gmailRehearsal(read:()=>Workspace,write:(value:Workspace)=>void,storageKey:string,reset:boolean,scope:Scope,calendarEnabled=false){
  const key=storageKey+':gmail',scenario=()=>new URLSearchParams(location.search).get('scenario')??'gmail-happy';
  const stored=reset?null:sessionStorage.getItem(key);
  const state:State=stored?JSON.parse(stored):{scope:structuredClone(scope),connected:scenario()!=='gmail-disconnected',full_mail_read:scenario()!=='gmail-consent',connected_at:'2026-10-26T11:00:00Z',grant:1,lost:[],ledger:[],reservations:[]};
@@ -36,12 +37,12 @@ export function gmailRehearsal(read:()=>Workspace,write:(value:Workspace)=>void,
  const find=(id:string)=>[...ledger.values()].find((row):row is Row&{value:GoogleMessageReceipt}=>'read_id'in row.value&&row.value.read_id===id);
  const current=(row:Row|undefined)=>{if(!row)fail('google_message_not_observed');if(row.grant!==state.grant)fail('google_message_grant_changed');return row;};
  const retain=async(id:string,body:unknown,work:()=>Promise<Value>)=>{const hash=await digest(body),prior=ledger.get(id);if(prior){if(prior.hash!==hash)fail('idempotency_conflict');current(prior);return structuredClone(prior.value);}const value=await work();ledger.set(id,{hash,grant:state.grant,value});persist();return structuredClone(value);};
- const withhold=()=>{const workspace=read();write({...workspace,entries:workspace.entries.map(entry=>entry.kind==='google_message'?{...entry,content:'',source_label:'Unavailable email source',google_source_state:'unavailable'}:entry)});};
+ const withhold=()=>{const workspace=read();write({...workspace,entries:workspace.entries.map(entry=>entry.kind==='google_message'?{...entry,content:'',source_label:'Unavailable email source',google_source_state:'unavailable'}:entry.kind==='google_calendar'?{...entry,content:'',source_label:'Unavailable calendar source',calendar_source_state:'unavailable'}:entry)});};
  const changeGrant=()=>{state.grant++;persist();withhold();};
  const disconnect=()=>{state.connected=false;persist();withhold();};
  Object.assign(window,{gmailRehearsalControls:{changeGrant,disconnect}});
  const lose=(kind:'read'|'review')=>{if(scenario()===`gmail-lost-${kind}`&&!state.lost.includes(kind)){state.lost.push(kind);persist();throw new Error(`Invented lost Gmail ${kind} success response`);}};
- return async(path:string,init?:RequestInit):Promise<Response|null>=>{
+ const handle=async(path:string,init?:RequestInit):Promise<Response|null>=>{
   if(path==='/connections/catalog'&&init?.method==='GET'){
    const catalog=readinessFixture();catalog.google=true;catalog.microsoft=true;
    for(const [vendor,actionId] of [['google','reviewed_email_source'],['microsoft','full_email_source']] as const)
@@ -58,7 +59,7 @@ export function gmailRehearsal(read:()=>Workspace,write:(value:Workspace)=>void,
    const b=body as Record<string,unknown>;
    if(!scopeCurrent())fail('google_message_grant_unavailable');
    if(session){
-    if(b.action==='status'&&(closed(b,'action')||closed(b,'action,include_capabilities')&&b.include_capabilities===true))return response({state:state.connected?'connected':'sign_in_required',account:state.connected?account:null,connected_at:state.connected?state.connected_at:null,...(b.include_capabilities?{capabilities:{mail:state.connected,calendar:false}}:{})});
+    if(b.action==='status'&&(closed(b,'action')||closed(b,'action,include_capabilities')&&b.include_capabilities===true))return response({state:state.connected?'connected':'sign_in_required',account:state.connected?account:null,connected_at:state.connected?state.connected_at:null,...(b.include_capabilities?{capabilities:{mail:state.connected,calendar:state.connected&&calendarEnabled}}:{})});
     if(b.action==='disconnect'&&teamClosed(b,'action')){disconnect();return response({state:'disconnected'});}
     // Real OAuth navigation is deliberately unavailable in an invented fixture.
     fail('google_message_grant_unavailable');
@@ -110,4 +111,6 @@ export function gmailRehearsal(read:()=>Workspace,write:(value:Workspace)=>void,
    });if(command.action==='read')lose('read');return response(result);
   }catch(error){if(error instanceof WorkspaceApiError)return response({detail:error.code??'invalid_google_message_request'},error.status);throw error;}
  };
+ // Calendar borrows this same synthetic account/grant without owning consent.
+ return Object.assign(handle,{calendarConnection:():GoogleRehearsalConnection=>({scope:structuredClone(state.scope),account:{...account},connected:scopeCurrent()&&state.connected,calendar_read:scopeCurrent()&&state.connected&&calendarEnabled,grant:state.grant})});
 }
