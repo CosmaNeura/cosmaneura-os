@@ -735,7 +735,6 @@ def _new_admission(
     *,
     attempt=None,
 ):
-    ws._entry_key_available(s, workspace.id, command["idempotency_key"])
     full_source_task = command.get("task_brief", {}).get("version") == 2
     tools_available = (team.runtime_settings.workspace_agent_tools_enabled
         and not any(key in command for key in (
@@ -748,6 +747,7 @@ def _new_admission(
                 prepared_contract=handoff_briefs.FULL_SOURCE_CONTRACT if tools_available else None)
         except (ValueError, TypeError, KeyError):
             raise ws.WorkspaceError("handoff_source_context_too_large", 422) from None
+    ws._entry_key_available(s, workspace.id, command["idempotency_key"])
     try:
         if not any(
             key in command for key in ("research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")

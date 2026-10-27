@@ -78,6 +78,36 @@ def test_unsupported_new_chief_preflight_and_v2_downgrade_fail_before_database_o
             "unused", full_context(), None, None)
 
 
+@pytest.mark.parametrize("tools_enabled", [False, True])
+@pytest.mark.parametrize("claimed_table", ["calendar_import_requests", "calendar_import_revocations"])
+def test_supported_source_still_checks_import_keys_before_model_preparation(
+    monkeypatch, tools_enabled, claimed_table,
+):
+    monkeypatch.setattr(model_work.team.runtime_settings, "workspace_agent_tools_enabled", tools_enabled)
+    checked = []
+
+    def scalar(statement):
+        table = statement.get_final_froms()[0].name
+        assert statement.compile().params == {
+            "workspace_id_1": "invented-workspace", "idempotency_key_1": "claimed-key",
+        }
+        checked.append(table)
+        return "claimed" if table == claimed_table else None
+
+    def prepare_unexpected(*args, **kwargs):
+        pytest.fail("an import-owned key must be rejected before model preparation")
+
+    monkeypatch.setattr(model_work.GPT41Connector, "prepare", prepare_unexpected)
+    monkeypatch.setattr(model_work.GPT41CompactToolsConnector, "prepare", prepare_unexpected)
+    with pytest.raises(WorkspaceError, match="idempotency_conflict"):
+        model_work._new_admission(
+            SimpleNamespace(scalar=scalar), SimpleNamespace(id="invented-workspace"),
+            None, None, None, {"idempotency_key": "claimed-key"}, "unused", context(), None, None,
+        )
+    assert checked == (["calendar_import_requests"] if claimed_table == "calendar_import_requests"
+        else ["calendar_import_requests", "calendar_import_revocations"])
+
+
 @pytest.mark.parametrize("stored_contract", [handoff_briefs.FULL_SOURCE_CONTRACT, None,
     "cosmas-gpt41-prepared.v5"])
 def test_v2_projection_requires_matching_saved_column_and_inner_contract(stored_contract):

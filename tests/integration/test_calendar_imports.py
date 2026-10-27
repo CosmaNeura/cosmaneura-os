@@ -21,6 +21,7 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.calendar_import_models import CalendarImportRequest, CalendarImportSourceReview
 from cosmas_os.domain.hashing import payload_hash
 from cosmas_os.models import AppointmentObservation, ExternalIdentity, WorkspaceEntry
+from cosmas_os.ports.bot_capabilities import BotContext
 
 signed_workspace = _signed_workspace
 
@@ -254,9 +255,10 @@ def test_reserved_import_keys_cannot_become_ordinary_entry_commands(calendar_imp
         assert response.status_code == 200, response.text
     if entry_path == "team_admission":
         w = ws._workspace(f.s, f.box, f.owner, f.workspace["id"], writing=True)
-        # Admission must refuse before consulting or generating a model context.
+        # A valid frozen context still cannot reuse an import-owned key or prepare a model call.
+        context = BotContext(w.id, w.revision, "chief", "Invented follow-up", "brief", (), ())
         with pytest.raises(ws.WorkspaceError, match="idempotency_conflict"):
-            model_work._new_admission(f.s, w, None, None, None, {"idempotency_key": key}, None, None, None, f.account)
+            model_work._new_admission(f.s, w, None, None, None, {"idempotency_key": key}, None, context, None, f.account)
     else:
         body = dict(expected_revision=f.workspace["revision"], idempotency_key=key, content="Invented follow-up")
         body |= {"kind": "scratchpad"} if entry_path == "entries" else {"team_revision": 1, "role": "chief"}
