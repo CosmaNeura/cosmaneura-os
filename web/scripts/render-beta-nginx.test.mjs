@@ -20,6 +20,7 @@ test('synthetic builds preserve the original microphone denial',()=>{
 });
 test('standalone hosted builds retain microphone denial',()=>{
   const standalone=resolveBetaFeatureProfile({...env,VITE_WORKSPACE_FEATURE_PROFILE:'standalone-practice-v1',
+    VITE_WORKSPACE_ORGANIZATION_ID:'org_invented_standalone',
     VITE_COSMANEURA_WEB_ORIGIN:'',VITE_CAPTURE_UPLOAD_ORIGINS:'',VITE_WORKSPACE_CAPTURE_MODE:'disabled'}).manifest;
   assert.equal(renderBetaNginx(template,standalone),template);
 });

@@ -43,9 +43,14 @@ def test_generated_key_contract_matches_current_docker_arguments(tmp_path: Path)
     assert web_build.load_config(write_config(tmp_path, config)) == config
     docker_args = dict(re.findall(r"^ARG (VITE_[A-Z_]+)(?:=([^\n]*))?$",
                                  (REPO / "Dockerfile.web").read_text(), re.M))
-    # The locked runner retains seven inputs; Messages is a separate package opt-in.
-    assert set(docker_args) == set(config) | {"VITE_MESSAGES_ENABLED"}
+    # The locked runner retains seven inputs. Other clients may explicitly opt
+    # into Messages or a standalone profile with its reviewed organization.
+    assert set(docker_args) == set(config) | {
+        "VITE_MESSAGES_ENABLED", "VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_ORGANIZATION_ID",
+    }
     assert docker_args["VITE_MESSAGES_ENABLED"] == "false"
+    assert docker_args["VITE_WORKSPACE_FEATURE_PROFILE"] == "operational-beta-v1"
+    assert docker_args["VITE_WORKSPACE_ORGANIZATION_ID"] == ""
     assert web_build.docker_argument_lines(config) == [f"{key}={value}" for key, value in config.items()]
 
 
@@ -57,7 +62,7 @@ def test_missing_input_is_rejected(tmp_path: Path, missing: str) -> None:
         web_build.load_config(write_config(tmp_path, config))
 
 
-@pytest.mark.parametrize("extra", ["VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_HOSTED_CLIENT",
+@pytest.mark.parametrize("extra", ["VITE_WORKSPACE_FEATURE_PROFILE", "VITE_WORKSPACE_ORGANIZATION_ID", "VITE_WORKSPACE_HOSTED_CLIENT",
                                   "VITE_API_BASE", "CLERK_SECRET_KEY", "NODE_BUILD_IMAGE",
                                   "VITE_MESSAGES_ENABLED"])
 def test_extra_fields_cannot_override_fixed_build_or_carry_secrets(tmp_path: Path, extra: str) -> None:
