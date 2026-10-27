@@ -1,4 +1,4 @@
-"""Owned local runtime boundary for the standalone synthetic practice proof."""
+"""Owned runtime and request boundaries for independent synthetic practices."""
 from __future__ import annotations
 
 import json
@@ -16,8 +16,8 @@ from cosmas_os.config import STANDALONE_ENVS, Settings
 from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 
-def standalone_request_allowed(method: str, path: str) -> bool:
-    """The first proof admits only local setup and notebook mutation surfaces."""
+def standalone_request_allowed(method: str, path: str, runtime: Settings | None = None) -> bool:
+    """Local state plus explicitly configured, bounded real-account features."""
     if method in {"GET", "HEAD", "OPTIONS"}:
         return True
     if method != "POST":
@@ -26,6 +26,19 @@ def standalone_request_allowed(method: str, path: str) -> bool:
                 "/workspaces/private-drafts", "/workspaces/private-drafts/resolve"}:
         return True
     identifier = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+    if runtime is not None and runtime.cosmas_env == "standalone_clerk_synthetic":
+        if re.fullmatch(r"/workspaces/" + identifier + r"/conversation/resolve", path):
+            return True  # Read exact saved/uncertain outcomes even after model disablement.
+        if runtime.workspace_llm_available and re.fullmatch(r"/workspaces/" + identifier + r"/conversation", path):
+            return True
+        if runtime.workspace_google_connection_enabled and path == "/connections/google/session":
+            return True
+        if runtime.workspace_google_message_available and (path == "/connections/google/messages"
+                or re.fullmatch(r"/workspaces/" + identifier + r"/google-messages/review", path)):
+            return True
+        if runtime.workspace_google_calendar_available and (path == "/connections/google/calendar-summaries"
+                or re.fullmatch(r"/workspaces/" + identifier + r"/google-calendar/review", path)):
+            return True
     bot = r"(?:scribe|visit_prep|follow_up|chief|" + identifier + r")"
     return bool(re.fullmatch(r"/workspaces/" + identifier
         + r"/(entries|notes|title(?:/resolve)?|appointment-link(?:/resolve)?|work-links|conversations/"
@@ -39,8 +52,9 @@ class StandaloneRequestBoundary:
         self.app, self.runtime = app, runtime
 
     async def __call__(self, scope, receive, send):
-        if (scope["type"] == "http" and self.runtime().cosmas_env in STANDALONE_ENVS
-                and not standalone_request_allowed(scope["method"], scope["path"])):
+        runtime = self.runtime()
+        if (scope["type"] == "http" and runtime.cosmas_env in STANDALONE_ENVS
+                and not standalone_request_allowed(scope["method"], scope["path"], runtime)):
             await JSONResponse({"detail": "standalone_operation_unavailable"}, status_code=403,
                                headers={"Cache-Control": "no-store"})(scope, receive, send)
             return

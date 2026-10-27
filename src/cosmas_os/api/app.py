@@ -133,8 +133,10 @@ async def lifespan(application: FastAPI):
 
         validate_standalone_runtime(settings, engine)
         application.state.workspace_worker_progress = {}
-        # No connector lifespans, queue clients, refresh loops or background work.
-        yield
+        # Only the explicitly configured personal Google service. No queue,
+        # handoff/routine workers, Core or unrelated connector runtimes.
+        with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
+            yield
         return
     async with portal_services_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
         with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), microsoft_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_login_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_lifespan(application, settings), managed_services_lifespan(
@@ -1115,6 +1117,8 @@ async def converse(request: Request, workspace_id: UUID, session: Session = Depe
     negotiated = model_header(request)
     body = await read_model_request(request, ConversationRequest)
     def submit():
+        if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"} and not settings.workspace_llm_available:
+            raise ws.WorkspaceError("model_unavailable", 503)
         if body.inbox_analysis:
             session.info["inbox_analysis_sources"] = _inbox_analysis_sources()
         if body.session_prep_analysis:

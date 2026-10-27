@@ -99,6 +99,7 @@ def main():
                               captureUploadOrigins=args.capture_upload_origin,
                               microphoneCapture=args.microphone_capture)
     staging = feature_manifest is not None and feature_manifest["profile"] == _beta.NATIVE_STAGING_PROFILE
+    independent = feature_manifest is not None and feature_manifest["profile"] == _beta.INDEPENDENT_BETA_PROFILE
     capture_disabled = feature_manifest is not None and feature_manifest["profile"] in _beta.CAPTURE_DISABLED_PROFILES
     if capture_disabled and (not operational or data_mode != "synthetic"):
         parser.error("A capture-disabled profile requires the operational native identity and synthetic data.")
@@ -107,6 +108,12 @@ def main():
                         args.microsoft_connection_callback_uri, args.scheduling_google_client_id,
                         args.scheduling_google_callback_uri)):
         parser.error("External account connections are disabled for first-owner staging.")
+    if independent and any((args.microsoft_connection_tenant_id, args.microsoft_connection_client_id,
+                            args.microsoft_connection_callback_uri, args.scheduling_google_client_id,
+                            args.scheduling_google_callback_uri)):
+        parser.error("Independent beta permits only the approved Google account connection.")
+    if independent and args.google_connection_client_id and args.google_connection_callback_uri != args.hosted_api_origin + "/connections/google/callback":
+        parser.error("Independent beta Google sign-in must return to its exact configured API.")
     native_capture = operational and not capture_disabled
     _navigation.validate_google(args.google_connection_client_id, args.google_connection_callback_uri)
     if args.google_connection_client_id and not args.native_auth_helper:
@@ -263,6 +270,7 @@ def main():
             "storageGeneration": 1, "electronVersion": "43.4.1",
             "rendererPartition": "persist:cosmasos-operational-beta" if operational else "persist:cosmasos-authenticated-local",
             "authHelperBundleIdentifier": info["CFBundleIdentifier"],
+            **({"storageScope": "identity-v1"} if independent else {}),
         }} if args.installation_profile else {"stateDirectory": str(output / "user-data")}),
         **({"installationRoot": str(installation_root)} if installation_root else {}),
         **({"nativeAuthEnabled": True} if args.native_auth_helper else {}),

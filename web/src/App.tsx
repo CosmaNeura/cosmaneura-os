@@ -443,7 +443,7 @@ function StandaloneOrganizationGate({ target, userId, sessionId, orgId, getToken
 
 export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
   const auth = useAuth();
-  const standalone = workspace && import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE === "standalone-practice-v1";
+  const standalone = workspace && ["standalone-practice-v1", "independent-beta-v1"].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE ?? "");
 
   if (!auth.isLoaded) {
     return (

@@ -130,7 +130,7 @@ const isFollowUpRecovery = (draft: RecoveryOffer["draft"]) => draft.kind === "wo
 const phoneLayout = () => window.matchMedia?.('(max-width: 600px)')?.matches ?? false;
 const deviceStorage=()=>{try{return window.localStorage;}catch{return undefined;}};
 const HISTORY_POSITION='cosmas.workspace-history.v1';
-const STANDALONE_PRACTICE_BUILD=import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE==='standalone-practice-v1';
+const STANDALONE_PRACTICE_BUILD=['standalone-practice-v1','independent-beta-v1'].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE??'');
 function workspaceHistoryPosition(value:unknown):number|null{
   const position=value&&typeof value==='object'?(value as Record<string,unknown>)[HISTORY_POSITION]:null;
   return typeof position==='number'&&Number.isSafeInteger(position)&&position>=0&&position<=1_000_000_000?position:null;

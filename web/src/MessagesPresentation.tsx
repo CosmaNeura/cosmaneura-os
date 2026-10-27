@@ -26,7 +26,7 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
   const searchControl=useInboxSearch({container:pull.ref,identity,scope:team?.recovery_scope??''}),{search,setSearch}=searchControl;
   const activeMenu=useRef(menu),alive=useRef(true);activeMenu.current=menu;useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
   const chief=team?.configuration.bots.find(bot=>bot.role==='chief'&&!bot.retired);
-  const notesOnly=import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE==='standalone-practice-v1'&&!team?.llm.enabled;
+  const notesOnly=['standalone-practice-v1','independent-beta-v1'].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE??'')&&!team?.llm.enabled;
   const chiefReady=!!chief?.enabled&&(notesOnly||!!team?.llm.enabled&&!chief.blocked_capabilities?.includes('model_answer'));
   const chiefRows=inbox?.rows.filter(row=>row.bot.role==='chief')??[];
   const groups=organizedConversations(inbox?.rows??[],organization.value,search,hidden),count=groups.reduce((total,group)=>total+group.rows.length,0);
@@ -75,9 +75,10 @@ export function MessagesInbox({identity,inbox,team,loading,error,locked,organiza
   </section>;
 }
 export function NewMessagePicker({team,locked,onChoose,onClose,canRestoreFocus}:{team:ProviderTeam;locked:boolean;onChoose:(address:string)=>void;onClose:()=>void;canRestoreFocus?:()=>boolean}){
-  const notesOnly=import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE==='standalone-practice-v1'&&!team.llm.enabled;
-  return <WorkspaceDialog title={notesOnly?'Open notes':'New message'} onClose={onClose} closeLabel={notesOnly?'Close notes':'Close new message'} canRestoreFocus={canRestoreFocus}><p>{notesOnly?'Choose Chief to open a visit notebook or private note. AI chat is not connected yet.':'Choose who can help. You’ll choose the visit or private note next.'}</p><div className="messages-bot-choices">
-    {[...team.configuration.bots].filter(bot=>!bot.retired&&(!notesOnly||bot.role==='chief')).sort((a,b)=>Number(b.role==='chief')-Number(a.role==='chief')).map(bot=><button key={botAddress(bot)} disabled={locked||!bot.enabled} onClick={()=>onChoose(botAddress(bot))}><BotAvatar role={bot.role}/><span><strong>{bot.name}</strong><small>{!bot.enabled?'Paused in Settings':notesOnly?'Visit notebook and saved drafts':bot.role==='scribe'?'Notes and recording':bot.role==='research'?'Choose a visit, query and sources':'Private conversation'}</small></span></button>)}
+  const independent=import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE==='independent-beta-v1';
+  const notesOnly=['standalone-practice-v1','independent-beta-v1'].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE??'')&&!team.llm.enabled;
+  return <WorkspaceDialog title={notesOnly?'Open notes':'New message'} onClose={onClose} closeLabel={notesOnly?'Close notes':'Close new message'} canRestoreFocus={canRestoreFocus}><p>{notesOnly?'Choose Chief to open a visit notebook or private note. AI chat is not connected yet.':independent?'Start with Chief. Choose a visit or private note next.':'Choose who can help. You’ll choose the visit or private note next.'}</p><div className="messages-bot-choices">
+    {[...team.configuration.bots].filter(bot=>!bot.retired&&(!(independent||notesOnly)||bot.role==='chief')).sort((a,b)=>Number(b.role==='chief')-Number(a.role==='chief')).map(bot=><button key={botAddress(bot)} disabled={locked||!bot.enabled} onClick={()=>onChoose(botAddress(bot))}><BotAvatar role={bot.role}/><span><strong>{bot.name}</strong><small>{!bot.enabled?'Paused in Settings':notesOnly?'Visit notebook and saved drafts':bot.role==='scribe'?'Notes and recording':bot.role==='research'?'Choose a visit, query and sources':'Private conversation'}</small></span></button>)}
   </div><button onClick={onClose} disabled={locked}>Cancel</button></WorkspaceDialog>;
 }
 export function MessagesThreadHeader({name,role,context,contextKind,task,locked,onBack,onContext,onDetails,onReturn,returnLabel}:{name:string;role:BotRole;context:string;contextKind:string;task:string|null;locked:boolean;onBack:()=>void;onContext:()=>void;onDetails:()=>void;onReturn:()=>void;returnLabel?:string}){

@@ -31,6 +31,8 @@ class PreflightComplete(Exception):
 
 
 class StandaloneNativeProfile(unittest.TestCase):
+    feature_profile = "standalone-practice-v1"
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory(prefix="cosmabot-standalone-native-")
         self.addCleanup(temporary.cleanup)
@@ -45,8 +47,8 @@ class StandaloneNativeProfile(unittest.TestCase):
             "node", "--input-type=module", "-e",
             "const m=await import(process.argv[1]);process.stdout.write(JSON.stringify(m.workspaceIdentityInputs("
             "JSON.parse(process.argv[2]),{webOrigin:'https://workspace.example.invalid',coreWebOrigin:'',"
-            "captureUploadOrigins:[],dataMode:'synthetic',featureProfile:'standalone-practice-v1'})));",
-            (ROOT / "scripts/prepare-workspace-identity.mjs").as_uri(), json.dumps(self.identity),
+            "captureUploadOrigins:[],dataMode:'synthetic',featureProfile:process.argv[3]})));",
+            (ROOT / "scripts/prepare-workspace-identity.mjs").as_uri(), json.dumps(self.identity), self.feature_profile,
         ], capture_output=True, text=True, check=True)
         files = json.loads(result.stdout)
         for client in ("desktop", "apple"):
@@ -127,7 +129,7 @@ class StandaloneNativeProfile(unittest.TestCase):
         args = ["package-desktop-auth-helper.py", "--products", str(products), "--qualification", str(qualification),
                 "--compiler-receipt", str(receipt), "--output", str(output),
                 "--native-identity-config", str(self.root / "desktop-identity.json"),
-                "--native-feature-profile", "standalone-practice-v1"]
+                "--native-feature-profile", self.feature_profile]
         # Compiler/signature validation is outside this configuration test. The
         # real copy, output inventory, identity validation and plist checks run.
         with patch.object(sys, "argv", args), patch.object(helper._binding, "verify", return_value=manifest):

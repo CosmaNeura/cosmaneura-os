@@ -10,7 +10,7 @@ import {basename, dirname, extname, isAbsolute, join, relative, resolve, sep} fr
 import {fileURLToPath, pathToFileURL} from 'node:url';
 import {promisify} from 'node:util';
 import {validateOperationalNativeIdentity, validateOperationalNativeDataMode, operationalNativeAuthSettings} from '../clients/desktop/native-identity-config.mjs';
-import {STANDALONE_FEATURE_PROFILE,validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
+import {INDEPENDENT_BETA_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,validateBetaFeatureManifest} from '../clients/shared/beta-feature-profile.mjs';
 import {verifyNativeHelper} from '../clients/desktop/spawn-auth-helper.mjs';
 import {verifyDesktopCapturePackage,CAPTURE_HELPERS} from '../clients/desktop/native-capture-package.mjs';
 
@@ -246,12 +246,21 @@ export function validateOperationalReleaseProfile(config, manifest, info) {
   const identity=validateOperationalNativeIdentity(config.nativeIdentity,'desktop',config.apiOrigin);
   validateOperationalNativeDataMode(config.dataMode,identity);
   const profile=validateBetaFeatureManifest(manifest);
+  const independent=profile.profile===INDEPENDENT_BETA_FEATURE_PROFILE;
   if (config.mode!=='hosted-beta-authenticated' || !['synthetic','authorized_beta'].includes(config.dataMode) || profile.client!=='desktop' ||
       profile.dataMode!==config.dataMode || profile.apiOrigin!==config.apiOrigin || config.appVersion!==info.CFBundleShortVersionString ||
       config.buildNumber!==info.CFBundleVersion || config.installation?.bundleIdentifier!==info.CFBundleIdentifier) fail();
+  if (independent ? config.installation?.storageScope!=='identity-v1' : Object.hasOwn(config.installation??{},'storageScope')) fail();
+  if (independent) {
+    const google=config.googleConnectionClientId??'', callback=config.googleConnectionCallbackUri??'';
+    if (Boolean(google)!==Boolean(callback) || google && (typeof google!=='string' ||
+      !/^[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com$/.test(google) || callback!==config.apiOrigin+'/connections/google/callback')) fail();
+  }
   if (profile.captureMode==='disabled' && (config.nativeCaptureEnabled!==false || config.microphoneCaptureEnabled===true ||
       config.captureUploadOrigins?.length || config.cosmaneuraWebOrigin)) fail();
-  if (profile.captureMode==='disabled' && profile.profile!==STANDALONE_FEATURE_PROFILE &&
+  if (independent && ['microsoftConnectionTenantId','microsoftConnectionClientId','microsoftConnectionCallbackUri',
+    'schedulingGoogleClientId','schedulingGoogleCallbackUri'].some(key=>config[key])) fail();
+  if (profile.captureMode==='disabled' && ![STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(profile.profile) &&
       ['googleConnectionClientId','googleConnectionCallbackUri',
         'microsoftConnectionTenantId','microsoftConnectionClientId','microsoftConnectionCallbackUri',
         'schedulingGoogleClientId','schedulingGoogleCallbackUri'].some(key=>config[key])) fail();

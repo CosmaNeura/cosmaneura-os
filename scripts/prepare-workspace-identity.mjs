@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {STAGING_NATIVE_PROFILE,validateOperationalNativeIdentity,validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
-import {BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
+import {BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 
 // OpenTofu jsonencode orders object keys and escapes these five characters.
 export function identityDigest(identity) {
@@ -15,7 +15,7 @@ export function identityDigest(identity) {
 /** Reuse the existing native schema; all output values are public configuration. */
 export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile}) {
   if(![BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE].includes(nativeFeatureProfile))throw new Error('Unknown native feature profile');
-  const standalone=featureProfile===STANDALONE_FEATURE_PROFILE;
+  const standalone=[STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(featureProfile);
   if(featureProfile!==undefined&&(!standalone||nativeFeatureProfile!==BETA_FEATURE_PROFILE))throw new Error('Select one explicit standalone feature profile');
   const desktop=validateOperationalNativeIdentity(candidate,'desktop',candidate?.apiOrigin);
   validateOperationalNativeDataMode(dataMode,desktop);
@@ -26,7 +26,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
   for(const client of ['web','desktop','apple']) {
     const staging=client!=='web'&&nativeFeatureProfile===NATIVE_STAGING_FEATURE_PROFILE;
     builds[client]=resolveBetaFeatureProfile({
-      VITE_WORKSPACE_FEATURE_PROFILE:standalone?STANDALONE_FEATURE_PROFILE:staging?nativeFeatureProfile:BETA_FEATURE_PROFILE,
+      VITE_WORKSPACE_FEATURE_PROFILE:standalone?featureProfile:staging?nativeFeatureProfile:BETA_FEATURE_PROFILE,
       VITE_WORKSPACE_HOSTED_CLIENT:client,VITE_WORKSPACE_DATA_MODE:dataMode,
       VITE_WORKSPACE_HOSTED_API_ORIGIN:desktop.apiOrigin,
       VITE_API_BASE:client==='desktop'?'app://cosmas/api':desktop.apiOrigin,
@@ -42,7 +42,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
   const webArgs=Object.fromEntries(['VITE_CLERK_PUBLISHABLE_KEY','VITE_WORKSPACE_HOSTED_API_ORIGIN',
     'VITE_WORKSPACE_WEB_ORIGIN','VITE_WORKSPACE_DATA_MODE','VITE_COSMANEURA_WEB_ORIGIN',
     'VITE_CAPTURE_UPLOAD_ORIGINS','VITE_WORKSPACE_CAPTURE_MODE'].map(key=>[key,builds.web.env[key]]));
-  if(standalone)Object.assign(webArgs,{VITE_WORKSPACE_FEATURE_PROFILE:STANDALONE_FEATURE_PROFILE,VITE_MESSAGES_ENABLED:'true',
+  if(standalone)Object.assign(webArgs,{VITE_WORKSPACE_FEATURE_PROFILE:featureProfile,VITE_MESSAGES_ENABLED:'true',
     VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId});
   return {
     'desktop-identity.json':desktop,
@@ -50,7 +50,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
     'web-build-arguments.json':webArgs,
     ...Object.fromEntries(Object.entries(builds).map(([client,value])=>[client+'-build-env.json',value.env])),
     ...(standalone?{'standalone-profile.json':{
-      version:1,profile:STANDALONE_FEATURE_PROFILE,identity_sha256:digest,
+      version:1,profile:featureProfile,identity_sha256:digest,
       clients:Object.fromEntries(Object.entries(builds).map(([client,value])=>[client,value.manifest])),
       dedicated_resource_ownership_verified:false,activation_authorized:false,
     }}:{}),
@@ -65,8 +65,8 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
     }}),
     'identity-bindings.json':{
       version:1,profile:desktop.profile,identity_sha256:digest,data_mode:dataMode,
-      native_feature_profile:standalone?STANDALONE_FEATURE_PROFILE:nativeFeatureProfile,
-      ...(standalone?{feature_profile:STANDALONE_FEATURE_PROFILE,platform_access:'disabled'}:{}),
+      native_feature_profile:standalone?featureProfile:nativeFeatureProfile,
+      ...(standalone?{feature_profile:featureProfile,platform_access:'disabled'}:{}),
       api_origin:desktop.apiOrigin,web_origin:webOrigin,core_web_origin:coreWebOrigin,
       native_origins:{desktop:'app://cosmas',apple:'capacitor://localhost'},
       native_bundles:{desktop:'com.cosmasos.beta.desktop',desktop_auth:'com.cosmasos.beta.desktop.auth',apple:'com.cosmasos.beta.ios'},
@@ -106,7 +106,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
       if(!known.has(key)||!value||value.startsWith('--')||(key!=='--capture-upload-origin'&&values[key]))throw new Error('Invalid public identity arguments');
       if(key==='--capture-upload-origin')(values[key]??=[]).push(value);else values[key]=value;
     }
-    const standalone=values['--feature-profile']===STANDALONE_FEATURE_PROFILE;
+    const standalone=[STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(values['--feature-profile']);
     if(values['--feature-profile']&&(!standalone||values['--native-feature-profile']))throw new Error('Select one explicit feature profile');
     if(standalone&&(values['--core-web-origin']||values['--capture-upload-origin']))throw new Error('Standalone practice has no Core or capture upload arguments');
     const required=standalone?['--identity','--web-origin','--output']:['--identity','--web-origin','--core-web-origin','--capture-upload-origin','--output'];

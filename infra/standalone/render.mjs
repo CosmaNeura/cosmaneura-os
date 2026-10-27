@@ -13,23 +13,50 @@ const object=(value,keys,code)=>{
     Object.keys(value).length!==keys.length||keys.some(key=>!Object.hasOwn(value,key)))refuse(code);
 };
 const platformHosts=new Set(['cosmas.ai','app.cosmas.ai','api.cosmas.ai','staging.cosmas.ai','api.staging.cosmas.ai']);
-function origin(value){
+function origin(value,ownedStaging=false){
   let url;try{url=new URL(value);}catch{refuse('exact_https_origin_required');}
   if(typeof value!=='string'||url.origin!==value||url.protocol!=='https:'||url.port||
     !/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?\.[a-z]{2,}$/.test(url.hostname)||
-    url.hostname==='cosmaneura.com'||url.hostname.endsWith('.cosmaneura.com')||platformHosts.has(url.hostname))
+    url.hostname==='cosmaneura.com'||url.hostname.endsWith('.cosmaneura.com')||
+    platformHosts.has(url.hostname)&&!(ownedStaging&&['staging.cosmas.ai','api.staging.cosmas.ai'].includes(url.hostname)))
     refuse('dedicated_https_origin_required');
   return url.hostname;
 }
 
+function betaFeatures(value){
+  if(value.beta_features===undefined)return {profile:'standalone-practice-v1',model:null,google:null};
+  const features=value.beta_features;object(features,['model','google'],'public_beta_features_shape');
+  if(features.model!==null){
+    object(features.model,['origin','endpoint','deployment'],'public_model_shape');
+    const model=features.model;
+    if(typeof model.origin!=='string'||model.origin!==model.origin.trim()||
+      !/^https:\/\/[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)$/.test(model.origin)||
+      model.endpoint!==model.origin+'/openai/v1'||model.deployment!=='gpt-4.1')refuse('exact_owned_model_selection_required');
+  }
+  if(features.google!==null){
+    object(features.google,['client_id','callback_uri','return_origin'],'public_google_shape');
+    if(typeof features.google.client_id!=='string'||features.google.client_id!==features.google.client_id.trim()||
+      !/^[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com$/.test(features.google.client_id)||
+      features.google.callback_uri!==value.api_origin+'/connections/google/callback'||
+      features.google.return_origin!==value.web_origin)refuse('matching_google_public_contract_required');
+  }
+  return {...features,profile:features.google?'independent-beta-v1':'standalone-practice-v1'};
+}
+
 export function validateInput(value){
-  object(value,['version','resource_scope','instance_id','box_id','source_commit','web_origin','api_origin',
-    'identity_policy','identity','ports','artifacts','tls'],'input_shape');
-  if(value.version!==1||value.resource_scope!=='dedicated-new-cosmabot-host')refuse('dedicated_host_required');
+  const keys=['version','resource_scope','instance_id','box_id','source_commit','web_origin','api_origin',
+    'identity_policy','identity','ports','artifacts','tls'];
+  if(value&&Object.hasOwn(value,'beta_features'))keys.push('beta_features');
+  object(value,keys,'input_shape');
+  const ownedVm=value.resource_scope==='owned-cosmabot-vm-instance';
+  if(value.version!==1||!['dedicated-new-cosmabot-host','owned-cosmabot-vm-instance'].includes(value.resource_scope))refuse('dedicated_host_required');
+  const features=betaFeatures(value);
+  if(ownedVm&&(features.profile!=='independent-beta-v1'||value.web_origin!=='https://staging.cosmas.ai'||
+    value.api_origin!=='https://api.staging.cosmas.ai'))refuse('exact_owned_cosmabot_routes_required');
   if(typeof value.instance_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.instance_id))refuse('instance_uuid_required');
   if(typeof value.box_id!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value.box_id)||value.box_id===value.instance_id)refuse('distinct_fresh_box_uuid_required');
   if(!/^[0-9a-f]{40}$/.test(value.source_commit))refuse('source_commit_required');
-  const web=origin(value.web_origin),api=origin(value.api_origin);
+  const web=origin(value.web_origin,ownedVm),api=origin(value.api_origin,ownedVm);
   if(web===api)refuse('separate_api_and_web_origins_required');
   const issuer=origin(value.identity?.frontendOrigin);
   if(issuer.endsWith('.invalid')||issuer.endsWith('.localhost')||[web,api].includes(issuer))refuse('separate_explicit_clerk_issuer_required');
@@ -43,7 +70,7 @@ export function validateInput(value){
   // organization and Box bind the practice; storage remains instance-specific.
   // This existing generator owns public identity validation and every client flag.
   workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
-    dataMode:'synthetic',featureProfile:'standalone-practice-v1'});
+    dataMode:'synthetic',featureProfile:features.profile});
   object(value.ports,['api','postgres'],'ports_shape');
   if(Object.values(value.ports).some(port=>!Number.isInteger(port)||port<1024||port>65535)||
     value.ports.api===value.ports.postgres)refuse('distinct_unprivileged_loopback_ports_required');
@@ -81,12 +108,14 @@ function service({name,user,config,release,intended,writePaths,environment=false
 
 export function render(input){
   const value=validateInput(input),id=value.instance_id,short=id.replaceAll('-','').slice(0,12);
-  const root=`/var/lib/cosmabot-standalone/${id}`,postgres=`/var/lib/cosmabot-postgres/${id}`;
-  const config=`/etc/cosmabot-standalone/${id}`,release=`/opt/cosmabot-standalone/${id}`,proxyRoot=`/var/lib/cosmabot-https/${id}`;
+  const features=betaFeatures(value),ownedVm=value.resource_scope==='owned-cosmabot-vm-instance';
+  const parent=`/var/lib/cosmabot/standalone/${id}`;
+  const root=ownedVm?parent+'/app':`/var/lib/cosmabot-standalone/${id}`,postgres=ownedVm?parent+'/postgres':`/var/lib/cosmabot-postgres/${id}`;
+  const config=ownedVm?parent+'/config':`/etc/cosmabot-standalone/${id}`,release=ownedVm?parent+'/release':`/opt/cosmabot-standalone/${id}`,proxyRoot=ownedVm?parent+'/proxy':`/var/lib/cosmabot-https/${id}`;
   const apiUser=`cosmabot-api-${short}`,pgUser=`cosmabot-pg-${short}`,proxyUser=`cosmabot-web-${short}`;
   const dbName=`cosmabot_standalone_${id.replaceAll('-','')}`,dbRole=`cosmabot_runtime_${short}`;
   const files=workspaceIdentityInputs(value.identity,{webOrigin:value.web_origin,coreWebOrigin:'',captureUploadOrigins:[],
-    dataMode:'synthetic',featureProfile:'standalone-practice-v1'});
+    dataMode:'synthetic',featureProfile:features.profile});
   const parties=[value.web_origin,'app://cosmas','capacitor://localhost'].join(',');
   const environment={...Object.fromEntries(disabledFlags.map(name=>[name,'false'])),
     COSMAS_ENV:'standalone_clerk_synthetic',DATA_MODE:'synthetic',AUTH_MODE:'clerk_jwt',BETA_BOX_ID:value.box_id,
@@ -103,6 +132,11 @@ export function render(input){
     CLERK_JWKS_URL:value.identity.frontendOrigin+'/.well-known/jwks.json',
     CLERK_AUDIENCE:value.identity.audience,CLERK_ORGANIZATION_ID:value.identity.organizationId,
     CLERK_AUTHORIZED_PARTIES:parties,CORS_ALLOWED_ORIGINS:parties};
+  if(features.model)Object.assign(environment,{WORKSPACE_LLM_BACKEND:'azure_gpt41',WORKSPACE_LLM_ENDPOINT:features.model.endpoint,
+    WORKSPACE_LLM_DEPLOYMENT:features.model.deployment,STANDALONE_MODEL_ORIGIN_ALLOWLIST:features.model.origin});
+  if(features.google)Object.assign(environment,{WORKSPACE_GOOGLE_CONNECTION_ENABLED:'true',WORKSPACE_GOOGLE_MESSAGE_ENABLED:'true',
+    WORKSPACE_GOOGLE_CALENDAR_ENABLED:'true',GOOGLE_CONNECTION_CLIENT_ID:features.google.client_id,
+    GOOGLE_CONNECTION_CALLBACK_URI:features.google.callback_uri,GOOGLE_CONNECTION_RETURN_ORIGIN:features.google.return_origin});
   const contract={schema:'cosmabot-standalone-host-preparation/v1',state:'PREPARATION_ONLY_STARTUP_HELD',
     instance_id:id,box_id:value.box_id,source_commit:value.source_commit,resource_scope:value.resource_scope,
     deployment_authorized:false,resource_ownership_verified:false,account_mapping_verified:false,
@@ -148,6 +182,21 @@ export function render(input){
       'Backup and restore proof for this exact deployment, independent of local synthetic lab proof',
       'Separate release review replacing the startup hold; no activation tool is provided'],
     external_workers:[],platform_connections:[],automatic_migrations:false,automatic_seed:false};
+  if(value.beta_features!==undefined){
+    contract.feature_profile=features.profile;
+    contract.optional_runtime_features={model:!!features.model,google:!!features.google,live_provider_acceptance:false,
+      secrets_in_package:false,practice_records:'invented synthetic records',google_content:'actual consenting account content; never relabelled as invented'};
+    if(features.model)contract.private_environment.exact_names.push('WORKSPACE_LLM_API_KEY');
+    if(features.google)contract.private_environment.exact_names.push('GOOGLE_CONNECTION_CLIENT_SECRET','GOOGLE_CONNECTION_ENCRYPTION_KEY');
+  }
+  if(ownedVm){
+    contract.resource_identity.host_name='vm-cosmabot-staging-eus2-lab01';
+    contract.private_environment.file=config+'/private/api-private.json';
+    contract.private_environment.mode='0400';contract.private_environment.expected_owner=apiUser;
+    contract.existing_proxy={retain_ports:[80,443],new_tls_listener_forbidden:true,
+      exact_routes:[value.web_origin,value.api_origin],old_services_and_data_retained:true,cutover_and_rollback_qualified:false};
+    contract.required_evidence.push('Exact existing VM machine/container/image/UID/port bindings and reviewed proxy-only cutover plus rollback');
+  }
   const firewall={schema:'cosmabot-standalone-host-network-requirements/v1',state:'NOT_INSTALLED_OR_VERIFIED',
     dedicated_host_required:true,target_host:`cosmabot-standalone-${short}`,default_policy:'deny',configuration_is_not_a_firewall:true,
     inbound:[{service:'manual HTTPS proxy',tcp_port:443,hostnames:value.tls.hostnames}],
@@ -161,8 +210,26 @@ export function render(input){
       '*.cosmaneura.com',...platformHosts],
     network_namespace:'Dedicated host; never the main platform host or its network/deployment identity',
     qualification:'Service configuration alone does not enforce destination allowlisting; demonstrate host egress policy before release.'};
+  if(features.model)firewall.api_egress.push({protocol:'https',hostname:new URL(features.model.origin).hostname,tcp_port:443,
+    path:'/openai/v1/chat/completions',redirects_allowed:false});
+  if(features.google){
+    for(const hostname of ['oauth2.googleapis.com','openidconnect.googleapis.com','gmail.googleapis.com','www.googleapis.com'])
+      firewall.api_egress.push({protocol:'https',hostname,tcp_port:443,redirects_allowed:false});
+    firewall.browser_oauth_origins=['https://accounts.google.com'];
+  }
+  if(value.beta_features!==undefined){
+    firewall.dns='Only the exact configured Clerk/model and documented Google API hostnames; qualify resolver enforcement separately.';
+    contract.required_evidence=contract.required_evidence.map(item=>item.startsWith('Host firewall and DNS')?
+      'Host firewall and DNS qualification: only declared Clerk, optional own model and Google API egress; no metadata or other providers':item);
+  }
+  if(ownedVm){
+    firewall.dedicated_host_required=false;firewall.existing_owned_cosmabot_host_required=true;
+    firewall.target_host=contract.resource_identity.host_name;
+    firewall.network_namespace='Existing dedicated CosmaBot VM, with separately owned instance users/data and retained old CosmaBot rollback services';
+    firewall.inbound=[{service:'existing CosmaBot HTTPS proxy only',tcp_port:443,hostnames:value.tls.hostnames}];
+  }
   const proxy=`# Review only. The matching service has an unconditional startup hold.\n# Manual certificate only; no ACME or provider discovery.\npid ${proxyRoot}/nginx.pid;\nerror_log ${proxyRoot}/error.log warn;\nevents { worker_connections 256; }\nhttp {\n  include /etc/nginx/mime.types;\n  access_log off;\n  server_tokens off;\n  client_body_temp_path ${proxyRoot}/body;\n  proxy_temp_path ${proxyRoot}/proxy;\n  ssl_certificate ${config}/tls/server.crt;\n  ssl_certificate_key ${config}/tls/server.key;\n  ssl_protocols TLSv1.2 TLSv1.3;\n  add_header X-Content-Type-Options "nosniff" always;\n  add_header Referrer-Policy "no-referrer" always;\n  add_header X-Frame-Options "DENY" always;\n  add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;\n  add_header Permissions-Policy "camera=(), geolocation=(), microphone=(), payment=()" always;\n  server { listen 443 ssl default_server; server_name _; return 444; }\n  server {\n    listen 443 ssl;\n    server_name ${new URL(value.api_origin).hostname};\n    client_max_body_size 8m;\n    location / {\n      proxy_pass http://127.0.0.1:${value.ports.api};\n      proxy_set_header Host $host;\n      proxy_set_header X-Forwarded-Proto https;\n      proxy_set_header X-Forwarded-For $remote_addr;\n    }\n  }\n  server {\n    listen 443 ssl;\n    server_name ${new URL(value.web_origin).hostname};\n    root ${release}/web;\n    location ~ \\.mjs$ { types { application/javascript mjs; } try_files $uri =404; expires 1y; }\n    location /assets/ { try_files $uri =404; expires 1y; }\n    location / { try_files $uri $uri/ /index.html; expires -1; }\n  }\n}\n`;
-  return {...Object.fromEntries(Object.entries(files).map(([name,data])=>['clients/'+name,data])),
+  const output={...Object.fromEntries(Object.entries(files).map(([name,data])=>['clients/'+name,data])),
     'host-input.json':value,'host-preparation.json':contract,'api-public.json':environment,
     'instance.json':{schema:'cosmabot-standalone-runtime/v1',instance_id:id},
     'api-public.env':Object.entries(environment).map(([key,item])=>`${key}=${JSON.stringify(item)}`).join('\n')+'\n',
@@ -176,6 +243,11 @@ export function render(input){
     'cosmabot-https.review.service':service({name:'CosmaBot HTTPS proxy',user:proxyUser,config,release,writePaths:[proxyRoot],https:true,
       intended:`/usr/sbin/nginx -c ${config}/https.conf -g 'daemon off;'`}),
     'STARTUP-HELD.sh':'#!/bin/sh\nprintf "%s\\n" "CosmaBot preparation only: deployment and startup are not authorized or qualified." >&2\nexit 78\n'};
+  if(ownedVm){
+    // Existing Caddy owns TLS. Do not even emit a second 443 listener candidate.
+    delete output['https.review.conf'];delete output['cosmabot-https.review.service'];
+  }
+  return output;
 }
 
 function parseJson(raw){

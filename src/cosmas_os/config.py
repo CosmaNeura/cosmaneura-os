@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import re
 from pathlib import Path
 from typing import Literal
@@ -24,6 +25,8 @@ class Settings(BaseSettings):
     standalone_jwks_path: str = ""
     # Separate reviewed issuer selection; never inferred from email or an old account.
     standalone_clerk_issuer_allowlist: str = ""
+    # Explicit owned model-resource selection; never inherit the legacy endpoint.
+    standalone_model_origin_allowlist: str = ""
     data_mode: Literal["synthetic", "authorized_beta"] = "synthetic"
     auth_mode: Literal["synth_headers", "clerk_jwt"] = "synth_headers"
     cors_allowed_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
@@ -327,6 +330,9 @@ class Settings(BaseSettings):
 
     @property
     def workspace_llm_available(self) -> bool:
+        if self.cosmas_env == "standalone_clerk_synthetic":
+            return bool(self.workspace_llm_backend == "azure_gpt41" and self.workspace_available
+                        and not self._standalone_model_errors())
         return bool(self.workspace_available and self.workspace_llm_backend == "azure_gpt41"
                     and self.workspace_llm_endpoint == "https://cosmascode.services.ai.azure.com/openai/v1"
                     and self.workspace_llm_deployment == "gpt-4.1"
@@ -486,7 +492,7 @@ class Settings(BaseSettings):
             return self._standalone_configuration_errors()
         errors: list[str] = []
         if (self.standalone_instance_id or self.standalone_root or self.standalone_jwks_path
-                or self.standalone_clerk_issuer_allowlist):
+                or self.standalone_clerk_issuer_allowlist or self.standalone_model_origin_allowlist):
             errors.append("Standalone settings require the explicit standalone synthetic profile")
         if self.clerk_session_policy == "shared_staging":
             errors.extend(self.clerk_session_configuration_errors())
@@ -665,6 +671,9 @@ class Settings(BaseSettings):
             errors.append("Standalone origins must match its explicit workspace transports")
         enabled_allowlist = {"workspace_enabled", "workspace_authenticated_enabled",
             "workspace_draft_recovery_required"}
+        if real_clerk:
+            enabled_allowlist.update({"workspace_google_connection_enabled", "workspace_google_message_enabled",
+                                      "workspace_google_calendar_enabled"})
         enabled_allowlist.update({"workspace_hosted_enabled", "workspace_apple_hosted_transport_enabled",
             "workspace_desktop_hosted_transport_enabled"} if real_clerk else {
             "workspace_apple_local_transport_enabled", "workspace_desktop_local_transport_enabled"})
@@ -672,19 +681,67 @@ class Settings(BaseSettings):
             if name.endswith("_enabled") and name not in enabled_allowlist and getattr(self, name):
                 errors.append("Standalone external features and background workers must remain disabled")
                 break
-        empty_prefixes = ("core_", "azure_", "google_connection_", "microsoft_connection_",
+        empty_prefixes = ("core_", "azure_", "microsoft_connection_",
             "scheduling_", "managed_services_config_")
         for name in type(self).model_fields:
             value = getattr(self, name)
+            reviewed_optional = real_clerk and name in {"workspace_llm_api_key", "google_connection_encryption_key"}
             if ((name.startswith(empty_prefixes) or name.endswith("_api_key")
-                 or name.endswith("_encryption_key")) and value):
+                 or name.endswith("_encryption_key")) and value and not reviewed_optional):
                 errors.append("Standalone cannot contain external service addresses or credentials")
                 break
-        if (self.workspace_capture_backend != "disabled" or self.workspace_llm_backend != "disabled"
-                or self.workspace_llm_endpoint or self.compact_web_root
+        if (self.workspace_capture_backend != "disabled" or self.compact_web_root
                 or self.workspace_native_synthetic_enabled):
-            errors.append("Standalone capture, models and alternate execution paths must be disabled")
+            errors.append("Standalone capture and alternate execution paths must be disabled")
+        if real_clerk:
+            errors.extend(self._standalone_model_errors())
+            errors.extend(self._standalone_google_errors())
+        elif (self.workspace_llm_backend != "disabled" or self.workspace_llm_endpoint
+              or self.standalone_model_origin_allowlist or any(getattr(self, name)
+                    for name in type(self).model_fields if name.startswith("google_connection_"))):
+            errors.append("Offline standalone models and Google credentials must remain disabled")
         return errors
+
+    def _standalone_model_errors(self) -> list[str]:
+        if self.workspace_llm_backend == "disabled":
+            return (["Disabled standalone model must have no endpoint, origin selection or key"]
+                    if self.workspace_llm_endpoint or self.standalone_model_origin_allowlist or self.workspace_llm_api_key else [])
+        endpoint = self.workspace_llm_endpoint
+        parsed = urlparse(endpoint)
+        origin = "https://" + (parsed.hostname or "")
+        if (self.workspace_llm_backend != "azure_gpt41" or self.workspace_llm_deployment != "gpt-4.1"
+                or not re.fullmatch(r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1", endpoint)
+                or self._csv(self.standalone_model_origin_allowlist) != (origin,)
+                or not self.workspace_llm_api_key or not self.workspace_llm_api_key.get_secret_value()):
+            return ["Standalone Chief requires one reviewed Azure OpenAI origin, GPT-4.1 and its own key"]
+        return []
+
+    def _standalone_google_errors(self) -> list[str]:
+        names = [name for name in type(self).model_fields if name.startswith("google_connection_")]
+        if not self.workspace_google_connection_enabled:
+            return (["Disabled standalone Google connection must have no credentials or read flags"]
+                    if self.workspace_google_message_enabled or self.workspace_google_calendar_enabled
+                    or any(getattr(self, name) for name in names) else [])
+        callback = urlparse(self.google_connection_callback_uri)
+        origin = callback.scheme + "://" + callback.netloc
+        hostname = callback.hostname or ""
+        valid_key = False
+        if self.google_connection_encryption_key:
+            try:
+                key = base64.b64decode(self.google_connection_encryption_key.get_secret_value(), altchars=b"-_", validate=True)
+                valid_key = len(key) == 32
+            except (ValueError, UnicodeError):
+                pass
+        if (not re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", self.google_connection_client_id)
+                or not self._is_exact_https_origin(origin) or origin != "https://" + hostname
+                or hostname == "cosmaneura.com" or hostname.endswith(".cosmaneura.com")
+                or callback.path != "/connections/google/callback" or callback.query or callback.fragment or callback.params
+                or not self._is_exact_https_origin(self.google_connection_return_origin)
+                or self.google_connection_return_origin not in self.allowed_origins
+                or not self.google_connection_client_secret or not self.google_connection_client_secret.get_secret_value()
+                or not valid_key):
+            return ["Standalone Google requires its reviewed client, exact owned callback/return origins and custody key"]
+        return []
 
     def clerk_session_configuration_errors(self) -> list[str]:
         if self.clerk_session_policy == "audience":

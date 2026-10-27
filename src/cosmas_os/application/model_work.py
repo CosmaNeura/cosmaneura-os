@@ -918,6 +918,10 @@ def reserve_conversation(
     handoff_limit = min(
         3, max(0, 49 - count), max(0, remaining - 1) if remaining is not None else 3
     )
+    if getattr(team.runtime_settings, "cosmas_env", None) == "standalone_clerk_synthetic":
+        # This release provides direct private replies only. No handoff worker is
+        # started, so do not advertise or queue work that could never complete.
+        handoff_limit = 0
     roles = roles if handoff_limit else ()
     command = {
         "expected_revision": expected,
@@ -1164,6 +1168,15 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
     if digest(claimed.envelope) != claimed.envelope_sha256:
         raise ModelCallFailure()
     key = team.runtime_settings.workspace_llm_api_key
+    if getattr(team.runtime_settings, "cosmas_env", None) == "standalone_clerk_synthetic":
+        runtime = team.runtime_settings
+        if (not runtime.workspace_llm_available
+                or claimed.envelope.get("contract") not in TEXT_PREPARED_CONTRACTS
+                or claimed.envelope.get("flags", {}).get("can_handoff") is not False
+                or claimed.envelope.get("context", {}).get("handoff_roles")):
+            raise ModelCallFailure(dispatch="not_dispatched")
+        return GPT41Connector(lambda: key.get_secret_value() if key else "", transport=transport,
+                              endpoint=runtime.workspace_llm_endpoint + "/chat/completions").review_prepared(claimed.envelope)
     if claimed.envelope.get("contract") in TOOL_PREPARED_CONTRACTS:
         from cosmas_os.application.agent_tools import AgentToolExecutor
         from cosmas_os.db import make_session_factory

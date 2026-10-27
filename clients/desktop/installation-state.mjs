@@ -26,6 +26,7 @@ export async function prepareDesktopState(config, appData, electronVersion) {
   }
   const identity = config.installation;
   if (!identity || typeof identity !== 'object' || (!hosted && config.mode !== 'local-synthetic-authenticated') || config.stateDirectory !== undefined ||
+      (Object.hasOwn(identity, 'storageScope') && (!operational || identity.storageScope !== 'identity-v1')) ||
       identity.version !== 1 || (operational ? identity.profile !== 'beta' : !/^w[1-9][0-9]*[a-z]?$/.test(identity.profile)) ||
       identity.bundleIdentifier !== (operational ? 'com.cosmasos.beta.desktop' : `com.cosmasos.synthetic.desktop.${identity.profile}`) ||
       identity.storageGeneration !== 1 || identity.electronVersion !== '43.4.1' ||
@@ -37,7 +38,10 @@ export async function prepareDesktopState(config, appData, electronVersion) {
   }
   const base = config.installationRoot ?? join(appData, operational ? 'CosmasOS Beta' : hosted ? 'CosmasOS Hosted Beta' : 'CosmasOS Synthetic');
   if (typeof base !== 'string' || !isAbsolute(base) || resolve(base) !== base) throw unavailable();
-  const directory = join(base, identity.bundleIdentifier);
+  // A new identity-scoped release never opens or rewrites the retained legacy
+  // root. Rollback to the old descriptor still selects that original root.
+  const scoped = identity.storageScope === 'identity-v1';
+  const directory = join(base, identity.bundleIdentifier + (scoped ? `.identity-${identityBinding}` : ''));
   async function secureDirectory(path) {
     await mkdir(path, {recursive: true, mode: 0o700});
     const stat = await lstat(path);
@@ -57,6 +61,7 @@ export async function prepareDesktopState(config, appData, electronVersion) {
       authHelperBundleIdentifier: identity.authHelperBundleIdentifier,
       ...(hosted ? {apiOrigin: config.apiOrigin, dataMode: config.dataMode} : {}),
       ...(operational ? {identityBinding} : {}),
+      ...(scoped ? {storageScope: identity.storageScope} : {}),
     };
     try { await lstat(filename); }
     catch (error) {

@@ -34,7 +34,7 @@ it('returns to the same entry and exact Details reading position without closing
 it('keeps review and linked-work actions direct while local source tasks remain reachable without a connector',async()=>{
  await open({onReviewAppointment:undefined,onReviewGoogle:undefined});await click('Visit note');expect(task).toHaveBeenLastCalledWith('Review');await click('Follow-up and linked work');expect(task).toHaveBeenLastCalledWith('Work');
  await click('Choose notes or sources');expect([...host.querySelectorAll('.messages-source-choices section')].filter(visible)).toHaveLength(1);await click('Saved sources');expect(task).toHaveBeenLastCalledWith('Sources');
- await click('Notebook and recording');expect(task).toHaveBeenLastCalledWith('Notebook');await click('Tools for this conversation');expect(task).toHaveBeenLastCalledWith('Tools');
+ await click('Notebook');expect(task).toHaveBeenLastCalledWith('Notebook');await click('Tools for this conversation');expect(task).toHaveBeenLastCalledWith('Tools');
 });
 
 it('honors a navigation lock before and after the source chooser opens',async()=>{

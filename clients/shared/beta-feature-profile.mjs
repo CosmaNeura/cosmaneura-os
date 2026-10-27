@@ -4,6 +4,7 @@ import {exactHostedOrigin, resolveHostedWorkspace} from './hosted-workspace-conf
 export const BETA_FEATURE_PROFILE = 'operational-beta-v1';
 export const NATIVE_STAGING_FEATURE_PROFILE = 'first-owner-staging-v1';
 export const STANDALONE_FEATURE_PROFILE = 'standalone-practice-v1';
+export const INDEPENDENT_BETA_FEATURE_PROFILE = 'independent-beta-v1';
 const stagingFlags = ['VITE_AI_ACTIVITY_ENABLED', 'VITE_WORKSPACE_ROUTINES_ENABLED'];
 export const BETA_FEATURE_FLAGS = Object.freeze([
   'VITE_AI_ACTIVITY_ENABLED', 'VITE_ATHENA_CONNECTION_ENABLED', 'VITE_ATHENA_VISIT_LINK_ENABLED',
@@ -36,6 +37,13 @@ export const STANDALONE_FEATURE_FLAGS = Object.freeze([
   'VITE_CONNECTION_ONBOARDING_ENABLED', 'VITE_WORKSPACE_APPOINTMENTS_ENABLED',
   'VITE_MESSAGES_ENABLED',
 ]);
+// Main beta keeps its own practice and reviewed Google sources. The server's
+// signed readiness and account grants still control every model/provider call.
+export const INDEPENDENT_BETA_FEATURE_FLAGS = Object.freeze([
+  ...STANDALONE_FEATURE_FLAGS,
+  'VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED', 'VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED',
+  'VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED',
+]);
 // The same existing platform hosts are reserved by infra/beta/environment.
 // This rejects known collisions, not a claim that arbitrary public DNS proves
 // deployment isolation; resource ownership must also be reviewed before use.
@@ -62,7 +70,9 @@ export function resolveBetaFeatureProfile(input) {
 
 function resolveProfile(input, checkPublishableKey) {
   const staging = input.VITE_WORKSPACE_FEATURE_PROFILE === NATIVE_STAGING_FEATURE_PROFILE;
-  const standalone = input.VITE_WORKSPACE_FEATURE_PROFILE === STANDALONE_FEATURE_PROFILE;
+  const independent = input.VITE_WORKSPACE_FEATURE_PROFILE === INDEPENDENT_BETA_FEATURE_PROFILE;
+  const standalone = independent || input.VITE_WORKSPACE_FEATURE_PROFILE === STANDALONE_FEATURE_PROFILE;
+  const standaloneFlags = independent ? INDEPENDENT_BETA_FEATURE_FLAGS : STANDALONE_FEATURE_FLAGS;
   if (!staging && !standalone && input.VITE_WORKSPACE_FEATURE_PROFILE !== BETA_FEATURE_PROFILE) fail(`select a supported VITE_WORKSPACE_FEATURE_PROFILE`);
   const env = {...input};
   // Catch stale recipes and misspelled gates instead of silently shipping partial UI.
@@ -76,8 +86,8 @@ function resolveProfile(input, checkPublishableKey) {
   set(env, 'VITE_COSMAS_ENV', 'early_adopter_beta');
   for (const key of foundations) set(env, key, 'true');
   for (const key of BETA_FEATURE_FLAGS) set(env, key,
-    (standalone ? STANDALONE_FEATURE_FLAGS.includes(key) : !staging || stagingFlags.includes(key)) ? 'true' : 'false');
-  if (standalone) for (const key of pilotFlags) set(env, key, STANDALONE_FEATURE_FLAGS.includes(key) ? 'true' : 'false');
+    (standalone ? standaloneFlags.includes(key) : !staging || stagingFlags.includes(key)) ? 'true' : 'false');
+  if (standalone) for (const key of pilotFlags) set(env, key, standaloneFlags.includes(key) ? 'true' : 'false');
   for (const key of forbidden) set(env, key, 'false');
   // Receiver remains unqualified; ship the correspondence capability dark.
   set(env, patientSetupFlag, 'false');
@@ -103,9 +113,9 @@ function resolveProfile(input, checkPublishableKey) {
     set(env, 'VITE_CAPTURE_UPLOAD_ORIGINS', '');
     set(env, 'VITE_WORKSPACE_CAPTURE_MODE', 'disabled');
     for (const key of captureFlags) set(env, key, 'false');
-    return {env: Object.freeze(env), manifest: {version: 1, profile: STANDALONE_FEATURE_PROFILE, ...hosted,
+    return {env: Object.freeze(env), manifest: {version: 1, profile: env.VITE_WORKSPACE_FEATURE_PROFILE, ...hosted,
       ...(client === 'web' ? {organizationId: env.VITE_WORKSPACE_ORGANIZATION_ID} : {}),
-      enabledFlags: [...STANDALONE_FEATURE_FLAGS], disabledFlags: [...knownGates].filter(key => env[key] === 'false'),
+      enabledFlags: [...standaloneFlags], disabledFlags: [...knownGates].filter(key => env[key] === 'false'),
       authentication: 'verified_hosted_identity', platformAccess: 'disabled',
       captureMode: 'disabled', captureUploadOrigins: [], coreWebOrigin: '', athenaAccess: 'disabled'}};
   }
@@ -163,7 +173,7 @@ export function validateNativeBetaProfile(manifest, expected) {
       manifest.apiOrigin !== expected.apiOrigin || manifest.coreWebOrigin !== expected.coreWebOrigin ||
       JSON.stringify(manifest.captureUploadOrigins) !== JSON.stringify(expected.captureUploadOrigins)) fail('native and web feature/origin profiles differ');
   if (manifest.profile === NATIVE_STAGING_FEATURE_PROFILE && expected.microphoneCapture === true) fail('native capture is disabled for first-owner staging');
-  if (manifest.profile === STANDALONE_FEATURE_PROFILE && expected.microphoneCapture === true) fail('native capture is disabled for standalone practice');
+  if ([STANDALONE_FEATURE_PROFILE, INDEPENDENT_BETA_FEATURE_PROFILE].includes(manifest.profile) && expected.microphoneCapture === true) fail('native capture is disabled for standalone practice');
   if (expected.client === 'desktop' && expected.microphoneCapture !== (manifest.captureMode === 'browser_microphone') ||
       expected.client === 'apple' && manifest.captureMode === 'ios_native' &&
       (!expected.renewableNativeCapture || !expected.nativeRendererRecovery ||
