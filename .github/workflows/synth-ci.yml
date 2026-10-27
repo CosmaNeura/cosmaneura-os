@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [backend, signed-ui-1, signed-ui-2, signed-ui-3]
+        suite: [backend-1, backend-2, backend-3, backend-4, signed-ui-1, signed-ui-2, signed-ui-3]
     services:
       postgres:
         image: postgres:16.9
@@ -100,13 +100,13 @@ jobs:
             ${{ runner.temp }}/cosmabot-backend-checks/*/pytest-junit.xml
           if-no-files-found: ignore
       - name: Demo ArtifactChase
-        if: matrix.suite == 'backend'
+        if: matrix.suite == 'backend-1'
         run: uv run python -m cosmas_os.cli demo-artifact-chase
       - name: OpenAPI dump
-        if: matrix.suite == 'backend'
+        if: matrix.suite == 'backend-1'
         run: uv run python -m cosmas_os.cli dump-openapi
       - name: Upload OpenAPI
-        if: matrix.suite == 'backend'
+        if: matrix.suite == 'backend-1'
         uses: actions/upload-artifact@v4
         with:
           name: openapi-json
