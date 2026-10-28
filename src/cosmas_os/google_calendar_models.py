@@ -98,3 +98,39 @@ class GoogleCalendarSourceReview(WorkspaceScope, Base):
     reviewed_exact_summary: Mapped[bool] = mapped_column(Boolean, nullable=False)
     reviewed_untrusted_source: Mapped[bool] = mapped_column(Boolean, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp())
+
+
+class GoogleCalendarPrivateSourceReview(WorkspaceScope, Base):
+    __tablename__ = "google_calendar_private_source_reviews"
+    __table_args__ = (
+        ForeignKeyConstraint(["workspace_id", "box_id", "owner_id"],
+            ["encounter_workspaces.id", "encounter_workspaces.box_id", "encounter_workspaces.owner_id"]),
+        ForeignKeyConstraint(["entry_id", "workspace_id", "box_id"],
+            ["workspace_entries.id", "workspace_entries.workspace_id", "workspace_entries.box_id"]),
+        ForeignKeyConstraint(["snapshot_id", "box_id", "owner_id"],
+            ["google_calendar_snapshots.id", "google_calendar_snapshots.box_id", "google_calendar_snapshots.owner_id"]),
+        UniqueConstraint("entry_id", name="uq_google_calendar_private_review_entry"),
+        UniqueConstraint("workspace_id", "snapshot_id", "event_id", name="uq_google_calendar_private_review_event"),
+        UniqueConstraint("workspace_id", "idempotency_key", name="uq_google_calendar_private_review_key"),
+        CheckConstraint("expected_revision>=1 AND workspace_revision=expected_revision+1", name="ck_google_calendar_private_review_revision"),
+        CheckConstraint("reviewed_private_notebook AND reviewed_exact_summary AND reviewed_untrusted_source", name="ck_google_calendar_private_review_checks"),
+        CheckConstraint("event_id ~ '^[A-Za-z0-9_-]+$' AND char_length(event_id) BETWEEN 1 AND 1024", name="ck_google_calendar_private_review_event"),
+        digest_check("request_hash", "observation_sha256", "event_sha256", "source_sha256", "content_sha256"),
+    )
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid4()))
+    entry_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    expected_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    workspace_revision: Mapped[int] = mapped_column(Integer, nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(100), nullable=False)
+    request_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    observation_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    event_id: Mapped[str] = mapped_column(String(1024), nullable=False)
+    event_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    source_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    valid_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewed_private_notebook: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reviewed_exact_summary: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reviewed_untrusted_source: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.clock_timestamp())

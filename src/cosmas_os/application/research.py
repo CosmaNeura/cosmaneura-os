@@ -278,6 +278,49 @@ def _saved(s, row):
             "entry_id": entry.id, "entry_revision": entry.revision}
 
 
+def saved_packet_markers(s, box, owner, wid, entries):
+    """Display provenance for exact saved packets after workspace authorization.
+
+    Labels and copied source text confer no provenance. Joined rows keep the
+    existing _saved integrity check in the identity map without per-entry SQL.
+    Failed or ambiguous proof leaves the entry as ordinary evidence.
+    """
+    candidates = {entry.id: entry for entry in entries if entry.kind == "evidence"
+        and (entry.box_id, entry.workspace_id, entry.actor_id) == (box, wid, owner)}
+    if not candidates:
+        return {}
+    rows = s.execute(select(ResearchSave, ResearchRun, WorkspaceEntry).join(
+        ResearchRun, ResearchRun.id == ResearchSave.run_id,
+    ).join(WorkspaceEntry, WorkspaceEntry.id == ResearchSave.entry_id).where(
+        ResearchSave.entry_id.in_(candidates), ResearchSave.box_id == box, ResearchSave.workspace_id == wid,
+        ResearchRun.box_id == box, ResearchRun.workspace_id == wid, ResearchRun.owner_id == owner,
+        WorkspaceEntry.box_id == box, WorkspaceEntry.workspace_id == wid, WorkspaceEntry.actor_id == owner,
+        WorkspaceEntry.kind == "evidence",
+    )).all()
+    by_entry = {}
+    for receipt, run, entry in rows:
+        by_entry.setdefault(entry.id, []).append((receipt, run, entry))
+    markers = {}
+    for entry_id, proofs in by_entry.items():
+        if len(proofs) != 1 or entry_id not in candidates:
+            continue
+        receipt, run, entry = proofs[0]
+        if ((receipt.box_id, receipt.workspace_id, run.box_id, run.workspace_id, run.owner_id,
+                entry.box_id, entry.workspace_id, entry.actor_id) != (box, wid, box, wid, owner, box, wid, owner)
+                or receipt.entry_id != entry_id or receipt.run_id != run.id
+                or entry.revision != candidates[entry_id].revision):
+            continue
+        try:
+            saved = _saved(s, receipt)
+        except (ValueError, TypeError, KeyError, AttributeError, ws.WorkspaceError):
+            continue
+        if (saved["entry_id"], saved["entry_revision"], saved["run_id"]) != (entry_id, entry.revision, run.id):
+            continue
+        markers[entry_id] = {"contract": "research.saved_packet_marker.v1", "run_id": run.id,
+            "entry_id": entry_id, "entry_revision": entry.revision}
+    return markers
+
+
 def resolve_save(s, box, owner, wid, run_id, *, key):
     _run(s, box, owner, wid, run_id=run_id)
     row = s.scalar(select(ResearchSave).where(ResearchSave.workspace_id == wid,

@@ -1,0 +1,19 @@
+.calendar-import-panel {max-width:48rem;min-width:0;display:grid;gap:.8rem;margin-block:1rem;}
+.calendar-import-panel h3,.calendar-import-panel h4,.calendar-import-panel p {margin:0;overflow-wrap:anywhere;}
+.calendar-import-panel fieldset {display:grid;gap:.7rem;min-width:0;margin:0;padding:1rem;border:1px solid var(--team-line,#d5dbe5);border-radius:12px;}
+.calendar-import-panel legend {font-weight:600;padding-inline:.3rem;}
+.calendar-import-panel label {display:flex;align-items:flex-start;gap:.6rem;line-height:1.45;min-width:0;}
+.calendar-import-panel label:has(input:not([type="checkbox"])) {display:grid;gap:.3rem;}
+.calendar-import-panel input:not([type="checkbox"]) {box-sizing:border-box;width:100%;min-width:0;max-width:100%;min-height:44px;font:inherit;padding:.55rem;border:1px solid var(--team-line,#cbd4cd);border-radius:8px;}
+.calendar-import-panel input[type="checkbox"] {flex-shrink:0;min-width:18px;min-height:18px;margin-top:.2rem;}
+.team-workspace .calendar-import-panel button,.calendar-import-panel button {min-height:44px;max-width:100%;white-space:normal;overflow-wrap:anywhere;}
+.calendar-import-panel ul {list-style:none;margin:0;padding:0;display:grid;gap:.5rem;}
+.calendar-import-panel li {display:grid;gap:.3rem;}
+.calendar-import-panel li button {text-align:left;width:100%;}
+.calendar-import-panel [aria-label="Review imported event"],.calendar-import-panel [aria-label="Saved calendar request"] {display:grid;gap:.8rem;padding:1rem;border:1px solid var(--team-line,#d5dbe5);border-radius:12px;background:var(--team-surface,#fff);}
+.calendar-import-panel [role="alert"] {padding:.8rem;border-left:3px solid var(--team-danger,#aa3e3e);background:var(--team-surface,#fff);}
+@media (max-width:480px) {.calendar-import-panel fieldset,.calendar-import-panel [aria-label="Review imported event"],.calendar-import-panel [aria-label="Saved calendar request"] {padding:.75rem;}}
+
+
+.calendar-import-panel select {box-sizing:border-box;width:100%;min-width:0;min-height:44px;padding:.55rem;font:inherit;}
+.calendar-import-panel label:has(select) {display:grid;gap:.3rem;}

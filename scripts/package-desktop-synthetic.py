@@ -17,6 +17,42 @@ _spec = importlib.util.spec_from_file_location("native_identity_build", Path(__f
 _identity = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_identity)
 
+_beta_spec = importlib.util.spec_from_file_location("beta_profile_build", Path(__file__).with_name("beta_profile_build.py"))
+_beta = importlib.util.module_from_spec(_beta_spec)
+_beta_spec.loader.exec_module(_beta)
+
+
+def validate_storage_profile(configuration, app):
+    """Bind the opt-in state namespace to the validated independent web profile."""
+    installation = configuration.get("installation") or {}
+    hosted = configuration.get("mode") == "hosted-beta-authenticated"
+    if not hosted:
+        if "storageScope" in installation:
+            raise ValueError("Identity-scoped storage requires the independent beta profile.")
+        return
+    manifest = _beta.validate_native(
+        app / "public", client="desktop", apiOrigin=configuration.get("apiOrigin"),
+        coreWebOrigin=configuration.get("cosmaneuraWebOrigin", ""),
+        captureUploadOrigins=configuration.get("captureUploadOrigins", []),
+        microphoneCapture=configuration.get("microphoneCaptureEnabled", False),
+    )
+    independent = manifest["profile"] == _beta.INDEPENDENT_BETA_PROFILE
+    if independent:
+        google = configuration.get("googleConnectionClientId", "")
+        callback = configuration.get("googleConnectionCallbackUri", "")
+        if (bool(google) != bool(callback) or google and (
+                not isinstance(google, str) or re.fullmatch(r"[A-Za-z0-9_-]{1,200}\.apps\.googleusercontent\.com", google) is None
+                or callback != configuration.get("apiOrigin", "") + "/connections/google/callback")):
+            raise ValueError("Independent beta Google sign-in must use an explicit client and its exact configured API callback.")
+        if (installation.get("storageScope") != "identity-v1" or "nativeIdentity" not in configuration
+                or configuration.get("dataMode") != "synthetic" or configuration.get("nativeCaptureEnabled") is not False
+                or any(configuration.get(key) for key in (
+                    "microsoftConnectionTenantId", "microsoftConnectionClientId", "microsoftConnectionCallbackUri",
+                    "schedulingGoogleClientId", "schedulingGoogleCallbackUri"))):
+            raise ValueError("Independent beta requires isolated identity storage and only its approved capabilities.")
+    elif "storageScope" in installation:
+        raise ValueError("An existing beta profile must retain its original storage namespace.")
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
@@ -58,6 +94,7 @@ def main():
             or package.get("version") != version):
         parser.error("The composition must have consistent numeric product and build versions.")
     installation = configuration.get("installation")
+    validate_storage_profile(configuration, app)
     if operational and (installation is None or installation.get("profile") != "beta" or
                         installation.get("bundleIdentifier") != "com.cosmasos.beta.desktop" or
                         installation.get("rendererPartition") != "persist:cosmasos-operational-beta" or

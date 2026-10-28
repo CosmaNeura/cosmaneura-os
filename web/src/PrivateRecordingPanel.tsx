@@ -4,14 +4,15 @@ import {PrivateRecordingRuntime,openPrivateRecordingStore,prewarmPrivateRecordin
 import {PrivateRecordingLedgerController,type PrivateRecordingLedger} from './private-recording-ledger';
 import {readPrivateRecordingLanguage,savePrivateRecordingLanguage} from './recording-preferences';
 import type {CaptureAttestation,CaptureLanguage} from './capture-api';
-import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
+import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import './practice-home.css';
 import {PrivateTranscriptPanel} from './PrivateTranscriptPanel';
 import {IOSPCM} from '../../clients/capture/plugins/ios-pcm';
 import {parseInputSignal,presentInputSignal} from '../../clients/capture/src/native/ios-input-signal';
 import {vendorSha256} from './vendor-contract';
 
-export type PrivateNotebookResult={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam};
+export type {PrivateNotebookResult} from './session/recording-model';
+import type {PrivateNotebookResult} from './session/recording-model';
 type Consent=CaptureAttestation&{language:CaptureLanguage};
 type Controller=Pick<PrivateRecordingRuntime,'snapshot'|'subscribe'|'start'|'pause'|'stop'|'close'|'attachWorkspace'|'exportWav'|'snapshotForLedger'|'savedChunks'|'snapshotForPrivateTranscript'|'rename'>;
 export type PrivateRecordingPanelProps={
@@ -22,6 +23,7 @@ export type PrivateRecordingPanelProps={
   onTranscribe?:(value:PrivateNotebookResult,recordingId:string)=>Promise<void>;
   /** Closed-panel result finalizer; caller verifies the original owner and reopens only this saved recording. */
   onNotebookPrepared?:(value:PrivateNotebookResult,recordingId:string)=>Promise<void>;
+  onTransitionChange?:(blocked:boolean)=>void;
   onBusyChange?:(busy:boolean)=>void;onSaved?:(snapshot:PrivateRecordingSnapshot)=>void;
   runtimeFactory?:(options:PrivateRecordingOptions,input:{recordingId?:string;title:string;consent?:Consent})=>Promise<Controller>;
   prepareStore?:()=>Promise<PrivateRecordingStore>;prepareNative?:(input:{scope:string;revision:string})=>Promise<PrivateRecordingNativeReceipt>;
@@ -274,6 +276,16 @@ export function PrivateRecordingPanel(props:PrivateRecordingPanelProps){
     void tick();const timer=setInterval(()=>void tick(),500);
     return()=>{alive=false;clearInterval(timer);};
   },[snapshot?.recordingId,snapshot?.phase,platform]);
+  const notebookCreationUnconfirmed=!!props.prepareNotebook&&!recordingId&&notebookTitle!==null&&!notebook;
+  const ledgerAwaitingConfirmation=!!notebook&&!!snapshot&&(!ledgerOwner.current?.loaded||!recordingId&&(
+    snapshot.phase==='recording'&&!ledger||['sealed','interrupted'].includes(snapshot.phase)&&snapshot.recordedChunks>0&&ledger?.state!=='finished'));
+  // Layout can change during steady recording, but not while its notebook or
+  // metadata write is unconfirmed, including before its synchronization effect
+  // starts. An unreadable ledger cannot prove settlement.
+  const transitionBlocked=working||transcriptionBusy||notebookWorking||notebookCreationUnconfirmed||ledgerAwaitingConfirmation||ledgerBusy||!!ledgerError||!!ledger?.uncertain||
+    ledger?.state==='attach_pending'||ledger?.state==='finish_pending'||!!snapshot&&['starting','pausing','stopping','stop_unconfirmed'].includes(snapshot.phase);
+  useEffect(()=>{live.current.onTransitionChange?.(transitionBlocked);},[transitionBlocked,props.onTransitionChange]);
+  useEffect(()=>()=>live.current.onTransitionChange?.(false),[]);
   useEffect(()=>{live.current.onBusyChange?.(working||activeAudio||transcriptionBusy);},[working,activeAudio,transcriptionBusy]);
   useEffect(()=>{if(snapshot&&['sealed','paused','interrupted'].includes(snapshot.phase))live.current.onSaved?.(snapshot);},[snapshot]);
   useEffect(()=>{if(platform==='ios'&&nativeConsumed.current&&snapshot&&['paused','interrupted'].includes(snapshot.phase)){nativeConsumed.current=false;setNativeEpoch(value=>value+1);}},[snapshot?.phase,platform]);

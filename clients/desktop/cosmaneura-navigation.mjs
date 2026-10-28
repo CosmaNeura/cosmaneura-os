@@ -2,11 +2,11 @@ import {googleNavigationConfig,validGoogleNavigationUrl} from './google-navigati
 import {microsoftNavigationConfig,validMicrosoftNavigationUrl} from './microsoft-navigation.mjs';
 import {schedulingNavigationConfig, validSchedulingNavigationUrl} from './scheduling-navigation.mjs';
 import {parseAuthState, sameAuthState} from './auth-helper-client.mjs';
+import {isPackagedWorkspaceDocument} from './workspace-document.mjs';
 
 export const COSMANEURA_CHANNELS = Object.freeze({
   googleCapability: 'cosmas:google:capability:v1', capability: 'cosmas:cosmaneura:capability:v1', schedulingCapability: 'cosmas:scheduling:capability:v1', microsoftCapability:'cosmas:microsoft:capability:v1', open: 'cosmas:cosmaneura:open:v1',
 });
-const ENTRY = 'app://cosmas/index.html';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 const NOTE_PATH = /^\/notes\/appointment_[0-7][0-9a-hjkmnp-tv-z]{25}$/;
 const WEB_ORIGIN = /^https:\/\/[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -46,7 +46,7 @@ export function installCosmaneuraNavigation({ipcMain, renderer, auth, webOrigin 
   const consumed = [];
   function assertRenderer(event) {
     if (disposed || renderer.isDestroyed() || event.sender !== renderer || !event.senderFrame ||
-        event.senderFrame !== renderer.mainFrame || event.senderFrame.url !== ENTRY || renderer.getURL() !== ENTRY) throw unavailable();
+        event.senderFrame !== renderer.mainFrame || !isPackagedWorkspaceDocument(event.senderFrame.url) || !isPackagedWorkspaceDocument(renderer.getURL())) throw unavailable();
   }
   function capability(event) {
     try { assertRenderer(event); event.returnValue = origin !== null; }

@@ -101,8 +101,14 @@ export function FaxSourceReviewPanel(props:FaxSourceReviewPanelProps){
   if(current.saved&&current.saved_request){
    const receipt=await faxSourceApi.resolve(identity,scope,current.saved_request,signal);if(!valid(generation))return;
    if(receipt.state==='not_found')throw new WorkspaceApiError(409,'fax_inbound_source_unavailable');
+   if(receipt.source_withheld){
+    await persist({...current,saved:receipt},generation);setHidden(true);setChecks([false,false,false,false]);
+    // Persistence reauthorizes the visit. Publish a read made after that check,
+    // so another source withdrawn meanwhile cannot be restored by an older view.
+    const workspace=await workspaceApi.read(identity,scope.workspace_id,signal);if(!valid(generation))return;
+    callbacks.current.onSaved?.(receipt,workspace);setError('This fax source is unavailable. Its exact saved review is retained.');return;
+   }
    const workspace=await workspaceApi.read(identity,scope.workspace_id,signal);if(!valid(generation))return;
-   if(receipt.source_withheld){await persist({...current,saved:receipt},generation);setHidden(true);setChecks([false,false,false,false]);callbacks.current.onSaved?.(receipt,workspace);setError('This fax source is unavailable. Its exact saved review is retained.');return;}
    await verifyFaxSourceWorkspace(workspace,receipt,current.saved_request);if(!valid(generation))return;
    await persist({...current,saved:receipt},generation);setHidden(false);setChecks([false,false,false,false]);setError('This saved passage is available for the current visit.');
   }else{

@@ -67,6 +67,8 @@ export async function validateAthenaVisitLinkResult(value:unknown,command:Athena
   if(result.applied){if(!result.link_ref||!result.operation||!['linked','removed','review_required'].includes(result.state)||a!=='status'&&result.operation!==a)return fail();}
   else if(a!=='status'||result.state!=='not_found'||result.operation!==null||result.link_ref!==null||result.encounter!==null)return fail();
   if(a==='unlink'&&(result.state!=='removed'||result.link_ref!==command.link_ref))return fail();
+  // A direct save must return the exact visit reviewed, not just its command receipt.
+  if(a==='link'&&result.state==='linked'&&(!result.encounter||result.encounter.appointment.appointment_ref!==command.appointment_ref||result.encounter.source_sha256!==command.core_source_sha256))return fail();
  }else{
   if(result.applied)return fail();
   if(a==='lookup'){

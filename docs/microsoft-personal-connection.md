@@ -19,9 +19,10 @@ using fixed categories without retaining the provider's scope string. Reference:
 [Microsoft token response](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow#successful-response-2).
 See also [Microsoft's standard identity scopes](https://learn.microsoft.com/en-us/entra/identity-platform/scopes-oidc#openid-connect-scopes).
 Graph operations are limited to GET `/v1.0/me`, GET
-`/v1.0/me/mailFolders/inbox/messages`, and GET `/v1.0/me/calendarView`.
+`/v1.0/me/mailFolders/inbox/messages`, GET `/v1.0/me/calendarView`, and, with the
+separate selected-message feature enabled, GET `/v1.0/me/messages/{selected-id}`.
 Only 25 message headers or event summaries are returned per request. The calendar
-view expands recurring instances. Message bodies, attachments, sending, editing,
+view expands recurring instances. Attachment downloads, sending, editing,
 application-only grants and automatic clinical-record imports are absent.
 Athena's independent read-only contract remains unchanged.
 
@@ -33,8 +34,9 @@ renderer. A lost exchange/refresh requires explicit reconnection. Current-owner
 checks occur before provider work, between token and account requests, and before
 disclosing read results. Disconnect erases stored credentials and cancels pending
 exchanges. It does not revoke the application's consent in Microsoft; that can be
-removed in the user's Microsoft account permissions. Read results stay in the
-current screen's memory and clear when identity changes or another action begins.
+removed in the user's Microsoft account permissions. The basic inbox/calendar
+results stay in the current screen's memory. Explicitly selected message work
+uses the separate retained source lifecycle described below.
 Audits contain operation metadata only. Unknown outcomes are not auto-replayed.
 Failed callbacks now record one fixed failure category in the existing audit,
 alongside atomically invalidating the single-use attempt. Provider response bodies,
@@ -80,3 +82,56 @@ and [mail-folder messages](https://learn.microsoft.com/en-us/graph/api/mailfolde
 Local qualification uses invented identities and injected provider HTTP responses.
 Real Microsoft consent, tenant policy/admin consent, deployed callbacks, physical
 phone/desktop execution and release acceptance remain outstanding.
+
+## Review an Outlook message for a visit
+
+`WORKSPACE_MICROSOFT_MESSAGE_ENABLED=true` and the matching
+`VITE_MICROSOFT_MESSAGE_ENABLED=true` enable the selected-message workflow with
+the existing Microsoft connection. The workspace compatibility response must
+include `microsoft_messages:1`. This adds no OAuth permission: the existing
+delegated `Mail.Read` grant already permits the explicitly selected read.
+
+The clinician checks email access, chooses a recent message, explicitly reads
+its text, confirms the current visit and reviews the shown message. Saving adds
+an independent `microsoft_message` visit source. Preparing a Chief draft uses
+the shared per-bot conversation journal, preserves existing directions and never
+sends a message or starts a model call.
+
+Graph receives a server-built path with the selected opaque ID encoded as one
+path segment, a fixed field selection and `Prefer: outlook.body-content-type="text"`.
+Expanded attachment metadata contains only IDs and inline flags. Any attachment,
+including an inline attachment, unsupported representation, ambiguous response,
+or message over the 5,000-character source limit requires review in Outlook and
+cannot be saved as a complete source. HTML is never rendered, and no attachment,
+remote image or returned link is fetched. See
+[Microsoft Get message](https://learn.microsoft.com/en-us/graph/api/message-get?view=graph-rest-1.0).
+
+The exact list/read reservation is committed before provider I/O; resolve and
+inspect retrieve server-saved results without repeating that I/O. The encrypted
+account editor is `outlook-messages`. A lost save is retried with its original
+visit, source commitment, review confirmations and key. Only a server-confirmed
+unconfirmed read allows an explicit fresh inbox check, retaining up to eight
+earlier exact read commands for later checking. If that read's old connection is
+unavailable, resolve returns only the owned request metadata; staff must check
+the newly connected account before explicitly starting a fresh inbox check.
+Review saves have no fresh-read bypass. Storage failure prevents dispatch.
+Back becomes available once actual I/O and private persistence settle, even when
+a saved request remains unresolved. Reopening retains that exact request and
+does not automatically repeat it.
+
+Migration `q46c2e5a0987` adds immutable Microsoft read, snapshot and review
+tables and the selected-source database guards. Custody binds the current Box,
+human, external account, installed configuration, connection epoch and selected
+message. A Graph 401 invalidates only the exact token and connection used for
+that read; a late failure cannot disconnect a refreshed or replacement grant.
+Reconnect, disconnect, revoked membership or a newer read of the same
+message withholds the old source and its derived private output. Recovery can
+confirm an earlier save without making its contents current. Refreshing the
+visit after a save prevents an older receipt from republishing withheld content.
+
+Focused qualification files are `test_microsoft_message.py`,
+`test_microsoft_message_binding.py`, `test_microsoft_message_model_work.py`,
+`OutlookMessagePanel.test.tsx`, `OutlookMessageMount.test.tsx`,
+`outlook-message-api.test.ts` and the desktop Microsoft message proxy tests.
+They use invented data and synthetic HTTP; this implementation does not claim
+that a real Microsoft account is connected or that tenant deployment is qualified.

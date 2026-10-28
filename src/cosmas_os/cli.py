@@ -97,6 +97,63 @@ def bootstrap_beta_identity_cmd(
         session.close()
 
 
+@app.command("bootstrap-standalone-synthetic-practice")
+def bootstrap_standalone_synthetic_practice_cmd(
+    manifest_path: Path = typer.Argument(..., exists=True, dir_okay=False, readable=True),
+    phase: str = typer.Option(..., "--phase"),
+    confirm_reviewed_synthetic_only: bool = typer.Option(False, "--confirm-reviewed-synthetic-only"),
+) -> None:
+    """Host-only reserve/seed of a fresh invented practice in an owned empty DB."""
+    if not confirm_reviewed_synthetic_only or phase not in {"reserve", "seed"}:
+        raise typer.BadParameter("reviewed synthetic confirmation and reserve/seed phase are required")
+    from cosmas_os.application.standalone_practice import (
+        StandalonePracticeError,
+        StandalonePracticeManifest,
+        reserve_standalone_practice,
+        seed_standalone_practice,
+    )
+
+    repository_root = Path(__file__).resolve().parents[2]
+    resolved = manifest_path.resolve()
+    if manifest_path.is_symlink() or resolved == repository_root or repository_root in resolved.parents:
+        raise typer.BadParameter("use a protected manifest outside the repository")
+    try:
+        descriptor = os.open(resolved, os.O_RDONLY | os.O_NONBLOCK | os.O_NOFOLLOW)
+    except OSError:
+        raise typer.BadParameter("manifest must be a protected regular file") from None
+    with os.fdopen(descriptor, "rb") as opened:
+        info = os.fstat(opened.fileno())
+        if (not stat.S_ISREG(info.st_mode) or stat.S_IMODE(info.st_mode) & 0o077
+                or info.st_size > 32768):
+            raise typer.BadParameter("manifest must be a regular file, at most 32768 bytes and mode 0600 or stricter")
+        encoded = opened.read(32768)
+        after = os.fstat(opened.fileno())
+        if after.st_size != info.st_size or len(encoded) != info.st_size:
+            raise typer.BadParameter("manifest changed while it was read")
+
+    def unique_fields(pairs):
+        value = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError("duplicate manifest field")
+            value[key] = item
+        return value
+
+    try:
+        parsed = json.loads(encoded.decode("utf-8"), object_pairs_hook=unique_fields)
+        manifest = StandalonePracticeManifest.model_validate(parsed)
+    except (UnicodeDecodeError, ValueError, ValidationError):
+        raise typer.BadParameter("standalone synthetic manifest is invalid") from None
+    session = _session()
+    try:
+        operation = reserve_standalone_practice if phase == "reserve" else seed_standalone_practice
+        typer.echo(json.dumps(operation(session, settings, manifest), sort_keys=True))
+    except StandalonePracticeError as exc:
+        raise typer.BadParameter(str(exc)) from None
+    finally:
+        session.close()
+
+
 @app.command("seed-beta-synthetic")
 def seed_beta_synthetic_cmd(
     confirm_synthetic_only: bool = typer.Option(False, "--confirm-synthetic-only"),

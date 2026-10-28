@@ -19,7 +19,7 @@ for i in $(seq 1 45); do
 done
 
 echo "== uv sync =="
-uv sync --extra dev --extra efax-inbound --extra mcp
+uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
 
 echo "== ruff =="
 uv run ruff check src tests

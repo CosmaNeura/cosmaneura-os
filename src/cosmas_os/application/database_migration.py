@@ -1,4 +1,9 @@
-"""Fixed forward migration using an existing administrator connection."""
+"""Historical j79 -> k80 function-only migration for its matching release.
+
+This helper deliberately refuses a newer runtime or packaged schema head. Its
+unchanged-catalog evidence cannot cover migrations that add tables or grants;
+current releases use the separately schema-bound database preparation path.
+"""
 
 from __future__ import annotations
 

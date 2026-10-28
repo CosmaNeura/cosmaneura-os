@@ -410,7 +410,7 @@ test('team setup exposes only paired read and pure rehearsal routes', async () =
 
 test('requires known team contract only on setup pairs and rejects combined or foreign headers', async () => {
   for (const [path, method, value] of [['/provider-team/setup', 'GET', null], ['/provider-team/rehearsal', 'POST', null],
-    ['/provider-team', 'GET', '5'], ['/provider-team', 'POST', '1, 1'], ['/provider-team', 'POST', '1, 2'], ['/workspaces', 'GET', '1'],
+    ['/provider-team', 'GET', '6'], ['/provider-team', 'POST', '1, 1'], ['/provider-team', 'POST', '1, 2'], ['/workspaces', 'GET', '1'],
     ['/provider-team/routines/chief', 'GET', '1']]) {
     const result = await proxyAuthenticatedWorkspaceRequest(request(path, {method,
       ...(method === 'POST' ? {body: '{}'} : {}), headers: value === null ? {} : {'X-Cosmas-Team-Contract': value}}),
@@ -642,7 +642,7 @@ test('team resources and usage are read-only v2 routes with independent 16 KiB c
     for (const suffix of ['/', '?owner=' + id, '/' + id, '/execute']) {
       assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path + suffix, 'GET'), null);
     }
-    for (const version of [null, '1', '2, 2', '1, 2', '5']) {
+    for (const version of [null, '1', '2, 2', '1, 2', '6']) {
       const result = await proxyAuthenticatedWorkspaceRequest(request(path, {headers: version === null ? {} : {'X-Cosmas-Team-Contract': version}}),
         fixture(), () => assert.fail('requires a supported policy contract'));
       assert.equal(result.status, 426);

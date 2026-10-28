@@ -293,13 +293,23 @@ def prepare(
                               nativeRendererRecovery=native_renderer_recovery,
                               simulatorCustody=simulator_custody, deviceCustody=operational)
     staging = feature_manifest is not None and feature_manifest["profile"] == _beta.NATIVE_STAGING_PROFILE
-    if staging and (not operational or data_mode != "synthetic"):
-        raise ValueError("First-owner staging requires the operational native identity and synthetic data.")
+    independent = feature_manifest is not None and feature_manifest["profile"] == _beta.INDEPENDENT_BETA_PROFILE
+    capture_disabled = feature_manifest is not None and feature_manifest["profile"] in _beta.CAPTURE_DISABLED_PROFILES
+    if capture_disabled and (not operational or data_mode != "synthetic"):
+        raise ValueError("A capture-disabled profile requires the operational native identity and synthetic data.")
     if staging and any((google_connection_client_id, google_connection_callback_uri,
                         microsoft_connection_tenant_id, microsoft_connection_client_id,
                         microsoft_connection_callback_uri, scheduling_google_client_id,
                         scheduling_google_callback_uri)):
         raise ValueError("External account connections are disabled for first-owner staging.")
+    if independent:
+        if not native_renderer_recovery:
+            raise ValueError("Independent beta requires the native recovery and keyboard host.")
+        if any((microsoft_connection_tenant_id, microsoft_connection_client_id,
+                microsoft_connection_callback_uri, scheduling_google_client_id, scheduling_google_callback_uri)):
+            raise ValueError("Independent beta permits only the approved Google account connection.")
+        if google_connection_client_id and google_connection_callback_uri != workspace_api_origin + "/connections/google/callback":
+            raise ValueError("Independent beta Google sign-in must return to its exact configured API.")
     policy = ((hosted_workspace_policy if hosted_workspace else local_workspace_policy)(workspace_api_origin, capture_upload_origins)
               if workspace_api_origin is not None else None)
     if operational:
@@ -484,7 +494,7 @@ def prepare(
         info["CosmasNativeAuth"] = identity["auth"] if operational else {"enabled": False}
         if operational:
             info["CosmasNativeIdentity"] = identity["identity"]
-            info["CosmasConfiguredCapture"] = {"enabled": False} if staging else {"enabled": True, "apiOrigin": workspace_api_origin}
+            info["CosmasConfiguredCapture"] = {"enabled": False} if capture_disabled else {"enabled": True, "apiOrigin": workspace_api_origin}
             info["CosmasSourceAccessGroup"] = configured_source_group
             info["CFBundleURLTypes"] = [{"CFBundleURLName": bundle_id, "CFBundleURLSchemes": [bundle_id]}]
         info["CosmaneuraWebOrigin"] = cosmaneura_web_origin
