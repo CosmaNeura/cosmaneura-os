@@ -1,3 +1,5 @@
+import {readFileSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
@@ -11,10 +13,20 @@ describe('Chief first-use controls',()=>{
   it('offers editable requests and never starts one during rendering',async()=>{
     const choose=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} onChoose={choose}/>));
     expect(choose).not.toHaveBeenCalled();
+    const summary=container.querySelector('.chief-ask-summary');
+    expect(summary?.textContent).toBe('Ask Chief');
+    expect(container.querySelector('[aria-label="Ask Chief on this visit"]')).toBeTruthy();
     const buttons=[...container.querySelectorAll('button')];
     expect(buttons.map(button=>button.textContent)).toEqual(CHIEF_STARTERS.map(task=>task.label));
     await act(async()=>buttons[2].click());expect(choose).toHaveBeenCalledExactlyOnceWith(CHIEF_STARTERS[2].prompt);
     expect(container.textContent).toContain('review the question');
+  });
+  it('keeps Ask Chief and starter taps at least 44px',async()=>{
+    await act(async()=>root.render(<ChiefStartActions {...ready} onChoose={vi.fn()}/>));
+    const css=readFileSync(fileURLToPath(import.meta.url).replace(/[^/]+$/,'chief-start-actions.css'),'utf8');
+    expect(css).toMatch(/\.chief-ask-summary[^}]*min-height:\s*44px/);
+    expect(css).toMatch(/\.chief-start-actions button[^}]*min-height:\s*44px/);
+    expect(container.querySelector('.chief-ask-summary')?.textContent).toBe('Ask Chief');
   });
   it.each([{modelEnabled:false},{sourceAllowed:false},{hasSavedContext:false},{notesDirty:true},{hasQuestion:true},{locked:true}])('keeps requests gated by %j',async(change)=>{
     const choose=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} {...change} onChoose={choose}/>));

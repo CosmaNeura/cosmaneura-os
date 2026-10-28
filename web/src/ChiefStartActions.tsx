@@ -18,9 +18,9 @@ export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedCon
     :!hasSavedContext?'Save your notes or add a reference note to give Chief context.'
     :hasQuestion?'Your question is below. Keep it, or clear it to choose another task.'
     :'Choose a task, review the question, then send it when ready.';
-  return <section className="chief-start-actions" aria-label="Chief task starters">
+  return <section className="chief-start-actions" aria-label="Ask Chief on this visit">
     <details className={`chief-starters-disclosure${compact?' compact':''}`} open={!compact}>
-    <summary>Choose a Chief task</summary>
+    <summary className="chief-ask-summary">Ask Chief</summary>
     <div>{CHIEF_STARTERS.map(task=>{
       const delegationRequired=task.id==='team'||task.id==='clinical';
       return <button type="button" key={task.id} disabled={disabled||delegationRequired&&!canDelegate}
