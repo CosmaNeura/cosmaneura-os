@@ -7,7 +7,9 @@ export class VisitOpenTimeout extends Error {
 }
 
 export class VisitOpenDeadline {
-  static readonly limitMs = 5_000;
+  // Staging opens that succeeded were measured at 4.6–6.0s. This sits past that
+  // window and still ends a silent disabled page before the 20s/30s transport timers.
+  static readonly limitMs = 8_000;
   private readonly endsAt = Date.now() + VisitOpenDeadline.limitMs;
   private didExpire = false;
 
@@ -19,7 +21,7 @@ export class VisitOpenDeadline {
     return error instanceof VisitOpenTimeout;
   }
 
-  /** Reject when this attempt's single five-second budget is spent. Later results are ignored. */
+  /** Reject when this attempt's single budget is spent. Later results are ignored. */
   limit<T>(work: Promise<T>): Promise<T> {
     const remaining = this.endsAt - Date.now();
     if (remaining <= 0) {

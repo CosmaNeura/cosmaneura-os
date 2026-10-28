@@ -17,7 +17,7 @@ describe("visit open deadline", () => {
     expect(VisitOpenDeadline.expired(new Error("saved visit missing"))).toBe(false);
   });
 
-  it("rejects once at five seconds and ignores a late result", async () => {
+  it("rejects once at the deadline and ignores a late result", async () => {
     vi.useFakeTimers();
     const deadline = new VisitOpenDeadline();
     let finish!: (value: string) => void;
@@ -39,7 +39,7 @@ describe("visit open deadline", () => {
     const deadline = new VisitOpenDeadline();
     let finish!: (value: string) => void;
     const opened = deadline.limit(new Promise<string>(resolve => { finish = resolve; }));
-    await vi.advanceTimersByTimeAsync(4_000);
+    await vi.advanceTimersByTimeAsync(VisitOpenDeadline.limitMs - 1_000);
     finish("invented-visit");
     await expect(opened).resolves.toBe("invented-visit");
     const recovery = deadline.limit(new Promise(() => {}));

@@ -852,7 +852,7 @@ describe("private encounter workspace", () => {
     expect(workspaceApi.open).toHaveBeenCalledWith(authenticated, fixture.appointment_id);
   });
 
-  it("opens a saved visit, and replaces a hung open with Retry within five seconds", async () => {
+  it("opens a saved visit, and replaces a hung open with Retry at the deadline", async () => {
     const access = {mode: "clerk_jwt" as const, getToken: vi.fn()};
     vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version: 2, drafts: [], has_more: false});
     vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id: fixture.appointment_id, workspace_id: fixture.id, label: "Invented Alex Example"}]);
