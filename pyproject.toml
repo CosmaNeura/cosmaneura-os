@@ -25,6 +25,9 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+calendar-import = [
+    "icalendar==7.3.0",
+]
 efax-inbound = [
     "pypdf==6.21.2",
 ]

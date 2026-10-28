@@ -3,7 +3,7 @@ import {createHash} from 'node:crypto';
 import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {STAGING_NATIVE_PROFILE,validateOperationalNativeIdentity,validateOperationalNativeDataMode} from '../clients/desktop/native-identity-config.mjs';
-import {BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
+import {BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE,STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE,resolveBetaFeatureProfile} from '../clients/shared/beta-feature-profile.mjs';
 
 // OpenTofu jsonencode orders object keys and escapes these five characters.
 export function identityDigest(identity) {
@@ -13,36 +13,47 @@ export function identityDigest(identity) {
 }
 
 /** Reuse the existing native schema; all output values are public configuration. */
-export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE}) {
+export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile}) {
   if(![BETA_FEATURE_PROFILE,NATIVE_STAGING_FEATURE_PROFILE].includes(nativeFeatureProfile))throw new Error('Unknown native feature profile');
+  const standalone=[STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(featureProfile);
+  if(featureProfile!==undefined&&(!standalone||nativeFeatureProfile!==BETA_FEATURE_PROFILE))throw new Error('Select one explicit standalone feature profile');
   const desktop=validateOperationalNativeIdentity(candidate,'desktop',candidate?.apiOrigin);
   validateOperationalNativeDataMode(dataMode,desktop);
   const apple=validateOperationalNativeIdentity({...desktop,client:'apple'},'apple',desktop.apiOrigin);
   if(!Array.isArray(captureUploadOrigins))throw new Error('Explicit upload origins required');
+  if(standalone&&(coreWebOrigin!==''||captureUploadOrigins.length!==0))throw new Error('Standalone practice cannot configure Core or capture uploads');
   const builds={};
   for(const client of ['web','desktop','apple']) {
     const staging=client!=='web'&&nativeFeatureProfile===NATIVE_STAGING_FEATURE_PROFILE;
     builds[client]=resolveBetaFeatureProfile({
-      VITE_WORKSPACE_FEATURE_PROFILE:staging?nativeFeatureProfile:BETA_FEATURE_PROFILE,
+      VITE_WORKSPACE_FEATURE_PROFILE:standalone?featureProfile:staging?nativeFeatureProfile:BETA_FEATURE_PROFILE,
       VITE_WORKSPACE_HOSTED_CLIENT:client,VITE_WORKSPACE_DATA_MODE:dataMode,
       VITE_WORKSPACE_HOSTED_API_ORIGIN:desktop.apiOrigin,
       VITE_API_BASE:client==='desktop'?'app://cosmas/api':desktop.apiOrigin,
       VITE_WORKSPACE_WEB_ORIGIN:client==='web'?webOrigin:'',
       VITE_CLERK_PUBLISHABLE_KEY:desktop.publishableKey,
+      ...(standalone&&client==='web'?{VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId}:{}),
       VITE_COSMANEURA_WEB_ORIGIN:staging?'':coreWebOrigin,
       VITE_CAPTURE_UPLOAD_ORIGINS:staging?'':captureUploadOrigins.join(','),
-      VITE_WORKSPACE_CAPTURE_MODE:staging?'disabled':client==='apple'?'ios_native':'browser_microphone',
+      VITE_WORKSPACE_CAPTURE_MODE:standalone||staging?'disabled':client==='apple'?'ios_native':'browser_microphone',
     });
   }
   const digest=identityDigest(desktop);
   const webArgs=Object.fromEntries(['VITE_CLERK_PUBLISHABLE_KEY','VITE_WORKSPACE_HOSTED_API_ORIGIN',
     'VITE_WORKSPACE_WEB_ORIGIN','VITE_WORKSPACE_DATA_MODE','VITE_COSMANEURA_WEB_ORIGIN',
     'VITE_CAPTURE_UPLOAD_ORIGINS','VITE_WORKSPACE_CAPTURE_MODE'].map(key=>[key,builds.web.env[key]]));
+  if(standalone)Object.assign(webArgs,{VITE_WORKSPACE_FEATURE_PROFILE:featureProfile,VITE_MESSAGES_ENABLED:'true',
+    VITE_WORKSPACE_ORGANIZATION_ID:desktop.organizationId});
   return {
     'desktop-identity.json':desktop,
     'apple-identity.json':apple,
     'web-build-arguments.json':webArgs,
     ...Object.fromEntries(Object.entries(builds).map(([client,value])=>[client+'-build-env.json',value.env])),
+    ...(standalone?{'standalone-profile.json':{
+      version:1,profile:featureProfile,identity_sha256:digest,
+      clients:Object.fromEntries(Object.entries(builds).map(([client,value])=>[client,value.manifest])),
+      dedicated_resource_ownership_verified:false,activation_authorized:false,
+    }}:{}),
     ...(desktop.profile===STAGING_NATIVE_PROFILE?{'os.runtime-identity.json':{
       CLERK_SESSION_POLICY:'shared_staging',
       CLERK_ORGANIZATION_ID:desktop.organizationId,CLERK_ISSUER:desktop.frontendOrigin,
@@ -54,7 +65,8 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
     }}),
     'identity-bindings.json':{
       version:1,profile:desktop.profile,identity_sha256:digest,data_mode:dataMode,
-      native_feature_profile:nativeFeatureProfile,
+      native_feature_profile:standalone?featureProfile:nativeFeatureProfile,
+      ...(standalone?{feature_profile:featureProfile,platform_access:'disabled'}:{}),
       api_origin:desktop.apiOrigin,web_origin:webOrigin,core_web_origin:coreWebOrigin,
       native_origins:{desktop:'app://cosmas',apple:'capacitor://localhost'},
       native_bundles:{desktop:'com.cosmasos.beta.desktop',desktop_auth:'com.cosmasos.beta.desktop.auth',apple:'com.cosmasos.beta.ios'},
@@ -64,7 +76,7 @@ export function workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captu
   };
 }
 
-export async function prepareWorkspaceIdentity({identityPath,webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,output}) {
+export async function prepareWorkspaceIdentity({identityPath,webOrigin,coreWebOrigin,captureUploadOrigins,dataMode='authorized_beta',nativeFeatureProfile=BETA_FEATURE_PROFILE,featureProfile,output}) {
   const info=await lstat(identityPath);
   if(!info.isFile()||info.isSymbolicLink()||info.size>8192)throw new Error('Use one bounded public native identity file');
   const raw=await readFile(identityPath,'utf8');
@@ -75,7 +87,7 @@ export async function prepareWorkspaceIdentity({identityPath,webOrigin,coreWebOr
     .filter(match=>raw.slice(match.index+match[0].length).trimStart().startsWith(':'))
     .map(match=>JSON.parse(match[0]));
   if(new Set(names).size!==names.length)throw new Error('Duplicate identity field');
-  const files=workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode,nativeFeatureProfile});
+  const files=workspaceIdentityInputs(candidate,{webOrigin,coreWebOrigin,captureUploadOrigins,dataMode,nativeFeatureProfile,featureProfile});
   await mkdir(output,{mode:0o700});
   const incomplete=join(output,'.incomplete');
   await writeFile(incomplete,'Public identity preparation incomplete\n',{flag:'wx'});
@@ -87,16 +99,20 @@ export async function prepareWorkspaceIdentity({identityPath,webOrigin,coreWebOr
 
 if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
   try {
-    const args=process.argv.slice(2),known=new Set(['--identity','--web-origin','--core-web-origin','--capture-upload-origin','--output','--data-mode','--native-feature-profile']);
+    const args=process.argv.slice(2),known=new Set(['--identity','--web-origin','--core-web-origin','--capture-upload-origin','--output','--data-mode','--native-feature-profile','--feature-profile']);
     const values={};
     for(let i=0;i<args.length;i+=2){
       const key=args[i],value=args[i+1];
       if(!known.has(key)||!value||value.startsWith('--')||(key!=='--capture-upload-origin'&&values[key]))throw new Error('Invalid public identity arguments');
       if(key==='--capture-upload-origin')(values[key]??=[]).push(value);else values[key]=value;
     }
-    if([...known].some(key=>!['--data-mode','--native-feature-profile'].includes(key)&&!values[key]))throw new Error('All public identity arguments are required');
+    const standalone=[STANDALONE_FEATURE_PROFILE,INDEPENDENT_BETA_FEATURE_PROFILE].includes(values['--feature-profile']);
+    if(values['--feature-profile']&&(!standalone||values['--native-feature-profile']))throw new Error('Select one explicit feature profile');
+    if(standalone&&(values['--core-web-origin']||values['--capture-upload-origin']))throw new Error('Standalone practice has no Core or capture upload arguments');
+    const required=standalone?['--identity','--web-origin','--output']:['--identity','--web-origin','--core-web-origin','--capture-upload-origin','--output'];
+    if(required.some(key=>!values[key]))throw new Error('All public identity arguments are required');
     console.log(JSON.stringify(await prepareWorkspaceIdentity({identityPath:values['--identity'],webOrigin:values['--web-origin'],
-      coreWebOrigin:values['--core-web-origin'],captureUploadOrigins:values['--capture-upload-origin'],dataMode:values['--data-mode'],nativeFeatureProfile:values['--native-feature-profile'],output:values['--output']})));
+      coreWebOrigin:standalone?'':values['--core-web-origin'],captureUploadOrigins:standalone?[]:values['--capture-upload-origin'],dataMode:values['--data-mode'],nativeFeatureProfile:values['--native-feature-profile'],featureProfile:values['--feature-profile'],output:values['--output']})));
   } catch {
     console.error('Public identity preparation refused; inspect the explicit inputs or choose a new output directory.');
     process.exitCode=1;

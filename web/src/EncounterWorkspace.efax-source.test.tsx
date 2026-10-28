@@ -6,6 +6,8 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_VENDOR_SETUP_ENABLED','true');vi.stubEnv('VITE_EFAX_INBOUND_ENABLED','true');vi.stubEnv('VITE_EFAX_INBOUND_SOURCE_ENABLED','true');});
+const observed=vi.hoisted(()=>({session:null as import('./session/workspace-session').WorkspaceSession|null}));
+vi.mock('./session/use-workspace-session',async original=>{const actual=await original<typeof import('./session/use-workspace-session')>();return {...actual,useWorkspaceSession:(...args:Parameters<typeof actual.useWorkspaceSession>)=>{observed.session=args[0];return actual.useWorkspaceSession(...args);}};});
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {workspaceApi,type AuthenticatedWorkspaceIdentity,type Workspace,type WorkspaceEntry} from './workspace-api';
 import {teamFixture,teamUuid as uuid} from './team-setup-test-fixture';
@@ -69,6 +71,8 @@ beforeEach(async()=>{
  vi.mocked(readConnectionCatalog).mockResolvedValue({core:false,google:false,microsoft:false,scheduling:false,messaging:true,payments:false,portals:false});vi.mocked(readConnectionSummary).mockResolvedValue({label:'Connected',reason:'Invented eFax account; controlled boundary',action:'Open fax work',tone:'ready'});
  resolved={...await efaxReceipt(acquireRequest),state:'acquired',content_available:true,source_withheld:false,document:{sha256:documentOffer.document_sha256,byte_length:100,pages:1}};vi.spyOn(efaxInboundApi,'resolve').mockImplementation(async()=>structuredClone(resolved));vi.spyOn(efaxInboundApi,'command');vi.spyOn(efaxInboundApi,'document');
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity}/>));await click('Visits and notes');await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Existing saved clinical note'));
+ // Same-composer assertions start in Chief; separate-bot ownership is covered by source draft regressions.
+ await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='chief')!.click());
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('routes actual settings to the current visit with the same authorized AES-GCM journal and no automatic image request',async()=>{
@@ -125,4 +129,11 @@ it.each([false,true])('fresh editor authorization preserves unfinished notes and
  if(changed)current={...current,entries:current.entries.map(e=>e.kind==='scratchpad'?{...e,content:'Externally changed saved note',revision:3}:e)};
  await act(async()=>{await editorAccess!.authorize();});await showNotebook();expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Unfinished provider note');
  expect(source.locked).toBe(changed);expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.disabled).toBe(changed);assertNoWork();
+});
+
+it('does not bypass another source panel’s busy state for its own verified Chief callback',async()=>{
+ await setText('#team-question','Keep these directions while other work finishes.');await offerFax();await preparePacket();await click('Save reviewed fax passage');
+ await act(async()=>{source.onBusyChange!(true);observed.session!.setProviderFaxSourceBusy(true);});const reads=vi.mocked(workspaceApi.read).mock.calls.length;
+ await act(async()=>{source.onAskChief!(packet);await new Promise(r=>setTimeout(r,20));});expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe('Keep these directions while other work finishes.');expect(vi.mocked(workspaceApi.read).mock.calls.length).toBe(reads);expect(visible('Team settings')?.disabled).toBe(true);
+ await act(async()=>{source.onBusyChange!(false);observed.session!.setProviderFaxSourceBusy(false);});assertNoWork();
 });

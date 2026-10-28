@@ -22,8 +22,10 @@ export type VisitTranscriptionIntent={contract:'cosmas.visit-transcription.inten
   finish_request_sha256:string;manifest_sha256:string;chunks:number;frames:number;audio_consent_sha256:string;
   admission:{key:string;attestation:CaptureAttestation;language:CaptureLanguage;bot:{address:string;team_revision:number}}};
 /** This token permits one mounted continuation, never consent inferred from a saved receipt. */
-export type RecordingTranscriptionGesture={identity:AuthenticatedWorkspaceIdentity;recordingId:string;scope:string;intent_sha256:string;claim:()=>boolean};
-export type SavedRecordingEntry={recordingId:string;scope:string;platform:'ios'|'desktop';originWorkspace?:Workspace;visitResolved?:boolean;binding?:RecordingVisitBinding;transcriptionGesture?:RecordingTranscriptionGesture};
+export type {RecordingTranscriptionGesture} from './session/recording-model';
+import type {RecordingTranscriptionGesture} from './session/recording-model';
+export type {SavedRecordingEntry} from './session/recording-model';
+import type {SavedRecordingEntry} from './session/recording-model';
 type Transfer={contract:'cosmas.saved-transfer.v1'|'cosmas.saved-transfer.v2'|'cosmas.saved-transfer.v3';binding?:RecordingVisitBinding;recording_id:string;workspace_id:string;scope:string;
   link_request:PrivateRecordingLinkRequest|null;receipt:PrivateRecordingReceipt|null;
   admission:null|{key:string;attestation:CaptureAttestation;language:CaptureLanguage;source:SavedRecordingSelection};

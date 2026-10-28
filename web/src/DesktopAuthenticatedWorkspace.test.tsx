@@ -33,6 +33,7 @@ describe("desktop native workspace", () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); enableDesktop();
     container = document.createElement("div"); document.body.append(container); root = createRoot(container);
     vi.stubGlobal("window", { location: { href: "app://cosmas/index.html" },
+      addEventListener: originalWindow.addEventListener.bind(originalWindow), removeEventListener: originalWindow.removeEventListener.bind(originalWindow),
       setInterval: originalWindow.setInterval.bind(originalWindow), clearInterval: originalWindow.clearInterval.bind(originalWindow) });
   });
   afterEach(async () => {
@@ -55,7 +56,7 @@ describe("desktop native workspace", () => {
     expect(headers.get("X-Cosmas-Desktop-Session")).toBe(id);
     expect(headers.has("Authorization")).toBe(false); expect(headers.has("X-Box-Id")).toBe(false);
     expect(catalogCall[0]).toBe("app://cosmas/api/workspaces");
-    await click("Sign out"); expect(container.textContent).not.toContain("Private desktop encounter");
+    await click("Log out"); expect(container.textContent).not.toContain("Private desktop encounter");
     expect(container.textContent).toContain("Sign in to CosmaBot");
   });
   it("discards a private response received after account change", async () => {

@@ -32,7 +32,7 @@ beforeEach(()=>{
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('starts with no read, no OCR, optional DOB and explicit four confirmations',async()=>{
  await mount();expect(efaxSourceApi.review).not.toHaveBeenCalled();expect(efaxSourceApi.resolve).not.toHaveBeenCalled();expect(workspaceApi.read).not.toHaveBeenCalled();
- expect(host.textContent).toContain('does not extract or OCR');expect(host.textContent).toContain('Date of birth is optional');expect(host.querySelectorAll('input[type=checkbox]')).toHaveLength(4);
+ expect(host.textContent).toContain('Nothing is copied automatically');expect(host.textContent).toContain('does not perform OCR');expect(host.textContent).toContain('Date of birth is optional');expect(host.querySelectorAll('input[type=checkbox]')).toHaveLength(4);
  await enter();expect(button('Save reviewed fax passage for this visit')!.disabled).toBe(true);await ack();expect(button('Save reviewed fax passage for this visit')!.disabled).toBe(false);
 });
 it('provider reviews exact pages, journals before POST, saves separately then prepares editable Chief request',async()=>{
@@ -95,4 +95,45 @@ it('does not adopt late response after identity replacement or expose prior pass
  await mount();await enter();await ack();let finish!:(r:EFaxSourceReceipt)=>void;vi.mocked(efaxSourceApi.review).mockReturnValueOnce(new Promise(r=>{finish=r;}));await act(async()=>button('Save reviewed fax passage for this visit')!.click());await wait(()=>expect(saved?.pending).toBeTruthy());const request=structuredClone(saved!.pending!.request);
  props={...props,identity:{mode:'clerk_jwt',getToken:async()=>null},scope:{...scope,owner_id:uuid(99)},recovery:{authorize:async()=>{},load:async()=>null,persist:async()=>{}}};await act(async()=>root.render(<EFaxSourceReviewPanel {...props}/>));await act(async()=>finish(await receipt(request)));
  expect(host.textContent).not.toContain(passage);expect(props.onSaved).not.toHaveBeenCalled();expect(workspaceApi.read).not.toHaveBeenCalled();
+});
+it('blocks direct Back for unsaved edits and active persistence, then permits a privately saved draft',async()=>{
+ props={...props,onOperationBusyChange:vi.fn()};await mount();await enter();
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);expect(host.textContent).toContain('Save passage draft privately before leaving');
+ let complete!:()=>void;vi.mocked(props.recovery!.persist).mockImplementationOnce(value=>new Promise<void>(resolve=>{complete=()=>{saved=value;resolve();};}));
+ await act(async()=>button('Save passage draft privately')!.click());await wait(()=>expect(props.recovery!.persist).toHaveBeenCalledOnce());
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);await act(async()=>complete());await idle();
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);expect(props.onBusyChange).toHaveBeenLastCalledWith(true);
+ props={...props,visible:false};await act(async()=>root.render(<EFaxSourceReviewPanel {...props}/>));
+ props={...props,visible:true};await act(async()=>root.render(<EFaxSourceReviewPanel {...props}/>));expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(passage);
+ await act(async()=>{const t=host.querySelector('textarea')!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(t,passage+' Edited');t.dispatchEvent(new Event('input',{bubbles:true}));});
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);expect(efaxSourceApi.review).not.toHaveBeenCalled();
+});
+it('permits Back after a lost source-save response while retaining the exact durable request',async()=>{
+ props={...props,onOperationBusyChange:vi.fn()};await mount();await enter();await ack();vi.mocked(efaxSourceApi.review).mockRejectedValueOnce(new WorkspaceApiError(503));
+ await click('Save reviewed fax passage for this visit');const pending=structuredClone(saved!.pending);
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);expect(props.onBusyChange).toHaveBeenLastCalledWith(true);
+ await act(async()=>root.render(null));await mount();await click('Restore saved fax passage');expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);
+ expect(saved!.pending).toEqual(pending);expect(efaxSourceApi.review).toHaveBeenCalledOnce();expect(button('Check saved fax review')!.disabled).toBe(false);
+});
+it('keeps actual review dispatch locked through native abort until its promise settles',async()=>{
+ props={...props,onOperationBusyChange:vi.fn(),identity:{mode:'clerk_jwt',getToken:async()=>null,nativeSession:{revision:uuid(90),isCurrent:()=>true}}};
+ await mount();await enter();await ack();let reject!:(reason:unknown)=>void;vi.mocked(efaxSourceApi.review).mockReturnValueOnce(new Promise((_,no)=>{reject=no;}));
+ await act(async()=>button('Save reviewed fax passage for this visit')!.click());await wait(()=>expect(saved?.pending).not.toBeNull());
+ await act(async()=>notifyNativeWorkspaceForeground(props.identity,false));expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);
+ await act(async()=>notifyNativeWorkspaceForeground(props.identity,true));expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);
+ await act(async()=>reject(new WorkspaceApiError(503)));await wait(()=>expect(button('Restore saved fax passage')).toBeDefined());
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);expect(saved!.pending).not.toBeNull();
+});
+it('releases the initial access-operation lock after a failed journal load without deleting saved work',async()=>{
+ props={...props,onOperationBusyChange:vi.fn()};vi.mocked(props.recovery!.load).mockRejectedValueOnce(new Error('Invented load failure'));
+ await act(async()=>root.render(<EFaxSourceReviewPanel {...props}/>));await wait(()=>expect(host.textContent).toContain('could not be opened'));
+ expect(props.onOperationBusyChange).toHaveBeenCalledWith(true);expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);expect(props.recovery!.persist).not.toHaveBeenCalled();
+});
+it('conceals a saved passage when the exact PDF is unavailable without deleting its receipt or signing out',async()=>{
+ props={...props,onOperationBusyChange:vi.fn(),onOpenDocument:vi.fn(async()=>null)};await mount();await enter();await ack();await click('Save reviewed fax passage for this visit');
+ const retained=structuredClone(saved);expect(host.textContent).toContain(passage);await click('Open original PDF');
+ await wait(()=>expect(host.textContent).not.toContain(passage));expect(saved).toEqual(retained);
+ expect(button('Prepare a Chief request')).toBeUndefined();expect(button('Check saved fax source')).toBeDefined();
+ expect(props.onAuthenticationLost).not.toHaveBeenCalled();expect(props.onAskChief).not.toHaveBeenCalled();expect(efaxSourceApi.review).toHaveBeenCalledOnce();
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false);
 });

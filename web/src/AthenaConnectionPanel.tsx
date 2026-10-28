@@ -1,10 +1,11 @@
 import {useEffect,useRef,useState} from 'react';
 import {coreConnectionApi} from './core-connection-api';
-import type {AthenaCommand,AthenaResult} from './athena-connection-contract';
+import type {AthenaAccount,AthenaCommand,AthenaResult} from './athena-connection-contract';
 import {AthenaVisitLinkPanel} from './AthenaVisitLinkPanel';
 import {ATHENA_VISIT_LINK_BUILD,type AthenaSourceSelection} from './athena-visit-link-api';
 import type {CoreConnection,CoreConnectionCommand} from './core-connection-contract';
 import type {AthenaAppointment} from './athena-connection-contract';
+import type {AthenaVisitRecoverySession} from './athena-visit-link-recovery';
 import {useSetupNavigationBusy} from './connection-setup-flow';
 import {WORKSPACE_AUTHENTICATED_BUILD,WORKSPACE_BUILD,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
@@ -24,17 +25,19 @@ export function athenaLocalTime(value:string):string{
 function zoneLabel(zone:string){return new Intl.DateTimeFormat(undefined,{timeZone:zone,timeZoneName:'longGeneric'}).formatToParts(new Date()).find(p=>p.type==='timeZoneName')?.value??zone;}
 const statusLabels:Record<string,string>={f:'Booked','2':'Checked in','3':'Checked out','4':'Charge entered',x:'Cancelled'};
 
-export function AthenaConnectionPanel({identity,connectionSha,connection,onBusyChange,onAccessLost,onOpenNotebook,openBlocked=false,visitLinkEnabled=ATHENA_VISIT_LINK_BUILD}:{identity:AuthenticatedWorkspaceIdentity;connectionSha:string;connection?:CoreConnection;onBusyChange?:(busy:boolean)=>void;onAccessLost:(error:unknown)=>void;onOpenNotebook?:(command:CoreConnectionCommand)=>Promise<void>;openBlocked?:boolean;visitLinkEnabled?:boolean}){
+export function AthenaConnectionPanel({identity,connectionSha,connection,onBusyChange,onAccessLost,onOpenNotebook,openBlocked=false,visitLinkEnabled=ATHENA_VISIT_LINK_BUILD,recovery,onRecoveryChange}:{identity:AuthenticatedWorkspaceIdentity;connectionSha:string;connection?:CoreConnection;onBusyChange?:(busy:boolean)=>void;onAccessLost:(error:unknown)=>void;onOpenNotebook?:(command:CoreConnectionCommand)=>Promise<void>;openBlocked?:boolean;visitLinkEnabled?:boolean;recovery?:AthenaVisitRecoverySession;onRecoveryChange?:()=>void}){
   const [snapshot,setSnapshot]=useState<{identity:AuthenticatedWorkspaceIdentity;sha:string;result:AthenaResult;requestWindow?:Window&{offset:number}}|null>(null);
+  const [reviewedAccount,setReviewedAccount]=useState<{identity:AuthenticatedWorkspaceIdentity;sha:string;account:AthenaAccount}|null>(null);
   const [window,setWindow]=useState<Window|null>(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
   const [selected,setSelected]=useState<{source:AthenaAppointment;selection:AthenaSourceSelection}|null>(null),[linkBusy,setLinkBusy]=useState(false);
   const locked=busy||linkBusy;
   const epoch=useRef(0),running=useRef(false),controller=useRef<AbortController|null>(null),scope=useRef({identity,connectionSha});
   scope.current={identity,connectionSha};
   useSetupNavigationBusy(locked,onBusyChange);
-  useEffect(()=>{epoch.current++;controller.current?.abort();running.current=false;setSnapshot(null);setSelected(null);setLinkBusy(false);setWindow(null);setError('');setBusy(false);return()=>{epoch.current++;controller.current?.abort();running.current=false;};},[identity,connectionSha]);
+  useEffect(()=>{epoch.current++;controller.current?.abort();running.current=false;setSnapshot(null);setReviewedAccount(null);setSelected(null);setLinkBusy(false);setWindow(null);setError('');setBusy(false);return()=>{epoch.current++;controller.current?.abort();running.current=false;};},[identity,connectionSha]);
   const result=snapshot?.identity===identity&&snapshot.sha===connectionSha?snapshot.result:null;
-  const discovery=result?.athena_discovery,account=discovery?.account;
+  const discovery=result?.athena_discovery;
+  const account=reviewedAccount?.identity===identity&&reviewedAccount.sha===connectionSha?reviewedAccount.account:null;
   const page=discovery?.action==='appointments'&&snapshot?.requestWindow?.start_date===window?.start_date&&snapshot?.requestWindow?.end_date===window?.end_date?discovery:null;
   async function run(command:AthenaCommand){
     if(running.current||linkBusy)return;
@@ -46,12 +49,15 @@ export function AthenaConnectionPanel({identity,connectionSha,connection,onBusyC
       const received=await coreConnectionApi.read(identity,command,abort.signal);
       if(!isCurrent())return;
       setSnapshot({identity,sha:connectionSha,result:received,...(command.action==='athena_appointments'?{requestWindow:{start_date:command.start_date,end_date:command.end_date,offset:command.offset}}:{})});
-      if(command.action==='athena_connection')setWindow(received.athena_discovery.account?athenaDateWindow(received.athena_discovery.account.department_timezone):null);
+      const nextAccount=received.athena_discovery.account;
+      setReviewedAccount(nextAccount?{identity,sha:connectionSha,account:nextAccount}:null);
+      if(command.action==='athena_connection')setWindow(previous=>nextAccount?(previous&&account?.account_sha256===nextAccount.account_sha256?previous:athenaDateWindow(nextAccount.department_timezone)):null);
     }catch(cause){
       if(!isCurrent())return;
       setSnapshot(null);
+      if(cause instanceof WorkspaceApiError&&[401,403,404,409].includes(cause.status)){setReviewedAccount(null);setWindow(null);}
       if(cause instanceof WorkspaceApiError&&[401,403,409].includes(cause.status)){onAccessLost(cause);return;}
-      setError(cause instanceof WorkspaceApiError&&cause.status===404?'Athena is not enabled for your practice yet. Ask your practice administrator to complete the connection.':'Athena could not be checked. Check the connection again to retry.');
+      setError(cause instanceof WorkspaceApiError&&cause.status===404?'Athena is not enabled for your practice yet. Ask your practice administrator to complete the connection.':account?'Athena could not be checked. Your selected dates are kept below. Try viewing appointments again.':'Athena could not be checked. Check the connection again to retry.');
     }finally{if(isCurrent()){running.current=false;setBusy(false);}}
   }
   function appointments(offset=0){
@@ -91,6 +97,6 @@ export function AthenaConnectionPanel({identity,connectionSha,connection,onBusyC
         <p className="team-fine">Refresh to see recent schedule changes.</p>
       </>}
     </>}
-    {visitLinkEnabled&&connection&&account&&page&&selected&&<AthenaVisitLinkPanel identity={identity} connection={connection} account={account} source={selected.source} selection={selected.selection} onBusyChange={setLinkBusy} onAccessLost={onAccessLost} onOpenNotebook={onOpenNotebook} openBlocked={openBlocked} onClose={()=>setSelected(null)}/>}
+    {visitLinkEnabled&&connection&&account&&page&&selected&&<AthenaVisitLinkPanel identity={identity} connection={connection} account={account} source={selected.source} selection={selected.selection} onBusyChange={setLinkBusy} onAccessLost={onAccessLost} onOpenNotebook={onOpenNotebook} openBlocked={openBlocked} recovery={recovery} onRecoveryChange={onRecoveryChange} onClose={()=>setSelected(null)}/>}
   </section>;
 }

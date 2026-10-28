@@ -6,8 +6,12 @@ and deliberately remains outside this registry.
 """
 
 from cosmas_os import (  # noqa: F401 -- imports register declarative models
+    calendar_import_models,
+    conversation_models,
     efax_inbound_models,
     efax_source_models,
+    ehr_read_models,
+    elation_sandbox_models,
     fax_inbound_models,
     fax_source_models,
     finance_models,
@@ -19,6 +23,7 @@ from cosmas_os import (  # noqa: F401 -- imports register declarative models
     inbox_models,
     membership_models,
     microsoft_connection_models,
+    microsoft_message_models,
     models,
     portal_models,
     portal_work_models,

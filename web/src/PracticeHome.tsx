@@ -18,7 +18,8 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam}:{
+export function PracticeHome({conversationContext,onPendingChange,identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam}:{
+  conversationContext?:{name:string;scribe:boolean};onPendingChange?:(pending:boolean)=>void;
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
   onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onConnections:()=>void;onPracticeWork:()=>void;
   onOpened:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
@@ -44,6 +45,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   else if(live.current.recovery!==recovery)live.current={...live.current,recovery};
   const current=(epoch:number)=>live.current.alive&&live.current.epoch===epoch&&live.current.identity===identity&&live.current.recovery===recovery;
   const sameAccount=(epoch:number)=>live.current.alive&&live.current.epoch===epoch&&live.current.identity===identity;
+  useEffect(()=>{onPendingChange?.(!!pending);},[pending,onPendingChange]);
   const callback=useRef(onBusyChange);callback.current=onBusyChange;
   const creating=useRef(false);
   const initialRecovery=useRef<{epoch:number;promise:ReturnType<typeof loadPrivateDraftRecovery>}|null>(null);
@@ -195,9 +197,9 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
     </section>;
   const recordingList=recordings&&onReopenRecording?<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong>{recording.createdAt&&<time dateTime={recording.createdAt}>{new Date(recording.createdAt).toLocaleString()}</time>}<span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>:null;
   const quickStart=<form className="practice-quick-start" onSubmit={event=>{event.preventDefault();void create();}}>
-      {nativeCompact&&<><h2>{!team?"Conversation":chiefAvailable?"Chief":"Private note"}</h2><p>Plan your next step privately.</p></>}
+      {nativeCompact&&!conversationContext&&<><h2>{!team?"Conversation":chiefAvailable?"Chief":"Private note"}</h2><p>Plan your next step privately.</p></>}
       {!nativeCompact&&titleField}
-      {(!nativeCompact||team?.revision===0)&&<div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):team?'No teammates are on yet.':'Your team list will appear here.'}</p>
+      {(!nativeCompact||team?.revision===0)&&!conversationContext&&<div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):team?'No teammates are on yet.':'Your team list will appear here.'}</p>
         <p>Private drafts first. External actions need separate human review.</p>
         {team?.revision===0&&<button type="button" disabled={locked||busy||!ready||!!pending} onClick={onUseTeam}>{teamUnchanged?'Use this team':'Review team changes'}</button>}
         <button type="button" className="team-subtle" onClick={onSettings}>Personalize later in Settings</button>
@@ -206,7 +208,7 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
       {nativeCompact&&<details className="practice-home-title"><summary>{title==='Private note'?nativeTitleLabel:title}</summary>{titleField}</details>}
       {!nativeCompact&&<p className="team-fine">No appointment, email, calendar or patient portal is needed. Patient-linked work and external actions need separate review.</p>}
     </form>;
-  return <section className="practice-home" data-native-compact={nativeCompact} aria-label="Practice Home">
+  return <section className="practice-home" data-native-compact={nativeCompact} data-conversation-context={!!conversationContext} data-context-scribe={!!conversationContext?.scribe} aria-label="Practice Home">
     {nativeCompact?<h1 className="team-sr-only">Home</h1>:<><p className="team-kicker">YOUR PRACTICE</p><h1>{team?.revision?'Your workspace':'Let’s get you ready.'}</h1></>}
     <p className="practice-home-lead">{nativeCompact?'Private notes, recordings and next steps.':'Record with Scribe or start a private note. Choose a patient or visit later.'}</p>
     {startupStatus&&<div className="practice-home-status" role="status">{startupStatus}{showStartupRetry&&<button type="button" onClick={retryChecks}>Retry</button>}</div>}

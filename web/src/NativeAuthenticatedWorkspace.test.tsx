@@ -60,6 +60,26 @@ describe("native workspace session", () => {
     const button = [...container.querySelectorAll("button")].find(item => item.textContent?.startsWith(label));
     expect(button, label).toBeDefined(); await act(async () => button!.click());
   }
+  it("logs out from Settings through the native owner and closes access before remote completion", async () => {
+    const native=harness(),finished=deferred<void>();
+    native.plugin.signOut.mockImplementationOnce(()=>finished.promise);
+    await render(native); await click("Team settings");
+    const settings=container.querySelector('.settings-hub');
+    const logout=settings?.querySelector<HTMLButtonElement>('[aria-label="Account"] button');
+    expect(logout?.textContent).toBe("Log out");
+    expect(logout?.disabled).toBe(false);
+    await act(async()=>logout!.click());
+    expect(native.plugin.signOut).toHaveBeenCalledOnce();
+    expect(container.querySelector('.team-workspace')).toBeNull();
+    expect(container.textContent).toContain("Updating your secure session");
+    const calls=fetchMock.mock.calls.length;
+    await act(async()=>native.emit(first));
+    expect(container.querySelector('.team-workspace')).toBeNull();
+    expect(fetchMock).toHaveBeenCalledTimes(calls);
+    native.set(signedOut); await act(async()=>finished.resolve());
+    expect(container.textContent).toContain("Sign in to CosmaBot");
+    expect(container.textContent).not.toContain("Settings");
+  });
   it("holds the hosted iPhone workspace at practice access and clears it on sign-out", async () => {
     for (const [key,value] of Object.entries({VITE_API_BASE:"https://api.example.invalid",VITE_COSMAS_ENV:"early_adopter_beta",
       VITE_WORKSPACE_ENABLED:"true",VITE_WORKSPACE_AUTHENTICATED_ENABLED:"true",VITE_WORKSPACE_HOSTED_ENABLED:"true",
@@ -82,7 +102,7 @@ describe("native workspace session", () => {
       expect(new Headers(options?.headers).get("X-Cosmas-Workspace-Protocol")).toBe("1");
       expect(new Headers(options?.headers).get("Authorization")).toBe(`Bearer ${token}`);
     }
-    await click("Sign out");expect(container.textContent).not.toContain("Ada Beta");expect(native.plugin.signOut).toHaveBeenCalledOnce();
+    await click("Log out");expect(container.textContent).not.toContain("Ada Beta");expect(native.plugin.signOut).toHaveBeenCalledOnce();
   });
   it("keeps missing or disabled native adapters offline", async () => {
     const native = harness(); await render(native, false);
@@ -128,7 +148,7 @@ describe("native workspace session", () => {
     expect(container.textContent).not.toContain("private provider detail");
     expect(container.textContent).not.toContain("Choose an encounter");
     expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
-    native.plugin.getState.mockResolvedValue(signedOut); await click("Sign out");
+    native.plugin.getState.mockResolvedValue(signedOut); await click("Log out");
     expect(native.plugin.signOut).toHaveBeenCalledOnce();
     expect(container.textContent).toContain("Sign in to CosmaBot");
     expect(fetchMock).not.toHaveBeenCalled();
@@ -161,7 +181,7 @@ describe("native workspace session", () => {
     expect(native.plugin.getToken).not.toHaveBeenCalled(); expect(fetchMock).not.toHaveBeenCalled();
     native.set(first); await act(async () => retry.resolve());
     expect(container.textContent).not.toContain("Sign-in didn’t finish");
-    expect(container.textContent).toContain("Sign out");
+    expect(container.textContent).toContain("Log out");
   });
   it("keeps unknown restored pending state on the existing sign-out recovery path", async () => {
     const native = harness(pending); await render(native);
@@ -177,7 +197,7 @@ describe("native workspace session", () => {
     await render(native); await click("Sign in");
     await click("Try signing in again");
     native.plugin.signOut.mockImplementationOnce(async () => { native.set(pending); throw new Error("private detail"); });
-    await click("Sign out");
+    await click("Log out");
     expect(container.textContent).toContain("Finish signing out");
     expect(container.textContent).not.toContain("Sign-in didn’t finish");
     await click("Retry sign-out");
@@ -222,7 +242,7 @@ describe("native workspace session", () => {
     const native = harness(); await render(native); await click("Visits and notes");
     const late = deferred<unknown>(); native.plugin.getToken.mockReturnValueOnce(late.promise);
     await click("Visits and notes"); const logout = deferred<void>(); native.plugin.signOut.mockReturnValueOnce(logout.promise);
-    await click("Sign out"); expect(container.textContent).not.toContain("Private invented label");
+    await click("Log out"); expect(container.textContent).not.toContain("Private invented label");
     await act(async () => { native.emit(first); late.resolve({ token, revision: first.revision }); });
     expect(container.textContent).not.toContain("Choose an encounter"); expect(fetchMock).toHaveBeenCalledTimes(4);
     native.set(pending); await act(async () => logout.reject(new Error("secret provider detail")));
@@ -246,7 +266,7 @@ describe("native workspace session", () => {
   it("ignores pending actions and tokens from a replaced adapter", async () => {
     const old = harness(); await render(old); const late = deferred<unknown>(); old.plugin.getToken.mockReturnValueOnce(late.promise);
     await click("Visits and notes"); const logout = deferred<void>(); old.plugin.signOut.mockReturnValueOnce(logout.promise);
-    await click("Sign out"); const fresh = harness(second); await render(fresh); await click("Visits and notes");
+    await click("Log out"); const fresh = harness(second); await render(fresh); await click("Visits and notes");
     await act(async () => { logout.resolve(); late.resolve({ token, revision: first.revision }); old.emit(pending); });
     expect(fetchMock).toHaveBeenCalledTimes(7); expect(container.textContent).toContain("Private invented label");
     expect(fresh.plugin.getState).toHaveBeenCalledTimes(1); expect(old.listeners.size).toBe(0);

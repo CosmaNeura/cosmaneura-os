@@ -161,7 +161,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     detail="Complete or cancel the sign-in window to return to Cosmas." role="status" />;
 
   if (state?.phase === "ready" && identity) {
-    const controls=<button className="button secondary" onClick={() => void act("signOut")}>Sign out</button>;
+    const controls=<button className="button secondary" onClick={() => void act("signOut")}>Log out</button>;
     return hostedWorkspaceRequested()
       ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate key={state.revision} identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
       : <EncounterWorkspace key={state.revision} authenticated={identity} accountControls={controls}/>;
@@ -170,7 +170,7 @@ export function NativeAuthenticatedWorkspace({ plugin = WorkspaceAuth, available
     detail="This installation could not verify your account. Try signing in again, or reopen the app. Your private workspace stays closed until verification succeeds.">
     <div className="row account-controls" aria-label="Account recovery">
       <button className="button" onClick={() => void act("signIn")}>Sign in again</button>
-      <button className="button secondary" onClick={() => void act("signOut")}>Sign out</button>
+      <button className="button secondary" onClick={() => void act("signOut")}>Log out</button>
     </div>
   </StatusScreen>;
   if (!state || state.phase === "loading") return <StatusScreen title="Checking your session"
