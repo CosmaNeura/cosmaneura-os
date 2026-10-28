@@ -159,10 +159,12 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
     vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
-    await vi.waitFor(async()=>{await act(async()=>{});expect(held).toBe(true);});
     await click('Visits and notes');
     await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
     expect(container.querySelector('#team-notebook')).not.toBeNull();
+    const refresh=[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Refresh private notes')!;
+    await act(async()=>refresh.click());
+    await vi.waitFor(async()=>{await act(async()=>{});expect(held).toBe(true);});
     await act(async()=>release({...structuredClone(team),recovery_scope:(scopeChanged?'b':'a').repeat(64)}));
     if(scopeChanged){
       expect(container.querySelector('#team-notebook')).toBeNull();
@@ -218,6 +220,21 @@ describe("private encounter workspace", () => {
     await click('Home');expect(container.querySelector('[aria-label="Practice Home"]')?.closest('[hidden]')).toBeNull();
     await click('Current notebook');expect(container.textContent).toContain('The earlier visit link is unconfirmed. Its exact request is retained.');
     expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();expect(workspaceApi.resolveAppointmentLink).not.toHaveBeenCalled();
+  });
+  it('enables Start when the team recovery check finishes without waiting for visits',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    let releaseVisits!:(value:Awaited<ReturnType<typeof workspaceApi.catalog>>)=>void;
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.catalog).mockImplementation(()=>new Promise(resolve=>{releaseVisits=resolve;}));
+    const started=performance.now();
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    expect(container.querySelector<HTMLInputElement>('.practice-quick-start input')?.disabled).toBe(false);
+    expect(container.textContent).not.toContain('Checking available visits');
+    await vi.waitFor(()=>expect([...container.querySelectorAll('button')].find(b=>b.textContent==='Start a private note')?.disabled).toBe(false));
+    expect(performance.now()-started).toBeLessThan(3000);
+    expect(releaseVisits).toEqual(expect.any(Function));
+    expect(container.textContent).toContain('Loading visits');
+    await act(async()=>releaseVisits([]));
   });
   it('uses the admitted startup team once without another initial team read',async()=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
@@ -626,7 +643,7 @@ describe("private encounter workspace", () => {
     const access = {mode:"clerk_jwt" as const,getToken:vi.fn()};
     vi.mocked(workspaceApi.team).mockResolvedValue({...team,revision:0});
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
-    expect(workspaceApi.team).toHaveBeenCalledWith(access);
+    expect(workspaceApi.team).toHaveBeenCalledWith(access,expect.any(AbortSignal));
     await settings().practice(); await input("Practice context","Invented independent practice");
     vi.mocked(workspaceApi.saveTeam).mockRejectedValueOnce(new WorkspaceApiError(503));
     await settings().save();

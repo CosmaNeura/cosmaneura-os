@@ -4,8 +4,9 @@ import {useContext,useEffect,useLayoutEffect,useRef,useState} from 'react';
 import {WorkspaceConnectionRecoveryContext} from './PracticeAccessGate';
 import {workspaceProtocolGeneration} from './workspace-protocol';
 import type {AccountRecoveryAccess} from './account-recovery';
-import {loadPrivateDraftRecovery,persistPrivateDraftRecovery,type PrivateDraftCreate,type PrivateDraftRecovery} from './private-draft-recovery';
+import {loadPrivateDraftRecovery,persistPrivateDraftRecovery,readStoredPrivateDraftRecovery,type PrivateDraftCreate,type PrivateDraftRecovery} from './private-draft-recovery';
 import {workspaceApi,WorkspaceApiError,type AuthenticatedWorkspaceIdentity,type ProviderTeam,type Workspace} from './workspace-api';
+import {WorkspaceHomeStartup} from './workspace-home-startup';
 import type {PrivateNotebookResult} from './PrivateRecordingPanel';
 import type {PrivateRecordingSnapshot} from './private-recording-runtime';
 import './practice-home.css';
@@ -17,14 +18,14 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false}:{
+export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam}:{
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
   onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onConnections:()=>void;onPracticeWork:()=>void;
   onOpened:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onNoteOpened?:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onAccessLost:(cause:unknown)=>void;onBusyChange:(busy:boolean)=>void;
   onRecord?:(value:StartPrivateRecording)=>void;recordings?:PrivateRecordingSnapshot[];onReopenRecording?:(recordingId:string)=>void;
-  openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;
+  openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;teamError?:string;onRetryTeam?:()=>void;
 }){
   const connection=useContext(WorkspaceConnectionRecoveryContext),connectionLive=useRef(connection);connectionLive.current=connection;
   const recoveredLists=useRef({identity,recovery,sequence:connection?.identity===identity?connection.sequence:0});
@@ -36,11 +37,13 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   const openingFlight=useRef<typeof opening>(null);
   const [drafts,setDrafts]=useState<Awaited<ReturnType<typeof workspaceApi.privateDraftSummaries>>|null>(null);
   const [listError,setListError]=useState('');
-  const [search,setSearch]=useState(''),[needsReview,setNeedsReview]=useState(false),[renaming,setRenaming]=useState<string|null>(null);
+  const [search,setSearch]=useState(''),[needsReview,setNeedsReview]=useState(false),[renaming,setRenaming]=useState<string|null>(null),[slowCheck,setSlowCheck]=useState(false);
   const [visits,setVisits]=useState<Awaited<ReturnType<typeof workspaceApi.catalog>>|null>(null),[visitError,setVisitError]=useState('');
   const live=useRef({identity,recovery,epoch:0,alive:true});
-  if(live.current.identity!==identity||live.current.recovery!==recovery)live.current={identity,recovery,epoch:live.current.epoch+1,alive:true};
+  if(live.current.identity!==identity)live.current={identity,recovery,epoch:live.current.epoch+1,alive:true};
+  else if(live.current.recovery!==recovery)live.current={...live.current,recovery};
   const current=(epoch:number)=>live.current.alive&&live.current.epoch===epoch&&live.current.identity===identity&&live.current.recovery===recovery;
+  const sameAccount=(epoch:number)=>live.current.alive&&live.current.epoch===epoch&&live.current.identity===identity;
   const callback=useRef(onBusyChange);callback.current=onBusyChange;
   const creating=useRef(false);
   const initialRecovery=useRef<{epoch:number;promise:ReturnType<typeof loadPrivateDraftRecovery>}|null>(null);
@@ -50,21 +53,35 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   useLayoutEffect(()=>{recoveredLists.current={identity,recovery,sequence:connection?.identity===identity?connection.sequence:0};},[identity,recovery]);
   function readLists(epoch:number){
     const flight={epoch,promise:Promise.resolve()};
+    const notesRead=workspaceApi.privateDraftSummaries,catalogRead=workspaceApi.catalog;
     flight.promise=(async()=>{
-      const [notes,schedule]=await Promise.allSettled([workspaceApi.privateDraftSummaries(identity),workspaceApi.catalog(identity)]);
-      if(!current(epoch))return;
+      const [notes,schedule]=await Promise.allSettled([
+        typeof notesRead==='function'?notesRead(identity):Promise.reject(new Error('unavailable')),
+        typeof catalogRead==='function'?catalogRead(identity):Promise.reject(new Error('unavailable')),
+      ]);
+      if(!sameAccount(epoch))return;
       if(notes.status==='fulfilled'){setDrafts(notes.value);setListError('');}else{setListError('Recent notes could not be loaded. You can still start recording or write a note.');deny(notes.reason);}
       if(schedule.status==='fulfilled'){setVisits(schedule.value);setVisitError('');}else{setVisitError('Today’s visits could not be loaded. Recording and private notes remain available.');deny(schedule.reason);}
-    })().finally(()=>{if(listRead.current===flight)listRead.current=null;});
+    })().catch(()=>{}).finally(()=>{if(listRead.current===flight)listRead.current=null;});
     listRead.current=flight;return flight.promise;
   }
   useEffect(()=>{
-    const epoch=++live.current.epoch;openingFlight.current=null;setOpening(null);setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');
-    if(!recovery)return;
-    const promise=loadPrivateDraftRecovery(recovery);initialRecovery.current={epoch,promise};
+    const epoch=++live.current.epoch;openingFlight.current=null;setOpening(null);setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');setSlowCheck(false);
+    // Visit and note lists do not decide whether Start is safe.
+    void readLists(epoch);
+  },[identity]);
+  useEffect(()=>{
+    if(ready){setSlowCheck(false);return;}
+    const timer=setTimeout(()=>setSlowCheck(true),3000);
+    return()=>clearTimeout(timer);
+  },[ready,identity]);
+  useEffect(()=>{
+    if(!recovery){setReady(false);return;}
+    // The journal was opened only after the signed team scope check. This read stays on device.
+    // Submitting Start still calls authorize(), which reads the team again.
+    const epoch=live.current.epoch,promise=readStoredPrivateDraftRecovery(recovery.journal);initialRecovery.current={epoch,promise};
     void(async()=>{const saved=await promise;if(!current(epoch))return;
       if(saved){setTitle(saved.title);setPending(saved.pending);}setReady(true);
-      await readLists(epoch);
     })().catch(cause=>{if(current(epoch)){setError('Private recovery could not be checked. Refresh Home before starting a new draft.');deny(cause);}});
   },[identity,recovery]);
   useEffect(()=>{
@@ -163,27 +180,32 @@ export function PracticeHome({identity,recovery,team,teamUnchanged=true,locked,o
   const chiefAvailable=team?.configuration.bots.some(bot=>bot.role==='chief'&&bot.enabled&&!bot.retired)??false;
   const nativeStartLabel=!team?'Start conversation':chiefAvailable?'Start with Chief':'Start a private note';
   const nativeTitleLabel=!team||chiefAvailable?'Name this conversation':'Name this note';
-  const titleField=<label>Note title<input maxLength={160} value={title} disabled={!ready||busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>;
+  const startEnabled=WorkspaceHomeStartup.startEnabled({recoveryReady:ready,busy,locked,pending:!!pending,title});
+  const startupStatus=WorkspaceHomeStartup.status({recoveryReady:ready,teamListed:!!team,visitsLoaded:visits!==null||!!visitError,notesLoaded:drafts!==null||!!listError,teamError});
+  const showStartupRetry=(!ready&&slowCheck)||!!visitError||!!listError||!!teamError;
+  function retryChecks(){if(!ready||teamError)onRetryTeam?.();void readLists(live.current.epoch);}
+  const titleField=<label>Note title<input maxLength={160} value={title} disabled={busy||locked||!!pending} onChange={event=>setTitle(event.target.value)}/></label>;
   const todayVisits=<section className="practice-home-notes" aria-label="Today's visits"><h2>Today's visits</h2>
       {todaysVisits.map(visit=><button className="practice-home-note" key={visit.appointment_id} onClick={onVisits}><strong>{visit.label}</strong><time dateTime={visit.start_at}>{new Date(visit.start_at!).toLocaleTimeString(undefined,{hour:'numeric',minute:'2-digit'})}</time><span>{visit.workspace_id?'Open visit notes':'View visit'}</span></button>)}
-      {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length?<p>No supported visits are scheduled today. You can record or write a private note.</p>:!visits?<p>Checking available visits…</p>:null}
+      {visitError?<p role="status">{visitError}</p>:visits&&!todaysVisits.length?<p>No supported visits are scheduled today. You can record or write a private note.</p>:null}
     </section>;
   const recordingList=recordings&&onReopenRecording?<section tabIndex={-1} className="practice-home-notes practice-home-recordings" aria-label="Saved private recordings"><h2>Recordings on this device</h2>{recordings.map(recording=><button className="practice-home-note" key={recording.recordingId} disabled={locked||busy} onClick={()=>onReopenRecording(recording.recordingId)}><strong>{recording.title}</strong>{recording.createdAt&&<time dateTime={recording.createdAt}>{new Date(recording.createdAt).toLocaleString()}</time>}<span>{recordingDetails(recording)}</span></button>)}{!recordings.length&&<p>No private recordings on this device yet.</p>}</section>:null;
   const quickStart=<form className="practice-quick-start" onSubmit={event=>{event.preventDefault();void create();}}>
       {nativeCompact&&<><h2>{!team?"Conversation":chiefAvailable?"Chief":"Private note"}</h2><p>Plan your next step privately.</p></>}
       {!nativeCompact&&titleField}
-      {(!nativeCompact||team?.revision===0)&&<div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):'Checking your team…'}</p>
+      {(!nativeCompact||team?.revision===0)&&<div className="practice-home-team"><h2>Your provider team</h2><p>{names.length?names.join(' · '):team?'No teammates are on yet.':'Your team list will appear here.'}</p>
         <p>Private drafts first. External actions need separate human review.</p>
         {team?.revision===0&&<button type="button" disabled={locked||busy||!ready||!!pending} onClick={onUseTeam}>{teamUnchanged?'Use this team':'Review team changes'}</button>}
         <button type="button" className="team-subtle" onClick={onSettings}>Personalize later in Settings</button>
       </div>}
-      <button type="submit" className="team-primary" disabled={!ready||busy||locked||!!pending||!title.trim()}>{busy?'Checking…':nativeCompact?nativeStartLabel:'Start a private note'}</button>
+      <button type="submit" className="team-primary" disabled={!startEnabled}>{busy?'Checking…':nativeCompact?nativeStartLabel:'Start a private note'}</button>
       {nativeCompact&&<details className="practice-home-title"><summary>{title==='Private note'?nativeTitleLabel:title}</summary>{titleField}</details>}
       {!nativeCompact&&<p className="team-fine">No appointment, email, calendar or patient portal is needed. Patient-linked work and external actions need separate review.</p>}
     </form>;
   return <section className="practice-home" data-native-compact={nativeCompact} aria-label="Practice Home">
     {nativeCompact?<h1 className="team-sr-only">Home</h1>:<><p className="team-kicker">YOUR PRACTICE</p><h1>{team?.revision?'Your workspace':'Let’s get you ready.'}</h1></>}
     <p className="practice-home-lead">{nativeCompact?'Private notes, recordings and next steps.':'Record with Scribe or start a private note. Choose a patient or visit later.'}</p>
+    {startupStatus&&<div className="practice-home-status" role="status">{startupStatus}{showStartupRetry&&<button type="button" onClick={retryChecks}>Retry</button>}</div>}
     {nativeCompact&&quickStart}
     {onRecord&&<section className="practice-home-scribe" aria-label="Start with Scribe"><div>{!nativeCompact&&<p className="team-kicker">SCRIBE</p>}<h2>{nativeCompact?'Record privately':'Record first. Organize later.'}</h2><p>{nativeCompact?'Original audio is encrypted on this iPhone. Confirm consent before recording.':'Private audio stays encrypted on this device. Everyone’s consent is required before the microphone starts.'}</p></div><button className="team-primary" disabled={!recovery||busy||locked} onClick={record}>Start recording</button></section>}
     {recordings&&onReopenRecording&&(nativeCompact?<details className="practice-home-recordings-disclosure"><summary>Saved recordings · {recordings.length}</summary>{recordingList}</details>:recordingList)}

@@ -133,6 +133,8 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [encounters, setEncounters] = useState<WorkspaceEncounter[] | null>(null);
   const [identity, setIdentity] = useState<WorkspaceIdentity | null>(null);
   const [team, setTeam] = useState<ProviderTeam | null>(null);
+  const [teamListError,setTeamListError]=useState('');
+  const [teamAttempt,setTeamAttempt]=useState(0);
   const [teamDraft, setTeamDraft] = useState<TeamConfiguration | null>(null);
   const [setupApproval, setSetupApproval] = useState<ReviewedTeamDraft | null>(null);
   const [setupProjection, setSetupProjection] = useState<SetupProjection | null>(null);
@@ -405,12 +407,16 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const startup=consumeWorkspaceStartupTeam(practiceAccess?.startupTeam,authenticated);
     void (startup?Promise.resolve(startup):workspaceApi.team(authenticated,controller.signal)).then(value => {
       if (!cancelled && current === generation.current) {
-        setTeam(value); setTeamDraft(previous => previous ?? structuredClone(value.configuration));
+        setTeam(value); setTeamDraft(previous => previous ?? structuredClone(value.configuration)); setTeamListError('');
         void recoverAfterRead(value, null, current);
       }
-    }).catch(cause => { if (!cancelled && current === generation.current) failure(cause); });
+    }).catch(cause => {
+      if(cancelled||current!==generation.current)return;
+      if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status))failure(cause);
+      else setTeamListError('Your team list could not be loaded.');
+    });
     return () => { cancelled = true;controller.abort(); };
-  }, [authenticated, team]);
+  }, [authenticated, team, teamAttempt]);
   useLayoutEffect(()=>{
     const element=materialRef.current;if(!element||!workspace)return;
     const key=`${workspace.id}:${panel}`;
@@ -659,7 +665,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     generation.current++;activityNavigation.current?.abort();activityNavigation.current=null;
     closeDraftJournal(); setRecoveryOffers([]); setRecoveryState("");
     setSetupApproval(null); setSetupProjection(null);
-    setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setSettingsOpen(false);
+    setInboxSelection(null);setWorkspace(null); setEncounters(null); setIdentity(null); setTeam(null); setTeamDraft(null); setTeamListError(''); setSettingsOpen(false);
     setPracticeOpen(false); setPracticeOpened(false); setCaptureNavigationLocked(false);
     setSchedulingPatientBusy(false);setAgentResearchBusy(false);setHomeBusy(false);setPracticePage(authenticated?"home":"visits");
     setConnectionLocks({google:false,googleMessages:false,googleCalendar:false,microsoft:false,scheduling:false,core:false,messaging:false, payments:false, portals:false, inbox:false});
@@ -2202,7 +2208,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           await returnPrivateRecordingNotebook(privateRecordingEntry,result);setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setPrivateRecordingListEpoch(value=>value+1);}}/></div>}
       {authenticated&&<div ref={recordingHome} tabIndex={-1} hidden={!!privateRecordingEntry&&!recordingMinimized||settingsOpen||practicePage!=='home'}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
         nativeCompact={nativeHome}
-        locked={!!privateRecordingEntry||busy||!!pending||conflict||recoveryState==="failed"||recoveryBlocked||captureNavigationLocked||captureDraftLocked} onBusyChange={setHomeBusy} onAccessLost={failure}
+        locked={!!privateRecordingEntry||busy||!!pending||conflict||recoveryState==="failed"||captureNavigationLocked||captureDraftLocked} teamError={teamListError} onRetryTeam={()=>setTeamAttempt(value=>value+1)} onBusyChange={setHomeBusy} onAccessLost={failure}
         onUseTeam={()=>{if(initialTeamUnchanged)saveTeam();else void openSettings();}} onSettings={()=>void openSettings()} onVisits={()=>void loadEncounters()}
         onConnections={()=>void openSettings('connections')} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}}
         onRecord={CAPTURE_WORKSPACE_BUILD?startPrivateRecording:undefined}

@@ -1,6 +1,7 @@
 import {useCallback,useEffect,useState,type ReactNode} from 'react';
 import {practiceAccessApi} from './practice-access-api';
 import {usePracticeAccessTask,WorkspaceConnectionRecoveryContext} from './PracticeAccessGate';
+import {WorkspaceStartupShell} from './WorkspaceStartupShell';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 import {admitWorkspaceProtocol,subscribeWorkspaceProtocol,workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 import './workspace-compatibility.css';
@@ -10,7 +11,13 @@ export function WorkspaceCompatibilityGate({identity,accountControls,children}:{
   const [phase,setPhase]=useState(()=>workspaceProtocolPhase(identity));
   const [error,setError]=useState('');
   const [recovery,setRecovery]=useState<{identity:AuthenticatedWorkspaceIdentity;sequence:number;generation:number}|null>(null);
-  const {busy,run}=usePracticeAccessTask(identity);
+  const {busy,run,cancel}=usePracticeAccessTask(identity);
+  const [slow,setSlow]=useState(false);
+  useEffect(()=>{
+    if(!busy){setSlow(false);return;}
+    const timer=setTimeout(()=>setSlow(true),3000);
+    return()=>clearTimeout(timer);
+  },[busy,identity]);
   useEffect(()=>{
     setAdmitted(null);setError('');setRecovery(null);setPhase(workspaceProtocolPhase(identity));
     return subscribeWorkspaceProtocol(identity,()=>setPhase(workspaceProtocolPhase(identity)));
@@ -32,19 +39,22 @@ export function WorkspaceCompatibilityGate({identity,accountControls,children}:{
   const opened=admitted===identity;
   const compact=opened&&identity.mode==='clerk_jwt'&&!!identity.nativeSession&&
     (window.matchMedia?.('(max-width: 600px)').matches??false);
-  return <WorkspaceConnectionRecoveryContext.Provider value={{identity,sequence:recovery?.identity===identity?recovery.sequence:0,
-    generation:recovery?.identity===identity?recovery.generation:workspaceProtocolGeneration(identity),phase,busy,retry:()=>void check(true)}}>
-    {(!opened || phase!=='ready') && <section className={`workspace-compatibility${opened?' workspace-compatibility-paused':''}${compact?' workspace-compatibility-native':''}`} aria-label="Workspace connection" role={busy?'status':'alert'}>
+  const retry=()=>{if(busy)cancel();void check(true);};
+  const banner=(!opened || phase!=='ready') && <section className={`workspace-compatibility${opened?' workspace-compatibility-paused':''}${compact?' workspace-compatibility-native':''}`} aria-label="Workspace connection" role={busy?'status':'alert'}>
       {!opened && <nav aria-label="Account and organization">{accountControls}</nav>}
       <header><h1>{compact?(busy?'Reconnecting…':'Connection paused'):busy?'Checking workspace connection':opened?'Workspace connection paused':'Connect to your workspace'}</h1>
-        <button disabled={busy} onClick={()=>void check(true)}>{busy?'Retrying…':'Retry'}</button></header>
+        <button disabled={busy&&!slow} onClick={retry}>{busy&&!slow?'Checking…':'Retry'}</button></header>
       {!compact&&<p>{error || (phase==='blocked'?'The service connection is paused. Retry checks the connection and your practice access.':'Checking that this app can work with your practice service.')}</p>}
       {compact&&<p>{error||'Sending is paused. Your saved work stays on this device.'}</p>}
       {opened?<details><summary>{compact?'Connection details':'Your saved work is retained'}</summary>
         {compact&&!error&&<p>Retry checks the service connection and your practice access.</p>}
         <p>You can keep editing or stop a recording. Sending and syncing are paused. Already-sent requests may still finish; their saved results need to be checked separately.</p></details>
         :<p>Saved drafts and recordings stay on this device.</p>}
-    </section>}
+    </section>;
+  return <WorkspaceConnectionRecoveryContext.Provider value={{identity,sequence:recovery?.identity===identity?recovery.sequence:0,
+    generation:recovery?.identity===identity?recovery.generation:workspaceProtocolGeneration(identity),phase,busy,retry}}>
+    {!opened && <WorkspaceStartupShell status="Checking workspace connection">{banner}</WorkspaceStartupShell>}
+    {opened && banner}
     {/* Keep editors and the recorder mounted after admission, including uncertain writes. */}
     {opened && children}
   </WorkspaceConnectionRecoveryContext.Provider>;

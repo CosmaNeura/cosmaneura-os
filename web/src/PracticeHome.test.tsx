@@ -33,7 +33,13 @@ describe('practice Quick start recovery',()=>{
   async function render(member=identity,configured=team,noteOpened?:typeof opened){
     const reads=vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length;
     await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onNoteOpened={noteOpened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
-    for(let attempt=0;attempt<100&&vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length===reads;attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+    for(let attempt=0;attempt<100;attempt++){
+      const called=vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length>reads;
+      const start=[...container.querySelectorAll('button')].find(b=>b.textContent==='Start a private note');
+      const text=container.textContent??'';
+      if(called&&(start?.disabled===false||text.includes('unconfirmed')||text.includes('could not be checked')))break;
+      await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+    }
     expect(vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length).toBeGreaterThan(reads);
   }
   async function click(label:string,heldReply=false){
