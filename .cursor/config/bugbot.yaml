@@ -1,0 +1,11 @@
+version: 1
+
+triggers:
+  drafts: false
+  frequency: oncePerPr
+
+review:
+  effort: low
+
+autofix:
+  mode: disabled
