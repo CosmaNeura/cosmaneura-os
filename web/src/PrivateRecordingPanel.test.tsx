@@ -22,7 +22,7 @@ class PcmSource implements CaptureSource {
   readonly kind='microphone' as const;options:CaptureSourceStartOptions|null=null;starts=0;stops=0;rejectStop=false;
   async start(options:CaptureSourceStartOptions){this.options=options;this.starts++;}
   async stop(){this.stops++;if(this.rejectStop)throw new Error('Synthetic lost stop');}
-  async chunk(sample=42){expect(this.options).not.toBeNull();const bytes=wav(sample);await this.options!.onChunk({sequenceNumber:0,durationMs:1,wavBytes:bytes});expect([...bytes]).toEqual(Array(bytes.length).fill(0));}
+  async chunk(sample=42,sequenceNumber=0){expect(this.options).not.toBeNull();const bytes=wav(sample);await this.options!.onChunk({sequenceNumber,durationMs:1,wavBytes:bytes});expect([...bytes]).toEqual(Array(bytes.length).fill(0));}
   async confirmRecoveryClosed(){return true;}
 }
 describe('Private Scribe recording controls with encrypted local PCM',()=>{
@@ -59,6 +59,45 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     const finish=vi.spyOn(privateRecordingApi,'finish').mockImplementation(async(_identity,_v,_team,_id,f)=>receipt={...receipt,state:'finished',finish:{receipt_id:uuid(4),request_sha256:f.request_sha256,manifest_sha256:f.request.manifest_sha256,chunks:f.request.chunks,frames:f.request.frames,ended_at:f.request.ended_at}});
     return {mapping,attach,finish,receipt:()=>receipt};
   }
+  it('unlocks layout changes during the same steady recording only after notebook and metadata confirmation',async()=>{
+    const metadata=await metadataNotebook(),transition=vi.fn();let release!:(value:PrivateNotebookResult)=>void;
+    props={...props,onTransitionChange:transition,prepareNotebook:()=>new Promise(resolve=>release=resolve)};
+    await render();expect(transition).toHaveBeenLastCalledWith(false);
+    await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    expect(transition).toHaveBeenLastCalledWith(true);expect(metadata.attach).not.toHaveBeenCalled();
+    const recordingId=runtimes[0].snapshot.recordingId;await act(async()=>sources[0].chunk(84));
+    expect(transition).toHaveBeenLastCalledWith(true);const lockReported=transition.mock.calls.length;
+    await act(async()=>release(metadata.mapping));
+    await wait(()=>container.textContent?.includes('Recording linked to your private notebook')===true&&transition.mock.calls.at(-1)?.[0]===false);
+    expect(transition.mock.calls.slice(lockReported)).toEqual([[false]]);
+    expect(status()).toBe('Recording');expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).not.toHaveBeenCalled();
+    props={...props,minimized:true};await act(async()=>root.render(<PrivateRecordingPanel {...props}/>));
+    expect(transition).toHaveBeenLastCalledWith(false);expect(runtimes).toHaveLength(1);expect(sources).toHaveLength(1);expect(sources[0].stops).toBe(0);
+    await act(async()=>sources[0].chunk(42,1));expect(runtimes[0].snapshot).toMatchObject({recordingId,phase:'recording',recordedChunks:2});
+  });
+  it.each(['attach','finish'] as const)('keeps the layout lock through a lost recording %s response until its exact metadata is checked',async kind=>{
+    const metadata=await metadataNotebook(),transition=vi.fn();let release!:()=>void;const held=new Promise<void>(resolve=>release=resolve);
+    if(kind==='attach'){const original=metadata.attach.getMockImplementation()!;metadata.attach.mockImplementationOnce(async(...args)=>{await held;await original(...args);throw new WorkspaceApiError(503);});}
+    else{const original=metadata.finish.getMockImplementation()!;metadata.finish.mockImplementationOnce(async(...args)=>{await held;await original(...args);throw new WorkspaceApiError(503);});}
+    const resolve=vi.spyOn(privateRecordingApi,'resolve').mockImplementation(async()=>({outcome:'saved',recording:metadata.receipt()}));
+    const read=vi.spyOn(privateRecordingApi,'read').mockImplementation(async()=>metadata.receipt());
+    props={...props,onTransitionChange:transition,prepareNotebook:async()=>metadata.mapping};
+    await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
+    await wait(()=>metadata.attach.mock.calls.length===1);
+    if(kind==='finish'){
+      await wait(()=>transition.mock.calls.at(-1)?.[0]===false);await act(async()=>sources[0].chunk(84));
+      await click('Stop and save recording');await wait(()=>metadata.finish.mock.calls.length===1&&status()==='Saved on this device');
+    }
+    expect(transition).toHaveBeenLastCalledWith(true);const lockReported=transition.mock.calls.length;
+    await act(async()=>release());await wait(()=>container.textContent?.includes('Notebook recording status is unconfirmed')===true&&button('Check saved recording result').disabled===false);
+    expect(transition).toHaveBeenLastCalledWith(true);expect(transition.mock.calls.slice(lockReported).some(([blocked])=>!blocked)).toBe(false);
+    await click('Check saved recording result');
+    await wait(()=>container.textContent?.includes(kind==='attach'?'Recording linked to your private notebook':'Recording details saved to your private notebook')===true&&transition.mock.calls.at(-1)?.[0]===false);
+    expect(metadata.attach).toHaveBeenCalledOnce();expect(metadata.finish).toHaveBeenCalledTimes(kind==='finish'?1:0);
+    expect(kind==='attach'?resolve:read).toHaveBeenCalledOnce();
+    expect(kind==='attach'?resolve.mock.calls[0][1]:read.mock.calls[0][1]).toEqual(metadata.attach.mock.calls[0][1]);
+    expect(status()).toBe(kind==='attach'?'Recording':'Saved on this device');expect(sources[0].stops).toBe(kind==='attach'?0:1);expect(fetch).not.toHaveBeenCalled();
+  });
   it.each([false,true])('withholds old Close success or failure after owner replacement (%s)',async fails=>{
     await render();await consent();await click('Start recording');await wait(()=>sources.length===1);
     await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
@@ -441,8 +480,11 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(fetch).not.toHaveBeenCalled();const rows=await listPrivateRecordings(scope,'desktop',()=>openPrivateRecordingStore(scope,'desktop',{indexedDB:factory,crypto:webcrypto}));expect(rows[0]).toMatchObject({recordingId,phase:'sealed',recordedChunks:2,workspaceId:id});
   });
   it('retains a lost notebook result without retry and permits a locally saved recording',async()=>{
+    const transition=vi.fn();props.onTransitionChange=transition;
     props.prepareNotebook=vi.fn().mockRejectedValue(new WorkspaceApiError(503));await render();await consent();await click('Start recording');await wait(()=>sources.length===1);await act(async()=>sources[0].chunk());await click('Stop and save recording');
     await wait(()=>status()==='Saved on this device');expect(props.prepareNotebook).toHaveBeenCalledOnce();expect(container.textContent).toContain('exact request is retained');expect(container.textContent).not.toContain('Open private notebook');expect(fetch).not.toHaveBeenCalled();
+    expect(transition).toHaveBeenLastCalledWith(true);expect(button('Close recording').disabled).toBe(false);
+    await act(async()=>root.unmount());expect(transition).toHaveBeenLastCalledWith(false);root=createRoot(container);
   });
   it('shows a pending microphone stage without claiming recording or polling idle notebook metadata',async()=>{
     const timers=vi.spyOn(globalThis,'setTimeout');
@@ -605,13 +647,14 @@ describe('Private Scribe recording controls with encrypted local PCM',()=>{
     expect(runtimes[0].snapshot.workspaceId).toBeNull();expect(container.textContent).not.toContain('Open private notebook');expect(sources).toHaveLength(1);expect(opened).not.toHaveBeenCalled();
   });
   it('keeps playback and Close available during a held notebook catalog and discards its late result',async()=>{
-    const busy=vi.fn();props.onBusyChange=busy;
+    const busy=vi.fn(),transition=vi.fn();props.onBusyChange=busy;props.onTransitionChange=transition;
     await render();await consent();await click('Start recording');await wait(()=>status()==='Recording');
     await act(async()=>sources[0].chunk(84));await click('Stop and save recording');await wait(()=>status()==='Saved on this device');
     const recordingId=runtimes[0].snapshot.recordingId;
     let resolve!:(value:Awaited<ReturnType<typeof workspaceApi.privateDraftSummaries>>)=>void;
     vi.spyOn(workspaceApi,'privateDraftSummaries').mockImplementation(()=>new Promise(done=>resolve=done));
     await click('Choose private notebook');expect(button('Choose private notebook').disabled).toBe(true);
+    expect(transition).toHaveBeenLastCalledWith(true);
     await wait(()=>!button('Play saved recording').disabled);
     expect(button('Close recording').disabled).toBe(false);expect(button('Play saved recording').disabled).toBe(false);expect(busy.mock.calls.at(-1)).toEqual([false]);
     await click('Play saved recording');await wait(()=>createUrl.mock.calls.length===1);

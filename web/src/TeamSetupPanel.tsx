@@ -2,10 +2,11 @@ import {useEffect,useRef,useState} from "react";
 import {botAddress,WorkspaceApiError,type ProviderTeam,type TeamConfiguration,type WorkspaceIdentity} from "./workspace-api";
 import {teamSetupApi,type TeamSetup} from "./team-setup-api";
 import {applyPreset,replacePresetSlot,upgradeInboxPreset,upgradeMembershipPreset,validTeamConfiguration,RESOURCE_PURPOSES,type CapabilityId,type PresetId,type ReadinessState,
-  type ModelUsage,type ResourceInventory,type ResourcePurpose,type SetupProjection,type SetupReview,type SlotName,type TeamRehearsal} from "./team-setup-request";
+  type ModelUsage,type ResourceInventory,type ResourcePurpose,type SetupProjection,type SlotName,type TeamRehearsal} from "./team-setup-request";
 import "./team-setup.css";
 
-export type ReviewedTeamDraft={review:SetupReview;configurationKey:string;revision:number};
+import type {ReviewedTeamDraft} from './session/model';
+export type {ReviewedTeamDraft} from './session/model';
 export const readinessLabels:Record<ReadinessState,string>={ready_local:"Available locally",available_for_scoped_request:"Scoped request available",
   requires_encounter:"Encounter review required",connection_required:"Prerequisite missing",disabled_by_owner:"Disabled by your settings",
   paused:"Bot paused",retired:"Bot retired",unavailable_in_beta:"Unavailable in this beta",resource_restricted:"Source restricted by your settings",

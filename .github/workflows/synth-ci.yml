@@ -31,7 +31,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Sync
-        run: uv sync --extra dev --extra efax-inbound --extra mcp
+        run: uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
       - name: Ruff
         run: uv run ruff check src tests
       - name: Pyright
@@ -44,7 +44,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        suite: [backend, signed-ui-1, signed-ui-2, signed-ui-3]
+        suite: [backend-1, backend-2, backend-3, backend-4, signed-ui-1, signed-ui-2, signed-ui-3]
     services:
       postgres:
         image: postgres:16.9
@@ -78,7 +78,7 @@ jobs:
         with:
           python-version: ${{ env.PYTHON_VERSION }}
       - name: Sync
-        run: uv sync --extra dev --extra efax-inbound --extra mcp
+        run: uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
       - name: Migrations on empty database
         run: uv run alembic upgrade head
       - uses: actions/setup-node@v4
@@ -100,13 +100,13 @@ jobs:
             ${{ runner.temp }}/cosmabot-backend-checks/*/pytest-junit.xml
           if-no-files-found: ignore
       - name: Demo ArtifactChase
-        if: matrix.suite == 'backend'
+        if: matrix.suite == 'backend-1'
         run: uv run python -m cosmas_os.cli demo-artifact-chase
       - name: OpenAPI dump
-        if: matrix.suite == 'backend'
+        if: matrix.suite == 'backend-1'
         run: uv run python -m cosmas_os.cli dump-openapi
       - name: Upload OpenAPI
-        if: matrix.suite == 'backend'
+        if: matrix.suite == 'backend-1'
         uses: actions/upload-artifact@v4
         with:
           name: openapi-json
@@ -144,6 +144,7 @@ jobs:
           VITE_COSMANEURA_WEB_ORIGIN: https://core.example.invalid
           VITE_CLERK_PUBLISHABLE_KEY: pk_live_synthetic_public_ci_value
           VITE_API_BASE: https://api.example.invalid
+          VITE_MESSAGES_ENABLED: 'true'
         run: pnpm run build:beta
 
   container-image:
@@ -182,6 +183,7 @@ jobs:
             --build-arg VITE_WORKSPACE_WEB_ORIGIN=https://app.example.invalid \
             --build-arg VITE_COSMANEURA_WEB_ORIGIN=https://core.example.invalid \
             --build-arg VITE_CAPTURE_UPLOAD_ORIGINS=https://upload.example.invalid \
+            --build-arg VITE_MESSAGES_ENABLED=true \
             .
           DIGEST="$(docker image inspect --format='{{.Id}}' "$IMAGE_TAG")"
           WEB_DIGEST="$(docker image inspect --format='{{.Id}}' "$WEB_IMAGE_TAG")"
@@ -218,8 +220,21 @@ jobs:
         run: test "$(docker run --rm --entrypoint id "$IMAGE_TAG" -u)" = "10001"
       - name: Confirm static web image
         run: |
+          set -euo pipefail
           test "$(docker run --rm --entrypoint id "$WEB_IMAGE_TAG" -u)" != "0"
           docker run --rm --entrypoint nginx "$WEB_IMAGE_TAG" -t
+          docker run --rm --network none --entrypoint cat "$WEB_IMAGE_TAG" \
+            /usr/share/nginx/html/cosmas-beta-features.json > artifacts/releases/web-features.json
+          python3 - <<'PY'
+          import json
+          from pathlib import Path
+          manifest = json.loads(Path('artifacts/releases/web-features.json').read_text())
+          flags = manifest['enabledFlags']
+          assert isinstance(flags, list) and all(isinstance(flag, str) for flag in flags)
+          assert 'VITE_MESSAGES_ENABLED' in flags, 'Messages missing from built web image'
+          assert not {'VITE_EHR_READ_ENABLED', 'VITE_CALENDAR_IMPORT_ENABLED'} & set(flags), 'Local-only connector flag enabled in hosted web image'
+          print('Built hosted web image enables Messages and keeps EHR/calendar import disabled')
+          PY
       - name: Reject fixable high or critical image vulnerabilities
         run: |
           set -euo pipefail
@@ -252,7 +267,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: release-manifest
-          path: artifacts/releases/manifest.json
+          path: |
+            artifacts/releases/manifest.json
+            artifacts/releases/web-features.json
 
   beta-infra-static:
     name: beta-infra-static

@@ -16,6 +16,7 @@ from cosmas_os.application.core_record_deadline import RecordDeadline
 from cosmas_os.config import Settings
 from cosmas_os.ports.athena_visit_links import AthenaVisitLinkCommand, AthenaVisitLinkRequest
 from cosmas_os.ports.bot_capabilities import ConnectorUnavailable
+from cosmas_os.ports.core_encounters import EncounterSnapshot, digest
 
 
 def fixture(name="link"):
@@ -106,6 +107,46 @@ def test_corrupted_or_unknown_reply_is_refused_without_replaying(fault):
         status = 503
     with pytest.raises(ConnectorUnavailable):
         read(request, payload, status)
+
+
+@pytest.mark.parametrize("fault", ["appointment", "source"])
+def test_applied_link_must_return_the_exact_reviewed_encounter(fault):
+    request, payload, _ = fixture()
+    encounter = payload["encounter"]
+    if fault == "appointment":
+        encounter["appointment"]["appointment_ref"] = "appointment_00000000000000000000000002"
+    else:
+        encounter["patient"]["display_name"] = "Invented updated display name"
+    encounter["source_sha256"] = digest(
+        {key: value for key, value in encounter.items() if key != "source_sha256"}
+    )
+    # A valid, same-account projection and the original command receipt must
+    # still be rejected when they no longer describe the reviewed encounter.
+    assert EncounterSnapshot.model_validate(encounter).connection_sha256 == request.connection_sha256
+    with pytest.raises(ConnectorUnavailable, match="^core_connection_unavailable$"):
+        read(request, payload)
+
+
+@pytest.mark.parametrize("name", ["lookup", "link", "status", "unlink"])
+def test_invalid_account_timezone_has_a_bounded_error_without_replay(name):
+    request, payload, _ = fixture(name)
+    payload["account"]["department_timezone"] = "Invalid/Zone"
+    with pytest.raises(ConnectorUnavailable, match="^core_connection_unavailable$"):
+        read(request, payload)
+
+
+def test_status_can_report_current_projection_after_reviewed_source_changes():
+    request, payload, _ = fixture("status")
+    encounter = payload["encounter"]
+    encounter["patient"]["display_name"] = "Invented updated display name"
+    encounter["source_sha256"] = digest(
+        {key: value for key, value in encounter.items() if key != "source_sha256"}
+    )
+    # Status has an exact command key/hash, not a newly approved encounter.
+    result = read(request, payload)
+    assert result.command_sha256 == request.command_sha256
+    assert result.encounter is not None
+    assert result.encounter.source_sha256 == encounter["source_sha256"]
 
 
 def test_renderer_cannot_select_the_actor_or_skip_confirmation():

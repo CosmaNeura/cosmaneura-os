@@ -2,6 +2,7 @@
 
 import json
 from datetime import timedelta
+from zoneinfo import ZoneInfoNotFoundError
 
 from cosmas_os.adapters.core_appointment_setup import CoreSetupChanged
 from cosmas_os.adapters.core_encounters import CoreDiscoveryDenied
@@ -87,7 +88,7 @@ def athena_visit_link(
             response.close()
     except (CoreDiscoveryDenied, CoreSetupChanged):
         raise
-    except (ValueError, TypeError, UnicodeError, RecursionError):
+    except (ValueError, TypeError, UnicodeError, RecursionError, ZoneInfoNotFoundError):
         raise ConnectorUnavailable("core_connection_unavailable") from None
 
 
@@ -139,6 +140,14 @@ def validate_reply(result, request):
             )
         if request.action == "unlink":
             require(result.state == "removed" and result.link_ref == request.link_ref)
+        if request.action == "link" and result.state == "linked":
+            # The command receipt alone does not bind the returned notebook.
+            # A direct save must return the exact encounter the human reviewed.
+            require(
+                result.encounter is not None
+                and result.encounter.appointment.appointment_ref == request.appointment_ref
+                and result.encounter.source_sha256 == request.core_source_sha256
+            )
     else:
         require(not result.applied)
         if request.action == "lookup":

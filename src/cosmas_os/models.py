@@ -518,7 +518,7 @@ class WorkspaceEntry(Base):
         UniqueConstraint("workspace_id", "idempotency_key", name="uq_workspace_entry_key"),
         UniqueConstraint("id", "workspace_id", "box_id", name="uq_workspace_entry_scope"),
         CheckConstraint("revision >= 1", name="ck_workspace_entry_revision"),
-        CheckConstraint("kind IN ('synthetic_source', 'scratchpad', 'conversation', 'evidence', 'work_link', 'handoff_result', 'google_message', 'google_calendar', 'efax_inbound_source', 'fax_inbound_source')", name="ck_workspace_entry_kind"),
+        CheckConstraint("kind IN ('synthetic_source', 'scratchpad', 'conversation', 'evidence', 'work_link', 'handoff_result', 'google_message', 'microsoft_message', 'google_calendar', 'efax_inbound_source', 'fax_inbound_source', 'ehr_read_source', 'calendar_import_source')", name="ck_workspace_entry_kind"),
         CheckConstraint("char_length(content) <= 20000", name="ck_workspace_entry_content"),
     )
 
@@ -662,7 +662,7 @@ class WorkspaceReply(Base):
     context_revision: Mapped[int] = mapped_column(Integer)
     content: Mapped[str] = mapped_column(Text)
     citations: Mapped[list[dict[str, Any]]] = mapped_column(JSONB)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.clock_timestamp())
 
 
 class WorkspaceNote(Base):

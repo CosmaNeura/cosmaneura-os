@@ -1,6 +1,43 @@
 import AppKit
 import CosmasNativeAuth
+import Darwin
 import Foundation
+
+/// One private, fixed-field status file per helper process; never record SDK errors,
+/// identities, Keychain values, tokens, URLs, or request payloads.
+@MainActor private final class AuthDiagnostics {
+    enum Phase: String {
+        case starting, backgroundReady, backgroundLoading, backgroundSignedOut, backgroundUnavailable
+        case backgroundSignOutPending, secureStorageApprovalRequired, interactiveWindowVisible
+        case interactiveStorageCheck, signingIn, signingOut, operationComplete
+        case operationUnavailable, configurationUnavailable, sourceRecoveryUnavailable
+    }
+    private let descriptor: Int32
+    private var last: Phase?
+
+    init() {
+        let directory = URL(fileURLWithPath: NSTemporaryDirectory(), isDirectory: true).resolvingSymlinksInPath()
+        let path = directory.appendingPathComponent("cosmabot-desktop-auth-\(getpid()).status.json").path
+        descriptor = open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0o600)
+        if descriptor >= 0 { _ = fchmod(descriptor, 0o600) }
+        record(.starting)
+    }
+
+    func record(_ phase: Phase) {
+        guard descriptor >= 0, phase != last else { return }
+        var metadata = stat()
+        guard fstat(descriptor, &metadata) == 0, metadata.st_uid == getuid(), metadata.st_nlink == 1,
+              metadata.st_mode & S_IFMT == S_IFREG, metadata.st_mode & 0o777 == 0o600,
+              let data = try? JSONSerialization.data(withJSONObject: [
+                "schema": "cosmabot-desktop-auth-status/v1", "phase": phase.rawValue,
+              ], options: [.sortedKeys]), data.count < 512 else { return }
+        let written = data.withUnsafeBytes { bytes in pwrite(descriptor, bytes.baseAddress, bytes.count, 0) }
+        guard written == data.count, ftruncate(descriptor, off_t(data.count)) == 0 else { return }
+        last = phase
+    }
+
+    deinit { if descriptor >= 0 { close(descriptor) } }
+}
 
 /// The system authentication session needs a visible window in this helper's
 /// process; the Electron window belongs to a different process.
@@ -11,14 +48,14 @@ import Foundation
 
     override init() {
         super.init()
-        window.title = "Sign in to Cosmas"
+        window.title = "CosmaBot secure account"
         window.isReleasedWhenClosed = false
         window.delegate = self
         let message = NSTextField(wrappingLabelWithString:
-            "Complete sign-in in the secure browser window. You can cancel and return to Cosmas.")
+            "Complete the secure account prompt. If macOS requests approval, use that prompt. You can cancel and return to CosmaBot.")
         message.frame = NSRect(x: 24, y: 77, width: 392, height: 65)
         window.contentView?.addSubview(message)
-        let cancel = NSButton(title: "Cancel sign-in", target: self, action: #selector(cancelSignIn))
+        let cancel = NSButton(title: "Cancel", target: self, action: #selector(cancelSignIn))
         cancel.bezelStyle = .rounded
         cancel.frame = NSRect(x: 266, y: 24, width: 150, height: 32)
         window.contentView?.addSubview(cancel)
@@ -31,6 +68,7 @@ import Foundation
         NSApplication.shared.setActivationPolicy(.regular)
         window.center()
         window.makeKeyAndOrderFront(nil)
+        window.displayIfNeeded()
         NSApplication.shared.activate()
     }
 
@@ -53,7 +91,10 @@ import Foundation
 
 /// Only the spawning Electron main process receives these pipe responses.
 @MainActor private final class Helper {
-    private let auth: NativeWorkspaceAuth
+    private var auth: NativeWorkspaceAuth
+    private let makeAuth: @MainActor () -> NativeWorkspaceAuth
+    private let accessBlock: KeychainAccessBlock?
+    private let diagnostics = AuthDiagnostics()
     private var active: [String: Task<Void, Never>] = [:]
     private var recent: [String] = []
     private var signInWindow: SignInWindow?
@@ -62,8 +103,13 @@ import Foundation
     init() {
         let settings = Bundle.main.object(forInfoDictionaryKey: "CosmasNativeAuth") as? [String: Any] ?? [:]
         if settings["enabled"] as? Bool != true {
-            auth = NativeWorkspaceAuth(enabled: false, organizationID: "",
-                driver: { throw NativeAuthError.unavailable }, accessBlock: { throw NativeAuthError.unavailable })
+            let factory: @MainActor () -> NativeWorkspaceAuth = {
+                NativeWorkspaceAuth(enabled: false, organizationID: "",
+                    driver: { throw NativeAuthError.unavailable }, accessBlock: { throw NativeAuthError.unavailable })
+            }
+            makeAuth = factory
+            accessBlock = nil
+            auth = factory()
         } else {
             do {
                 guard let key = settings["publishableKey"] as? String,
@@ -78,14 +124,35 @@ import Foundation
                     authorizedParty: NativeWorkspaceOrigin.desktopApp.rawValue,
                     nativeSessionWithoutOrigin: profile != .synthetic,
                     sharedStagingSession: profile == .operationalStaging)
-                auth = NativeWorkspaceAuth(enabled: true, organizationID: organization, tokenPolicy: policy,
-                    driver: { try ClerkKitWorkspaceDriver(configuration: configuration) },
-                    accessBlock: { try KeychainAccessBlock(bundleIdentifier: bundle, profile: profile) })
+                let block = try KeychainAccessBlock(bundleIdentifier: bundle, profile: profile,
+                    allowsAuthenticationUI: false)
+                var cachedDriver: ClerkKitWorkspaceDriver?
+                let factory: @MainActor () -> NativeWorkspaceAuth = {
+                    NativeWorkspaceAuth(enabled: true, organizationID: organization, tokenPolicy: policy,
+                        driver: {
+                            if let cachedDriver { return cachedDriver }
+                            let created = try ClerkKitWorkspaceDriver(configuration: configuration)
+                            cachedDriver = created
+                            return created
+                        }, accessBlock: { block })
+                }
+                makeAuth = factory
+                accessBlock = block
+                auth = factory()
             } catch {
-                auth = NativeWorkspaceAuth(enabled: true, organizationID: "",
-                    driver: { throw NativeAuthError.unavailable }, accessBlock: { throw NativeAuthError.unavailable })
+                let factory: @MainActor () -> NativeWorkspaceAuth = {
+                    NativeWorkspaceAuth(enabled: true, organizationID: "",
+                        driver: { throw NativeAuthError.unavailable }, accessBlock: { throw NativeAuthError.unavailable })
+                }
+                makeAuth = factory
+                accessBlock = nil
+                auth = factory()
             }
         }
+        attachAuth()
+    }
+
+    private func attachAuth() {
         auth.onChange = { [weak self] state in
             self?.sourceHost?.authChanged(state)
             Self.send(["event": "authStateChanged", "state": NativeAuthPayload.state(state)])
@@ -112,9 +179,23 @@ import Foundation
             do {
                 let result: Any
                 switch request.method {
-                case .getState: result = NativeAuthPayload.state(auth.state())
-                case .signIn: result = NativeAuthPayload.state(try await signIn(requestID: request.id))
-                case .signOut: result = NativeAuthPayload.state(try await auth.signOut())
+                case .getState:
+                    let state = auth.state()
+                    if signInWindow == nil {
+                        switch state.phase {
+                        case .ready: diagnostics.record(.backgroundReady)
+                        case .loading: diagnostics.record(.backgroundLoading)
+                        case .signedOut: diagnostics.record(.backgroundSignedOut)
+                        case .signOutPending: diagnostics.record(.backgroundSignOutPending)
+                        case .unavailable:
+                            diagnostics.record(accessBlock?.availability == .interactionRequired
+                                ? .secureStorageApprovalRequired : .backgroundUnavailable)
+                        default: break
+                        }
+                    }
+                    result = NativeAuthPayload.state(state)
+                case .signIn: result = NativeAuthPayload.state(try await interactive(requestID: request.id, signingIn: true))
+                case .signOut: result = NativeAuthPayload.state(try await interactive(requestID: request.id, signingIn: false))
                 case .getToken:
                     guard let revision = request.revision else { throw NativeAuthError.unavailable }
                     result = ["token": try await auth.token(expectedRevision: revision), "revision": revision]
@@ -132,16 +213,49 @@ import Foundation
         }
     }
 
-    private func signIn(requestID: String) async throws -> NativeAuthState {
+    private func interactive(requestID: String, signingIn: Bool) async throws -> NativeAuthState {
         guard signInWindow == nil else { throw NativeAuthError.unavailable }
         let window = SignInWindow()
         signInWindow = window
         window.show { [weak self] in self?.active[requestID]?.cancel() }
+        diagnostics.record(.interactiveWindowVisible)
         defer {
             window.dismiss()
             signInWindow = nil
         }
-        return try await auth.signIn()
+        // Let Cocoa display/activate the owned window before an OS approval can
+        // synchronously wait. Background state/token checks retain fail-closed UI.
+        await Task.yield()
+        do {
+            try Task.checkCancellation()
+            guard let accessBlock else {
+                diagnostics.record(.configurationUnavailable)
+                throw NativeAuthError.unavailable
+            }
+            return try await accessBlock.withAuthenticationUI {
+                diagnostics.record(.interactiveStorageCheck)
+                _ = auth.state()
+                if auth.allowsStorageRecovery {
+                    // Never replace a coordinator retained by a source host or
+                    // with pending SDK work; either could outlive this request.
+                    guard sourceHost == nil else {
+                        diagnostics.record(.sourceRecoveryUnavailable)
+                        throw NativeAuthError.unavailable
+                    }
+                    auth.onChange = nil
+                    auth = makeAuth()
+                    attachAuth()
+                }
+                try Task.checkCancellation()
+                diagnostics.record(signingIn ? .signingIn : .signingOut)
+                let state = signingIn ? try await auth.signIn() : try await auth.signOut()
+                diagnostics.record(.operationComplete)
+                return state
+            }
+        } catch {
+            diagnostics.record(.operationUnavailable)
+            throw error
+        }
     }
 
     private static func send(_ payload: [String: Any]) {

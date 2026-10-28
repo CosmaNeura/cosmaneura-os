@@ -133,6 +133,19 @@ isolated Azure execution proves the deployment.
 
 ## Recovery and future migrations
 
+The retained `application/database_migration.py` helper is specific to the
+historical `j79f1d5a2340` → `k80e6a9d4321` function-body update. It requires that
+matching runtime revision and sole packaged head, and proves that relation and
+function identities, owners, ACLs, and security attributes remain unchanged.
+It intentionally refuses later releases. Its integration tests package the
+real migration ancestry through `k80` and select the historical runtime
+expectation inside the test only; they do not attest the current schema.
+
+Use the release-bound `prepare-beta-database` flow described above for current
+releases. A migration that adds objects, such as conversation read markers,
+cannot reuse the historical helper's unchanged-catalog evidence or gain
+deployment authorization from its local tests.
+
 - Do not downgrade the live database. Correct a failed or incompatible schema
   with a reviewed additive migration and a new image digest.
 - Rerunning the job rotates the runtime password to the protected URL and

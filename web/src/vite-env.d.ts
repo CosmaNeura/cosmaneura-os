@@ -7,6 +7,7 @@ interface ImportMetaEnv {
   readonly VITE_COSMANEURA_WEB_ORIGIN?: string;
   readonly VITE_API_BASE?: string;
   readonly VITE_CLERK_PUBLISHABLE_KEY?: string;
+  readonly VITE_WORKSPACE_ORGANIZATION_ID?: string;
   readonly VITE_COSMAS_ENV?: "synth_os" | "early_adopter_beta";
   readonly VITE_VENDOR_SETUP_ENABLED?: string;
   readonly VITE_EFAX_INBOUND_ENABLED?: string;
