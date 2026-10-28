@@ -8,8 +8,27 @@
 .google-account-controls .microsoft-actions button {margin:0}
 .google-next-step {display:grid;gap:4px;margin:12px 0;font-size:14px;line-height:1.5}
 .google-next-step span {color:var(--team-muted)}
-.google-work-actions {display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
-.google-work-actions button {min-width:44px;min-height:44px;max-width:100%;margin:0;white-space:normal;overflow-wrap:anywhere}
+.google-work-actions {display:grid;grid-template-columns:minmax(0,1fr);gap:8px;max-width:24rem;margin:8px 0}
+.team-workspace .google-connection > button,
+.team-workspace .google-connection > p > button,
+.team-workspace .google-connection > p > .microsoft-continue,
+.team-workspace .google-connection .google-work-actions > button {
+  box-sizing:border-box;display:inline-flex;align-items:center;justify-content:center;
+  width:100%;max-width:24rem;min-width:0;min-height:48px;padding:12px 16px;margin:8px 0;
+  border:1px solid var(--team-line,#d9ddd9);border-radius:10px;
+  font-size:14px;line-height:1.4;font-weight:600;text-align:center;text-decoration:none;
+  white-space:normal;overflow-wrap:anywhere;cursor:pointer;box-shadow:0 1px 2px #253d3414;
+}
+.team-workspace .google-connection .google-work-actions > button {margin:0}
+.team-workspace .google-connection > p > .microsoft-continue {background:#253d34;color:#fff;border-color:#253d34}
+.team-workspace .google-connection > button.team-primary,
+.team-workspace .google-connection > p > button.team-primary,
+.team-workspace .google-connection .google-work-actions > button.team-primary {border-color:#253d34}
+.google-connection > button:focus-visible,
+.google-connection > p > button:focus-visible,
+.google-connection > p > .microsoft-continue:focus-visible,
+.google-work-actions > button:focus-visible {outline:2px solid var(--team-accent,#396750);outline-offset:2px}
+.google-connection button:disabled {cursor:default}
 @media(max-width:420px) {
   .google-connection .connection-service-action {width:100%}
   .google-account-controls .microsoft-actions {display:grid;grid-template-columns:minmax(0,1fr)}
