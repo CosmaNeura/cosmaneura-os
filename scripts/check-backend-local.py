@@ -34,6 +34,18 @@ SIGNED_UI_TESTS = tuple(sorted({
     for path in (REPO / "tests/integration").glob(pattern)
 }))
 SIGNED_UI_SUITES = ("signed-ui-1", "signed-ui-2", "signed-ui-3")
+BACKEND_SUITES = ("backend-1", "backend-2", "backend-3", "backend-4")
+
+
+def backend_tests() -> tuple[str, ...]:
+    # Match pytest's default file patterns; each complete module keeps its
+    # fixtures together. Signed UI modules already have separate CI batches.
+    return tuple(sorted(
+        path.relative_to(REPO).as_posix()
+        for path in (REPO / "tests").rglob("*.py")
+        if (path.name.startswith("test_") or path.name.endswith("_test.py"))
+        and path.relative_to(REPO).as_posix() not in SIGNED_UI_TESTS
+    ))
 
 
 def child_tool_path(pg_bin: Path, python: Path) -> str:
@@ -48,6 +60,12 @@ def child_tool_path(pg_bin: Path, python: Path) -> str:
 
 
 def suite_selections(suite: str) -> tuple[dict[str, list[str]], tuple[str, ...]]:
+    if suite in BACKEND_SUITES:
+        index = BACKEND_SUITES.index(suite)
+        paths = list(backend_tests()[index::len(BACKEND_SUITES)])
+        if not paths:
+            raise ValueError(f"No backend tests belong to {suite}")
+        return selections(paths, "all"), ()
     if suite in SIGNED_UI_SUITES:
         index = SIGNED_UI_SUITES.index(suite)
         paths = list(SIGNED_UI_TESTS[index::len(SIGNED_UI_SUITES)])
@@ -154,7 +172,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("tests", nargs="*", help="Repository-relative test paths or pytest node IDs")
     parser.add_argument("--profile", choices=("workspace", "deployment", "compact", "all"), default="all")
-    parser.add_argument("--suite", choices=("all", "backend", *SIGNED_UI_SUITES), default="all",
+    parser.add_argument("--suite", choices=("all", "backend", *BACKEND_SUITES, *SIGNED_UI_SUITES), default="all",
                         help="Complete local run or disjoint CI batches; defaults to all")
     parser.add_argument("--postgres-bin", type=Path, help="Directory containing PostgreSQL tools")
     parser.add_argument("--evidence-dir", type=Path, help="New directory; defaults to an owned system-temp directory")

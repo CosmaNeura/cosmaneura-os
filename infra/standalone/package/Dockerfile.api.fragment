@@ -1,0 +1,9 @@
+# Appended to the exact reviewed root Dockerfile by prepare_api_recipe.py.
+ARG SOURCE_COMMIT
+ARG ENTRYPOINT_SHA256
+LABEL org.opencontainers.image.title="CosmaBot standalone synthetic API" \
+      org.opencontainers.image.revision=${SOURCE_COMMIT} \
+      com.cosmabot.standalone.entrypoint-sha256=${ENTRYPOINT_SHA256}
+COPY infra/standalone/package/entrypoint.py /app/standalone-entrypoint.py
+ENTRYPOINT ["/usr/local/bin/python", "-I", "/app/standalone-entrypoint.py"]
+CMD ["8000"]

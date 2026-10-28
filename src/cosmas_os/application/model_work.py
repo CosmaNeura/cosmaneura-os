@@ -602,16 +602,25 @@ def _context_for(
     from cosmas_os.application.clinical_note_share import clinical_request
 
     context = clinical_request(s, workspace, settings, command["content"], context)
-    selected_google_kinds = {"google_message", "google_calendar"}
-    if any(s.get(WorkspaceEntry, source.entry_id).kind in selected_google_kinds
+    bounded_connector_kinds = {"google_message", "microsoft_message", "google_calendar", "ehr_read_source", "calendar_import_source"}
+    if any(s.get(WorkspaceEntry, source.entry_id).kind in bounded_connector_kinds
            for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None) and (
             len(context.sources) > 12 or any(len(source.content) > 5000 and not (
                 prepared_contract in handoff_briefs.FULL_SOURCE_CONTRACTS
                 and s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
             ) for source in context.sources)
             or sum(len(source.content) for source in context.sources) > 30000):
+        if any(s.get(WorkspaceEntry, source.entry_id).kind == "calendar_import_source"
+               for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
+            raise ws.WorkspaceError("calendar_import_source_context_too_large", 422)
         has_calendar = any(s.get(WorkspaceEntry, source.entry_id).kind == "google_calendar"
             for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
+        if any(s.get(WorkspaceEntry, source.entry_id).kind == "ehr_read_source"
+               for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
+            raise ws.WorkspaceError("ehr_read_source_context_too_large", 422)
+        if any(s.get(WorkspaceEntry, source.entry_id).kind == "microsoft_message"
+               for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None):
+            raise ws.WorkspaceError("microsoft_message_context_too_large", 422)
         raise ws.WorkspaceError("selected_google_context_too_large" if has_calendar else "google_message_context_too_large", 422)
     has_fax = any(s.get(WorkspaceEntry, source.entry_id).kind in {"efax_inbound_source", "fax_inbound_source"}
                   for source in context.sources if s.get(WorkspaceEntry, source.entry_id) is not None)
@@ -679,12 +688,26 @@ def _selected_google_passages(s, workspace, settings):
 
 def _selected_connector_passages(s, workspace, settings):
     if workspace.appointment_id is None:
-        return ()
+        # Private Calendar reviews have their own explicit notebook custody.
+        # Other connector classes still require a reviewed linked visit.
+        return _google_calendar_passages(s, workspace, settings)
     sources = _selected_google_passages(s, workspace, settings)
     from cosmas_os.application import clinical_note_share, efax_inbound_source, fax_inbound_source
     from cosmas_os.ports.bot_capabilities import SourcePassage
 
     reviewed = []
+    if team.runtime_settings.workspace_microsoft_message_available:
+        from cosmas_os.application import microsoft_message
+
+        reviewed.extend(microsoft_message.selected_entries(s, workspace, settings, workspace.revision))
+    if team.runtime_settings.workspace_calendar_import_available:
+        from cosmas_os.application import calendar_imports
+
+        reviewed.extend(calendar_imports.selected_entries(s, workspace, settings, workspace.revision))
+    if team.runtime_settings.workspace_ehr_read_available:
+        from cosmas_os.application import ehr_reads
+
+        reviewed.extend(ehr_reads.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.efax_inbound_source_available:
         reviewed.extend(efax_inbound_source.selected_entries(s, workspace, settings, workspace.revision))
     if team.runtime_settings.fax_inbound_source_available:
@@ -726,6 +749,7 @@ def _new_admission(
                 prepared_contract=handoff_briefs.FULL_SOURCE_CONTRACT if tools_available else None)
         except (ValueError, TypeError, KeyError):
             raise ws.WorkspaceError("handoff_source_context_too_large", 422) from None
+    ws._entry_key_available(s, workspace.id, command["idempotency_key"])
     try:
         if not any(
             key in command for key in ("research_analysis", "inbox_analysis", "membership_analysis", "session_prep_analysis")
@@ -847,6 +871,7 @@ def reserve_conversation(
         s.commit()
         return None, prior
     # No current-model/policy gate precedes the exact historical lookup above.
+    ws._entry_key_available(s, wid, key)
     if workspace.revision != expected:
         raise ws.WorkspaceError("workspace_revision_conflict")
     if workspace.revision >= 500:
@@ -895,6 +920,10 @@ def reserve_conversation(
     handoff_limit = min(
         3, max(0, 49 - count), max(0, remaining - 1) if remaining is not None else 3
     )
+    if getattr(team.runtime_settings, "cosmas_env", None) == "standalone_clerk_synthetic":
+        # This release provides direct private replies only. No handoff worker is
+        # started, so do not advertise or queue work that could never complete.
+        handoff_limit = 0
     roles = roles if handoff_limit else ()
     command = {
         "expected_revision": expected,
@@ -1141,6 +1170,15 @@ def dispatch_claim(claimed, *, session_factory=None, transport=None, delivery_ex
     if digest(claimed.envelope) != claimed.envelope_sha256:
         raise ModelCallFailure()
     key = team.runtime_settings.workspace_llm_api_key
+    if getattr(team.runtime_settings, "cosmas_env", None) == "standalone_clerk_synthetic":
+        runtime = team.runtime_settings
+        if (not runtime.workspace_llm_available
+                or claimed.envelope.get("contract") not in TEXT_PREPARED_CONTRACTS
+                or claimed.envelope.get("flags", {}).get("can_handoff") is not False
+                or claimed.envelope.get("context", {}).get("handoff_roles")):
+            raise ModelCallFailure(dispatch="not_dispatched")
+        return GPT41Connector(lambda: key.get_secret_value() if key else "", transport=transport,
+                              endpoint=runtime.workspace_llm_endpoint + "/chat/completions").review_prepared(claimed.envelope)
     if claimed.envelope.get("contract") in TOOL_PREPARED_CONTRACTS:
         from cosmas_os.application.agent_tools import AgentToolExecutor
         from cosmas_os.db import make_session_factory

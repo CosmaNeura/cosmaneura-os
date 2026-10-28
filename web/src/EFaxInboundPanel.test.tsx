@@ -82,7 +82,7 @@ it('rejects recovery that changes approved image version or the selected metadat
  const proposal=structuredClone(saved!);proposal.pending={kind:'propose',request:{idempotency_key:efaxUuid(80),grant_id:proposal.observation!.grant_id!,observation_id:proposal.observation!.observation_id!,observation_sha256:proposal.observation!.source_sha256!,fax_id:proposal.selected_fax_id!,fax_sha256:'f'.repeat(64)}};await expect(validateEFaxRecovery(proposal,efaxScope)).rejects.toThrow();
 });
 it('offers an exact current received document for manual visit review only after DB-only resolution',async()=>{
- props.onReviewDocument=vi.fn();await approve();vi.mocked(efaxInboundApi.command).mockImplementationOnce(async(_i,_s,p)=>({...await efaxReceipt(p),state:'acquired',content_available:true,document:{sha256:await vendorSha256(efaxPdf),byte_length:efaxPdf.length,pages:1}}));await click('Acquire approved PDF once');
+ const active=vi.fn();props.onActiveChange=active;props.onReviewDocument=vi.fn(()=>expect(active).toHaveBeenLastCalledWith(false));await approve();vi.mocked(efaxInboundApi.command).mockImplementationOnce(async(_i,_s,p)=>({...await efaxReceipt(p),state:'acquired',content_available:true,document:{sha256:await vendorSha256(efaxPdf),byte_length:efaxPdf.length,pages:1}}));await click('Acquire approved PDF once');
  const request=structuredClone(saved!.acquire_request!);vi.mocked(efaxInboundApi.resolve).mockResolvedValueOnce(saved!.acquisition!);await click('Review a passage for the current visit');
  expect(props.onReviewDocument).toHaveBeenCalledWith({operation_id:saved!.acquisition!.operation_id,document_sha256:await vendorSha256(efaxPdf),pages:1},request);
  expect(efaxInboundApi.document).not.toHaveBeenCalled();expect(vi.mocked(efaxInboundApi.command).mock.calls.filter(c=>c[2].kind==='acquire')).toHaveLength(1);
@@ -90,4 +90,29 @@ it('offers an exact current received document for manual visit review only after
 it('does not offer a revoked received document after its exact DB-only check',async()=>{
  props.onReviewDocument=vi.fn();await approve();vi.mocked(efaxInboundApi.command).mockImplementationOnce(async(_i,_s,p)=>({...await efaxReceipt(p),state:'acquired',content_available:true,document:{sha256:await vendorSha256(efaxPdf),byte_length:efaxPdf.length,pages:1}}));await click('Acquire approved PDF once');
  vi.mocked(efaxInboundApi.resolve).mockResolvedValueOnce({...saved!.acquisition!,source_withheld:true,content_available:false,document:null});await click('Review a passage for the current visit');expect(props.onReviewDocument).not.toHaveBeenCalled();expect(efaxInboundApi.document).not.toHaveBeenCalled();expect(button('Review a passage for the current visit')).toBeUndefined();
+});
+
+
+it('reports authorization, dispatch and persistence as active but releases a durably saved unconfirmed request',async()=>{
+ const reported=vi.fn();props={...props,onActiveChange:reported};await mount();await click('Check received-fax access');await select(1,efaxUuid(4));
+ let authorize!:()=>void;vi.mocked(access.authorize).mockReturnValueOnce(new Promise(resolve=>{authorize=resolve;}));
+ await act(async()=>button('Check received faxes · last 7 days')!.click());expect(reported).toHaveBeenLastCalledWith(true);expect(efaxInboundApi.command).not.toHaveBeenCalled();
+ let complete!:(value:EFaxReceipt)=>void;vi.mocked(efaxInboundApi.command).mockReturnValueOnce(new Promise(resolve=>{complete=resolve;}));await act(async()=>authorize());await wait(()=>expect(saved?.pending?.kind).toBe('observe'));const pending=structuredClone(saved!.pending!);expect(reported).toHaveBeenLastCalledWith(true);
+ await act(async()=>complete({...await efaxReceipt(pending),state:'outcome_unconfirmed'}));await idle();expect(saved!.pending).toEqual(pending);expect(button('Check saved received-fax result')?.disabled).toBe(false);expect(reported).toHaveBeenLastCalledWith(false);expect(efaxInboundApi.command).toHaveBeenCalledOnce();
+});
+it('keeps active work locked through hide until cleanup and discards its stale result after task reentry',async()=>{
+ const reported=vi.fn();props={...props,onActiveChange:reported,taskActive:true};await mount();await click('Check received-fax access');await select(1,efaxUuid(4));let complete!:(value:EFaxReceipt)=>void;
+ vi.mocked(efaxInboundApi.command).mockReturnValueOnce(new Promise(resolve=>{complete=resolve;}));await act(async()=>button('Check received faxes · last 7 days')!.click());await wait(()=>expect(saved?.pending?.kind).toBe('observe'));const pending=structuredClone(saved!.pending!);
+ props={...props,taskActive:false};await act(async()=>root.render(<EFaxInboundPanel {...props}/>));expect(reported).toHaveBeenLastCalledWith(true);props={...props,taskActive:true};await act(async()=>root.render(<EFaxInboundPanel {...props}/>));await act(async()=>complete(await efaxReceipt(pending)));
+ await wait(()=>expect(button('Restore saved received-fax work')).toBeDefined());expect(saved!.pending).toEqual(pending);expect(host.textContent).not.toContain('Invented private sender');expect(reported).toHaveBeenLastCalledWith(false);expect(efaxInboundApi.command).toHaveBeenCalledOnce();
+});
+it('finishes an initial journal load across task hide and reveal without repeating it or stranding readiness',async()=>{
+ let finish!:(value:EFaxInboundRecovery|null)=>void;vi.mocked(access.load).mockReturnValueOnce(new Promise(resolve=>{finish=resolve;}));props={...props,taskActive:true};await act(async()=>root.render(<EFaxInboundPanel {...props}/>));await wait(()=>expect(access.load).toHaveBeenCalledOnce());
+ props={...props,taskActive:false};await act(async()=>root.render(<EFaxInboundPanel {...props}/>));props={...props,taskActive:true};await act(async()=>root.render(<EFaxInboundPanel {...props}/>));await act(async()=>finish(null));await wait(()=>expect(button('Check received-fax access')?.disabled).toBe(false));expect(access.load).toHaveBeenCalledOnce();expect(efaxInboundApi.status).not.toHaveBeenCalled();
+});
+
+it('withholds a late resolved passage handoff after the task hides and reopens',async()=>{
+ props.onReviewDocument=vi.fn();props.taskActive=true;await approve();vi.mocked(efaxInboundApi.command).mockImplementationOnce(async(_i,_s,p)=>({...await efaxReceipt(p),state:'acquired',content_available:true,document:{sha256:await vendorSha256(efaxPdf),byte_length:efaxPdf.length,pages:1}}));await click('Acquire approved PDF once');
+ const acquired=structuredClone(saved!.acquisition!);let release!:(receipt:EFaxReceipt)=>void;vi.mocked(efaxInboundApi.resolve).mockReturnValueOnce(new Promise(resolve=>{release=resolve;}));await act(async()=>button('Review a passage for the current visit')!.click());await wait(()=>expect(efaxInboundApi.resolve).toHaveBeenCalledOnce());
+ props={...props,taskActive:false};await act(async()=>root.render(<EFaxInboundPanel {...props}/>));props={...props,taskActive:true};await act(async()=>root.render(<EFaxInboundPanel {...props}/>));await act(async()=>release(acquired));await idle();expect(props.onReviewDocument).not.toHaveBeenCalled();expect(saved!.acquisition).toEqual(acquired);expect(efaxInboundApi.document).not.toHaveBeenCalled();expect(vi.mocked(efaxInboundApi.command).mock.calls.filter(call=>call[2].kind==='acquire')).toHaveLength(1);
 });

@@ -74,6 +74,22 @@ test('same-document changes and subframe navigation do not restart the main-fram
   f.advance(10_000); assert.deepEqual(f.failures, ['startup']); f.dispose();
 });
 
+test('routed same-document readiness persists and a routed failure stays actionable',()=>{
+  const f=fixture();f.navigate();f.advance(20_000);
+  f.renderer.mainFrame.url=ENTRY+'#cosmas/home';f.navigate({isSameDocument:true,url:f.renderer.mainFrame.url});
+  f.notice('ready');f.advance(600_000);assert.deepEqual(f.failures,[]);assert.equal(f.timers.size,0);
+  f.renderer.mainFrame.url=ENTRY+'#cosmas/settings';f.notice('failed');
+  assert.deepEqual(f.failures,['renderer']);f.dispose();
+});
+
+test('a fragment does not make a replacement or wrong-base main document trusted',()=>{
+  const initial=fixture();initial.navigate({url:ENTRY+'#cosmas/home'});
+  initial.notice('ready');assert.deepEqual(initial.failures,['startup']);initial.dispose();
+  const f=fixture();f.navigate();f.renderer.mainFrame.url=ENTRY+'?foreign=true#cosmas/home';
+  f.notice('ready');f.notice('failed');f.advance(30_000);
+  assert.deepEqual(f.failures,['startup']);f.dispose();
+});
+
 test('startup deadline counts only visible focused non-minimized time and stale timer callbacks are ignored', () => {
   const f = fixture(); f.navigate(); f.advance(10_000);
   const stale = [...f.timers.values()][0].callback;

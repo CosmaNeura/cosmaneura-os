@@ -437,9 +437,13 @@ pnpm test
 
 Playwright starts or reuses the local fixture server on port 5187. The suite tests
 1280px desktop and 390px phone viewports, keyboard navigation, status labels,
-target sizes, overflow and axe WCAG A/AA rules. It retains failure traces and saves
-screenshots. This is browser viewport coverage, not physical iPhone or native
-sign-in acceptance. Request interception denies non-loopback URLs.
+target sizes, overflow and axe WCAG A/AA rules. Routine runs, failures and retries
+retain text results only: automatic screenshots, videos and traces are disabled.
+The persona driver supplies accessibility snapshots and refuses image capture.
+This prevents repeated lab runs from accumulating chat images. A separately
+requested visual inspection must use an explicit small image budget; it is not
+part of these commands. This is browser viewport coverage, not physical iPhone
+or native sign-in acceptance. Request interception denies non-loopback URLs.
 
 The connection directory now uses compact rows and actual account-status reads.
 It distinguishes connected, pending, sign-in needed, admin setup and failed

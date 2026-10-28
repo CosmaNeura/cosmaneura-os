@@ -10,9 +10,9 @@ import {DraftStoreError} from './draft-store';
 
 export type GoogleCalendarMountProps={identity:AuthenticatedWorkspaceIdentity;workspace:GoogleCalendarVisit|null;locked?:boolean;recoveryLocked?:boolean;
   currentSources?:Array<{entry_id:string;state:'current'|'unavailable'}>;
-  onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(cause:unknown)=>void;
+  onSaved:(workspace:Workspace)=>void;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;onAuthenticationLost:(cause:unknown)=>void;
   onRequestCalendarAccess?:()=>void;calendarAccessBusy?:boolean;onChooseVisit?:()=>void;
-  onAskChief?:(source:GoogleCalendarSaved)=>void;onRefreshVisit?:()=>Promise<void>;enabled?:boolean};
+  taskActive?:boolean;isTaskCurrent?:()=>boolean;onAskChief?:(source:GoogleCalendarSaved)=>void;onRefreshVisit?:()=>Promise<void>;enabled?:boolean};
 const address=accountEditorAddress('google-calendar');
 export function GoogleCalendarMount({identity,enabled=GOOGLE_CALENDAR_BUILD,...props}:GoogleCalendarMountProps){
   const context=useContext(AccountRecoveryContext),scope=context?.recoveryScope;

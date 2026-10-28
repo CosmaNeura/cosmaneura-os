@@ -37,6 +37,7 @@ beforeEach(async()=>{
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('opens operational calendar from product settings and prepares Chief without replacing unfinished notes or sending',async()=>{
  const setValue=async(id:string,value:string)=>{await act(async()=>{const field=host.querySelector<HTMLTextAreaElement>(id)!;Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});};
+ await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='chief')!.click());
  await setValue('#team-notebook','Unfinished provider notes');await setValue('#team-question','Existing provider request');
  const nav=settingsNavigation(host);await nav.click('Team settings');await nav.click('Connections');await nav.click('Google email & calendar');await click('📅 Work with calendar');
  expect(host.querySelector('[aria-label="Mounted calendar work"]')?.closest('[hidden]')).toBeNull();expect(mount.workspace?.id).toBe(current.id);

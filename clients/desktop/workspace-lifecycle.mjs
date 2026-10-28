@@ -1,3 +1,5 @@
+import {isPackagedWorkspaceDocument} from './workspace-document.mjs';
+
 export const WORKSPACE_LIFECYCLE_CHANNEL = 'cosmas:workspace-lifecycle:v1';
 const ENTRY = 'app://cosmas/index.html';
 
@@ -46,7 +48,7 @@ export function installDesktopWorkspaceLifecycle({ipcMain, window, fail, timeout
     try {
       if (disposed || failed || !started || renderer.isDestroyed() || event.sender !== renderer ||
           !event.senderFrame || event.senderFrame !== renderer.mainFrame ||
-          event.senderFrame.url !== ENTRY || renderer.getURL() !== ENTRY || extra.length !== 0 ||
+          !isPackagedWorkspaceDocument(event.senderFrame.url) || !isPackagedWorkspaceDocument(renderer.getURL()) || extra.length !== 0 ||
           (kind !== 'ready' && kind !== 'failed')) return;
       if (kind === 'failed') return failOnce('renderer');
       if (!ready) { ready = true; stopTimer(); }

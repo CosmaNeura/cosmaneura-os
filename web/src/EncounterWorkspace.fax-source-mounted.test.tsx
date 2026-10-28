@@ -69,6 +69,8 @@ beforeEach(async()=>{
  resolved={contract_version:1,scope:faxScope,kind:'acquire',idempotency_key:acquireRequest.request.idempotency_key,request_sha256:'a'.repeat(64),public_request_sha256:'b'.repeat(64),receipt_sha256:'c'.repeat(64),state:'acquired',source_withheld:false,operation_id:documentOffer.operation_id,document_sha256:documentOffer.document_sha256,pages:1};vi.spyOn(faxInboundApi,'resolve').mockImplementation(async()=>structuredClone(resolved));vi.spyOn(faxInboundApi,'command');vi.spyOn(faxInboundApi,'document');
  vi.spyOn(faxSourceApi,'review').mockImplementation(async(_identity,_scope,request)=>saveReceipt(request));vi.spyOn(faxSourceApi,'resolve').mockImplementation(async()=>structuredClone(packet.receipt));
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity}/>));await click('Visits and notes');await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Existing saved clinical note'));
+ // Same-composer assertions start in Chief; separate-bot ownership is covered by source draft regressions.
+ await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='chief')!.click());
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('ordinary Connections offer reaches the real Sources review, saves encrypted passage and prepares an editable Chief request',async()=>{

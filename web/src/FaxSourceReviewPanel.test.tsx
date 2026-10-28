@@ -104,3 +104,19 @@ it('updates the parent masked workspace when a reopened saved source is revoked,
  await act(async()=>{await root.unmount();root=createRoot(host);root.render(<FaxSourceReviewPanel {...props}/>);});await wait(()=>expect(button('Restore saved fax passage')).toBeDefined());await click('Restore saved fax passage');await click('Check saved fax source');expect(saved!.saved).toEqual(withheld);expect(saved!.saved_request).toEqual(request);expect(props.onSaved).toHaveBeenLastCalledWith(withheld,masked);
  expect(host.querySelector('textarea')).toBeNull();expect(host.textContent).not.toContain(passage);expect(button('Prepare a Chief request')).toBeUndefined();expect(faxSourceApi.review).toHaveBeenCalledOnce();expect(props.onAskChief).not.toHaveBeenCalled();
 });
+
+
+it('publishes a fresh workspace after revoked-source persistence instead of reviving another withdrawn source',async()=>{
+ await mount();await enter();await ack();await click('Save reviewed fax passage for this visit');const r=saved!.saved!,request=saved!.saved_request!;
+ const withheld={...r,source_withheld:true},fax={...workspace(r,request).entries[0],content:'',practice_fax_source_state:'unavailable' as const};
+ const other={...fax,id:uuid(82),kind:'ehr_read_source' as const,content:'Invented separate EHR summary',practice_fax_source_state:undefined,ehr_source_state:'current' as const};
+ const earlier={...workspace(r,request),entries:[fax,other]},fresh={...earlier,entries:[fax,{...other,content:'',ehr_source_state:'unavailable' as const}]};
+ let server:Workspace=earlier;
+ vi.mocked(faxSourceApi.resolve).mockResolvedValueOnce(withheld);vi.mocked(workspaceApi.read).mockImplementation(async()=>server);
+ await act(async()=>{await root.unmount();root=createRoot(host);root.render(<FaxSourceReviewPanel {...props}/>);});await wait(()=>expect(button('Restore saved fax passage')).toBeDefined());await click('Restore saved fax passage');
+ const persist=vi.mocked(props.recovery!.persist).getMockImplementation()!;
+ vi.mocked(props.recovery!.persist).mockImplementation(async value=>{if(value?.saved?.source_withheld)server=fresh;await persist(value);});
+ await click('Check saved fax source');
+ expect(props.onSaved).toHaveBeenLastCalledWith(withheld,fresh);expect(saved!.saved_request).toEqual(request);
+ expect(faxSourceApi.review).toHaveBeenCalledOnce();expect(props.onAskChief).not.toHaveBeenCalled();
+});

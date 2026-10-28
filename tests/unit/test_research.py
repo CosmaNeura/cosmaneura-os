@@ -450,3 +450,68 @@ def test_navigation_requires_canonical_bot_before_any_database_read(bot):
         with pytest.raises(research.ws.WorkspaceError) as error:
             read(None, "unused", "unused", "unused", bot=bot)
         assert error.value.status == 422
+
+
+@pytest.mark.parametrize("source,query", [
+    ("npi_registry", "Invented Provider"), ("npi_registry", "123456789"),
+    ("npi_registry", "12345678901"), ("npi_registry", "１２３４５６７８９０"),
+    ("cms_coverage", "Invented coverage policy"), ("cms_coverage", "123456789"),
+    ("cms_coverage", "NCD 123:123456789"), ("cms_coverage", "１２３"),
+    ("cms_coverage", "NCD 123:２"),
+])
+def test_identifier_only_sources_reject_invalid_queries_before_publisher_io(source, query):
+    calls = []
+    settings = Settings(_env_file=None, research_sources=source)
+
+    def unexpected(request):
+        calls.append(request)
+        return httpx.Response(500)
+
+    with adapter.PublicResearch(settings, transport=httpx.MockTransport(unexpected)) as port:
+        with pytest.raises(ResearchUnavailable, match="^invalid_source_response$"):
+            port.lookup(source, query, check=lambda: 30)
+    assert calls == []
+
+
+@pytest.mark.parametrize("query,expected_params", [
+    ("123", {"ncdid": "123"}), ("NCD123", {"ncdid": "123"}),
+    ("ncd 123:2", {"ncdid": "123", "ncdver": "2"}),
+    ("123:2", {"ncdid": "123", "ncdver": "2"}),
+])
+def test_ncd_identifier_guidance_matches_reader_and_retains_exact_query_provenance(query, expected_params):
+    calls = []
+    settings = Settings(_env_file=None, research_sources="cms_coverage")
+
+    def respond(request):
+        calls.append(request)
+        assert request.method == "GET"
+        assert request.url.host == "api.coverage.cms.gov"
+        assert request.url.path == "/v1/data/ncd/"
+        assert dict(request.url.params) == expected_params
+        return httpx.Response(200, json={"meta": {"status": {"id": 200}}, "data": [{
+            "document_id": 123, "document_version": 2, "title": "Invented policy",
+            "indications_limitations": "Invented criteria",
+        }]})
+
+    with adapter.PublicResearch(settings, transport=httpx.MockTransport(respond)) as port:
+        rows = port.lookup("cms_coverage", query, check=lambda: 30)
+    assert len(calls) == 1 and len(rows) == 1
+    assert rows[0]["query_sha256"] == research_digest({"source": "cms_coverage", "query": query})
+    assert rows[0]["version"] == "2"
+    assert rows[0]["url"] == "https://www.cms.gov/medicare-coverage-database/view/ncd.aspx?ncdid=123&ncdver=2"
+
+
+@pytest.mark.parametrize("source,topic,query", [
+    ("npi_registry", "provider_data", "Invented Provider"),
+    ("cms_coverage", "coverage", "NCD １２３"),
+])
+def test_legacy_invalid_identifier_results_keep_existing_request_and_error_contract(source, topic, query):
+    request = command(sources=[source], topic=topic, query=query)
+    errors = [{"source": source, "code": "invalid_source_response"}]
+    row = SimpleNamespace(request=request, request_sha256=research_digest(request),
+                          results=[], errors=errors, state="unavailable", created_at=datetime.now(UTC),
+                          id=str(uuid4()), workspace_id=str(uuid4()), idempotency_key=request["idempotency_key"])
+    value = research.observation(row)
+    assert value["request"] == request and value["idempotency_key"] == request["idempotency_key"]
+    assert value["request_sha256"] == research_digest(request)
+    assert value["errors"] == errors and value["state"] == "unavailable"

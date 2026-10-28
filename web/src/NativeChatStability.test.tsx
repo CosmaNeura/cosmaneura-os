@@ -64,6 +64,35 @@ beforeEach(async()=>{
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 
+it.each(['authorization','response'] as const)('waits for confirmation during delayed %s without claiming model activity',async phase=>{
+  let finish!:(value:Awaited<ReturnType<typeof modelReceipt>>)=>void,authorize!:(token:string)=>void,transportCalls=0;
+  if(access.mode!=='clerk_jwt')throw new Error('Native test owner required');const nativeAccess=access;
+  if(phase==='authorization')nativeAccess.getToken=vi.fn(()=>new Promise<string>(resolve=>{authorize=resolve;}));
+  vi.mocked(workspaceApi.ask).mockImplementation(async()=>{await nativeAccess.getToken({skipCache:true});transportCalls++;return new Promise(resolve=>{finish=resolve;});});
+  const scroller=await positionConversation(200);
+  await type('Wait for confirmation of this invented request');question().focus();await click('Send message');
+  await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());
+  const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);
+  await type('Keep this next unsent message while waiting');
+  expect(host.textContent).not.toMatch(/is thinking|is reviewing/);
+  const status=host.querySelector('[data-request-state="awaiting_confirmation"]');
+  expect(status?.textContent).toContain('Waiting for confirmation');
+  expect(status?.getAttribute('role')).toBe('status');
+  expect(status?.getAttribute('aria-live')).toBe('polite');
+  expect(status?.getAttribute('aria-atomic')).toBe('true');
+  expect(status?.querySelector('[data-running="true"]')).toBeNull();
+  expect(host.querySelector('#team-request-progress')?.hasAttribute('role')).toBe(false);
+  expect(question().getAttribute('aria-describedby')?.split(' ')).toContain(status?.id);
+  expect(scroller.scrollTop).toBe(200);expect(document.activeElement).toBe(question());
+  if(phase==='authorization'){expect(transportCalls).toBe(0);await act(async()=>authorize('invented-token'));await ready(()=>expect(transportCalls).toBe(1));expect(host.querySelector('[data-request-state="awaiting_confirmation"]')).toBe(status);}
+  else expect(transportCalls).toBe(1);
+  await act(async()=>finish(await modelReceipt(sent,workspace.id)));
+  await ready(()=>expect(draft()?.pending).toBeNull());
+  expect(host.querySelector('[data-request-state="awaiting_confirmation"]')).toBeNull();
+  expect(question().value).toBe('Keep this next unsent message while waiting');
+  expect(workspaceApi.ask).toHaveBeenCalledOnce();
+});
+
 it('reveals the submitted native message before its saved reply arrives without scrolling for next-draft typing',async()=>{
   vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise(()=>{}));
   const scroller=await positionConversation(800);
@@ -127,6 +156,7 @@ it('restores an unconfirmed outgoing native message separately from its empty co
   await click('Visits and notes');await ready(()=>expect(host.querySelector('.team-encounter-option')).toBeTruthy());
   await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await click('Restore notebook draft');
   expect(question().value).toBe('');expect(host.textContent).toContain(sent.content);
+  expect(host.querySelector('[data-request-state="unknown"]')?.textContent).toBe('Result not confirmed');expect(host.querySelector('.message-request-status-dots')).toBeNull();
   expect(draft()?.pending).toMatchObject({type:'ask',body:sent});expect(workspaceApi.ask).toHaveBeenCalledOnce();expect(send().disabled).toBe(true);
   notifyNativeWorkspaceForeground(access,true);
 });
@@ -154,7 +184,8 @@ it('retains the new working question alongside the immutable old request after a
   let reject!:(cause:unknown)=>void;vi.mocked(workspaceApi.ask).mockImplementation(()=>new Promise((_resolve,fail)=>{reject=fail;}));
   const scroller=await positionConversation(200);
   await type('Original exact request');question().focus();const input=question();await click('Send message');await ready(()=>expect(workspaceApi.ask).toHaveBeenCalledOnce());const sent=structuredClone(vi.mocked(workspaceApi.ask).mock.calls[0][2]);
-  await type('Unsent next question');await act(async()=>reject(new WorkspaceApiError(503)));await ready(()=>expect(host.textContent).toContain('unconfirmed'));
+  await type('Unsent next question');const waiting=host.querySelector('[data-request-state="awaiting_confirmation"]')!;expect(waiting).not.toBeNull();await act(async()=>reject(new WorkspaceApiError(503)));await ready(()=>expect(host.textContent).toContain('unconfirmed'));
+  expect(host.querySelector('[data-request-state="unknown"]')).toBe(waiting);expect(waiting.textContent).toBe('Result not confirmed');expect(waiting.querySelector('.message-request-status-dots')).toBeNull();
   expect(host.querySelector('.workspace-notebook-body[data-native-chat="true"]')).toBeTruthy();
   expect(host.querySelector('.mobile-chat-scroll')).toBe(scroller);expect(scroller.scrollTop).toBe(200);
   const recovery=host.querySelector('[aria-label="Unconfirmed model request"]');

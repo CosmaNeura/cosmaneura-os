@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import re
 import time
 from collections.abc import Callable
 from dataclasses import asdict, replace
@@ -156,10 +157,14 @@ If a specifically requested teammate is absent from handoff_targets or allowed_h
 
 class GPT41Connector:
     def __init__(
-        self, credential: Callable[[], str], *, transport: httpx.BaseTransport | None = None
+        self, credential: Callable[[], str], *, transport: httpx.BaseTransport | None = None,
+        endpoint: str = ENDPOINT,
     ):
+        if not re.fullmatch(r"https://[a-z0-9][a-z0-9-]{1,62}\.(?:openai\.azure\.com|services\.ai\.azure\.com)/openai/v1/chat/completions", endpoint):
+            raise ValueError("Exact Azure OpenAI v1 endpoint required")
         self.credential = credential
         self.transport = transport
+        self.endpoint = endpoint
 
     def prepare(self, context: BotContext) -> dict:
         value = self._prepare_value(context)
@@ -381,7 +386,7 @@ class GPT41Connector:
                 dispatch = "started_unconfirmed"
                 with client.stream(
                     "POST",
-                    ENDPOINT,
+                    self.endpoint,
                     headers={"Authorization": "Bearer " + key, "Content-Type": "application/json"},
                     json=body,
                 ) as response:

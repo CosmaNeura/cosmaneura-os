@@ -25,7 +25,13 @@ def staged_auth_modules(tmp_path: Path) -> Path:
     app.mkdir()
     # Execute only the production copy loop. No source extraction, native helper,
     # build provenance, Electron runtime or installed application is fabricated.
-    step = ast.fix_missing_locations(ast.Module(body=loops, type_ignores=[]))
+    document_copy = [node for node in ast.walk(tree) if isinstance(node, ast.Expr)
+                     and isinstance(node.value, ast.Call)
+                     and any(isinstance(child, ast.Constant)
+                             and child.value == "clients/shared/workspace-document.mjs"
+                             for child in ast.walk(node))]
+    assert len(document_copy) == 1, "The shared document guard must be staged inside the package"
+    step = ast.fix_missing_locations(ast.Module(body=loops + document_copy, type_ignores=[]))
     exec(compile(step, str(COMPOSER), "exec"), {"root": ROOT, "app": app, "shutil": shutil})
     return app
 
@@ -55,3 +61,20 @@ def test_staged_proxy_cannot_fall_back_to_unpackaged_checkout_modules(tmp_path: 
     assert result.returncode != 0
     assert "ERR_MODULE_NOT_FOUND" in result.stderr
     assert "clinical-team-requests.mjs" in result.stderr
+
+
+@pytest.mark.skipif(NODE is None, reason="Node is required for Desktop module linking")
+def test_staged_auth_uses_packaged_shared_document_guard_without_checkout_imports(tmp_path: Path):
+    app = staged_auth_modules(tmp_path)
+    assert (app / "workspace-document.mjs").read_bytes() == (
+        ROOT / "clients/shared/workspace-document.mjs").read_bytes()
+    result = subprocess.run(
+        [NODE, "--input-type=module", "-e",
+         "const auth=await import(process.argv[1]);const document=await import(process.argv[2]);"
+         "if(typeof auth.installAuthIpc!=='function'||"
+         "!document.isPackagedWorkspaceDocument('app://cosmas/index.html#cosmas/home')||"
+         "document.isPackagedWorkspaceDocument('app://other/index.html#cosmas/home'))process.exit(2);",
+         (app / "auth-ipc.mjs").as_uri(), (app / "workspace-document.mjs").as_uri()],
+        capture_output=True, text=True, timeout=10,
+    )
+    assert result.returncode == 0, result.stderr
