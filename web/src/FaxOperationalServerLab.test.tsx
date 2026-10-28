@@ -165,7 +165,8 @@ it.skipIf(!base).each([{persona:'physician',round:1},{persona:'nurse_practitione
   await c.wait(async()=>expect((await sourceSaved()).saved?.state).toBe('saved'));if(round===2)await c.click('Check saved fax source');
   const sourceRecord=await sourceSaved();ep.workspace=await workspaceApi.read(ep.identity,ep.packet.workspace.id);await c.wait(()=>expect(ep.host.querySelector(`[id="source-${sourceRecord.saved!.entry_id}"]`)?.textContent).toContain(ep.packet!.passage));await verifyFaxSourceWorkspace(ep.workspace!,sourceRecord.saved!,sourceRecord.saved_request!);expect(ep.workspace!.note).toEqual(ep.packet.workspace.note);
   await c.click('Prepare a Chief request');await c.wait(()=>expect(ep.host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toContain(sourceRecord.saved!.entry_id));
-  const question=ep.host.querySelector<HTMLTextAreaElement>('#team-question')!;expect(question.disabled).toBe(false);
+  await c.wait(()=>expect(ep.host.querySelector<HTMLTextAreaElement>('#team-question')?.disabled).toBe(false));
+  const question=ep.host.querySelector<HTMLTextAreaElement>('#team-question')!;
   const requested=question.value+`\n${persona}: create a private follow-up draft. Ask Scribe, keep unknown heart history and trial eligibility explicit, do not send.`;
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question,requested);question.dispatchEvent(new Event('input',{bubbles:true}));});
   await c.click('Send message');await c.wait(()=>expect(ep.host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toBe(''));

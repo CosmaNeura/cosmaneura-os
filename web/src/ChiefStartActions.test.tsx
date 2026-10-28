@@ -16,6 +16,11 @@ describe('Chief first-use controls',()=>{
     await act(async()=>buttons[2].click());expect(choose).toHaveBeenCalledExactlyOnceWith(CHIEF_STARTERS[2].prompt);
     expect(container.textContent).toContain('review the question');
   });
+  it('keeps Messages starters to two editable choices without a disclosure menu',async()=>{
+    const choose=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} minimal onChoose={choose}/>));
+    expect(container.querySelectorAll('button')).toHaveLength(2);expect(container.querySelector('details')).toBeNull();expect(choose).not.toHaveBeenCalled();
+    await act(async()=>container.querySelector('button')!.click());expect(choose).toHaveBeenCalledExactlyOnceWith(CHIEF_STARTERS[0].prompt);
+  });
   it.each([{modelEnabled:false},{sourceAllowed:false},{hasSavedContext:false},{notesDirty:true},{hasQuestion:true},{locked:true}])('keeps requests gated by %j',async(change)=>{
     const choose=vi.fn();await act(async()=>root.render(<ChiefStartActions {...ready} {...change} onChoose={choose}/>));
     for(const button of container.querySelectorAll('button')){expect(button.disabled).toBe(true);await act(async()=>button.click());}

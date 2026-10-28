@@ -1,0 +1,87 @@
+// @vitest-environment node
+import {describe,expect,it,vi} from 'vitest';
+import {WorkspaceSession} from './workspace-session';
+import {DraftJournal,editorAddress} from '../draft-journal';
+import {memoryDraftStorage} from '../draft-test-fixture';
+import {teamFixture} from '../team-setup-test-fixture';
+import type {ConversationHost} from './conversations';
+import type {SourceContext,SourceDependencies} from './sources';
+import {emptyEhrReadRecovery,type EhrReadSaved} from '../ehr-read-recovery';
+import {ehrScope,ehrVisit,ehrUuid,ehrWindowReceipt,ehrVerifiedReceipt,ehrReviewBody,ehrReviewResult} from '../ehr-read-fixtures.test-support';
+import {WorkspaceApiError} from '../workspace-api';
+import {vendorSha256} from '../vendor-contract';
+async function fixture(deps:SourceDependencies={}){
+ const verified=await ehrVerifiedReceipt(await ehrWindowReceipt()),result=await ehrReviewResult(verified,ehrReviewBody(verified)),workspace={...result.workspace,appointment_id:ehrUuid(900)};
+ const identity={mode:'clerk_jwt' as const,getToken:async()=>null};
+ const session=new WorkspaceSession({sources:{read:async()=>workspace,...deps},conversationRead:async()=>workspace,conversations:{read:vi.fn(async()=>({contract_version:1 as const,as_of:'2026-10-25T12:00:00Z',rows:[],next_cursor:null})),mark:vi.fn(async()=>({contract_version:1 as const,marker_version:1,manual_unread:false,seen_watermark:null}))}});
+ session.setWorkspace(workspace);session.setTeam(teamFixture());session.setIdentity(identity);session.setSelected('chief');session.setPracticePage('notebook');
+ const journal=new DraftJournal(await memoryDraftStorage()({scope:'invented'}));session.recovery.journal.current={scope:'invented',serverScope:'a'.repeat(64),value:journal};
+ const host:ConversationHost={identity,journal,scope:'invented',current:()=>session.getSnapshot().identity===identity,blocked:()=>session.getSnapshot().busy||!!session.getSnapshot().pending,authorize:vi.fn(async()=>{}),navigate:vi.fn(async route=>{session.navigation.sequence.current++;session.setSelected(route.helper!);session.setSettingsOpen(false);session.setPracticeOpen(false);session.setPracticePage('notebook');}),failure:vi.fn()};
+ const context:SourceContext={authenticated:identity,conversationHost:host,locked:false,connectionNavigationLocked:false,captureNavigationLocked:false,captureDraftLocked:false,connectionEditorsLocked:false,activityBusy:false,accessBusy:false,scribeSourceBusy:false,schedulingPatientBusy:false,accountAccess:null,failure:vi.fn(),focusQuestion:vi.fn()};
+ const saved:EhrReadSaved={workspace_id:ehrScope.workspace_id,entry_id:result.entry_id,entry_revision:result.entry_revision,source_sha256:result.source.source_sha256,content_sha256:result.source.content_sha256,request_sha256:result.request_sha256,source_withheld:false};
+ return {session,workspace,journal,host,context,saved};
+}
+describe('shared EHR Chief draft preparation',()=>{
+ it('prepares a reviewed problem-list snapshot without describing it as an appointment or replacing the draft',async()=>{
+  const f=await fixture(),send=vi.spyOn(f.session.models,'save');
+  const entry=f.workspace.entries.find(item=>item.id===f.saved.entry_id)!;
+  entry.content='Elation problem-list snapshot\nCoverage: one bounded page; more records may exist.\nInvented recorded problem: Active; verification status: unconfirmed.';
+  f.saved.content_sha256=await vendorSha256(new TextEncoder().encode(entry.content));
+  f.session.models.updateThought('Ask me about missing history.');await f.session.conversations.observe(f.host);
+  await f.session.sources.prepareEhr(f.context,f.saved);
+  const text=f.session.getSnapshot().thought;
+  expect(text).toContain('Ask me about missing history.\n\nReview the human-selected EHR source '+entry.id);
+  expect(text).toContain('recorded statuses and verification status');
+  expect(text).toContain('do not infer missing clinical facts or a complete chart');
+  expect(text).not.toContain('EHR appointment source');
+  expect(f.session.getSnapshot().selectedSource).toBe(entry.id);
+  expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'))).toMatchObject({data:{text}});
+  expect(send).not.toHaveBeenCalled();
+ });
+ it('preserves both specialist and retained Chief directions and sends no model request',async()=>{const f=await fixture(),send=vi.spyOn(f.session.models,'save');f.session.models.updateThought('Retained Chief instructions');await f.session.conversations.observe(f.host);await f.session.conversations.open(ehrVisit.id,'follow_up',f.host);f.session.models.updateThought('Specialist directions stay here');await f.session.sources.prepareEhr(f.context,f.saved);
+ expect(f.session.getSnapshot().thought).toContain('Retained Chief instructions\n\nReview the human-selected EHR');expect(f.session.getSnapshot().thought).not.toContain('Specialist directions');expect(f.session.getSnapshot().selectedSource).toBe(f.saved.entry_id);expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:follow_up'))).toMatchObject({data:{text:'Specialist directions stay here'}});expect(send).not.toHaveBeenCalled();expect(f.context.focusQuestion).toHaveBeenCalledOnce();});
+ it('does not erase a retained saved-note task while preparing a new EHR source',async()=>{const f=await fixture();const task={contract:'chief-note-task.compose.v1' as const,note_id:ehrUuid(600),note_version:1,content_hash:'a'.repeat(64),source_fingerprint:'b'.repeat(64)};await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'));await f.journal.persist(editorAddress(ehrVisit.id,'conversation:chief'),{kind:'editor',workspaceId:ehrVisit.id,editor:'conversation:chief',pending:null,data:{text:'Directions for the saved note',noteTask:task}});await f.session.sources.prepareEhr(f.context,f.saved);expect(f.session.getSnapshot().thought).toBe('Directions for the saved note');expect(f.session.getSnapshot().phoneNoteTask?.selection.note_id).toBe(task.note_id);expect(f.session.getSnapshot().error).toContain('Finish or close the saved-note draft');expect(f.context.focusQuestion).not.toHaveBeenCalled();});
+ it.each(['withheld','hash','foreign-workspace'] as const)('refuses %s saved source without appending instructions',async kind=>{const f=await fixture();f.session.models.updateThought('Keep these directions');const source={...f.saved,...(kind==='withheld'?{source_withheld:true}:kind==='hash'?{content_sha256:'f'.repeat(64)}:{workspace_id:ehrUuid(999)})};await f.session.sources.prepareEhr(f.context,source);expect(f.session.getSnapshot().thought).toBe('Keep these directions');expect(f.context.failure).toHaveBeenCalledOnce();});
+ it('refuses a source whose current server projection is unavailable',async()=>{const f=await fixture({read:async()=>({...f.workspace,entries:f.workspace.entries.map(e=>({...e,ehr_source_state:'unavailable' as const,content:''}))})});await f.session.sources.prepareEhr(f.context,f.saved);expect(f.session.getSnapshot().thought).toBe('');expect(f.context.failure).toHaveBeenCalledWith(expect.any(WorkspaceApiError));});
+ it('does not append after a newer composer edit wins during source hashing',async()=>{let release!:(s:string)=>void;const f=await fixture({hash:()=>new Promise(r=>{release=r;})}),preparing=f.session.sources.prepareEhr(f.context,f.saved);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));f.session.models.updateThought('New directions while checking');release(f.saved.content_sha256);await preparing;expect(f.session.getSnapshot().thought).toBe('New directions while checking');expect(f.context.focusQuestion).not.toHaveBeenCalled();});
+ it('does not focus a newer route when retained Chief draft persistence settles',async()=>{const f=await fixture(),original=f.journal.persist.bind(f.journal);let release!:()=>void;vi.spyOn(f.journal,'persist').mockImplementation(async(address,draft)=>{if(draft?.kind==='editor'&&JSON.stringify(draft.data).includes('human-selected EHR'))await new Promise<void>(r=>{release=r;});return original(address,draft);});const preparing=f.session.sources.prepareEhr(f.context,f.saved);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));f.session.navigation.sequence.current++;f.session.setPracticePage('home');release();await preparing;expect(f.context.focusQuestion).not.toHaveBeenCalled();});
+ it('requires the shared conversation journal instead of moving specialist text into Chief',async()=>{const f=await fixture();f.session.setSelected('follow_up');f.session.models.updateThought('Unsent specialist directions');await f.session.sources.prepareEhr({...f.context,conversationHost:null},f.saved);expect(f.session.getSnapshot()).toMatchObject({selected:'follow_up',thought:'Unsent specialist directions'});expect(f.context.failure).toHaveBeenCalledOnce();});
+});
+
+describe('shared EHR task navigation',()=>{
+ it.each(['conversation','sources','connections'] as const)('retains the composer before entering from %s and preserves EHR work on return',async origin=>{
+  const f=await fixture();f.session.models.updateThought('Keep these unsent directions');
+  const address=editorAddress(ehrVisit.id,'ehr-read'),draft={kind:'editor' as const,workspaceId:ehrVisit.id,editor:'ehr-read' as const,pending:null,data:{...emptyEhrReadRecovery(ehrScope),pending:{kind:'install',anchor:null,request:{action:'install',installation_id:ehrUuid(810),installation_sha256:'8'.repeat(64),idempotency_key:ehrUuid(811)}}}};
+  await f.journal.load(address);await f.journal.persist(address,draft);
+  expect(await f.session.sources.openEhr(f.context,origin)).toBe(true);
+  expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'))).toMatchObject({data:{text:'Keep these unsent directions'}});
+  expect(f.session.getSnapshot().ehrReview).toMatchObject({open:true,origin,workspaceId:ehrVisit.id});
+  expect(f.session.sources.closeEhr(f.context)).toBe(true);
+  expect(f.session.getSnapshot()).toMatchObject({thought:'Keep these unsent directions',ehrReview:{open:false}});
+  expect(await f.journal.load(address)).toEqual(draft);
+  if(origin==='connections')expect(f.session.getSnapshot()).toMatchObject({settingsOpen:true,settingsEntry:'connections'});
+  else expect(f.session.getSnapshot().mobilePanel).toBe(origin==='sources'?'Sources':'Conversation');
+ });
+ it('keeps the original page when its composer cannot be retained',async()=>{const f=await fixture();f.session.models.updateThought('Unsent');vi.spyOn(f.journal,'persist').mockRejectedValueOnce(new Error('storage unavailable'));expect(await f.session.sources.openEhr(f.context,'conversation')).toBe(false);expect(f.session.getSnapshot().ehrReview).toBeNull();expect(f.session.getSnapshot().thought).toBe('Unsent');});
+ it.each(['edit','navigation','account'] as const)('does not open after newer %s wins while retaining',async change=>{const f=await fixture();let finish!:()=>void;vi.mocked(f.host.authorize).mockImplementationOnce(()=>new Promise<void>(r=>{finish=r;}));const opening=f.session.sources.openEhr(f.context,'conversation');await vi.waitFor(()=>expect(finish).toBeTypeOf('function'));if(change==='edit')f.session.models.updateThought('New edit');else if(change==='navigation')f.session.navigation.sequence.current++;else f.session.setIdentity({mode:'clerk_jwt',getToken:async()=>null});finish();expect(await opening).toBe(false);expect(f.session.getSnapshot().ehrReview).toBeNull();});
+ it('blocks an unfinished operation from being hidden with Back',async()=>{const f=await fixture();await f.session.sources.openEhr(f.context,'conversation');expect(f.session.sources.closeEhr({...f.context,connectionNavigationLocked:true})).toBe(false);expect(f.session.getSnapshot().ehrReview?.open).toBe(true);});
+});
+
+
+it.each(['withheld','deleted','changed'] as const)('preserves the draft when the source is %s during final authorization',async change=>{
+ const f=await fixture(),previousSource=ehrUuid(979),text='Keep my existing Chief directions';
+ f.session.models.updateThought(text);await f.session.conversations.observe(f.host);
+ f.session.setSelectedSource(previousSource);
+ f.session.setEhrReview({identity:f.host.identity,generation:f.session.generation.current,workspaceId:f.workspace.id,open:true,origin:'sources'});
+ let release!:()=>void,paused=false;
+ vi.mocked(f.host.authorize).mockImplementation(async()=>{if(f.session.getSnapshot().busy&&!paused){paused=true;await new Promise<void>(r=>{release=r;});}});
+ const preparing=f.session.sources.prepareEhr(f.context,f.saved);
+ await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ const entries=change==='deleted'?[]:f.workspace.entries.map(entry=>entry.id===f.saved.entry_id?{...entry,
+  ...(change==='withheld'?{ehr_source_state:'unavailable' as const,content:''}:{content:entry.content+' changed while authorizing'})}:entry);
+ f.session.sources.receive({...f.workspace,entries});release();await preparing;
+ expect(f.session.getSnapshot()).toMatchObject({thought:text,selectedSource:previousSource,ehrReview:{open:true}});
+ expect(f.context.failure).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({status:409,code:'ehr_read_source_changed'}));
+ expect(f.context.focusQuestion).not.toHaveBeenCalled();
+ expect(await f.journal.load(editorAddress(ehrVisit.id,'conversation:chief'))).toMatchObject({data:{text}});
+});

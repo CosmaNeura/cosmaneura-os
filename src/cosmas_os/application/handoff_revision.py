@@ -1,5 +1,7 @@
 """Explicit fresh private revision after current human feedback; no implicit model dispatch."""
 
+from __future__ import annotations
+
 import json
 import re
 from dataclasses import replace
@@ -31,8 +33,8 @@ FIELDS = {
 }
 
 
-def _parent(s, w, hid):
-    parent = s.scalar(
+def _parent(s, w, hid, *, snapshot: handoff_review.ReviewReadSnapshot | None = None):
+    parent = snapshot.handoffs.get(hid) if snapshot is not None else s.scalar(
         select(WorkspaceHandoff).where(
             WorkspaceHandoff.id == hid,
             WorkspaceHandoff.workspace_id == w.id,
@@ -40,9 +42,9 @@ def _parent(s, w, hid):
             WorkspaceHandoff.owner_id == w.owner_id,
         )
     )
-    if parent is None:
+    if parent is None or (parent.workspace_id, parent.box_id, parent.owner_id) != (w.id, w.box_id, w.owner_id):
         raise ws.WorkspaceError("handoff_unavailable", 404)
-    attempt = s.scalar(
+    attempt = snapshot.latest_attempt(hid) if snapshot is not None else s.scalar(
         select(WorkspaceHandoffAttempt)
         .where(
             WorkspaceHandoffAttempt.handoff_id == hid,
@@ -58,14 +60,14 @@ def _parent(s, w, hid):
 MAX_REVISION_DEPTH = 3
 
 
-def revision_depth(s, w, handoff_id):
+def revision_depth(s, w, handoff_id, *, snapshot: handoff_review.ReviewReadSnapshot | None = None):
     """Bound projection before recursive review validation, including corrupt cycles."""
     depth, seen = 0, set()
     while True:
         if handoff_id in seen:
             raise ws.WorkspaceError("handoff_revision_unverifiable")
         seen.add(handoff_id)
-        link = s.scalar(
+        link = snapshot.revision_link(w, handoff_id=handoff_id) if snapshot is not None else s.scalar(
             select(WorkspaceHandoffRevision).where(
                 WorkspaceHandoffRevision.revision_handoff_id == handoff_id,
                 WorkspaceHandoffRevision.workspace_id == w.id,
@@ -81,15 +83,15 @@ def revision_depth(s, w, handoff_id):
         handoff_id = link.parent_handoff_id
 
 
-def revision_question(s, w, metadata, *, current=True):
+def revision_question(s, w, metadata, *, current=True, snapshot: handoff_review.ReviewReadSnapshot | None = None):
     """Quote the full prior draft only after rechecking exact current review/source binding."""
     if not isinstance(metadata, dict) or set(metadata) != FIELDS:
         raise ws.WorkspaceError("handoff_revision_unverifiable")
-    parent, attempt = _parent(s, w, metadata["parent_handoff_id"])
-    if revision_depth(s, w, parent.id) >= MAX_REVISION_DEPTH:
+    parent, attempt = _parent(s, w, metadata["parent_handoff_id"], snapshot=snapshot)
+    if revision_depth(s, w, parent.id, snapshot=snapshot) >= MAX_REVISION_DEPTH:
         raise ws.WorkspaceError("handoff_revision_limit")
     receipt = (handoff_review.review_for if current else handoff_review.stored_review_for)(
-        s, w, parent, attempt
+        s, w, parent, attempt, snapshot=snapshot
     )
     if (
         receipt is None
@@ -105,7 +107,9 @@ def revision_question(s, w, metadata, *, current=True):
         }
     ):
         raise ws.WorkspaceError("handoff_revision_stale")
-    previous = s.get(WorkspaceReply, receipt["result_entry_id"])
+    previous = snapshot.replies.get(receipt["result_entry_id"]) if snapshot is not None else s.get(WorkspaceReply, receipt["result_entry_id"])
+    if previous is None:
+        raise ws.WorkspaceError("handoff_revision_unverifiable")
     text = (
         "\n\nHuman-requested revision of the prior private draft\n"
         + json.dumps(
@@ -128,8 +132,8 @@ def revision_question(s, w, metadata, *, current=True):
     return text
 
 
-def revision_handoff_for_review(s, w, review_id):
-    link = s.scalar(
+def revision_handoff_for_review(s, w, review_id, *, snapshot: handoff_review.ReviewReadSnapshot | None = None):
+    link = snapshot.revision_link(w, review_id=review_id) if snapshot is not None else s.scalar(
         select(WorkspaceHandoffRevision).where(
             WorkspaceHandoffRevision.review_id == review_id,
             WorkspaceHandoffRevision.workspace_id == w.id,

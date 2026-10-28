@@ -1,4 +1,5 @@
 import {parseAuthState} from './auth-helper-client.mjs';
+import {isPackagedWorkspaceDocument} from './workspace-document.mjs';
 
 export const AUTH_CHANNELS = Object.freeze({getState: 'cosmas:workspace-auth:state:v1',
   signIn: 'cosmas:workspace-auth:sign-in:v1', signOut: 'cosmas:workspace-auth:sign-out:v1',
@@ -13,7 +14,7 @@ export function installAuthIpc(ipcMain, renderer, auth) {
   function assertRenderer(event) {
     if (disposed || renderer.isDestroyed() || event.sender !== renderer ||
         event.senderFrame !== renderer.mainFrame || !event.senderFrame ||
-        event.senderFrame.url !== 'app://cosmas/index.html') throw unavailable();
+        !isPackagedWorkspaceDocument(event.senderFrame.url)) throw unavailable();
   }
   for (const method of ['getState', 'signIn', 'signOut']) {
     ipcMain.handle(AUTH_CHANNELS[method], async (event, payload) => {
@@ -32,7 +33,7 @@ export function installAuthIpc(ipcMain, renderer, auth) {
     });
   }
   const remove = auth.subscribe(state => {
-    if (disposed || renderer.isDestroyed() || renderer.mainFrame.url !== 'app://cosmas/index.html') return;
+    if (disposed || renderer.isDestroyed() || !isPackagedWorkspaceDocument(renderer.mainFrame.url)) return;
     try { renderer.send(AUTH_CHANNELS.changed, parseAuthState(state)); } catch { /* Closed frame or invalid state. */ }
   });
   return () => {

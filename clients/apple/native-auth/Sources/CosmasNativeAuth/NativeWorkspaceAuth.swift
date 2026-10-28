@@ -118,6 +118,14 @@ public struct NativeAuthState: Equatable, Sendable, Codable {
         return snapshot()
     }
 
+    /// An explicit desktop recovery may rebuild a failed storage coordinator
+    /// only after every SDK operation has settled. Its native source host must
+    /// separately consent by not retaining this coordinator.
+    public var allowsStorageRecovery: Bool {
+        phase == .unavailable && (storageFailed || driver == nil) && transition == nil &&
+            pendingSignIns.isEmpty && pendingSignOuts.isEmpty && pendingTokens.isEmpty
+    }
+
     /// Stable native key namespace across SDK sessions for the same account.
     /// Identity-policy changes isolate custody; this digest grants no access.
     public func recordingAccountDigest(expectedRevision: String) throws -> String {

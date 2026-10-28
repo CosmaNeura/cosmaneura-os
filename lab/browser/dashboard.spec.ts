@@ -1,7 +1,7 @@
 import {test,expect} from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 const address=process.env.LAB_REPORT_URL;
-test('agent dashboard is readable, accessible, and exposes no database files',async({page,request},info)=>{
+test('agent dashboard is readable, accessible, and exposes no database files',async({page,request})=>{
   test.skip(!address,'Set LAB_REPORT_URL to a running local report viewer.');
   const url=new URL(address!);
   expect(url.hostname).toBe('127.0.0.1');
@@ -14,5 +14,4 @@ test('agent dashboard is readable, accessible, and exposes no database files',as
   expect(results.violations).toEqual([]);
   expect((await request.get(new URL('/postgres/PG_VERSION',url).href)).status()).toBe(404);
   expect((await request.get(new URL('/artifacts.sqlite3',url).href)).status()).toBe(404);
-  await page.screenshot({path:info.outputPath('dashboard.png')});
 });

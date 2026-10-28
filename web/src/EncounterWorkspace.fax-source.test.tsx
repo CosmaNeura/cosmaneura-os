@@ -6,6 +6,8 @@ import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_VENDOR_SETUP_ENABLED','true');vi.stubEnv('VITE_FAX_INBOUND_ENABLED','true');vi.stubEnv('VITE_FAX_INBOUND_SOURCE_ENABLED','true');});
+const observed=vi.hoisted(()=>({session:null as import('./session/workspace-session').WorkspaceSession|null}));
+vi.mock('./session/use-workspace-session',async original=>{const actual=await original<typeof import('./session/use-workspace-session')>();return {...actual,useWorkspaceSession:(...args:Parameters<typeof actual.useWorkspaceSession>)=>{observed.session=args[0];return actual.useWorkspaceSession(...args);}};});
 import {EncounterWorkspace} from './EncounterWorkspace';
 import {workspaceApi,type AuthenticatedWorkspaceIdentity,type Workspace,type WorkspaceEntry} from './workspace-api';
 import {teamFixture,teamUuid as uuid} from './team-setup-test-fixture';
@@ -69,6 +71,8 @@ beforeEach(async()=>{
  vi.mocked(readConnectionCatalog).mockResolvedValue({core:false,google:false,microsoft:false,scheduling:false,messaging:true,payments:false,portals:false});vi.mocked(readConnectionSummary).mockResolvedValue({label:'Connected',reason:'Invented practice fax account; controlled boundary',action:'Open fax work',tone:'ready'});
  resolved={contract_version:1,scope:faxScope,kind:'acquire',idempotency_key:acquireRequest.request.idempotency_key,request_sha256:'a'.repeat(64),public_request_sha256:'b'.repeat(64),receipt_sha256:'c'.repeat(64),state:'acquired',source_withheld:false,operation_id:documentOffer.operation_id,document_sha256:documentOffer.document_sha256,pages:1};vi.spyOn(faxInboundApi,'resolve').mockImplementation(async()=>structuredClone(resolved));vi.spyOn(faxInboundApi,'command');vi.spyOn(faxInboundApi,'document');
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity}/>));await click('Visits and notes');await act(async()=>host.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe('Existing saved clinical note'));
+ // Same-composer assertions start in Chief; separate-bot ownership is covered by source draft regressions.
+ await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('.team-roster button')].find(b=>b.querySelector('strong')?.textContent==='chief')!.click());
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
 it('routes actual settings to the current visit with the same authorized AES-GCM journal and no automatic image request',async()=>{
@@ -118,4 +122,11 @@ it('hides the old document offer on identity and visit changes and refuses its l
 });
 it('never routes an invalid upstream document offer into source review',async()=>{
  await settings('Team settings');await settings('Connections');await settings('Messaging & fax');await act(async()=>inbound.onReviewDocument!({...documentOffer,document_sha256:'invalid'},acquireRequest));expect(host.querySelector('[aria-label="Controlled fax passage mount"]')).toBeNull();assertNoWork();
+});
+
+it('does not bypass another source panel’s busy state for its own verified Chief callback',async()=>{
+ await setText('#team-question','Keep these directions while other work finishes.');await offerFax();await preparePacket();await click('Save reviewed fax passage');
+ await act(async()=>{source.onBusyChange!(true);observed.session!.setFaxSourceBusy(true);});const reads=vi.mocked(workspaceApi.read).mock.calls.length;
+ await act(async()=>{source.onAskChief!(packet);await new Promise(r=>setTimeout(r,20));});expect(host.querySelector<HTMLTextAreaElement>('#team-question')!.value).toBe('Keep these directions while other work finishes.');expect(vi.mocked(workspaceApi.read).mock.calls.length).toBe(reads);expect(visible('Team settings')?.disabled).toBe(true);
+ await act(async()=>{source.onBusyChange!(false);observed.session!.setFaxSourceBusy(false);});assertNoWork();
 });

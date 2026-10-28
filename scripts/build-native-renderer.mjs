@@ -85,6 +85,9 @@ export async function buildNativeRenderer({inputs, client, output}, {build} = {}
     VITE_COSMANEURA_WEB_ORIGIN: env.VITE_COSMANEURA_WEB_ORIGIN,
     VITE_CAPTURE_UPLOAD_ORIGINS: env.VITE_CAPTURE_UPLOAD_ORIGINS,
     VITE_WORKSPACE_CAPTURE_MODE: env.VITE_WORKSPACE_CAPTURE_MODE,
+    ...Object.fromEntries(['VITE_MESSAGES_ENABLED', 'VITE_EHR_READ_ENABLED',
+      'VITE_CALENDAR_IMPORT_ENABLED', 'VITE_MICROSOFT_MESSAGE_ENABLED']
+      .filter(key => Object.hasOwn(env, key)).map(key => [key, env[key]])),
   });
   if (!isDeepStrictEqual(env, profile.env)) {
     throw new Error('Retained native environment differs from the complete current identity/profile');

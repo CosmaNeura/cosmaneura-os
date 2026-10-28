@@ -46,6 +46,24 @@ async function emit(config, env, change = {}) {
     JSON.stringify(change.transport ?? {version: 1, ...resolveHostedWorkspace(env)}));
 }
 
+for(const client of ['desktop','apple'])test(`${client} retains exact optional pilot flags through renderer compilation`,async t=>{
+  const f=await fixture(t,client,'synthetic'),name=client+'-build-env.json';
+  const optIns={VITE_MESSAGES_ENABLED:'true',VITE_EHR_READ_ENABLED:'true',VITE_CALENDAR_IMPORT_ENABLED:'false',VITE_MICROSOFT_MESSAGE_ENABLED:'true'};
+  const env={...f.files[name],...optIns};
+  await writeFile(join(f.inputs,name),JSON.stringify(env));
+  let calls=0;
+  const result=await buildNativeRenderer(f,{build:async config=>{
+    calls++;
+    for(const [key,value] of Object.entries(optIns))assert.equal(process.env[key],value);
+    await emit(config,env);
+  }});
+  assert.equal(calls,1);
+  assert.deepEqual(result.profile.enabledFlags,resolveBetaFeatureProfile(env).manifest.enabledFlags);
+  assert.equal(result.profile.enabledFlags.includes('VITE_CALENDAR_IMPORT_ENABLED'),false);
+  assert.equal(result.inputsSha256[name],createHash('sha256').update(await readFile(join(f.inputs,name))).digest('hex'));
+  assert.equal(Object.keys(process.env).some(key=>key.startsWith('VITE_')),false);
+});
+
 test('CLI requires explicit inputs, native client and output without duplicate arguments', () => {
   assert.deepEqual(nativeRendererArguments(['--inputs', '/retained/clients', '--client', 'apple', '--output', '/new/build']),
     {inputs: '/retained/clients', client: 'apple', output: '/new/build'});

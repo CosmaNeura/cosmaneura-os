@@ -89,7 +89,7 @@ export function connectionActionClientAvailable(id:string,service?:ConnectionId)
   const microsoft=import.meta.env.VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED==='true';
   const scheduling=import.meta.env.VITE_WORKSPACE_SCHEDULING_ENABLED==='true';
   const gates:Record<string,boolean>={mail_headers:service==='google'?google:service==='microsoft'?microsoft:google||microsoft,
-    calendar_summaries:microsoft,reviewed_email_source:google&&import.meta.env.VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED==='true',
+    calendar_summaries:microsoft,full_email_source:microsoft&&import.meta.env.VITE_MICROSOFT_MESSAGE_ENABLED==='true',reviewed_email_source:google&&import.meta.env.VITE_WORKSPACE_GOOGLE_MESSAGE_ENABLED==='true',
     calendar_source:google&&import.meta.env.VITE_WORKSPACE_GOOGLE_CALENDAR_ENABLED==='true',
     availability:scheduling,athena_schedule:import.meta.env.VITE_ATHENA_CONNECTION_ENABLED==='true',
     appointment_proposals:scheduling&&import.meta.env.VITE_WORKSPACE_APPOINTMENTS_ENABLED==='true',

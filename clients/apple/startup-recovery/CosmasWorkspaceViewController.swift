@@ -10,6 +10,11 @@ import CosmaneuraIOSPCMCapacitor
     private var sceneDisconnected = false
     private var timer: Timer?
     private var stopTask: Task<Void, Never>?
+    private var keyboardBottom: NSLayoutConstraint?
+    private var restingBottom: NSLayoutConstraint?
+    private let keyboardDismissBar = UIView()
+    private let keyboardDoneButton = UIButton(type: .system)
+    private var keyboardDismissHeight: NSLayoutConstraint?
     private let panel = UIView()
     private let titleLabel = UILabel()
     private let explanationLabel = UILabel()
@@ -17,10 +22,22 @@ import CosmaneuraIOSPCMCapacitor
     private let reopenButton = UIButton(type: .system)
     private let retryButton = UIButton(type: .system)
 
+    // The shipped workspace header is light in both layouts. A future dark
+    // palette must change its status style together with its surface tokens.
+    override var preferredStatusBarStyle: UIStatusBarStyle { .darkContent }
+
     override func viewDidLoad() {
         super.viewDidLoad()
+        overrideUserInterfaceStyle = .light
         view.backgroundColor = .systemBackground
         buildPanel()
+        buildKeyboardDismissal()
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)),
+            name: UIResponder.keyboardWillShowNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(keyboardDidHide(_:)),
+            name: UIResponder.keyboardDidHideNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(updateKeyboardDismissalSize),
+            name: UIContentSizeCategory.didChangeNotification, object: nil)
         openWorkspace()
         timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] timer in
             MainActor.assumeIsolated {
@@ -28,6 +45,80 @@ import CosmaneuraIOSPCMCapacitor
                 self.tick()
             }
         }
+    }
+
+    @objc private func keyboardWillShow(_ notification: Notification) {
+        // Keyboard notifications are process-wide. Only this active key window
+        // may opt into its own keyboard guide.
+        guard let window = view.window, window.isKeyWindow,
+              window.windowScene?.activationState == .foregroundActive,
+              notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool != false,
+              workspace != nil else { return }
+        keyboardDismissBar.isHidden = false
+        updateKeyboardDismissalSize()
+        restingBottom?.isActive = false
+        keyboardBottom?.isActive = true
+        // Commit the native resize before WebKit reacts to the same keyboard
+        // transition, so it does not also pan a full-height document.
+        view.layoutIfNeeded()
+    }
+
+    @objc private func keyboardDidHide(_ notification: Notification) {
+        // Some UIKit versions retain the dismissed accessory's height in the
+        // guide. Once UIKit confirms dismissal, the viewport is the full view.
+        // Interactive dismissal continues to follow the guide until didHide.
+        guard notification.userInfo?[UIResponder.keyboardIsLocalUserInfoKey] as? Bool != false else { return }
+        keyboardDismissBar.isHidden = true
+        updateKeyboardDismissalSize()
+        keyboardBottom?.isActive = false
+        restingBottom?.isActive = true
+    }
+
+    private func buildKeyboardDismissal() {
+        // WebKit's system accessory is not consistently available on the phone.
+        // Keep one explicit native dismissal action beside the existing resize owner.
+        keyboardDismissBar.translatesAutoresizingMaskIntoConstraints = false
+        keyboardDismissBar.backgroundColor = .systemBackground
+        keyboardDismissBar.isHidden = true
+        view.addSubview(keyboardDismissBar)
+        keyboardDoneButton.translatesAutoresizingMaskIntoConstraints = false
+        keyboardDoneButton.setTitle("Done", for: .normal)
+        keyboardDoneButton.accessibilityIdentifier = "cosmas.keyboard.done"
+        keyboardDoneButton.accessibilityHint = "Hides the keyboard. Your draft is kept."
+        keyboardDoneButton.titleLabel?.adjustsFontForContentSizeCategory = true
+        keyboardDoneButton.addTarget(self, action: #selector(dismissKeyboard), for: .touchUpInside)
+        keyboardDismissBar.addSubview(keyboardDoneButton)
+        let separator = UIView()
+        separator.translatesAutoresizingMaskIntoConstraints = false
+        separator.backgroundColor = .separator
+        keyboardDismissBar.addSubview(separator)
+        keyboardDismissHeight = keyboardDismissBar.heightAnchor.constraint(equalToConstant: 0)
+        NSLayoutConstraint.activate([
+            keyboardDismissBar.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            keyboardDismissBar.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            keyboardDismissBar.bottomAnchor.constraint(equalTo: view.keyboardLayoutGuide.topAnchor),
+            keyboardDismissHeight!,
+            keyboardDoneButton.trailingAnchor.constraint(equalTo: keyboardDismissBar.safeAreaLayoutGuide.trailingAnchor, constant: -12),
+            keyboardDoneButton.topAnchor.constraint(equalTo: keyboardDismissBar.topAnchor),
+            keyboardDoneButton.bottomAnchor.constraint(equalTo: keyboardDismissBar.bottomAnchor),
+            keyboardDoneButton.widthAnchor.constraint(greaterThanOrEqualToConstant: 64),
+            separator.leadingAnchor.constraint(equalTo: keyboardDismissBar.leadingAnchor),
+            separator.trailingAnchor.constraint(equalTo: keyboardDismissBar.trailingAnchor),
+            separator.topAnchor.constraint(equalTo: keyboardDismissBar.topAnchor),
+            separator.heightAnchor.constraint(equalToConstant: 1 / traitCollection.displayScale),
+        ])
+        updateKeyboardDismissalSize()
+    }
+
+    @objc private func updateKeyboardDismissalSize() {
+        let font = UIFont.preferredFont(forTextStyle: .body)
+        keyboardDoneButton.titleLabel?.font = font
+        keyboardDismissHeight?.constant = keyboardDismissBar.isHidden ? 0 : max(44, ceil(font.lineHeight + 16))
+    }
+
+    @objc private func dismissKeyboard() {
+        // Resigning focus preserves the current draft and never submits the form.
+        view.endEditing(true)
     }
 
     func setSceneActive(_ active: Bool) {
@@ -98,11 +189,15 @@ import CosmaneuraIOSPCMCapacitor
         let keyboard = view.keyboardLayoutGuide
         keyboard.followsUndockedKeyboard = false
         keyboard.usesBottomSafeArea = false
+        keyboardBottom = next.view.bottomAnchor.constraint(equalTo: keyboardDismissBar.topAnchor)
+        restingBottom = next.view.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         NSLayoutConstraint.activate([
             next.view.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             next.view.trailingAnchor.constraint(equalTo: view.trailingAnchor),
             next.view.topAnchor.constraint(equalTo: view.topAnchor),
-            next.view.bottomAnchor.constraint(equalTo: keyboard.topAnchor),
+            // Keep the guide attached from first layout so WebKit cannot also
+            // pan the document while UIKit begins the first keyboard resize.
+            keyboardBottom!,
         ])
         next.didMove(toParent: self)
     }

@@ -46,3 +46,30 @@ test('rechecks the frame after an awaited operation and never publishes credenti
   f.renderer.mainFrame.url = 'https://outside.invalid'; release(state); await denied;
   f.emit({...state, token: 'forged'}); assert.equal(f.sends.length, 0); f.dispose();
 });
+
+test('native state polling and events survive workspace fragment navigation in the same owned frame',async()=>{
+  const f=fixture(),handler=f.handlers.get(AUTH_CHANNELS.getState);
+  for(const fragment of ['', '#cosmas/home','#cosmas/settings',
+    '#cosmas/notebook/00000000-0000-4000-8000-000000000084?helper=chief&material=Sources']){
+    f.renderer.mainFrame.url='app://cosmas/index.html'+fragment;
+    assert.deepEqual(await handler(f.event,f.payload()),state);
+    f.emit(state);
+  }
+  assert.equal(f.calls.length,4);assert.equal(f.sends.length,4);
+  await assert.rejects(handler({...f.event,senderFrame:{url:f.renderer.mainFrame.url}},f.payload()));
+  assert.equal(f.calls.length,4);f.dispose();
+});
+
+test('a same-document fragment change during state verification preserves the original frame guard',async()=>{
+  const f=fixture();let release;f.auth.getState=()=>new Promise(resolve=>{release=resolve;});
+  const result=f.handlers.get(AUTH_CHANNELS.getState)(f.event,f.payload());
+  f.renderer.mainFrame.url='app://cosmas/index.html#cosmas/home';release(state);
+  assert.deepEqual(await result,state);
+  for(const url of ['app://cosmas/index.html?foreign=true#cosmas/home','app://user@cosmas/index.html#cosmas/home',
+    'app://cosmas:443/index.html#cosmas/home','app://cosmas/a/../index.html#cosmas/home']){
+    f.renderer.mainFrame.url=url;
+    await assert.rejects(f.handlers.get(AUTH_CHANNELS.getState)(f.event,f.payload()));
+    f.emit(state);
+  }
+  assert.equal(f.sends.length,0);f.dispose();
+});
