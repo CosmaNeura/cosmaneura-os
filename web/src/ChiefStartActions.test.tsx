@@ -1,9 +1,10 @@
-import {readFileSync} from 'node:fs';
-import {fileURLToPath} from 'node:url';
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,describe,expect,it,vi} from 'vitest';
 import {CHIEF_STARTERS,ChiefStartActions,InitialTeamAction} from './ChiefStartActions';
+
+const {readFileSync}=await vi.importActual<{readFileSync:(path:string,encoding:'utf8')=>string}>('node:fs');
+const {fileURLToPath}=await vi.importActual<{fileURLToPath:(url:string)=>string}>('node:url');
 
 describe('Chief first-use controls',()=>{
   let container:HTMLDivElement,root:Root;
