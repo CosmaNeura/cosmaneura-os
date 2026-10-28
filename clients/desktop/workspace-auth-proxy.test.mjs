@@ -642,7 +642,7 @@ test('team resources and usage are read-only v2 routes with independent 16 KiB c
     for (const suffix of ['/', '?owner=' + id, '/' + id, '/execute']) {
       assert.equal(permittedAuthenticatedApiPath('app://cosmas/api' + path + suffix, 'GET'), null);
     }
-    for (const version of [null, '1', '2, 2', '1, 2', '5']) {
+    for (const version of [null, '1', '2, 2', '1, 2', '6']) {
       const result = await proxyAuthenticatedWorkspaceRequest(request(path, {headers: version === null ? {} : {'X-Cosmas-Team-Contract': version}}),
         fixture(), () => assert.fail('requires a supported policy contract'));
       assert.equal(result.status, 426);
