@@ -32,7 +32,6 @@ test('clinician fixture supports actual note UI and isolates each browser tab',a
   if(info.project.name==='desktop')expect(await page.locator('.team-material-content').evaluate(element=>element.scrollTop)).toBe(0);
   await expect(page.getByRole('button',{name:'View Follow-up draft',exact:true})).toBeVisible();
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
-  await page.screenshot({path:info.outputPath('clinician-workspace.png')});
   const other=await context.newPage();await other.goto(url.href);
   await other.getByRole('button',{name:/^Choose an encounter/}).click();
   await other.getByRole('button',{name:'Jordan Cypress · synthetic visit Open saved notes',exact:true}).click();

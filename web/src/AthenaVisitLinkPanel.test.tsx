@@ -5,7 +5,7 @@ import fixture from './__fixtures__/athena-visit-links.json';
 import {AthenaVisitLinkPanel} from './AthenaVisitLinkPanel';
 import {coreConnectionApi} from './core-connection-api';
 import {coreDigest} from './core-connection-contract';
-import {validateAthenaVisitLinkResult,type AthenaVisitLinkCommand} from './athena-visit-link-api';
+import {validateAthenaVisitLinkCommand,validateAthenaVisitLinkResult,type AthenaVisitLinkCommand,type AthenaVisitLinkObservation} from './athena-visit-link-api';
 import type {AthenaAccount,AthenaAppointment} from './athena-connection-contract';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 vi.mock('./core-connection-api',()=>({coreConnectionApi:{read:vi.fn()}}));
@@ -15,8 +15,9 @@ async function settle(){await act(async()=>{await Promise.all(fixtureReplies.spl
 const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=>null};
 const props={connection:fixture.lookup.response.athena_visit_link.connection,account:fixture.lookup.response.athena_visit_link.account as AthenaAccount,source:fixture.lookup.response.athena_visit_link.source as AthenaAppointment,selection:fixture.lookup.command.source};
 const reply=(name:Exclude<keyof typeof fixture,'encounters'>)=>fixture[name].response as never;
-const respond=(name:Exclude<keyof typeof fixture,'encounters'>)=>(_who:unknown,input:unknown)=>{const task=(async()=>{
+const respond=(name:Exclude<keyof typeof fixture,'encounters'>,edit?:(value:AthenaVisitLinkObservation)=>void|Promise<void>)=>(_who:unknown,input:unknown)=>{const task=(async()=>{
  const command=input as AthenaVisitLinkCommand,value=structuredClone(fixture[name].response),d=value.athena_visit_link;
+ validateAthenaVisitLinkCommand(command);
  Object.assign(d,{checked_at:new Date().toISOString(),request_nonce:command.request_nonce,command_key:command.command_key??null});
  if(command.command_key){
   const {request_nonce:_nonce,action,...values}=command;
@@ -24,6 +25,7 @@ const respond=(name:Exclude<keyof typeof fixture,'encounters'>)=>(_who:unknown,i
   const hash=operation==='status'?command.command_sha256:await coreDigest({...values,action:operation,expected_actor_ref:d.connection.actor_ref,expected_tenant_ref:d.connection.tenant_ref,...(action.endsWith('preview')?{plan_sha256:d.plan_sha256,confirmed:true}:{})});
   Object.assign(d,{command_sha256:hash});
  }
+ await edit?.(d as unknown as AthenaVisitLinkObservation);
  return await validateAthenaVisitLinkResult(value,command) as never;
 })();fixtureReplies.push(task);return task;
 };
@@ -68,4 +70,42 @@ it('does not offer saving when patient correspondence needs review',async()=>{
  const conflict=structuredClone(fixture.preview.response);Object.assign(conflict.athena_visit_link,{state:'review_required',plan_sha256:null,command_sha256:null,operation:null});
  vi.mocked(coreConnectionApi.read).mockImplementationOnce(respond('lookup')).mockResolvedValueOnce(fixture.encounters as never).mockResolvedValueOnce(conflict as never);
  await mount();await review();expect(host.textContent).toContain('needs review');expect(button('Save visit connection')).toBeUndefined();
+});
+it.each(['appointment','patient'] as const)('withholds a recovered notebook for a different reviewed %s and checks the same command again',async fault=>{
+ const open=vi.fn(async()=>{});
+ const changed=respond('status',async d=>{
+  const encounter=d.encounter!;
+  if(fault==='appointment')encounter.appointment.appointment_ref='appointment_00000000000000000000000002';
+  else{encounter.patient.patient_ref='patient_00000000000000000000000002';encounter.appointment.patient_ref=encounter.patient.patient_ref;}
+  const {source_sha256:_old,...content}=encounter;encounter.source_sha256=await coreDigest(content);
+ });
+ vi.mocked(coreConnectionApi.read).mockImplementationOnce(respond('lookup')).mockResolvedValueOnce(fixture.encounters as never).mockImplementationOnce(respond('preview')).mockRejectedValueOnce(new Error('lost reply')).mockImplementationOnce(changed).mockImplementationOnce(respond('status'));
+ await mount(identity,open);await review();await act(async()=>host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());await click('Save visit connection');
+ await click('Check saved result');expect(host.textContent).toContain('saved result could not be verified');expect(button('Open linked notebook')).toBeUndefined();expect(button('Close visit connection').disabled).toBe(true);expect(open).not.toHaveBeenCalled();
+ await click('Check saved result');await click('Open linked notebook');expect(open).toHaveBeenCalledOnce();
+ const commands=vi.mocked(coreConnectionApi.read).mock.calls.map(call=>call[1] as AthenaVisitLinkCommand);
+ expect(commands.filter(c=>c.action==='athena_visit_link')).toHaveLength(1);
+ expect(commands[5]).toMatchObject({command_key:commands[4].command_key,command_sha256:commands[4].command_sha256});
+});
+it('allows a fresh projection for the same reviewed patient and appointment after recovering the save',async()=>{
+ const open=vi.fn(async()=>{});
+ vi.mocked(coreConnectionApi.read).mockImplementationOnce(respond('lookup')).mockResolvedValueOnce(fixture.encounters as never).mockImplementationOnce(respond('preview')).mockRejectedValueOnce(new Error('lost reply')).mockImplementationOnce(respond('status',async d=>{
+  const encounter=d.encounter!;encounter.patient.display_name='Invented updated display name';
+  const {source_sha256:_old,...content}=encounter;encounter.source_sha256=await coreDigest(content);
+ }));
+ await mount(identity,open);await review();await act(async()=>host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());await click('Save visit connection');await click('Check saved result');
+ expect(host.textContent).toContain('Invented updated display name');await click('Open linked notebook');
+ expect(open).toHaveBeenCalledWith(expect.objectContaining({appointment_ref:fixture.link.command.appointment_ref}));
+ expect(open.mock.calls[0]).not.toEqual([expect.objectContaining({source_sha256:fixture.link.command.core_source_sha256})]);
+});
+it.each(['operation','connection'] as const)('keeps a removal unresolved when its saved %s differs from the reviewed removal',async fault=>{
+ const changed=respond('status',d=>{
+  if(fault==='connection')Object.assign(d,{operation:'unlink',state:'removed',encounter:null,link_ref:'athena_visit_link_00000000000000000000000002'});
+ });
+ const removed=respond('status',d=>{Object.assign(d,{operation:'unlink',state:'removed',encounter:null,link_ref:fixture.unlink.command.link_ref});});
+ vi.mocked(coreConnectionApi.read).mockImplementationOnce(respond('linked_lookup')).mockImplementationOnce(respond('unlink_preview')).mockRejectedValueOnce(new Error('lost reply')).mockImplementationOnce(changed).mockImplementationOnce(removed);
+ await mount();await click('Review removing connection');await act(async()=>host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());await click('Remove visit connection');await click('Check saved result');
+ expect(host.textContent).toContain('saved result could not be verified');expect(button('Open linked notebook')).toBeUndefined();expect(button('Close visit connection').disabled).toBe(true);
+ await click('Check saved result');expect(host.textContent).toContain('Its history is retained');expect(button('Check saved result')).toBeUndefined();
+ expect(vi.mocked(coreConnectionApi.read).mock.calls.filter(call=>call[1].action==='athena_visit_unlink')).toHaveLength(1);
 });

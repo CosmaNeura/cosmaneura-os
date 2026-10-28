@@ -319,3 +319,31 @@ IMPLEMENTATION IMPACT:
   transition and test it before changing live sign-in configuration. The
   decision does not grant every platform user CosmaBot access or authorize a
   production rollout. See `docs/validation/shared-identity-flight-plan.md`.
+
+### DL-20261023-01
+
+- **Status:** ACCEPTED
+- **Ruling:** Implement two permanent presentations using one shared session,
+  action layer, conversation projection and navigation intent. Messages opens
+  Chief first on iPhone when that capability is available; Workspace remains
+  the desktop default. A persistent per-device preference selects the layout.
+  Conversations address individual bots within an explicit visit or private-note
+  context. Other bots are opened by choice; visits do not expose a default group
+  chat. Delegation outcomes use attributed review cards and optional Activity.
+- **Owner acceptance evidence:** On October 23, 2026, after reviewing the
+  implementation adjustments and selecting the Chief-first concept, the owner
+  said: "Fine, I approve your overall plan. As you're doing this, have a bot
+  designated as UI/UX QC function to ensure the visual space and workflow don't
+  sprawl or become unintutive."
+- **Supersedes:** The round-2 handoff's default visit group-chat presentation,
+  UI-control-only rollout flag, and proposed replacement of all stale-response
+  guards with one generation check. Existing operation, route and authority
+  guards remain necessary. The earlier persistent bottom-navigation decision
+  continues to apply.
+- **Implementation impact:** Extract behavior in tested slices; preserve exact
+  request recovery, revision/hash-bound approvals and recorder lifetime. Add
+  accurate conversation summaries and human read tracking before default
+  rollout. Require independent UI/UX QC and behavior parity across layouts.
+  Camera attachments, live dictation, push notifications and continuous
+  cross-visit bot history remain deferred. This approval does not activate
+  production capabilities or authorize access to real patient content.

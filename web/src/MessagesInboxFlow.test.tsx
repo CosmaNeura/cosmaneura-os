@@ -1,0 +1,28 @@
+import {act} from 'react';
+import {createRoot,type Root} from 'react-dom/client';
+import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+vi.hoisted(()=>{vi.stubEnv('VITE_MESSAGES_ENABLED','true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');});
+import {EncounterWorkspace} from './EncounterWorkspace';
+import {identity,installFixtures} from '../ux-acceptance/fixtures';
+import {workspaceApi} from './workspace-api';
+import {memoryDraftStorage} from './draft-test-fixture';
+import {PRESENTATION_KEY} from './session/presentation';
+const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+let root:Root,host:HTMLDivElement;
+beforeEach(async()=>{vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();history.replaceState(null,'','#cosmas/home');localStorage.setItem(PRESENTATION_KEY,'messages');
+  window.matchMedia=vi.fn().mockReturnValue({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()});window.scrollTo=vi.fn();HTMLElement.prototype.scrollIntoView=vi.fn();await installFixtures(true);
+  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
+});
+afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.unstubAllGlobals();});
+it('renames through the unchanged durable notebook editor and returns to the updated inbox',async()=>{
+  await vi.waitFor(()=>expect(host.querySelector<HTMLButtonElement>('.messages-row-menu')?.disabled).toBe(false));
+  await act(async()=>host.querySelector<HTMLButtonElement>('.messages-row-menu')!.click());
+  const button=(label:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(item=>!item.closest('[hidden]')&&item.textContent===label);
+  await vi.waitFor(()=>expect(button('Rename notebook')).toBeTruthy());await act(async()=>button('Rename notebook')!.click());
+  const editor=()=>host.querySelector<HTMLInputElement>('.notebook-title-editor input');await vi.waitFor(()=>expect(editor()?.disabled).toBe(false));
+  const rename=vi.spyOn(workspaceApi,'renameNotebook');await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(editor(),'Invented renamed sleep notebook');editor()!.dispatchEvent(new Event('input',{bubbles:true}));});
+  await act(async()=>button('Save title')!.click());await vi.waitFor(()=>expect(rename).toHaveBeenCalledOnce());
+  expect(rename.mock.calls[0][2]).toMatchObject({title:'Invented renamed sleep notebook',expected_title_revision:0});expect(rename.mock.calls[0][2].idempotency_key).toMatch(/^[a-f0-9-]{36}$/);
+  await vi.waitFor(()=>expect(host.querySelector('.messages-row .messages-context')?.textContent).toBe('Invented renamed sleep notebook'));
+  expect(host.querySelector('.notebook-title-editor')).toBeNull();expect(host.querySelectorAll('[role="dialog"]')).toHaveLength(0);
+});

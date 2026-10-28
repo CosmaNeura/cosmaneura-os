@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {mkdtemp, mkdir, readFile, writeFile, chmod, symlink, rm, readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
-import {join} from 'node:path';
+import {basename, dirname, join} from 'node:path';
 import {prepareDesktopState} from './installation-state.mjs';
 import {createAuthAccessStore} from './auth-access-store.mjs';
 
@@ -116,4 +116,104 @@ test('existing isolated compositions retain their original state paths without n
   const {root, prepare} = await fixture(t);
   assert.equal(await prepare({stateDirectory: join(root, 'old')}), join(root, 'old'));
   assert.deepEqual(await readdir(root), []);
+});
+
+async function operationalFixture(t) {
+  const {root} = await fixture(t);
+  const apiOrigin = 'https://api.example.invalid';
+  const nativeIdentity = {
+    version: 1, profile: 'operational-beta-v1', client: 'desktop', apiOrigin,
+    frontendOrigin: 'https://identity.example.invalid',
+    publishableKey: 'pk_live_' + Buffer.from('identity.example.invalid$').toString('base64'),
+    organizationId: 'org_invented_practice', audience: 'invented-cosmabot-api',
+  };
+  const installation = {version: 1, profile: 'beta', bundleIdentifier: 'com.cosmasos.beta.desktop',
+    storageGeneration: 1, electronVersion: '43.4.1', rendererPartition: 'persist:cosmasos-operational-beta',
+    authHelperBundleIdentifier: 'com.cosmasos.beta.desktop.auth'};
+  const config = {mode: 'hosted-beta-authenticated', apiOrigin, dataMode: 'synthetic', nativeIdentity,
+    installation: {...installation, storageScope: 'identity-v1'}};
+  const legacy = {...config, installation, nativeIdentity: {...nativeIdentity,
+    profile: 'operational-staging-v1', audience: '', organizationId: 'org_invented_old_lab',
+    frontendOrigin: 'https://invented-old.clerk.accounts.dev',
+    publishableKey: 'pk_test_' + Buffer.from('invented-old.clerk.accounts.dev$').toString('base64')}};
+  return {root, config, legacy, prepare: value => prepareDesktopState(value, root, '43.4.1')};
+}
+
+test('identity-scoped beta cold start preserves the complete old installation and supports both rollback paths', async t => {
+  const {config, legacy, prepare} = await operationalFixture(t);
+  const oldPath = await prepare(legacy);
+  const oldMarker = await readFile(join(oldPath, 'cosmas-installation.json'));
+  const oldCiphertext = Buffer.from([19, 210, 0, 155]);
+  await writeFile(join(oldPath, 'old-encrypted-drafts'), oldCiphertext, {mode: 0o600});
+  assert.equal(await createAuthAccessStore(oldPath).read(), 'needs_login');
+  await createAuthAccessStore(oldPath).write('logout_pending');
+  const directory = await prepare(config);
+  assert.equal(dirname(directory), dirname(oldPath));
+  assert.match(basename(directory), /^com\.cosmasos\.beta\.desktop\.identity-[a-f0-9]{64}$/);
+  assert.deepEqual(await readdir(directory), ['cosmas-installation.json']);
+  assert.equal(await createAuthAccessStore(directory).read(), 'needs_login');
+  const marker = await readFile(join(directory, 'cosmas-installation.json'));
+  assert.equal(JSON.parse(marker).storageScope, 'identity-v1');
+  const ciphertext = Buffer.from([209, 6, 0, 18]);
+  await writeFile(join(directory, 'new-encrypted-drafts'), ciphertext, {mode: 0o600});
+  await createAuthAccessStore(directory).write('logout_pending');
+  for (const buildNumber of ['1104', '1103']) {
+    assert.equal(await prepare({...config, buildNumber}), directory);
+    assert.deepEqual(await readFile(join(directory, 'cosmas-installation.json')), marker);
+    assert.deepEqual(await readFile(join(directory, 'new-encrypted-drafts')), ciphertext);
+    assert.equal(await createAuthAccessStore(directory).read(), 'logout_pending');
+  }
+  assert.equal(await prepare(legacy), oldPath);
+  assert.deepEqual(await readFile(join(oldPath, 'cosmas-installation.json')), oldMarker);
+  assert.deepEqual(await readFile(join(oldPath, 'old-encrypted-drafts')), oldCiphertext);
+  assert.equal(await createAuthAccessStore(oldPath).read(), 'logout_pending');
+});
+
+test('each exact native identity has separate state and an omitted scope cannot adopt old account data', async t => {
+  const {config, legacy, prepare} = await operationalFixture(t);
+  const oldPath = await prepare(legacy), path = await prepare(config);
+  await writeFile(join(path, 'retained-ciphertext'), 'invented encrypted bytes', {mode: 0o600});
+  const changes = [
+    {organizationId: 'org_invented_other'},
+    {frontendOrigin: 'https://other.example.invalid', publishableKey: 'pk_live_' + Buffer.from('other.example.invalid$').toString('base64')},
+    {audience: 'invented-other-api'},
+    {apiOrigin: 'https://other-api.example.invalid'},
+  ];
+  const directories = new Set([oldPath, path]);
+  for (const change of changes) {
+    const identity = {...config.nativeIdentity, ...change};
+    const next = await prepare({...config, apiOrigin: identity.apiOrigin, nativeIdentity: identity});
+    assert.equal(directories.has(next), false);
+    assert.deepEqual(await readdir(next), ['cosmas-installation.json']);
+    directories.add(next);
+  }
+  await assert.rejects(prepare({...config, installation: legacy.installation}), /preserved/);
+  assert.equal(await readFile(join(path, 'retained-ciphertext'), 'utf8'), 'invented encrypted bytes');
+  assert.equal(await prepare(legacy), oldPath);
+});
+
+test('unsupported or nonoperational storage scopes fail before creating state', async t => {
+  const {root, config, prepare} = await operationalFixture(t);
+  for (const storageScope of ['', null, false, 'identity-v2', undefined]) {
+    await assert.rejects(prepare({...config, installation: {...config.installation, storageScope}}), /preserved/);
+  }
+  await assert.rejects(prepare({mode: 'local-synthetic-authenticated', installationRoot: join(root, 'synthetic'),
+    installation: {...identity, storageScope: 'identity-v1'}}), /preserved/);
+  assert.deepEqual(await readdir(root), []);
+});
+
+test('identity-scoped roots retain missing-marker recovery and symlink protections', async t => {
+  const {root, config, prepare} = await operationalFixture(t);
+  const directory = await prepare(config);
+  const marker = join(directory, 'cosmas-installation.json');
+  await rm(marker);
+  await writeFile(join(directory, 'retained-ciphertext'), 'do not reset', {mode: 0o600});
+  await assert.rejects(prepare(config), /preserved/);
+  assert.deepEqual(await readdir(directory), ['retained-ciphertext']);
+  await rm(directory, {recursive: true});
+  const target = join(root, 'untouched-target');
+  await mkdir(target, {mode: 0o700});
+  await symlink(target, directory);
+  await assert.rejects(prepare(config), /preserved/);
+  assert.deepEqual(await readdir(target), []);
 });

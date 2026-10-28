@@ -10,17 +10,20 @@ import {DraftStoreError} from './draft-store';
 import type {EFaxInboundPanelProps} from './EFaxInboundPanel';
 
 const address=accountEditorAddress('efax-inbound');
-export function EFaxInboundMount({identity,enabled=EFAX_INBOUND_BUILD,locked=false,onBusyChange,onAuthenticationLost,onReviewDocument}:{identity:AuthenticatedWorkspaceIdentity;enabled?:boolean;locked?:boolean;onBusyChange?:(busy:boolean)=>void;onAuthenticationLost:(e:unknown)=>void;onReviewDocument?:EFaxInboundPanelProps['onReviewDocument']}){
+export function EFaxInboundMount({identity,enabled=EFAX_INBOUND_BUILD,locked=false,onBusyChange,onActiveChange,taskActive=true,isTaskCurrent,onAuthenticationLost,onReviewDocument}:{identity:AuthenticatedWorkspaceIdentity;enabled?:boolean;locked?:boolean;onBusyChange?:(busy:boolean)=>void;onActiveChange?:(active:boolean)=>void;taskActive?:boolean;isTaskCurrent?:()=>boolean;onAuthenticationLost:(e:unknown)=>void;onReviewDocument?:EFaxInboundPanelProps['onReviewDocument']}){
  const context=useContext(AccountRecoveryContext),scope=context?.recoveryScope;
+ const activeCallback=useRef(onActiveChange);activeCallback.current=onActiveChange;
+ const activity=useMemo(()=>({checking:false,panel:false}),[identity,context,scope,enabled]),currentActivity=useRef(activity);currentActivity.current=activity;
+ const reportActivity=useMemo(()=>({set:(kind:'checking'|'panel',value:boolean)=>{if(currentActivity.current!==activity)return;activity[kind]=value;activeCallback.current?.(activity.checking||activity.panel);}}),[activity]);
  const [proof,setProof]=useState<{identity:AuthenticatedWorkspaceIdentity;context:typeof context;generation:number;account:AccountIdentity}|null>(null),[error,setError]=useState('');
  const live=useRef({identity,context,scope,enabled,alive:true,generation:0}),denied=useRef(onAuthenticationLost);denied.current=onAuthenticationLost;
  if(live.current.identity!==identity||live.current.context!==context||live.current.scope!==scope||live.current.enabled!==enabled)live.current={identity,context,scope,enabled,alive:true,generation:live.current.generation+1};
  useEffect(()=>{live.current.alive=true;return()=>{live.current.alive=false;live.current.generation++;};},[]);
  useEffect(()=>{const generation=++live.current.generation,c=new AbortController();setProof(null);setError('');
   const current=()=>live.current.alive&&live.current.enabled&&live.current.generation===generation&&live.current.identity===identity&&live.current.context===context&&live.current.scope===scope;
-  if(enabled&&context&&validRecoveryScope(scope))void(async()=>{await context.authorize();if(!current())return;const account=await accountIdentityApi.read(identity,c.signal);if(!current())return;if(account.recovery_scope!==scope)throw new WorkspaceApiError(403);setProof({identity,context,generation,account});})().catch(e=>{if(!current())return;setError('Private received-fax work could not be opened with this account.');if(e instanceof WorkspaceApiError&&[401,403,404,426].includes(e.status))denied.current(e);});
-  return()=>{c.abort();live.current.generation++;};
- },[identity,context,scope,enabled]);
+  if(enabled&&context&&validRecoveryScope(scope)){reportActivity.set('checking',true);void(async()=>{await context.authorize();if(!current())return;const account=await accountIdentityApi.read(identity,c.signal);if(!current())return;if(account.recovery_scope!==scope)throw new WorkspaceApiError(403);setProof({identity,context,generation,account});})().catch(e=>{if(!current())return;setError('Private received-fax work could not be opened with this account.');if(e instanceof WorkspaceApiError&&[401,403,404,426].includes(e.status))denied.current(e);}).finally(()=>reportActivity.set('checking',false));}
+  return()=>{c.abort();live.current.generation++;reportActivity.set('checking',false);};
+ },[identity,context,scope,enabled,reportActivity]);
  const access=useMemo<EFaxInboundRecoveryAccess|null>(()=>{
   if(!proof||!context||proof.identity!==identity||proof.context!==context||proof.generation!==live.current.generation||!enabled||proof.account.recovery_scope!==scope)return null;
   const expected={box_id:proof.account.box_id,owner_id:proof.account.actor_id},generation=proof.generation;
@@ -32,5 +35,5 @@ export function EFaxInboundMount({identity,enabled=EFAX_INBOUND_BUILD,locked=fal
  if(!enabled)return <section aria-label="Received eFax"><h2>Received eFax</h2><p>Received-fax access is not enabled in this app build. Your administrator must configure it separately from sending faxes.</p></section>;
  if(!context||!validRecoveryScope(scope))return <p role="alert">Private saved-work storage is required for received eFax.</p>;
  if(!proof||!access)return <section aria-label="Received-fax account access"><p role={error?'alert':'status'}>{error||'Checking private received-fax account access…'}</p></section>;
- return <EFaxInboundPanel identity={identity} scope={{box_id:proof.account.box_id,owner_id:proof.account.actor_id}} recovery={access} locked={locked} onBusyChange={onBusyChange} onAuthenticationLost={onAuthenticationLost} onReviewDocument={onReviewDocument}/>;
+ return <EFaxInboundPanel identity={identity} scope={{box_id:proof.account.box_id,owner_id:proof.account.actor_id}} recovery={access} locked={locked} onBusyChange={onBusyChange} onActiveChange={value=>reportActivity.set('panel',value)} taskActive={taskActive} isTaskCurrent={isTaskCurrent} onAuthenticationLost={onAuthenticationLost} onReviewDocument={onReviewDocument}/>;
 }

@@ -24,7 +24,7 @@ export function clinicalDraftEntry(workspace:Workspace,handoff:DraftHandoff):Wor
   if(handoff.status!=='completed'||handoff.task_brief_unavailable)return undefined;
   return workspace.entries.find(entry=>entry.id===handoff.result_entry_id&&entry.kind==='handoff_result'&&entry.reply&&
     (entry.reply.agent_id?entry.reply.agent_id===handoff.recipient_agent_id:entry.reply.role===handoff.recipient_role)&&
-    ![entry.google_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state].includes('unavailable'));
+    ![entry.google_source_state,entry.microsoft_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state,entry.ehr_source_state,entry.calendar_import_source_state].includes('unavailable'));
 }
 
 export function clinicalDraftAccepted(handoff:DraftHandoff):boolean {

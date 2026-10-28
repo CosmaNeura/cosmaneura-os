@@ -20,10 +20,15 @@ const research = new RegExp(`^/workspaces/${ID}/research(?:/(saved|search|resolv
 const agentResearch = new RegExp(`^/workspaces/${ID}/agent-research(?:/(${ID})/review)?$`);
 const privateDraft = new RegExp(`^/workspaces/(?:private-drafts(?:/resolve)?|${ID}/appointment-link(?:/resolve)?)$`);
 const privateRecording = new RegExp(`^/workspaces/${ID}/private-recordings(?:/(resolve|${ID})(?:/(finish|link|visit-binding))?)?$`);
+const ehrReadReview = new RegExp(`^/workspaces/${ID}/ehr-read/review$`);
 const googleCalendarReview = new RegExp(`^/workspaces/${ID}/google-calendar/review$`);
+const microsoftMessageReview = new RegExp(`^/workspaces/${ID}/microsoft-messages/review$`);
 const googleMessageReview = new RegExp(`^/workspaces/${ID}/google-messages/review$`);
 const schedulingPatientSetup = new RegExp(`^/workspaces/${ID}/scheduling-patient/setup$`);
-export const CONNECTOR_HEADERS = ['X-Cosmas-Vendor-Contract','X-Cosmas-Finance-Contract','X-Cosmas-Portal-Contract','X-Cosmas-Portal-Work-Contract','X-Cosmas-Finance-Setup-Contract','X-Cosmas-Membership-Contract','X-Cosmas-Vendor-Setup-Contract','X-Cosmas-Inbox-Contract','X-Cosmas-Inbox-Handoff-Contract','X-Cosmas-Record-Contract','X-Cosmas-Research-Contract','X-Cosmas-Connection-Contract','X-Cosmas-Scheduling-Login','X-Cosmas-Microsoft-Connection','X-Cosmas-Google-Connection','X-Cosmas-Practice-Access-Contract','X-Cosmas-Google-Messages','X-Cosmas-Google-Calendar','X-Cosmas-Scheduling-Patient','X-Cosmas-Private-Draft','X-Cosmas-Private-Recording'];
+const conversationPages = /^\/workspaces\/conversations(?:\/pages\/c1[0-9a-f]{160})?$/;
+const conversationBot = '(?:chief|scribe|visit_prep|follow_up|[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})';
+const conversationRead = new RegExp(`^/workspaces/${ID}/conversations/${conversationBot}/read$`);
+export const CONNECTOR_HEADERS = ['X-Cosmas-Vendor-Contract','X-Cosmas-Finance-Contract','X-Cosmas-Portal-Contract','X-Cosmas-Portal-Work-Contract','X-Cosmas-Finance-Setup-Contract','X-Cosmas-Membership-Contract','X-Cosmas-Vendor-Setup-Contract','X-Cosmas-Inbox-Contract','X-Cosmas-Inbox-Handoff-Contract','X-Cosmas-Record-Contract','X-Cosmas-Research-Contract','X-Cosmas-Connection-Contract','X-Cosmas-Scheduling-Login','X-Cosmas-Microsoft-Connection','X-Cosmas-Google-Connection','X-Cosmas-Practice-Access-Contract','X-Cosmas-Google-Messages','X-Cosmas-Google-Calendar','X-Cosmas-Scheduling-Patient','X-Cosmas-Private-Draft','X-Cosmas-Private-Recording','X-Cosmas-Conversations','X-Cosmas-Ehr-Read','X-Cosmas-Microsoft-Messages'];
 
 /** Closed method/path/query classification, shared by admission and byte budgets. */
 export function connectorApiRoute(target, method) {
@@ -31,6 +36,8 @@ export function connectorApiRoute(target, method) {
   const query = question < 0 ? '' : target.slice(question);
   const plan = (header,input,output,extra={}) => ({header,input,output,seconds:30,...extra});
   const incoming = (header,input,output) => plan(header,input,output,{seconds:15,strictResponse:true,errorOutput:2048});
+  if(conversationPages.test(path)) return method==='GET'&&!query ? incoming('X-Cosmas-Conversations',0,65536) : null;
+  if(conversationRead.test(path)) return method==='POST'&&!query ? incoming('X-Cosmas-Conversations',4096,65536) : null;
   const recording = privateRecording.exec(path);
   if(recording) return !query && (method==='POST'&&(recording[1]===undefined||recording[1]==='resolve'&&!recording[2]||recording[1]!=='resolve'&&!!recording[2])||method==='GET'&&recording[1]!==undefined&&recording[1]!=='resolve'&&(!recording[2]||recording[2]==='visit-binding'))
     ? incoming('X-Cosmas-Private-Recording',method==='POST'?4096:0,16384) : null;
@@ -38,8 +45,12 @@ export function connectorApiRoute(target, method) {
     ? incoming('X-Cosmas-Private-Draft',method==='POST'?4096:0,method==='GET'?65536:12000000) : null;
   if(schedulingPatientSetup.test(path)) return method === 'POST' && !query
     ? plan('X-Cosmas-Scheduling-Patient',4096,16384,{seconds:45,strictResponse:true,errorOutput:2048}) : null;
+  if(path === '/connections/ehr/reads' || ehrReadReview.test(path)) return method === 'POST' && !query
+    ? plan('X-Cosmas-Ehr-Read',4096,ehrReadReview.test(path)?12000000:131072,{seconds:50,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/google/calendar-summaries' || googleCalendarReview.test(path)) return method === 'POST' && !query
     ? plan('X-Cosmas-Google-Calendar',4096,googleCalendarReview.test(path)?12000000:131072,{seconds:50,strictResponse:true,errorOutput:2048}) : null;
+  if(path === '/connections/microsoft/messages' || microsoftMessageReview.test(path)) return method === 'POST' && !query
+    ? plan('X-Cosmas-Microsoft-Messages',8192,microsoftMessageReview.test(path)?12000000:131072,{seconds:50,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/google/messages' || googleMessageReview.test(path)) return method === 'POST' && !query
     ? plan('X-Cosmas-Google-Messages',4096,googleMessageReview.test(path)?12000000:131072,{seconds:50,strictResponse:true,errorOutput:2048}) : null;
   if(path === '/connections/catalog') return method === 'GET' && !query

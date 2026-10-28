@@ -1,5 +1,6 @@
 import {act as reactAct} from 'react';
 import {ScribeLabEpisode} from './scribe-lab-episode';
+import {clickEnabledLabButton} from './lab-button';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterAll,afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_CAPTURE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_CAPTURE_NOTES_ENABLED','true');});
@@ -37,8 +38,9 @@ const note=(w:Workspace)=>JSON.stringify(w.note,(_key,value)=>_key==='sources_ch
 function controls(ep:Episode){
  const act=async <T,>(callback:()=>T|Promise<T>):Promise<T>=>{ep.lifecycle.check();const result=await reactAct(callback);ep.lifecycle.check();return result;};
 async function wait(check:()=>void|Promise<void>){const until=performance.now()+15000;while(performance.now()<until){ep.lifecycle.check();let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,5));ep.lifecycle.check();try{await check();done=true;}catch{}});if(done)return;}ep.lifecycle.check();await check();}
-function button(label:string){const result=[...ep.host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===label||b.textContent?.replace(/^📄\s*/u,'').trim()===label||b.getAttribute('aria-label')===label);expect(result,label).toBeTruthy();return result!;}
-async function click(label:string){await wait(()=>expect(button(label).disabled,label).toBe(false));await act(async()=>button(label).click());}
+function findButton(label:string){return [...ep.host.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent?.trim()===label||b.textContent?.replace(/^📄\s*/u,'').trim()===label||b.getAttribute('aria-label')===label);}
+function button(label:string){const result=findButton(label);expect(result,label).toBeTruthy();return result!;}
+async function click(label:string){await clickEnabledLabButton(()=>findButton(label),act,()=>ep.lifecycle.check(),label);}
 async function input(selector:string,value:string){await wait(()=>expect(ep.host.querySelector(selector)).toBeTruthy());const field=ep.host.querySelector<HTMLTextAreaElement>(selector)!;await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(field,value);field.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function read(){ep.lifecycle.check();const w=await workspaceApi.read(ep.identity,ep.wid);ep.lifecycle.check();expect(note(w)).toBe(ep.noteBefore);expect(sources(w)).toBe(ep.sourcesBefore);return w;}
 async function refresh(){await click('Refresh encounter');await wait(()=>expect(button('Refresh encounter').disabled).toBe(false));}

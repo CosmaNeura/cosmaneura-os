@@ -1,7 +1,15 @@
 import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
-import {afterEach,beforeEach,expect,it,vi} from 'vitest';
+import {afterAll,afterEach,beforeEach,expect,it,vi} from 'vitest';
+vi.hoisted(()=>{
+  for(const flag of ['VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED','VITE_WORKSPACE_ROUTINES_ENABLED'])vi.stubEnv(flag,'true');
+  vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_API_BASE','http://127.0.0.1:8000');
+});
 import {parseWorkBrief} from './routine-api';
+import {WorkRoutines} from './WorkRoutines';
+import {AccountRecoveryContext} from './account-recovery';
+import {DraftJournal} from './draft-journal';
+import {memoryDraftStorage} from './draft-test-fixture';
 import type {AccountRecoveryAccess} from './account-recovery';
 import type {ProviderTeam} from './workspace-api';
 import actual from './__fixtures__/routine-lanes/actual-routine-lanes.json';
@@ -65,16 +73,13 @@ it('bounds partial-report counts by visible facts and the number of hidden rows'
   expect(()=>parseWorkBrief({...value,counts:{...value.counts,open:open.length+3}},value.id)).toThrow();
 });
 
+afterAll(()=>vi.unstubAllEnvs());
 let root:Root|undefined,host:HTMLDivElement|undefined,access:AccountRecoveryAccess|undefined;
 beforeEach(()=>{Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});vi.clearAllMocks();});
 afterEach(async()=>{if(root)await act(async()=>root!.unmount());root=undefined;access?.journal.close();access=undefined;
-  host?.remove();host=undefined;vi.unstubAllGlobals();vi.unstubAllEnvs();});
+  host?.remove();host=undefined;vi.unstubAllGlobals();});
 
 async function mount(report:unknown=actual.report){
-  for(const flag of ['VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED','VITE_WORKSPACE_ROUTINES_ENABLED'])vi.stubEnv(flag,'true');
-  vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_API_BASE','http://127.0.0.1:8000');vi.resetModules();
-  const [{WorkRoutines},{AccountRecoveryContext},{DraftJournal},{memoryDraftStorage}]=await Promise.all([
-    import('./WorkRoutines'),import('./account-recovery'),import('./draft-journal'),import('./draft-test-fixture')]);
   const state={report,status:200};
   const summary=report as typeof actual.report;
   const configuration={...actual.routine,runs:[{id:summary.id,scheduled_at:summary.scheduled_at,completed_at:summary.completed_at,local_date:summary.local_date}]};

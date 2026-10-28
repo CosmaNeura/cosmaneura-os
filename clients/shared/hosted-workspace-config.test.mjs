@@ -37,3 +37,20 @@ test('an incomplete or unpinned hosted build fails closed', () => {
     'https://api.example.invalid?q=1','https://api.example.invalid#x','https://API.example.invalid','https://api.example.invalid:444'])
     assert.equal(exactHostedOrigin(origin),false,origin);
 });
+
+test('desktop hash navigation retains only the exact packaged document and proxy transport', () => {
+  const env={...base,VITE_WORKSPACE_HOSTED_CLIENT:'desktop',VITE_WORKSPACE_WEB_ORIGIN:'',
+    VITE_WORKSPACE_NATIVE_AUTH_ENABLED:'false',VITE_WORKSPACE_DESKTOP_AUTH_ENABLED:'true',VITE_API_BASE:'app://cosmas/api'};
+  const config=resolveHostedWorkspace(env);assert.ok(config);
+  for(const fragment of ['#cosmas/home','#cosmas/messages/chief?details=1']) {
+    const page='app://cosmas/index.html'+fragment;
+    assert.equal(permittedHostedWorkspace(config,env.VITE_API_BASE,page),true);
+    assert.equal(permittedHostedWorkspace(config,env.VITE_API_BASE,page,true),false);
+    assert.equal(permittedHostedWorkspace(config,base.VITE_API_BASE,page),false);
+  }
+  for(const page of ['app://cosmas/index.html?redirect=1#cosmas/home','app://cosmas/other.html#cosmas/home',
+    'app://user@cosmas/index.html#cosmas/home','app://cosmas:80/index.html#cosmas/home',
+    'app://cosmas/a/../index.html#cosmas/home','app://cosmas/%69ndex.html#cosmas/home',
+    'app://COSMAS/index.html#cosmas/home','https://cosmas/index.html#cosmas/home'])
+    assert.equal(permittedHostedWorkspace(config,env.VITE_API_BASE,page),false,page);
+});

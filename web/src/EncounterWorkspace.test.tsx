@@ -62,7 +62,11 @@ describe("private encounter workspace", () => {
     Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
     vi.stubGlobal('crypto',webcrypto);
     vi.clearAllMocks(); draftStorage = memoryDraftStorage();
+    // One-shot responses belong to one journey, including ones it never sends.
+    for(const method of Object.values(workspaceApi))if(vi.isMockFunction(method))method.mockReset();
+    vi.mocked(modelWorkApi.resolve).mockReset();
     vi.mocked(workspaceApi.checkSyntheticConnection).mockResolvedValue(undefined);
+    vi.mocked(workspaceApi.practiceWorkItem).mockRejectedValue(new Error("Unavailable fixture"));
     vi.mocked(workspaceApi.open).mockResolvedValue({ identity, workspace: structuredClone(fixture), team: structuredClone(team) });
     vi.mocked(workspaceApi.team).mockResolvedValue(structuredClone(team));
     vi.mocked(workspaceApi.read).mockResolvedValue({...structuredClone(fixture),revision:2});
@@ -80,6 +84,12 @@ describe("private encounter workspace", () => {
     await act(async () => button!.click());
   }
   const settings = () => settingsNavigation(container);
+  function enableModel(){
+    const connected=structuredClone(team);connected.llm.enabled=true;
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity,workspace:structuredClone(fixture),team:connected});
+    vi.mocked(workspaceApi.team).mockResolvedValue(connected);
+    return connected;
+  }
   it('hides pages that cannot render until their required identity is available',async()=>{
     const labels=()=>[...container.querySelectorAll('[aria-label="Workspace navigation"] button')].map(button=>button.textContent);
     expect(labels()).toEqual(['Visits and notes']);
@@ -247,10 +257,10 @@ describe("private encounter workspace", () => {
     });
   }
 
-  async function openAuthenticated(access:AuthenticatedWorkspaceIdentity, storage=draftStorage) {
+  async function openAuthenticated(access:AuthenticatedWorkspaceIdentity, storage=draftStorage, configured=team) {
     vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
     vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
-    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(configured)});
     await act(async()=>root.render(<EncounterWorkspace draftStorage={storage} authenticated={access}/>));
     await click('Visits and notes');
     await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
@@ -411,7 +421,7 @@ describe("private encounter workspace", () => {
 
   it.each([false,true])('uses explicit Send for native iOS multiline questions while preserving desktop Enter (native: %s)',async native=>{
     const access:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:vi.fn(),...(native?{nativeSession:{revision:modelUuid(954),isCurrent:()=>true}}:{})};
-    await openAuthenticated(access);
+    await openAuthenticated(access,draftStorage,enableModel());
     await input('Thought or question','First invented line');
     vi.mocked(workspaceApi.ask).mockRejectedValue(new TypeError('Invented offline response'));
     const question=container.querySelector<HTMLTextAreaElement>('#team-question')!;
@@ -566,7 +576,7 @@ describe("private encounter workspace", () => {
     expect(container.querySelector<HTMLDetailsElement>(".session-prep-detail")?.open).toBe(false);
     expect(document.activeElement).toBe(container.querySelector("#team-question"));
     await input("Thought or question","What changed since the previous visit?");await click("Send message");
-    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Conversation saved.");});
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Delivered");});
     const first=vi.mocked(workspaceApi.ask).mock.calls[0][2];
     expect(first.session_prep_analysis).toEqual(await sessionPrepAnalysis(sessionPrepFixture()));
     expect(JSON.stringify(first)).not.toContain("Invented reviewed visit summary");
@@ -580,7 +590,7 @@ describe("private encounter workspace", () => {
     expect(workspaceApi.open).not.toHaveBeenCalled();
     await click("Open synthetic encounter");
     expect(container.textContent).toContain("Linked visit");
-    expect(container.textContent).toContain("AI chat needs a service connection");
+    expect(container.textContent).toContain("AI chat is not connected yet.");
     await click("During");
     expect((([...container.querySelectorAll("button")].find(b => b.textContent === "Start recording")) as HTMLButtonElement).disabled).toBe(true);
     expect(container.querySelector('nav[aria-label="Encounter stage"] button[aria-pressed="true"]')?.textContent).toBe("During");
@@ -736,6 +746,7 @@ describe("private encounter workspace", () => {
   }
 
   it("adds a private instance, retries the identical configuration, and addresses that instance", async () => {
+    const connected=enableModel();
     await click("Open synthetic encounter"); await addScribe();
     vi.mocked(workspaceApi.saveTeam).mockRejectedValueOnce(new WorkspaceApiError(503));
     await settings().save();
@@ -745,8 +756,8 @@ describe("private encounter workspace", () => {
     expect(added.instance_id).toMatch(/^[0-9a-f-]{36}$/);
     expect(input.configuration.bots[0].name).toBe("Scribe");
     expect(container.querySelector<HTMLButtonElement>('.team-flow-footer button')!.disabled).toBe(true);
-    const saved = {...team, revision: 2, configuration: input.configuration,
-      members: [...team.members, {...team.members[0], instance_id: added.instance_id, agent_id: "extra-principal"}]};
+    const saved = {...connected, revision: 2, configuration: input.configuration,
+      members: [...connected.members, {...connected.members[0], instance_id: added.instance_id, agent_id: "extra-principal"}]};
     vi.mocked(workspaceApi.saveTeam).mockResolvedValue(saved); vi.mocked(workspaceApi.team).mockResolvedValue(saved);
     await click("Retry same save");
     expect(vi.mocked(workspaceApi.saveTeam).mock.calls[1][1]).toEqual(input);
@@ -759,7 +770,7 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.ask).mockImplementation(async(_,id,body)=>modelReceipt(body,id));
     await click("Send message");
     expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({role: added.instance_id, team_revision: 2});
-    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Conversation saved.");});
+    await vi.waitFor(async()=>{await act(async()=>{});expect(container.textContent).toContain("Delivered");});
     await settings().editSelected(); await settings().click("Permissions");
     const enabled = [...container.querySelectorAll("label")].find(e => e.textContent === "Enable this bot")!.querySelector<HTMLInputElement>("input")!;
     await act(async () => enabled.click());
@@ -950,6 +961,7 @@ describe("private encounter workspace", () => {
   });
 
   it("resolves an uncertain model save with the identical payload and key without resubmitting", async () => {
+    enableModel();
     await click("Open synthetic encounter"); await input("Thought or question", "Invented question");
     vi.mocked(workspaceApi.ask).mockRejectedValueOnce(new TypeError("network detail must stay private"));
     vi.mocked(modelWorkApi.resolve).mockImplementation(async(_,id,op)=>modelReceipt(op.body as typeof import('./model-work-test-fixture').conversationFixture,id));
@@ -1056,14 +1068,16 @@ describe("private encounter workspace", () => {
     expect(container.textContent).toContain("My Prep Partner");
   });
 
-  it("uses the selected bot and shows thinking then an attributed GPT-4.1 answer", async () => {
+  it("uses the selected bot and waits for confirmation before showing its attributed answer", async () => {
     const connected = structuredClone(team); connected.llm.enabled = true;
     vi.mocked(workspaceApi.open).mockResolvedValue({ identity, workspace: fixture, team: connected });
     await click("Open synthetic encounter"); await input("Thought or question", "What needs attention?");
     let resolve!: (result: Awaited<ReturnType<typeof workspaceApi.ask>>) => void;
     vi.mocked(workspaceApi.ask).mockReturnValue(new Promise(done => { resolve = done; }));
     await click("Send message");
-    expect(container.textContent).toContain("Visit Prep is thinking");
+    expect(container.textContent).toContain("Waiting for confirmation…");
+    expect(container.textContent).not.toContain("Visit Prep is thinking");
+    expect(container.querySelector(".message-request-status-dots")).toBeNull();
     expect(vi.mocked(workspaceApi.ask).mock.calls[0][2]).toMatchObject({ role: "visit_prep", expected_revision: 1, team_revision: 1 });
     const result = structuredClone(fixture);
     result.revision = 2;
@@ -1089,6 +1103,7 @@ describe("private encounter workspace", () => {
   });
 
   it.each(["success", "error"])("animates only the selected bot's pending ask and stops immediately on %s", async outcome => {
+    enableModel();
     const preference = Object.assign(new EventTarget(), {matches:false});
     vi.stubGlobal("matchMedia", () => preference);
     vi.stubGlobal("IntersectionObserver", class {
@@ -1163,7 +1178,7 @@ describe("private encounter workspace", () => {
     await click("Review Scribe result");
     expect(container.textContent).toContain("Brief from Chief");
     expect(document.activeElement?.id).toBe("turn-draft-result");
-    expect(container.querySelector("#turn-draft-result .team-pill")?.textContent).toBe("GPT-4.1");
+    expect(container.querySelector("#turn-draft-result .team-pill")?.textContent).toBe("Unreviewed draft");
     expect(workspaceApi.ask).not.toHaveBeenCalled();
   });
 

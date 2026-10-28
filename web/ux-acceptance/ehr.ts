@@ -1,0 +1,93 @@
+import {elationLabFixture} from './elation-lab-fixtures';
+import {elationLabReport,elationLabWarnings,elationLabSource,type ElationLabReportsObservation,type ElationLabReportObservation} from '../src/elation-lab-contract';
+import {modelCanonical} from '../src/model-work-request';
+import {ehrHash,ehrProvider,ehrProviderFields,ehrSourceLabel,ehrItemHash,ehrContentHash,ehrSourceContent,ehrSourceHash,ehrReviewHash,validEhrCommand,validEhrReview,ehrMatchesCommand,type EhrReceipt,type EhrWindowItem,type EhrVerifiedItem,type EhrProblemsObservation,type EhrMedicationsObservation} from '../src/ehr-read-api';
+import {WorkspaceApiError,type Workspace} from '../src/workspace-api';
+
+/** Local invented-data rehearsal only. This handler never reaches a provider. */
+export function ehrRehearsal(read:()=>Workspace,write:(value:Workspace)=>void,storageKey:string,reset:boolean){
+ const ledgerKey=storageKey+':ehr',ledger=new Map<string,{hash:string;value:unknown}>(reset?[]:JSON.parse(sessionStorage.getItem(ledgerKey)??'[]'));
+ if(reset)sessionStorage.removeItem(ledgerKey);
+ const elationBinding={connection_id:'00000000-0000-4000-8000-000000009701',binding_sha256:'b'.repeat(64)};
+ const tebraBinding={connection_id:'00000000-0000-4000-8000-000000009702',binding_sha256:'a'.repeat(64)};
+ const stats={reads:0,problemReads:0,medicationReads:0,labListReads:0,labReportReads:0,reviews:0,resolves:0,inspects:0,externalCalls:0,requests:[] as {action:string;key:string}[]};
+ Object.assign(window,{ehrRehearsalStats:stats});
+ let lostReview=false,lostProblemRead=false,lostMedicationRead=false,lostLabRead=false,lostLabReview=false;
+ const scenario=()=>new URLSearchParams(location.search).get('scenario');
+ const response=(value:unknown,status=200)=>new Response(JSON.stringify(value),{status,headers:{'Content-Type':'application/json','Cache-Control':'no-store'}});
+ const find=(id:string)=>[...ledger.values()].map(row=>row.value).find((value):value is EhrReceipt=>!!value&&typeof value==='object'&&'observation_id' in value&&value.observation_id===id);
+ const retain=async(key:string,body:unknown,work:()=>Promise<unknown>)=>{const hash=await ehrHash(body),old=ledger.get(key);if(old){if(old.hash!==hash)throw new WorkspaceApiError(409,'idempotency_conflict');return structuredClone(old.value);}const value=await work();ledger.set(key,{hash,value});sessionStorage.setItem(ledgerKey,JSON.stringify([...ledger]));return structuredClone(value);};
+ return async(path:string,init?:RequestInit):Promise<Response|null>=>{
+  const review=/^\/workspaces\/([a-f0-9-]{36})\/ehr-read\/review$/.exec(path);
+  if(path!=='/connections/ehr/reads'&&!review)return null;
+  try{
+   if(init?.method!=='POST'||typeof init.body!=='string'||new Headers(init.headers).get('X-Cosmas-Ehr-Read')!=='1')throw new WorkspaceApiError(422,'invalid_ehr_read_request');
+   const body=JSON.parse(init.body);stats.requests.push({action:body.action??'review',key:body.idempotency_key??''});const provider=ehrProvider(body),binding=provider==='tebra'?tebraBinding:elationBinding,practice={label:provider==='tebra'?'Invented Tebra practice':'Invented Cypress practice',timezone:'America/New_York'};
+   if(review){
+    if(!validEhrReview(body)||review[1]!==read().id)throw new WorkspaceApiError(422,'invalid_ehr_read_review');stats.reviews++;
+    const result=await retain(body.idempotency_key,body,async()=>{const current=read(),anchor=find(body.observation_id);if(current.revision!==body.expected_revision)throw new WorkspaceApiError(409,'workspace_revision_conflict');if(!anchor||anchor.observation.provider!==provider||(anchor.observation.kind==='window'||anchor.observation.kind==='lab_reports')||anchor.source_sha256!==body.observation_sha256||anchor.observation.item.handle!==body.item_handle||anchor.observation.item.sha256!==body.item_sha256)throw new WorkspaceApiError(409,'ehr_read_source_changed');
+     const content=ehrSourceContent(anchor.observation),entry_id=crypto.randomUUID(),revision=current.revision+1;
+     const workspace:Workspace={...current,revision,model_observed_at:new Date().toISOString(),entries:[...current.entries,{id:entry_id,revision,kind:'ehr_read_source',content,source_label:ehrSourceLabel(anchor.observation),origin:'authenticated_human',ticket:null,created_at:new Date().toISOString(),ehr_source_state:'current'}]};write(workspace);
+     return {...ehrProviderFields(provider),transport:'mock',entry_id,entry_revision:revision,request_sha256:await ehrReviewHash(current.id,body),source_withheld:false,workspace,source:{entry_id,source_sha256:await ehrSourceHash(anchor,anchor.observation.item),content_sha256:await ehrContentHash(content)}};
+    });
+    if(['ehr-lost-review','ehr-problems-lost-review','ehr-medications-lost-review'].includes(scenario()??'')&&!lostReview){lostReview=true;throw new Error('Invented lost saved-source response');}
+    if(scenario()==='ehr-labs-lost-review'&&!lostLabReview){lostLabReview=true;throw new Error('Invented lost laboratory source response');}
+    return response(result);
+   }
+   if(body.action==='status')return response({contract_version:1,provider,mode:'synthetic',transport:'mock',installation:null,status:'ready',...binding,practice,...(body.include_problems===true&&provider==='elation'?{problems:scenario()==='ehr-problems-disabled'?'not_enabled':'available'}:{}),...(body.include_medications===true&&provider==='elation'?{medications:scenario()==='ehr-medications-disabled'?'not_enabled':'available'}:{}),...(body.include_labs===true&&provider==='elation'?{labs:scenario()==='ehr-labs-disabled'?'not_enabled':'available'}:{})});
+   if(body.action==='resolve'){stats.resolves++;return response((() => {const value=ledger.get(body.idempotency_key)?.value;if(value&&typeof value==='object'&&('provider' in value?value.provider:'elation')!==provider)throw new WorkspaceApiError(409,'ehr_read_binding_changed');return value;})()??{...ehrProviderFields(provider),status:'not_found',observation_id:null,observation_key:body.idempotency_key});}
+   if(body.action==='inspect'){stats.inspects++;const value=find(body.observation_id);if(!value||value.observation.provider!==provider)throw new WorkspaceApiError(409,'ehr_read_not_observed');return response(value);}
+   if(!validEhrCommand(body)||body.connection_id!==binding.connection_id||body.binding_sha256!==binding.binding_sha256)throw new WorkspaceApiError(422,'invalid_ehr_read_request');
+   const result=await retain(body.idempotency_key,body,async()=>{stats.reads++;
+    if(body.action==='observe'){
+     const duration=Date.parse(body.ends_at)-Date.parse(body.starts_at),starts=Date.parse(body.starts_at)+Math.min(3600000,duration/4);
+     const item:EhrWindowItem={handle:crypto.randomUUID(),sha256:'',starts_at:new Date(starts).toISOString(),ends_at:new Date(starts+Math.min(1800000,duration/4)).toISOString(),status:'Scheduled',selectable:true};item.sha256=await ehrItemHash(item);
+     const observation={kind:'window' as const,provider,mode:'synthetic' as const,practice,observed_at:new Date().toISOString(),window:{starts_at:body.starts_at,ends_at:body.ends_at},coverage:provider==='tebra'?'returned_rows_only' as const:'end_of_results' as const,items:[item]};
+     return {contract_version:1,...ehrProviderFields(provider),transport:'mock',...binding,observation_id:crypto.randomUUID(),observation_key:body.idempotency_key,source_sha256:await ehrHash({body,observation}),payload_sha256:await ehrHash(observation),observation};
+    }
+    if(body.action==='lab_reports'||body.action==='lab_report'){
+     if(body.workspace_id!==read().id||scenario()==='ehr-labs-disabled')throw new WorkspaceApiError(404,'ehr_read_labs_unavailable');
+     const anchor=find(body.observation_id),fixture=elationLabFixture(scenario());if(!anchor||anchor.observation.provider!=='elation')throw new WorkspaceApiError(409,'ehr_read_not_observed');
+     let observation:ElationLabReportsObservation|ElationLabReportObservation;
+     if(body.action==='lab_reports'){
+      stats.labListReads++;if(anchor.observation.kind!=='verified_visit'||!('first_name' in anchor.observation.item.patient))throw new WorkspaceApiError(409,'ehr_read_not_observed');const p=anchor.observation.item.patient,items=await Promise.all(fixture.reports.map(async r=>{const i={handle:crypto.randomUUID(),sha256:'',metadata_json:r.metadata_json};i.sha256=await ehrItemHash(i);return i;}));
+      observation={kind:'lab_reports',provider:'elation',mode:'synthetic',workspace_id:body.workspace_id,practice,window:anchor.observation.window,observed_at:new Date().toISOString(),patient_identity_json:modelCanonical({first_name:p.first_name,last_name:p.last_name,dob:p.birth_date}),parent:{observation_id:anchor.observation_id,source_sha256:anchor.source_sha256,item_sha256:anchor.observation.item.sha256},coverage:fixture.coverage,returned_report_count:fixture.returned_report_count,other_report_count:fixture.other_report_count,reported_total:fixture.reported_total,items};
+     }else{
+      stats.labReportReads++;if(anchor.observation.kind!=='lab_reports')throw new WorkspaceApiError(409,'ehr_read_not_observed');const index=anchor.observation.items.findIndex(i=>i.handle===body.item_handle&&i.sha256===body.item_sha256),chosen=fixture.reports[index];if(index<0||!chosen)throw new WorkspaceApiError(409,'ehr_read_source_changed');
+      const {items:_,coverage:__,returned_report_count:___,other_report_count:____,reported_total:_____,...base}=anchor.observation;
+      observation={...base,kind:'verified_lab_report',observed_at:new Date().toISOString(),parent:{observation_id:anchor.observation_id,source_sha256:anchor.source_sha256,item_sha256:body.item_sha256},item:{handle:body.item_handle,sha256:'',report_json:chosen.report_json,changed_since_selection:chosen.changed_since_selection,warnings:elationLabWarnings(elationLabReport(chosen.report_json),chosen.changed_since_selection),completeness:'selected_report_api_fields_only',source_content:'',content_sha256:''}};
+      observation.item.source_content=elationLabSource(observation);observation.item.content_sha256=await ehrContentHash(observation.item.source_content);observation.item.sha256=await ehrItemHash(observation.item);
+     }
+     const result:EhrReceipt={contract_version:1,transport:'mock',...binding,observation_id:crypto.randomUUID(),observation_key:body.idempotency_key,source_sha256:await ehrHash({body,observation}),payload_sha256:await ehrHash(observation),observation};if(!ehrMatchesCommand(result,body,anchor))throw new WorkspaceApiError(409,'ehr_read_source_changed');return result;
+    }
+    if(body.action==='medications'){
+     if(scenario()==='ehr-medications-disabled')throw new WorkspaceApiError(503,'ehr_read_medications_unavailable');
+     stats.medicationReads++;const anchor=find(body.observation_id);if(!anchor||anchor.observation.kind!=='verified_visit'||anchor.observation.provider!=='elation')throw new WorkspaceApiError(409,'ehr_read_not_observed');
+     const medications:EhrMedicationsObservation['item']['medications']={coverage:scenario()==='ehr-medications-unknown'?'unknown':scenario()==='ehr-medications-empty'?'end_of_results':'more_rows_available',total_count:scenario()==='ehr-medications-unknown'?null:scenario()==='ehr-medications-empty'?0:3,items:scenario()==='ehr-medications-empty'?[]:[{medication_name:'Invented medication record',strength:'Recorded strength',route:'Recorded route',form:'Recorded form',directions:'Invented directions, line one.\nInvented directions, line two.',medication_type:'historical',order_type:'Prescription',is_doc_med:false,is_permanent:true,start_date:'2025-01-02',document_date:'2025-01-02T09:15:00',signed_date:'2025-01-02T09:20:00.123456-05:00',deleted_date:null,discontinue_date:null,signature_state:'date_recorded',discontinuation_state:'no_date_recorded',deletion_state:'unknown'},{medication_name:'Invented historical record',strength:null,route:null,form:null,directions:null,medication_type:'discontinued',order_type:null,is_doc_med:null,is_permanent:false,start_date:null,document_date:null,signed_date:null,deleted_date:null,discontinue_date:'2025-03-04',signature_state:'unknown',discontinuation_state:'date_recorded',deletion_state:'no_date_recorded'}]};
+     const item={...anchor.observation.item,medications};item.sha256=await ehrItemHash(item);
+     const observation:EhrMedicationsObservation={...anchor.observation,provider:'elation',kind:'verified_medications',observed_at:new Date().toISOString(),parent:{observation_id:anchor.observation_id,source_sha256:anchor.source_sha256,item_sha256:anchor.observation.item.sha256},item};
+     const result:EhrReceipt={...anchor,observation_id:crypto.randomUUID(),observation_key:body.idempotency_key,source_sha256:await ehrHash({body,observation}),payload_sha256:await ehrHash(observation),observation};
+     if(!ehrMatchesCommand(result,body,anchor))throw new WorkspaceApiError(409,'ehr_read_source_changed');return result;
+    }
+    if(body.action==='problems'){
+     stats.problemReads++;const anchor=find(body.observation_id);if(!anchor||anchor.observation.kind!=='verified_visit'||anchor.observation.provider!=='elation')throw new WorkspaceApiError(409,'ehr_read_not_observed');
+     const problems:EhrProblemsObservation['item']['problems']={coverage:scenario()==='ehr-problems-unknown'?'unknown':scenario()==='ehr-problems-empty'?'end_of_results':'more_rows_available',total_count:scenario()==='ehr-problems-unknown'?null:scenario()==='ehr-problems-empty'?0:3,items:scenario()==='ehr-problems-empty'?[]:[{description:'Invented seasonal concern',status:'Active',start_date:'2025-01-02',resolved_date:null,verification_status:'unconfirmed'},{description:'Invented prior concern',status:'Resolved',start_date:'2024-02-03',resolved_date:'2024-03-04',verification_status:'entered_in_error'}]};
+     const item={...anchor.observation.item,problems};item.sha256=await ehrItemHash(item);
+     const observation:EhrProblemsObservation={...anchor.observation,provider:'elation',kind:'verified_problems',observed_at:new Date().toISOString(),parent:{observation_id:anchor.observation_id,source_sha256:anchor.source_sha256,item_sha256:anchor.observation.item.sha256},item};
+     const result:EhrReceipt={...anchor,observation_id:crypto.randomUUID(),observation_key:body.idempotency_key,source_sha256:await ehrHash({body,observation}),payload_sha256:await ehrHash(observation),observation};
+     if(!ehrMatchesCommand(result,body,anchor))throw new WorkspaceApiError(409,'ehr_read_source_changed');return result;
+    }
+    const anchor=find(body.observation_id);if(!anchor||anchor.observation.provider!==provider||anchor.observation.kind!=='window')throw new WorkspaceApiError(409,'ehr_read_not_observed');const source=anchor.observation.items.find(item=>item.handle===body.item_handle);if(!source)throw new WorkspaceApiError(409,'ehr_read_source_changed');
+    if(body.action==='verify'&&provider==='tebra'&&(body.last_name!=='Cypress'||body.birth_date!=='1990-03-04'))throw new WorkspaceApiError(409,'ehr_read_record_unavailable');
+    const {selectable:_,...fields}=source,item:EhrVerifiedItem={...fields,patient:provider==='tebra'?{full_name:'Jordan Cypress',birth_date:'1990-03-04'}:{first_name:'Jordan',last_name:'Cypress',birth_date:'1990-03-04'}};item.sha256=await ehrItemHash(item);
+    const {items:__,...base}=anchor.observation,observation={...base,kind:'verified_visit' as const,observed_at:new Date().toISOString(),item};
+    const result:EhrReceipt={contract_version:1,...ehrProviderFields(provider),transport:'mock',...binding,observation_id:crypto.randomUUID(),observation_key:body.idempotency_key,source_sha256:await ehrHash({body,observation}),payload_sha256:await ehrHash(observation),observation};
+    if(!ehrMatchesCommand(result,body,anchor))throw new WorkspaceApiError(409,'ehr_read_source_changed');return result;
+   });
+   if(body.action==='problems'&&scenario()==='ehr-problems-lost-read'&&!lostProblemRead){lostProblemRead=true;throw new Error('Invented lost problem-list response');}
+   if(body.action==='medications'&&scenario()==='ehr-medications-lost-read'&&!lostMedicationRead){lostMedicationRead=true;throw new Error('Invented lost medication-record response');}
+   if((body.action==='lab_report'&&scenario()==='ehr-labs-lost-read'||body.action==='lab_reports'&&scenario()==='ehr-labs-lost-list')&&!lostLabRead){lostLabRead=true;throw new Error('Invented lost laboratory response');}
+   return response(result);
+  }catch(error){if(error instanceof WorkspaceApiError)return response({detail:error.code??'invalid_ehr_read_request'},error.status);throw error;}
+ };
+}
