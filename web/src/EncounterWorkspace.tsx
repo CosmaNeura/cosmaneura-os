@@ -2,6 +2,7 @@ import {WorkspaceDialog} from './WorkspaceDialog';
 import {WorkspaceNavIcon} from './WorkspaceNavIcon';
 import {teamConfigurationChanged} from './team-configuration-diff';
 import {VisitCatalog} from './VisitCatalog';
+import {VisitOpenDeadline} from './visit-open-deadline';
 import {consumeWorkspaceStartupTeam} from './workspace-team-read';
 import {workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 import {WorkspaceMarkdown} from './WorkspaceMarkdown';
@@ -257,9 +258,10 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const [selectedSource, setSelectedSource] = useState<string | null>(null);
   const [selectedResult, setSelectedResult] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [openingVisit, setOpeningVisit] = useState(false);
   const [message, setMessage] = useState("");
   const [error, setErrorMessage] = useState("");
-  const [readRetry,setReadRetry]=useState<{run:()=>Promise<void>}|null>(null);
+  const [readRetry,setReadRetry]=useState<{run:()=>Promise<void>;label?:string}|null>(null);
   const setError=useCallback((value:string)=>{setErrorMessage(value);setReadRetry(null);},[]);
   const [conflict, setConflict] = useState(false);
   const [schedulingObservation,setSchedulingObservation]=useState(0);
@@ -667,7 +669,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     setAccessBusy(false);setActivityProof(null);setActivityBusy(false);setActivityContextBusy(false);setActivityContextError('');
     chiefNotebookFocus.current=null;
     setEntryIntent(null);setRecordingSourceRequest(0);setNote(""); setThought(""); setEvidence(""); setSource(""); setSelectedSource(null); setSelectedResult(null);
-    setPending(null); setClinicalShareCheck(null); setConflict(false); setMessage(""); setError(""); setBusy(false);
+    setPending(null); setClinicalShareCheck(null); setConflict(false); setMessage(""); setError(""); setBusy(false); setOpeningVisit(false);
     setModelObservation(null);setReplacementDraft(null);setModelHashes({});
     setPreviousModelRequest(null);
     nativeModelSettling.current=false;
@@ -756,9 +758,12 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
     const useRecording = !recordVisit && !incoming && entryIntent === "recording";
     const startChief = !recordVisit && !useRecording && !incoming && entryIntent === "chief";
     const startFax = !recordVisit && !useRecording && !incoming && entryIntent === "fax";
+    const catalogVisit = !!appointmentId && !coreSelection && !incoming;
+    const deadline = catalogVisit ? new VisitOpenDeadline() : null;
     chiefNotebookFocus.current=null;
     const preserveTeamDraft = !!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft);
-    const current = ++generation.current; setBusy(true); setError(""); setMessage("");
+    const current = ++generation.current; setBusy(true); setOpeningVisit(catalogVisit); setError(""); setMessage("");
+    let showedVisit = false;
     try {
       let selected: {workspace_id:string;appointment_id:string}|undefined;
       if (coreSelection) {
@@ -768,7 +773,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
         if (!opened.workspace) throw new WorkspaceApiError(502);
         selected = opened.workspace;
       }
-      const result = incoming && authenticated ? {identity:authenticated,workspace:await workspaceApi.read(authenticated,incoming.workspace_id),team:await workspaceApi.team(authenticated)} : authenticated ? selected ? await workspaceApi.openExisting(authenticated,selected) : await workspaceApi.open(authenticated, appointmentId) : await workspaceApi.open();
+      const result = incoming && authenticated ? {identity:authenticated,workspace:await workspaceApi.read(authenticated,incoming.workspace_id),team:await workspaceApi.team(authenticated)} : authenticated ? selected ? await workspaceApi.openExisting(authenticated,selected) : await (deadline ? deadline.limit(workspaceApi.open(authenticated, appointmentId)) : workspaceApi.open(authenticated, appointmentId)) : await workspaceApi.open();
       if (current !== generation.current) return;
       checkRecoveryOwner(result.team);
       if(incoming&&(result.workspace.id!==incoming.workspace_id||result.workspace.revision!==incoming.expected_revision))throw new WorkspaceApiError(409,'source_changed');
@@ -802,11 +807,24 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       if (!preserveTeamDraft) setTeamDraft(structuredClone(result.team.configuration));
       setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
       setSettingsOpen(false);
-      await recoverAfterRead(result.team, result.workspace, current);
+      showedVisit = true;
+      const recovery = recoverAfterRead(result.team, result.workspace, current);
+      if (deadline) await deadline.limit(recovery);
+      else await recovery;
       if(googleVisitSelection.current&&current===generation.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}
     } catch (cause) { if (current === generation.current) {
-      // Opening can seed a demo or create a notebook. A general Retry must only
-      // recheck the service or saved history; exact writes keep their own UI.
+      // A hung catalog read disables the visit list. Stop that within one budget
+      // and retry the same open. A general failure still must not repeat a write:
+      // opening can seed a demo or create a notebook, so that Retry only rechecks
+      // the service or saved history. Exact writes keep their own UI.
+      if (deadline?.expired) {
+        if (showedVisit) setRecoveryState("failed");
+        else {
+          setError(cause instanceof Error ? cause.message : "This visit could not be opened.");
+          setReadRetry({run: () => open(appointmentId, coreSelection, incoming, recordVisit), label: "Retry"});
+        }
+        return;
+      }
       failure(cause,authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection);
       if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
         setError('The Scribe recording does not match this visit’s notebook. Ask your practice administrator to review the match.');
@@ -815,7 +833,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
       else if (coreSelection && !(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status)))
         setError('The notebook could not be confirmed. View your appointments and select it again; an existing notebook will be reused.');
     } }
-    finally { if (current === generation.current) setBusy(false); }
+    finally { if (current === generation.current) { setBusy(false); setOpeningVisit(false); } }
   }
   async function save(operation: PendingSave,mode:'submit'|'resolve'='submit',authorityCurrent?:()=>boolean) {
     if(operation.type==='ask'||operation.type==='retry'){await saveModel(operation,'submit');return;}
@@ -2008,7 +2026,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
   const hasWorkspaceIdentity=!!(authenticated||identity);
   const showExecutionProof=!!onExit&&import.meta.env.VITE_SHOW_EXECUTION_PROOF==='true';
   const errorBanner=error&&<div className="team-banner error workspace-error-banner" role="alert"><p>{error}</p><div className="workspace-error-actions">
-    {readRetry&&<button disabled={busy||homeBusy||!!pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void readRetry.run()}>Try again</button>}
+    {readRetry&&<button disabled={busy||homeBusy||!!pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void readRetry.run()}>{readRetry.label??'Try again'}</button>}
     <button onClick={()=>setError('')}>Dismiss</button></div></div>;
   return <EditorRecoveryContext.Provider value={editorAccess}><main className="team-workspace" style={{'--workspace-nav-height':`${navigationHeight}px`} as CSSProperties} data-page={practicePage} data-native-home={nativeHome} data-native-chat={nativeChat} data-native-workspace={nativeWorkspace} data-recording-open={!!privateRecordingEntry} data-recording-focused={!!privateRecordingEntry&&!recordingMinimized} data-settings-open={settingsOpen && !practiceOpen} data-settings-rendered={settingsOpen&&hasWorkspaceIdentity} data-settings-navigation-locked={connectionNavigationLocked}>
     <aside ref={sidebar} className="team-sidebar" hidden={nativeWorkspace}>
@@ -2221,6 +2239,7 @@ export function EncounterWorkspace({ onExit, authenticated, accountControls, pra
           onResearch={authenticated?()=>{setResearchEntry(true);setEntryIntent(null);void loadEncounters();}:undefined}/>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {workspace&&practicePage==='visits'&&!settingsOpen&&<button className="team-phone-notebook-return" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
+        {openingVisit&&<p className="team-fine" role="status">Opening this visit…</p>}
         {authenticated&&encounters&&<VisitCatalog identity={authenticated} visits={encounters} locked={busy||!!pending} recordingActive={!!privateRecordingEntry}
           onOpen={appointmentId=>void open(appointmentId)} onRecord={CAPTURE_WORKSPACE_BUILD&&(!team||team.capture?.enabled)?appointmentId=>void open(appointmentId,undefined,undefined,true):undefined}
           onPrivateNote={workspaceId=>{if(privateRecordingEntry||pending||busy)return;void workspaceApi.openPrivateDraft(authenticated,workspaceId).then(openPrivateNotebook).catch(failure);}}
