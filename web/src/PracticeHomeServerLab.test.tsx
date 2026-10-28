@@ -39,7 +39,7 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   await wait(()=>expect(container.querySelector('[aria-label="Practice Home"]'),container.textContent??'').toBeTruthy());
   expect(calls.some(call=>call.path==='/workspaces')).toBe(false);expect(button('Close notebook')).toBeUndefined();await click('Use this team');
   await wait(()=>expect(container.querySelector('.team-roster small')?.textContent).toBe('On'));
-  await click('Start a private note');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false));
+  await click('Start a private note');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false);
   expect(container.querySelector('[aria-label="Link private draft to a visit"]')?.textContent).toContain('not linked');
   expect(container.querySelector('.team-encounter-heading .team-kicker')?.textContent).toBe('PRIVATE NOTE');
   expect(container.querySelector('.team-encounter-heading h1')?.textContent).toBe('Private note');expect(container.querySelector('.team-encounter-heading')?.textContent).toContain('No patient yet · Unlinked note');
