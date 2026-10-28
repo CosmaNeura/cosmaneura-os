@@ -1,7 +1,8 @@
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { attachNavClosePolish } from "./attach-nav-close-polish";
+
+const {readFileSync}=await vi.importActual<{readFileSync:(path:string,encoding:"utf8")=>string}>("node:fs");
+const {fileURLToPath}=await vi.importActual<{fileURLToPath:(url:string)=>string}>("node:url");
 
 async function flushObserver() {
   await Promise.resolve();
