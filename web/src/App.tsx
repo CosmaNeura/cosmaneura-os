@@ -1,9 +1,10 @@
 import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {hostedWorkspaceRequested} from './hosted-workspace';
-import { OrganizationSwitcher, SignIn, UserButton, useAuth } from "@clerk/react";
+import { OrganizationSwitcher, UserButton, useAuth } from "@clerk/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BetaIdentityAdmin } from "./BetaIdentityAdmin";
+import { BetaSignIn } from "./beta-sign-in";
 import { api, COMPACT_LOCAL, type ApiIdentity, type QueueItem, type Seed } from "./api";
 import { EncounterWorkspace } from "./EncounterWorkspace";
 import { WORKSPACE_BUILD } from "./workspace-api";
@@ -345,7 +346,7 @@ function SignedInWorkspace({ getToken }: { getToken: BetaTokenGetter }) {
   const controls=<div className="row account-controls" aria-label="Account and organization">
     <OrganizationSwitcher hidePersonal /><UserButton /></div>;
   return hostedWorkspaceRequested()
-    ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
+    ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/></PracticeAccessGate></WorkspaceCompatibilityGate>
     : <EncounterWorkspace authenticated={identity} accountControls={controls}/>;
 }
 
@@ -367,7 +368,7 @@ export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
       <main className="shell">
         <h1 className="brand">Cosmas OS</h1>
         <p className="lede">Sign in with your invited Cosmas Beta Lab account.</p>
-        <SignIn routing="hash" />
+        <BetaSignIn />
       </main>
     );
   }
