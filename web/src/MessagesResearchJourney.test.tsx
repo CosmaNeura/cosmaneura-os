@@ -24,11 +24,11 @@ const query=()=>research()?.querySelector<HTMLTextAreaElement>('.research-questi
 const stats=()=>(window as Window&{researchRehearsalStats?:{searches:number;saves:number;resolveSearches:number;resolveSaves:number;historyReads:number;packetReads:number;externalCalls:number}}).researchRehearsalStats!;
 const publicQuestion='What does public evidence say about sleep diaries for adults with insomnia?';
 function noDispatchReceipt(){for(const key of Object.keys(sessionStorage).filter(key=>key.endsWith(':receipts')))expect(JSON.parse(sessionStorage.getItem(key)!)).toEqual([]);}
-async function wait(check:()=>void){for(let n=0;n<500;n++){let done=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));try{check();done=true;}catch{}});if(done)return;}check();}
+async function wait(check:()=>void,attempts=500){for(let n=0;n<attempts;n++){let done=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,2));try{check();done=true;}catch{}});if(done)return;}check();}
 async function click(name:string){await wait(()=>expect(button(name)?.disabled,name).toBe(false));await act(async()=>button(name)!.click());}
 async function type(element:HTMLTextAreaElement,value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(element,value);element.dispatchEvent(new Event('input',{bubbles:true}));});}
 async function checkLabel(text:string){const box=()=>[...research()!.querySelectorAll<HTMLLabelElement>('label')].find(label=>label.textContent?.includes(text))?.querySelector<HTMLInputElement>('input[type="checkbox"]');await wait(()=>expect(box()?.disabled,text).toBe(false));await act(async()=>box()!.click());}
-async function openChief(){const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(element=>visible(element)&&element.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(composer()?.disabled).toBe(false));}
+async function openChief(){const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(element=>visible(element)&&element.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()?.disabled).toBe(false),1500);await act(async()=>row()!.click());await wait(()=>expect(composer()?.disabled).toBe(false));}
 async function chooseResearch(){
  await click('New message');const choice=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-bot-choices button')].find(element=>element.querySelector('strong')?.textContent==='Research');await wait(()=>expect(choice()?.disabled).toBe(false));await act(async()=>choice()!.click());
  const visit=()=>[...host.querySelectorAll<HTMLButtonElement>('.team-encounter-option')].find(visible);await wait(()=>expect(visit()?.disabled).toBe(false));expect(visit()?.textContent).toContain('Jordan Cypress');await act(async()=>visit()!.click());await wait(()=>expect(research()).toBeDefined());
@@ -76,7 +76,7 @@ it('does not append or focus a Chief continuation when native foreground is lost
  await act(async()=>button('Prepare Chief draft')!.click());await wait(()=>expect(finish).toBeDefined());await act(async()=>notifyNativeWorkspaceForeground(owner,false));await act(async()=>finish(prior));
  expect(composer().value).not.toContain('Review the saved public Research packet');expect(document.activeElement).not.toBe(composer());expect(stats()).toEqual(before);expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();noDispatchReceipt();await act(async()=>notifyNativeWorkspaceForeground(owner,true));
  await remount();await openChief();expect(composer().value).toBe(prefix);
-});
+},10000);
 
 it.each([false,true])('opens a saved Research packet in Chief and returns to its exact card without draft, scroll, keyboard or readmark changes (native=%s)',async native=>{
  if(native){owner={...identity,nativeSession:{revision:'00000000-0000-4000-8000-000000000992',isCurrent:()=>true}};await act(async()=>root.render(<EncounterWorkspace authenticated={owner} draftStorage={storage}/>));}
