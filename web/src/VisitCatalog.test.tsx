@@ -1,10 +1,11 @@
-import {readFileSync} from 'node:fs';
-import {join} from 'node:path';
 import {act} from 'react';
 import {createRoot, type Root} from 'react-dom/client';
 import {afterEach, beforeEach, expect, it, vi} from 'vitest';
 import {VISIT_CATALOG_VIEWS, VisitCatalog} from './VisitCatalog';
 import {workspaceApi, type AuthenticatedWorkspaceIdentity, type WorkspaceEncounter} from './workspace-api';
+
+const {readFileSync}=await vi.importActual<{readFileSync:(path:string,encoding:'utf8')=>string}>('node:fs');
+const {fileURLToPath}=await vi.importActual<{fileURLToPath:(url:string)=>string}>('node:url');
 
 vi.mock('./workspace-api', async original => {
   const mod = await original<typeof import('./workspace-api')>();
@@ -52,7 +53,7 @@ it('keeps visit views as a single-line scrollable tab strip with ≥14px type', 
   expect(host.querySelector('.team-encounter-picker')).toBeTruthy();
   expect(host.textContent).toContain('Invented Jordan Café');
 
-  const css = readFileSync(join(process.cwd(), 'src/visit-catalog.css'), 'utf8');
+  const css = readFileSync(fileURLToPath(import.meta.url).replace(/[^/]+$/, 'visit-catalog.css'), 'utf8');
   expect(css).toContain('.visit-catalog-tabs');
   expect(css).toContain('flex-wrap: nowrap');
   expect(css).toContain('overflow-x: auto');
