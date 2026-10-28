@@ -110,6 +110,8 @@
 .settings-account button { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
 .connection-directory-actions { display:flex; flex-wrap:wrap; gap:10px; margin:12px 0; }
 .connection-directory-actions button { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+.connection-directory-list[data-native-directory="true"] .connection-directory-actions button { width:100%; margin:0; }
+.connection-directory-empty { margin:14px 0; padding:12px; border:1px dashed var(--team-line); border-radius:9px; color:var(--team-muted); font-size:14px; line-height:1.45; }
 .connection-add-catalog > p { color:var(--team-muted); font-size:14px; }
 .connection-group h3 { margin:0 0 8px; font-size:15px; }
 .connection-card-box > .connection-state-help { padding:0 12px; margin:0; }

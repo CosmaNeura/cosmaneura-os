@@ -20,7 +20,7 @@ it('offers four named record paths only after choosing Add connection, without r
  expect(mounted).not.toHaveBeenCalled();await click('Add connection');
  const catalog=host.querySelector('[aria-label="Add connection catalog"]')!;expect(catalog).toBeTruthy();
  for(const name of ['Atlas.MD','Elation','Tebra','Athena'])expect(catalog.textContent).toContain(name);
- expect(catalog.textContent).toContain('No live connection');expect(catalog.textContent).toContain('Access checked when opened');expect(catalog.textContent).not.toContain('Connected');
+ expect(catalog.textContent).toContain('no live sync');expect(catalog.textContent).toContain('Approved practice access checked when opened');expect(catalog.textContent).toContain('athenahealth allergy');expect(catalog.textContent).not.toContain('Connected');
  await click('Atlas.MD');expect(opened).toHaveBeenLastCalledWith('atlas_md');await click('Elation');await click('Tebra');await click('Athena');expect(opened.mock.calls.map(c=>c[0])).toEqual(['atlas_md','elation','tebra','athena']);
  expect(mounted).not.toHaveBeenCalled();expect(readConnectionCatalog).not.toHaveBeenCalled();expect(readConnectionSummary).not.toHaveBeenCalled();
 });
@@ -80,4 +80,19 @@ it('opens setup guidance for an unavailable service and mounts saved work only a
 it('closes the picker and clears its search when the authenticated account changes',async()=>{
  const render=(account:typeof identity)=>act(async()=>root.render(<SettingsHub open initialScreen="connections" connectionIdentity={account} google={<p>Google</p>} team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
  await render(identity);await click('Add connection');await search('old search');await render({...identity});expect(host.querySelector('[aria-label="Add connection catalog"]')).toBeNull();await click('Add connection');expect(host.querySelector<HTMLInputElement>('input[type="search"]')!.value).toBe('');
+});
+it('keeps the native directory compact while the catalog retains setup-only services',async()=>{
+ vi.mocked(readConnectionCatalog).mockResolvedValue(readinessFixture({core:'user_connectable',google:'user_connectable',microsoft:'user_connectable',messaging:'practice_setup'}));
+ vi.mocked(readConnectionSummary).mockImplementation(async(_who,id)=>id==='google'
+   ?{label:'Connected',reason:'invented@example.test',action:'Open Google',tone:'neutral',checkedAt:Date.now()}
+   :id==='microsoft'?{label:'Needs setup',reason:'Sign in to connect.',action:'Connect account',tone:'attention'}
+   :{label:'Needs attention',reason:'Practice review is required.',action:'Review connection',tone:'attention'});
+ await act(async()=>root.render(<SettingsHub open nativePresentation="messages" initialScreen="connections" connectionIdentity={identity} core={<p>Core</p>} google={<p>Google</p>} microsoft={<p>Microsoft</p>} messaging={<p>Fax</p>} practiceRecordActions={{elation:vi.fn()}} team={<p>Team</p>} teamSummary="Five coworkers" teamDirty={false} onClose={()=>{}}/>));
+ const directory=host.querySelector('[data-native-directory="true"]')!;expect(directory).toBeTruthy();
+ expect(directory.textContent).toContain('Google email & calendar');expect(directory.textContent).toContain('Connected');
+ expect(directory.textContent).toContain('Cosmaneura account & appointments');expect(directory.textContent).toContain('Needs attention');
+ expect(directory.textContent).not.toContain('Microsoft email & calendar');expect(directory.textContent).not.toContain('Messaging & fax');
+ expect(directory.querySelectorAll('details')).toHaveLength(0);expect(directory.textContent).toContain('Choose your records system');
+ await click('Add connection');const catalog=host.querySelector('[aria-label="Add connection catalog"]')!;
+ expect(catalog.textContent).toContain('Microsoft email & calendar');expect(catalog.textContent).toContain('Messaging & fax');expect(catalog.textContent).toContain('Elation');
 });
