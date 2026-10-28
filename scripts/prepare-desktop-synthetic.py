@@ -218,6 +218,9 @@ def main():
     for filename in ("main.mjs", "api-proxy.mjs", "close-protection.mjs", "startup-recovery.mjs",
                      "workspace-lifecycle.mjs", "preload.cjs"):
         shutil.copyfile(root / "clients/desktop" / filename, app / filename)
+    # Keep the shared document guard inside the package. The repository's
+    # desktop facade is for source imports, never a path outside the ASAR.
+    shutil.copyfile(root / "clients/shared/workspace-document.mjs", app / "workspace-document.mjs")
     if args.native_auth_helper:
         native = app / "native-auth"
         destination = native / "CosmasDesktopAuth.app"
