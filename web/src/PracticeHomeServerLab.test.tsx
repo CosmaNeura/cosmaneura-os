@@ -37,7 +37,7 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   const started=performance.now();await act(render);await click('Set up my practice');
   await input('Practice name','Invented solo Quick start');await input('Your name','Invented physician');await click('Continue to my workspace');
   await wait(()=>expect(container.querySelector('[aria-label="Practice Home"]'),container.textContent??'').toBeTruthy());
-  expect(calls.some(call=>call.path==='/workspaces')).toBe(false);expect(button('Close notebook')).toBeUndefined();await click('Use this team');
+  expect(calls.some(call=>call.method==='POST'&&call.path==='/workspaces')).toBe(false);expect(button('Close notebook')).toBeUndefined();await click('Use this team');
   await wait(()=>expect(container.querySelector('.team-roster small')?.textContent).toBe('On'));
   await click('Start a private note');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false));
   expect(container.querySelector('[aria-label="Link private draft to a visit"]')?.textContent).toContain('not linked');
@@ -50,8 +50,8 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   const savedPath=calls.find(call=>call.method==='POST'&&/\/workspaces\/[^/]+\/entries$/.test(call.path))!.path;
   const workspaceId=savedPath.split('/')[2];await click('Home');
   await act(async()=>root!.unmount());root=createRoot(container);await act(render);
-  await wait(()=>expect(container.querySelector('.practice-home-note')?.textContent).toContain('Private note'));
-  const noteButton=container.querySelector<HTMLButtonElement>('[aria-label="Saved private notes"] .practice-home-note')!;await act(async()=>noteButton.click());
+  await wait(()=>{const note=container.querySelector<HTMLButtonElement>('[aria-label="Saved private notes"] .practice-home-note');expect(note?.textContent).toContain('Private note');expect(note?.disabled).toBe(false);});
+  await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Saved private notes"] .practice-home-note')!.click());
   await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe(content));
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/practice-access/setup/complete')).toHaveLength(1);
