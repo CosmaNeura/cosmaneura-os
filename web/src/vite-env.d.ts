@@ -16,6 +16,8 @@ interface ImportMetaEnv {
   readonly VITE_EFAX_INBOUND_SOURCE_ENABLED?: string;
   readonly VITE_INBOX_ENABLED?: string;
   readonly VITE_INBOX_HANDOFF_ENABLED?: string;
+  /** Short git SHA baked in at build time for Settings/footer. */
+  readonly VITE_BUILD_SHA?: string;
 }
 
 interface ImportMeta {

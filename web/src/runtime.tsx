@@ -8,6 +8,7 @@ import { DesktopAuthenticatedWorkspace } from "./DesktopAuthenticatedWorkspace";
 import { permittedDesktopWorkspaceApi } from "./workspace-origin";
 import {hostedWorkspaceConfiguration, hostedWorkspaceRequested} from "./hosted-workspace";
 import {permittedHostedWorkspace} from "../../clients/shared/hosted-workspace-config.mjs";
+import { attachBuildInfo } from "./attach-build-info";
 import {
   App,
   ClerkBetaApp,
@@ -95,7 +96,10 @@ type RuntimeAppProps = {
 };
 
 function RuntimeReady({ children }: { children: ReactNode }) {
-  useEffect(() => { notifyWorkspaceLifecycle("ready"); }, []);
+  useEffect(() => {
+    notifyWorkspaceLifecycle("ready");
+    return attachBuildInfo();
+  }, []);
   return children;
 }
 
