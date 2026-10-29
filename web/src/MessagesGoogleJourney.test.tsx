@@ -73,7 +73,7 @@ it('does not strand a delayed initial Gmail journal load when Back is followed b
 it('restores the exact older reading position and current Details control without a new read mark',async()=>{
  await openChat();await type('Keep my place and draft.');vi.spyOn(HTMLElement.prototype,'scrollHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?1000:0;});vi.spyOn(HTMLElement.prototype,'clientHeight','get').mockImplementation(function(this:HTMLElement){return this.classList.contains('mobile-chat-scroll')?200:0;});
  const scroll=()=>host.querySelector<HTMLElement>('.mobile-chat-scroll')!;scroll().scrollTop=230;await act(async()=>scroll().dispatchEvent(new Event('scroll')));const mark=vi.spyOn(conversationsApi,'mark');await openTask();await click('‹ Back to Chief of Staff');
- await wait(()=>expect(scroll().scrollTop).toBe(230));expect(document.activeElement).toBe(button('Details'));expect(question().value).toBe('Keep my place and draft.');expect(mark).not.toHaveBeenCalled();expect(stats()).toMatchObject({lists:0,reads:0,reviews:0});
+ await wait(()=>expect(scroll().scrollTop).toBe(230));await wait(()=>expect(document.activeElement).toBe(button('Details')));expect(question().value).toBe('Keep my place and draft.');expect(mark).not.toHaveBeenCalled();expect(stats()).toMatchObject({lists:0,reads:0,reviews:0});
 });
 it('cancels a deferred Gmail opening when Details is dismissed during authorization',async()=>{
  await openChat();await type('Keep the current draft.');await click('Details');await click('Choose notes or sources');const team=workspaceApi.team,prior=await team(identity);let finish!:(value:typeof prior)=>void;
