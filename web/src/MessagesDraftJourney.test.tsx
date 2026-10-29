@@ -1,4 +1,5 @@
 import {act} from 'react';
+import {waitMessagesJourney as wait, MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
@@ -9,15 +10,18 @@ import {openDraftStore} from './draft-store';
 import {PRESENTATION_KEY} from './session/presentation';
 import {workspaceApi} from './workspace-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+
+// Journey waits may legitimately exceed Vitest's 5s default under CI load.
+vi.setConfig({testTimeout: MESSAGES_JOURNEY_TEST_TIMEOUT_MS});
 let root:Root,host:HTMLDivElement,idb:IDBFactory;
 const storage=({scope}:{scope:string})=>openDraftStore({scope,native:false,indexedDB:idb,crypto:webcrypto});
 const visible=(e:Element)=>!e.closest('[hidden]');
 const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&(b.textContent?.trim()===name||b.getAttribute('aria-label')===name));
 const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
 const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(b=>visible(b)&&b.textContent?.includes('Chief of Staff'));
-async function wait(check:()=>void){for(let n=0;n<400;n++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,2));try{check();done=true;}catch{}});if(done)return;}check();}
-async function click(name:string){await wait(()=>expect(button(name)?.disabled,name).toBe(false));await act(async()=>button(name)!.click());}
-async function openChat(){await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(question()?.disabled).toBe(false));}
+
+async function click(name:string){await wait(()=>expect(button(name)).toBeTruthy());await wait(()=>expect(button(name)!.disabled).toBe(false));await act(async()=>button(name)!.click());}
+async function openChat(){await wait(()=>expect(row()).toBeTruthy());await wait(()=>expect(row()!.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(question()).toBeTruthy());await wait(()=>expect(question()!.disabled).toBe(false));}
 async function type(value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),value);question().dispatchEvent(new Event('input',{bubbles:true}));});}
 async function mount(){await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={storage}/>));await wait(()=>expect(row()).toBeDefined());}
 beforeEach(async()=>{
