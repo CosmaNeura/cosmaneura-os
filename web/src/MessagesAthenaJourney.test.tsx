@@ -1,4 +1,5 @@
 import {act} from 'react';
+import {waitMessagesJourney as wait, MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_CORE_CONNECTION_ENABLED','VITE_ATHENA_CONNECTION_ENABLED','VITE_ATHENA_VISIT_LINK_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
@@ -11,18 +12,21 @@ import {useUnsavedWork} from './unsaved-work';
 import {readinessFixture} from './connection-readiness-fixture';
 import {CONNECTION_IDS} from './connection-catalog-api';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+
+// Journey waits may legitimately exceed Vitest's 5s default under CI load.
+vi.setConfig({testTimeout: MESSAGES_JOURNEY_TEST_TIMEOUT_MS});
 let root:Root,host:HTMLDivElement;
 const visible=(e:Element)=>!e.closest('[hidden]');
 const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&(b.textContent?.trim()===name||b.getAttribute('aria-label')===name));
 const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
-async function wait(check:()=>void){for(let n=0;n<350;n++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,2));try{check();done=true;}catch{}});if(done)return;}check();}
-async function click(label:string){await wait(()=>expect(button(label)?.disabled,label).toBe(false));await act(async()=>{button(label)!.focus();button(label)!.click();});}
-async function clickCard(name:string){await wait(()=>expect([...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&b.querySelector('strong')?.textContent===name)?.disabled).toBe(false));await act(async()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&b.querySelector('strong')?.textContent===name)!.click());}
+
+async function click(label:string){await wait(()=>expect(button(label)).toBeTruthy());await wait(()=>expect(button(label)!.disabled).toBe(false));await act(async()=>{button(label)!.focus();button(label)!.click();});}
+async function clickCard(name:string){const card=()=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&b.querySelector('strong')?.textContent===name);await wait(()=>expect(card()).toBeTruthy());await wait(()=>expect(card()!.disabled).toBe(false));await act(async()=>card()!.click());}
 async function draft(value:string){await act(async()=>{Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype,'value')!.set!.call(question(),value);question().dispatchEvent(new Event('input',{bubbles:true}));});}
 async function connect(){
  for(const label of ['Check connection status','Check Athena connection','View Athena appointments','Connect or open visit','Find Cosmaneura visits','Review this visit'])await click(label);
  const confirmation=()=>host.querySelector<HTMLInputElement>('.ehr-read-task[aria-label="Find or connect an Athena visit"] input[type="checkbox"]');
- await wait(()=>expect(confirmation()?.matches(':disabled')).toBe(false));await act(async()=>confirmation()!.click());expect(confirmation()?.checked).toBe(true);await click('Save visit connection');
+ await wait(()=>expect(confirmation()).toBeTruthy());await wait(()=>expect(confirmation()!.matches(':disabled')).toBe(false));await act(async()=>confirmation()!.click());expect(confirmation()?.checked).toBe(true);await click('Save visit connection');
 }
 beforeEach(async()=>{
  // UTC has crossed midnight while the Athena practice is still on October 26.
@@ -30,7 +34,7 @@ beforeEach(async()=>{
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();sessionStorage.clear();localStorage.setItem(PRESENTATION_KEY,'messages');history.replaceState(null,'','#cosmas/home');
  window.matchMedia=vi.fn().mockReturnValue({matches:true,addEventListener:vi.fn(),removeEventListener:vi.fn()});window.scrollTo=vi.fn();HTMLElement.prototype.scrollIntoView=vi.fn();await installFixtures(true);vi.spyOn(workspaceApi,'ask');vi.spyOn(workspaceApi,'append');
  host=document.createElement('div');document.body.append(host);root=createRoot(host);await act(async()=>root.render(<EncounterWorkspace authenticated={identity} draftStorage={memoryDraftStorage()}/>));
- await wait(()=>expect(host.querySelector<HTMLButtonElement>('.messages-row')?.disabled).toBe(false));await act(async()=>host.querySelector<HTMLButtonElement>('.messages-row')!.click());await wait(()=>expect(question()?.disabled).toBe(false));
+ await wait(()=>expect(host.querySelector<HTMLButtonElement>('.messages-row')).toBeTruthy());await wait(()=>expect(host.querySelector<HTMLButtonElement>('.messages-row')!.disabled).toBe(false));await act(async()=>host.querySelector<HTMLButtonElement>('.messages-row')!.click());await wait(()=>expect(question()).toBeTruthy());await wait(()=>expect(question()!.disabled).toBe(false));
 });
 afterEach(async()=>{await act(async()=>root.unmount());host.remove();vi.restoreAllMocks();vi.useRealTimers();vi.unstubAllGlobals();history.replaceState(null,'','/');});
 it('opens the shared Athena task from Chief and Settings while keeping the exact draft and one host',async()=>{
@@ -62,7 +66,7 @@ it.each(['fresh','recovered'] as const)('opens the already-current notebook from
  if(mode==='recovered')history.replaceState(null,'','/?scenario=athena-lost-link'+location.hash);
  await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');await connect();
  if(mode==='recovered'){await click('Check saved visit result');await wait(()=>expect(host.textContent).toContain('Connected to Jordan Cypress'));}
- await wait(()=>expect(button('Open linked notebook')?.disabled).toBe(false));
+ await wait(()=>expect(button('Open linked notebook')).toBeTruthy());await wait(()=>expect(button('Open linked notebook')!.disabled).toBe(false));
  const original=workspaceApi.team;let finish!:()=>void,started!:()=>void;const entered=new Promise<void>(resolve=>{started=resolve;});
  vi.spyOn(workspaceApi,'team').mockImplementationOnce(async(...args)=>{started();await new Promise<void>(resolve=>{finish=resolve;});return original(...args);});
  await click('Open linked notebook');await entered;expect(open).not.toHaveBeenCalled();
@@ -74,7 +78,7 @@ it.each(['fresh','recovered'] as const)('opens the already-current notebook from
 it('keeps unrelated unsaved work admission after the Athena authorization finishes',async()=>{
  history.replaceState(null,'','/?scenario=athena-lost-link'+location.hash);
  await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');await connect();await click('Check saved visit result');
- await wait(()=>expect(button('Open linked notebook')?.disabled).toBe(false));
+ await wait(()=>expect(button('Open linked notebook')).toBeTruthy());await wait(()=>expect(button('Open linked notebook')!.disabled).toBe(false));
  const open=vi.spyOn(workspaceApi,'openExisting'),original=workspaceApi.team;let finish!:()=>void,started!:()=>void;const entered=new Promise<void>(resolve=>{started=resolve;});
  vi.spyOn(workspaceApi,'team').mockImplementationOnce(async(...args)=>{started();await new Promise<void>(resolve=>{finish=resolve;});return original(...args);});
  await click('Open linked notebook');await entered;
@@ -89,7 +93,7 @@ it('keeps unrelated unsaved work admission after the Athena authorization finish
 it('shows an opening failure in the active task and retries only notebook opening',async()=>{
  history.replaceState(null,'','/?scenario=athena-lost-link'+location.hash);
  await click('Details');await click('Choose notes or sources');await click('Find or connect an Athena visit');await connect();await click('Check saved visit result');
- await wait(()=>expect(button('Open linked notebook')?.disabled).toBe(false));
+ await wait(()=>expect(button('Open linked notebook')).toBeTruthy());await wait(()=>expect(button('Open linked notebook')!.disabled).toBe(false));
  const original=window.fetch;let failed=false;const attempts:string[]=[];
  vi.spyOn(window,'fetch').mockImplementation(async(input,init)=>{
   const action=typeof init?.body==='string'?(JSON.parse(init.body) as {action?:string}).action:undefined;
