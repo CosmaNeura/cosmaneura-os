@@ -1,8 +1,11 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
+import { attachNavClosePolish } from "./attach-nav-close-polish";
 import { RuntimeApp } from "./runtime";
 import { notifyWorkspaceLifecycle } from "./workspace-lifecycle";
 import "./styles.css";
+
+attachNavClosePolish();
 
 createRoot(document.getElementById("root")!, {
   // The boundary presents safe recovery guidance; caught errors can contain

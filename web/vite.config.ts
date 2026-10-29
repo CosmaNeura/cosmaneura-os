@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
+import { execFileSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import {resolveHostedWorkspace} from "../clients/shared/hosted-workspace-config.mjs";
 import {resolveBetaFeatureProfile} from "../clients/shared/beta-feature-profile.mjs";
@@ -7,19 +8,41 @@ import {resolveBetaFeatureProfile} from "../clients/shared/beta-feature-profile.
 let hostedBuild: ReturnType<typeof resolveHostedWorkspace> = null;
 let featureBuild: ReturnType<typeof resolveBetaFeatureProfile> | null = null;
 
-export default defineConfig({
+function resolveBuildSha(env: Record<string, string>) {
+  const configured = env.VITE_BUILD_SHA?.trim();
+  if (configured && /^[0-9a-f]{7,40}$/i.test(configured)) return configured.slice(0, 40).toLowerCase();
+  try {
+    return execFileSync("git", ["rev-parse", "--short=7", "HEAD"], {
+      cwd: fileURLToPath(new URL("..", import.meta.url)),
+      encoding: "utf8",
+    }).trim();
+  } catch {
+    return "dev";
+  }
+}
+
+export default defineConfig(({mode}) => {
+  const env = loadEnv(mode, fileURLToPath(new URL("./", import.meta.url)), "VITE_");
+  const buildSha = resolveBuildSha(env);
+  return {
+  define: {
+    "import.meta.env.VITE_BUILD_SHA": JSON.stringify(buildSha),
+  },
   plugins: [react(), {
     name: "cosmas-hosted-workspace",
     apply: "build",
-    config(config, {mode}) {
-      const env = loadEnv(mode, config.envDir ?? fileURLToPath(new URL('./', import.meta.url)), "VITE_");
+    config(config, {mode: buildMode}) {
+      const buildEnv = loadEnv(buildMode, config.envDir ?? fileURLToPath(new URL('./', import.meta.url)), "VITE_");
       featureBuild = null;
       hostedBuild = null;
-      if (env.VITE_WORKSPACE_HOSTED_ENABLED === 'true' || env.VITE_WORKSPACE_FEATURE_PROFILE) {
-        featureBuild = resolveBetaFeatureProfile(env);
+      if (buildEnv.VITE_WORKSPACE_HOSTED_ENABLED === 'true' || buildEnv.VITE_WORKSPACE_FEATURE_PROFILE) {
+        featureBuild = resolveBetaFeatureProfile(buildEnv);
         hostedBuild = resolveHostedWorkspace(featureBuild.env);
-        return {define: Object.fromEntries(Object.entries(featureBuild.env).map(([key, value]) =>
-          [`import.meta.env.${key}`, JSON.stringify(value)]))};
+        return {define: {
+          "import.meta.env.VITE_BUILD_SHA": JSON.stringify(resolveBuildSha(buildEnv)),
+          ...Object.fromEntries(Object.entries(featureBuild.env).map(([key, value]) =>
+            [`import.meta.env.${key}`, JSON.stringify(value)])),
+        }};
       }
     },
     configResolved(config) {
@@ -43,4 +66,5 @@ export default defineConfig({
   } },
   server: { port: 5173 },
   test: { alias:{"@cosmaneura-scribe/capture-preview-domain":fileURLToPath(new URL("../clients/capture/test-fixtures/preview-constants.ts",import.meta.url))}, environment: "jsdom", globals: true, setupFiles:['./vitest.setup.ts'] },
+};
 });
