@@ -39,7 +39,7 @@ vi.mock('./FaxSourceReviewMount',async original=>{
 });
 const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=> 'invented-signed-boundary'},opaque='a'.repeat(64),time='2026-10-02T14:00:00Z';
 const documentOffer:FaxSourceOffer={operation_id:uuid(11),document_sha256:'d'.repeat(64),pages:1};
-const acquireRequest:Extract<FaxPending,{kind:'acquire'}>={kind:'acquire',request:{idempotency_key:uuid(40),ticket_id:uuid(7),revision_id:uuid(9),expected_version:2,approval_sha256:'e'.repeat(64)}};
+const acquireRequest:Extract<FaxPending,{kind:'acquire'}>=  {kind:'acquire',request:{idempotency_key:uuid(40),ticket_id:uuid(7),revision_id:uuid(9),expected_version:2,approval_sha256:'e'.repeat(64)}};
 const privatePassage='Human-reviewed invented café passage. DOB and trial eligibility remain unknown.';
 let root:Root,host:HTMLDivElement,idb:IDBFactory,current:Workspace&{appointment_id:string},packet:{receipt:FaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry};
 let resolved:FaxReceipt;
@@ -92,7 +92,7 @@ it('ordinary Connections offer reaches the real Sources review, saves encrypted 
  expect(host.querySelector(`[id="source-${packet.entry.id}"]`)?.textContent).toContain(privatePassage);expect(host.textContent).toContain(FAX_SOURCE_LABEL);
  expect(faxSourceApi.review).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
  await click('Prepare a Chief request');await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toContain(packet.entry.id));
- const question=host.querySelector<HTMLTextAreaElement>('#team-question')!;expect(question.disabled).toBe(false);expect(question.value).toContain('Preserved provider question');expect(question.value).not.toContain(privatePassage);
+ const question=host.querySelector<HTMLTextAreaElement>('#team-question')!;await wait(()=>expect(question.disabled).toBe(false));expect(question.value).toContain('Preserved provider question');expect(question.value).not.toContain(privatePassage);
  await setText('#team-question',question.value+' Ask about uncertainty before suggesting next steps.');expect(question.value).toContain('Ask about uncertainty');
  await showNotebook();expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Unfinished provider note');
  expect(faxSourceApi.resolve).toHaveBeenCalledOnce();assertNoWork();
