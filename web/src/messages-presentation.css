@@ -117,6 +117,7 @@
 .messages-inbox-group{margin-top:24px}.messages-inbox-group>.messages-list{margin:4px 0 16px}
 .messages-list>.messages-conversation-card{display:grid;grid-template-columns:minmax(0,1fr) 44px;gap:0;align-items:stretch;margin:8px 0;padding:0;overflow:hidden;border:1px solid var(--team-line);border-radius:14px;background:var(--team-paper,#fff)}
 .team-workspace .messages-row-menu{width:44px;min-height:44px;padding:0;border:0;border-left:1px solid var(--team-line);border-radius:0;background:transparent;letter-spacing:2px}
+.team-workspace .messages-conversation-card>.messages-row:focus-visible,.team-workspace .messages-conversation-card>.messages-row-menu:focus-visible{outline-offset:-3px}
 .messages-conversation-actions{display:flex;flex-direction:column;gap:6px}
 .messages-conversation-actions>button{min-height:44px;text-align:left;padding:12px;overflow-wrap:anywhere}
 .messages-inbox .messages-status:empty{display:none}
