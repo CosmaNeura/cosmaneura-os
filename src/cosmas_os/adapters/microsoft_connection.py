@@ -14,7 +14,7 @@ import hashlib
 import json
 import re
 import secrets
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from time import monotonic
@@ -796,6 +796,91 @@ class MicrosoftPersonalConnection:
 
     def calendar(self, identity):
         return self._read(identity, "calendar")
+
+    def _full_message_enabled(self):
+        try:
+            self._enabled()
+        except ConnectorUnavailable:
+            raise ws.WorkspaceError("microsoft_message_unavailable", 404) from None
+        if not self.settings.workspace_microsoft_message_available:
+            raise ws.WorkspaceError("microsoft_message_unavailable", 404)
+
+    def _message_account(self, session, identity):
+        """Read current caller custody without upgrading workspace shared locks."""
+        self._full_message_enabled()
+        if identity.auth_mode != "clerk_jwt" or not identity.external_identity_id:
+            raise ws.WorkspaceError("microsoft_message_unavailable", 403)
+        ws._human(session, identity.box_id, identity.principal_id)
+        account = session.scalar(select(ExternalIdentity).where(
+            ExternalIdentity.id == identity.external_identity_id,
+            ExternalIdentity.box_id == identity.box_id,
+            ExternalIdentity.principal_id == identity.principal_id,
+            ExternalIdentity.active.is_(True),
+        ).with_for_update(read=True).execution_options(populate_existing=True))
+        if account is None:
+            raise ws.WorkspaceError("microsoft_message_unavailable", 403)
+        binding = digest(canonical([self.config_digest, account.id, account.box_id,
+            account.principal_id, account.issuer, account.subject, account.organization_id]))
+        return account, binding
+
+    def message_binding(self, identity, *, require_full=False, session=None):
+        """DB-only, refresh-stable grant proof. Never contacts Microsoft."""
+        from cosmas_os.ports.microsoft_message import MicrosoftMessageBinding
+
+        self._full_message_enabled()
+        with self._session() if session is None else nullcontext(session) as current:
+            account, binding = self._message_account(current, identity)
+            credential = current.scalar(select(self.Credential).where(self.Credential.account_id == account.id)
+                .with_for_update(read=True).execution_options(populate_existing=True))
+            pending = current.scalar(select(self.Attempt.id).where(self.Attempt.account_id == account.id,
+                self.Attempt.status.in_(["pending", "exchanging"]), self.Attempt.expires_at > self.now()))
+            if (pending is not None or credential is None or credential.status != "ready" or credential.sealed is None
+                    or credential.binding_digest != binding or credential.expires_at <= self.now()):
+                raise ws.WorkspaceError("microsoft_message_grant_unavailable")
+            private = self._open(credential.sealed, "credential", account.id, binding)
+            connected_at = credential.connected_at.astimezone(UTC)
+            # Every stored Microsoft credential passed _verify_scopes at exchange
+            # and refresh. Token bytes are deliberately excluded from this proof.
+            return MicrosoftMessageBinding(account_id=account.id, binding_digest=binding,
+                connected_at=connected_at, grant_sha256=digest(canonical([
+                    "cosmas-microsoft-message-grant.v1", account.id, binding,
+                    connected_at.isoformat(), private["subject"], sorted(SCOPES.split())])))
+
+    def message_status(self, identity, *, session=None):
+        self._full_message_enabled()
+        with self._session() if session is None else nullcontext(session) as current:
+            account, binding = self._message_account(current, identity)
+            try:
+                self.message_binding(identity, session=current)
+            except ws.WorkspaceError as error:
+                if error.code != "microsoft_message_grant_unavailable":
+                    raise
+                return {"contract_version": 1, "state": "sign_in_required", "full_mail_read": False, "account": None}
+            credential = current.get(self.Credential, account.id)
+            private = self._open(credential.sealed, "credential", account.id, binding)
+            return {"contract_version": 1, "state": "connected", "full_mail_read": True,
+                    "account": {"label": self._text(private["label"], 256), "email": self._text(private["email"], 320)}}
+
+    def read_message(self, identity, selection):
+        from cosmas_os.adapters.microsoft_message import read_message
+
+        return read_message(self, identity, selection)
+
+    def _message_authentication_failed(self, identity, private, custody):
+        """A failed old token must never disconnect a refreshed/replaced grant."""
+        with self._session() as session:
+            account, selected, binding = self._account(session, identity=identity)
+            credential = session.scalar(select(self.Credential).where(self.Credential.account_id == account.id)
+                .with_for_update().execution_options(populate_existing=True))
+            if (credential is None or account.id != custody.account_id or credential.status != "ready"
+                    or credential.connected_at != custody.connected_at or binding != custody.binding_digest
+                    or credential.binding_digest != binding or credential.sealed is None):
+                return
+            if self._open(credential.sealed, "credential", account.id, binding) != private:
+                return
+            credential.status, credential.sealed, credential.refresh_id = "failed", None, None
+            self._audit(session, selected, account.id, "message_authentication", "sign_in_required")
+            session.commit()
 
     def close(self):
         self._closed = True

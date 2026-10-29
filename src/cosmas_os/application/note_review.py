@@ -31,6 +31,11 @@ def source_fingerprint(s: Session, wid: str, revision: int) -> str:
             .order_by(WorkspaceEntry.revision)
         )
     )
+    return fingerprint_for_sources(sources)
+
+
+def fingerprint_for_sources(sources: list[WorkspaceEntry]) -> str:
+    """Hash already-selected, revision-ordered clinical sources without I/O."""
     latest_notebook = next((e.id for e in reversed(sources) if e.kind == "scratchpad"), None)
     return payload_hash(
         [
@@ -56,7 +61,7 @@ def _require_note_lineage(s: Session, w, reply_id):
 
     for source in _context(admission.prepared_envelope["context"]).sources:
         entry = s.get(WorkspaceEntry, source.entry_id)
-        if entry is not None and entry.kind in {"google_message", "google_calendar", "efax_inbound_source", "fax_inbound_source"}:
+        if entry is not None and entry.kind in {"google_message", "microsoft_message", "google_calendar", "efax_inbound_source", "fax_inbound_source", "ehr_read_source", "calendar_import_source"}:
             # Selected connector work has independent custody and cannot enter
             # the clinical-note fingerprint through a derived draft.
             raise ws.WorkspaceError(entry.kind + "_note_import_unavailable", 409)

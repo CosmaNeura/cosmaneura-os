@@ -21,7 +21,9 @@ config = Config(str(root / 'alembic.ini'))
 config.set_main_option('script_location', str(root / 'migrations'))
 config.set_main_option('prepend_sys_path', str(root / 'src'))
 config.attributes['configure_logger'] = False
-command.upgrade(config, 'e3a90d77b812:head', sql=True)
+# This regression concerns j79's file-relative guard loader. Later revisions
+# may require an online catalog and are qualified by the migration tests.
+command.upgrade(config, 'e3a90d77b812:j79f1d5a2340', sql=True)
 """
     result = subprocess.run([sys.executable, "-c", script, str(root)], cwd=tmp_path,
         env={"PATH": os.defpath, "PYTHONPATH": str(root / "src"), "PYTHONNOUSERSITE": "1",
@@ -32,3 +34,4 @@ command.upgrade(config, 'e3a90d77b812:head', sql=True)
     assert "CREATE FUNCTION public.clinical_note_source_valid" in result.stdout
     assert "CREATE CONSTRAINT TRIGGER clinical_note_source_guard" in result.stdout
     assert "version_num='j79f1d5a2340'" in result.stdout
+    assert result.stdout.count("-- Running upgrade") == 1

@@ -107,14 +107,16 @@ def register(app, *, runtime, verifier, session_factory):
 
             def invoke():
                 config = runtime()
-                if not config.workspace_hosted_enabled or not config.workspace_available:
+                if ((not config.workspace_hosted_enabled and config.cosmas_env != "standalone_synthetic")
+                        or not config.workspace_available):
                     raise access.PracticeAccessError("practice_access_not_found", 404)
                 token_verifier = verifier(request.headers.getlist("origin"))
                 member = verified(config, request.headers["authorization"], token_verifier)
 
                 def fence():
                     check_capture_deadline()
-                    if (runtime() is not config or not config.workspace_hosted_enabled
+                    if (runtime() is not config or (not config.workspace_hosted_enabled
+                            and config.cosmas_env != "standalone_synthetic")
                             or not config.workspace_available
                             or verified(config, request.headers["authorization"], token_verifier) != member):
                         raise AccessDenied()

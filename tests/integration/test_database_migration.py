@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
@@ -9,17 +11,54 @@ from uuid import uuid4
 import pytest
 from alembic import command
 from alembic.config import Config
+from alembic.script import ScriptDirectory
 from sqlalchemy import create_engine, event, text
 from sqlalchemy.engine import make_url
 
 from cosmas_os.application import database_migration as migration
+from cosmas_os.runtime_schema import EXPECTED_SCHEMA_REVISION
 
 ROOT = Path(__file__).resolve().parents[2]
 GUARD = "public.selected_google_model_sources_current(public.model_work_admissions)"
 
 
 @pytest.fixture
-def case():
+def historical_package(tmp_path, monkeypatch):
+    # Exercise the real j79 -> k80 release package. Later migrations may add
+    # catalog objects that this function-only helper intentionally cannot attest.
+    # Only this module's captured runtime expectation is historical; the current
+    # runtime_schema and release graph keep their actual current head.
+    source_config = Config(str(ROOT / "alembic.ini"))
+    source_config.set_main_option("script_location", str(ROOT / "migrations"))
+    source = ScriptDirectory.from_config(source_config)
+    versions = tmp_path / "historical-release/migrations/versions"
+    versions.mkdir(parents=True)
+    for revision in source.iterate_revisions(migration.TO_REVISION, "base"):
+        shutil.copy2(revision.path, versions / Path(revision.path).name)
+    shutil.copy2(ROOT / "migrations/env.py", versions.parent / "env.py")
+    config_path = versions.parent.parent / "alembic.ini"
+    config_path.write_text("[alembic]\nscript_location=migrations\n")
+    monkeypatch.setattr(migration, "EXPECTED_SCHEMA_REVISION", migration.TO_REVISION)
+    return config_path
+
+
+def test_historical_package_preserves_the_exact_forward_sql(historical_package):
+    statements = []
+    for config_path in (ROOT / "alembic.ini", historical_package):
+        output = StringIO()
+        config = Config(str(config_path), output_buffer=output)
+        config.set_main_option("script_location", str(config_path.parent / "migrations"))
+        config.attributes["configure_logger"] = False
+        assert ScriptDirectory.from_config(config).get_heads() == [
+            migration.TO_REVISION if config_path == historical_package else EXPECTED_SCHEMA_REVISION]
+        command.upgrade(config, f"{migration.FROM_REVISION}:{migration.TO_REVISION}", sql=True)
+        statements.append(output.getvalue())
+    assert statements[0] == statements[1]
+    assert "clinical-team-drafts.request.v2" in statements[1] and "owner_directions" in statements[1]
+
+
+@pytest.fixture
+def case(historical_package):
     # This setup is restricted to the fresh cluster created by the local helper.
     url = make_url(os.environ["DATABASE_URL"])
     token = os.environ["COSMAS_TEST_DATABASE_TOKEN"]
@@ -44,8 +83,8 @@ def case():
             assert not connection.scalar(text("SELECT EXISTS(SELECT FROM pg_database WHERE datname='cosmas_os')"))
             connection.exec_driver_sql("CREATE DATABASE cosmas_os")
             connection.exec_driver_sql(f"CREATE ROLE {role} LOGIN PASSWORD 'invented-runtime-password-123456789'")
-        config = Config(str(ROOT / "alembic.ini"))
-        config.set_main_option("script_location", str(ROOT / "migrations"))
+        config = Config(str(historical_package))
+        config.set_main_option("script_location", str(historical_package.parent / "migrations"))
         config.attributes["configure_logger"] = False
         with engine.begin() as connection:
             config.attributes["connection"] = connection
@@ -53,7 +92,7 @@ def case():
             connection.exec_driver_sql(f"GRANT CONNECT ON DATABASE cosmas_os TO {role}")
             connection.exec_driver_sql(f"GRANT USAGE ON SCHEMA public TO {role}")
             connection.exec_driver_sql(f"GRANT SELECT ON public.alembic_version TO {role}")
-        yield SimpleNamespace(engine=engine, admin_url=admin_url, role=role,
+        yield SimpleNamespace(engine=engine, admin_url=admin_url, role=role, config_path=historical_package,
                               runtime_url=runtime_url.render_as_string(hide_password=False))
     finally:
         engine.dispose()
@@ -79,6 +118,7 @@ def read_state(case):
 
 
 def run(case, **kwargs):
+    kwargs.setdefault("alembic_config_path", case.config_path)
     with case.engine.connect() as connection:
         return migration.migrate_beta_database_forward(connection, case.runtime_url,
                                                        require_verify_full=False, **kwargs)
@@ -136,7 +176,7 @@ def test_failed_or_broadened_migration_rolls_back_all_owned_work(case, monkeypat
     with case.engine.connect() as connection:
         with pytest.raises(migration.DatabaseMigrationError) as error:
             migration.migrate_beta_database_forward(connection, case.runtime_url,
-                                                   require_verify_full=False)
+                                                   require_verify_full=False, alembic_config_path=case.config_path)
         assert not connection.in_transaction()
         assert not connection.closed and not connection.invalidated
         assert connection.scalar(text("SELECT 1")) == 1
@@ -168,7 +208,8 @@ def test_active_caller_transaction_is_refused_before_any_sql_and_left_owned(case
     event.listen(case.engine, "before_cursor_execute", lambda c, cursor, stmt, params, ctx, many: statements.append(stmt))
     with case.engine.connect() as connection, connection.begin() as transaction:
         with pytest.raises(migration.DatabaseMigrationError):
-            migration.migrate_beta_database_forward(connection, case.runtime_url, require_verify_full=False)
+            migration.migrate_beta_database_forward(connection, case.runtime_url,
+                                                   require_verify_full=False, alembic_config_path=case.config_path)
         assert transaction.is_active and connection.in_transaction()
         assert statements == []
 
@@ -191,7 +232,7 @@ def test_existing_administrator_runtime_boundary_refuses_before_any_sql(case, bo
     with case.engine.connect() as connection:
         with pytest.raises(migration.DatabaseMigrationError):
             migration.migrate_beta_database_forward(connection, url.render_as_string(hide_password=False),
-                                                   require_verify_full=boundary == "tls_required")
+                                                   require_verify_full=boundary == "tls_required", alembic_config_path=case.config_path)
         assert not connection.in_transaction() and statements == []
 
 
@@ -234,6 +275,36 @@ def test_packaged_sole_head_and_direct_parent_must_match_before_upgrade(case, tm
     assert_lock_released(case)
 
 
+def test_historical_helper_rejects_current_runtime_before_any_sql(case, monkeypatch):
+    assert EXPECTED_SCHEMA_REVISION != migration.TO_REVISION
+    monkeypatch.setattr(migration, "EXPECTED_SCHEMA_REVISION", EXPECTED_SCHEMA_REVISION)
+    before = read_state(case)
+    statements = []
+    def counted(c, cursor, stmt, params, ctx, many):
+        statements.append(stmt)
+    event.listen(case.engine, "before_cursor_execute", counted)
+    try:
+        with pytest.raises(migration.DatabaseMigrationError, match=migration.FAILURE):
+            run(case)
+        assert statements == []
+    finally:
+        event.remove(case.engine, "before_cursor_execute", counted)
+    assert read_state(case) == before
+
+
+def test_historical_helper_rejects_current_packaged_graph_without_upgrade(case, monkeypatch):
+    before = read_state(case)
+    upgrades = []
+    def unexpected_upgrade(config, target):
+        upgrades.append(target)
+        raise AssertionError("Historical helper must not upgrade a later release graph")
+    monkeypatch.setattr(migration.command, "upgrade", unexpected_upgrade)
+    with pytest.raises(migration.DatabaseMigrationError, match=migration.FAILURE):
+        run(case, alembic_config_path=ROOT / "alembic.ini")
+    assert upgrades == [] and read_state(case) == before
+    assert_lock_released(case)
+
+
 @pytest.mark.parametrize("state", ["missing", "privileged"])
 def test_runtime_role_must_already_exist_without_administrator_attributes(case, state):
     if state == "missing":
@@ -255,7 +326,8 @@ def test_effective_role_must_match_supplied_administrator_connection(case):
         connection.commit()
         try:
             with pytest.raises(migration.DatabaseMigrationError):
-                migration.migrate_beta_database_forward(connection, case.runtime_url, require_verify_full=False)
+                migration.migrate_beta_database_forward(connection, case.runtime_url,
+                                                       require_verify_full=False, alembic_config_path=case.config_path)
         finally:
             connection.exec_driver_sql("RESET ROLE")
             connection.commit()
@@ -274,7 +346,8 @@ def test_unusable_supplied_connection_is_not_reopened(case, state):
     event.listen(case.engine, "before_cursor_execute", lambda c, cursor, stmt, params, ctx, many: statements.append(stmt))
     try:
         with pytest.raises(migration.DatabaseMigrationError):
-            migration.migrate_beta_database_forward(connection, case.runtime_url, require_verify_full=False)
+            migration.migrate_beta_database_forward(connection, case.runtime_url,
+                                                   require_verify_full=False, alembic_config_path=case.config_path)
         assert statements == []
     finally:
         connection.close()

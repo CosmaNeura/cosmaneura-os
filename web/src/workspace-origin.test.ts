@@ -1,5 +1,5 @@
 import {describe, expect, it} from "vitest";
-import {permittedSignedWorkspaceApi, permittedWorkspaceApi} from "./workspace-origin";
+import {permittedDesktopWorkspaceApi, permittedSignedWorkspaceApi, permittedWorkspaceApi} from "./workspace-origin";
 
 describe("synthetic workspace origin", () => {
   it("keeps browser access on loopback and enables the exact desktop bridge only in its own build and origin", () => {
@@ -11,6 +11,24 @@ describe("synthetic workspace origin", () => {
   it.each(["app://other/api", "app://cosmas/api/", "app://cosmas:123/api", "app://cosmas/api?url=outside",
     "https://outside.invalid", "http://user@127.0.0.1", "http://127.0.0.1/private"])("rejects %s", base => {
     expect(permittedWorkspaceApi(base, true, "app://cosmas/index.html")).toBe(false);
+  });
+  it("retains the exact desktop transport while Messages changes the document fragment", () => {
+    for (const page of ["app://cosmas/index.html#cosmas/home", "app://cosmas/index.html#cosmas/messages/chief?details=1"]) {
+      expect(permittedDesktopWorkspaceApi("app://cosmas/api", page)).toBe(true);
+      expect(permittedWorkspaceApi("app://cosmas/api", true, page)).toBe(true);
+      expect(permittedWorkspaceApi("app://cosmas/api", false, page)).toBe(false);
+      expect(permittedSignedWorkspaceApi("app://cosmas/api", page)).toBe(false);
+      expect(permittedDesktopWorkspaceApi("app://cosmas/api/", page)).toBe(false);
+    }
+  });
+  it("does not use a fragment to admit another desktop document or a normalized URL", () => {
+    for (const base of ["app://cosmas/other.html", "app://cosmas/index.html?redirect=1", "app://user@cosmas/index.html",
+      "app://cosmas:80/index.html", "app://cosmas/a/../index.html", "app://cosmas/%69ndex.html",
+      "app://COSMAS/index.html", "https://cosmas/index.html", "app://cosmas.evil/index.html"]) {
+      const page = base + "#cosmas/home";
+      expect(permittedDesktopWorkspaceApi("app://cosmas/api", page)).toBe(false);
+      expect(permittedWorkspaceApi("app://cosmas/api", true, page)).toBe(false);
+    }
   });
 });
 

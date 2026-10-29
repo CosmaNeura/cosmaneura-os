@@ -27,6 +27,12 @@ it('matches compiled delivery work and independent source feature gates without 
   vi.stubEnv('VITE_WORKSPACE_GOOGLE_CONNECTION_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED','false');
   expect(connectionActionClientAvailable('mail_headers','google')).toBe(true);
   expect(connectionActionClientAvailable('mail_headers','microsoft')).toBe(false);
+  vi.stubEnv('VITE_MICROSOFT_MESSAGE_ENABLED','true');
+  expect(connectionActionClientAvailable('full_email_source','microsoft')).toBe(false);
+  vi.stubEnv('VITE_WORKSPACE_MICROSOFT_CONNECTION_ENABLED','true');
+  expect(connectionActionClientAvailable('full_email_source','microsoft')).toBe(true);
+  vi.stubEnv('VITE_MICROSOFT_MESSAGE_ENABLED','false');
+  expect(connectionActionClientAvailable('full_email_source','microsoft')).toBe(false);
 });
 it.each(['false_success','extra_action','unsupported_runtime','unexpected_account'])('rejects %s readiness',kind=>{
  const value=responseV2();const row=value.services[6];

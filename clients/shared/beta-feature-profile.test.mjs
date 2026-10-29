@@ -4,7 +4,8 @@ import {readFileSync,readdirSync} from 'node:fs';
 import {fileURLToPath} from 'node:url';
 import {join} from 'node:path';
 import {createRequire} from 'node:module';
-import {BETA_FEATURE_FLAGS,NATIVE_STAGING_FEATURE_PROFILE,resolveBetaFeatureProfile,validateNativeBetaProfile} from './beta-feature-profile.mjs';
+import {BETA_FEATURE_FLAGS,NATIVE_STAGING_FEATURE_PROFILE,resolveBetaFeatureProfile,validateBetaFeatureManifest,validateNativeBetaProfile} from './beta-feature-profile.mjs';
+const pilotFlags=['VITE_MESSAGES_ENABLED','VITE_EHR_READ_ENABLED','VITE_CALENDAR_IMPORT_ENABLED','VITE_MICROSOFT_MESSAGE_ENABLED'];
 const root=fileURLToPath(new URL('../../',import.meta.url));
 const base={VITE_WORKSPACE_FEATURE_PROFILE:'operational-beta-v1',VITE_WORKSPACE_HOSTED_CLIENT:'web',
   VITE_WORKSPACE_DATA_MODE:'synthetic',VITE_WORKSPACE_HOSTED_API_ORIGIN:'https://api.example.invalid',
@@ -25,9 +26,32 @@ test('profile covers every actual workflow gate, including the formerly omitted 
     const contents=readFileSync(join(entry.parentPath,entry.name),'utf8');
     for(const match of contents.matchAll(/import[.]meta[.]env[.](VITE_\w+_ENABLED)/g))gates.add(match[1]);
   }
-  for(const key of gates)assert.ok(key in env,`Unclassified build gate: ${key}`);
+  for(const key of gates)assert.ok(key in env||pilotFlags.includes(key),`Unclassified build gate: ${key}`);
   for(const key of BETA_FEATURE_FLAGS)assert.ok(gates.has(key),`Unused profile flag: ${key}`);
   for(const key of ['VITE_WORKSPACE_CAPTURE_ENABLED','VITE_WORKSPACE_APPOINTMENTS_ENABLED','VITE_INBOX_ENABLED','VITE_COSMANEURA_RECORD_ENABLED','VITE_FAX_INBOUND_ENABLED','VITE_FAX_INBOUND_SOURCE_ENABLED'])assert.equal(env[key],'true');
+});
+test('pilot flags require exact explicit opt-in while omitted environments and manifests remain unchanged',()=>{
+  for(const client of ['web','desktop','apple']){
+    const input=client==='web'?base:native(client),ordinary=resolveBetaFeatureProfile(input);
+    for(const key of pilotFlags){assert.equal(Object.hasOwn(ordinary.env,key),false);assert.equal(ordinary.manifest.enabledFlags.includes(key),false);}
+    const off=resolveBetaFeatureProfile({...input,...Object.fromEntries(pilotFlags.map(key=>[key,'false']))});
+    assert.deepEqual(off.manifest,ordinary.manifest);
+    const selected=resolveBetaFeatureProfile({...input,...Object.fromEntries(pilotFlags.map(key=>[key,'true']))});
+    assert.deepEqual(selected.manifest.enabledFlags,[...BETA_FEATURE_FLAGS,...pilotFlags]);
+    for(const key of pilotFlags)assert.equal(selected.env[key],'true');
+    assert.equal(validateBetaFeatureManifest(selected.manifest),selected.manifest);
+    if(client!=='web')assert.equal(validateNativeBetaProfile(selected.manifest,expected(client)),selected.manifest);
+    for(const key of pilotFlags)for(const value of [true,1,'TRUE','1','',undefined,null])
+      assert.throws(()=>resolveBetaFeatureProfile({...input,[key]:value}));
+  }
+});
+test('pilot manifest cannot add unrecognized, duplicate or reordered permissions and first-owner staging stays closed',()=>{
+  const manifest=resolveBetaFeatureProfile({...native('apple'),VITE_MESSAGES_ENABLED:'true'}).manifest;
+  for(const enabledFlags of [[...manifest.enabledFlags,'VITE_UNREVIEWED_ENABLED'],[...manifest.enabledFlags,'VITE_MESSAGES_ENABLED'],[...manifest.enabledFlags].reverse()])
+    assert.throws(()=>validateBetaFeatureManifest({...manifest,enabledFlags}));
+  assert.throws(()=>resolveBetaFeatureProfile({...base,VITE_UNKNOWN_PILOT_ENABLED:'true'}));
+  for(const key of pilotFlags)assert.throws(()=>resolveBetaFeatureProfile({...native('apple'),VITE_WORKSPACE_FEATURE_PROFILE:NATIVE_STAGING_FEATURE_PROFILE,
+    VITE_COSMANEURA_WEB_ORIGIN:'',VITE_CAPTURE_UPLOAD_ORIGINS:'',VITE_WORKSPACE_CAPTURE_MODE:'disabled',[key]:'true'}));
 });
 test('rejects prior partial recipes, misspelled flags and individual feature exclusions',()=>{
   for(const change of [{VITE_WORKSPACE_FEATURE_PROFILE:undefined},{VITE_WORKSPACE_AI_ACTIVITY_ENABLED:'true'},
@@ -89,7 +113,7 @@ test('synthetic Apple data can use operational device custody without admitting 
   assert.equal(validateNativeBetaProfile(authorized,device),authorized);
   assert.throws(()=>validateNativeBetaProfile(authorized,expected('apple')));
 });
-test('ordinary Vite config emits the expanded profile in both direct flags and whole import.meta.env',async()=>{
+test('ordinary Vite config emits defaults and explicit pilot flags in compiled values and the exact manifest',async()=>{
   const require=createRequire(join(root,'web/package.json'));const {build}=await import(require.resolve('vite'));
   const saved=Object.fromEntries(Object.entries(process.env).filter(([key])=>key.startsWith('VITE_')));
   for(const key of Object.keys(saved))delete process.env[key];Object.assign(process.env,base);
@@ -106,6 +130,18 @@ test('ordinary Vite config emits the expanded profile in both direct flags and w
     assert.equal(module.default.VITE_WORKSPACE_SCHEDULING_PATIENT_SETUP_ENABLED,'false');
     const manifest=JSON.parse(chunks.find(item=>item.fileName==='cosmas-beta-features.json').source);
     assert.deepEqual(manifest,resolveBetaFeatureProfile(base).manifest);
+    const pilot=Object.fromEntries(pilotFlags.map(key=>[key,'true']));
+    Object.assign(process.env,pilot);
+    const selected=await build({root:join(root,'web'),mode:'production',logLevel:'silent',
+      plugins:[{name:'pilot-proof',resolveId:id=>id==='virtual:pilot-proof'?id:null,
+        load:id=>id==='virtual:pilot-proof'?'export default import.meta.env; export const messages = import.meta.env.VITE_MESSAGES_ENABLED;':null}],
+      build:{write:false,minify:false,rollupOptions:{preserveEntrySignatures:'strict',input:'virtual:pilot-proof',output:{format:'es'}}}});
+    const pilotEntry=selected.output.find(item=>item.type==='chunk'&&item.isEntry);
+    const pilotModule=await import('data:text/javascript;base64,'+Buffer.from(pilotEntry.code).toString('base64'));
+    assert.equal(pilotModule.messages,'true');
+    for(const key of pilotFlags)assert.equal(pilotModule.default[key],'true',key);
+    assert.deepEqual(JSON.parse(selected.output.find(item=>item.fileName==='cosmas-beta-features.json').source),resolveBetaFeatureProfile({...base,...pilot}).manifest);
+    for(const key of pilotFlags)delete process.env[key];
     process.env.VITE_WORKSPACE_CAPTURE_ENABLED='false';
     await assert.rejects(()=>build({root:join(root,'web'),logLevel:'silent',build:{write:false}}),/conflicts/);
     delete process.env.VITE_WORKSPACE_CAPTURE_ENABLED;

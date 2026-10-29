@@ -74,6 +74,8 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
             reauthenticate()
             if body.action == "status":
                 result = port.calendar_status(identity, session=session)
+                if body.include_private_notebook is True:
+                    result = {**result, "private_notebook_review": True}
             elif body.action == "observe":
                 result = google_calendar.observe(*scope, key=body.idempotency_key, port=port,
                     reauthenticate=reauthenticate)
@@ -102,7 +104,8 @@ def router(*, runtime, configuration, identity_dependency, session_dependency, w
             result = google_calendar.select_review(session, identity.box_id, identity.principal_id, str(workspace_id),
                 expected=body.expected_revision, key=body.idempotency_key, observation_id=str(body.observation_id),
                 observation_sha256=body.observation_sha256, event_id=body.event_id, event_sha256=body.event_sha256,
-                reviewed_visit=body.reviewed_visit, reviewed_exact_summary=body.reviewed_exact_summary,
+                reviewed_visit=body.reviewed_visit, reviewed_private_notebook=body.reviewed_private_notebook,
+                reviewed_exact_summary=body.reviewed_exact_summary,
                 reviewed_untrusted_source=body.reviewed_untrusted_source, port=port,
                 external_identity_id=identity.external_identity_id,
                 reauthenticate=lambda: fence(request, session, identity))

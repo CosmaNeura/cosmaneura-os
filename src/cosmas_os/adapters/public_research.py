@@ -535,7 +535,7 @@ class PublicResearch:
         return result
 
     def _cms_coverage(self, query, check):
-        match = re.fullmatch(r"(?:NCD\s*)?(\d{1,8})(?::(\d{1,8}))?", query, re.I)
+        match = re.fullmatch(r"(?:NCD\s*)?([0-9]{1,8})(?::([0-9]{1,8}))?", query, re.I)
         if not match:
             raise ResearchUnavailable("invalid_source_response")
         params = {"ncdid": match[1]}

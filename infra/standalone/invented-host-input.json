@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "resource_scope": "dedicated-new-cosmabot-host",
+  "instance_id": "cb724658-2683-4f53-8c31-774b214bf612",
+  "box_id": "fcc02750-85b1-4f9d-ab9f-38f33b3bfa03",
+  "source_commit": "482cd8b879766c77bd575aa3317b41b94b25feb1",
+  "web_origin": "https://workspace.standalone.example.invalid",
+  "api_origin": "https://api.standalone.example.invalid",
+  "identity_policy": "audience",
+  "identity": {
+    "version": 1,
+    "profile": "operational-beta-v1",
+    "client": "desktop",
+    "apiOrigin": "https://api.standalone.example.invalid",
+    "publishableKey": "pk_live_aWRlbnRpdHkuc3RhbmRhbG9uZS5leGFtcGxlLmNvbSQ=",
+    "frontendOrigin": "https://identity.standalone.example.com",
+    "organizationId": "org_invented_standalone_host",
+    "audience": "invented-cosmabot-application-api"
+  },
+  "ports": {
+    "api": 18443,
+    "postgres": 15432
+  },
+  "artifacts": {
+    "api_archive_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "web_archive_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "postgres_major": 16,
+    "schema_revision": "x13d9ec7654"
+  },
+  "tls": {
+    "certificate_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+    "hostnames": [
+      "api.standalone.example.invalid",
+      "workspace.standalone.example.invalid"
+    ]
+  }
+}

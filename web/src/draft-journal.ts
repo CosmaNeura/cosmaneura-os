@@ -1,10 +1,20 @@
+import {validateAthenaMedicationRecovery,validAthenaMedicationScope} from './athena-medication-recovery';
+import {validateAthenaRecovery,validAthenaAllergyScope} from './athena-allergy-recovery';
+import {validateAthenaVisitRecovery,validAthenaVisitRecoveryScope} from './athena-visit-link-recovery';
+import {validateCalendarRecovery,validCalendarOwner} from './calendar-import-recovery';
+import {ehrProvider} from './ehr-read-api';
+import {validateEhrReadRecovery,validEhrScope} from './ehr-read-recovery';
+import {validateTebraRecovery,validTebraMedicationScope} from './tebra-medication-recovery';
+import {parseConversationDraft} from './conversation-draft';
+import {parseConversationPreferences} from './conversation-preferences';
+import {teamAddress} from './team-setup-request';
 import {validateInvitationRecovery} from './practice-invitation-contract';
 import {validateTitleRecovery} from './notebook-metadata-contract';
 import {parsePendingReviewDecision} from "../../clients/scribe-review/creator-review-journal";
 import {validScribeSourceRequest} from './scribe-source-api';
 import {validateResearchDraft} from './research-contract';
 import { DraftStoreError, type DraftRecord, type DraftStore, type DraftValue } from "./draft-store";
-import type { PendingSave } from "./EncounterWorkspace";
+import type { PendingSave } from "./session/model";
 import {validShareSavedNoteInput} from './clinical-team-contract';
 import type { ProviderTeam, TeamConfiguration, TeamSaveInput, Workspace } from "./workspace-api";
 import { validTeamConfiguration, validTeamSave } from "./team-setup-request";
@@ -22,6 +32,7 @@ import { validateInbox } from "./inbox-contract";
 import { validateInboxRecovery } from "./inbox-recovery";
 import { validInboxHandoffActor, validateInboxHandoffRecovery } from "./inbox-handoff-recovery";
 import { validGoogleMessageScope, validateGoogleMessageRecovery } from "./google-message-recovery";
+import {validOutlookMessageScope,validateOutlookMessageRecovery} from "./outlook-message-recovery";
 import { validGoogleCalendarScope, validateGoogleCalendarRecovery } from "./google-calendar-recovery";
 import {validateHandoffReviewRecovery} from './handoff-review-recovery';
 import {validateFaxRecovery} from "./fax-inbound-recovery";
@@ -39,10 +50,10 @@ export type TeamDraft = { kind: "team"; baseRevision: number; configuration: Tea
 export type ChiefNoteTaskDraft={contract:'chief-note-task.compose.v1';note_id:string;note_version:number;content_hash:string;source_fingerprint:string};
 export type NotebookDraft = { kind: "workspace"; workspaceId: string; baseRevision: number;
   note: string; thought: string; evidence: string; source: string; pending: Exclude<PendingSave, { type: "team"; body: TeamSaveInput }> | null;previous_model_request?:PreviousModelRequest;chief_note_task?:ChiefNoteTaskDraft };
-export type EditorKind = "notebook-title" | "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
+export type EditorKind = `conversation:${string}` | "notebook-title" | "private-draft-link" | "agent-research-review" | "private-note" | "core-note" | "transcript" | "scribe-source" | `creator-review:${string}` | `handoff-review:${string}` | `efax-source-review:${string}` | `fax-source-review:${string}` | "follow-up-proposal" | "appointments" | "scheduling-patient" | "ehr-read" | "ehr-read:tebra" | "ehr-read:tebra:fhir" | "ehr-read:athena:core" | "ehr-read:athena:core:medications" | "calendar-import" | "prep-work" | "vendor-work" | "finance-work" | "portal-work" | "membership-work" | `follow-up-result:${string}` | `research:${string}`;
 export type EditorDraft = { kind: "editor"; workspaceId: string; editor: EditorKind; data: unknown; pending: string | null };
 export type AccountOperationDraft = {kind: "account-operation"; lane: "practice-work"; pending: PracticeWorkOperation};
-export type AccountEditorKind = "practice-invite" | "private-draft" | "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
+export type AccountEditorKind = "athena-visit-link" | "conversation-preferences" | "practice-invite" | "private-draft" | "work-routine" | "portal_setup" | "finance-setup" | "vendor-setup" | "inbox-work" | "inbox-handoffs" | "google-messages" | "outlook-messages" | "google-calendar" | "efax-inbound" | "fax-inbound" | `practice-result:${string}` | `vendor-work:${string}`;
 export type AccountEditorDraft = {kind:"account-editor";editor:AccountEditorKind;data:unknown;pending:string|null};
 export const accountEditorAddress = (editor: AccountEditorKind) => `account-editor:${editor}`;
 export type RecoveredDraft = TeamDraft | NotebookDraft | EditorDraft | AccountOperationDraft | AccountEditorDraft;
@@ -51,7 +62,7 @@ export const editorAddress = (workspaceId: string, editor: EditorKind) => `edito
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const UUID = /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/;
 const validEditor = (kind: unknown) => typeof kind === "string" &&
-  (["notebook-title", "private-draft-link", "agent-research-review", "private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
+  (kind.startsWith("conversation:") && teamAddress(kind.slice("conversation:".length)) || ["notebook-title", "private-draft-link", "agent-research-review", "private-note", "core-note", "transcript", "scribe-source", "follow-up-proposal", "appointments", "scheduling-patient", "ehr-read", "ehr-read:tebra", "ehr-read:tebra:fhir", "ehr-read:athena:core", "ehr-read:athena:core:medications", "calendar-import", "prep-work", "vendor-work", "finance-work", "portal-work", "membership-work"].includes(kind) ||
     kind.startsWith("creator-review:") && UUID.test(kind.slice("creator-review:".length)) || kind.startsWith("handoff-review:") && UUID.test(kind.slice("handoff-review:".length)) ||
     kind.startsWith("fax-source-review:") && UUID.test(kind.slice("fax-source-review:".length)) ||
     kind.startsWith("efax-source-review:") && UUID.test(kind.slice("efax-source-review:".length)) ||
@@ -104,7 +115,7 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   const draft = value.body as RecoveredDraft;
   if (draft && draft.kind === "account-editor") {
     if (Object.keys(draft).sort().join(",")!=="data,editor,kind,pending" ||
-        typeof draft.editor!=="string" || !(draft.editor==="practice-invite" || draft.editor==="private-draft" || draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="google-calendar" || draft.editor==="efax-inbound" || draft.editor==="fax-inbound" ||
+        typeof draft.editor!=="string" || !(draft.editor==="athena-visit-link" || draft.editor==="conversation-preferences" || draft.editor==="practice-invite" || draft.editor==="private-draft" || draft.editor==="work-routine" || draft.editor==="portal_setup" || draft.editor==="finance-setup" || draft.editor==="vendor-setup" || draft.editor==="inbox-work" || draft.editor==="inbox-handoffs" || draft.editor==="google-messages" || draft.editor==="outlook-messages" || draft.editor==="google-calendar" || draft.editor==="efax-inbound" || draft.editor==="fax-inbound" ||
           draft.editor.startsWith("practice-result:") && UUID.test(draft.editor.slice("practice-result:".length)) ||
           draft.editor.startsWith("vendor-work:") && UUID.test(draft.editor.slice("vendor-work:".length))) ||
         address!==accountEditorAddress(draft.editor) || draft.pending!==null && !UUID.test(draft.pending) ||
@@ -120,6 +131,7 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
     if (Object.keys(draft).sort().join(",") !== "data,editor,kind,pending,workspaceId" || !UUID.test(draft.workspaceId) ||
         !validEditor(draft.editor) || address !== editorAddress(draft.workspaceId, draft.editor) ||
         draft.pending !== null && !UUID.test(draft.pending) && !(draft.editor.startsWith("creator-review:") && /^[A-Za-z0-9._-]{8,255}$/.test(draft.pending)) || !draft.data || typeof draft.data !== "object") throw new DraftStoreError("integrity");
+    if(draft.editor.startsWith("conversation:")){if(draft.pending!==null)throw new DraftStoreError("integrity");parseConversationDraft(draft.data);}
     return draft;
   }
   if (!draft || typeof draft !== "object" || !Number.isSafeInteger(draft.baseRevision) || draft.baseRevision < 0) throw new DraftStoreError("integrity");
@@ -145,6 +157,14 @@ function parse(value: DraftValue | null, address: string): RecoveredDraft | null
   return draft;
 }
 async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
+  if(draft?.kind==='account-editor'&&draft.editor==='athena-visit-link'){
+    try{const scope=(draft.data as {scope?:unknown}).scope;if(draft.pending!==null||!validAthenaVisitRecoveryScope(scope))throw new Error();await validateAthenaVisitRecovery(draft.data,scope);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
+  if(draft?.kind==='account-editor'&&draft.editor==='conversation-preferences'){
+    try{if(draft.pending!==null)throw new Error();parseConversationPreferences(draft.data);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
   if(draft?.kind==='account-editor'&&draft.editor==='practice-invite'){
     try{const data=validateInvitationRecovery(draft.data);if(draft.pending!==(data.pending?.body.idempotency_key??null))throw new Error();}
     catch{throw new DraftStoreError('integrity');}return;
@@ -178,6 +198,26 @@ async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
       if(data.offered.operation_id!==draft.editor.slice('efax-source-review:'.length))throw new Error();}
     catch{throw new DraftStoreError('integrity');}return;
   }
+  if(draft?.kind==='editor'&&draft.editor==='calendar-import'){
+    try{const owner=(draft.data as {owner?:unknown}).owner;if(!validCalendarOwner(owner)||owner.workspace_id!==draft.workspaceId||draft.pending!==null)throw new Error();await validateCalendarRecovery(draft.data,owner);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
+  if(draft?.kind==='editor'&&draft.editor==='ehr-read:athena:core:medications'){
+    try{const scope=(draft.data as {scope?:unknown}).scope;if(!validAthenaMedicationScope(scope)||scope.workspace_id!==draft.workspaceId||draft.pending!==null)throw new Error();await validateAthenaMedicationRecovery(draft.data,scope);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
+  if(draft?.kind==='editor'&&draft.editor==='ehr-read:athena:core'){
+    try{const scope=(draft.data as {scope?:unknown}).scope;if(!validAthenaAllergyScope(scope)||scope.workspace_id!==draft.workspaceId||draft.pending!==null)throw new Error();await validateAthenaRecovery(draft.data,scope);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
+  if(draft?.kind==='editor'&&draft.editor==='ehr-read:tebra:fhir'){
+    try{const scope=(draft.data as {scope?:unknown}).scope;if(!validTebraMedicationScope(scope)||scope.workspace_id!==draft.workspaceId||draft.pending!==null)throw new Error();await validateTebraRecovery(draft.data,scope);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
+  if(draft?.kind==='editor'&&(draft.editor==='ehr-read'||draft.editor==='ehr-read:tebra')){
+    try{const scope=(draft.data as {scope?:unknown}).scope;if(!validEhrScope(scope)||ehrProvider(scope)!==(draft.editor==='ehr-read:tebra'?'tebra':'elation')||scope.workspace_id!==draft.workspaceId||draft.pending!==null)throw new Error();await validateEhrReadRecovery(draft.data,scope);}
+    catch{throw new DraftStoreError('integrity');}return;
+  }
   if(draft?.kind==='editor'&&draft.editor==='scheduling-patient'){
     try{const data=await validateSchedulingPatientRecovery(draft.data,draft.workspaceId);
       if(draft.pending!==(data.pending?.idempotency_key??null))throw new Error();}
@@ -202,6 +242,15 @@ async function verifyModelHistory(draft:RecoveredDraft|null):Promise<void> {
     if (draft.pending !== null) throw new DraftStoreError("integrity");
     try {const scope=(draft.data as {scope?:unknown}).scope;if(!validGoogleCalendarScope(scope))throw new Error();await validateGoogleCalendarRecovery(draft.data,scope);}
     catch {throw new DraftStoreError("integrity");}return;
+  }
+  if (draft?.kind === "account-editor" && draft.editor === "outlook-messages") {
+    if (draft.pending !== null) throw new DraftStoreError("integrity");
+    try {
+      const scope = (draft.data as {scope?:unknown}).scope;
+      if (!validOutlookMessageScope(scope)) throw new DraftStoreError("integrity");
+      await validateOutlookMessageRecovery(draft.data, scope);
+    } catch { throw new DraftStoreError("integrity"); }
+    return;
   }
   if (draft?.kind === "account-editor" && draft.editor === "google-messages") {
     if (draft.pending !== null) throw new DraftStoreError("integrity");
@@ -301,7 +350,11 @@ export class DraftJournal {
   readonly records = new Map<string, DraftRecord>();
   private chain: Promise<unknown> = Promise.resolve();
   private active = true;
+  private listeners = new Set<(address:string|null)=>void>();
   constructor(private readonly store: DraftStore) {}
+  /** Only confirmed local changes are announced; no draft content leaves here. */
+  subscribe(changed:(address:string|null)=>void):()=>void {this.listeners.add(changed);return()=>{this.listeners.delete(changed);};}
+  private changed(address:string|null):void {for(const listener of [...this.listeners]){try{listener(address);}catch{/* An observer cannot fail a confirmed save. */}}}
   has(address: string): boolean { return this.records.has(address); }
   async load(address: string): Promise<RecoveredDraft | null> {
     // A newly mounted editor must see writes queued by its predecessor.
@@ -315,12 +368,15 @@ export class DraftJournal {
     this.records.set(address, record);
     return draft;
   }
-  persist(address: string, body: RecoveredDraft | null): Promise<void> {
+  persist(address: string, body: RecoveredDraft | null, expectedRevision?: string | null): Promise<void> {
     // Snapshot before enqueueing: later input mutations cannot change this save.
     const copy = structuredClone(body);
     const task = async () => {
       if (!this.active || !this.records.has(address)) throw new DraftStoreError("unavailable");
       const previous = this.records.get(address)!;
+      // Conditional cleanup must not overwrite a newer write queued while its
+      // caller was checking the record. Compare inside this serialized task.
+      if (expectedRevision !== undefined && previous.revision !== expectedRevision) throw new DraftStoreError("conflict");
       if (same(previous.value?.body ?? null, copy)) return;
       const value: DraftValue | null = copy ? { schema: 1, updatedAt: new Date().toISOString(), body: copy } : null;
       parse(value, address);
@@ -337,10 +393,11 @@ export class DraftJournal {
       }
       if (!this.active) throw new DraftStoreError("unavailable");
       this.records.set(address, saved);
+      this.changed(address);
     };
     const result = this.chain.catch(() => {}).then(task);
     this.chain = result;
     return result;
   }
-  close(): void { this.active = false; this.records.clear(); this.store.close(); }
+  close(): void { this.active = false; this.records.clear(); this.store.close(); this.changed(null); this.listeners.clear(); }
 }

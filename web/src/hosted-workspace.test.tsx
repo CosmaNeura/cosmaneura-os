@@ -71,3 +71,12 @@ it.each(["apple","desktop"])("selects %s native sign in for its hosted client",a
   await render();expect(container.textContent).toContain(client==="desktop"?"Native desktop sign in":"Native iPhone sign in");
   expect(harness.providers).toBe(0);
 });
+it("keeps desktop native sign in selected after navigating to Messages",async()=>{
+  vi.stubEnv("VITE_WORKSPACE_HOSTED_CLIENT","desktop");vi.stubEnv("VITE_WORKSPACE_WEB_ORIGIN","");
+  vi.stubEnv("VITE_WORKSPACE_DESKTOP_AUTH_ENABLED","true");vi.stubEnv("VITE_API_BASE","app://cosmas/api");
+  vi.stubGlobal("window",{location:{href:"app://cosmas/index.html#cosmas/messages/chief"}});
+  await render();
+  expect(container.textContent).toContain("Native desktop sign in");
+  expect(container.textContent).not.toContain("connection is not configured");
+  expect(harness.providers).toBe(0);expect(harness.tokens).not.toHaveBeenCalled();expect(fetch).not.toHaveBeenCalled();
+});
