@@ -1,1 +1,4 @@
 version = 1
+revision = 3
+requires-python = ">=3.13"
+# INCOMPLETE_TEST_DO_NOT_KEEP
