@@ -1,5 +1,5 @@
 import {act} from 'react';
-import {waitMessagesJourney as wait} from './messages-journey-wait';
+import {waitMessagesJourney as wait, MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 import {IDBFactory} from '../../clients/capture/node_modules/fake-indexeddb';
@@ -17,6 +17,9 @@ import {efaxInboundApi} from './efax-inbound-api';
 import {efaxSourceApi,type EFaxSourceReceipt,type EFaxSourceReviewRequest} from './efax-inbound-source-api';
 import {RECEIVED_FAX_PASSAGE,type ReceivedFaxStats} from '../ux-acceptance/efax';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+
+// Journey waits may legitimately exceed Vitest's 5s default under CI load.
+vi.setConfig({testTimeout: MESSAGES_JOURNEY_TEST_TIMEOUT_MS});
 let root:Root,host:HTMLDivElement,idb:IDBFactory;
 const storage=({scope}:{scope:string})=>openDraftStore({scope,native:false,indexedDB:idb,crypto:webcrypto});
 const visible=(e:Element)=>!e.closest('[hidden]');

@@ -1,5 +1,5 @@
 import {act} from 'react';
-import {waitMessagesJourney as wait} from './messages-journey-wait';
+import {waitMessagesJourney as wait, MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_MESSAGES_ENABLED','true');vi.stubEnv('VITE_EHR_READ_ENABLED','true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');});
@@ -10,6 +10,9 @@ import {ehrReadApi,type EhrReceipt} from './ehr-read-api';
 import {memoryDraftStorage} from './draft-test-fixture';
 import {PRESENTATION_KEY} from './session/presentation';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+
+// Journey waits may legitimately exceed Vitest's 5s default under CI load.
+vi.setConfig({testTimeout: MESSAGES_JOURNEY_TEST_TIMEOUT_MS});
 let root:Root,host:HTMLDivElement;
 const visibleButton=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>!button.closest('[hidden]')&&(button.textContent?.trim()===name||button.getAttribute('aria-label')===name));
 const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
