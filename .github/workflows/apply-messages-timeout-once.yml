@@ -1,0 +1,72 @@
+name: apply-messages-timeout-once
+on:
+  push:
+    branches: [cursor/messages-journey-wait-06d2]
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: apply-messages-timeout
+  cancel-in-progress: false
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/messages-journey-wait-06d2
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Insert per-file test timeout
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import pathlib, sys
+
+          BLOCK = (
+              "// Journey waits may legitimately exceed Vitest's 5s default under CI load.\n"
+              "vi.setConfig({testTimeout: MESSAGES_JOURNEY_TEST_TIMEOUT_MS});\n"
+          )
+          changed = []
+          for p in sorted(pathlib.Path("web/src").glob("Messages*Journey.test.tsx")):
+              t = p.read_text()
+              if "vi.setConfig" in t:
+                  continue
+              if "messages-journey-wait" not in t:
+                  sys.exit(f"missing helper import: {p}")
+              if "MESSAGES_JOURNEY_TEST_TIMEOUT_MS" not in t:
+                  t2 = t.replace(
+                      "import {waitMessagesJourney as wait} from './messages-journey-wait';",
+                      "import {waitMessagesJourney as wait, MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';",
+                  )
+                  if t2 == t:
+                      sys.exit(f"could not extend helper import: {p}")
+                  t = t2
+              lines = t.splitlines(True)
+              last = 0
+              for i, ln in enumerate(lines):
+                  if ln.startswith("import ") or "await vi.importActual" in ln:
+                      last = i
+              lines.insert(last + 1, "\n" + BLOCK)
+              p.write_text("".join(lines))
+              changed.append(p.name)
+
+          print("changed", len(changed))
+          missing = [
+              p.name
+              for p in pathlib.Path("web/src").glob("Messages*Journey.test.tsx")
+              if "vi.setConfig" not in p.read_text()
+          ]
+          if missing:
+              sys.exit(f"still missing timeout: {missing}")
+          PY
+          rm -f .github/workflows/apply-messages-timeout-once.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          if git diff --cached --quiet; then
+            echo 'nothing to commit'
+            exit 0
+          fi
+          git commit -m 'test(web): give Messages journeys a real per-file test timeout'
+          git push origin HEAD:cursor/messages-journey-wait-06d2
