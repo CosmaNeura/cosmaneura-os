@@ -18,7 +18,7 @@ function recordingDetails(recording:PrivateRecordingSnapshot):string {
 }
 
 export type StartPrivateRecording={title:string;prepareNotebook:(title?:string)=>Promise<PrivateNotebookResult>};
-export function PracticeHome({conversationContext,onPendingChange,identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam}:{
+export function PracticeHome({conversationContext,onPendingChange,identity,recovery,team,teamUnchanged=true,locked,onUseTeam,onSettings,onVisits,onConnections,onPracticeWork,onOpened,onNoteOpened,onAccessLost,onBusyChange,onRecord,recordings,onReopenRecording,openRecordingRequest=0,recordingActive=false,nativeCompact=false,teamError='',onRetryTeam,suspended=false}:{
   conversationContext?:{name:string;scribe:boolean};onPendingChange?:(pending:boolean)=>void;
   identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess|null;team:ProviderTeam|null;teamUnchanged?:boolean;locked:boolean;
   onUseTeam:()=>void;onSettings:()=>void;onVisits:()=>void;onConnections:()=>void;onPracticeWork:()=>void;
@@ -26,7 +26,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
   onNoteOpened?:(value:{identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam})=>Promise<void>;
   onAccessLost:(cause:unknown)=>void;onBusyChange:(busy:boolean)=>void;
   onRecord?:(value:StartPrivateRecording)=>void;recordings?:PrivateRecordingSnapshot[];onReopenRecording?:(recordingId:string)=>void;
-  openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;teamError?:string;onRetryTeam?:()=>void;
+  openRecordingRequest?:number;recordingActive?:boolean;nativeCompact?:boolean;teamError?:string;onRetryTeam?:()=>void;suspended?:boolean;
 }){
   const connection=useContext(WorkspaceConnectionRecoveryContext),connectionLive=useRef(connection);connectionLive.current=connection;
   const recoveredLists=useRef({identity,recovery,sequence:connection?.identity===identity?connection.sequence:0});
@@ -72,16 +72,18 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
     listRead.current=flight;return flight.promise;
   }
   useEffect(()=>{
+    if(suspended)return;
     const epoch=++live.current.epoch;openingFlight.current=null;setOpening(null);setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');setSlowCheck(false);
     // Visit and note lists do not decide whether Start is safe.
     void readLists(epoch);
-  },[identity]);
+  },[identity,suspended]);
   useEffect(()=>{
-    if(ready){setSlowCheck(false);return;}
+    if(suspended||ready){setSlowCheck(false);return;}
     const timer=setTimeout(()=>setSlowCheck(true),3000);
     return()=>clearTimeout(timer);
-  },[ready,identity]);
+  },[ready,identity,suspended]);
   useEffect(()=>{
+    if(suspended)return;
     if(!recovery){setReady(false);return;}
     // The journal was opened only after the signed team scope check. This read stays on device.
     // Submitting Start still calls authorize(), which reads the team again.
@@ -89,7 +91,7 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
     void(async()=>{const saved=await promise;if(!current(epoch))return;
       if(saved){setTitle(saved.title);setPending(saved.pending);}setReady(true);
     })().catch(cause=>{if(current(epoch)){setError('Private recovery could not be checked. Refresh Home before starting a new draft.');deny(cause);}});
-  },[identity,recovery]);
+  },[identity,recovery,suspended]);
   useEffect(()=>{
     if(!recovery||!ready||connection?.identity!==identity||recoveredLists.current.identity!==identity||recoveredLists.current.recovery!==recovery||
       connection.sequence<=recoveredLists.current.sequence||connection.phase!=='ready'||connection.busy||workspaceProtocolGeneration(identity)!==connection.generation)return;

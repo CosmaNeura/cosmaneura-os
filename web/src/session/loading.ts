@@ -38,19 +38,35 @@ export class WorkspaceLoading {
   startup(context:LoadingContext,consume:()=>ProviderTeam|null|undefined,report?:{listed:()=>void;unavailable:()=>void}):(()=>void)|undefined {
     const {authenticated}=context;if(!authenticated||this.session.getSnapshot().team)return;
     let cancelled=false;const current=this.session.generation.current,controller=new AbortController();
-    const startup=consume();
-    void (startup?Promise.resolve(startup):this.api.team(authenticated,controller.signal)).then(value=>{
-      if(!cancelled&&current===this.session.generation.current){
-        this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
-        report?.listed();
-        void context.recoverAfterRead(value,null,current);
-      }
-    }).catch(cause=>{
+    const startupTeam=consume();
+    let retried=false;
+    const live=()=>!cancelled&&current===this.session.generation.current&&!this.session.getSnapshot().team;
+    const apply=(value:ProviderTeam)=>{
+      if(!live())return;
+      this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
+      if(retried)this.session.setError('');
+      report?.listed();
+      void context.recoverAfterRead(value,null,current);
+    };
+    const fail=(cause:unknown)=>{
       if(cancelled||current!==this.session.generation.current)return;
-      if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status))context.failure(cause);
-      else if(report)report.unavailable();
+      const denied=cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status);
+      if(denied){context.failure(cause);return;}
+      // A not-ready protocol or an aborted shared flight is the 503 main recovers
+      // by failure() without ending the session. One fresh read follows it.
+      // A real team-list failure keeps the admitted session and shows Retry.
+      const transient=cause instanceof WorkspaceApiError&&cause.status===503&&(cause.code==null||cause.code==='workspace_protocol_required');
+      if(transient&&!retried&&!startupTeam){
+        retried=true;
+        context.failure(cause);
+        if(!live())return;
+        void this.api.team(authenticated,controller.signal).then(apply,fail);
+        return;
+      }
+      if(report)report.unavailable();
       else context.failure(cause);
-    });
+    };
+    void (startupTeam?Promise.resolve(startupTeam):this.api.team(authenticated,controller.signal)).then(apply,fail);
     return()=>{cancelled=true;controller.abort();};
   }
 
