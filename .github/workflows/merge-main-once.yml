@@ -1,0 +1,62 @@
+name: merge-main-once
+on:
+  push:
+    branches:
+      - cursor/forgot-password-clerk-06d2
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  merge:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/forgot-password-clerk-06d2
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Merge main and resolve App.tsx
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git merge --no-edit FETCH_HEAD || true
+          echo "--- status ---"
+          git status --porcelain | head -30
+          python3 - <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          path = pathlib.Path("web/src/App.tsx")
+          text = path.read_text()
+          text = re.sub(r"<<<<<<<[^\n]*\n.*?=======\n.*?>>>>>>>[^\n]*\n", "", text, flags=re.S)
+          if "BetaSignIn" not in text:
+              sys.exit("BetaSignIn missing")
+          text = text.replace('<SignIn routing="hash" />', "<BetaSignIn />")
+          text = text.replace(
+              'import { OrganizationSwitcher, UserButton, useAuth } from "@clerk/react";',
+              'import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";',
+          )
+          text = text.replace(
+              'import { OrganizationSwitcher, SignIn, UserButton, useAuth, useClerk, useUser } from "@clerk/react";',
+              'import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";',
+          )
+          path.write_text(text)
+          if "<<<<<<<" in text or ">>>>>>>" in text:
+              sys.exit("markers remain in App.tsx")
+          if "BetaSignIn />" not in text:
+              sys.exit("BetaSignIn not mounted")
+          if "useClerk" not in text:
+              sys.exit("useClerk import missing")
+          print("App.tsx resolved")
+          PY
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Merge main into forgot-password branch"
+          fi
+          git rm -q .github/workflows/merge-main-once.yml || true
+          git commit -m "ci: remove one-shot merge helper" || true
+          git push origin HEAD:cursor/forgot-password-clerk-06d2
+          echo pushed
