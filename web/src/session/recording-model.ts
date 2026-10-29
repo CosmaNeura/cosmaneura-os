@@ -1,0 +1,11 @@
+import type {DraftJournal} from '../draft-journal';
+import type {RecordingVisitBinding} from '../private-recording-api';
+import type {PrivateRecordingSnapshot} from '../private-recording-runtime';
+import type {AuthenticatedWorkspaceIdentity,Workspace,ProviderTeam} from '../workspace-api';
+export type PrivateNotebookResult={identity:AuthenticatedWorkspaceIdentity;workspace:Workspace;team:ProviderTeam};
+export type RecordingTranscriptionGesture={identity:AuthenticatedWorkspaceIdentity;recordingId:string;scope:string;intent_sha256:string;claim:()=>boolean};
+export type SavedRecordingEntry={recordingId:string;scope:string;platform:'ios'|'desktop';originWorkspace?:Workspace;visitResolved?:boolean;binding?:RecordingVisitBinding;transcriptionGesture?:RecordingTranscriptionGesture};
+export type PrivateRecordingEntry={identity:AuthenticatedWorkspaceIdentity;journal:DraftJournal;scope:string;serverScope:string;generation:number;title:string;recordingId?:string;returnWorkspaceId?:string;prepareNotebook?:(title?:string)=>Promise<PrivateNotebookResult>;authorize:()=>Promise<void>};
+export type SessionSavedRecording=SavedRecordingEntry&{workspaceId:string;identity:AuthenticatedWorkspaceIdentity};
+export type RecordingCatalog={identity:AuthenticatedWorkspaceIdentity;scope:string;generation:number;rows:PrivateRecordingSnapshot[]};
+export type RecordingOwner={authenticated:AuthenticatedWorkspaceIdentity|undefined;editorJournal:DraftJournal|undefined;editorScope:string|null|undefined;generation:number};

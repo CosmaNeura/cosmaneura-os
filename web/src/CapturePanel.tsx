@@ -25,9 +25,10 @@ const idle: CaptureFlowSnapshot = { state: "idle", statusCode: "idle", sessionId
   recordedChunks: 0, queuedChunks: 0, elapsedSeconds: 0, remainingBudgetSeconds: null,
   remainingAuthoritySeconds: null, transcriptionStatus: null, transcript: null };
 
-export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptureRuntime, notesEnabled = false, correctionsEnabled = false, recoveryEnabled = CAPTURE_RECOVERY_BUILD, onDraftLock, onNavigationLock, onExpandedChange, onReviewDraft, onCurrentDraft, reviewLocked, scratchpad, notebookDirty = false, onNotebook, taskBot, openRequest = 0, preferencesScope, encounterLabel }: {
+export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptureRuntime, notesEnabled = false, correctionsEnabled = false, recoveryEnabled = CAPTURE_RECOVERY_BUILD, onDraftLock, onNavigationLock, onTransitionChange, onExpandedChange, onReviewDraft, onCurrentDraft, reviewLocked, scratchpad, notebookDirty = false, onNotebook, taskBot, openRequest = 0, preferencesScope, encounterLabel }: {
   workspaceId: string; identity: AuthenticatedWorkspaceIdentity; runtimeFactory?: CaptureRuntimeFactory; notesEnabled?: boolean;
   onDraftLock?: (locked: boolean) => void;
+  onTransitionChange?: (blocked:boolean) => void;
   onNavigationLock?: (locked: boolean) => void;
   onExpandedChange?: (expanded:boolean)=>void;
   onReviewDraft?: (draft: CaptureDraft) => void; reviewLocked?: boolean;
@@ -62,6 +63,7 @@ export function CapturePanel({ workspaceId, identity, runtimeFactory = openCaptu
   const [showConfiguredNote, setShowConfiguredNote] = useState(false);
   const [working, setWorking] = useState<WorkingReceipt | null>(null);
   useEffect(() => { onDraftLock?.(draftLocked || transcriptLocked); return () => onDraftLock?.(false); }, [draftLocked, transcriptLocked, onDraftLock]);
+  useEffect(()=>{onTransitionChange?.(!!busy||!!pending||["uploading","preparing","stopping"].includes(snapshot.state));return()=>onTransitionChange?.(false);},[busy,pending,snapshot.state,onTransitionChange]);
   useEffect(() => {
     onNavigationLock?.(!!busy || !!pending || ["recording", "uploading", "preparing", "stopping"].includes(snapshot.state));
     return () => onNavigationLock?.(false);

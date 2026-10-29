@@ -204,6 +204,7 @@ def ask(
             "entry_revision": anchor["revision"],
             "workspace": ws.read(s, box, owner, wid, at_revision=anchor["revision"]),
         }
+    ws._entry_key_available(s, wid, key)
     version, bot, settings = team.active_bot(s, box, owner, role, team_revision)
     if settings["role"] == "custom" and settings.get("skills") == ["membership_review"] and membership_analysis is None:
         raise ws.WorkspaceError("membership_selection_required")

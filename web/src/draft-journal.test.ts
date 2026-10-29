@@ -10,6 +10,24 @@ const complete={type:"followUpComplete" as const,ticketId,body:{revision_id,payl
 const draft=(pending:unknown)=>({kind:"workspace",workspaceId,baseRevision:4,note:"Retained notebook",thought:"",evidence:"",source:"",pending}) as NotebookDraft;
 const address=`workspace:${workspaceId}`;
 
+it('checks an optional expected revision inside the write queue and preserves a newer queued edit',async()=>{
+ const factory=memoryDraftStorage(),options={scope:'e'.repeat(64)},store=await factory(options);let release!:()=>void,hold=false;
+ const journal=new DraftJournal({...store,async write(where,expected,value){if(hold){hold=false;await new Promise<void>(resolve=>{release=resolve;});}return store.write(where,expected,value);}});
+ await journal.load(address);await journal.persist(address,draft(null));const expected=journal.records.get(address)!.revision;
+ hold=true;const newer=journal.persist(address,{...draft(null),note:'Newer edit'});await vi.waitFor(()=>expect(release).toBeTypeOf('function'));
+ const cleanup=journal.persist(address,{...draft(null),note:'Old restored value'},expected),refused=expect(cleanup).rejects.toMatchObject({code:'conflict'});
+ release();await newer;await refused;expect(await journal.load(address)).toMatchObject({note:'Newer edit'});journal.close();
+ const reopened=new DraftJournal(await factory(options));expect(await reopened.load(address)).toMatchObject({note:'Newer edit'});
+});
+
+it('checks expected revision before an identical-body no-op while leaving ordinary callers unchanged',async()=>{
+ const journal=new DraftJournal(await memoryDraftStorage()({scope:'f'.repeat(64)}));await journal.load(address);
+ await journal.persist(address,draft(null),null);const saved=journal.records.get(address)!.revision;
+ await expect(journal.persist(address,draft(null),null)).rejects.toMatchObject({code:'conflict'});
+ await journal.persist(address,draft(null),saved);await journal.persist(address,{...draft(null),note:'Ordinary caller'});
+ expect(await journal.load(address)).toMatchObject({note:'Ordinary caller'});
+});
+
 it.each([decision,{...decision,body:{...decision.body,choice:"reject"}},complete])("round-trips the exact ticket request without adding notebook authority fields (%j)",async pending=>{
   const factory=memoryDraftStorage();const options={scope:"a".repeat(64)};
   const journal=new DraftJournal(await factory(options));await journal.load(address);

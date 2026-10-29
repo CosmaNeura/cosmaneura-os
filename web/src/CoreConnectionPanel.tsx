@@ -4,6 +4,7 @@ import {CoreAppointmentSetupPanel,CORE_APPOINTMENT_SETUP_BUILD} from './CoreAppo
 import {AthenaConnectionPanel,ATHENA_CONNECTION_BUILD} from './AthenaConnectionPanel';
 import {isCoreWindow,type CoreConnectionCommand,type CoreConnectionResult,type CoreCursor,type CoreWindow} from './core-connection-contract';
 import {useSetupNavigationBusy} from './connection-setup-flow';
+import type {AthenaVisitRecoverySession} from './athena-visit-link-recovery';
 import {WORKSPACE_AUTHENTICATED_BUILD,WORKSPACE_BUILD,WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
 
 export const CORE_CONNECTION_BUILD=WORKSPACE_BUILD&&WORKSPACE_AUTHENTICATED_BUILD&&import.meta.env.VITE_CORE_CONNECTION_ENABLED==='true';
@@ -14,7 +15,7 @@ function initialWindow():CoreWindow{
   return {start_date,end_date:end.toISOString().slice(0,10)};
 }
 
-export function CoreConnectionPanel({identity,onBusyChange,onAuthenticationLost,onOpenNotebook,openBlocked=false,athenaEnabled=ATHENA_CONNECTION_BUILD,appointmentSetupEnabled=CORE_APPOINTMENT_SETUP_BUILD}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onOpenNotebook?:(command:CoreConnectionCommand)=>Promise<void>;openBlocked?:boolean;athenaEnabled?:boolean;appointmentSetupEnabled?:boolean;onAuthenticationLost:(error:unknown)=>void}){
+export function CoreConnectionPanel({identity,onBusyChange,onAuthenticationLost,onOpenNotebook,openBlocked=false,athenaEnabled=ATHENA_CONNECTION_BUILD,appointmentSetupEnabled=CORE_APPOINTMENT_SETUP_BUILD,athenaOnly=false,athenaRecovery,onAthenaRecoveryChange,onOpenAthena}:{identity:AuthenticatedWorkspaceIdentity;onBusyChange?:(busy:boolean)=>void;onOpenNotebook?:(command:CoreConnectionCommand)=>Promise<void>;openBlocked?:boolean;athenaEnabled?:boolean;appointmentSetupEnabled?:boolean;onAuthenticationLost:(error:unknown)=>void;athenaOnly?:boolean;athenaRecovery?:AthenaVisitRecoverySession;onAthenaRecoveryChange?:()=>void;onOpenAthena?:()=>void}){
   const [storedConnection,storeConnection]=useState<{identity:AuthenticatedWorkspaceIdentity;value:CoreConnectionResult}|null>(null),[storedPage,storePage]=useState<{identity:AuthenticatedWorkspaceIdentity;value:CoreConnectionResult}|null>(null);
   const connection=storedConnection?.identity===identity?storedConnection.value:null,page=storedPage?.identity===identity?storedPage.value:null;
   const setConnection=(value:CoreConnectionResult|null)=>storeConnection(value?{identity,value}:null),setPage=(value:CoreConnectionResult|null)=>storePage(value?{identity,value}:null);
@@ -62,27 +63,29 @@ export function CoreConnectionPanel({identity,onBusyChange,onAuthenticationLost,
         <button className="team-primary" disabled={locked} onClick={()=>void run({action:'connect',connection_sha256:connection.discovery.connection.connection_sha256})}>Connect this practice</button>
       </>}
     </div>}
-    {connected&&<section aria-label="Cosmaneura appointments">
-      <h3>Your appointments</h3><p>Choose a date range to view appointments available to your account.</p>
+    {onOpenAthena&&<button disabled={locked} onClick={onOpenAthena}>Find or connect an Athena visit</button>}
+    {connected&&!athenaOnly&&<section className="connection-appointments-section" aria-label="Cosmaneura appointments">
+      <header><h3>Your appointments</h3><p>Choose a date range to view appointments available to your account.</p></header>
       <div className="connection-date-range"><label>From<input type="date" value={window.start_date} disabled={locked} onChange={e=>{setWindow({...window,start_date:e.target.value});setPage(null);setError('');}}/></label>
         <label>Before<input type="date" value={window.end_date} disabled={locked} onChange={e=>{setWindow({...window,end_date:e.target.value});setPage(null);setError('');}}/></label></div>
       <p className="team-fine">Up to 31 days, using the dates recorded by your practice.</p>
-      <button disabled={locked} onClick={()=>appointments()}>View appointments</button>
+      <button className={page?'team-subtle':'team-primary'} disabled={locked} onClick={()=>appointments()}>{page?'Refresh appointments':'View appointments'}</button>
       {appointmentSetupEnabled&&!busy&&!athenaBusy&&<CoreAppointmentSetupPanel identity={identity} connectionSha={connection.discovery.connection.connection_sha256} window={window} onBusyChange={setSetupBusy} onConnected={()=>setPage(null)} onAccessLost={cause=>{
         setConnection(null);setPage(null);setError('Practice access or appointments changed. Check your connection again.');
         if(cause instanceof WorkspaceApiError&&cause.status===401)onAuthenticationLost(cause);
       }}/>}
       {page&&openBlocked&&<p>Save or recover unfinished work before opening a notebook.</p>}
-      {page&&<><ul className="connection-appointments">{page.discovery.encounters.map(entry=><li key={entry.appointment.appointment_ref}>
-        <strong>{entry.patient.display_name}</strong><span>{entry.appointment.timezone_known?new Date(entry.appointment.appointment_date).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):entry.appointment.appointment_date.slice(0,19).replace('T',' ')}</span>
-        {!entry.appointment.timezone_known&&<small>Time zone not supplied by the practice</small>}
-        {onOpenNotebook&&<button disabled={locked||openBlocked} onClick={()=>void onOpenNotebook({action:'open',request_nonce:crypto.randomUUID(),connection_sha256:entry.connection_sha256,appointment_ref:entry.appointment.appointment_ref,source_sha256:entry.source_sha256})}>Open notebook</button>}
+      {page&&<><ul className="connection-appointments">{page.discovery.encounters.map(entry=><li className="connection-appointment-row" key={entry.appointment.appointment_ref}>
+        <div className="connection-appointment-copy"><strong>{entry.patient.display_name}</strong><span>{entry.appointment.timezone_known?new Date(entry.appointment.appointment_date).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):entry.appointment.appointment_date.slice(0,19).replace('T',' ')}</span>
+          {!entry.appointment.timezone_known&&<details className="connection-appointment-details"><summary>Time zone not supplied</summary><small>Check the practice-recorded time before relying on it.</small></details>}
+        </div>
+        {onOpenNotebook&&<button className="team-primary connection-appointment-open" disabled={locked||openBlocked} onClick={()=>void onOpenNotebook({action:'open',request_nonce:crypto.randomUUID(),connection_sha256:entry.connection_sha256,appointment_ref:entry.appointment.appointment_ref,source_sha256:entry.source_sha256})}>Open notebook</button>}
       </li>)}</ul>
         {!page.discovery.encounters.length&&<p>{page.discovery.next_cursor?'No available appointments on this page. Continue to check the next page.':'No available appointments in this part of the date range.'}</p>}
         {page.discovery.next_cursor&&<button disabled={locked} onClick={()=>appointments(page.discovery.next_cursor!)}>Next appointments</button>}
       </>}
     </section>}
-    {athenaEnabled&&connected&&!busy&&!setupBusy&&<AthenaConnectionPanel key={connection.discovery.connection.connection_sha256} identity={identity} connectionSha={connection.discovery.connection.connection_sha256} connection={connection.discovery.connection} onOpenNotebook={onOpenNotebook} openBlocked={openBlocked} onBusyChange={setAthenaBusy} onAccessLost={cause=>{
+    {athenaEnabled&&connected&&!busy&&!setupBusy&&<AthenaConnectionPanel key={connection.discovery.connection.connection_sha256} identity={identity} connectionSha={connection.discovery.connection.connection_sha256} connection={connection.discovery.connection} onOpenNotebook={onOpenNotebook} openBlocked={openBlocked} recovery={athenaRecovery} onRecoveryChange={onAthenaRecoveryChange} onBusyChange={setAthenaBusy} onAccessLost={cause=>{
       setConnection(null);setPage(null);setError('Practice access changed. Check your connection again.');
       if(cause instanceof WorkspaceApiError&&cause.status===401)onAuthenticationLost(cause);
     }}/>}

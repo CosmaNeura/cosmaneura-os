@@ -124,9 +124,9 @@ export async function proxyAuthenticatedWorkspaceRequest(request, auth, fetchImp
   const teamPath = ['/provider-team', '/provider-team/setup', '/provider-team/rehearsal'].includes(path);
   const teamInfoPath = activityPath || ['/provider-team/resources', '/provider-team/usage', '/provider-team/identity'].includes(path);
   const teamContract = request.headers.get('X-Cosmas-Team-Contract');
-  if (teamContract !== null && (!['1', '2', '3', '4'].includes(teamContract) || !teamPath && !teamInfoPath) ||
+  if (teamContract !== null && (!['1', '2', '3', '4', '5'].includes(teamContract) || !teamPath && !teamInfoPath) ||
       teamPath && path !== '/provider-team' && teamContract === null ||
-      teamInfoPath && !(activityPath || identityPath ? teamContract === '2' : ['2', '3', '4'].includes(teamContract)) || identityPath && recoveryGeneration !== '2') return unavailable(426);
+      teamInfoPath && !(activityPath || identityPath ? teamContract === '2' : ['2', '3', '4', '5'].includes(teamContract)) || identityPath && recoveryGeneration !== '2') return unavailable(426);
   const modelCommand = request.method === 'POST' && MODEL_COMMAND.test(path);
   const workspaceRead = request.method === 'GET' && WORKSPACE_READ.test(path);
   const modelContract = request.headers.get('X-Cosmas-Model-Contract');

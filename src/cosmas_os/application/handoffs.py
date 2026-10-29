@@ -20,7 +20,7 @@ from cosmas_os.models import (
 from cosmas_os.ports.bot_capabilities import supports_skill
 
 
-def available_roles(s, box, owner, version, chief_settings):
+def available_roles(s, box, owner, version, chief_settings, *, snapshot: team.TeamReadSnapshot | None = None):
     if any(team.blocked(chief_settings, key) for key in ("private_draft_handoff", "model_answer")):
         return ()
     roles = []
@@ -44,7 +44,7 @@ def available_roles(s, box, owner, version, chief_settings):
         ):
             continue
         try:
-            team.active_bot(s, box, owner, role, version.revision)
+            team.active_bot(s, box, owner, role, version.revision, snapshot=snapshot)
         except ws.WorkspaceError:
             continue
         roles.append(role)
@@ -131,9 +131,12 @@ def read(s, w, revision):
                         unavailable_kinds.add(original.kind)
                         brief = {
                             "google_message": "The selected email is unavailable. Check its account access before using this draft.",
+                            "microsoft_message": "The selected email is unavailable. Check its account access before using this draft.",
                             "google_calendar": "The selected calendar summary is unavailable. Load and review a fresh summary before using this draft.",
                             "efax_inbound_source": "The reviewed fax passage is unavailable. Check its received-fax access and selected visit before using this draft.",
                             "fax_inbound_source": "The reviewed practice-fax passage is unavailable. Check its account access and selected visit before using this draft.",
+                            "ehr_read_source": "The reviewed EHR visit is unavailable. Load and review the patient and visit again before using this draft.",
+                            "calendar_import_source": "The imported calendar summary is unavailable. Check the retained import and selected visit before using this draft.",
                         }[original.kind]
                         evidence.pop("task_brief", None)
                         evidence.pop("completion_evidence", None)
@@ -146,9 +149,13 @@ def read(s, w, revision):
                 # Only their independently verified immutable digest is recoverable.
                 result_sha256 = handoff_review.result_recovery_digest(s, w, handoff, latest)
             feedback_notice = ("Email access must be checked before viewing this feedback."
-                               if unavailable_kinds == {"google_message"} else
+                               if unavailable_kinds and unavailable_kinds <= {"google_message", "microsoft_message"} else
                                "Check the reviewed fax passage before viewing this feedback."
                                if unavailable_kinds & {"efax_inbound_source", "fax_inbound_source"} else
+                               "Check the reviewed EHR appointment before viewing this feedback."
+                               if "ehr_read_source" in unavailable_kinds else
+                               "Check the imported calendar summary before viewing this feedback."
+                               if "calendar_import_source" in unavailable_kinds else
                                "Check the selected calendar summary before viewing this feedback.")
             if reviewed:
                 reviewed = {**reviewed, "feedback": feedback_notice}

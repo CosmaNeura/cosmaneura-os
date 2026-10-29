@@ -1,0 +1,27 @@
+{
+  "status": "shared input and expected token-preserving canonical JSON; reader/formatter qualification pending",
+  "invented_only": true,
+  "raw_section_json": "{\"sectionnote\":\"Invented notes: caf\u00e9 \ud83e\uddea\\r\\nNo clinical instruction is inferred.\",\"nomedicationsreported\":true,\"medications\":[[{\"medicationentryid\":\"C-invented-one\",\"medication\":\"Invented tablet\",\"quantity\":0.50,\"status\":\"PEND\",\"unstructuredsig\":\"Invented instruction line\\nKeep wording as recorded.\",\"structuredsig\":{\"tiny\":1e-7,\"signedzero\":-0,\"minimum\":-9223372036854775808,\"maximum\":9223372036854775807,\"opaque\":{\"\ud83d\ude00\":1E+3,\"\ue000\":0.500}},\"events\":[{\"type\":\"ORDER\",\"eventdate\":\"10/26/2026\",\"userdisplayname\":null}]}],[],[{\"medicationentryid\":\"C-invented-one\",\"medication\":\"Invented repeated record\",\"quantity\":0.50}]]}",
+  "expected_section_json": "{\"medications\":[[{\"events\":[{\"eventdate\":\"10/26/2026\",\"type\":\"ORDER\",\"userdisplayname\":null}],\"medication\":\"Invented tablet\",\"medicationentryid\":\"C-invented-one\",\"quantity\":0.50,\"status\":\"PEND\",\"structuredsig\":{\"maximum\":9223372036854775807,\"minimum\":-9223372036854775808,\"opaque\":{\"\\ue000\":0.500,\"\\ud83d\\ude00\":1E+3},\"signedzero\":-0,\"tiny\":1e-7},\"unstructuredsig\":\"Invented instruction line\\nKeep wording as recorded.\"}],[],[{\"medication\":\"Invented repeated record\",\"medicationentryid\":\"C-invented-one\",\"quantity\":0.50}]],\"nomedicationsreported\":true,\"sectionnote\":\"Invented notes: caf\\u00e9 \\ud83e\\uddea\\r\\nNo clinical instruction is inferred.\"}",
+  "expected_section_sha256": "bf3e38de9cf35341fbd8878634b58276a6b235547060fa9e0b31a5144e3c7a6c",
+  "number_tokens": [
+    "0.50",
+    "1e-7",
+    "-0",
+    "-9223372036854775808",
+    "9223372036854775807",
+    "1E+3",
+    "0.500"
+  ],
+  "groups": 3,
+  "records": 2,
+  "constraints": [
+    "Preserve empty group and repeated medicationentryid",
+    "Preserve explicit nomedicationsreported=true alongside returned records",
+    "Preserve documented nullable events.userdisplayname",
+    "Sort opaque keys by Unicode codepoint, not UTF16 code unit",
+    "Numbers never parsed through binary float, Number, BigInt serialization or clinical jsonb"
+  ],
+  "source_content": null,
+  "source_content_status": "Pending actual foundation formatter; UI must not invent source reconstruction text"
+}

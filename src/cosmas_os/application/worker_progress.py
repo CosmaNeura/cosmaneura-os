@@ -50,6 +50,11 @@ class WorkerProgress:
 
 
 def workspace_workers_ready(application, settings) -> bool:
+    # Standalone lifespan deliberately runs no handoff/routine queue workers;
+    # its model is used directly by Chief. Configuration and database readiness
+    # are still checked by /ready.
+    if getattr(settings, "cosmas_env", None) in {"standalone_synthetic", "standalone_clerk_synthetic"}:
+        return True
     expected = set()
     if settings.workspace_llm_available:
         expected.add("handoffs")

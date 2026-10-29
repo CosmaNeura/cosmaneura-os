@@ -102,3 +102,34 @@ it('preserves journal when identity changes before an authorized local rewrite',
  await seed();const before=await readSaved();await render();await click('Restore saved fax passage');await click('Check saved fax review');await click('Prepare a new review for current visit');await click('Check exact acquired PDF');
  const afterReset=await readSaved();vi.mocked(accountIdentityApi.read).mockResolvedValue({...account,actor_id:uuid(99)});await click('Save passage draft privately');expect(await readSaved()).toEqual(afterReset);expect(before).not.toBeNull();expect(props.onAuthenticationLost).toHaveBeenCalled();expect(efaxSourceApi.review).not.toHaveBeenCalled();
 });
+it('forwards exact-document opening and retained visibility without discarding the passage',async()=>{
+ let signal:AbortSignal|undefined;
+ props={...props,onOpenDocument:vi.fn(value=>{signal=value;return new Promise<null>(resolve=>value.addEventListener('abort',()=>resolve(null),{once:true}));})};
+ await render();await enterPassage();await click('Open original PDF');expect(props.onOpenDocument).toHaveBeenCalledOnce();
+ await render(context,{...props,visible:false});expect(signal?.aborted).toBe(true);
+ await render(context,{...props,visible:true});expect(props.onOpenDocument).toHaveBeenCalledOnce();
+ expect(host.querySelector<HTMLTextAreaElement>('textarea')?.value).toBe(record.passage);
+ expect(host.querySelector<HTMLInputElement>('[aria-label="Pages used"]')?.value).toBe('1, 3');
+ expect([...host.querySelectorAll<HTMLInputElement>('input[type=checkbox]')].every(value=>!value.checked)).toBe(true);
+ expect(await readSaved()).toBeNull();expect(efaxSourceApi.review).not.toHaveBeenCalled();
+});
+it('keeps direct Back locked across initial account proof, journal load and unpersisted passage edits',async()=>{
+ props={...props,onOperationBusyChange:vi.fn()};let complete!:(value:Workspace)=>void;
+ vi.mocked(context.authorize).mockReturnValueOnce(new Promise(resolve=>{complete=resolve;}));await render();
+ expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);expect(host.querySelector('textarea')).toBeNull();
+ await act(async()=>complete({id:scope.workspace_id,revision:5} as Workspace));await wait(()=>expect(host.querySelector('textarea')).not.toBeNull());
+ await wait(()=>expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false));
+ await enterPassage();expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(true);
+ await click('Save passage draft privately');await wait(()=>expect(props.onOperationBusyChange).toHaveBeenLastCalledWith(false));
+ expect((await readSaved())?.kind).toBe('editor');expect(efaxSourceApi.review).not.toHaveBeenCalled();
+});
+it('releases the direct activity lock when initial account proof fails and fences old proof after replacement',async()=>{
+ const priorNotify=vi.fn();props={...props,onOperationBusyChange:priorNotify};let oldComplete!:(value:AccountIdentity)=>void;
+ vi.mocked(accountIdentityApi.read).mockReturnValueOnce(new Promise(resolve=>{oldComplete=resolve;}));await render();await wait(()=>expect(accountIdentityApi.read).toHaveBeenCalledOnce());
+ const nextNotify=vi.fn();let fail!:(cause:unknown)=>void;
+ vi.mocked(accountIdentityApi.read).mockReturnValueOnce(new Promise((_,reject)=>{fail=reject;}));
+ await render(context,{...props,onOperationBusyChange:nextNotify,offered:{...props.offered,operation_id:uuid(44)}});await wait(()=>expect(accountIdentityApi.read).toHaveBeenCalledTimes(2));
+ await act(async()=>oldComplete(account));expect(nextNotify).toHaveBeenLastCalledWith(true);
+ await act(async()=>fail(new WorkspaceApiError(403)));await wait(()=>expect(nextNotify).toHaveBeenLastCalledWith(false));
+ expect(host.querySelector('textarea')).toBeNull();expect(journal).toBeTruthy();expect(efaxSourceApi.review).not.toHaveBeenCalled();
+});
