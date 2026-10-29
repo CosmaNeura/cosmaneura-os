@@ -45,7 +45,7 @@ it('opens one complete Calendar task from Chief and returns the exact draft, foc
  const ask=vi.spyOn(workspaceApi,'ask'),append=vi.spyOn(workspaceApi,'append');await openChat();await type('Keep exact Chief calendar directions.');
  const scroll=()=>host.querySelector<HTMLElement>('.mobile-chat-scroll')!;Object.defineProperty(scroll(),'scrollHeight',{configurable:true,value:1000});Object.defineProperty(scroll(),'clientHeight',{configurable:true,value:200});scroll().scrollTop=230;await act(async()=>scroll().dispatchEvent(new Event('scroll')));const marks=vi.spyOn(conversationsApi,'mark');
  await openTask();expect(host.querySelectorAll('.google-calendar-panel')).toHaveLength(1);expect(host.querySelector('.messages-details')).toBeNull();expect(stats()).toMatchObject({status:0,observes:0,reviews:0});const owner=host.querySelector('.google-calendar-panel');
- await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(button('Details')));expect(question().value).toBe('Keep exact Chief calendar directions.');expect(scroll().scrollTop).toBe(230);expect(marks).not.toHaveBeenCalled();
+ await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(button('Details')));expect(question().value).toBe('Keep exact Chief calendar directions.');await wait(()=>expect(scroll().scrollTop).toBe(230));expect(marks).not.toHaveBeenCalled();
  await openTask();expect(host.querySelector('.google-calendar-panel')).toBe(owner);expect(stats().observes).toBe(0);expect(ask).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();
 });
 it('reviews one event with three acknowledgments, saves an exact source and prepares Chief without sending',async()=>{
