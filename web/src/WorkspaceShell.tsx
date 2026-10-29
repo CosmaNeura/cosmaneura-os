@@ -151,6 +151,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   const {setActivityProof,setActivityBusy,setActivityContextBusy,setActivityContextError,setActivityAttempt,setSelectedSource,setFaxSourceBusy,setProviderFaxSourceBusy,setPhoneNoteTask,setReviewHandoffId,setHandoffReviewPending,setSelectedResult,setSavedResearchChat,setSettingsOpen,setPracticePage,setPracticeOpen,setPracticeOpened,setSelected,setPanel,setMobilePanel,setStage,setEntryIntent,setResearchEntry,setSettingsEntry,setInboxSelection,setPrivateRecordingBusy,setPrivateRecordingEntry,setSavedRecordingEntry,setSavedRecordingNotebook,setPrivateRecordingListEpoch,setPrivateRecordingRequest,setClinicalPreparing,setHomeBusy,setSetupApproval,setSetupProjection,setSetupEpoch,setConfirmTeamExit,setTeamSaveExit,setConnectionError,setConflict,setMessage,setError,generation,
     setWorkspace,setTeamDraft,setNote,setThought,setEvidence,setSource,setClinicalShareCheck,setModelObservation,setReplacementDraft,setModelHashes,setSchedulingObservation,setRecoveryState}=session;
   const messagesMode=session.presentation.current()==='messages';
+  const [openingVisit,setOpeningVisit]=useState(false);
   const [newMessage,setNewMessage]=useState(false),[conversationDetails,setConversationDetails]=useState(false);
   const [athenaTask,setAthenaTask]=useState<{identity:AuthenticatedWorkspaceIdentity;open:boolean;view:string;returnLabel:string;target:HTMLElement|null}|null>(null);
   const athenaOpening=useRef(0);
@@ -539,6 +540,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     setCaptureRequest(0); setObservedCaptureDraft(null);
     setResearchEntry(false);
     setReviewHandoffId(null);setHandoffReviewPending(false);
+    setOpeningVisit(false);
   }
   function lifecycleContext(){return {authenticated,connectionRecovery,clear,
     recoveryFailed:()=>setRecoveryState('failed'),
@@ -626,6 +628,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       focusChief:(workspace,generation)=>{chiefNotebookFocus.current={workspace,generation};},focusFax:()=>setFocusFaxWork(true),showResearch:()=>setSavedResearchChat(false),
       afterOpen:()=>{afterOpen?.();if(selectedRecord){const opened=session.getSnapshot().workspace;if(opened?.appointment_id){setSettingsEntry('connections');setSettingsOpen(true);setQueuedRecordLaunch({...selectedRecord,workspaceId:opened.id,generation:generation.current});}}else if(ehrVisitSelection.current){ehrVisitSelection.current=false;setSettingsEntry('ehr');setSettingsOpen(true);}else if(googleVisitSelection.current){const service=googleVisitSelection.current;googleVisitSelection.current=false;setSettingsEntry('google');setGoogleMessageOpen(service==='message');if(service==='message')setGoogleMessageVisited(true);else setGoogleCalendarVisited(true);setGoogleWorkReturn(null);setGoogleCalendarOpen(service==='calendar');setSettingsOpen(true);}else if(microsoftVisitSelection.current){microsoftVisitSelection.current=false;setOutlookMessageVisited(true);setOutlookMessageOpen(true);setOutlookReturn(null);setSettingsEntry('microsoft');setSettingsOpen(true);}},
       retryRead:authenticated?()=>loadEncounters():identity?refresh:recheckSyntheticConnection,
+      setOpeningVisit,
     },appointmentId,coreSelection,incoming,recordVisit);
   }
   async function stageAthenaNotebook(command:CoreConnectionCommand,current:()=>boolean){
@@ -928,9 +931,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     void session.conversations.observe(host).catch(()=>{if(host.current())setRecoveryState('failed');});
   },[authenticated,workspace?.id,selected,thought,phoneNoteTask,conversationBusy,recoveryOffers.length,recoveryBlocked,editorJournal]);
   useEffect(()=>{
-    if(!session.presentation.enabled||!authenticated||!team?.revision||!accountAccess||settingsOpen||practiceOpen||practicePage!=='home'||contextBot)return;
+    // A startup reset clears the list. Read it again once access is ready instead
+    // of waiting for a new team revision, which may never arrive.
+    if(!session.presentation.enabled||!authenticated||!team?.revision||!accountAccess||settingsOpen||practiceOpen||practicePage!=='home'||contextBot||conversationInbox)return;
     void session.conversations.refresh(authenticated,false,failure);
-  },[authenticated,team?.revision,accountAccess,practicePage,settingsOpen,practiceOpen,contextBot,connectionGeneration]);
+  },[authenticated,team?.revision,accountAccess,practicePage,settingsOpen,practiceOpen,contextBot,connectionGeneration,conversationInbox]);
   useEffect(()=>{setContextBot(null);setNewMessage(false);setConversationDetails(false);setMessagesTask(null);},[authenticated]);
   const agentResearchRecovery=useMemo(()=>session.recovery.agentResearchAccess(editorAccess,editorWorkspace),[editorAccess,editorWorkspace]);
   const conversation=projectConversation(workspace,team,selected),turns=conversation.turns;
@@ -1368,7 +1373,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
 
   const showExecutionProof=!!onExit&&import.meta.env.VITE_SHOW_EXECUTION_PROOF==='true';
   const errorBanner=error&&<div className="team-banner error workspace-error-banner" role="alert"><p>{error}</p><div className="workspace-error-actions">
-    {readRetry&&<button disabled={busy||homeBusy||!!pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void readRetry.run()}>Try again</button>}
+    {readRetry&&<button disabled={busy||homeBusy||!!pending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={()=>void readRetry.run()}>{readRetry.label??'Try again'}</button>}
     <button onClick={()=>setError('')}>Dismiss</button></div></div>;
   // Recovery belongs to the scrollable conversation on phones. Keeping
   // these controls above the fixed chat frame can make them unreachable when
@@ -1626,6 +1631,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           onResearch={authenticated?()=>{setResearchEntry(true);setEntryIntent(null);void loadEncounters();}:undefined}/>
         {!encounters && <div className="team-welcome-roles"><BotAvatar role="scribe" large /><BotAvatar role="visit_prep" large /><BotAvatar role="follow_up" large /><BotAvatar role="chief" large /><BotAvatar role="research" large /><span>Scribe · Visit Prep · Follow-up · Chief · Research</span></div>}
         {workspace&&practicePage==='visits'&&!settingsOpen&&<button className="team-phone-notebook-return" disabled={viewNavigationLocked||captureNavigationLocked||captureDraftLocked} onClick={goNotebook}>Current notebook</button>}
+        {openingVisit&&<p className="team-fine" role="status">Opening this visit…</p>}
         {authenticated&&encounters&&<VisitCatalog identity={authenticated} visits={encounters} visitsOnly={contextChoice?.role==='research'} locked={busy||!!pending} recordingActive={!!privateRecordingEntry}
           onOpen={appointmentId=>{const target=contextBot;void open(appointmentId).then(()=>{const current=session.getSnapshot().workspace;if(target&&current?.appointment_id===appointmentId){setContextBot(null);return openConversation(current.id,target);}});}} onRecord={!contextChoice&&CAPTURE_WORKSPACE_BUILD&&(!team||team.capture?.enabled)?appointmentId=>void open(appointmentId,undefined,undefined,true):undefined}
           onPrivateNote={workspaceId=>{void session.loading.openSavedPrivate(workspaceId,{authenticated,failure,opened:openPrivateNotebook});}}

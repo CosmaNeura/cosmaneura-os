@@ -1,0 +1,41 @@
+/* Stronger current-page cue for workspace nav (desktop sidebar + phone bottom bar). */
+.team-workspace .practice-navigation .team-nav-item.active,
+.team-workspace .practice-navigation .team-nav-item[aria-current="page"] {
+  background: #d7e4d8;
+  color: #1f3d2c;
+  font-weight: 650;
+}
+
+.team-workspace .practice-navigation .team-nav-item.active .team-nav-icon,
+.team-workspace .practice-navigation .team-nav-item[aria-current="page"] .team-nav-icon {
+  color: #254b36;
+}
+
+@media (max-width: 600px) {
+  .team-workspace .practice-navigation .team-nav-item.active,
+  .team-workspace .practice-navigation .team-nav-item[aria-current="page"] {
+    box-shadow: inset 0 -3px 0 #326c59;
+  }
+}
+
+/* Close notebook: findable, ≥44px tap — marked by attach-nav-close-polish (data attr survives React className). */
+.team-workspace button[data-nav-close-polish="true"],
+.native-home-menu button[data-nav-close-polish="true"] {
+  box-sizing: border-box;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.25;
+  color: #254b36;
+  background: #fffdf7;
+  border: 1px solid #8da58e;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.team-workspace button[data-nav-close-polish="true"]:hover,
+.native-home-menu button[data-nav-close-polish="true"]:hover {
+  background: #e8efe7;
+}

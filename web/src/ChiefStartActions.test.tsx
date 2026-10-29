@@ -41,4 +41,11 @@ describe('Chief first-use controls',()=>{
     const button=container.querySelector('button')!;expect(button.textContent).toBe('Review team changes');
     await act(async()=>button.click());expect(settings).toHaveBeenCalledOnce();expect(use).not.toHaveBeenCalled();
   });
+  it('keeps Ask Chief and starter taps at least 44px',async()=>{
+    await act(async()=>root.render(<ChiefStartActions {...ready} onChoose={vi.fn()}/>));
+    const {readFileSync}=await vi.importActual<{readFileSync:(path:string,encoding:'utf8')=>string}>('node:fs');const {fileURLToPath}=await vi.importActual<{fileURLToPath:(url:string)=>string}>('node:url');
+    const css=readFileSync(fileURLToPath(import.meta.url).replace(/[^/]+$/,'chief-start-actions.css'),'utf8');
+    expect(css).toMatch(/\.chief-ask-summary[^}]*min-height:\s*44px/);
+    expect(css).toMatch(/\.chief-start-actions button[^}]*min-height:\s*44px/);
+  });
 });

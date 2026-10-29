@@ -1,0 +1,22 @@
+.workspace-build-info {
+  margin: 12px 0 0;
+  color: var(--team-muted, #6a7466);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.settings-hub > .workspace-build-info {
+  margin: 18px 0 8px;
+  padding: 0 4px 12px;
+}
+
+.team-sidebar-bottom > .workspace-build-info {
+  margin: 8px 0 0;
+  font-size: 11px;
+}
+
+main.shell > .workspace-build-info {
+  margin-top: 24px;
+  text-align: center;
+}

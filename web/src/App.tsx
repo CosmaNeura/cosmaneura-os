@@ -1,9 +1,10 @@
 import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {hostedWorkspaceRequested} from './hosted-workspace';
-import { OrganizationSwitcher, SignIn, UserButton, useAuth, useClerk, useUser } from "@clerk/react";
+import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BetaIdentityAdmin } from "./BetaIdentityAdmin";
+import { BetaSignIn } from "./beta-sign-in";
 import { api, COMPACT_LOCAL, type ApiIdentity, type QueueItem, type Seed } from "./api";
 import { EncounterWorkspace } from "./EncounterWorkspace";
 import { WORKSPACE_BUILD } from "./workspace-api";
@@ -460,7 +461,7 @@ export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
       <main className="shell">
         <h1 className="brand">{standalone ? "CosmaBot" : "Cosmas OS"}</h1>
         <p className="lede">{standalone ? "Sign in to open your practice." : "Sign in with your invited Cosmas Beta Lab account."}</p>
-        <SignIn routing="hash" />
+        <BetaSignIn />
       </main>
     );
   }

@@ -21,7 +21,7 @@ export type PendingSave = NoteOperation | FollowUpOperation | {type:'entry';body
   {type:'link';body:{expected_revision:number;idempotency_key:string;ticket_id:string}};
 
 export type ConnectionFailure = {identity:WorkspaceIdentity;generation:number;message:string};
-export type ReadRetry = {run:()=>Promise<void>};
+export type ReadRetry = {run:()=>Promise<void>;label?:string};
 export type ClinicalShareCheck={operation:Extract<PendingSave,{type:'clinicalNoteShare'}>;receipt:ClinicalNoteShareReceipt;owner:WorkspaceIdentity;generation:number};
 
 export type ChiefNoteTask = {

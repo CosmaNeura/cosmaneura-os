@@ -1,0 +1,69 @@
+/* Visits catalog phone readability. Scoped here so open EncounterWorkspace CSS drafts stay free. */
+
+.team-encounter-picker {
+  font-size: 14px;
+}
+
+.team-encounter-picker .visit-search {
+  display: grid;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.team-encounter-picker .visit-search input {
+  min-height: 44px;
+  font-size: 16px; /* iOS zoom guard; labels/copy stay ≥14px */
+  padding: 10px 12px;
+  border: 1px solid #dfe6e1;
+  border-radius: 10px;
+}
+
+.team-encounter-picker .visit-catalog-tabs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0 0;
+  border-bottom: 1px solid var(--team-line, #e6e8eb);
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-wrap: nowrap;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+}
+
+.team-encounter-picker .visit-catalog-tabs button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  border: 0;
+  background: transparent;
+  padding: 10px 8px 12px;
+  border-bottom: 2px solid transparent;
+  border-radius: 0;
+  font: inherit;
+  font-size: 14px;
+  min-height: 44px;
+  color: #7d8279;
+}
+
+.team-encounter-picker .visit-catalog-tabs button[aria-pressed="true"] {
+  color: #355645;
+  border-bottom-color: #355645;
+}
+
+.team-encounter-picker .team-encounter-option,
+.team-encounter-picker .team-encounter-option span,
+.team-encounter-picker p,
+.team-encounter-picker .team-subtle {
+  font-size: 14px;
+}
+
+@media (max-width: 360px) {
+  .team-encounter-picker .visit-catalog-tabs {
+    gap: 4px;
+  }
+
+  .team-encounter-picker .visit-catalog-tabs button {
+    padding: 10px 6px 12px;
+    font-size: 14px;
+  }
+}

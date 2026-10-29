@@ -1,9 +1,25 @@
 .chief-start-actions { margin:0 0 12px; }
 .chief-start-actions > div,.chief-initial-team > div { display:flex; flex-wrap:wrap; gap:6px; }
-.chief-start-actions button { min-height:38px; padding:7px 10px; font-size:12px; text-align:left; }
+.chief-start-actions button,
+.chief-start-actions .chief-ask-summary,
+.chief-initial-team button {
+  min-height:44px;
+  min-width:44px;
+  box-sizing:border-box;
+  padding:10px 12px;
+  font-size:14px;
+  text-align:left;
+  cursor:pointer;
+}
+.chief-start-actions .chief-ask-summary {
+  display:flex;
+  align-items:center;
+  list-style:none;
+  font-weight:600;
+}
+.chief-start-actions .chief-ask-summary::-webkit-details-marker { display:none; }
 .chief-start-actions p,.chief-initial-team p { color:var(--team-muted); font-size:12px; line-height:1.5; margin:7px 0 10px; overflow-wrap:anywhere; }
 .chief-initial-team { padding:12px; border:1px solid var(--team-line); border-radius:10px; background:#f6f8f3; }
 .chief-initial-team h3 { font-size:15px; margin:0; }
 .team-initial-action { margin:0 28px 18px; }
 @media(max-width:600px) { .team-initial-action { margin:0 12px 14px; } }
-@media(max-width:600px) { .chief-start-actions button,.chief-initial-team button { min-height:44px; } }
