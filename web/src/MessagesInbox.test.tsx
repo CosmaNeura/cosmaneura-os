@@ -10,9 +10,10 @@ import type {ConversationSummary} from './conversations-api';
 import type {Workspace} from './workspace-api';
 const first:ConversationSummary={workspace_id:teamUuid(900),appointment_id:null,context_label:'Invented sleep notebook',bot:{address:'chief',role:'chief',name:'Chief of Staff',available:true},preview:'Organize invented notes',preview_withheld:false,attention:'needs_review',last_activity_at:new Date().toISOString(),watermark:'opaque',unread:true,manual_unread:false,marker_version:1};
 const second:ConversationSummary={...first,workspace_id:teamUuid(901),bot:{address:'follow_up',role:'follow_up',name:'Follow-up',available:true},context_label:'Invented medication note',attention:'idle'};
+const otherChief:ConversationSummary={...first,workspace_id:teamUuid(902),context_label:'Invented annual visit',preview:'Prepare invented annual visit',unread:false,attention:'idle'};
 let root:Root,host:HTMLDivElement,controller:WorkspaceInboxPreferences,journal:DraftJournal,read:ReturnType<typeof vi.fn>,more:ReturnType<typeof vi.fn>,rename:ReturnType<typeof vi.fn>;
-function Harness(){const organization=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
-  return <MessagesInbox team={teamFixture()} inbox={{contract_version:1,as_of:new Date().toISOString(),rows:[first,second],next_cursor:'opaque-earlier-page'}} loading={false} locked={false} error="" organization={organization}
+function Harness({rows=[first,second]}:{rows?:ConversationSummary[]}){const organization=useSyncExternalStore(controller.subscribe,controller.getSnapshot,controller.getSnapshot);
+  return <MessagesInbox team={teamFixture()} inbox={{contract_version:1,as_of:new Date().toISOString(),rows,next_cursor:'opaque-earlier-page'}} loading={false} locked={false} error="" organization={organization}
     onOpen={()=>{}} onNew={()=>{}} onChief={()=>{}} onRefresh={()=>{}} onMore={()=>more()} onUnread={()=>{}} onSettings={()=>{}} onOrganize={(row,change)=>controller.set(row,change)} onRestoreAll={()=>controller.restoreAll()}
     onInspect={row=>void controller.inspect(row)} onCloseMenu={()=>controller.closeMenu()} onRename={target=>rename(target)} onReloadOrganization={()=>{}}/>;
 }
@@ -30,6 +31,19 @@ it('searches loaded results honestly and offers the earlier-results path',async(
   await act(async()=>{Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value')!.set!.call(input,'Missing invented text');input.dispatchEvent(new Event('input',{bubbles:true}));});
   expect(host.textContent).toContain('0 matches among 2 loaded conversations. Load earlier conversations to search more.');expect(host.querySelectorAll('.messages-row')).toHaveLength(0);expect(read).not.toHaveBeenCalled();
   await click('Load earlier conversations');expect(more).toHaveBeenCalledOnce();
+});
+it('makes context the primary title and keeps each Chief conversation and its menu in a distinct card',async()=>{
+  await act(async()=>root.render(<Harness rows={[first,otherChief]}/>));
+  const cards=[...host.querySelectorAll<HTMLElement>('.messages-conversation-card')];
+  expect(cards).toHaveLength(2);
+  expect(cards.map(card=>card.querySelector('strong > .messages-context')?.textContent)).toEqual([first.context_label,otherChief.context_label]);
+  expect(cards.every(card=>!card.querySelector('.bot-avatar')&&!card.querySelector('.messages-bot-identity'))).toBe(true);
+  expect([...host.querySelectorAll('.messages-inbox-group>h2')].filter(heading=>heading.textContent==='Chief')).toHaveLength(1);
+  expect(cards.every(card=>card.children.length===2&&card.children[0].classList.contains('messages-row')&&card.children[1].classList.contains('messages-row-menu'))).toBe(true);
+  expect(cards.map(card=>card.querySelector('.messages-row-menu')?.getAttribute('aria-label'))).toEqual([
+    `Conversation actions for ${first.context_label}, Chief of Staff`,
+    `Conversation actions for ${otherChief.context_label}, Chief of Staff`,
+  ]);
 });
 it('uses one row menu and keeps hidden chats discoverable and restorable',async()=>{
   expect(button('Mark unread')).toBeUndefined();expect(host.querySelectorAll('.messages-row-menu')).toHaveLength(2);
