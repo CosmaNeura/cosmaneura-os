@@ -1,7 +1,7 @@
 import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {hostedWorkspaceRequested} from './hosted-workspace';
-import { OrganizationSwitcher, UserButton, useAuth } from "@clerk/react";
+import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BetaIdentityAdmin } from "./BetaIdentityAdmin";
 import { BetaSignIn } from "./beta-sign-in";
@@ -333,7 +333,7 @@ function BetaOrganizationQueue({ getToken }: { getToken: BetaTokenGetter }) {
   );
 }
 
-function SignedInWorkspace({ getToken }: { getToken: BetaTokenGetter }) {
+function SignedInWorkspace({ getToken, accountControls }: { getToken: BetaTokenGetter; accountControls?: ReactNode }) {
   const active = useRef(true);
   const tokenGetter = useRef(getToken);
   tokenGetter.current = getToken;
@@ -343,15 +343,108 @@ function SignedInWorkspace({ getToken }: { getToken: BetaTokenGetter }) {
     const token = await tokenGetter.current(options);
     return active.current ? token : null;
   }}), []);
-  const controls=<div className="row account-controls" aria-label="Account and organization">
+  const controls=accountControls ?? <div className="row account-controls" aria-label="Account and organization">
     <OrganizationSwitcher hidePersonal /><UserButton /></div>;
   return hostedWorkspaceRequested()
     ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
     : <EncounterWorkspace authenticated={identity} accountControls={controls}/>;
 }
 
+function StandaloneOrganizationGate({ target, userId, sessionId, orgId, getToken }: {
+  target: string; userId: string; sessionId: string; orgId: string | null | undefined; getToken: BetaTokenGetter;
+}) {
+  const {isLoaded, user} = useUser();
+  const clerk = useClerk();
+  const scope = JSON.stringify([userId, sessionId, target, orgId ?? null]);
+  const current = useRef(scope);
+  current.current = scope;
+  const mounted = useRef(false);
+  const [retry, setRetry] = useState(0);
+  const [membership, setMembership] = useState({scope: "", phase: "loading", name: ""});
+  const [selecting, setSelecting] = useState(false);
+  const [selectionFailed, setSelectionFailed] = useState(false);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => {
+    let cancelled = false;
+    setMembership({scope, phase: "loading", name: ""});
+    if (!isLoaded || !user || user.id !== userId) return () => { cancelled = true; };
+    // Read the actual user's memberships directly. useOrganizationList also
+    // attempts environment enablement; this gate must never provision anything.
+    void (async () => {
+      try {
+        let seen = 0;
+        for (let page = 1; page <= 10; page++) {
+          const result = await user.getOrganizationMemberships({initialPage: page, pageSize: 100});
+          if (cancelled || current.current !== scope) return;
+          if (!Number.isSafeInteger(result.total_count) || result.total_count < result.data.length) throw new Error();
+          const found = result.data.find(item => item.organization.id === target);
+          if (found) {
+            const name = found.organization.name.trim().slice(0, 120);
+            if (!name) throw new Error();
+            setMembership({scope, phase: "ready", name});
+            return;
+          }
+          seen += result.data.length;
+          if (seen >= result.total_count) {
+            setMembership({scope, phase: "missing", name: ""});
+            return;
+          }
+          if (!result.data.length) throw new Error();
+        }
+        throw new Error();
+      } catch {
+        if (!cancelled && current.current === scope) setMembership({scope, phase: "failed", name: ""});
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isLoaded, user, userId, scope, target, retry]);
+
+  const controls = <div className="row account-controls" aria-label="Account and practice"><UserButton /></div>;
+  const checked = membership.scope === scope && isLoaded && user?.id === userId &&
+    clerk.user?.id === userId && clerk.session?.id === sessionId;
+  if (!checked || membership.phase === "loading") return <StatusScreen title="Checking your practice"
+    detail="Verifying which practice this account can open." role="status">{controls}</StatusScreen>;
+  if (membership.phase === "failed") return <StatusScreen title="Your practice could not be checked"
+    detail="Try again, or use the account menu to sign in with another account.">
+    <button className="button" onClick={() => setRetry(value => value + 1)}>Try again</button>{controls}</StatusScreen>;
+  if (membership.phase === "missing") return <StatusScreen title="This account cannot open this practice"
+    detail="Use the account menu to sign in with your practice account. If access is missing, contact your practice administrator.">{controls}</StatusScreen>;
+
+  async function selectPractice() {
+    if (selecting || clerk.user?.id !== userId || clerk.session?.id !== sessionId) return;
+    setSelecting(true);
+    setSelectionFailed(false);
+    try {
+      await clerk.setActive({session: sessionId, organization: target});
+    } catch {
+      if (mounted.current && current.current === scope) setSelectionFailed(true);
+    } finally {
+      if (mounted.current) setSelecting(false);
+    }
+  }
+  const scopedGetToken: BetaTokenGetter = async options => {
+    const sameContext = () => mounted.current && current.current === scope &&
+      clerk.user?.id === userId && clerk.session?.id === sessionId &&
+      clerk.organization?.id === target && clerk.session?.lastActiveOrganizationId === target;
+    if (!sameContext()) return null;
+    const token = await getToken(options);
+    return sameContext() ? token : null;
+  };
+  // The SDK promise is not admission: wait for observed auth and freshly read
+  // membership to agree. A changed org immediately unmounts the old workspace.
+  if (orgId === target && !selecting) return <SignedInWorkspace key={`${userId}:${sessionId}:${orgId}`}
+    getToken={scopedGetToken} accountControls={<div className="row account-controls" aria-label="Account and practice">
+      <span>{membership.name}</span><UserButton /></div>} />;
+  return <StatusScreen title={`Open ${membership.name}`} detail={selectionFailed
+    ? "Your practice did not open. Try again, or use the account menu to sign in again."
+    : "This CosmaBot app opens this practice. Your other practice work stays separate."} role={selectionFailed ? "alert" : "status"}>
+    <button className="button" disabled={selecting} onClick={() => void selectPractice()}>
+      {selecting ? "Opening practice…" : `Continue to ${membership.name}`}</button>{controls}</StatusScreen>;
+}
+
 export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
   const auth = useAuth();
+  const standalone = workspace && ["standalone-practice-v1", "independent-beta-v1"].includes(import.meta.env.VITE_WORKSPACE_FEATURE_PROFILE ?? "");
 
   if (!auth.isLoaded) {
     return (
@@ -366,11 +459,22 @@ export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
   if (auth.isSignedIn !== true) {
     return (
       <main className="shell">
-        <h1 className="brand">Cosmas OS</h1>
-        <p className="lede">Sign in with your invited Cosmas Beta Lab account.</p>
+        <h1 className="brand">{standalone ? "CosmaBot" : "Cosmas OS"}</h1>
+        <p className="lede">{standalone ? "Sign in to open your practice." : "Sign in with your invited Cosmas Beta Lab account."}</p>
         <BetaSignIn />
       </main>
     );
+  }
+
+  if (standalone) {
+    const target = import.meta.env.VITE_WORKSPACE_ORGANIZATION_ID;
+    const controls = <div className="row account-controls" aria-label="Account and practice"><UserButton /></div>;
+    if (typeof target !== "string" || target !== target.trim() || !/^org_[A-Za-z0-9_]{1,251}$/.test(target)) return <StatusScreen
+      title="Your practice is not configured" detail="This installation needs its practice connection. Contact your practice administrator.">{controls}</StatusScreen>;
+    if (typeof auth.getToken !== "function" || !auth.sessionId || !auth.userId) return <StatusScreen
+      title="Secure session unavailable" detail="Use the account menu to sign out, then sign in again. No work has been loaded.">{controls}</StatusScreen>;
+    return <StandaloneOrganizationGate key={`${auth.userId}:${auth.sessionId}:${target}`} target={target}
+      userId={auth.userId} sessionId={auth.sessionId} orgId={auth.orgId} getToken={auth.getToken} />;
   }
 
   const accountControls = <div className="row account-controls" aria-label="Account and organization">
