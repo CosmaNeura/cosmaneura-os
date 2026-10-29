@@ -1,0 +1,51 @@
+name: restore-uv-lock-once
+on:
+  workflow_dispatch:
+  push:
+    branches: [cursor/ask-chief-visit-tap-06d2]
+    paths: [.github/workflows/restore-uv-lock-once.yml]
+jobs:
+  restore:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Restore branch-correct uv.lock and delete this workflow
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = 'cursor/ask-chief-visit-tap-06d2';
+            const blobSha = '7a99533999e1941c393e6ac6c73f97624b346b50';
+            const workflowPath = '.github/workflows/restore-uv-lock-once.yml';
+            const { data: ref } = await github.rest.git.getRef({ owner, repo, ref: `heads/${branch}` });
+            const headSha = ref.object.sha;
+            const { data: headCommit } = await github.rest.git.getCommit({ owner, repo, commit_sha: headSha });
+            const { data: newTree } = await github.rest.git.createTree({
+              owner,
+              repo,
+              base_tree: headCommit.tree.sha,
+              tree: [
+                { path: 'uv.lock', mode: '100644', type: 'blob', sha: blobSha },
+                { path: workflowPath, mode: '100644', type: 'blob', sha: null },
+              ],
+            });
+            if (newTree.sha === headCommit.tree.sha) {
+              core.info('already clean');
+              return;
+            }
+            const { data: newCommit } = await github.rest.git.createCommit({
+              owner,
+              repo,
+              message: 'fix(ci): restore branch-correct uv.lock; remove one-shot workflow',
+              tree: newTree.sha,
+              parents: [headSha],
+            });
+            await github.rest.git.updateRef({
+              owner,
+              repo,
+              ref: `heads/${branch}`,
+              sha: newCommit.sha,
+            });
+            core.info(`Updated ${branch} to ${newCommit.sha}`);
