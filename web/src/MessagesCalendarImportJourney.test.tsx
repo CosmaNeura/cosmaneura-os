@@ -1,5 +1,5 @@
 import {act} from 'react';
-import {waitMessagesJourney as wait} from './messages-journey-wait';
+import {waitMessagesJourney as wait, MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{vi.stubEnv('VITE_MESSAGES_ENABLED','true');vi.stubEnv('VITE_EHR_READ_ENABLED','true');vi.stubEnv('VITE_CALENDAR_IMPORT_ENABLED','true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');vi.stubEnv('VITE_WORKSPACE_ENABLED','true');vi.stubEnv('VITE_WORKSPACE_AUTHENTICATED_ENABLED','true');});
@@ -11,6 +11,9 @@ import {conversationsApi} from './conversations-api';
 import {memoryDraftStorage} from './draft-test-fixture';
 import {PRESENTATION_KEY} from './session/presentation';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+
+// Journey waits may legitimately exceed Vitest's 5s default under CI load.
+vi.setConfig({testTimeout: MESSAGES_JOURNEY_TEST_TIMEOUT_MS});
 let root:Root,host:HTMLDivElement;
 const visibleButton=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(button=>!button.closest('[hidden]')&&(button.textContent?.trim()===name||button.getAttribute('aria-label')===name));
 const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
@@ -47,7 +50,7 @@ it.each([false,true])('opens the reviewed calendar summary from its Chief card a
   // this clamp case with that reply already read, then move back to older text.
   // The non-clamping case deliberately leaves the lower reply unread.
   scroll.scrollTop=900;await act(async()=>scroll.dispatchEvent(new Event('scroll')));
-  await wait(()=>expect(marks.mock.calls.some(([, , ,command])=>command?.watermark!==undefined&&command.manual_unread===undefined)).toBe(true);
+  await wait(()=>expect(marks.mock.calls.some(([, , ,command])=>command?.watermark!==undefined&&command.manual_unread===undefined)).toBe(true));
   await act(async()=>{await Promise.all(marks.mock.results.map(result=>result.value));});
  }
  const initialReadState=await conversationsApi.read(identity,null);expect(initialReadState.rows.find(row=>row.workspace_id===receipt.workspace.id&&row.bot.role==='chief')?.unread).toBe(!clamped);
@@ -63,7 +66,7 @@ it.each([false,true])('opens the reviewed calendar summary from its Chief card a
 it('updates the exact calendar card to unavailable after stopping its import and exposes only the source placeholder',async()=>{
  const receipt=await saveCalendar(),retained=question().value,card=()=>host.querySelector<HTMLElement>(`[data-entry-id="source:${receipt.entry_id}"]`);expect(card()).not.toBeNull();
  await openTask();if(visibleButton('Restore saved calendar import'))await click('Restore saved calendar import');await click('Check import access');await click('Stop using this import');await wait(()=>expect(visibleButton('Prepare Chief draft')?.disabled).toBe(true));await click('‹ Back to Chief of Staff');
- await wait(()=>expect(card()?.querySelector('h3')?.textContent).toBe('Unavailable calendar file summary');expect(card()!.textContent).not.toContain('Invented calendar visit');expect(card()!.textContent).not.toContain('Atlas.md');expect(card()!.textContent).toContain('Unavailable — check access');
+  await wait(()=>expect(card()?.querySelector('h3')?.textContent).toBe('Unavailable calendar file summary'));expect(card()!.textContent).not.toContain('Invented calendar visit');expect(card()!.textContent).not.toContain('Atlas.md');expect(card()!.textContent).toContain('Unavailable — check access');
  const before=structuredClone(calendarStats()),control=card()!.querySelector<HTMLButtonElement>('button')!;await act(async()=>control.click());await wait(()=>expect(document.activeElement?.id).toBe('source-'+receipt.entry_id));
  const shown=document.getElementById('source-'+receipt.entry_id)!;expect(shown.textContent).toContain('This imported calendar summary is unavailable');expect(shown.textContent).not.toContain('Invented calendar visit');await click('‹ Back to Chief of Staff');await wait(()=>expect(document.activeElement).toBe(control));expect(question().value).toBe(retained);expect(calendarStats()).toEqual(before);expect(workspaceApi.ask).not.toHaveBeenCalled();expect(workspaceApi.append).not.toHaveBeenCalled();
 });

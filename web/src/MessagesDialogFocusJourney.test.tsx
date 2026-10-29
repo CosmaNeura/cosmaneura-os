@@ -1,5 +1,5 @@
 import {act,StrictMode} from 'react';
-import {waitMessagesJourney as wait} from './messages-journey-wait';
+import {waitMessagesJourney as wait, MESSAGES_JOURNEY_TEST_TIMEOUT_MS} from './messages-journey-wait';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{for(const name of ['VITE_MESSAGES_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED'])vi.stubEnv(name,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
@@ -13,6 +13,9 @@ import {memoryDraftStorage} from './draft-test-fixture';
 import {PRESENTATION_KEY} from './session/presentation';
 import {notifyNativeWorkspaceForeground} from './native-workspace-foreground';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
+
+// Journey waits may legitimately exceed Vitest's 5s default under CI load.
+vi.setConfig({testTimeout: MESSAGES_JOURNEY_TEST_TIMEOUT_MS});
 let root:Root,host:HTMLDivElement,owner:AuthenticatedWorkspaceIdentity,nativeCurrent:boolean;
 const composer=()=>host.querySelector<HTMLTextAreaElement>('#team-question')!;
 const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(e=>!e.closest('[hidden]')&&(e.textContent?.trim()===name||e.getAttribute('aria-label')===name))!;
