@@ -1,5 +1,5 @@
 import type {AccountRecoveryAccess} from './account-recovery';
-import {accountEditorAddress} from './draft-journal';
+import {accountEditorAddress,type DraftJournal} from './draft-journal';
 import type {AuthenticatedWorkspaceIdentity} from './workspace-api';
 
 export type PrivateDraftCreate = {title:string;idempotency_key:string};
@@ -21,11 +21,14 @@ export function validatePrivateDraftLinkRecovery(value:unknown,workspaceId:strin
   return value as PrivateDraftLinkRecovery;
 }
 export type PrivateDraftAccess={identity:AuthenticatedWorkspaceIdentity;recovery:AccountRecoveryAccess};
-export async function loadPrivateDraftRecovery(access:AccountRecoveryAccess):Promise<PrivateDraftRecovery|null>{
-  await access.authorize();const value=await access.journal.load(accountEditorAddress('private-draft'));
+export async function readStoredPrivateDraftRecovery(journal:DraftJournal):Promise<PrivateDraftRecovery|null>{
+  const value=await journal.load(accountEditorAddress('private-draft'));
   if(value===null)return null;
   if(value.kind!=='account-editor'||value.editor!=='private-draft')throw new Error('Invalid private draft editor');
   return validatePrivateDraftRecovery(value.data);
+}
+export async function loadPrivateDraftRecovery(access:AccountRecoveryAccess):Promise<PrivateDraftRecovery|null>{
+  await access.authorize();return readStoredPrivateDraftRecovery(access.journal);
 }
 export async function persistPrivateDraftRecovery(access:AccountRecoveryAccess,value:PrivateDraftRecovery|null):Promise<void>{
   await access.journal.persist(accountEditorAddress('private-draft'),value?{kind:'account-editor',editor:'private-draft',data:value,pending:value.pending?.idempotency_key??null}:null);

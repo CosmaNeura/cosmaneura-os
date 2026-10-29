@@ -433,7 +433,12 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     conversationEnd.current?.scrollIntoView?.({ block: "nearest" });
   }, [authenticated,workspace?.revision, pending]);
   useEffect(()=>session.models.observePendingHash(),[pending]);
-  useEffect(()=>session.loading.startup(loadingContext(),()=>authenticated?consumeWorkspaceStartupTeam(practiceAccess?.startupTeam,authenticated):null),[authenticated,team]);
+  const [teamListError,setTeamListError]=useState('');
+  const [teamAttempt,setTeamAttempt]=useState(0);
+  useEffect(()=>session.loading.startup(loadingContext(),()=>authenticated?consumeWorkspaceStartupTeam(practiceAccess?.startupTeam,authenticated):null,{
+    listed:()=>setTeamListError(''),
+    unavailable:()=>setTeamListError('Your team list could not be loaded.'),
+  }),[authenticated,team,teamAttempt]);
   useLayoutEffect(()=>{
     const element=materialRef.current;if(!element||!workspace)return;
     const key=`${workspace.id}:${panel}`;
@@ -514,6 +519,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
   function clear() {
     setConnectionError(null);
     setSavedRecordingEntry(null);
+    setTeamListError('');
     session.clear();
     setSetupApproval(null); setSetupProjection(null);
     setInboxSelection(null);setSettingsOpen(false);
@@ -1604,9 +1610,9 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
           setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setSettingsOpen(false);setPracticeOpen(false);setPracticePage(returnToNotebook?'notebook':'home');setPrivateRecordingListEpoch(value=>value+1);}}
         onNotebook={async result=>{if(!recordingCurrent(privateRecordingEntry))throw new WorkspaceApiError(403);
           await returnPrivateRecordingNotebook(privateRecordingEntry,result);setPrivateRecordingEntry(null);setPrivateRecordingBusy(false);setPrivateRecordingListEpoch(value=>value+1);}}/></div>}
-      {authenticated&&<div ref={recordingHome} tabIndex={-1} hidden={!!privateRecordingEntry&&!recordingMinimized||settingsOpen||practicePage!=='home'||messagesMode&&!contextBot}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged}
+      {authenticated&&<div ref={recordingHome} tabIndex={-1} hidden={!!privateRecordingEntry&&!recordingMinimized||settingsOpen||practicePage!=='home'||messagesMode&&!contextBot}><PracticeHome identity={authenticated} recovery={accountAccess??null} team={team} teamUnchanged={initialTeamUnchanged} suspended={!!privateRecordingEntry&&!recordingMinimized||settingsOpen||practicePage!=='home'||messagesMode&&!contextBot}
         nativeCompact={nativeHome} conversationContext={contextChoice?{name:contextChoice.name,scribe:contextChoice.role==='scribe'}:undefined} onPendingChange={setHomePending}
-        locked={!!privateRecordingEntry||busy||!!pending||conflict||recoveryState==="failed"||recoveryBlocked||captureNavigationLocked||captureDraftLocked} onBusyChange={setHomeBusy} onAccessLost={failure}
+        locked={!!privateRecordingEntry||busy||!!pending||conflict||recoveryState==="failed"||captureNavigationLocked||captureDraftLocked} teamError={teamListError} onRetryTeam={()=>setTeamAttempt(value=>value+1)} onBusyChange={setHomeBusy} onAccessLost={failure}
         onUseTeam={()=>{if(initialTeamUnchanged)saveTeam();else void openSettings();}} onSettings={()=>void openSettings()} onVisits={()=>void loadEncounters()}
         onConnections={()=>void openSettings('connections')} onPracticeWork={()=>{setPracticeOpen(true);setPracticeOpened(true);}}
         onRecord={CAPTURE_WORKSPACE_BUILD?startPrivateRecording:undefined}

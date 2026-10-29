@@ -427,18 +427,28 @@ describe("beta runtime", () => {
     clerkHarness.auth = { isLoaded: true, isSignedIn: true, orgId: "org_invented",
       userId: "user_invented", sessionId: "session_invented", getToken: vi.fn().mockResolvedValue("fresh-token") };
     await act(async () => root.render(workspaceApp()));
-    expect(fetchMock.mock.calls.map(([url])=>url)).toEqual(["http://127.0.0.1:8018/provider-team"]);
+    const startupUrls=fetchMock.mock.calls.map(([url])=>String(url));
+    expect(startupUrls).toEqual(expect.arrayContaining([
+      "http://127.0.0.1:8018/provider-team",
+      "http://127.0.0.1:8018/workspaces",
+      "http://127.0.0.1:8018/workspaces/private-drafts/summary",
+    ]));
+    expect(new Set(startupUrls).size).toBe(startupUrls.length);
     const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Visits and notes"));
+    const beforeVisits=fetchMock.mock.calls.length;
     await act(async () => choose!.click());
     expect(container.textContent).toContain("Private invented label");
-    expect(fetchMock.mock.calls[1][0]).toBe("http://127.0.0.1:8018/workspaces");
-    expect(requestHeaders(fetchMock, 1).get("Authorization")).toBe("Bearer fresh-token");
+    const visitCall=fetchMock.mock.calls.slice(beforeVisits).find(([url])=>String(url).endsWith("/workspaces"));
+    expect(visitCall?.[0]).toBe("http://127.0.0.1:8018/workspaces");
+    expect(new Headers(visitCall?.[1]?.headers).get("Authorization")).toBe("Bearer fresh-token");
     clerkHarness.auth = { ...clerkHarness.auth, getToken: vi.fn().mockResolvedValue("refreshed-token") };
     await act(async () => root.render(workspaceApp()));
     expect(container.textContent).toContain("Private invented label");
     const refresh = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Visits and notes"));
+    const beforeRefresh=fetchMock.mock.calls.length;
     await act(async () => refresh!.click());
-    expect(requestHeaders(fetchMock, 2).get("Authorization")).toBe("Bearer refreshed-token");
+    const refreshed=fetchMock.mock.calls.slice(beforeRefresh).find(([url])=>String(url).endsWith("/workspaces"));
+    expect(new Headers(refreshed?.[1]?.headers).get("Authorization")).toBe("Bearer refreshed-token");
     clerkHarness.auth = { ...clerkHarness.auth, isSignedIn: false };
     await act(async () => root.render(workspaceApp()));
     expect(container.textContent).not.toContain("Private invented label");
@@ -465,7 +475,8 @@ describe("beta runtime", () => {
     await act(async () => root.render(workspaceApp()));
     const choose = [...container.querySelectorAll("button")].find(button => button.textContent?.startsWith("Visits and notes"));
     await act(async () => choose!.click());
-    expect(getToken).toHaveBeenCalledTimes(2);
+    // Home starts the team, visit list, and note list together. Opening Visits reads the catalog again.
+    expect(getToken).toHaveBeenCalledTimes(4);
     const resolveOldToken=resolveToken;
     clerkHarness.auth = { ...clerkHarness.auth, [field]: `${field === "orgId" ? "org" : field}_changed` };
     await act(async () => root.render(workspaceApp()));

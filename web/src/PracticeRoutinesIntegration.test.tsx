@@ -28,7 +28,7 @@ it("opens private briefs before selecting or writing any encounter",async()=>{
     await act(async()=>[...container.querySelectorAll("button")].find(b=>b.textContent==="Practice work")!.click());
     await vi.waitFor(async()=>{await act(async()=>{await Promise.resolve();});expect(container.textContent).toContain("Daily Brief");});expect(container.textContent).toContain("Work observed on 2026-09-21");
     expect(container.querySelector('[aria-label="Configure Provider Team"]')).not.toBeNull();
-    expect(workspaceApi.team).toHaveBeenCalledTimes(3);expect(workspaceApi.open).not.toHaveBeenCalled();expect(workspaceApi.catalog).not.toHaveBeenCalled();
+    expect(workspaceApi.team).toHaveBeenCalledTimes(2);expect(workspaceApi.open).not.toHaveBeenCalled();expect(workspaceApi.catalog).toHaveBeenCalledTimes(1);
   }finally{await act(async()=>root.unmount());container.remove();}
 });
 
@@ -46,6 +46,6 @@ it.each([false,true])("refreshes team authority from briefs and preserves edited
     expect(context().value).toBe(edited?"Keep my unfinished settings":"Saved by another client");
     expect(context().disabled).toBe(edited);
     if(edited)expect(container.textContent).toContain("Unsaved settings are preserved");
-    expect(workspaceApi.open).not.toHaveBeenCalled();expect(workspaceApi.catalog).not.toHaveBeenCalled();
+    expect(workspaceApi.open).not.toHaveBeenCalled();expect(workspaceApi.catalog).toHaveBeenCalledTimes(1);
   }finally{await act(async()=>root.unmount());container.remove();}
 });

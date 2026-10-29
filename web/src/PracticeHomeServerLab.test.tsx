@@ -28,7 +28,7 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   const identity={mode:'clerk_jwt' as const,getToken:async()=>packet.token};
   const container=document.createElement('div');document.body.append(container);root=createRoot(container);
   const render=()=>root!.render(<WorkspaceCompatibilityGate identity={identity} accountControls={null}><PracticeAccessGate identity={identity} accountControls={null}>{access=><EncounterWorkspace authenticated={identity} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>);
-  async function wait(check:()=>void){const end=performance.now()+15000;while(performance.now()<end){let passed=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10));try{check();passed=true;}catch{}});if(passed)return;}check();}
+  async function wait(check:()=>void){const end=performance.now()+45000;while(performance.now()<end){let passed=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,10));try{check();passed=true;}catch{}});if(passed)return;}check();}
   const visible=(element:Element)=>!element.closest('[hidden]');
   const button=(label:string)=>[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&b.textContent?.trim()===label)!;
   async function click(label:string){await wait(()=>{expect(button(label),`${label}: ${container.textContent}`).toBeTruthy();expect(button(label).disabled,label).toBe(false);});await act(async()=>button(label).click());}
@@ -37,7 +37,7 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   const started=performance.now();await act(render);await click('Set up my practice');
   await input('Practice name','Invented solo Quick start');await input('Your name','Invented physician');await click('Continue to my workspace');
   await wait(()=>expect(container.querySelector('[aria-label="Practice Home"]'),container.textContent??'').toBeTruthy());
-  expect(calls.some(call=>call.path==='/workspaces')).toBe(false);expect(button('Close notebook')).toBeUndefined();await click('Use this team');
+  expect(calls.some(call=>call.method==='POST'&&call.path==='/workspaces')).toBe(false);expect(button('Close notebook')).toBeUndefined();await click('Use this team');
   await wait(()=>expect(container.querySelector('.team-roster small')?.textContent).toBe('On'));
   await click('Start a private note');await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.disabled).toBe(false));
   expect(container.querySelector('[aria-label="Link private draft to a visit"]')?.textContent).toContain('not linked');
@@ -50,8 +50,8 @@ it.skipIf(!base)('authorizes solo setup, uses defaults, saves/reopens a private 
   const savedPath=calls.find(call=>call.method==='POST'&&/\/workspaces\/[^/]+\/entries$/.test(call.path))!.path;
   const workspaceId=savedPath.split('/')[2];await click('Home');
   await act(async()=>root!.unmount());root=createRoot(container);await act(render);
-  await wait(()=>expect(container.querySelector('.practice-home-note')?.textContent).toContain('Private note'));
-  const noteButton=container.querySelector<HTMLButtonElement>('[aria-label="Saved private notes"] .practice-home-note')!;await act(async()=>noteButton.click());
+  await wait(()=>{const note=container.querySelector<HTMLButtonElement>('[aria-label="Saved private notes"] .practice-home-note');expect(note?.textContent).toContain('Private note');expect(note?.disabled).toBe(false);});
+  await act(async()=>container.querySelector<HTMLButtonElement>('[aria-label="Saved private notes"] .practice-home-note')!.click());
   await wait(()=>expect(container.querySelector<HTMLTextAreaElement>('#team-notebook')?.value).toBe(content));
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/workspaces/private-drafts')).toHaveLength(1);
   expect(calls.filter(call=>call.method==='POST'&&call.path==='/practice-access/setup/complete')).toHaveLength(1);

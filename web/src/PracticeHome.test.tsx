@@ -33,7 +33,13 @@ describe('practice Quick start recovery',()=>{
   async function render(member=identity,configured=team,noteOpened?:typeof opened){
     const reads=vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length;
     await act(async()=>root.render(<PracticeHome identity={member} recovery={recovery} team={configured} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onNoteOpened={noteOpened} onAccessLost={vi.fn()} onBusyChange={vi.fn()}/>));
-    for(let attempt=0;attempt<100&&vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length===reads;attempt++)await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+    for(let attempt=0;attempt<100;attempt++){
+      const called=vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length>reads;
+      const start=[...container.querySelectorAll('button')].find(b=>b.textContent==='Start a private note');
+      const text=container.textContent??'';
+      if(called&&(start?.disabled===false||text.includes('unconfirmed')||text.includes('could not be checked')))break;
+      await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));});
+    }
     expect(vi.mocked(workspaceApi.privateDraftSummaries).mock.calls.length).toBeGreaterThan(reads);
   }
   async function click(label:string,heldReply=false){
@@ -100,6 +106,17 @@ describe('practice Quick start recovery',()=>{
     expect(await recovery.journal.load(accountEditorAddress('private-draft'))).toEqual(retained);
     expect(workspaceApi.createPrivateDraft).toHaveBeenCalledExactlyOnceWith(identity,request);expect(workspaceApi.resolvePrivateDraft).not.toHaveBeenCalled();expect(opened).not.toHaveBeenCalled();
     await draw(1,'ready');expect(workspaceApi.privateDraftSummaries).toHaveBeenCalledTimes(2);
+  });
+  it('keeps Start ready when background visit or note lists return auth errors',async()=>{
+    const lost=vi.fn();
+    vi.mocked(workspaceApi.privateDraftSummaries).mockRejectedValueOnce(new WorkspaceApiError(401));
+    vi.mocked(workspaceApi.catalog).mockRejectedValueOnce(new WorkspaceApiError(403));
+    await act(async()=>root.render(<PracticeHome identity={identity} recovery={recovery} team={team} locked={false} onUseTeam={useTeam} onSettings={settings} onVisits={vi.fn()} onConnections={vi.fn()} onPracticeWork={vi.fn()} onOpened={opened} onAccessLost={lost} onBusyChange={vi.fn()}/>));
+    await vi.waitFor(()=>expect(container.textContent).toContain('Recent notes could not be loaded'));
+    expect(container.textContent).toContain('Today’s visits could not be loaded');
+    const start=[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Start a private note')!;
+    expect(start.disabled).toBe(false);
+    expect(lost).not.toHaveBeenCalled();
   });
   it('withholds former-account late results and never opens their notebook',async()=>{
     let finish!:(value:Awaited<ReturnType<typeof workspaceApi.createPrivateDraft>>)=>void;
