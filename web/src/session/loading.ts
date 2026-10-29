@@ -38,17 +38,24 @@ export class WorkspaceLoading {
     this.api={open:(...args)=>workspaceApi.open(...args),openExisting:(...args)=>workspaceApi.openExisting(...args),openPrivateDraft:(...args)=>workspaceApi.openPrivateDraft(...args),read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),catalog:(...args)=>workspaceApi.catalog(...args),...deps};
   }
 
-  startup(context:LoadingContext,consume:()=>ProviderTeam|null|undefined):(()=>void)|undefined {
+  startup(context:LoadingContext,consume:()=>ProviderTeam|null|undefined,report?:{listed:()=>void;unavailable:()=>void}):(()=>void)|undefined {
     const {authenticated}=context;if(!authenticated||this.session.getSnapshot().team)return;
     let cancelled=false;const current=this.session.generation.current,controller=new AbortController();
-    const startup=consume();
-    const live=()=>!cancelled&&current===this.session.generation.current;
+    const startupTeam=consume();
+    const live=()=>!cancelled&&current===this.session.generation.current&&!this.session.getSnapshot().team;
     const apply=(value:ProviderTeam)=>{
       if(!live())return;
       this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
+      report?.listed();
       void context.recoverAfterRead(value,null,current);
     };
-    if(startup){apply(startup);return()=>{cancelled=true;controller.abort();};}
+    const fail=(cause:unknown)=>{
+      if(cancelled||current!==this.session.generation.current)return;
+      if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status))context.failure(cause);
+      else if(report)report.unavailable();
+      else context.failure(cause);
+    };
+    if(startupTeam){apply(startupTeam);return()=>{cancelled=true;controller.abort();};}
     let unsubscribe=()=>{};
     const dispatch=()=>{
       if(!live())return;
@@ -56,9 +63,8 @@ export class WorkspaceLoading {
       // admission is refused, and repeating it repeats the same refusal.
       if(workspaceProtocolPhase(authenticated)!=='ready')return;
       unsubscribe();
-      void this.api.team(authenticated,controller.signal).then(apply,applyFault);
+      void this.api.team(authenticated,controller.signal).then(apply,fail);
     };
-    const applyFault=(cause:unknown)=>{if(live())context.failure(cause);};
     unsubscribe=subscribeWorkspaceProtocol(authenticated,dispatch);
     dispatch();
     return()=>{cancelled=true;unsubscribe();controller.abort();};
@@ -146,7 +152,7 @@ export class WorkspaceLoading {
       }
       failure(cause,context.retryRead);
       if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
-        setError('The Scribe recording does not match this visit\u2019s notebook. Ask your practice administrator to review the match.');
+        setError('The Scribe recording does not match this visit’s notebook. Ask your practice administrator to review the match.');
       else if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_scribe_encounter_unavailable')
         setError('Scribe encounters could not be loaded. Try again, or open your saved visit from the encounter list.');
       else if (coreSelection && !(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status)))
