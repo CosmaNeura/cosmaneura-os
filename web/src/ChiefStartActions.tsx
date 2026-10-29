@@ -7,9 +7,9 @@ export const CHIEF_STARTERS = [
   {id:'clinical',label:'Plan follow-up and research',prompt:'Use the saved Scribe note and available sources to prepare two drafts: Follow-up’s patient email draft with follow-up instructions and provider action items, and Research’s assessment of drug or treatment questions with supporting sources and further research needed. Flag missing or uncertain details. Keep the work private for my review; do not send an email or run a public search.\n\nMy directions: '},
 ] as const;
 
-export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedContext,notesDirty,hasQuestion,canDelegate,compact=false,onChoose}:{
+export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedContext,notesDirty,hasQuestion,canDelegate,compact=false,minimal=false,onChoose}:{
   locked:boolean;modelEnabled:boolean;sourceAllowed:boolean;hasSavedContext:boolean;notesDirty:boolean;hasQuestion:boolean;canDelegate:boolean;
-  compact?:boolean;onChoose:(prompt:string)=>void;
+  compact?:boolean;minimal?:boolean;onChoose:(prompt:string)=>void;
 }) {
   const disabled=locked||!modelEnabled||!sourceAllowed||!hasSavedContext||notesDirty||hasQuestion;
   const guidance=!modelEnabled?'AI drafting is unavailable. You can still write and review your notes.'
@@ -18,6 +18,7 @@ export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedCon
     :!hasSavedContext?'Save your notes or add a reference note to give Chief context.'
     :hasQuestion?'Your question is below. Keep it, or clear it to choose another task.'
     :'Choose a task, review the question, then send it when ready.';
+  if(minimal)return <section className="chief-start-actions messages-starters" aria-label="Ask Chief on this visit"><div>{CHIEF_STARTERS.slice(0,2).map(task=><button type="button" key={task.id} disabled={disabled} onClick={()=>{if(!disabled)onChoose(task.prompt);}}>{task.label}</button>)}</div>{disabled&&<p>{guidance}</p>}</section>;
   return <section className="chief-start-actions" aria-label="Ask Chief on this visit">
     <details className={`chief-starters-disclosure${compact?' compact':''}`} open={!compact}>
     <summary className="chief-ask-summary">Ask Chief</summary>
