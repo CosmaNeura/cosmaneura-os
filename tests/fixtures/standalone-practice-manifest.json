@@ -1,0 +1,27 @@
+{
+  "schema_version": "cosmas-os/standalone-synthetic-practice/v1",
+  "provenance": "fresh_invented_cosmabot_practice",
+  "confirm_synthetic_only": true,
+  "instance_id": "58d3ad88-7510-4475-8e20-a3223154a285",
+  "dataset_id": "3682500a-0e34-47d0-8786-a82bfe6d7568",
+  "database_name": "cosmabot_standalone_invented_fixture",
+  "identity": {
+    "schema_version": "cosmas-os/d3-beta-bootstrap/v1",
+    "box_id": "4b2bec57-740d-41a4-86d7-44a32c40a48e",
+    "clinic_display_name": "Cosmas MD · Standalone synthetic",
+    "owner_display_name": "Invented practice owner",
+    "clerk_issuer": "https://58d3ad88-7510-4475-8e20-a3223154a285.cosmabot.invalid",
+    "clerk_subject": "user_cosmabot_fixture_owner",
+    "clerk_organization_id": "org_cosmabot_58d3ad88751044758e20a3223154a285",
+    "reviewed_by": "Invented local fixture review",
+    "evidence_ref": "invented:standalone-proof-only"
+  },
+  "patients": [
+    {"id": "eeb8a48f-4ad4-4cfd-a6e2-fb24d16841b3", "label": "Invented Alex Example"},
+    {"id": "b4100cf1-ab65-42c6-8c81-914625c51622", "label": "Invented Sam Example"}
+  ],
+  "appointments": [
+    {"id": "78650e55-ecbb-4573-a6f9-117a9c5d41b3", "patient_id": "eeb8a48f-4ad4-4cfd-a6e2-fb24d16841b3", "start_at": "2026-10-28T14:00:00Z"},
+    {"id": "3e4dba86-b6d7-436d-9837-9e5c7fcf594d", "patient_id": "b4100cf1-ab65-42c6-8c81-914625c51622", "start_at": "2026-10-28T15:00:00Z"}
+  ]
+}

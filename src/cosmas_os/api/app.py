@@ -128,6 +128,16 @@ def session_scope() -> Iterator[Session]:
 @asynccontextmanager
 async def lifespan(application: FastAPI):
     settings.validate_runtime_configuration()
+    if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"}:
+        from cosmas_os.standalone_runtime import validate_standalone_runtime
+
+        validate_standalone_runtime(settings, engine)
+        application.state.workspace_worker_progress = {}
+        # Only the explicitly configured personal Google service. No queue,
+        # handoff/routine workers, Core or unrelated connector runtimes.
+        with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
+            yield
+        return
     async with portal_services_lifespan(application, settings, lambda: new_capture_session(SessionLocal)):
         with google_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), microsoft_connection_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_login_lifespan(application, settings, lambda: new_capture_session(SessionLocal)), scheduling_lifespan(application, settings), managed_services_lifespan(
                 application, settings, lambda: new_capture_session(SessionLocal)):
@@ -233,6 +243,10 @@ class IdentitySummaryResponse(BaseModel):
 
 @lru_cache(maxsize=3)
 def _clerk_verifier(native_origin: str | None = None) -> ClerkTokenVerifier:
+    if settings.cosmas_env == "standalone_synthetic":
+        from cosmas_os.standalone_runtime import StandaloneTokenVerifier
+
+        return StandaloneTokenVerifier(settings)
     return ClerkTokenVerifier(settings, native_origin=native_origin)
 
 
@@ -285,6 +299,8 @@ def _map_err(exc: Exception) -> HTTPException:
 
 
 def _require_data_entry_authorized() -> None:
+    if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"}:
+        raise HTTPException(status_code=403, detail="standalone_operation_unavailable")
     if settings.cosmas_env == "early_adopter_beta" and settings.data_mode != "authorized_beta":
         raise HTTPException(
             status_code=403,
@@ -331,6 +347,14 @@ async def safe_workspace_storage_error(request: Request, exc: SQLAlchemyError):
 @app.get("/workspaces", dependencies=[Depends(_workspace_gate)])
 def workspace_catalog(session: Session = Depends(get_session), identity: RequestIdentity = Depends(_identity)):
     return ws.catalog(session, identity.box_id, identity.principal_id)
+
+
+from cosmas_os.api.conversation_inbox_routes import (  # noqa: E402
+    router as conversation_inbox_router,
+)
+
+app.include_router(conversation_inbox_router(workspace_gate=_workspace_gate, get_session=get_session, identity=_identity,
+    fence=lambda request, session, identity: _refresh_model_identity(request, session, identity)))
 
 
 from cosmas_os.api.private_draft_routes import router as private_draft_router  # noqa: E402
@@ -1093,6 +1117,8 @@ async def converse(request: Request, workspace_id: UUID, session: Session = Depe
     negotiated = model_header(request)
     body = await read_model_request(request, ConversationRequest)
     def submit():
+        if settings.cosmas_env in {"standalone_synthetic", "standalone_clerk_synthetic"} and not settings.workspace_llm_available:
+            raise ws.WorkspaceError("model_unavailable", 503)
         if body.inbox_analysis:
             session.info["inbox_analysis_sources"] = _inbox_analysis_sources()
         if body.session_prep_analysis:
@@ -2085,6 +2111,7 @@ register_practice_access(app, runtime=lambda: settings, verifier=_request_clerk_
 
 allowed_headers = ["X-Cosmas-Handoff-Review", "X-Cosmas-Practice-Access-Contract", "Authorization", "Content-Type", "X-Cosmas-Draft-Recovery", "X-Cosmas-Team-Contract", "X-Cosmas-Model-Contract", "X-Cosmas-Vendor-Contract", "X-Cosmas-Vendor-Setup-Contract", "X-Cosmas-Artifact-Write-Key", "X-Cosmas-Portal-Contract", "X-Cosmas-Portal-Work-Contract", "X-Cosmas-Finance-Contract", "X-Cosmas-Finance-Setup-Contract", "X-Cosmas-Membership-Contract", "X-Cosmas-Inbox-Contract", "X-Cosmas-Inbox-Handoff-Contract", "X-Cosmas-Routine-Contract"]
 allowed_headers.extend(["X-Cosmas-Research-Contract", "X-Cosmas-Scheduling-Login", "X-Cosmas-Microsoft-Connection", "X-Cosmas-Google-Connection", "X-Cosmas-Google-Messages", "X-Cosmas-Google-Calendar"])
+allowed_headers.append("X-Cosmas-Microsoft-Messages")
 allowed_headers.append("X-Cosmas-EFax-Inbound")
 allowed_headers.extend(["X-Cosmas-Record-Contract", "X-Cosmas-Connection-Contract", "X-Cosmas-Activity-Contract"])
 if settings.cosmas_env == "synth_os" and settings.auth_mode == "synth_headers":
@@ -2147,6 +2174,15 @@ app.include_router(google_message_router(
     fence=_refresh_model_identity))
 app.add_middleware(GoogleMessageBoundary)
 
+from cosmas_os.api.microsoft_message_routes import MicrosoftMessageBoundary  # noqa: E402
+from cosmas_os.api.microsoft_message_routes import router as microsoft_message_router  # noqa: E402
+
+app.include_router(microsoft_message_router(
+    runtime=lambda: getattr(app.state, "microsoft_connection", None), configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(MicrosoftMessageBoundary)
+
 from cosmas_os.api.google_calendar_routes import GoogleCalendarBoundary  # noqa: E402
 from cosmas_os.api.google_calendar_routes import router as google_calendar_router  # noqa: E402
 
@@ -2156,12 +2192,36 @@ app.include_router(google_calendar_router(
     fence=_refresh_model_identity))
 app.add_middleware(GoogleCalendarBoundary)
 
+from cosmas_os.api.calendar_import_routes import CalendarImportBoundary  # noqa: E402
+from cosmas_os.api.calendar_import_routes import router as calendar_import_router  # noqa: E402
+
+app.include_router(calendar_import_router(configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(CalendarImportBoundary)
+allowed_headers.append("X-Cosmas-Calendar-Import")
+
+from cosmas_os.api.ehr_read_routes import EhrReadBoundary  # noqa: E402
+from cosmas_os.api.ehr_read_routes import router as ehr_read_router  # noqa: E402
+from cosmas_os.application import ehr_reads  # noqa: E402
+
+ehr_reads.configure_runtime_reader(lambda: getattr(app.state, "ehr_reads", None))
+app.include_router(ehr_read_router(
+    runtime=lambda: getattr(app.state, "ehr_reads", None), configuration=lambda: settings,
+    identity_dependency=_identity, session_dependency=get_session, workspace_gate=_workspace_gate,
+    fence=_refresh_model_identity))
+app.add_middleware(EhrReadBoundary)
+allowed_headers.append("X-Cosmas-Ehr-Read")
+
 
 from cosmas_os.api.workspace_protocol import WorkspaceProtocolBoundary  # noqa: E402
+from cosmas_os.standalone_runtime import StandaloneRequestBoundary  # noqa: E402
 
+app.add_middleware(StandaloneRequestBoundary, runtime=lambda: settings)
 app.add_middleware(WorkspaceProtocolBoundary, runtime=lambda: settings)
 allowed_headers.append("X-Cosmas-Workspace-Protocol")
 allowed_headers.append("X-Cosmas-Clinical-Team")
+allowed_headers.append("X-Cosmas-Conversations")
 # Origin policy covers compatibility failures before any inner handler runs.
 app.add_middleware(
     CORSMiddleware,

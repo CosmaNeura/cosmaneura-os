@@ -2,12 +2,12 @@ import {act} from 'react';
 import {createRoot,type Root} from 'react-dom/client';
 import {beforeEach,afterEach,expect,it,vi} from 'vitest';
 import {ResearchWorkspace} from './ResearchWorkspace';
-import {EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
+import {editorDraft,EditorRecoveryContext,type EditorRecoveryAccess} from './editor-recovery';
 import {DraftJournal,editorAddress} from './draft-journal';
 import {memoryDraftStorage} from './draft-test-fixture';
-import {researchCatalog,researchObservation,researchIdentity,researchWorkspaceId,researchBotId,researchRunId,researchSaved,researchSavedPacket,researchFixtureId} from './research-test-fixture';
+import {researchCatalog,researchObservation,researchIdentity,researchWorkspaceId,researchBotId,researchRunId,researchSaved,researchSavedPacket,researchFixtureId,researchRequest} from './research-test-fixture';
 import type {ResearchPort} from './research-api';
-import {researchDigest,type ResearchObservation,type ResearchSaved} from './research-contract';
+import {researchDigest,type ResearchObservation,type ResearchSaved,type ResearchSearch} from './research-contract';
 import {researchSavedText} from './research-analysis-contract';
 import {WorkspaceApiError,type Workspace} from './workspace-api';
 import {noteResearchWorkspace} from './note-research-test-fixture';
@@ -95,6 +95,42 @@ it('restores an uncertain exact request after remount and resolves without resen
 });
 it('retains an unconfirmed evidence save and checks its exact receipt without resaving',async()=>{
  vi.mocked(port.save).mockRejectedValue(new Error('save response lost'));await mount();await prepare();await click('Search selected sources');await workSettled();await check('Select excerpt to save');await click('Save selected excerpts');await workSettled();const request=vi.mocked(port.save).mock.calls[0][3];expect(element.textContent).toContain('Evidence save retained');await click('Check saved result');await workSettled();expect(port.resolveSave).toHaveBeenCalledTimes(1);expect(vi.mocked(port.resolveSave).mock.calls[0][3]).toEqual(request);expect(port.save).toHaveBeenCalledTimes(1);expect(changed).toHaveBeenCalledWith(3);
+});
+it.each(['search','save'] as const)('keeps navigation locked through an unconfirmed %s until its exact saved result is confirmed',async kind=>{
+ const onBusyChange=vi.fn();let loseResponse!:(cause:Error)=>void;
+ const response=new Promise<never>((_resolve,reject)=>{loseResponse=reject;});
+ if(kind==='search')vi.mocked(port.search).mockImplementation(()=>response);else vi.mocked(port.save).mockImplementation(()=>response);
+ await mount({onBusyChange});await prepare();expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ await click('Search selected sources');
+ if(kind==='save'){await workSettled();await check('Select excerpt to save');await click('Save selected excerpts');}
+ await vi.waitFor(()=>expect(kind==='search'?port.search:port.save).toHaveBeenCalledOnce());
+ expect(onBusyChange).toHaveBeenLastCalledWith(true);const lockReported=onBusyChange.mock.calls.length;
+ const request=kind==='search'?vi.mocked(port.search).mock.calls[0][2]:vi.mocked(port.save).mock.calls[0][3];
+ await act(async()=>loseResponse(new Error('Synthetic response lost')));await workSettled();
+ expect(element.querySelector('[aria-label="Unconfirmed research request"]')).not.toBeNull();
+ expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ expect(onBusyChange.mock.calls.slice(lockReported).some(([blocked])=>!blocked)).toBe(false);
+ expect(button('Check saved result').disabled).toBe(false);
+ await click('Check saved result');await workSettled();
+ expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ expect(element.querySelector('[aria-label="Unconfirmed research request"]')).toBeNull();
+ expect(kind==='search'?port.resolve:port.resolveSave).toHaveBeenCalledOnce();
+ expect(kind==='search'?vi.mocked(port.resolve).mock.calls[0][2]:vi.mocked(port.resolveSave).mock.calls[0][3]).toEqual(request);
+ expect(port.search).toHaveBeenCalledOnce();expect(port.save).toHaveBeenCalledTimes(kind==='save'?1:0);
+ expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:null,data:{pending:null}});
+});
+it('reports a recovered pending request before restoration and releases its host lock on unmount',async()=>{
+ const onBusyChange=vi.fn();vi.mocked(port.search).mockRejectedValue(new Error('Synthetic response lost'));
+ await mount({onBusyChange});await prepare();await click('Search selected sources');await workSettled();
+ expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ await act(async()=>root.unmount());expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ journal.close();journal=new DraftJournal(await factory({scope:'c'.repeat(64)}));access={...access,journal};root=createRoot(element);
+ await mount({onBusyChange});expect(button('Restore research draft')).toBeTruthy();expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ const lockReported=onBusyChange.mock.calls.length;
+ await click('Restore research draft');expect(onBusyChange).toHaveBeenLastCalledWith(true);
+ expect(onBusyChange.mock.calls.slice(lockReported).some(([blocked])=>!blocked)).toBe(false);
+ await click('Check saved result');await workSettled();expect(onBusyChange).toHaveBeenLastCalledWith(false);
+ expect(port.search).toHaveBeenCalledOnce();expect(port.resolve).toHaveBeenCalledOnce();
 });
 it('invalidates a prepared review on revision or lock changes and never sends while locked',async()=>{
  await mount();await prepare();await mount({workspaceRevision:3});expect([...element.querySelectorAll('button')].some(b=>b.textContent==='Search selected sources')).toBe(false);await mount({locked:true});expect(button('Review query').matches(':disabled')).toBe(true);expect(port.search).not.toHaveBeenCalled();
@@ -221,4 +257,117 @@ it('cancels a saved-history read and fences a late reply while allowing another 
  expect(element.querySelectorAll('.research-history strong')).toHaveLength(0);
  expect(element.querySelector('textarea')!.value).toBe('Keep my question');
  expect(port.search).not.toHaveBeenCalled();expect(port.save).not.toHaveBeenCalled();
+});
+
+it('guides an explicitly selected NPI lookup and blocks names or Unicode digits before dispatch',async()=>{
+ const catalog=researchCatalog(),source=catalog.sources.find(source=>source.id==='npi_registry')!;
+ source.state='enabled';source.description='Look up a public provider by their 10-digit NPI.';
+ vi.mocked(port.catalog).mockResolvedValue(catalog);
+ vi.mocked(port.search).mockImplementation(async(_i,_w,request)=>({...await researchObservation(request),results:[]}));
+ await mount();await click('Provider data');
+ const checkbox=[...element.querySelectorAll('label')].find(label=>label.textContent?.includes('NPI Registry'))!.querySelector('input')!;
+ expect(checkbox.checked).toBe(false);expect(element.textContent).toContain(source.description);
+ await check('NPI Registry');expect(element.querySelector('textarea')!.placeholder).toContain('1234567890');
+ for(const query of ['Invented Provider','１２３４５６７８９０','123456789']){
+  await fill(query);expect(button('Review query').disabled).toBe(true);
+  expect(element.querySelector('textarea')!.getAttribute('aria-invalid')).toBe('true');
+  expect(element.textContent).toContain('NPI Registry needs a 10-digit NPI');
+  await act(async()=>element.querySelector('form')!.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true})));
+ }
+ expect(port.search).not.toHaveBeenCalled();await fill('1234567890');await click('Review query');
+ expect(button('Search selected sources').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();
+ await check('This is a general public question');await click('Search selected sources');await workSettled();
+ expect(vi.mocked(port.search).mock.calls[0][2]).toMatchObject({query:'1234567890',sources:['npi_registry'],public_query_confirmed:true});
+ expect(element.textContent).toContain('This lookup returned no records');expect(element.textContent).not.toContain('Source excerpts are ready to compare');
+ expect(port.search).toHaveBeenCalledOnce();expect(port.save).not.toHaveBeenCalled();
+});
+
+it('explains the exact NCD input while preserving the selected source and deliberate query review',async()=>{
+ const catalog=researchCatalog();catalog.sources.find(source=>source.id==='cms_coverage')!.state='enabled';
+ vi.mocked(port.catalog).mockResolvedValue(catalog);await mount();await click('Coverage versions');await check('CMS Coverage');
+ expect(element.querySelector('textarea')!.placeholder).toContain('NCD 123:2');
+ for(const query of ['Invented coverage policy','１２３','NCD 123:２','123456789']){
+  await fill(query);expect(button('Review query').disabled).toBe(true);expect(element.textContent).toContain('CMS Coverage needs an NCD ID');
+ }
+ await fill('NCD 123:2');await click('Review query');expect(element.querySelector('.research-query-review')?.textContent).toContain('NCD 123:2');
+ expect(button('Search selected sources').disabled).toBe(true);expect(port.search).not.toHaveBeenCalled();
+ await click('Edit query');await fill('123');expect(button('Review query').disabled).toBe(false);
+ expect([...element.querySelectorAll('label')].find(label=>label.textContent?.includes('CMS Coverage'))?.querySelector<HTMLInputElement>('input')?.checked).toBe(true);
+});
+
+it('lets the user deselect an identifier-only source without rewriting a different dataset query',async()=>{
+ const catalog=researchCatalog();for(const source of catalog.sources)if(['npi_registry','cms_open_data'].includes(source.id))source.state='enabled';
+ vi.mocked(port.catalog).mockResolvedValue(catalog);await mount();await click('Provider data');await check('CMS Open Data');await check('NPI Registry');
+ await fill('Invented public facility');expect(button('Review query').disabled).toBe(true);await check('NPI Registry');
+ expect(element.querySelector('textarea')!.value).toBe('Invented public facility');await click('Review query');
+ expect(element.querySelector('.research-query-review')?.textContent).toContain('To: CMS Open Data');
+ expect(element.querySelector('.research-query-review')?.textContent).not.toContain('NPI Registry');expect(port.search).not.toHaveBeenCalled();
+});
+
+it.each([
+ ['no_matching_record','No matching record was returned. Check the query or identifier'],
+ ['source_rate_limited','The source is limiting requests. Wait a little'],
+ ['source_timeout','The source took too long to respond. Try a new reviewed search later'],
+ ['source_not_configured','This source is not connected. Check the research connection'],
+ ['invalid_source_response','The source response could not be verified. No records from this source were accepted'],
+ ['source_unavailable','The source is unavailable. Try a new reviewed search later'],
+])('explains a completed %s without redispatching or offering unconfirmed-request recovery',async(code,message)=>{
+ vi.mocked(port.search).mockImplementation(async(_i,_w,request)=>({...await researchObservation(request),state:'unavailable',results:[],errors:[{source:'pubmed',code}]}));
+ await mount();await prepare();await click('Search selected sources');await workSettled();
+ expect(element.textContent).toContain(message);expect(element.textContent).toContain('This lookup finished without confirmed records');
+ expect(element.textContent).not.toContain('Source excerpts are ready to compare');
+ expect(element.querySelector('[aria-label="Unconfirmed research request"]')).toBeNull();
+ await click('Edit public query');expect(document.activeElement).toBe(element.querySelector('textarea'));
+ if(code==='source_not_configured'){await click('Check research connection');await settle();expect(port.catalog).toHaveBeenCalledTimes(2);}
+ expect(port.search).toHaveBeenCalledOnce();expect(port.resolve).not.toHaveBeenCalled();expect(port.save).not.toHaveBeenCalled();
+ expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:null,data:{pending:null}});
+});
+
+it('restores and resolves a legacy invalid identifier request exactly while blocking a new invalid lookup',async()=>{
+ const request:ResearchSearch={...researchRequest(),topic:'provider_data',sources:['npi_registry'],query:'Invented Provider'};
+ const draft={version:1,bot:researchBotId,topic:request.topic,query:request.query,sources:request.sources,pending:{kind:'search',request}};
+ const address=editorAddress(researchWorkspaceId,`research:${researchBotId}`);await journal.load(address);
+ await journal.persist(address,editorDraft(researchWorkspaceId,`research:${researchBotId}`,draft,request.idempotency_key));
+ const catalog=researchCatalog();catalog.sources.find(source=>source.id==='npi_registry')!.state='enabled';vi.mocked(port.catalog).mockResolvedValue(catalog);
+ vi.mocked(port.resolve).mockImplementation(async(_i,_w,body)=>({...await researchObservation(body),state:'unavailable',results:[],errors:[{source:'npi_registry',code:'invalid_source_response'}]}));
+ await mount();await click('Restore research draft');expect(button('Review query').disabled).toBe(true);
+ await click('Check saved result');await workSettled();expect(vi.mocked(port.resolve).mock.calls[0][2]).toEqual(request);
+ expect(element.querySelector('.research-results')?.textContent).toContain('NPI Registry needs a 10-digit NPI');
+ await fill('1234567890');expect(button('Review query').disabled).toBe(false);
+ expect(element.querySelector('.research-results')?.textContent).toContain('NPI Registry needs a 10-digit NPI');
+ expect(request.query).toBe('Invented Provider');expect(port.search).not.toHaveBeenCalled();expect(port.resolve).toHaveBeenCalledOnce();
+ expect(await journal.load(editorAddress(researchWorkspaceId,`research:${researchBotId}`))).toMatchObject({pending:null,data:{pending:null,query:'1234567890'}});
+});
+
+async function chiefPacket(onPrepareChief:NonNullable<Parameters<typeof ResearchWorkspace>[0]['onPrepareChief']>){
+ const {analysisWorkspace}=await import('./research-analysis-test-fixture'),analysis={workspace:analysisWorkspace(),model:{enabled:true,model:'Configured model'},onSubmit:vi.fn(async()=>{})};
+ await mount({analysis,onPrepareChief});await prepare();await click('Search selected sources');await workSettled();await check('Select excerpt to save');await click('Save selected excerpts');await workSettled();
+ const run=await researchObservation(vi.mocked(port.search).mock.calls[0][2]),receipt=await researchSaved(vi.mocked(port.save).mock.calls[0][3]);analysis.workspace=savedWorkspace(run,receipt);await mount({workspaceRevision:3,analysis,onPrepareChief});await analysisReady();
+ return {analysis,run,receipt};
+}
+async function chiefWait(check:()=>void){for(let attempt=0;attempt<100;attempt++){let ready=false;await act(async()=>{await new Promise(resolve=>setTimeout(resolve,5));try{check();ready=true;}catch{}});if(ready)return;}check();}
+async function chiefSettled(){await chiefWait(()=>expect(element.textContent).not.toContain('Preparing Chief draft…'));}
+it('retains exact Research work before handing its verified packet to Chief without consenting to AI or searching again',async()=>{
+ const address=editorAddress(researchWorkspaceId,`research:${researchBotId}`),callback=vi.fn(async(selection:import('./session/research-chief').ResearchChiefSelection)=>{expect(await journal.load(address)).toMatchObject({pending:null,data:{saved_packet:selection.anchor,query:'Invented general public question'}});return true;});
+ const {analysis,run,receipt}=await chiefPacket(callback);await click('Prepare Chief draft');await chiefSettled();
+ expect(callback).toHaveBeenCalledExactlyOnceWith({workspace_id:researchWorkspaceId,workspace_revision:3,team_revision:1,bot:researchBotId,anchor:{entry_id:receipt.entry_id,entry_revision:3,run_id:receipt.run_id,save_request_sha256:receipt.request_sha256},run,saved:receipt});
+ expect(element.textContent).toContain('Chief can also use other saved visit information allowed in its settings.');expect(element.textContent).toContain('Chief draft prepared. Nothing was sent.');expect(analysis.onSubmit).not.toHaveBeenCalled();expect(port.search).toHaveBeenCalledOnce();expect(port.save).toHaveBeenCalledOnce();
+});
+it('refuses an altered saved packet before the Chief callback',async()=>{
+ const callback=vi.fn(async()=>true),{analysis}=await chiefPacket(callback);analysis.workspace={...analysis.workspace,entries:analysis.workspace.entries.map(entry=>({...entry,content:'Changed retained source'}))};
+ await mount({workspaceRevision:3,analysis,onPrepareChief:callback});await click('Prepare Chief draft');await chiefSettled();
+ expect(callback).not.toHaveBeenCalled();expect(element.textContent).toContain('Load and check the exact saved source details');expect(analysis.onSubmit).not.toHaveBeenCalled();
+});
+it('does not dispatch the Chief handoff when its editor commit fails',async()=>{
+ const callback=vi.fn(async()=>true);await chiefPacket(callback);vi.spyOn(journal,'persist').mockRejectedValueOnce(new Error('invented private storage failure'));await click('Prepare Chief draft');await chiefSettled();
+ expect(callback).not.toHaveBeenCalled();expect(element.textContent).toContain('could not be retained safely');expect(port.save).toHaveBeenCalledOnce();
+});
+it('describes an unconfirmed Chief result without claiming a possibly committed draft was undone',async()=>{
+ const callback=vi.fn(async()=>false);await chiefPacket(callback);await click('Prepare Chief draft');await chiefSettled();
+ expect(element.textContent).toContain('Chief’s draft could not be confirmed. Reopen Chief and check its saved directions before trying again. Nothing was sent.');expect(port.save).toHaveBeenCalledOnce();
+});
+it('clears its preparing state on a same-mounted identity replacement and ignores the old callback result',async()=>{
+ let release!:(value:boolean)=>void;const callback=vi.fn(()=>new Promise<boolean>(resolve=>{release=resolve;})),{analysis}=await chiefPacket(callback);await click('Prepare Chief draft');await chiefWait(()=>expect(release).toBeTypeOf('function'));expect(button('Preparing Chief draft…').disabled).toBe(true);
+ await mount({identity:{mode:'clerk_jwt',getToken:async()=>null},workspaceRevision:3,analysis,onPrepareChief:callback});await settle();expect(element.textContent).not.toContain('Preparing Chief draft…');
+ await act(async()=>release(true));expect(element.textContent).not.toContain('Chief draft prepared.');expect(element.querySelector<HTMLTextAreaElement>('textarea')?.disabled).toBe(false);
 });

@@ -41,7 +41,7 @@ class TokenVerifier(Protocol):
 
 def native_clerk_origin(runtime: Settings, origins: list[str]) -> str | None:
     """Select a native transport; the Origin header does not establish identity."""
-    if (len(origins) != 1 or runtime.cosmas_env != "early_adopter_beta"
+    if (len(origins) != 1 or runtime.cosmas_env not in {"early_adopter_beta", "standalone_clerk_synthetic"}
             or runtime.auth_mode != "clerk_jwt" or not runtime.workspace_enabled
             or not runtime.workspace_authenticated_enabled or not runtime.workspace_hosted_enabled):
         return None
@@ -79,6 +79,16 @@ class ClerkTokenVerifier:
     _shared_states_lock = Lock()
     _shared_states: dict[str, _JwksState] = {}
 
+    @staticmethod
+    def _key_client(runtime_settings: Settings):
+        if not runtime_settings.clerk_jwks_url:
+            raise RuntimeError("Clerk JWKS URL is required")
+        if runtime_settings.cosmas_env == "standalone_clerk_synthetic":
+            from cosmas_os.adapters.standalone_clerk_jwks import StandaloneClerkKeys
+
+            return StandaloneClerkKeys(runtime_settings)
+        return PyJWKClient(runtime_settings.clerk_jwks_url, cache_jwk_set=True, timeout=5)
+
     def __init__(
         self,
         runtime_settings: Settings,
@@ -98,31 +108,22 @@ class ClerkTokenVerifier:
         self._settings = runtime_settings
         self._native_origin = native_origin
         initialize_state = True
+        state_key = ("standalone-clerk:" if runtime_settings.cosmas_env == "standalone_clerk_synthetic" else "") + runtime_settings.clerk_jwks_url
         if jwks_client is None and start_background_refresh:
             # functools.lru_cache may invoke the wrapped factory more than once
             # during a concurrent cold start. Share one state so those duplicate
             # verifier instances cannot multiply initial fetches or refresh loops.
             with self._shared_states_lock:
-                state = self._shared_states.get(runtime_settings.clerk_jwks_url)
+                state = self._shared_states.get(state_key)
                 if state is None:
-                    state = _JwksState(
-                        PyJWKClient(
-                            runtime_settings.clerk_jwks_url,
-                            cache_jwk_set=True,
-                            timeout=5,
-                        )
-                    )
-                    self._shared_states[runtime_settings.clerk_jwks_url] = state
+                    state = _JwksState(self._key_client(runtime_settings))
+                    self._shared_states[state_key] = state
                 else:
                     initialize_state = False
         else:
             state = _JwksState(
                 jwks_client
-                or PyJWKClient(
-                    runtime_settings.clerk_jwks_url,
-                    cache_jwk_set=True,
-                    timeout=5,
-                )
+                or self._key_client(runtime_settings)
             )
 
         self._jwks = state.client

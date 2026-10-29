@@ -16,7 +16,7 @@ export function TeamWorkPanel({handoffs,entries,locked,onRetry,onReview}:{
     resultAvailable={entries.some(entry=>entry.id===handoff.result_entry_id&&entry.kind==='handoff_result'&&entry.reply&&
       (entry.reply.agent_id?entry.reply.agent_id===handoff.recipient_agent_id:entry.reply.role===handoff.recipient_role))}
     maskedResultAvailable={entries.some(entry=>entry.id===handoff.result_entry_id&&entry.kind==='handoff_result'&&entry.content===''&&entry.reply==null&&
-      [entry.google_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state].includes('unavailable'))}
+      [entry.google_source_state,entry.microsoft_source_state,entry.calendar_source_state,entry.fax_source_state,entry.practice_fax_source_state,entry.ehr_source_state,entry.calendar_import_source_state].includes('unavailable'))}
     onRetry={()=>onRetry(handoff)} onShow={()=>onReview(handoff)}/>;
   return <section className="team-work-overview" aria-label="Team work for this visit">
     <header><div><h2>Team work</h2><p>{working} working or queued · {ready} drafts saved{attention?` · ${attention} need attention`:''}</p></div>

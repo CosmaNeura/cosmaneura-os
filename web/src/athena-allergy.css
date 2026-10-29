@@ -1,0 +1,11 @@
+.ehr-read-panel [aria-label="Review Athena allergy records"] { display: grid; gap: .8rem; min-width: 0; }
+.ehr-read-panel [aria-label="Athena allergy records"] > li { padding-block: .8rem; border-top: 1px solid var(--team-line, #d5dbe5); }
+.ehr-read-panel [aria-label="Review Athena allergy records"] h5,
+.ehr-read-panel [aria-label="Review Athena allergy records"] h6 { font: inherit; font-weight: 600; margin: .2rem 0; overflow-wrap: anywhere; }
+.athena-allergy-value { white-space: pre-wrap; overflow-wrap: anywhere; }
+.athena-allergy-fields { margin: .5rem 0; }
+.athena-allergy-fields > div { margin: .6rem 0; }
+.athena-allergy-fields dt { font-weight: 650; overflow-wrap: anywhere; }
+.athena-allergy-fields dd { margin: .15rem 0 0; overflow-wrap: anywhere; }
+.athena-allergy-items { padding-inline-start: 1rem; }
+.athena-allergy-items .athena-allergy-items { padding-inline-start: .5rem; }

@@ -62,6 +62,11 @@ import CosmasWorkspaceAuthPlugin
     private var navigationProxy: WorkspaceNavigationDelegate?
     private let lifecycleHandler = WorkspaceLifecycleHandler()
     private var quarantined = false
+    private var messagesPresentation = false
+    private var lastFeedbackAt: TimeInterval = 0
+    private var sendFeedback: UIImpactFeedbackGenerator?
+    private var selectionFeedback: UISelectionFeedbackGenerator?
+    private var notificationFeedback: UINotificationFeedbackGenerator?
     private(set) var capturePlugin: IOSPCMCapacitorPlugin?
     #if canImport(CosmasWorkspaceAuthPlugin)
     private var authPlugin: CosmasWorkspaceAuthPlugin?
@@ -90,6 +95,7 @@ import CosmasWorkspaceAuthPlugin
         // the WebView, so install on the finished instance before loadWebView.
         let content = webView.configuration.userContentController
         content.add(lifecycleHandler, name: "cosmasWorkspaceLifecycle")
+        content.add(lifecycleHandler, name: "cosmasPresentation")
         // UUID-generated value contains no user input or credentials.
         let source = "Object.defineProperty(window, '__cosmasWorkspaceGeneration', {value: '\(workspaceGeneration)', writable: false, configurable: false});"
         content.addUserScript(WKUserScript(
@@ -129,6 +135,7 @@ import CosmasWorkspaceAuthPlugin
     }
 
     fileprivate func receive(_ message: WKScriptMessage) {
+        if message.name == "cosmasPresentation" { receivePresentation(message); return }
         guard !quarantined, message.name == "cosmasWorkspaceLifecycle",
               message.webView === webView,
               let body = message.body as? [String: Any], Set(body.keys) == ["kind", "generation"],
@@ -138,6 +145,57 @@ import CosmasWorkspaceAuthPlugin
         // The compositor fixes the local origin. Never accept a remote page's readiness.
         let sameOrigin = origin.protocol == "capacitor" && origin.host == "localhost" && origin.port == 0
         onSignal?(signal, generation, message.frameInfo.isMainFrame, sameOrigin)
+    }
+
+    private func receivePresentation(_ message: WKScriptMessage) {
+        guard !quarantined, message.webView === webView, message.frameInfo.isMainFrame,
+              let body = message.body as? [String: Any], Set(body.keys) == ["kind", "value", "generation"],
+              body["generation"] as? String == workspaceGeneration,
+              let kind = body["kind"] as? String, let value = body["value"] as? String else { return }
+        let origin = message.frameInfo.securityOrigin
+        guard origin.protocol == "capacitor", origin.host == "localhost", origin.port == 0 else { return }
+        if kind == "mode", ["messages", "workspace"].contains(value) {
+            messagesPresentation = value == "messages"
+            // Existing route history and its navigation guards remain authoritative.
+            webView?.allowsBackForwardNavigationGestures = messagesPresentation
+            if messagesPresentation { preparePresentationFeedback() }
+            return
+        }
+        guard kind == "feedback", messagesPresentation,
+              webView?.window?.windowScene?.activationState == .foregroundActive,
+              IOSPCMCapacitorPlugin.confirmProcessCaptureIdle(),
+              ["send", "selection", "success", "warning"].contains(value) else { return }
+        let now = ProcessInfo.processInfo.systemUptime
+        guard now - lastFeedbackAt >= 0.08 else { return }
+        lastFeedbackAt = now
+        preparePresentationFeedback()
+        switch value {
+        case "send": sendFeedback?.impactOccurred()
+        case "selection": selectionFeedback?.selectionChanged()
+        case "success": notificationFeedback?.notificationOccurred(.success)
+        case "warning": notificationFeedback?.notificationOccurred(.warning)
+        default: break
+        }
+    }
+
+    private func preparePresentationFeedback() {
+        guard let webView else { return }
+        // Modern UIKit routes feedback through the active view's interaction.
+        // Retain the generators rather than creating and dropping one per event.
+        if sendFeedback == nil {
+            if #available(iOS 17.5, *) {
+                sendFeedback = UIImpactFeedbackGenerator(style: .light, view: webView)
+                selectionFeedback = UISelectionFeedbackGenerator(view: webView)
+                notificationFeedback = UINotificationFeedbackGenerator(view: webView)
+            } else {
+                sendFeedback = UIImpactFeedbackGenerator(style: .light)
+                selectionFeedback = UISelectionFeedbackGenerator()
+                notificationFeedback = UINotificationFeedbackGenerator()
+            }
+        }
+        sendFeedback?.prepare()
+        selectionFeedback?.prepare()
+        notificationFeedback?.prepare()
     }
 
     /// A foreground hint requires this current scene's live, local document.

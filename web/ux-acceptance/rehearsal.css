@@ -1,0 +1,3 @@
+/* Keep native chat geometry equivalent to the installed application.
+   The invented-data notice remains visible in the inbox and Settings. */
+#root[data-native-rehearsal=true]:has(.team-workspace[data-messages-chat=true]) > .rehearsal-notice { display:none; }

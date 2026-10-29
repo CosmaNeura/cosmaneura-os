@@ -60,3 +60,20 @@ provider, sends patient email or proves native iPhone acceptance.
 An existing bundled runtime can be selected without changing dependencies with
 `PLAYWRIGHT_MODULE_PATH` (Playwright package directory) and `AXE_MODULE_PATH`
 (local `axe.min.js` file).
+
+## Text wrapping rehearsal
+
+Add `?text-size=200` to either acceptance preview to double product text and line
+height. This changes only font sizing: viewport, zoom, transforms, button sizes,
+padding and spacing keep their product rules. Content may naturally wrap or grow.
+The rehearsal banner stays its normal size. Newly opened panels are also enlarged;
+re-measuring restores the original styles first so inherited text never compounds.
+
+Add `&long-names=1` to use long invented bot names, a visit title and a linked-visit
+label. This case has separate synthetic tab storage so it cannot rename the normal
+rehearsal data. For the Messages preview, use
+`http://127.0.0.1:5187/?text-size=200&long-names=1` and inspect the inbox, a chat,
+Details, review, Research and keyboard-height viewport. Use `?long-names=1` alone
+to separate long-content wrapping from text enlargement. These controls exist only
+in the rehearsal build and do not establish physical Dynamic Type or VoiceOver
+acceptance.

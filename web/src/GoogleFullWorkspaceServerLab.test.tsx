@@ -73,7 +73,7 @@ const sourceEditor = () => calendar ? 'google-calendar' as const : 'google-messa
 const exactSelector = () => calendar ? '[aria-label="Exact selected calendar summary"]' : '[aria-label="Complete selected email"]';
 const sourceSuffix = () => calendar ? '/google-calendar/review' : '/google-messages/review';
 const saveLabel = () => calendar ? 'Save calendar summary to visit' : 'Save reviewed email for this visit';
-const askLabel = () => calendar ? 'Ask Chief about this calendar summary' : 'Ask Chief about this email';
+const askLabel = () => calendar ? 'Ask Chief about this calendar summary' : 'Prepare Chief draft';
 const sourceRestore = () => calendar ? 'Restore saved calendar work' : 'Restore saved email work';
 const note = (w: Workspace) => JSON.stringify(w.note ?? null);
 const visible = (element: Element) => !element.closest('[hidden]');

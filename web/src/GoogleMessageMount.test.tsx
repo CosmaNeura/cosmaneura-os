@@ -54,7 +54,7 @@ it('preserves a confirmed masked source receipt in encrypted storage and never d
    subject:'Invented private subject',sender:'sender@example.invalid',received_at:'2026-10-02T12:00:00Z',is_read:false,observed_at:'2026-10-02T12:06:00Z',status:'complete',content:text,reason:null,raw_sha256:'d'.repeat(64),content_sha256:contentSha}};
  const masked={...record,pending:null,message,saved:{workspace_id:uuid(9),entry_id:uuid(10),entry_revision:6,source_sha256:message.source_sha256,content_sha256:contentSha,request_sha256:'f'.repeat(64),source_withheld:true}};
  await seed(masked);const before=await reread();await render();await click('Restore saved email work');expect(host.querySelector('pre')).toBeNull();
- expect(host.textContent).not.toContain(text);expect(button('Ask Chief about this email')).toBeUndefined();expect(host.textContent).toContain('exact email source save is confirmed');
+ expect(host.textContent).not.toContain(text);expect(button('Prepare Chief draft')).toBeUndefined();expect(host.textContent).toContain('exact email source save is confirmed');
  await act(async()=>root.render(null));expect(await reread()).toEqual(before);await render();await click('Restore saved email work');expect(host.querySelector('pre')).toBeNull();
  expect(googleMessageApi.read).not.toHaveBeenCalled();expect(googleMessageApi.resolve).not.toHaveBeenCalled();expect(await reread()).toEqual(before);
 });

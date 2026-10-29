@@ -18,6 +18,12 @@ test('the actual web template allows only self microphone for the selected brows
 test('synthetic builds preserve the original microphone denial',()=>{
   assert.equal(renderBetaNginx(template,resolveBetaFeatureProfile({...env,VITE_WORKSPACE_CAPTURE_MODE:'synthetic'}).manifest),template);
 });
+test('standalone hosted builds retain microphone denial',()=>{
+  const standalone=resolveBetaFeatureProfile({...env,VITE_WORKSPACE_FEATURE_PROFILE:'standalone-practice-v1',
+    VITE_WORKSPACE_ORGANIZATION_ID:'org_invented_standalone',
+    VITE_COSMANEURA_WEB_ORIGIN:'',VITE_CAPTURE_UPLOAD_ORIGINS:'',VITE_WORKSPACE_CAPTURE_MODE:'disabled'}).manifest;
+  assert.equal(renderBetaNginx(template,standalone),template);
+});
 test('missing features, foreign clients and conflicting headers cannot generate a permissive policy',()=>{
   for(const item of [null,{...manifest,enabledFlags:[]},{...manifest,athenaAccess:'write'},
     {...manifest,client:'apple'},{...manifest,unexpected:'field'}])assert.throws(()=>renderBetaNginx(template,item));

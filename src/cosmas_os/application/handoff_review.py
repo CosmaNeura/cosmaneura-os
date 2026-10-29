@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import re
+from dataclasses import dataclass
 
 from sqlalchemy import select
 
 from cosmas_os.adapters.gpt41 import _context
-from cosmas_os.application import handoff_briefs, handoffs, model_work
+from cosmas_os.application import clinical_note_share, handoff_briefs, handoffs, model_work
 from cosmas_os.application import provider_team as team
 from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import payload_hash
@@ -19,20 +20,75 @@ from cosmas_os.models import (
     WorkspaceHandoff,
     WorkspaceHandoffAttempt,
     WorkspaceHandoffReview,
+    WorkspaceHandoffRevision,
     WorkspaceReply,
 )
+
+
+@dataclass(frozen=True)
+class ReviewReadSnapshot:
+    """Complete page-scoped immutable review inputs; never a command authority.
+
+    Missing referenced records fail the normal validity checks. No preloaded
+    path falls back to SQL or grants access to selected connector sources.
+    """
+
+    team: team.TeamReadSnapshot
+    workspace_ids: frozenset[str]
+    clinical: clinical_note_share.ClinicalSourceSnapshot
+    replies: dict[str, WorkspaceReply]
+    handoffs: dict[str, WorkspaceHandoff]
+    attempts: tuple[WorkspaceHandoffAttempt, ...]
+    reviews: tuple[WorkspaceHandoffReview, ...]
+    revisions: tuple[WorkspaceHandoffRevision, ...]
+    admissions: dict[str, ModelWorkAdmission]
+
+    def __post_init__(self):
+        owned = (*self.clinical.notes.values(), *self.replies.values(), *self.handoffs.values(),
+            *self.attempts, *self.reviews, *self.revisions, *self.admissions.values())
+        if (any(row.workspace_id not in self.workspace_ids or (row.box_id, row.owner_id) != (self.team.box, self.team.owner) for row in owned)
+                or any(row.workspace_id not in self.workspace_ids or (row.box_id, row.actor_id) != (self.team.box, self.team.owner) for row in self.clinical.entries.values())
+                or any(key != row.id for key, row in self.clinical.entries.items())
+                or any(key != row.id for key, row in self.clinical.notes.items())
+                or any(key != row.entry_id for key, row in self.replies.items())
+                or any(key != row.id for key, row in self.handoffs.items())
+                or any(key != row.handoff_attempt_id for key, row in self.admissions.items())):
+            raise ws.WorkspaceError('handoff_snapshot_unavailable', 503)
+
+    def require_scope(self, w):
+        self.team.require_scope(w.box_id, w.owner_id)
+        if w.id not in self.workspace_ids or any(entry.workspace_id == w.id and entry.kind in
+                {'google_message', 'microsoft_message', 'google_calendar', 'efax_inbound_source', 'fax_inbound_source', 'ehr_read_source', 'calendar_import_source'}
+                for entry in self.clinical.entries.values()):
+            raise ws.WorkspaceError('handoff_snapshot_unavailable', 503)
+
+    def latest_attempt(self, handoff_id):
+        return max((attempt for attempt in self.attempts if attempt.handoff_id == handoff_id),
+            key=lambda attempt: attempt.number, default=None)
+
+    def review_record(self, w, handoff):
+        return max((review for review in self.reviews if review.handoff_id == handoff.id
+            and (review.workspace_id, review.box_id, review.owner_id) == (w.id, w.box_id, w.owner_id)
+            and review.workspace_revision <= w.revision), key=lambda review: review.workspace_revision, default=None)
+
+    def revision_link(self, w, *, handoff_id=None, review_id=None):
+        return next((link for link in self.revisions if (link.workspace_id, link.box_id, link.owner_id) == (w.id, w.box_id, w.owner_id)
+            and (link.revision_handoff_id == handoff_id if handoff_id is not None else link.review_id == review_id)), None)
 
 
 def _hash(content):
     return hashlib.sha256(content.encode("utf-8")).hexdigest()
 
 
-def _selected_versions(s, w, settings):
+def _selected_versions(s, w, settings, *, snapshot: ReviewReadSnapshot | None = None):
     from cosmas_os.ports.bot_capabilities import supports_skill
 
     if not supports_skill(settings, "saved_context"):
         return []
-    entries = list(
+    entries = sorted((entry for entry in snapshot.clinical.entries.values()
+        if (entry.workspace_id, entry.box_id, entry.actor_id) == (w.id, w.box_id, w.owner_id)
+        and entry.revision <= w.revision and entry.kind in {"scratchpad", "evidence", "synthetic_source"}),
+        key=lambda entry: entry.revision) if snapshot is not None else list(
         s.scalars(
             select(WorkspaceEntry)
             .where(
@@ -63,12 +119,11 @@ def _selected_versions(s, w, settings):
     from cosmas_os.application import selected_connector_sources
     from cosmas_os.application.model_work import _selected_connector_passages
 
-    additional = _selected_connector_passages(s, w, settings)
+    additional = (clinical_note_share.selected(s, w, settings, snapshot=snapshot.clinical) if w.appointment_id is not None else ()) if snapshot is not None else _selected_connector_passages(s, w, settings)
     for source in additional:
-        from cosmas_os.application import clinical_note_share
-
-        if clinical_note_share.is_shared_snapshot(s.get(WorkspaceEntry, source.entry_id)):
-            clinical_note_share.validate_current_source(s, w, source.entry_id)
+        entry = snapshot.clinical.entries.get(source.entry_id) if snapshot is not None else s.get(WorkspaceEntry, source.entry_id)
+        if clinical_note_share.is_shared_snapshot(entry):
+            clinical_note_share.validate_current_source(s, w, source.entry_id, snapshot=snapshot.clinical if snapshot is not None else None)
         else:
             selected_connector_sources.validate_selected_source(s, w, source.entry_id)
         versions.append({"entry_id": source.entry_id, "revision": source.revision,
@@ -79,14 +134,15 @@ def _selected_versions(s, w, settings):
     return versions
 
 
-def _current_settings(s, w, handoff):
+def _current_settings(s, w, handoff, *, snapshot: ReviewReadSnapshot | None = None):
     """Current human/team authority; reading a receipt does not consume history capacity."""
-    version = s.get(ProviderTeamRevision, handoff.team_revision_id)
+    version = snapshot.team.versions.get(handoff.team_revision_id) if snapshot is not None else s.get(ProviderTeamRevision, handoff.team_revision_id)
     if version is None:
         raise ws.WorkspaceError("handoff_context_changed")
-    _, chief, chief_settings = team.active_bot(s, w.box_id, w.owner_id, "chief", version.revision)
-    address = team.address_for_agent(s, w.box_id, w.owner_id, handoff.recipient_agent_id)
-    _, bot, settings = team.active_bot(s, w.box_id, w.owner_id, address, version.revision)
+    team_snapshot = snapshot.team if snapshot is not None else None
+    _, chief, chief_settings = team.active_bot(s, w.box_id, w.owner_id, "chief", version.revision, snapshot=team_snapshot)
+    address = team.address_for_agent(s, w.box_id, w.owner_id, handoff.recipient_agent_id, snapshot=team_snapshot)
+    _, bot, settings = team.active_bot(s, w.box_id, w.owner_id, address, version.revision, snapshot=team_snapshot)
     if any(
         team.blocked(config, key)
         for config in (chief_settings, settings)
@@ -97,24 +153,26 @@ def _current_settings(s, w, handoff):
         chief.agent_id != handoff.issuer_agent_id
         or bot.agent_id != handoff.recipient_agent_id
         or settings["role"] != handoff.recipient_role
-        or address not in handoffs.available_roles(s, w.box_id, w.owner_id, version, chief_settings)
+        or address not in handoffs.available_roles(s, w.box_id, w.owner_id, version, chief_settings, snapshot=team_snapshot)
     ):
         raise ws.WorkspaceError("handoff_context_changed")
     return version, settings
 
 
-def _binding(s, w, handoff, attempt, *, current=True):
+def _binding(s, w, handoff, attempt, *, current=True, snapshot: ReviewReadSnapshot | None = None):
     """Verify saved intent/output and the current versions of every admitted source."""
     if (handoff.workspace_id, handoff.box_id, handoff.owner_id) != (w.id, w.box_id, w.owner_id):
         raise ws.WorkspaceError("handoff_unavailable", 404)
     from cosmas_os.application.handoff_revision import revision_depth
 
-    revision_depth(s, w, handoff.id)
-    version = s.get(ProviderTeamRevision, handoff.team_revision_id)
+    if snapshot is not None:
+        snapshot.require_scope(w)
+    revision_depth(s, w, handoff.id, snapshot=snapshot)
+    version = snapshot.team.versions.get(handoff.team_revision_id) if snapshot is not None else s.get(ProviderTeamRevision, handoff.team_revision_id)
     settings = None
     if current:
-        version, settings = _current_settings(s, w, handoff)
-    latest = s.scalar(
+        version, settings = _current_settings(s, w, handoff, snapshot=snapshot)
+    latest = snapshot.latest_attempt(handoff.id) if snapshot is not None else s.scalar(
         select(WorkspaceHandoffAttempt)
         .where(
             WorkspaceHandoffAttempt.handoff_id == handoff.id,
@@ -130,7 +188,7 @@ def _binding(s, w, handoff, attempt, *, current=True):
         or attempt.result_entry_id is None
     ):
         raise ws.WorkspaceError("handoff_result_unavailable")
-    row = s.scalar(
+    row = snapshot.admissions.get(attempt.id) if snapshot is not None else s.scalar(
         select(ModelWorkAdmission).where(
             ModelWorkAdmission.handoff_attempt_id == attempt.id,
             ModelWorkAdmission.workspace_id == w.id,
@@ -138,8 +196,8 @@ def _binding(s, w, handoff, attempt, *, current=True):
             ModelWorkAdmission.owner_id == w.owner_id,
         )
     )
-    reply = s.get(WorkspaceReply, attempt.result_entry_id)
-    entry = s.get(WorkspaceEntry, attempt.result_entry_id)
+    reply = snapshot.replies.get(attempt.result_entry_id) if snapshot is not None else s.get(WorkspaceReply, attempt.result_entry_id)
+    entry = snapshot.clinical.entries.get(attempt.result_entry_id) if snapshot is not None else s.get(WorkspaceEntry, attempt.result_entry_id)
     try:
         if (
             row is None
@@ -180,13 +238,13 @@ def _binding(s, w, handoff, attempt, *, current=True):
             task, context, goal=handoff.brief, origin_id=handoff.origin_entry_id,
             prepared_contract=row.envelope_contract,
         )
-        origin = s.get(WorkspaceEntry, handoff.origin_entry_id)
+        origin = snapshot.clinical.entries.get(handoff.origin_entry_id) if snapshot is not None else s.get(WorkspaceEntry, handoff.origin_entry_id)
         expected_question = handoff_briefs.question(task)
         if "revision_request" in row.request_body:
             from cosmas_os.application.handoff_revision import revision_question
 
             expected_question += revision_question(
-                s, w, row.request_body["revision_request"], current=current
+                s, w, row.request_body["revision_request"], current=current, snapshot=snapshot
             )
         if (
             origin is None
@@ -210,18 +268,18 @@ def _binding(s, w, handoff, attempt, *, current=True):
         # Stored receipts still bind exact immutable passages, while a later selected
         # source is allowed to make that receipt historical rather than unreadable.
         for source in versions:
-            source_entry = s.get(WorkspaceEntry, source["entry_id"])
+            source_entry = snapshot.clinical.entries.get(source["entry_id"]) if snapshot is not None else s.get(WorkspaceEntry, source["entry_id"])
             source_kind = source_entry.kind if source_entry is not None else None
             from cosmas_os.application import clinical_note_share, selected_connector_sources
 
             if clinical_note_share.is_shared_snapshot(source_entry):
                 try:
-                    source_entry = clinical_note_share.historical_source(s, w, source["entry_id"])
+                    source_entry = clinical_note_share.historical_source(s, w, source["entry_id"], snapshot=snapshot.clinical if snapshot is not None else None)
                 except ws.WorkspaceError:
                     raise ValueError("saved clinical source binding") from None
                 if current:
                     try:
-                        clinical_note_share.validate_current_source(s, w, source["entry_id"])
+                        clinical_note_share.validate_current_source(s, w, source["entry_id"], snapshot=snapshot.clinical if snapshot is not None else None)
                     except ws.WorkspaceError:
                         raise ws.WorkspaceError("handoff_sources_changed") from None
                 source_kind = "evidence"
@@ -249,7 +307,7 @@ def _binding(s, w, handoff, attempt, *, current=True):
                 source["sha256"],
             ):
                 raise ValueError("saved source binding")
-        if current and versions != _selected_versions(s, w, settings):
+        if current and versions != _selected_versions(s, w, settings, snapshot=snapshot):
             raise ws.WorkspaceError("handoff_sources_changed")
         by_id = {source["entry_id"]: source for source in versions}
         if any(
@@ -266,8 +324,8 @@ def _binding(s, w, handoff, attempt, *, current=True):
         raise ws.WorkspaceError("handoff_result_unverifiable") from None
 
 
-def _record(s, w, handoff):
-    return s.scalar(
+def _record(s, w, handoff, *, snapshot: ReviewReadSnapshot | None = None):
+    return snapshot.review_record(w, handoff) if snapshot is not None else s.scalar(
         select(WorkspaceHandoffReview)
         .where(
             WorkspaceHandoffReview.handoff_id == handoff.id,
@@ -281,13 +339,13 @@ def _record(s, w, handoff):
     )
 
 
-def _review_for(s, w, handoff, attempt, *, current):
+def _review_for(s, w, handoff, attempt, *, current, snapshot: ReviewReadSnapshot | None = None):
     """Verify provenance separately from whether this decision authorizes current work."""
-    review = _record(s, w, handoff)
+    review = _record(s, w, handoff, snapshot=snapshot)
     if review is None or review.attempt_id != attempt.id:
         return None
     try:
-        row, reply, versions = _binding(s, w, handoff, attempt, current=current)
+        row, reply, versions = _binding(s, w, handoff, attempt, current=current, snapshot=snapshot)
         if (
             review.result_entry_id != attempt.result_entry_id
             or review.agent_id != reply.agent_id
@@ -308,7 +366,7 @@ def _review_for(s, w, handoff, attempt, *, current):
         "decision": review.decision,
         "feedback": review.feedback,
         "created_at": review.created_at.isoformat(),
-        **revision_handoff_for_review(s, w, review.id),
+        **revision_handoff_for_review(s, w, review.id, snapshot=snapshot),
     }
 
 
@@ -321,14 +379,14 @@ def result_recovery_digest(s, w, handoff, attempt):
     return _hash(reply.content)
 
 
-def stored_review_for(s, w, handoff, attempt):
+def stored_review_for(s, w, handoff, attempt, *, snapshot: ReviewReadSnapshot | None = None):
     """Exact immutable command receipt for recovery; never current-work authorization."""
-    return _review_for(s, w, handoff, attempt, current=False)
+    return _review_for(s, w, handoff, attempt, current=False, snapshot=snapshot)
 
 
-def review_for(s, w, handoff, attempt):
+def review_for(s, w, handoff, attempt, *, snapshot: ReviewReadSnapshot | None = None):
     """Return a decision only while reviewed source and team authority remain current."""
-    return _review_for(s, w, handoff, attempt, current=True)
+    return _review_for(s, w, handoff, attempt, current=True, snapshot=snapshot)
 
 
 def review_status_for(s, w, handoff, attempt):

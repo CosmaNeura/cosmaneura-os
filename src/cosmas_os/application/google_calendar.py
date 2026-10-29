@@ -17,6 +17,7 @@ from cosmas_os.application import workspace as ws
 from cosmas_os.domain.hashing import canonical_json, payload_hash
 from cosmas_os.google_calendar_models import (
     GoogleCalendarObservationRequest,
+    GoogleCalendarPrivateSourceReview,
     GoogleCalendarSnapshot,
     GoogleCalendarSourceReview,
 )
@@ -279,16 +280,30 @@ def valid_until(observation, event):
 
 
 def _review_body(wid, expected, key, observation_id, observation_sha256, event_id, event_sha256,
-                 reviewed_visit, reviewed_exact_summary, reviewed_untrusted_source):
+                 reviewed_visit, reviewed_exact_summary, reviewed_untrusted_source, *, reviewed_private_notebook=None):
     return dict(workspace_id=wid, expected_revision=expected, idempotency_key=key,
         observation_id=observation_id, observation_sha256=observation_sha256, event_id=event_id,
-        event_sha256=event_sha256, reviewed_visit=reviewed_visit,
+        event_sha256=event_sha256,
+        **({"reviewed_private_notebook": True} if reviewed_private_notebook is True else {"reviewed_visit": reviewed_visit}),
         reviewed_exact_summary=reviewed_exact_summary, reviewed_untrusted_source=reviewed_untrusted_source)
+
+
+def _review_for_entry(s, entry_id):
+    rows = [s.scalar(select(model).where(model.entry_id == entry_id))
+            for model in (GoogleCalendarSourceReview, GoogleCalendarPrivateSourceReview)]
+    found = [row for row in rows if row is not None]
+    if len(found) > 1:
+        raise ws.WorkspaceError("google_calendar_source_invalid")
+    return found[0] if found else None
+
+
+def _review_context(review):
+    return {"reviewed_private_notebook": True} if isinstance(review, GoogleCalendarPrivateSourceReview) else {}
 
 
 def historical_source(s, w, entry_id):
     entry = s.get(WorkspaceEntry, entry_id)
-    review = s.scalar(select(GoogleCalendarSourceReview).where(GoogleCalendarSourceReview.entry_id == entry_id))
+    review = _review_for_entry(s, entry_id)
     if (entry is None or review is None or (entry.workspace_id, entry.box_id, entry.actor_id, entry.kind)
             != (w.id, w.box_id, w.owner_id, "google_calendar")):
         raise ws.WorkspaceError("google_calendar_source_unavailable", 404)
@@ -304,9 +319,13 @@ def historical_source(s, w, entry_id):
     content = source_content(snap.payload, event)
     body = _review_body(w.id, review.expected_revision, review.idempotency_key, read.id,
         review.observation_sha256, review.event_id, review.event_sha256,
-        review.reviewed_visit, review.reviewed_exact_summary, review.reviewed_untrusted_source)
-    if ((review.workspace_id, review.box_id, review.owner_id, review.patient_link_id, review.workspace_revision)
-            != (w.id, w.box_id, w.owner_id, w.patient_link_id, entry.revision)
+        getattr(review, "reviewed_visit", None), review.reviewed_exact_summary, review.reviewed_untrusted_source, **_review_context(review))
+    private = isinstance(review, GoogleCalendarPrivateSourceReview)
+    context_valid = ((w.draft_title is not None and review.reviewed_private_notebook is True) if private else
+                     (w.appointment_id is not None and review.patient_link_id == w.patient_link_id and review.reviewed_visit is True))
+    if ((review.workspace_id, review.box_id, review.owner_id, review.workspace_revision)
+            != (w.id, w.box_id, w.owner_id, entry.revision)
+            or not context_valid
             or (snap.box_id, snap.owner_id, read.box_id, read.owner_id) != (w.box_id, w.owner_id, w.box_id, w.owner_id)
             or review.observation_sha256 != snap.source_sha256 or review.event_sha256 != event_hash(event)
             or review.source_sha256 != payload_hash(dict(observation_sha256=review.observation_sha256,
@@ -317,7 +336,7 @@ def historical_source(s, w, entry_id):
             or entry.idempotency_key != review.idempotency_key
             or entry.source_label != ("Google calendar: " + event.subject)[:160]
             or review.workspace_revision != review.expected_revision + 1
-            or not all((review.reviewed_visit, review.reviewed_exact_summary, review.reviewed_untrusted_source))):
+            or review.reviewed_exact_summary is not True or review.reviewed_untrusted_source is not True):
         raise ws.WorkspaceError("google_calendar_source_invalid")
     return entry
 
@@ -327,7 +346,12 @@ def validate_selected_source(s, w, entry_id):
         raise ws.WorkspaceError("google_calendar_source_unavailable")
     model_work.read_workspace(s, w.box_id, w.owner_id, w.id)
     entry = historical_source(s, w, entry_id)
-    review = s.scalar(select(GoogleCalendarSourceReview).where(GoogleCalendarSourceReview.entry_id == entry_id))
+    review = _review_for_entry(s, entry_id)
+    if review is None:
+        raise ws.WorkspaceError("google_calendar_source_unavailable")
+    if isinstance(review, GoogleCalendarPrivateSourceReview) and (
+            w.appointment_id is not None or w.patient_link_id is not None or w.draft_title is None):
+        raise ws.WorkspaceError("google_calendar_source_unavailable")
     snap = s.get(GoogleCalendarSnapshot, review.snapshot_id)
     read = s.get(GoogleCalendarObservationRequest, snap.observation_id)
     _authorize(s, read)
@@ -376,21 +400,25 @@ def _selection_receipt(s, w, read, review, entry):
         source=dict(entry_id=entry.id, source_sha256=review.source_sha256, content_sha256=review.content_sha256),
         request_sha256=payload_hash(_review_body(w.id, review.expected_revision, review.idempotency_key,
             read.id, review.observation_sha256, review.event_id, review.event_sha256,
-            review.reviewed_visit, review.reviewed_exact_summary, review.reviewed_untrusted_source)),
+            getattr(review, "reviewed_visit", None), review.reviewed_exact_summary, review.reviewed_untrusted_source, **_review_context(review))),
         source_withheld=withheld)
 
 
 def select_review(s, box, actor, wid, *, expected, key, observation_id, observation_sha256,
-                  event_id, event_sha256, reviewed_visit, reviewed_exact_summary,
+                  event_id, event_sha256, reviewed_visit=None, reviewed_private_notebook=None, reviewed_exact_summary,
                   reviewed_untrusted_source, port=None, external_identity_id=None, reauthenticate=None):
+    private = reviewed_private_notebook is True and reviewed_visit is None
+    visit = reviewed_visit is True and reviewed_private_notebook is None
     if (type(expected) is not int or expected < 1 or not isinstance(key, str) or _KEY.fullmatch(key) is None
             or any(not isinstance(value, str) or _DIGEST.fullmatch(value) is None for value in (observation_sha256, event_sha256))
-            or any(value is not True for value in (reviewed_visit, reviewed_exact_summary, reviewed_untrusted_source))):
+            or not (private or visit)
+            or any(value is not True for value in (reviewed_exact_summary, reviewed_untrusted_source))):
         raise ws.WorkspaceError("invalid_google_calendar_review", 422)
     model_work.lock_owner(s, box, actor)
     if reauthenticate is not None:
         reauthenticate()
-    w = ws._workspace(s, box, actor, wid, writing=True)
+    w = ws._workspace(s, box, actor, wid, writing=True, allow_private=private)
+    review_model = GoogleCalendarPrivateSourceReview if private else GoogleCalendarSourceReview
     read = s.get(GoogleCalendarObservationRequest, observation_id)
     if (read is None or (read.box_id, read.owner_id) != (box, actor)
             or external_identity_id is not None and read.account_id != external_identity_id):
@@ -398,10 +426,12 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
     _identity(s, box, actor, read.account_id)
     snap = _snapshot(s, read)
     body = _review_body(wid, expected, key, observation_id, observation_sha256, event_id,
-        event_sha256, reviewed_visit, reviewed_exact_summary, reviewed_untrusted_source)
+        event_sha256, reviewed_visit, reviewed_exact_summary, reviewed_untrusted_source,
+        reviewed_private_notebook=reviewed_private_notebook)
     request_hash = payload_hash(body)
-    replay = s.scalar(select(GoogleCalendarSourceReview).where(
-        GoogleCalendarSourceReview.workspace_id == wid, GoogleCalendarSourceReview.idempotency_key == key))
+    replays = [s.scalar(select(model).where(model.workspace_id == wid, model.idempotency_key == key))
+               for model in (GoogleCalendarSourceReview, GoogleCalendarPrivateSourceReview)]
+    replay = next((row for row in replays if row is not None), None)
     if replay is not None:
         if replay.request_hash != request_hash:
             raise ws.WorkspaceError("idempotency_conflict")
@@ -409,6 +439,8 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
         if reauthenticate is not None:
             reauthenticate()
         return _selection_receipt(s, w, read, replay, entry)
+    if private and (w.appointment_id is not None or w.patient_link_id is not None or w.draft_title is None):
+        raise ws.WorkspaceError("google_calendar_private_notebook_required")
     _authorize(s, read, port=port)
     _latest(s, read)
     if expected != w.revision:
@@ -426,8 +458,8 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
         raise ws.WorkspaceError("workspace_history_limit")
     if s.scalar(select(WorkspaceEntry.id).where(WorkspaceEntry.workspace_id == wid, WorkspaceEntry.idempotency_key == key)):
         raise ws.WorkspaceError("idempotency_conflict")
-    if s.scalar(select(GoogleCalendarSourceReview.id).where(GoogleCalendarSourceReview.workspace_id == wid,
-            GoogleCalendarSourceReview.snapshot_id == snap.id, GoogleCalendarSourceReview.event_id == event_id)):
+    if s.scalar(select(review_model.id).where(review_model.workspace_id == wid,
+            review_model.snapshot_id == snap.id, review_model.event_id == event_id)):
         raise ws.WorkspaceError("google_calendar_already_selected")
     content = source_content(snap.payload, event)
     content_sha = hashlib.sha256(content.encode()).hexdigest()
@@ -438,12 +470,13 @@ def select_review(s, box, actor, wid, *, expected, key, observation_id, observat
         idempotency_key=key, request_hash=request_hash)
     s.add(entry)
     s.flush()
-    review = GoogleCalendarSourceReview(workspace_id=wid, box_id=box, owner_id=actor,
-        entry_id=entry.id, snapshot_id=snap.id, patient_link_id=w.patient_link_id,
+    review = review_model(workspace_id=wid, box_id=box, owner_id=actor,
+        entry_id=entry.id, snapshot_id=snap.id,
+        **({"reviewed_private_notebook": True} if private else {"patient_link_id": w.patient_link_id, "reviewed_visit": True}),
         expected_revision=expected, workspace_revision=w.revision, idempotency_key=key,
         request_hash=request_hash, observation_sha256=observation_sha256, event_id=event_id,
         event_sha256=event_sha256, source_sha256=source_sha, content_sha256=content_sha,
-        valid_until=expires, reviewed_visit=True, reviewed_exact_summary=True, reviewed_untrusted_source=True)
+        valid_until=expires, reviewed_exact_summary=True, reviewed_untrusted_source=True)
     s.add(review)
     ws._audit(s, w, "google_calendar_reviewed")
     if reauthenticate is not None:

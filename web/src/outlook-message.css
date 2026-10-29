@@ -1,0 +1,12 @@
+.outlook-message-panel{display:grid;gap:.75rem;min-width:0;padding:1rem 0;border-top:1px solid var(--team-line,#d9ddd9)}
+.outlook-message-panel h3,.outlook-message-panel h4,.outlook-message-panel p{margin:0}
+.outlook-message-panel button{min-height:44px;white-space:normal;max-width:100%;font:inherit}
+.outlook-message-notice,.outlook-message-recovery{padding:.85rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.6rem;background:var(--team-accent-soft,#edf4ef)}
+.outlook-message-recovery{display:grid;gap:.65rem}
+.outlook-message-list ul{list-style:none;padding:0;display:grid;gap:.5rem}
+.outlook-message-list li{min-width:0}.outlook-message-list button{width:100%;display:grid;gap:.35rem;text-align:left;padding:.8rem;border:1px solid var(--team-line,#d9ddd9);border-radius:.5rem;background:transparent;overflow-wrap:anywhere}
+.outlook-message-list button[aria-pressed=true]{border-color:var(--team-accent,#396750);background:var(--team-accent-soft,#edf4ef)}
+.outlook-message-content{display:grid;gap:.8rem;min-width:0}.outlook-message-content pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.55;padding:.85rem;background:var(--team-accent-soft,#edf4ef);border-radius:.5rem;margin:0;max-width:100%}
+.outlook-message-check{display:flex;gap:.6rem;align-items:flex-start;padding:.65rem 0;line-height:1.5}.outlook-message-check input{min-width:20px;min-height:20px;margin-top:.2rem}
+.outlook-message-panel button:focus-visible,.outlook-message-panel h3:focus-visible{outline:3px solid var(--team-accent,#396750);outline-offset:2px}
+@media(max-width:420px){.outlook-message-panel button{width:100%}.outlook-message-panel{gap:.9rem}.outlook-message-check{padding:.85rem 0}}

@@ -55,7 +55,7 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
   const retained=(handoff as ReviewableHandoff).review;
   const confirmedWithheld=withheldReceipt?.workspaceId===workspace.id&&withheldReceipt.handoffId===handoff.id?withheldReceipt:null;
   const sourceWithheld=identityChanged||journalChanged||recovery.access===null||!!confirmedWithheld||workspace.entries.some(entry=>(entry.id===handoff.result_entry_id||entry.id===pending?.result.entryId||entry.id===recoveryRecord?.result.result_entry_id)&&
-    (entry.google_source_state==='unavailable'||entry.calendar_source_state==='unavailable'||entry.fax_source_state==='unavailable'));
+    (entry.google_source_state==='unavailable'||entry.microsoft_source_state==='unavailable'||entry.calendar_source_state==='unavailable'||entry.fax_source_state==='unavailable'||entry.practice_fax_source_state==='unavailable'||(entry.calendar_import_source_state==='unavailable'||entry.ehr_source_state==='unavailable')));
   const restoredChanged=!!recoveryRecord&&!handoffRecoveryMatches(recoveryRecord,workspace,handoff);
   const stale=handoff.review_status==='stale'||refusal?.freshAssignment===true||sourceWithheld||restoredChanged;
   const receipt=proof&&!stale?[saved,retained].find(value=>validHandoffReviewReceipt(value)&&value.attempt_id===proof.attemptId&&
@@ -160,6 +160,7 @@ export function HandoffReviewPanel({workspace,handoff,identity,locked,recoveryLo
   if(accessLost||identityChanged||journalChanged)return <section className="handoff-review" aria-label="Review completed draft"><p role="alert">Workspace access is unavailable. The draft is withheld from this view.</p></section>;
   return <section className="handoff-review" aria-label="Review completed draft" aria-busy={checking||busy||recovery.phase==='checking'}>
     <h3 tabIndex={-1}>{pending?.recipientName??handoff.recipient_name} draft</h3>
+    <p className="handoff-review-context">{workspace.notebook?.title??workspace.label}</p>
     <EditorRecoveryNotice recovery={recovery} label="Handoff review" onRestore={async(draft,latest,isCurrent)=>{
       const restored=await validateHandoffReviewRecovery(draft.data,workspace.id,handoff.id);
       if(latest.id!==restored.workspace_id||latest.appointment_id!==restored.appointment_id)throw new WorkspaceApiError(403);
