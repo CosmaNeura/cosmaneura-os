@@ -925,9 +925,11 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
     void session.conversations.observe(host).catch(()=>{if(host.current())setRecoveryState('failed');});
   },[authenticated,workspace?.id,selected,thought,phoneNoteTask,conversationBusy,recoveryOffers.length,recoveryBlocked,editorJournal]);
   useEffect(()=>{
-    if(!session.presentation.enabled||!authenticated||!team?.revision||!accountAccess||settingsOpen||practiceOpen||practicePage!=='home'||contextBot)return;
+    // A startup reset clears the list. Read it again once access is ready instead
+    // of waiting for a new team revision, which may never arrive.
+    if(!session.presentation.enabled||!authenticated||!team?.revision||!accountAccess||settingsOpen||practiceOpen||practicePage!=='home'||contextBot||conversationInbox)return;
     void session.conversations.refresh(authenticated,false,failure);
-  },[authenticated,team?.revision,accountAccess,practicePage,settingsOpen,practiceOpen,contextBot,connectionGeneration]);
+  },[authenticated,team?.revision,accountAccess,practicePage,settingsOpen,practiceOpen,contextBot,connectionGeneration,conversationInbox]);
   useEffect(()=>{setContextBot(null);setNewMessage(false);setConversationDetails(false);setMessagesTask(null);},[authenticated]);
   const agentResearchRecovery=useMemo(()=>session.recovery.agentResearchAccess(editorAccess,editorWorkspace),[editorAccess,editorWorkspace]);
   const conversation=projectConversation(workspace,team,selected),turns=conversation.turns;
