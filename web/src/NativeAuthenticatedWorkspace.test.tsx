@@ -118,8 +118,8 @@ describe("native workspace session", () => {
     expect(container.textContent).not.toContain("Sign-in needs attention");
     expect(container.querySelector(".apple-hosted-card")?.getAttribute("role")).toBe("status");
     await click("Sign in"); await click("Visits and notes"); await click("Visits and notes");
-    expect(native.plugin.signIn).toHaveBeenCalledTimes(1); expect(native.plugin.getToken).toHaveBeenCalledTimes(3);
-    expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: first.revision }], [{ expectedRevision: first.revision }], [{ expectedRevision: first.revision }]]);
+    expect(native.plugin.signIn).toHaveBeenCalledTimes(1); expect(native.plugin.getToken).toHaveBeenCalledTimes(5);
+    expect(native.plugin.getToken.mock.calls).toEqual(Array.from({length:5},()=>[{ expectedRevision: first.revision }]));
     for (const [, options] of fetchMock.mock.calls) {
       expect(new Headers(options?.headers).get("Authorization")).toBe(`Bearer ${token}`);
       expect(options?.credentials).toBe("omit");
@@ -137,7 +137,7 @@ describe("native workspace session", () => {
     native.set(second); await act(async () => signin.resolve());
     await click("Visits and notes");
     expect(native.plugin.signIn).toHaveBeenCalledOnce();
-    expect(native.plugin.getToken.mock.calls).toEqual([[{ expectedRevision: second.revision }], [{ expectedRevision: second.revision }]]);
+    expect(native.plugin.getToken.mock.calls).toEqual(Array.from({length:4},()=>[{ expectedRevision: second.revision }]));
     expect(container.textContent).toContain("Private invented label");
   });
   it("keeps a failed recovery closed and allows sign-out when session reads recover", async () => {
@@ -234,9 +234,9 @@ describe("native workspace session", () => {
     await render(native); await act(async()=>native.emit({...first}));
     await act(async()=>vi.advanceTimersByTimeAsync(5_000));
     expect(container.textContent).toContain("Private invented label");
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
     await click("Visits and notes");
-    expect(native.plugin.getToken).toHaveBeenCalledTimes(3);
+    expect(native.plugin.getToken).toHaveBeenCalledTimes(5);
   });
   it("closes on logout, rejects late tokens, and offers a safe retry after failure", async () => {
     const native = harness(); await render(native); await click("Visits and notes");
@@ -244,7 +244,7 @@ describe("native workspace session", () => {
     await click("Visits and notes"); const logout = deferred<void>(); native.plugin.signOut.mockReturnValueOnce(logout.promise);
     await click("Log out"); expect(container.textContent).not.toContain("Private invented label");
     await act(async () => { native.emit(first); late.resolve({ token, revision: first.revision }); });
-    expect(container.textContent).not.toContain("Choose an encounter"); expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(container.textContent).not.toContain("Choose an encounter"); expect(fetchMock).toHaveBeenCalledTimes(4);
     native.set(pending); await act(async () => logout.reject(new Error("secret provider detail")));
     expect(container.textContent).toContain("Retry sign-out"); expect(container.textContent).not.toContain("secret provider detail");
     await click("Retry sign-out"); expect(container.textContent).toContain("Sign in to CosmaBot");
@@ -268,7 +268,7 @@ describe("native workspace session", () => {
     await click("Visits and notes"); const logout = deferred<void>(); old.plugin.signOut.mockReturnValueOnce(logout.promise);
     await click("Log out"); const fresh = harness(second); await render(fresh); await click("Visits and notes");
     await act(async () => { logout.resolve(); late.resolve({ token, revision: first.revision }); old.emit(pending); });
-    expect(fetchMock).toHaveBeenCalledTimes(3); expect(container.textContent).toContain("Private invented label");
+    expect(fetchMock).toHaveBeenCalledTimes(7); expect(container.textContent).toContain("Private invented label");
     expect(fresh.plugin.getState).toHaveBeenCalledTimes(1); expect(old.listeners.size).toBe(0);
   });
   it("cleans up strict-mode subscriptions and denies tokens after unmount", async () => {

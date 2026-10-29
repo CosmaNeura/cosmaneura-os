@@ -110,10 +110,13 @@ export class WorkspaceRecovery {
     const scope=await privateDraftScope(serverScope,input.apiBase);
     if(current!==this.session.generation.current)return;
     if(this.journal.current?.scope!==scope) {
-      this.journal.current?.value.close();this.journal.current=null;
+      // Keep the current journal until its replacement is open. Dropping it
+      // first leaves Messages clickable with no account host, and that click is lost.
+      const previous=this.journal.current;
       const store=await input.draftStorage({scope,native:input.native});
-      if(current!==this.session.generation.current){store.close();return;}
+      if(current!==this.session.generation.current||this.journal.current!==previous){store.close();return;}
       this.journal.current={scope,serverScope,value:new DraftJournal(store)};
+      previous?.value.close();
     }
     const active=this.journal.current.value;
     const addresses=['team',...(workspace?[`workspace:${workspace.id}`,

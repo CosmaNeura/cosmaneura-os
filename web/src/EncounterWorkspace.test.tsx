@@ -14,6 +14,7 @@ import {modelWorkApi} from './model-work-api';
 import {modelReceipt,modelUuid,retryReceipt} from './model-work-test-fixture';
 const {webcrypto}=await vi.importActual<{webcrypto:Crypto}>('node:crypto');
 import { workspaceApi, WorkspaceApiError, type Workspace, type ProviderTeam, type BotRole } from "./workspace-api";
+import {VisitOpenDeadline} from "./visit-open-deadline";
 import {listPrivateRecordings,type PrivateRecordingSnapshot} from "./private-recording-runtime";
 vi.mock("./private-recording-runtime",async original=>({...await original<typeof import("./private-recording-runtime")>(),listPrivateRecordings:vi.fn().mockResolvedValue([])}));
 
@@ -169,10 +170,12 @@ describe("private encounter workspace", () => {
     vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id:fixture.appointment_id,workspace_id:fixture.id,label:fixture.label}]);
     vi.mocked(workspaceApi.open).mockResolvedValue({identity:access,workspace:structuredClone(fixture),team:structuredClone(team)});
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
-    await vi.waitFor(async()=>{await act(async()=>{});expect(held).toBe(true);});
     await click('Visits and notes');
     await act(async()=>container.querySelector<HTMLButtonElement>('.team-encounter-option')!.click());
     expect(container.querySelector('#team-notebook')).not.toBeNull();
+    const refresh=[...container.querySelectorAll<HTMLButtonElement>('button')].find(b=>b.textContent==='Refresh private notes')!;
+    await act(async()=>refresh.click());
+    await vi.waitFor(async()=>{await act(async()=>{});expect(held).toBe(true);});
     await act(async()=>release({...structuredClone(team),recovery_scope:(scopeChanged?'b':'a').repeat(64)}));
     if(scopeChanged){
       expect(container.querySelector('#team-notebook')).toBeNull();
@@ -228,6 +231,21 @@ describe("private encounter workspace", () => {
     await click('Home');expect(container.querySelector('[aria-label="Practice Home"]')?.closest('[hidden]')).toBeNull();
     await click('Current notebook');expect(container.textContent).toContain('The earlier visit link is unconfirmed. Its exact request is retained.');
     expect(workspaceApi.linkAppointment).toHaveBeenCalledOnce();expect(workspaceApi.resolveAppointmentLink).not.toHaveBeenCalled();
+  });
+  it('enables Start when the team recovery check finishes without waiting for visits',async()=>{
+    const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
+    let releaseVisits!:(value:Awaited<ReturnType<typeof workspaceApi.catalog>>)=>void;
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version:2,drafts:[],has_more:false});
+    vi.mocked(workspaceApi.catalog).mockImplementation(()=>new Promise(resolve=>{releaseVisits=resolve;}));
+    const started=performance.now();
+    await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
+    expect(container.querySelector<HTMLInputElement>('.practice-quick-start input')?.disabled).toBe(false);
+    expect(container.textContent).not.toContain('Checking available visits');
+    await vi.waitFor(()=>expect([...container.querySelectorAll('button')].find(b=>b.textContent==='Start a private note')?.disabled).toBe(false));
+    expect(performance.now()-started).toBeLessThan(3000);
+    expect(releaseVisits).toEqual(expect.any(Function));
+    expect(container.textContent).toContain('Loading visits');
+    await act(async()=>releaseVisits([]));
   });
   it('uses the admitted startup team once without another initial team read',async()=>{
     const access={mode:'clerk_jwt' as const,getToken:vi.fn()};
@@ -636,7 +654,7 @@ describe("private encounter workspace", () => {
     const access = {mode:"clerk_jwt" as const,getToken:vi.fn()};
     vi.mocked(workspaceApi.team).mockResolvedValue({...team,revision:0});
     await act(async()=>root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access}/>));
-    expect(workspaceApi.team).toHaveBeenCalledWith(access);
+    expect(workspaceApi.team).toHaveBeenCalledWith(access,expect.any(AbortSignal));
     await settings().practice(); await input("Practice context","Invented independent practice");
     vi.mocked(workspaceApi.saveTeam).mockRejectedValueOnce(new WorkspaceApiError(503));
     await settings().save();
@@ -860,6 +878,38 @@ describe("private encounter workspace", () => {
     const second = [...container.querySelectorAll("button")].find(button => button.textContent?.includes("Second invented visit"));
     await act(async () => second!.click());
     expect(workspaceApi.open).toHaveBeenCalledWith(authenticated, fixture.appointment_id);
+  });
+
+  it("opens a saved visit, and replaces a hung open with Retry at the deadline", async () => {
+    const access = {mode: "clerk_jwt" as const, getToken: vi.fn()};
+    vi.mocked(workspaceApi.privateDraftSummaries).mockResolvedValue({contract_version: 2, drafts: [], has_more: false});
+    vi.mocked(workspaceApi.catalog).mockResolvedValue([{appointment_id: fixture.appointment_id, workspace_id: fixture.id, label: "Invented Alex Example"}]);
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity: access, workspace: structuredClone(fixture), team: structuredClone(team)});
+    await act(async () => root.render(<EncounterWorkspace draftStorage={draftStorage} authenticated={access} />));
+    await click("Visits and notes");
+    await act(async () => container.querySelector<HTMLButtonElement>(".team-encounter-option")!.click());
+    expect(container.querySelector("#team-notebook")).not.toBeNull();
+    expect(container.textContent).not.toContain("This visit could not be opened.");
+
+    await click("Visits and notes");
+    vi.useFakeTimers();
+    vi.mocked(workspaceApi.open).mockImplementation(() => new Promise(() => {}));
+    await act(async () => container.querySelector<HTMLButtonElement>(".team-encounter-option")!.click());
+    const option = () => container.querySelector<HTMLButtonElement>(".team-encounter-option")!;
+    expect(option().disabled).toBe(true);
+    expect(container.textContent).toContain("Opening this visit…");
+    await act(async () => { await vi.advanceTimersByTimeAsync(VisitOpenDeadline.limitMs - 1); });
+    expect(option().disabled).toBe(true);
+    expect(container.querySelector(".workspace-error-banner")).toBeNull();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1); });
+    expect(option().disabled).toBe(false);
+    expect(container.querySelector(".workspace-error-banner")?.textContent).toContain("This visit could not be opened.");
+    expect([...container.querySelectorAll("button")].some(button => button.textContent === "Retry")).toBe(true);
+    expect(container.textContent).not.toContain("Opening this visit…");
+    vi.mocked(workspaceApi.open).mockResolvedValue({identity: access, workspace: structuredClone(fixture), team: structuredClone(team)});
+    await click("Retry");
+    expect(container.querySelector("#team-notebook")).not.toBeNull();
+    expect(container.querySelector(".workspace-error-banner")).toBeNull();
   });
 
   it.each(['Choose an encounter','Start with Chief'])("shows an empty signed-in catalog from %s without falling back to demo seeding", async action => {

@@ -2,6 +2,8 @@ import {coreConnectionApi} from '../core-connection-api';
 import type {CoreConnectionCommand,CoreConnectionResult} from '../core-connection-contract';
 import type {InboxDraftSelection} from '../inbox-analysis-contract';
 import {teamConfigurationChanged} from '../team-configuration-diff';
+import {VisitOpenDeadline} from '../visit-open-deadline';
+import {subscribeWorkspaceProtocol,workspaceProtocolPhase} from '../workspace-protocol';
 import {workspaceApi,WorkspaceApiError,botAddress,type AuthenticatedWorkspaceIdentity,type WorkspaceIdentity,type ProviderTeam,type Workspace} from '../workspace-api';
 import type {WorkspaceSession} from './workspace-session';
 
@@ -24,6 +26,7 @@ export type OpenedNotebook={identity:AuthenticatedWorkspaceIdentity;workspace:Wo
 export type OpenContext=LoadingContext&{
   locked:boolean;captureNavigationLocked:boolean;captureDraftLocked:boolean;hasUnsavedWork:()=>boolean;
   begin:()=>void;resetCapture:(recordVisit:boolean,useRecording:boolean)=>void;focusChief:(workspaceId:string,generation:number)=>void;focusFax:()=>void;showResearch:()=>void;afterOpen:()=>void;retryRead:()=>Promise<void>;
+  setOpeningVisit?:(opening:boolean)=>void;
 };
 
 /** Reads publish only inside the initiating workspace and navigation lifetime. */
@@ -35,22 +38,41 @@ export class WorkspaceLoading {
     this.api={open:(...args)=>workspaceApi.open(...args),openExisting:(...args)=>workspaceApi.openExisting(...args),openPrivateDraft:(...args)=>workspaceApi.openPrivateDraft(...args),read:(...args)=>workspaceApi.read(...args),team:(...args)=>workspaceApi.team(...args),catalog:(...args)=>workspaceApi.catalog(...args),...deps};
   }
 
-  startup(context:LoadingContext,consume:()=>ProviderTeam|null|undefined):(()=>void)|undefined {
+  startup(context:LoadingContext,consume:()=>ProviderTeam|null|undefined,report?:{listed:()=>void;unavailable:()=>void}):(()=>void)|undefined {
     const {authenticated}=context;if(!authenticated||this.session.getSnapshot().team)return;
     let cancelled=false;const current=this.session.generation.current,controller=new AbortController();
-    const startup=consume();
-    void (startup?Promise.resolve(startup):this.api.team(authenticated,controller.signal)).then(value=>{
-      if(!cancelled&&current===this.session.generation.current){
-        this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
-        void context.recoverAfterRead(value,null,current);
-      }
-    }).catch(cause=>{if(!cancelled&&current===this.session.generation.current)context.failure(cause);});
-    return()=>{cancelled=true;controller.abort();};
+    const startupTeam=consume();
+    const live=()=>!cancelled&&current===this.session.generation.current&&!this.session.getSnapshot().team;
+    const apply=(value:ProviderTeam)=>{
+      if(!live())return;
+      this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
+      report?.listed();
+      void context.recoverAfterRead(value,null,current);
+    };
+    const fail=(cause:unknown)=>{
+      if(cancelled||current!==this.session.generation.current)return;
+      if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status))context.failure(cause);
+      else if(report)report.unavailable();
+      else context.failure(cause);
+    };
+    if(startupTeam){apply(startupTeam);return()=>{cancelled=true;controller.abort();};}
+    let unsubscribe=()=>{};
+    const dispatch=()=>{
+      if(!live())return;
+      // An ordinary GET is fenced on the admitted protocol. Dispatching before
+      // admission is refused, and repeating it repeats the same refusal.
+      if(workspaceProtocolPhase(authenticated)!=='ready')return;
+      unsubscribe();
+      void this.api.team(authenticated,controller.signal).then(apply,fail);
+    };
+    unsubscribe=subscribeWorkspaceProtocol(authenticated,dispatch);
+    dispatch();
+    return()=>{cancelled=true;unsubscribe();controller.abort();};
   }
 
   async open(context:OpenContext,appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false){
     const {team,teamDraft,busy,pending,privateRecordingEntry,privateRecordingBusy,entryIntent,researchEntry}=this.session.getSnapshot();
-    const {generation,setBusy,setError,setMessage,setInboxSelection,setSelected,setPracticeOpen,setMobilePanel,setIdentity,setWorkspace,setTeam,setPracticePage,setPreviousModelRequest,setThought,setEvidence,setSource,setModelObservation,setReplacementDraft,setModelHashes,setEntryIntent,setStage,setPanel,setTeamDraft,setNote,setSettingsOpen}=this.session;
+    const {generation,setBusy,setError,setMessage,setReadRetry,setRecoveryState,setInboxSelection,setSelected,setPracticeOpen,setMobilePanel,setIdentity,setWorkspace,setTeam,setPracticePage,setPreviousModelRequest,setThought,setEvidence,setSource,setModelObservation,setReplacementDraft,setModelHashes,setEntryIntent,setStage,setPanel,setTeamDraft,setNote,setSettingsOpen}=this.session;
     const {authenticated,locked,captureNavigationLocked,captureDraftLocked,hasUnsavedWork,recoverAfterRead,failure}=context;
     const checkRecoveryOwner=(value:ProviderTeam)=>this.session.recovery.checkOwner(authenticated,value);
     if (pending || busy || privateRecordingEntry || privateRecordingBusy) {if(privateRecordingEntry)setError('Stop and save your recording before opening another notebook.');return;}
@@ -61,9 +83,12 @@ export class WorkspaceLoading {
     const useRecording = !recordVisit && !incoming && entryIntent === "recording";
     const startChief = !recordVisit && !useRecording && !incoming && entryIntent === "chief";
     const startFax = !recordVisit && !useRecording && !incoming && entryIntent === "fax";
+    const catalogVisit = !!appointmentId && !coreSelection && !incoming;
+    const deadline = catalogVisit ? new VisitOpenDeadline() : null;
     context.begin();
     const preserveTeamDraft = !!team && !!teamDraft && teamConfigurationChanged(team.configuration,teamDraft);
-    const current = ++generation.current; setBusy(true); setError(""); setMessage("");
+    const current = ++generation.current; setBusy(true); if(catalogVisit)context.setOpeningVisit?.(true); setError(""); setMessage("");
+    let showedVisit = false;
     try {
       let selected: {workspace_id:string;appointment_id:string}|undefined;
       if (coreSelection) {
@@ -73,7 +98,7 @@ export class WorkspaceLoading {
         if (!opened.workspace) throw new WorkspaceApiError(502);
         selected = opened.workspace;
       }
-      const result = incoming && authenticated ? {identity:authenticated,workspace:await this.api.read(authenticated,incoming.workspace_id),team:await this.api.team(authenticated)} : authenticated ? selected ? await this.api.openExisting(authenticated,selected) : await this.api.open(authenticated, appointmentId) : await this.api.open();
+      const result = incoming && authenticated ? {identity:authenticated,workspace:await this.api.read(authenticated,incoming.workspace_id),team:await this.api.team(authenticated)} : authenticated ? selected ? await this.api.openExisting(authenticated,selected) : await (deadline ? deadline.limit(this.api.open(authenticated, appointmentId)) : this.api.open(authenticated, appointmentId)) : await this.api.open();
       if (current !== generation.current) return;
       checkRecoveryOwner(result.team);
       if(incoming&&(result.workspace.id!==incoming.workspace_id||result.workspace.revision!==incoming.expected_revision))throw new WorkspaceApiError(409,'source_changed');
@@ -107,11 +132,24 @@ export class WorkspaceLoading {
       if (!preserveTeamDraft) setTeamDraft(structuredClone(result.team.configuration));
       setNote(result.workspace.entries.filter(e => e.kind === "scratchpad").at(-1)?.content ?? "");
       setSettingsOpen(false);
-      await recoverAfterRead(result.team, result.workspace, current);
+      showedVisit = true;
+      const recovery = recoverAfterRead(result.team, result.workspace, current);
+      if (deadline) await deadline.limit(recovery);
+      else await recovery;
       if(current===generation.current)context.afterOpen();
     } catch (cause) { if (current === generation.current) {
-      // Opening can seed a demo or create a notebook. A general Retry must only
-      // recheck the service or saved history; exact writes keep their own UI.
+      // A hung catalog read disables the visit list. Stop that within one budget
+      // and retry the same open. A general failure still must not repeat a write:
+      // opening can seed a demo or create a notebook, so that Retry only rechecks
+      // the service or saved history. Exact writes keep their own UI.
+      if (deadline?.expired) {
+        if (showedVisit) setRecoveryState("failed");
+        else {
+          setError(cause instanceof Error ? cause.message : "This visit could not be opened.");
+          setReadRetry({run: () => this.open(context, appointmentId, coreSelection, incoming, recordVisit), label: "Retry"});
+        }
+        return;
+      }
       failure(cause,context.retryRead);
       if(coreSelection && cause instanceof WorkspaceApiError && cause.code==='core_existing_recording_conflict')
         setError('The Scribe recording does not match this visit’s notebook. Ask your practice administrator to review the match.');
@@ -120,7 +158,7 @@ export class WorkspaceLoading {
       else if (coreSelection && !(cause instanceof WorkspaceApiError && [401,403,404,426].includes(cause.status)))
         setError('The notebook could not be confirmed. View your appointments and select it again; an existing notebook will be reused.');
     } }
-    finally { if (current === generation.current) setBusy(false); }
+    finally { if (current === generation.current) { setBusy(false); context.setOpeningVisit?.(false); } }
   }
 
   async refresh(context:RefreshContext):Promise<void> {

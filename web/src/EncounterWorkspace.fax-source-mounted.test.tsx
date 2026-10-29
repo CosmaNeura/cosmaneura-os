@@ -92,7 +92,7 @@ it('ordinary Connections offer reaches the real Sources review, saves encrypted 
  expect(host.querySelector(`[id="source-${packet.entry.id}"]`)?.textContent).toContain(privatePassage);expect(host.textContent).toContain(FAX_SOURCE_LABEL);
  expect(faxSourceApi.review).toHaveBeenCalledOnce();expect(workspaceApi.ask).not.toHaveBeenCalled();
  await click('Prepare a Chief request');await wait(()=>expect(host.querySelector<HTMLTextAreaElement>('#team-question')?.value).toContain(packet.entry.id));
- const question=host.querySelector<HTMLTextAreaElement>('#team-question')!;expect(question.disabled).toBe(false);expect(question.value).toContain('Preserved provider question');expect(question.value).not.toContain(privatePassage);
+ const question=host.querySelector<HTMLTextAreaElement>('#team-question')!;await wait(()=>expect(question.disabled).toBe(false));expect(question.value).toContain('Preserved provider question');expect(question.value).not.toContain(privatePassage);
  await setText('#team-question',question.value+' Ask about uncertainty before suggesting next steps.');expect(question.value).toContain('Ask about uncertainty');
  await showNotebook();expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe('Unfinished provider note');
  expect(faxSourceApi.resolve).toHaveBeenCalledOnce();assertNoWork();

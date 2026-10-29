@@ -3,6 +3,7 @@ import {createContext,useCallback,useContext,useEffect,useLayoutEffect,useRef,us
 import {practiceAccessApi} from './practice-access-api';
 import {accessCode,accessName,type AccessStatus,type PracticeSetupStatus,type CompletePracticeSetup} from './practice-access-contract';
 import {WorkspaceApiError,type AuthenticatedWorkspaceIdentity} from './workspace-api';
+import {WorkspaceStartupShell} from './WorkspaceStartupShell';
 import {workspaceProtocolGeneration,workspaceProtocolPhase} from './workspace-protocol';
 import type {WorkspaceStartupTeam} from './workspace-team-read';
 import './practice-access.css';
@@ -28,6 +29,11 @@ export function usePracticeAccessTask(identity:AuthenticatedWorkspaceIdentity) {
     const next={identity,active:true,request:null as AbortController|null};scope.current=next;setBusy(false);
     return ()=>{next.active=false;next.request?.abort();};
   },[identity]);
+  const cancel=useCallback(()=>{
+    const started=scope.current;
+    if(!started?.active||started.identity!==identity)return;
+    started.request?.abort();started.request=null;setBusy(false);
+  },[identity]);
   const run=useCallback(async <T,>(operation:(signal:AbortSignal)=>Promise<T>,accept:(value:T)=>void,fail:(error:unknown)=>void)=>{
     const started=scope.current;
     if(!started?.active || started.identity!==identity || current.current!==identity || started.request)return;
@@ -37,7 +43,7 @@ export function usePracticeAccessTask(identity:AuthenticatedWorkspaceIdentity) {
     catch(error){if(live())fail(error);}
     finally {if(live())setBusy(false);if(started.request===controller)started.request=null;}
   },[identity]);
-  return {busy,run};
+  return {busy,run,cancel};
 }
 
 export function PracticeAccessGate({identity,accountControls,children}:{identity:AuthenticatedWorkspaceIdentity;accountControls:ReactNode;children:(access:PracticeAccessContext)=>ReactNode;prefetchTeam?:boolean}) {
@@ -103,6 +109,10 @@ export function PracticeAccessGate({identity,accountControls,children}:{identity
     <nav aria-label="Account and organization">{accountControls}</nav>
     <p>Practice access will be checked after Retry.{uncertain?' Your unconfirmed request is retained; nothing will be sent again.':''}</p>
   </section>;
+  if(!status&&!error)return <WorkspaceStartupShell status="Checking practice access…">
+    <nav aria-label="Account and organization">{accountControls}</nav>
+    <button type="button" disabled={busy} onClick={()=>recovery?recovery.retry():void check()}>{busy?'Checking…':'Retry'}</button>
+  </WorkspaceStartupShell>;
   const request=status?.request;
   const mayRequest=status && ['request_required','cancelled','declined','expired'].includes(status.state);
   async function submit(){
