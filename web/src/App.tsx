@@ -1,10 +1,9 @@
 import {WorkspaceCompatibilityGate} from './WorkspaceCompatibilityGate';
 import {PracticeAccessGate} from './PracticeAccessGate';
 import {hostedWorkspaceRequested} from './hosted-workspace';
-import { OrganizationSwitcher, UserButton, useAuth, useClerk, useUser } from "@clerk/react";
+import { OrganizationSwitcher, SignIn, UserButton, useAuth, useClerk, useUser } from "@clerk/react";
 import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
 import { BetaIdentityAdmin } from "./BetaIdentityAdmin";
-import { BetaSignIn } from "./beta-sign-in";
 import { api, COMPACT_LOCAL, type ApiIdentity, type QueueItem, type Seed } from "./api";
 import { EncounterWorkspace } from "./EncounterWorkspace";
 import { WORKSPACE_BUILD } from "./workspace-api";
@@ -176,7 +175,7 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
       <section className="panel">
         <div className="row">
           <strong>Clinic</strong>
-          <span className="meta">{loading ? "Loading\u2026" : identity ? clinicName : "Unavailable"}</span>
+          <span className="meta">{loading ? "Loading…" : identity ? clinicName : "Unavailable"}</span>
         </div>
         <p className="meta">
           People and agents are ready. Infrastructure details stay off this screen.
@@ -191,7 +190,7 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
 
       {loading ? (
         <section className="panel" role="status">
-          Loading work\u2026
+          Loading work…
         </section>
       ) : !error && items.length === 0 ? (
         <section className="panel">
@@ -272,7 +271,7 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
                 {timeline[item.id].map((event, index) => (
                   <li key={`${event.event_type}-${index}`}>
                     <strong>{event.event_type}</strong>
-                    {event.outcome ? ` \u2014 ${event.outcome}` : ""}
+                    {event.outcome ? ` — ${event.outcome}` : ""}
                   </li>
                 ))}
               </ul>
@@ -317,7 +316,7 @@ function BetaOrganizationQueue({ getToken }: { getToken: BetaTokenGetter }) {
     <OwnerQueue
       bootstrap={loadBetaQueue}
       clinicName="Cosmas Beta Lab"
-      lede="Synthetic-only beta work queue. Use invented data only\u2014never clinic or patient information. Review the proposed message, then approve, edit, reject, or escalate."
+      lede="Synthetic-only beta work queue. Use invented data only—never clinic or patient information. Review the proposed message, then approve, edit, reject, or escalate."
       headerActions={
         <div className="row account-controls" aria-label="Account and organization">
           <OrganizationSwitcher hidePersonal />
@@ -461,7 +460,7 @@ export function ClerkBetaApp({ workspace = false }: { workspace?: boolean }) {
       <main className="shell">
         <h1 className="brand">{standalone ? "CosmaBot" : "Cosmas OS"}</h1>
         <p className="lede">{standalone ? "Sign in to open your practice." : "Sign in with your invited Cosmas Beta Lab account."}</p>
-        <BetaSignIn />
+        <SignIn routing="hash" />
       </main>
     );
   }
