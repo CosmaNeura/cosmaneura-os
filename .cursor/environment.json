@@ -1,0 +1,5 @@
+{
+  "name": "cosmas-os",
+  "user": "ubuntu",
+  "install": "set -euo pipefail\nexport PATH=\"$HOME/.local/bin:/usr/local/bin:$PATH\"\nif ! command -v uv >/dev/null 2>&1; then\n  curl -LsSf https://astral.sh/uv/install.sh | sh\nfi\nuv python install 3.13.15\nuv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import\nneed_node=0\nif ! command -v node >/dev/null 2>&1; then\n  need_node=1\nelse\n  major=$(node -p 'process.versions.node.split(\".\")[0]')\n  if [ \"$major\" != \"24\" ]; then\n    need_node=1\n  fi\nfi\nif [ \"$need_node\" = \"1\" ]; then\n  curl -fsSL https://nodejs.org/dist/v24.19.0/node-v24.19.0-linux-x64.tar.xz | sudo tar -xJ -C /usr/local --strip-components=1 --no-same-owner\nfi\nsudo corepack enable\n./scripts/install-client-deps.sh\nif ! command -v pg_ctl >/dev/null 2>&1 || ! command -v pg_config >/dev/null 2>&1; then\n  sudo apt-get update\n  sudo DEBIAN_FRONTEND=noninteractive apt-get install -y postgresql-16\nfi\n"
+}

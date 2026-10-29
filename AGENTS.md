@@ -20,15 +20,20 @@ alternative.
 
 ## Mandatory phase gate
 
-Before the exact owner message `APPROVE LOCAL SYNTH BUILD`, agents may edit only
-the eight Phase 0 files under `docs/validation/`.
+John Clemente approved passing the Phase 0 docs-only limit. Agents may write
+code, install dependencies, and run tests in this repository.
 
-They must not scaffold code, install dependencies, run containers, initialize a
-remote, or edit another repository. Phase 0 ends with:
+Before that approval, agents could edit only the eight Phase 0 files under
+`docs/validation/` until the owner message `APPROVE LOCAL SYNTH BUILD`, and
+could not scaffold code, install dependencies, or run tests. That limit is
+marked passed:
 
 ```text
-BUILD_GATE: WAITING_FOR_OWNER_APPROVAL
+BUILD_GATE: LOCAL_SYNTH_BUILD_APPROVED
 ```
+
+Nothing goes live without a yes from John or Shawn. Do not deploy. Do not edit
+another repository.
 
 ## Repository boundary
 
@@ -42,15 +47,32 @@ BUILD_GATE: WAITING_FOR_OWNER_APPROVAL
 
 ## Data and credential boundary
 
-Never place PHI, real patient information, production-like exports, production
-identifiers, credentials, `.env` values, database dumps, or vendor tokens in
-this repository, prompts, fixtures, tests, logs, screenshots, or reports.
+Product runtime and coding agents are different.
 
-Do not access or mutate Azure, Clerk, Stripe, Athena, Acuity, production
-databases, external messaging services, or GitHub production identities without
-a later direct owner instruction.
+- Product runtime. CosmaBot / Cosmas, running in a customer's production
+  environment, may handle and pass real patient data between its own agents
+  when the product requires it. That handling sits under the customer's
+  agreement and the product's own security controls. Code may be written to
+  do that.
+- Coding agents, including Cursor agents writing this repository. Use invented
+  or synthetic patient data. Do not put real patient details in code, tests,
+  fixtures, commits, pull request text, logs, screenshots, reports, or chat.
+  Do not ask John, Shawn, or anyone else to confirm that data is synthetic or
+  non-PHI. Use synthetic data and continue.
 
-Use invented people, appointments, identifiers, images, and money in synth.
+Do not commit credentials, `.env` values, database dumps, vendor tokens, or
+real production identifiers.
+
+Production access is off by default. This includes Azure, Clerk, Stripe,
+Athena, Acuity, production databases, external messaging, and GitHub
+production identities. John or Shawn may grant it for a specific task by
+saying so in that task. The grant covers that task only. Even then, do not
+copy real patient data into code, tests, fixtures, commits, pull request
+text, logs, or chat, and do not deploy or put anything live without a yes
+from John or Shawn.
+
+Use invented people, appointments, identifiers, images, and money in synth
+work.
 
 ## Product invariants
 
@@ -91,8 +113,9 @@ Use invented people, appointments, identifiers, images, and money in synth.
 - Tests must prove failure and recovery paths, not only happy paths.
 - Never claim a command passed unless it ran and its output was checked.
 - Record assumptions and exact evidence.
-- Do not push, deploy, create cloud resources, or connect real vendors during
-  the local synthetic mandate.
+- Do not push, deploy, or create cloud resources. Nothing goes live without a
+  yes from John or Shawn. Production and vendor access follows the data and
+  credential boundary.
 
 ## Risk discipline
 
@@ -100,3 +123,34 @@ Treat identity/authority, PHI paths, patient messaging, retention, schema,
 external side effects, deployment, and cross-repository contracts as high-risk.
 They require explicit tests, recovery behavior, and owner review before a real
 environment is considered.
+
+## Install, lint, and tests
+
+From the repository root. These commands match `.github/workflows/synth-ci.yml`.
+They do not need secrets or real keys. Backend checks start a temporary
+database and invent their own password. Cloud agents prepare a fresh machine
+with the `install` command in `.cursor/environment.json`.
+
+Install:
+
+```bash
+uv sync --extra dev --extra efax-inbound --extra mcp --extra calendar-import
+./scripts/install-client-deps.sh
+```
+
+Lint:
+
+```bash
+uv run ruff check src tests
+uv run pyright src
+```
+
+Tests. Repeat the backend command once for each suite: `backend-1`,
+`backend-2`, `backend-3`, `backend-4`, `signed-ui-1`, `signed-ui-2`,
+`signed-ui-3`. On this machine `pg_config --bindir` is
+`/usr/lib/postgresql/16/bin`.
+
+```bash
+uv run python scripts/check-backend-local.py --suite backend-1 --postgres-bin "$(pg_config --bindir)" --pytest-timeout 3600 --stack-dump-after 300
+cd web && corepack pnpm test
+```

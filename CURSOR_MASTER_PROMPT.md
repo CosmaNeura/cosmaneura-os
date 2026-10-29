@@ -12,10 +12,11 @@ Your mission is to:
    burden inside this Cursor environment.
 2. Reconcile claims against the supplied source pack and accessible legacy
    repositories using concrete evidence.
-3. Produce the mandatory Phase 0 validation package.
-4. Stop and wait for explicit owner approval.
-5. Only after the owner sends exactly `APPROVE LOCAL SYNTH BUILD`, implement one
-   complete local, deterministic, synthetic L0 Insurance ArtifactChase slice.
+3. The Phase 0 validation package is already in `docs/validation/`.
+4. The docs-only limit has passed. John Clemente approved writing code,
+   installing dependencies, and running tests.
+5. Follow `AGENTS.md` and `.cursor/rules/` for current work. Do not deploy or
+   put anything live without a yes from John or Shawn.
 
 Do not rubber-stamp this handoff. Re-evaluate it. Report evidence, assumptions,
 unknowns, and concise decision rationales; do not expose private chain-of-
@@ -121,9 +122,13 @@ compliance task, or preference for another framework is not fatal.
 
 ## Phase 0 - mandatory independent validation
 
-Do not create application code, migrations, containers, dependency files, or
-install anything in Phase 0. You may write only the eight validation artifacts
-listed below.
+This procedure is complete. The docs-only limit has passed. Do not treat the
+steps below as a current ban on code, installs, or tests. Current permissions
+are in `AGENTS.md` and `.cursor/rules/`.
+
+Historically, Phase 0 did not create application code, migrations, containers,
+or dependency files, and it did not install anything. The only files written in
+that phase were the eight validation artifacts listed below.
 
 ### 0.1 Inventory and current evidence
 
@@ -220,24 +225,23 @@ packing, support assumptions, and break-even combinations. Do not create IaC.
 
 ### 0.4 Mandatory stop
 
-After writing and checking those documents:
-
-1. Run no build command.
-2. Make no application-code change.
-3. Present a concise validation summary with file links.
-4. Ask only for decisions that genuinely block the slice.
-5. End exactly with:
+That stop has passed. The historical end of Phase 0 was:
 
 ```text
 BUILD_GATE: WAITING_FOR_OWNER_APPROVAL
 ```
 
-Do not infer build approval from this prompt.
+The current marker is:
 
-## Phase 1 - only after `APPROVE LOCAL SYNTH BUILD`
+```text
+BUILD_GATE: LOCAL_SYNTH_BUILD_APPROVED
+```
 
-Use the owner-approved validation plan. Record any owner changes to the decision
-log before implementation.
+## Phase 1 - local synthetic build
+
+Owner approval to leave the docs-only limit has been given. Use the
+owner-approved validation plan. Record any owner changes to the decision log
+before implementation.
 
 This one approval authorizes Roadmap Phase 1 foundation and Roadmap Phase 2
 vertical slice as one local synthetic mandate. Roadmap Gate 1 is a mandatory
