@@ -18,8 +18,8 @@ export function ChiefStartActions({locked,modelEnabled,sourceAllowed,hasSavedCon
     :!hasSavedContext?'Save your notes or add a reference note to give Chief context.'
     :hasQuestion?'Your question is below. Keep it, or clear it to choose another task.'
     :'Choose a task, review the question, then send it when ready.';
-  if(minimal)return <section className="chief-start-actions messages-starters" aria-label="Chief task starters"><div>{CHIEF_STARTERS.slice(0,2).map(task=><button type="button" key={task.id} disabled={disabled} onClick={()=>{if(!disabled)onChoose(task.prompt);}}>{task.label}</button>)}</div>{disabled&&<p>{guidance}</p>}</section>;
-  return <section className="chief-start-actions" aria-label="Chief task starters">
+  if(minimal)return <section className="chief-start-actions messages-starters" aria-label="Ask Chief on this visit"><div>{CHIEF_STARTERS.slice(0,2).map(task=><button type="button" key={task.id} disabled={disabled} onClick={()=>{if(!disabled)onChoose(task.prompt);}}>{task.label}</button>)}</div>{disabled&&<p>{guidance}</p>}</section>;
+  return <section className="chief-start-actions" aria-label="Ask Chief on this visit">
     <details className={`chief-starters-disclosure${compact?' compact':''}`} open={!compact}>
     <summary>Choose a Chief task</summary>
     <div>{CHIEF_STARTERS.map(task=>{
