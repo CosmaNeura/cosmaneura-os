@@ -1,4 +1,5 @@
 import {act} from 'react';
+import {waitMessagesJourney as wait} from './messages-journey-wait';
 import {createRoot,type Root} from 'react-dom/client';
 import {afterEach,beforeEach,expect,it,vi} from 'vitest';
 vi.hoisted(()=>{for(const key of ['VITE_MESSAGES_ENABLED','VITE_EHR_READ_ENABLED','VITE_CALENDAR_IMPORT_ENABLED','VITE_WORKSPACE_ENABLED','VITE_WORKSPACE_AUTHENTICATED_ENABLED'])vi.stubEnv(key,'true');vi.stubEnv('VITE_COSMAS_ENV','synth_os');});
@@ -14,11 +15,11 @@ const visible=(e:Element)=>!e.closest('[hidden]');
 const button=(name:string)=>[...host.querySelectorAll<HTMLButtonElement>('button')].find(b=>visible(b)&&(b.textContent?.trim()===name||b.getAttribute('aria-label')===name||b.querySelector('strong')?.textContent===name));
 const question=()=>host.querySelector<HTMLTextAreaElement>('#team-question');
 const task=()=>[...host.querySelectorAll<HTMLElement>('.ehr-read-task')].find(visible);
-async function wait(check:()=>void){for(let n=0;n<300;n++){let done=false;await act(async()=>{await new Promise(r=>setTimeout(r,2));try{check();done=true;}catch{}});if(done)return;}check();}
-async function click(name:string){await wait(()=>expect(button(name)?.disabled,name).toBe(false));await act(async()=>{button(name)!.focus({preventScroll:true});button(name)!.click();});}
-async function openChat(){if(question()&&visible(question()!)&&!question()!.disabled)return;const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(b=>visible(b)&&b.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(question()?.disabled).toBe(false));}
+
+async function click(name:string){await wait(()=>expect(button(name)).toBeTruthy());await wait(()=>expect(button(name)!.disabled).toBe(false));await act(async()=>{button(name)!.focus({preventScroll:true});button(name)!.click();});}
+async function openChat(){if(question()&&visible(question()!)&&!question()!.disabled)return;const row=()=>[...host.querySelectorAll<HTMLButtonElement>('.messages-row')].find(b=>visible(b)&&b.textContent?.includes('Chief of Staff'));await wait(()=>expect(row()).toBeTruthy());await wait(()=>expect(row()!.disabled).toBe(false));await act(async()=>row()!.click());await wait(()=>expect(question()).toBeTruthy());await wait(()=>expect(question()!.disabled).toBe(false));}
 async function records(){await click('Settings');await click('Connections');await click('Add connection');}
-async function selectVisit(){const row=()=>host.querySelector<HTMLButtonElement>('.team-encounter-picker .team-encounter-option');await wait(()=>expect(row()?.disabled).toBe(false));await act(async()=>row()!.click());}
+async function selectVisit(){const row=()=>host.querySelector<HTMLButtonElement>('.team-encounter-picker .team-encounter-option');await wait(()=>expect(row()).toBeTruthy());await wait(()=>expect(row()!.disabled).toBe(false));await act(async()=>row()!.click());}
 async function choose(provider:string){const target=host.querySelector<HTMLButtonElement>(`[data-practice-record-provider="${provider}"]`);expect(target).not.toBeNull();expect(target!.disabled).toBe(false);await act(async()=>{target!.focus({preventScroll:true});target!.click();});return target!;}
 beforeEach(async()=>{
  vi.stubGlobal('crypto',webcrypto);vi.stubGlobal('IS_REACT_ACT_ENVIRONMENT',true);localStorage.clear();sessionStorage.clear();localStorage.setItem(PRESENTATION_KEY,'messages');history.replaceState(null,'','#cosmas/home');
@@ -41,7 +42,7 @@ it.each(['athena','atlas_md'])('retains the selected %s provider through the exi
  await click('‹ Back to connections');await wait(()=>expect(document.activeElement).toBe(host.querySelector('.settings-hub-heading h1')));expect(ehrReadApi.execute).not.toHaveBeenCalled();
 });
 it('discarding the visit picker does not later replay a vendor launch',async()=>{
- await records();await choose('tebra');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')?.disabled).toBe(false));await click('Messages');await openChat();expect(task()).toBeUndefined();await click('Details');await click('Choose notes or sources');await click('Review EHR records');await wait(()=>expect(task()?.querySelector<HTMLSelectElement>('[aria-label="Records system"]')?.value).toBe('elation'));
+ await records();await choose('tebra');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')).toBeTruthy());await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')!.disabled).toBe(false));await click('Messages');await openChat();expect(task()).toBeUndefined();await click('Details');await click('Choose notes or sources');await click('Review EHR records');await wait(()=>expect(task()?.querySelector<HTMLSelectElement>('[aria-label="Records system"]')?.value).toBe('elation'));
 });
 it('a denied opening cannot publish the requested provider or leave Connections',async()=>{
  await openChat();await click('‹ Messages');await records();vi.spyOn(workspaceApi,'team').mockRejectedValueOnce(new WorkspaceApiError(403));await choose('tebra');await wait(()=>expect(task()).toBeUndefined());expect(ehrReadApi.execute).not.toHaveBeenCalled();expect(workspaceApi.ask).not.toHaveBeenCalled();
@@ -53,7 +54,7 @@ it('an abandoned discovery cannot attach its late result to another visit choice
  await records();const visits=await workspaceApi.catalog(identity);let release!:(value:typeof visits)=>void;vi.spyOn(workspaceApi,'catalog').mockImplementationOnce(()=>new Promise(resolve=>{release=resolve;}));await choose('athena');await wait(()=>expect(release).toBeTypeOf('function'));await click('Messages');await act(async()=>release(visits));await click('Visits');await selectVisit();await wait(()=>expect(host.querySelector('.team-workspace')?.getAttribute('data-page')).toBe('notebook'));await act(async()=>new Promise<void>(resolve=>requestAnimationFrame(()=>resolve())));expect(task()).toBeUndefined();expect(ehrReadApi.execute).not.toHaveBeenCalled();
 });
 it.each(['suspension','history navigation'])('a retained picker-return frame cannot launch records after %s',async interruption=>{
- await records();await choose('athena');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')?.disabled).toBe(false));const frames:FrameRequestCallback[]=[];
+ await records();await choose('athena');await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')).toBeTruthy());await wait(()=>expect(host.querySelector<HTMLButtonElement>('.team-encounter-option')!.disabled).toBe(false));const frames:FrameRequestCallback[]=[];
  vi.spyOn(window,'requestAnimationFrame').mockImplementation(callback=>{frames.push(callback);return frames.length+70000;});await selectVisit();await wait(()=>expect(frames.length).toBeGreaterThan(0));
  await act(async()=>{if(interruption==='suspension')window.dispatchEvent(new Event('pagehide'));else{history.replaceState(null,'','#cosmas/home');window.dispatchEvent(new PopStateEvent('popstate'));}});
  if(interruption==='history navigation'){await click('Settings');await click('Connections');}
