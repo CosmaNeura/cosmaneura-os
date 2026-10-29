@@ -2,6 +2,7 @@ import {coreConnectionApi} from '../core-connection-api';
 import type {CoreConnectionCommand,CoreConnectionResult} from '../core-connection-contract';
 import type {InboxDraftSelection} from '../inbox-analysis-contract';
 import {teamConfigurationChanged} from '../team-configuration-diff';
+import {subscribeWorkspaceProtocol,workspaceProtocolPhase} from '../workspace-protocol';
 import {workspaceApi,WorkspaceApiError,botAddress,type AuthenticatedWorkspaceIdentity,type WorkspaceIdentity,type ProviderTeam,type Workspace} from '../workspace-api';
 import type {WorkspaceSession} from './workspace-session';
 
@@ -39,35 +40,32 @@ export class WorkspaceLoading {
     const {authenticated}=context;if(!authenticated||this.session.getSnapshot().team)return;
     let cancelled=false;const current=this.session.generation.current,controller=new AbortController();
     const startupTeam=consume();
-    let retried=false;
     const live=()=>!cancelled&&current===this.session.generation.current&&!this.session.getSnapshot().team;
     const apply=(value:ProviderTeam)=>{
       if(!live())return;
       this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
-      if(retried)this.session.setError('');
       report?.listed();
       void context.recoverAfterRead(value,null,current);
     };
     const fail=(cause:unknown)=>{
       if(cancelled||current!==this.session.generation.current)return;
-      const denied=cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status);
-      if(denied){context.failure(cause);return;}
-      // A not-ready protocol or an aborted shared flight is the 503 main recovers
-      // by failure() without ending the session. One fresh read follows it.
-      // A real team-list failure keeps the admitted session and shows Retry.
-      const transient=cause instanceof WorkspaceApiError&&cause.status===503&&(cause.code==null||cause.code==='workspace_protocol_required');
-      if(transient&&!retried&&!startupTeam){
-        retried=true;
-        context.failure(cause);
-        if(!live())return;
-        void this.api.team(authenticated,controller.signal).then(apply,fail);
-        return;
-      }
-      if(report)report.unavailable();
+      if(cause instanceof WorkspaceApiError&&[401,403,404,426].includes(cause.status))context.failure(cause);
+      else if(report)report.unavailable();
       else context.failure(cause);
     };
-    void (startupTeam?Promise.resolve(startupTeam):this.api.team(authenticated,controller.signal)).then(apply,fail);
-    return()=>{cancelled=true;controller.abort();};
+    if(startupTeam){apply(startupTeam);return()=>{cancelled=true;controller.abort();};}
+    let unsubscribe=()=>{};
+    const dispatch=()=>{
+      if(!live())return;
+      // An ordinary GET is fenced on the admitted protocol. Dispatching before
+      // admission is refused, and repeating it repeats the same refusal.
+      if(workspaceProtocolPhase(authenticated)!=='ready')return;
+      unsubscribe();
+      void this.api.team(authenticated,controller.signal).then(apply,fail);
+    };
+    unsubscribe=subscribeWorkspaceProtocol(authenticated,dispatch);
+    dispatch();
+    return()=>{cancelled=true;unsubscribe();controller.abort();};
   }
 
   async open(context:OpenContext,appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false){

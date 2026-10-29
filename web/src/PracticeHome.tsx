@@ -71,8 +71,12 @@ export function PracticeHome({conversationContext,onPendingChange,identity,recov
     })().catch(()=>{}).finally(()=>{if(listRead.current===flight)listRead.current=null;});
     listRead.current=flight;return flight.promise;
   }
+  const listsFor=useRef<AuthenticatedWorkspaceIdentity|null>(null);
   useEffect(()=>{
     if(suspended)return;
+    // Returning to Home reuses the lists already read for this account.
+    if(listsFor.current===identity)return;
+    listsFor.current=identity;
     const epoch=++live.current.epoch;openingFlight.current=null;setOpening(null);setReady(false);setPending(null);setDrafts(null);setListError('');setBusy(false);setRetryAllowed(false);setError('');setMessage('');setTitle('Private note');setSearch('');setRenaming(null);setVisits(null);setVisitError('');setSlowCheck(false);
     // Visit and note lists do not decide whether Start is safe.
     void readLists(epoch);
