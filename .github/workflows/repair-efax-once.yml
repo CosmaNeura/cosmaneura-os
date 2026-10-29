@@ -1,0 +1,64 @@
+name: repair-efax-once
+on:
+  push:
+    branches:
+      - cursor/efax-syntax-repair-06d2
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: repair-efax-once
+  cancel-in-progress: false
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: cursor/efax-syntax-repair-06d2
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Repair MessagesEFaxJourney syntax
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          python3 - <<'PY'
+          import pathlib
+          import sys
+
+          path = pathlib.Path("web/src/MessagesEFaxJourney.test.tsx")
+          text = path.read_text()
+
+          text = text.replace("\\u2039", "\u2039")
+
+          broken = "await wait(()=>expect(button('\u2039 Back to Chief of Staff')!.disabled).toBe(false);"
+          fixed = "await wait(()=>expect(button('\u2039 Back to Chief of Staff')!.disabled).toBe(false));"
+          if broken in text:
+              text = text.replace(broken, fixed)
+          elif fixed not in text:
+              sys.exit("could not locate the broken wait to repair")
+
+          path.write_text(text)
+
+          checks = {
+              "no literal escapes": "\\u2039" not in text,
+              "no conflict markers": "<<<<<<<" not in text and ">>>>>>>" not in text,
+              "has real back char": "\u2039" in text,
+              "wait fix present": "await wait(()=>expect(passage()).toBeUndefined())" in text,
+              "repaired wait present": fixed in text,
+          }
+          for name, ok in checks.items():
+              print(("OK   " if ok else "FAIL ") + name)
+          if not all(checks.values()):
+              sys.exit("repair verification failed")
+          PY
+          rm -f .github/workflows/repair-efax-once.yml
+          git add -A
+          if git diff --cached --quiet; then
+            echo "nothing to commit"
+          else
+            git commit -m "fix(web): repair EFax journey syntax broken by the race-fix merge"
+          fi
+          git push origin HEAD:cursor/efax-syntax-repair-06d2
+          echo pushed
