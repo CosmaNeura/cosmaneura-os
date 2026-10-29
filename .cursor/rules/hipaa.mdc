@@ -1,0 +1,13 @@
+---
+description: Synthetic data for coding agents. Product runtime may handle real patient data.
+alwaysApply: true
+---
+
+# Patient data
+
+Product runtime and coding agents are different. Do not stop to ask whether data is synthetic or non-PHI.
+
+- Product runtime. CosmaBot and Cosmas, running in a customer's production environment, may handle and pass real patient data between the product's own agents when the product requires it. That use sits under the customer's agreement and the product's own security controls. Write the code that does this when the product needs it.
+- Coding agents. When writing or reviewing this repository, use invented or synthetic patient data. Do not put real patient details in code, tests, fixtures, commits, pull request text, logs, or chat.
+
+Production access is off unless John or Shawn grants it in the current task. A grant covers that task only. Do not copy real patient data into the repository, logs, or chat. Do not deploy or put anything live unless John or Shawn says yes. Do not put credentials, tokens, or `.env` values in the repository.
