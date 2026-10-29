@@ -22,8 +22,7 @@ jobs:
           test "$(wc -c < uv.lock)" -gt 200000
           grep -q 'pypdf-6.21.2' uv.lock
           head -1 uv.lock | grep -q 'version = 1'
-          # refuse path-stub corruption patterns
-          if grep -qE '^(LOAD_FROM_FILE:|@/|file:)' uv.lock; then echo 'stub detected after copy' >&2; exit 1; fi
+          if grep -qE '^(LOAD_FROM_FILE:|__FROM_FILE__|PLACEHOLDER|@/|file:)' uv.lock; then echo 'stub detected after copy' >&2; exit 1; fi
           rm -f .cursor-agent-size-probe.txt .mcp_uv_lock_content.txt
           rm -f .github/workflows/restore-uv-lock-once.yml
           git config user.name 'github-actions[bot]'
