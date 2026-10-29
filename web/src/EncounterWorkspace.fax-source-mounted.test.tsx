@@ -39,7 +39,7 @@ vi.mock('./FaxSourceReviewMount',async original=>{
 });
 const identity:AuthenticatedWorkspaceIdentity={mode:'clerk_jwt',getToken:async()=> 'invented-signed-boundary'},opaque='a'.repeat(64),time='2026-10-02T14:00:00Z';
 const documentOffer:FaxSourceOffer={operation_id:uuid(11),document_sha256:'d'.repeat(64),pages:1};
-const acquireRequest:Extract<FaxPending,{kind:'acquire'}>=  {kind:'acquire',request:{idempotency_key:uuid(40),ticket_id:uuid(7),revision_id:uuid(9),expected_version:2,approval_sha256:'e'.repeat(64)}};
+const acquireRequest:Extract<FaxPending,{kind:'acquire'}>={kind:'acquire',request:{idempotency_key:uuid(40),ticket_id:uuid(7),revision_id:uuid(9),expected_version:2,approval_sha256:'e'.repeat(64)}};
 const privatePassage='Human-reviewed invented café passage. DOB and trial eligibility remain unknown.';
 let root:Root,host:HTMLDivElement,idb:IDBFactory,current:Workspace&{appointment_id:string},packet:{receipt:FaxSourceReceipt;workspace:Workspace;entry:WorkspaceEntry};
 let resolved:FaxReceipt;
