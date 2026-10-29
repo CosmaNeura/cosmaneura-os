@@ -92,7 +92,7 @@ it('adds Calendar to private Chief without a visit, preserves Back and unsent dr
  expect(visitOpen).not.toHaveBeenCalled();expect(append).not.toHaveBeenCalled();expect(ask).not.toHaveBeenCalled();expect(stats()).toMatchObject({observes:1,reviews:1,externalCalls:0});
  await click('‹ Messages');await act(async()=>root.unmount());root=createRoot(host);await installFixtures();await mount();await openChat();expect(question().value).toBe(draft);expect(host.querySelector<HTMLTextAreaElement>('#team-notebook')!.value).toBe(notes);
  const card=host.querySelector<HTMLElement>('[aria-label="Saved Google Calendar summary"]')!;expect(card).not.toBeNull();await act(async()=>card.querySelector<HTMLButtonElement>('button')!.click());await wait(()=>expect(document.activeElement?.id.startsWith('source-')).toBe(true));await click('‹ Back to Chief of Staff');expect(question().value).toBe(draft);expect(stats().observes).toBe(0);
- await openTask();await click('Restore saved calendar work');expect(task()?.querySelector('pre')).toBeNull();await click('Check calendar access');expect(button('Prepare Chief draft')?.disabled).toBe(false);expect(stats()).toMatchObject({observes:0,inspects:1,reviews:0});
+ await openTask();await click('Restore saved calendar work');expect(task()?.querySelector('pre')).toBeNull();await click('Check calendar access');await wait(()=>expect(button('Prepare Chief draft')?.disabled).toBe(false));expect(stats()).toMatchObject({observes:0,inspects:1,reviews:0});
 });
 
 it('blocks departure while the exact pending request is still being persisted and sends nothing until it is durable',async()=>{
