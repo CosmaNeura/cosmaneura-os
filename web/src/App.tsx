@@ -176,7 +176,7 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
       <section className="panel">
         <div className="row">
           <strong>Clinic</strong>
-          <span className="meta">{loading ? "Loading…" : identity ? clinicName : "Unavailable"}</span>
+          <span className="meta">{loading ? "Loading\u2026" : identity ? clinicName : "Unavailable"}</span>
         </div>
         <p className="meta">
           People and agents are ready. Infrastructure details stay off this screen.
@@ -191,7 +191,7 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
 
       {loading ? (
         <section className="panel" role="status">
-          Loading work…
+          Loading work\u2026
         </section>
       ) : !error && items.length === 0 ? (
         <section className="panel">
@@ -272,7 +272,7 @@ function OwnerQueue({ bootstrap, clinicName, lede, headerActions, afterQueue }: 
                 {timeline[item.id].map((event, index) => (
                   <li key={`${event.event_type}-${index}`}>
                     <strong>{event.event_type}</strong>
-                    {event.outcome ? ` — ${event.outcome}` : ""}
+                    {event.outcome ? ` \u2014 ${event.outcome}` : ""}
                   </li>
                 ))}
               </ul>
@@ -317,7 +317,7 @@ function BetaOrganizationQueue({ getToken }: { getToken: BetaTokenGetter }) {
     <OwnerQueue
       bootstrap={loadBetaQueue}
       clinicName="Cosmas Beta Lab"
-      lede="Synthetic-only beta work queue. Use invented data only—never clinic or patient information. Review the proposed message, then approve, edit, reject, or escalate."
+      lede="Synthetic-only beta work queue. Use invented data only\u2014never clinic or patient information. Review the proposed message, then approve, edit, reject, or escalate."
       headerActions={
         <div className="row account-controls" aria-label="Account and organization">
           <OrganizationSwitcher hidePersonal />
@@ -346,7 +346,7 @@ function SignedInWorkspace({ getToken }: { getToken: BetaTokenGetter }) {
   const controls=<div className="row account-controls" aria-label="Account and organization">
     <OrganizationSwitcher hidePersonal /><UserButton /></div>;
   return hostedWorkspaceRequested()
-    ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/></PracticeAccessGate></WorkspaceCompatibilityGate>
+    ? <WorkspaceCompatibilityGate identity={identity} accountControls={controls}><PracticeAccessGate identity={identity} accountControls={controls} prefetchTeam>{access=><EncounterWorkspace authenticated={identity} accountControls={controls} practiceAccess={access}/>}</PracticeAccessGate></WorkspaceCompatibilityGate>
     : <EncounterWorkspace authenticated={identity} accountControls={controls}/>;
 }
 
