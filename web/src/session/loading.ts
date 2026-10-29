@@ -3,6 +3,7 @@ import type {CoreConnectionCommand,CoreConnectionResult} from '../core-connectio
 import type {InboxDraftSelection} from '../inbox-analysis-contract';
 import {teamConfigurationChanged} from '../team-configuration-diff';
 import {VisitOpenDeadline} from '../visit-open-deadline';
+import {subscribeWorkspaceProtocol,workspaceProtocolPhase} from '../workspace-protocol';
 import {workspaceApi,WorkspaceApiError,botAddress,type AuthenticatedWorkspaceIdentity,type WorkspaceIdentity,type ProviderTeam,type Workspace} from '../workspace-api';
 import type {WorkspaceSession} from './workspace-session';
 
@@ -41,13 +42,26 @@ export class WorkspaceLoading {
     const {authenticated}=context;if(!authenticated||this.session.getSnapshot().team)return;
     let cancelled=false;const current=this.session.generation.current,controller=new AbortController();
     const startup=consume();
-    void (startup?Promise.resolve(startup):this.api.team(authenticated,controller.signal)).then(value=>{
-      if(!cancelled&&current===this.session.generation.current){
-        this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
-        void context.recoverAfterRead(value,null,current);
-      }
-    }).catch(cause=>{if(!cancelled&&current===this.session.generation.current)context.failure(cause);});
-    return()=>{cancelled=true;controller.abort();};
+    const live=()=>!cancelled&&current===this.session.generation.current;
+    const apply=(value:ProviderTeam)=>{
+      if(!live())return;
+      this.session.setTeam(value);this.session.setTeamDraft(previous=>previous??structuredClone(value.configuration));
+      void context.recoverAfterRead(value,null,current);
+    };
+    if(startup){apply(startup);return()=>{cancelled=true;controller.abort();};}
+    let unsubscribe=()=>{};
+    const dispatch=()=>{
+      if(!live())return;
+      // An ordinary GET is fenced on the admitted protocol. Dispatching before
+      // admission is refused, and repeating it repeats the same refusal.
+      if(workspaceProtocolPhase(authenticated)!=='ready')return;
+      unsubscribe();
+      void this.api.team(authenticated,controller.signal).then(apply,applyFault);
+    };
+    const applyFault=(cause:unknown)=>{if(live())context.failure(cause);};
+    unsubscribe=subscribeWorkspaceProtocol(authenticated,dispatch);
+    dispatch();
+    return()=>{cancelled=true;unsubscribe();controller.abort();};
   }
 
   async open(context:OpenContext,appointmentId?:string,coreSelection?:CoreConnectionCommand,incoming?:InboxDraftSelection,recordVisit=false){

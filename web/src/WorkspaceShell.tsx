@@ -1490,7 +1490,7 @@ export function WorkspaceShell({ onExit, authenticated, accountControls, practic
       <div className="workspace-main-content" hidden={practiceOpen||athenaTaskOpen}>
       {messagesMode&&authenticated&&!settingsOpen&&practicePage==='home'&&!contextBot&&(!privateRecordingEntry||recordingMinimized)&&<MessagesInbox identity={authenticated} inbox={conversationInbox} team={team} loading={conversationLoading} error={conversationError} organization={inboxOrganization} canRestoreFocus={canRestoreDialogFocus}
         drafts={currentInboxDrafts} onRefreshDrafts={()=>void session.conversations.drafts.refresh()}
-        locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked}
+        locked={conversationBusy||busy||!!pending||homeBusy||homePending||connectionNavigationLocked||captureNavigationLocked||captureDraftLocked||!accountAccess}
         onNew={()=>setNewMessage(true)} onChief={address=>void chooseConversationContext(address)} onSettings={()=>void openSettings()}
         onOpen={row=>void openConversation(row.workspace_id,row.bot.address,row)} onRefresh={()=>session.conversations.refresh(authenticated,false,failure)} onMore={()=>void session.conversations.refresh(authenticated,true,failure)} onUnread={row=>void session.conversations.markUnread(row,authenticated,failure)}
         onOrganize={(row,change)=>session.inboxPreferences.set(row,change)} onRestoreAll={()=>session.inboxPreferences.restoreAll()} onInspect={row=>void session.inboxPreferences.inspect(row)} onCloseMenu={()=>session.inboxPreferences.closeMenu()}
